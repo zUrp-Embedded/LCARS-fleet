@@ -149,3 +149,23 @@ obsolète (+ nettoyer les 5 refs) ? (b) OK pour rallumer Credo/Sobelow/Dialyzer 
 
 **Rien de bloquant pour les phases 1-2-4 en cours** (fixes PERCE mécaniques). Les décisions D1/D6/D7 débloquent la
 phase 3. Tu peux répondre cluster par cluster, dans l'ordre que tu veux.
+
+---
+
+## Ajouts PASS-2 — 7 findings reclassés DOCTRINE à la re-vérif (chacun un fork de fix)
+
+> Ces 7 étaient « PERCE » en phase 0 ; la re-vérif consequence-check (R-09) montre que leur **fix a
+> plusieurs formes valides / change un contrat** → ils te reviennent. Détail tracé dans `CONSOLIDATION-PASS2.md`.
+
+| Finding | Le fork à trancher | Ma reco | Cluster |
+|---|---|---|---|
+| **F-C043** | seed permanent corrompu → **fail boot** (aucun architect/gatekeeper) *vs* **session fraîche** (marche, perd l'identité resume) | fail-closed sur `présent-invalide`, degrade seulement sur `absent` (comme F-C045) | **D5** |
+| **F-C047** | `get_issue_status.delivered` conflate fermeture≠merge → **exiger une preuve merge forge** (nouvelle capacité) *vs* **affaiblir le champ** (`issue_closed`, delivered=unknown) | affaiblir le champ (cheap) + noter la capacité merge-proof en backlog | **D6** |
+| **F-C053** | rôle cap-profile non-chargeable classé juge-payload → typer `deliverable_mode` `{:ok\|:error}` (re-câble GateEngine) *vs* fail-closed au load | fail-closed au **load** cap-profile (verrou amont) plutôt que threader un contrat dans le GateEngine | **D4** |
+| **F-C066** | gatekeeper seal rend `:ok` après close-KO → propager `{:error,{:close,_}}` **casse** `StepRunCompleter.promote` (pas de catch-all) + policy unlock-sur-close-KO | ajouter la clause catch-all chez `StepRunCompleter.promote` PUIS propager + garder `lcars-in-flight` (skip re-dispatch) | **D1** |
+| **F-C084** | ProjectOnboard `already_exists`→succès avant preuve repo-mutable → change l'**idempotence documentée** ; `import/2` est le twin correct | garder l'idempotence + guider vers `import/2` (déjà documenté) ; pas de fail-closed unilatéral | **D2** |
+| **F-C141** | schéma cap-profile n'exige pas `allowedTools` (que `claude_launch` hard-requiert, fail-loud jq exit 1) → **schéma-requis** *vs* **invariant sémantique** | invariant `allowedTools` (comme le jumeau `disallowedTools`), cohérent avec la codebase | **D7** |
+| **F-C161** | schéma gate-decision exige `reason`, runtime non → **durcir runtime** (halt_invalid) *vs* **relâcher schéma** (directions opposées, jumeau F-C167) | durcir le runtime vers le schéma (traçabilité verdict) — à trancher AVEC F-C167 | **D7** |
+
+**Note honnêteté** : F-C075 et F-C076 (Sysadmin escalation / assignee) ont été **oubliés** dans la délégation
+de re-vérif → je les re-vérifie moi-même avant de conclure ; ils pourraient ajouter 0-2 items ici ou en CLEAN-FIX.

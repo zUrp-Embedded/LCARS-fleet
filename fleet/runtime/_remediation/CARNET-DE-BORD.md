@@ -20,33 +20,35 @@
 
 ## Prochaine action précise
 
-**Attendre les 4 verdicts workers** (consequence-check : CLEAN-FIX / DOWNGRADE / DOCTRINE / RESIDUAL par finding).
-Dès qu'ils rendent → **consolider dans LEDGER.csv** (reclasser selon verdicts) → **attaquer la shortlist CLEAN-FIX**
-en TDD (RED→verrou amont→GREEN→supprimer default case→gate→commit→journal), un finding par unité, re-vérif-moi-même
-sur les points critiques. **Rien ne bouge sur un finding non-confirmé-percé-ET-conséquence-matérialisée.**
+**Pass-2 consolidé** (les 4 workers ont rendu, `CONSOLIDATION-PASS2.md`). **Attaquer la shortlist CLEAN-FIX**
+en TDD (RED→verrou amont→GREEN→supprimer default case→gate→commit→journal), un finding par unité, verify-moi-même
+avant chaque fix (le worker propose, je confirme). Ordre par valeur :
+**F-C059** (retour ment + kill destructif d'un pipe vivant = plus sérieux) → **F-C069** (2xx corrompu → merge/half-jury)
+→ **F-C119** (issue_id ingress no-auth) → **F-C018** (rôle brut → injection trailer/email) → **F-C044/F-C035/F-C037**
+(observabilité spawn/admin, finitions `emit_spawn_failed`/`brief_slot` 3-state) → **F-C086/F-C031** (faible enjeu).
+Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-check moi-même AVANT tout fix.
+**Rien ne bouge sur un finding non-confirmé-percé-ET-conséquence-matérialisée.**
 
-Si workers figés (158 o) au prochain watchdog SANS notification → vrai stall → investiguer/relancer.
+## Reclassements (verify-the-verifier + consequence-check R-09)
 
-## Reclassements depuis phase 0 (verify-the-verifier + consequence-check)
-
-- F-C099/104/117/082 : PERCE→**DOCTRINE (D4)** — clés config jamais posées, garde-anti-misconfig (R-08).
-- F-C010 : PERCE→**DOCTRINE (D5)** — `|| "fleet/lcars"` backward-compat documentée (fix = choix design).
-- F-C060 : PERCE→**THEORIQUE** — churn non-matérialisée (seal ferme l'issue + réconciliation réclame) (R-09).
-- F-C164 : PERCE→THEORIQUE (déjà en phase 0).
+- **Phase 1-2 solo** : F-C099/104/117/082 PERCE→DOCTRINE (D4, R-08) · F-C010 PERCE→DOCTRINE (D5) · F-C060 PERCE→THEORIQUE (R-09) · F-C164 THEORIQUE.
+- **Pass-2 (4 workers)** : 18 PERCE→THEORIQUE (022/027/028/029/055/062/068/073/074/079/092/100/106/107/113/114/115/116)
+  · 7 PERCE→DOCTRINE (043/047/053/066/084/141/161) · F-C165/167 PERCE→DOCTRINE (D6/D7, flaggés phase 1).
+- **Motif** : substrat durable rattrape (forge-sync/re-wake/poller-rescan/scoped-label-mutex), ou site sans caller vivant, ou valeur déjà valide amont, ou fork de contrat.
 
 ## Compteurs (LEDGER à jour)
 
 | | valeur |
 |---|---|
 | findings totaux | 167 |
-| vérifiés (1er passage) | 167 / 167 |
-| **PERCE** (verify_verdict) | **44** (dont 3 fixés + 2 flaggés-doctrine dedans → ~37 ouverts en re-vérif) |
+| vérifiés (1er + 2e passage) | 167 / 167 |
+| **PERCE** (verify_verdict) | **15** (4 FIXÉ + 11 ouverts : 9 CLEAN-FIX + F-C075/076 à re-vérif) |
 | PERCE-doc | 25 |
-| **DOCTRINE** (→ user) | **75** (7 clusters D1-D7, voir DECISION-BRIEF.md) |
-| THEORIQUE (WONTFIX) | 22 |
+| **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2, voir DECISION-BRIEF.md) |
+| THEORIQUE (WONTFIX) | 41 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **3** (F-C166, F-C160, F-C097) |
-| constructeurs de frontière posés | 1 (`boot_enabled?/2`) |
+| **fixés (commit)** | **4** (F-C166, F-C160, F-C097, **F-C098**) |
+| constructeurs de frontière posés | 2 (`boot_enabled?/2`, `encode_line/1` fail-safe) |
 | règles méta posées | R-01 → R-09 |
 
 ## Crons (session-only — à SUPPRIMER en fin de chantier)

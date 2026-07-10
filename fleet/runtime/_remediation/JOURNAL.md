@@ -70,3 +70,12 @@
 ### F-C060 — verify-the-verifier : churn non-matérialisée → THEORIQUE
 - Tracé : seal_and_merge FERME l'issue (l.43/80/84) ; poller dispatch seulement issues ouvertes → pas de re-dispatch ; Réconciliation réclame les orphan-locks (producteur killé). La brèche décrite (churn load-bearing) ne survient pas. Résidu = label cosmétique sur issue fermée + log imprécis → pas de fix (harness disproportionné). R-09 posée.
 - PATTERN de campagne confirmé (3 cas de suite : F-C010 doctrine-tail, config-int non-atteignable, F-C060 conséquence-nulle) → je délègue la re-vérif des PERCE restants avec la discipline consequence-check.
+
+### PASS-2 consolidé — 4 workers re-vérif consequence-check (35 PERCE)
+- Résultat : **9 CLEAN-FIX · 18 DOWNGRADE→THEORIQUE · 7 DOCTRINE · 1 RESIDUAL(→theo, F-C062)**. Détail cité dans `CONSOLIDATION-PASS2.md`.
+- Distribution finale : 85 DOCTRINE · 41 THEORIQUE · 25 PERCE-doc · 15 PERCE (4 FIXÉ) · 1 DEJA-FIXE.
+- **F-C098 FIXÉ** (1er CLEAN-FIX du pass-2) : AuditLog.write rescue encode → contrat no-crash honoré. Vérifié moi-même : le fix worker (`Jason.encode` non-bang) aurait été INCOMPLET (protocol-undefined lève aussi) → `rescue` requis. RED=Protocol.UndefinedError, GREEN, starfleet 68+1/0.
+- Bookkeeping corrigé : F-C097/160/166 marqués FIXÉ ; F-C165/167 → DOCTRINE (D6/D7).
+- **Oubli assumé** : F-C075/F-C076 jamais assignés à un lot → à re-vérifier moi-même avant tout fix.
+- Motif méta : l'intégrité a déjà posé les logs LOUD ; le substrat durable (forge-sync/re-wake/poller-rescan/scoped-label-mutex) neutralise le faux-succès ; les vrais CLEAN-FIX sont des FINITIONS de verrous à moitié posés (jumeau existant). F-C059 = le plus sérieux (retour ment + kill destructif).
+- Prochain : F-C059 (verify-moi + TDD).
