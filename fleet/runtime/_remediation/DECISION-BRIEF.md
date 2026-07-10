@@ -214,3 +214,14 @@ Le cluster « config require-vs-soft » N'EST PAS homogène :
 - **Config-int keys-JAMAIS-posées (R-08, défensif)** : 082/099/104/117 — garde-anti-misconfig-future ; fail-loud défensif si tu veux, mais aucune valeur malformée n'y arrive aujourd'hui.
 - **Autres concerns (pas require-vs-soft)** : F-C052 (fallback legacy vs event=SSoT → fail-closed), F-C063 (default brief-gate caché = documenté), F-C064 (troncature repo-id 4 digits → identité).
 → Après vérif, D4 se réduit à ~4 fixes config-validation + 2 doc/dep + 4 défensifs + 3 autres. Ta décision : appliquer EnvParse aux 4 load-bearing ? (les 4 défensifs + autres = sous-décisions séparées.)
+
+### D1 RÉSOLU (2 workers, 12 rails classés) — 0 FAIL-LOUD
+Résultat honnête : **le code applique DÉJÀ ta doctrine** — chaque event LIVE double son event lossy d'un jumeau DURABLE. Aucun rail n'est event-only avec conséquence vivante.
+- **9 BEST-EFFORT-OK** (lossy-assumé + backstop réel) : F-C019/046 (TaskQueue persisté + `Reconciliation` reclaim→re-dispatch ; le faux-succès était DÉJÀ fermé en `{:error,:broadcast_failed}`), F-C058 (`stage/*` = human-only, PAS la state-machine ; workflow PR-driven), F-C101 (rail Logger = sa propre surface `:degraded`), F-C102 (boot events = observabilité ; fait durable via spawner+`PermanentWarden`), F-C051 (Cat-5 draft = accélérateur sur `freeze_to_arch` forge), F-C091 (`coord.*` = dashboard ; `escalate_human` dormant), F-C093 (prod câble `Fleet.Coord` + Readiness `:degraded`), F-C103 (poll `mcp.pod_facing` live-state).
+- **3 DOWNGRADE** : F-C089 (empty-registry test-only, prod `Catalog.load!` avant Bus), F-C095 (rails dormants + producteurs live=payloads valides), F-C105 (Shutdown INERT + prod câble `AggregateDispatcher`).
+- **0 code-fix fail-loud.** Mon estimation « ~4-5 » était fausse.
+
+**LE VRAI livrable D1 = un FORWARD-GUARD (ta décision, 1 ligne)** : *tout futur rail `escalate_human` câblé SANS jumeau forge durable (livraison = uniquement l'event lossy) DOIT fail-loud (propager l'échec broadcast OU ancrer un fait forge avant `:ok`).* Aujourd'hui aucun rail ne le viole. C'est une règle de design à graver, pas un fix.
+
+**Résidus doc (je nettoie, PERCE-doc-like)** : F-C046 (`work_items.ex:57-60` sur-affirme « re-submit → re-emit » ; en vrai recovery = poller reconciliation), F-C051 (`cat5_escalator.ex:22-26` dit « no producer » alors que `step_run_consumer:453/717` en a un live → aligner sur `drift_monitor.ex`), F-C102 (`@spec run/1 :: :ok` = « orchestrateur exécuté » ≠ « boot réussi », clarté).
+**Optionnel R-08 défensif (ta décision)** : F-C089 prod fail-closed, F-C093/F-C105 forward-guards de dé-câblage — rien de cassé aujourd'hui.
