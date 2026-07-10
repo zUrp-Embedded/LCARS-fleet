@@ -330,10 +330,22 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         end
 
       # pod_info without has_active_task (partial stub): conservative -> :busy (a living pipe of unknown
-      # state is NOT reset, just deferred). Absent/error -> :dead (fresh spawn).
+      # state is NOT reset, just deferred).
       {:ok, _partial} ->
         :busy
 
+      # F-C059 — aliveness UNKNOWN (pod_info RAISED): fail-CLOSED -> :busy (DEFER), NEVER :dead. Classing an
+      # uncertain pod dead -> serialize `:ok` -> fresh spawn on the deterministic id -> reap/`safe_kill` of a
+      # maybe-LIVING pipe eng + its context (the exact destructive path `pod_alive?` guards with "assume ALIVE").
+      # A transient raise self-corrects next tick; a persistent one defers visibly (Logger.warning) rather than
+      # acting destructively. This is the "grow a variant" the old `safe_pod_info` comment flagged as needed.
+      # NB: only the RAISE case is closed here — the deeper `pod_info` conflation (a live-but-slow pod whose
+      # GenServer.call times out into `{:error, :not_found}`, indistinguishable from a genuinely-absent pod at
+      # THIS layer) needs a pod_info contract split at the spawner and is a separate doctrine item.
+      :unknown ->
+        :busy
+
+      # Genuinely absent / a reachable `{:error}` from pod_info -> dead -> fresh spawn (1st issue).
       :error ->
         :dead
     end
@@ -350,14 +362,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   rescue
     e ->
-      # A RAISE from pod_info leaves the pod state UNKNOWN. We keep the conservative `:error` (→ cold reset,
-      # recoverable — the pod re-does its work) but SURFACE it: a silent swallow here masked a maybe-busy pod
-      # being reset. (Full fail-closed = defer-on-uncertainty; that needs `pipe_rebrief_state` to grow a variant.)
+      # A RAISE from pod_info leaves the pod state UNKNOWN — distinct from a reachable `{:error}` (absent).
+      # We return `:unknown` (NOT `:error`): `pipe_rebrief_state` DEFERS on unknown (fail-closed), never
+      # cold-resets/kills a maybe-LIVING pipe. Surfaced. (Mirror of `pod_alive?`'s "assume ALIVE" on raise.)
       Logger.warning(
-        "Spawn.safe_pod_info: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → :error (conservative reset)"
+        "Spawn.safe_pod_info: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → :unknown (fail-closed defer)"
       )
 
-      :error
+      :unknown
   end
 
   # COLD in-place reset of the workspace + /clear BEFORE the rebrief, then :ok (proceed). Reset failed -> DEFERRED

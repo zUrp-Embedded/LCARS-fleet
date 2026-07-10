@@ -280,6 +280,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         :ready -> {:ok, %{conditions: [], has_active_task: false}}
         :busy_active -> {:ok, %{conditions: [], has_active_task: true}}
         :publishing -> {:ok, %{conditions: [:publishing], has_active_task: false}}
+        # F-C059 : sonde qui RAISE (échec transitoire sur un pipe VIVANT-mais-lent) → état INCONNU.
+        :raise -> raise "F-C059: pod_info RAISED (transient probe failure on a LIVE pipe)"
       end
     end
   end
@@ -795,6 +797,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert_received {:reprovisioned, _, _, _}
       refute_received {:enqueued, _, _}
+      refute_received {:spawned, _, _}
+    end
+
+    test "GATE pipe pod_info RAISE (sonde transitoire échoue sur pipe VIVANT) : DEFERE :role_busy, PAS de spawn destructif (F-C059)" do
+      # F-C059 : un raise de pod_info laissait l'état INCONNU → :error → :dead → serialize `:ok` → spawn
+      # frais qui REAP/kill le pipe eng VIVANT + son contexte (le danger exact que `pod_alive?` garde en
+      # « assume ALIVE »). Fail-closed : incertitude (raise) → DEFERE (miroir de pod_alive?), jamais reset/kill.
+      Process.put(:pipe_state, :raise)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:skipped, :role_busy} = StepDispatcher.dispatch_issue(eng_issue(), opts)
+
+      refute_received {:reprovisioned, _, _, _}
       refute_received {:spawned, _, _}
     end
   end
