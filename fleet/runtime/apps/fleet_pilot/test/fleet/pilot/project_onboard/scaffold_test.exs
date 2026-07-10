@@ -18,6 +18,23 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert File.dir?(Path.join(dir, "plans"))
   end
 
+  test "F-C087 : la date des fichiers générés = la date d'onboard (seam :today), pas hardcodée 2026-06-14",
+       %{tmp_dir: dir} do
+    assert :ok = Scaffold.main(dir, "monprojet", today: "2026-07-11")
+    spec = File.read!(Path.join(dir, "docs/spec.md"))
+    assert spec =~ "**Date** : 2026-07-11"
+    refute spec =~ "2026-06-14"
+
+    assert :ok = Scaffold.work(dir, "monprojet", today: "2026-07-11")
+    assert File.read!(Path.join(dir, "backlog.md")) =~ "**Date** : 2026-07-11"
+  end
+
+  test "F-C087 : sans :today → date UTC courante", %{tmp_dir: dir} do
+    assert :ok = Scaffold.main(dir, "p", [])
+    today = Date.to_iso8601(Date.utc_today())
+    assert File.read!(Path.join(dir, "docs/spec.md")) =~ "**Date** : #{today}"
+  end
+
   test "F-C086 : mkdir échec (dir sous un FICHIER) → {:error, {:scaffold_write}}, PAS de raise (honore le @spec)",
        %{tmp_dir: dir} do
     # main/3 fait mkdir_p(docs). Si `dir` est sous un chemin qui est un FICHIER, mkdir échoue (:enotdir).

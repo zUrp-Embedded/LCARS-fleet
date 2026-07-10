@@ -18,7 +18,9 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   @doc """
   Scaffold of the `main` worktree: README + .gitignore + .editorconfig + docs/spec.md.
-  `opts`: `:pitch` (default `:description`, default `"(à compléter)"`).
+  `opts`: `:pitch` (default `:description`, default `"(à compléter)"`);
+  `:today` (ISO8601 date string, default `Date.utc_today/0` — F-C087: the generated GO-7 header must
+  carry the ONBOARD date, not a hard-coded one; the seam lets a test pin it).
   """
   @spec main(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
@@ -30,14 +32,14 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
         "README.md" => readme(name, pitch),
         ".gitignore" => gitignore(),
         ".editorconfig" => editorconfig(),
-        "docs/spec.md" => spec_md(name, pitch)
+        "docs/spec.md" => spec_md(name, pitch, today(opts))
       })
     end
   end
 
   @doc """
   Scaffold of the `work/ops` worktree: backlog.md + scratchpad.md + plans/.
-  `opts`: `:pitch` (default `:description`, default `""`).
+  `opts`: `:pitch` (default `:description`, default `""`); `:today` (see `main/3`).
   """
   @spec work(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
@@ -46,11 +48,17 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
     with :ok <- ensure_dir(Path.join(dir, "plans")) do
       write_all(dir, %{
-        "backlog.md" => backlog_md(name, pitch),
+        "backlog.md" => backlog_md(name, pitch, today(opts)),
         "scratchpad.md" => "",
         "plans/.gitkeep" => ""
       })
     end
+  end
+
+  # F-C087 — the generated files' GO-7 date = the ONBOARD date, not a hard-coded past date. Seam
+  # (`:today`) so a test can pin it; default is the real current UTC date.
+  defp today(opts) do
+    Keyword.get(opts, :today) || Date.to_iso8601(Date.utc_today())
   end
 
   # Writes the manifest {relative path => content} under `dir` — fail-loud PER file
@@ -97,12 +105,12 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     """
   end
 
-  defp spec_md(name, pitch) do
+  defp spec_md(name, pitch, today) do
     """
     # #{name} — Spec
 
-    **Date** : 2026-06-14
-    **Dernière révision** : 2026-06-14
+    **Date** : #{today}
+    **Dernière révision** : #{today}
     **Statut** : draft v1
     **Référencé par** : work/ops:backlog.md
     **Dérivé de** : —
@@ -117,12 +125,12 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     """
   end
 
-  defp backlog_md(name, pitch) do
+  defp backlog_md(name, pitch, today) do
     """
     # #{name} — Backlog
 
-    **Date** : 2026-06-14
-    **Dernière révision** : 2026-06-14
+    **Date** : #{today}
+    **Dernière révision** : #{today}
     **Statut** : actif
     **Référencé par** : —
     **Dérivé de** : docs/spec.md
