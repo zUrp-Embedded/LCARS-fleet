@@ -60,3 +60,9 @@
 ### Phase 2 — F-C097 (1er constructeur)
 - **F-C097 FIXÉ** : `Fleet.Starfleet.Application.boot_enabled?/2` — booléen strict fail-loud, route les 6 knobs `:start_*`. Test dédié 3/0 + suite starfleet 67/0.
 - 1 constructeur posé, 1 finding tué. Pattern éprouvé (verrou amont config-boot). Prochain : la famille config-int (F-C099/104/117/082) — voir si un helper `Fleet.EnvParse` partagé consolide, ou site-par-site.
+
+### Phase 2 — re-scoping famille config-int (verify-the-verifier)
+- F-C099/104/117/082 : clés config JAMAIS posées (runtime/config/test) → défaut hardcodé toujours utilisé → malformé non-atteignable → **reclassés DOCTRINE (D4)**. Pas de fix unilatéral (règle R-08).
+- F-C097 gardé (knobs activement configurés + doctrine EnvParse établie). La famille B « config-parse » s'effondre : 1 fix légitime (F-C097), le reste → D4 user.
+- → Phase 2 se recentre sur les familles DATA-FLOW (C ingress-parse, D identité, E schéma) = vraies brèches atteignables par données réelles (webhook/forge/champ-schéma-ouvert).
+- Distribution : PERCE 44, DOCTRINE 75.

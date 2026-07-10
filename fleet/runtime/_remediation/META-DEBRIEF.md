@@ -34,3 +34,12 @@
 - **R-07 (2026-07-10)** — *Le hollow-green cache parfois une VRAIE violation.* F-C167 : le gate ne checkait
   rien ET l'invariant qu'il prétend tenir (0 ref `05_data-canon` en test) est **violé** (5 fichiers). Le
   faux-vert masquait le vrai rouge. Toujours vérifier ce que le gate DEVRAIT trouver s'il tournait.
+
+- **R-08 (2026-07-10)** — *Pour un finding « config malformée », le test d'atteignabilité est : un CONFIG RÉEL
+  (runtime.exs / config.exs / test.exs) pose-t-il une valeur malformée ?* Si la clé est **jamais posée**
+  (lue avec un défaut hardcodé toujours utilisé), la brèche n'est atteignable que par une misconfig-future
+  d'opérateur → c'est du **garde-contre-misconfig = DOCTRINE (D4 require-vs-soft)**, PAS un fix mécanique.
+  Vécu : F-C099/104/117/082 (audit/interval/timeout/write_spacing) — clés absentes de tout config →
+  reclassés DOCTRINE. Nuance retenue : un knob ACTIVEMENT configuré (F-C097 `:start_*`, posé en test.exs)
+  avec un typo plausible + une doctrine codebase établie (EnvParse « load-bearing → raise ») justifie le fix.
+  Corollaire de R-06 : « PERCE » (worker) ≠ « atteignable par un chemin réel aujourd'hui ».
