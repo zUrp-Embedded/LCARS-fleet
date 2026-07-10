@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 ~23h (relevé horaire · 9 fixés · shortlist CLEAN-FIX en cours)
-**Statut** : PHASE 1 CLOSE · PHASE 2/4 EN COURS (9 CLEAN-FIX livrés, 6 PERCE ouverts)
+**Dernière révision** : 2026-07-10 ~minuit (JALON : shortlist CLEAN-FIX COMPLÈTE — 12 fixés, 0 PERCE ouvert)
+**Statut** : PHASES 1/2/4 CLOSES (code-fix terminé) · reste PHASE 5 (doc-batch) + triage DOCTRINE user
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -21,14 +21,15 @@
 
 ## Prochaine action précise
 
-**Continuer la shortlist CLEAN-FIX** en TDD (RED→verrou amont→GREEN→commit→journal), verify-moi avant chaque fix.
-**Restent 6 PERCE ouverts** :
-- **F-C035** (broker `:unknown` → brief admin.spawn droppé ; jumeau `brief_slot` 3-state + branche `:free`)
-- **F-C037** (hiccup TaskQueue consomme `:result_deadline` ; jumeau `brief_slot` 3-state + `rearm_deadline`)
-- **F-C086** (scaffold `mkdir_p!` viole @spec typé ; jumeau `File.write` in-fn ; faible enjeu)
-- **F-C031** (plugin skill whitespace lossy ; jumeau `Fleet.Slug` ; basse prio, danger déjà rattrapé par bwrap)
-- **F-C075, F-C076** (Sysadmin escalation/assignee) — **JAMAIS re-vérifiés (oubli délégation)** → consequence-check MOI-MÊME avant tout fix.
-**Rien ne bouge sur un finding non-confirmé-percé-ET-conséquence-matérialisée.**
+**CODE-FIX TERMINÉ (12 fixés, 0 PERCE ouvert).** Deux chantiers restants :
+1. **PHASE 5 — batch PERCE-doc (25)** : corrections mécaniques doc/commentaire/log/test (NON-bloqué). ⚠️ Comme
+   pass-2, ne PAS batch-fixer à l'aveugle — spot-check/vérif d'abord (certains phase-0 ont bougé à la re-vérif).
+2. **TRIAGE DOCTRINE (87 findings)** : `DECISION-BRIEF.md` (7 clusters D1-D7 + ajouts pass-2/2b), prêt à décider.
+   C'est le GROS du chantier restant → **attend l'user**.
+3. **CLEANUP fin** : `CronDelete a73c2099 b1dc7bc3`.
+
+**12 FIXÉS (TDD, committés)** : F-C166, F-C160, F-C097, F-C098, F-C059, F-C069, F-C119, F-C018, F-C044, F-C035, F-C037, F-C086.
+**Reclassés à la re-vérif** : F-C031→theo (plugin non-exercé), F-C075/076→doctrine (escalade a lieu, fix=fork).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
 
@@ -43,12 +44,12 @@
 |---|---|
 | findings totaux | 167 |
 | vérifiés (1er + 2e passage) | 167 / 167 |
-| **PERCE** (verify_verdict) | **15** (9 FIXÉ + 6 ouverts : F-C031/035/037/086 + F-C075/076 à re-vérif) |
-| PERCE-doc | 25 |
-| **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2 + F-C059-b, voir DECISION-BRIEF.md) |
-| THEORIQUE (WONTFIX) | 41 |
+| **PERCE** (verify_verdict) | **12** (TOUS FIXÉS ✅ — 0 ouvert) |
+| PERCE-doc | 25 (phase 5, non commencée) |
+| **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b, voir DECISION-BRIEF.md) |
+| THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **9** (F-C166/160/097/098/059/069/119/018/044) |
+| **fixés (commit)** | **12** (166/160/097/098/059/069/119/018/044/035/037/086) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-10 |
 
