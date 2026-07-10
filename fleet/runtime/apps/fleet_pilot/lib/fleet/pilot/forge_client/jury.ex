@@ -78,8 +78,16 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
       {:ok,
        %{verdicts: verdicts_by_reviewer(reviews, head_sha), reviewers: jury_reviewers(reviews)}}
     else
-      {:ok, _non_list} -> {:ok, %{verdicts: %{}, reviewers: []}}
-      {:error, _} = err -> err
+      # F-C069 — a 2xx with a NON-LIST body (a proxy/gateway serving an HTML page or an object envelope
+      # with 200) is fail-LOUD, NEVER an `{:ok, empty}`: an empty jury here → `dispatch_by_verdicts([], %{})`
+      # → the MERGE branch (merge on a lost/empty jury). Mirror of `paginate`'s `:unexpected_page_shape`.
+      {:ok, non_list} ->
+        {:error,
+         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
+          non_list}}
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -145,8 +153,15 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
            http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
       {:ok, change_requests_by_reviewer(reviews)}
     else
-      {:ok, _non_list} -> {:ok, []}
-      {:error, _} = err -> err
+      # F-C069 — 2xx non-list body → fail-loud (mirror of `paginate`), never `{:ok, []}` (an empty feedback
+      # would silently give the eng a generic "fix per the review" without the review content).
+      {:ok, non_list} ->
+        {:error,
+         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
+          non_list}}
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -176,8 +191,15 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
 
       {:ok, count}
     else
-      {:ok, _non_list} -> {:ok, 0}
-      {:error, _} = err -> err
+      # F-C069 — 2xx non-list body → fail-loud (mirror of `paginate`), never `{:ok, 0}` (an undercounted
+      # rework budget → blind re-dispatch instead of arch escalation; the caller escalates on `{:error}`).
+      {:ok, non_list} ->
+        {:error,
+         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
+          non_list}}
+
+      {:error, _} = err ->
+        err
     end
   end
 

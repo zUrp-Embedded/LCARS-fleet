@@ -523,6 +523,46 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "F-C069 — 2xx non-liste sur /reviews → fail-loud (jumeau paginate), jamais un {:ok, vide}" do
+    # Un 2xx à corps NON-LISTE (proxy/gateway rendant une page HTML ou une enveloppe objet avec 200) tombait
+    # sur `{:ok, _non_list} -> {:ok, <vide>}` → jury/feedback/budget VIDES silencieux. Le jumeau
+    # `pr_rerequested_reviewers` (via `paginate`) fail-loud `:unexpected_page_shape` sur page non-liste. On
+    # aligne → `{:error, {:unexpected_review_shape, path, body}}`. Conséquences évitées : merge sur jury vide
+    # (pr_review_state → dispatch_by_verdicts([], %{}) → branche MERGE) ; budget rework sous-compté
+    # (count → 0 → re-dispatch aveugle au lieu d'escalade arch).
+    setup do
+      %{
+        handlers: %{
+          {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+            {200, %{"message" => "internal proxy error (200 but not an array)"}}
+        }
+      }
+    end
+
+    test "pr_review_state : 2xx non-liste → {:error, {:unexpected_review_shape, _, _}}", %{
+      handlers: handlers
+    } do
+      assert {:error, {:unexpected_review_shape, _path, _body}} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "change_request_feedback : 2xx non-liste → {:error, {:unexpected_review_shape, _, _}}",
+         %{
+           handlers: handlers
+         } do
+      assert {:error, {:unexpected_review_shape, _path, _body}} =
+               ForgeClient.change_request_feedback("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "count_change_request_rounds : 2xx non-liste → {:error, ...} (PAS {:ok, 0} qui sous-compte)",
+         %{
+           handlers: handlers
+         } do
+      assert {:error, {:unexpected_review_shape, _path, _body}} =
+               ForgeClient.count_change_request_rounds("fleet/lcars", 6, opts(handlers))
+    end
+  end
+
   describe "add_label/4 — config" do
     test "manque base_url → {:error, {:config, {:missing, :base_url}}}" do
       assert {:error, {:config, {:missing, :base_url}}} =
