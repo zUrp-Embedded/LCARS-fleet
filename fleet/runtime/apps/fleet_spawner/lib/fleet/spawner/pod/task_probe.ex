@@ -72,6 +72,26 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
     do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
 
   @doc """
+  3-STATE version of `pod_has_active_task?` for the `:result_deadline` fire (F-C037). The boolean
+  version CONFLATES `:error` (broker unreachable) into `false` (= idle), which is safe for a
+  *reporting* field but WRONG at the deadline fire: a hung pod whose broker blips at the exact fire
+  moment would be classed "idle" → the deadline lapses (never re-armed unless the pod MOVES, which a
+  hung pod does not) → orphan. So we distinguish:
+    * `:active`  → a real response timeout (pending/assigned/in_progress) → KILL;
+    * `:idle`    → genuinely between tasks → let the deadline lapse (no idle-kill);
+    * `:unknown` → broker unverifiable → NEITHER (no-kill preserved) but RE-ARM, never lapse.
+  Same 3-state fail-closed shape as `brief_slot/1`.
+  """
+  @spec active_task_state(String.t()) :: :active | :idle | :unknown
+  def active_task_state(pod_id) do
+    case safe_pod_status(pod_id) do
+      {:ok, s} when s in [:pending, :assigned, :in_progress] -> :active
+      {:ok, _} -> :idle
+      :error -> :unknown
+    end
+  end
+
+  @doc """
   Is the brief already pulled by the pod? "Pull" = the task is in a state that PROVES that
   Claude has called get_work_item: `:assigned | :in_progress | :completed`. Deliberately NOT:
   `:pending`/`nil` (not yet pulled / not yet enqueued — we keep kicking, which also covers

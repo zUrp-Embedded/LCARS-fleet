@@ -795,6 +795,28 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
+    # F-C037 — décision 3-state au FIRE du deadline (couture testable sans TaskQueue injoignable).
+    test "F-C037 :idle → lapse (:keep_state_and_data, PAS de re-arm) — pod entre deux tasks" do
+      data = %{pod_id: "p-idle", cap_profile: valid_profile()}
+      assert :keep_state_and_data = Fleet.Spawner.Pod.result_deadline_fire(:idle, data)
+    end
+
+    test "F-C037 :unknown (broker injoignable) → RE-ARM le deadline, jamais un lapse (sinon pod hung orphelin)" do
+      # Le bug : pod_has_active_task? conflait :error broker en `false` (= idle) → lapse → un pod HUNG dont
+      # le broker blip pile au fire n'est jamais re-checké (le liveness ne ré-arme que si le pod BOUGE, or un
+      # hung ne bouge pas). Fail-safe : :unknown → re-arm (reste sous surveillance), no-kill préservé.
+      data = %{pod_id: "p-unknown", cap_profile: valid_profile()}
+
+      assert {:keep_state_and_data, actions} =
+               Fleet.Spawner.Pod.result_deadline_fire(:unknown, data)
+
+      assert Enum.any?(actions, fn
+               {:state_timeout, ms, :result_deadline} when is_integer(ms) -> true
+               _ -> false
+             end),
+             "le deadline doit être RE-ARMÉ (state_timeout), pas consommé"
+    end
+
     test "pod forever — deadline JAMAIS armé (survit même avec task active + timeout court)" do
       StubBackend.set_reply(interactive_reply())
 

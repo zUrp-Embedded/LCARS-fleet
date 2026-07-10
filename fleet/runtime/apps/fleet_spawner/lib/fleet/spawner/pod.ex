@@ -519,12 +519,21 @@ defmodule Fleet.Spawner.Pod do
   #     is at the moment of the fire (≠ at arming) → covers the worker-enqueue race AND the inter-step.
   # The state_timeout, once fired, is no longer armed → no re-fire until the liveness re-arms it.
   def handle_event(:state_timeout, :result_deadline, :monitoring, data) do
-    if TaskProbe.pod_has_active_task?(data.pod_id) do
-      transition_failed(data, {:result_timeout, data.pod_id})
-    else
-      :keep_state_and_data
-    end
+    result_deadline_fire(TaskProbe.active_task_state(data.pod_id), data)
   end
+
+  # 3-STATE decision at the :result_deadline fire (F-C037), split out to be testable without a
+  # live-vs-unreachable TaskQueue. `:active` = real response timeout → kill; `:idle` = between tasks →
+  # lapse (no idle-kill); `:unknown` = broker unverifiable → no-kill (preserved) BUT re-arm, never lapse
+  # (a bare lapse orphans a hung pod whose broker blipped at the fire — the liveness only re-arms on move).
+  @doc false
+  def result_deadline_fire(:active, data),
+    do: transition_failed(data, {:result_timeout, data.pod_id})
+
+  def result_deadline_fire(:idle, _data), do: :keep_state_and_data
+
+  def result_deadline_fire(:unknown, data),
+    do: {:keep_state_and_data, arm_result_deadline_actions(data)}
 
   # LIVENESS watchdog (recurring generic timeout, workers only). If the pod has MOVED since the
   # previous tick (jsonl size ↑ OR CPU jiffies ↑) → re-arm the deadline (pushes back the kill) + the
