@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 ~minuit (JALON : shortlist CLEAN-FIX COMPLÈTE — 12 fixés, 0 PERCE ouvert)
+**Dernière révision** : 2026-07-11 ~minuit (JALON : shortlist CLEAN-FIX COMPLÈTE — 12 fixés, 0 PERCE ouvert)
 **Statut** : PHASES 1/2/4 CLOSES (code-fix terminé) · reste PHASE 5 (doc-batch) + triage DOCTRINE user
 **Référencé par** : `PLAYBOOK.md`
 
@@ -22,8 +22,9 @@
 ## Prochaine action précise
 
 **CODE-FIX TERMINÉ (12 fixés, 0 PERCE ouvert).** Deux chantiers restants :
-1. **PHASE 5 — batch PERCE-doc (25)** : corrections mécaniques doc/commentaire/log/test (NON-bloqué). ⚠️ Comme
-   pass-2, ne PAS batch-fixer à l'aveugle — spot-check/vérif d'abord (certains phase-0 ont bougé à la re-vérif).
+1. **PHASE 5 — batch PERCE-doc (25) — EN COURS** : **3 workers vérif en vol** (a985b007, ac3977d7, ae1dd821 —
+   lancés ~00h15) confirment stale + rédigent la correction (CONFIRM-STALE / NOT-STALE / CODE-ISSUE). Dès rendus →
+   j'applique les CONFIRM-STALE en batch, je vérifie moi-même les CODE-ISSUE (tests). ⚠️ ne PAS fixer à l'aveugle.
 2. **TRIAGE DOCTRINE (87 findings)** : `DECISION-BRIEF.md` (7 clusters D1-D7 + ajouts pass-2/2b), prêt à décider.
    C'est le GROS du chantier restant → **attend l'user**.
 3. **CLEANUP fin** : `CronDelete a73c2099 b1dc7bc3`.
