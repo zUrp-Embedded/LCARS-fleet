@@ -52,6 +52,7 @@ defmodule Fleet.API.SpawnAdmission do
   @type refusal ::
           {:forbidden_fields, [String.t()]}
           | {:invalid_pod_id, term()}
+          | {:invalid_issue_id, term()}
           | :missing_cap_profile
           | {:cap_profile, String.t(), term()}
           | {:host_native_forbidden, String.t()}
@@ -111,7 +112,8 @@ defmodule Fleet.API.SpawnAdmission do
         {:error, {:forbidden_fields, extraneous}}
 
       true ->
-        with {:ok, opts} <- build_admin_opts(raw) do
+        with {:ok, opts} <- build_admin_opts(raw),
+             :ok <- validate_issue_id(raw) do
           payload =
             raw
             |> Map.take(["cap_profile_name", "role", "issue_id"])
@@ -119,6 +121,20 @@ defmodule Fleet.API.SpawnAdmission do
 
           {:ok, payload}
         end
+    end
+  end
+
+  # `issue_id` is an OPTIONAL forge/event correlation string (allowlisted but not required). Present → it
+  # MUST be a binary, mirroring the `pod_id` guard in `build_admin_opts`: a raw JSON number/bool/list would
+  # be `to_string`-d downstream (`PublishConsumer`) into the pod's issue correlation + spawn logs (e.g.
+  # `to_string([1, 2, 3]) = <<1, 2, 3>>` control bytes) — a no-auth ingress must not admit an untyped
+  # correlation key. Absent → OK (`PublishConsumer` falls back to the Bus envelope's issue_id). NOT
+  # path-bound (the FS path derives from `pod_id`), so `is_binary` suffices — no `valid_pod_id?` needed.
+  defp validate_issue_id(raw) do
+    case Map.fetch(raw, "issue_id") do
+      :error -> :ok
+      {:ok, issue_id} when is_binary(issue_id) -> :ok
+      {:ok, other} -> {:error, {:invalid_issue_id, other}}
     end
   end
 

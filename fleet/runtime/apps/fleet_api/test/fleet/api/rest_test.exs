@@ -230,6 +230,23 @@ defmodule Fleet.API.RestTest do
       assert bad.status == 422
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
+
+    test "issue_id non-binaire (number JSON) → 422 avant spawn (F-C119, jumeau pod_id)" do
+      # issue_id = corrélation forge/event OPTIONNELLE : présent → doit être une string. Un number/bool/liste
+      # JSON serait `to_string`-é en aval (PublishConsumer) dans la corrélation + les logs (ex `to_string([1,2,3])`
+      # = octets de contrôle). Ingress no-auth → typage strict comme pod_id. (Absent → OK, fallback enveloppe Bus.)
+      bad =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{"role" => "engineer", "brief" => "x", "issue_id" => 42})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert bad.status == 422
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+    end
   end
 
   # ============================================================

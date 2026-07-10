@@ -119,6 +119,18 @@ defmodule Fleet.API.Rest do
           })
         )
 
+      {:error, {:invalid_issue_id, value}} ->
+        # 422 — `issue_id` (optional forge/event correlation) was present but not a string. A raw
+        # number/bool/list would be `to_string`-d downstream into the pod's correlation + logs.
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{
+            error: "invalid issue_id (expected a string)",
+            value: inspect(value)
+          })
+        )
+
       {:error, :brief_required} ->
         # 422 — one-shot cap-profile without `brief`: the spawner would refuse (R18), the 202 would lie.
         send_resp(
