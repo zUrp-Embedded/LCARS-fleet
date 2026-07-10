@@ -124,6 +124,8 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
+  defp parse_admin_spawn_dto(_), do: {:ok, %{}}
+
   # `issue_id` is an OPTIONAL forge/event correlation string (allowlisted but not required). Present → it
   # MUST be a binary, mirroring the `pod_id` guard in `build_admin_opts`: a raw JSON number/bool/list would
   # be `to_string`-d downstream (`PublishConsumer`) into the pod's issue correlation + spawn logs (e.g.
@@ -137,8 +139,6 @@ defmodule Fleet.API.SpawnAdmission do
       {:ok, other} -> {:error, {:invalid_issue_id, other}}
     end
   end
-
-  defp parse_admin_spawn_dto(_), do: {:ok, %{}}
 
   # Builds the spawn `opts` from the public fields only. `pod_id` is kept only if path-safe.
   defp build_admin_opts(raw) do

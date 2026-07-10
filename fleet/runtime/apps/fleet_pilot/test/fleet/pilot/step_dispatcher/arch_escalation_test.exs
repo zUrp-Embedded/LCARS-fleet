@@ -38,8 +38,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
                  })
       end)
 
-    assert log =~ "NOT added"
-    assert log =~ "churn"
+    # Token ARCH-SPÉCIFIQUE (`ArchEscalation:` + le fragment unique du message) : sous `async` + `capture_log`,
+    # une chaîne partagée comme « NOT added » bave depuis un test IncidentRegistry.Escalation concurrent (même
+    # mot). On assert sur ce que SEUL ce module émet → pas de faux-positif par bleed.
+    assert log =~ "ArchEscalation:"
+    assert log =~ "until the label sticks"
   end
 
   test "throttle label OK → retour {:skipped, _escalated}, AUCUN log de churn" do
@@ -49,6 +52,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
                  ArchEscalation.escalate_rework(seams(OkForge), 5, @head, %{rounds: 4, budget: 3})
       end)
 
-    refute log =~ "NOT added"
+    # `ArchEscalation:` (préfixe de log unique à ce module ; arch ne logue QUE sur échec) au lieu de la chaîne
+    # PARTAGÉE « NOT added » : robuste au bleed async d'un log IncidentRegistry.Escalation concurrent (flaky fix).
+    refute log =~ "ArchEscalation:"
   end
 end

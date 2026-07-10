@@ -522,19 +522,6 @@ defmodule Fleet.Spawner.Pod do
     result_deadline_fire(TaskProbe.active_task_state(data.pod_id), data)
   end
 
-  # 3-STATE decision at the :result_deadline fire (F-C037), split out to be testable without a
-  # live-vs-unreachable TaskQueue. `:active` = real response timeout → kill; `:idle` = between tasks →
-  # lapse (no idle-kill); `:unknown` = broker unverifiable → no-kill (preserved) BUT re-arm, never lapse
-  # (a bare lapse orphans a hung pod whose broker blipped at the fire — the liveness only re-arms on move).
-  @doc false
-  def result_deadline_fire(:active, data),
-    do: transition_failed(data, {:result_timeout, data.pod_id})
-
-  def result_deadline_fire(:idle, _data), do: :keep_state_and_data
-
-  def result_deadline_fire(:unknown, data),
-    do: {:keep_state_and_data, arm_result_deadline_actions(data)}
-
   # LIVENESS watchdog (recurring generic timeout, workers only). If the pod has MOVED since the
   # previous tick (jsonl size ↑ OR CPU jiffies ↑) → re-arm the deadline (pushes back the kill) + the
   # tick; otherwise → just reschedule the tick (the state_timeout deadline keeps running). Result:
@@ -712,6 +699,20 @@ defmodule Fleet.Spawner.Pod do
 
   # Silent catch-all: other info messages (down, monitor, exit_status of a foreign port, etc.).
   def handle_event(:info, _msg, _state, _data), do: :keep_state_and_data
+
+  # 3-STATE decision at the :result_deadline fire (F-C037), split out (grouped OUTSIDE the handle_event/4
+  # clauses) to be testable without a live-vs-unreachable TaskQueue. `:active` = real response timeout →
+  # kill; `:idle` = between tasks → lapse (no idle-kill); `:unknown` = broker unverifiable → no-kill
+  # (preserved) BUT re-arm, never lapse (a bare lapse orphans a hung pod whose broker blipped at the fire —
+  # the liveness only re-arms on movement).
+  @doc false
+  def result_deadline_fire(:active, data),
+    do: transition_failed(data, {:result_timeout, data.pod_id})
+
+  def result_deadline_fire(:idle, _data), do: :keep_state_and_data
+
+  def result_deadline_fire(:unknown, data),
+    do: {:keep_state_and_data, arm_result_deadline_actions(data)}
 
   # ============================================================
   # terminate/3 — GUARANTEED teardown net (anti-orphan + anti-socket-leak)
