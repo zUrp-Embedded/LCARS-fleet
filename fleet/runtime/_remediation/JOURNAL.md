@@ -90,3 +90,8 @@
 - Vérifié moi-même : 3 clauses `{:ok, _non_list} -> {:ok, vide}` contredisaient le jumeau paginate (fail-loud :unexpected_page_shape, commentaire explicite l.211-213). Callers vérifiés (pas de CaseClauseError) : pr_review_state wrap {:error}, count escalate_rework, feedback "". Conséquence confirmée : merge sur jury vide + budget sous-compté.
 - Fix = `{:error, {:unexpected_review_shape, path, non_list}}`. RED×3 (ok/0/[]/%{vide}), GREEN. fleet_pilot 361+2+1/0.
 - Enchaîne (homme-mort ≠ cadence) → F-C119.
+
+### F-C119 FIXÉ — admission issue_id is_binary (miroir pod_id) + clause handler
+- Vérifié moi-même : issue_id optionnel pris cru vs pod_id strictement gardé (même module). Pas path-bound (path=pod_id). Conséquence modeste (mis-corrélation/control-bytes logs) mais trou de typage à un ingress no-auth.
+- RED a attrapé un CaseClauseError : do_admin_spawn (rest.ex) sans catch-all → nouvelle forme {:invalid_issue_id} non gérée → 500. Ajouté la clause 422. (Leçon intégrité : nouvelle forme de retour = vérifier TOUS les callers.)
+- fleet_api 74/0. Enchaîne → F-C018.
