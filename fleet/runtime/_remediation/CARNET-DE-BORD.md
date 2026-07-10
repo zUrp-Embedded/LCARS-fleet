@@ -46,7 +46,7 @@ Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-che
 | **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2, voir DECISION-BRIEF.md) |
 | THEORIQUE (WONTFIX) | 41 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **5** (F-C166, F-C160, F-C097, F-C098, **F-C059**) |
+| **fixés (commit)** | **6** (F-C166, F-C160, F-C097, F-C098, F-C059, **F-C069**) |
 | constructeurs de frontière posés | 3 (`boot_enabled?/2`, `encode_line/1`, `safe_pod_info` :unknown) |
 | règles méta posées | R-01 → R-09 |
 

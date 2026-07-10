@@ -67,7 +67,7 @@ F-C065,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_protocol.ex:29,THEO
 F-C066,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/gatekeeper_seal.ex:92,DOCTRINE,unassigned,"Gatekeeper seal returns success after a failed explicit issue close"
 F-C067,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/gatekeeper_seal.ex:29,PERCE-doc,unassigned,"`GatekeeperSeal.as_gatekeeper/1` docs still describe system-token fallback"
 F-C068,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client.ex:651,THEORIQUE,unassigned,"Half-written workflow route labels are read as ordinary `:none`"
-F-C069,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client/jury.ex:75,PERCE,unassigned,"PR review reads convert unexpected 2xx shapes into empty jury/feedback/budget facts"
+F-C069,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client/jury.ex:75,PERCE,FIXÉ,"PR review reads convert unexpected 2xx shapes into empty jury/feedback/budget facts"
 F-C070,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client/repo.ex:184,PERCE-doc,unassigned,"Repo id docs/tests still describe a random UUID fallback that current spawn identity no longer uses"
 F-C071,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client.ex:29,PERCE-doc,unassigned,"`ForgeClient` module docs still describe removed GET+PUT label mutation"
 F-C072,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client.ex:96,PERCE-doc,unassigned,"`list_open_issues_without_label/3` docs still claim single-page issue reads"

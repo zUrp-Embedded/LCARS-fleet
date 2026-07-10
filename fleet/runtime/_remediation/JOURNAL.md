@@ -85,3 +85,8 @@
 - RED = spawn frais destructif d'un pipe vivant ; GREEN. fleet_pilot 358+2+1/0.
 - **Couche-2 flaggée DOCTRINE** : `pod_info` conflate absent vs timeout-vivant (tous deux `{:error,:not_found}`) → un pipe vivant-mais-lent peut encore être classé :dead. Non fixable au niveau safe_pod_info (un pod vraiment mort resterait :busy = wedge) → exige un split de contrat pod_info côté spawner = décision design (ajouté DECISION-BRIEF).
 - Prochain : F-C069 (jury 2xx corrompu → merge/half-jury).
+
+### F-C069 FIXÉ — reviews 2xx non-liste → fail-loud (jumeau paginate)
+- Vérifié moi-même : 3 clauses `{:ok, _non_list} -> {:ok, vide}` contredisaient le jumeau paginate (fail-loud :unexpected_page_shape, commentaire explicite l.211-213). Callers vérifiés (pas de CaseClauseError) : pr_review_state wrap {:error}, count escalate_rework, feedback "". Conséquence confirmée : merge sur jury vide + budget sous-compté.
+- Fix = `{:error, {:unexpected_review_shape, path, non_list}}`. RED×3 (ok/0/[]/%{vide}), GREEN. fleet_pilot 361+2+1/0.
+- Enchaîne (homme-mort ≠ cadence) → F-C119.
