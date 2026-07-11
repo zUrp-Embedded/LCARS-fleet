@@ -66,17 +66,16 @@
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-15 |
 
-## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
+## Crons — SUPPRIMÉS par l'user (2026-07-11 ~09h) — NE PAS RÉ-ARMER
 
-> ⚠️ `durable` sans effet : ces crons vivent en mémoire de session. **Si tu reprends ce chantier dans une
-> session fraîche, ta TOUTE PREMIÈRE action est de recréer le watchdog** (sinon plus aucun heartbeat, le
-> dispositif autonome est mort). Vérifie d'abord avec `CronList` : s'il manque, recrée-le AVANT tout le reste.
+> ⛔ L'user a explicitement coupé le watchdog + le relevé horaire (« stop tes cron ») une fois le bord
+> factuel atteint : le factuel était fini, les crons ne faisaient plus que du bruit (confirmations « rien
+> bougé » toutes les 10 min). **En reprise de session : NE recrée PAS ces crons.** Le chantier attend
+> désormais une DÉCISION user, pas un heartbeat autonome. Si l'user veut relancer un dispositif autonome,
+> il le demandera explicitement.
 
-- **watchdog 10 min** : `a73c2099` — cron `3-59/10 * * * *`. Ré-arme via `CronCreate` avec ce prompt exact :
-  > WATCHDOG remédiation-ssot (10 min). Relis /home/lordzurp/wt-remediation/fleet/runtime/_remediation/CARNET-DE-BORD.md. Check court : est-ce que j'avance sur le plan ? un worker délégué est-il fini ou bloqué (si fini → consolide dans LEDGER.csv + avance à l'unité suivante) ? suis-je en train de dériver (« je fais vite ce bout ») ou d'attendre bêtement ? RÈGLE CARDINALE : aucun code ne bouge sur un finding non vérifié-percé (cf. PLAYBOOK.md). Si tout tourne bien, ne fais qu'un check et continue le travail en cours — ne churn pas. Si le chantier est en pause sans raison, relance l'étape suivante du PLAN.md.
-- **relevé horaire (:47)** : `b1dc7bc3` — cron `47 * * * *` — checkpoint horaire (pause + écriture d'état).
-- **À SUPPRIMER en fin de chantier** (CronDelete a73c2099 + b1dc7bc3).
-- ⚠️ auto-expiration cron : 7 jours (ré-armer si le chantier dépasse).
+- ~~watchdog 10 min `a73c2099`~~ — supprimé (CronDelete).
+- ~~relevé horaire :47 `b1dc7bc3`~~ — supprimé (CronDelete).
 
 ## Décisions en attente (pour le user)
 
