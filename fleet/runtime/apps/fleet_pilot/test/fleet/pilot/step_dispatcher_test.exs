@@ -37,6 +37,14 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-arch"}]})
       assert {:skip, :awaits_arch} = StepDispatcher.decide(payload)
     end
+
+    test "F-C066 : label stage/merged → {:skip, :merged} (brique fusionnée TERMINALE, jamais re-engagée)" do
+      # Une brique fusionnée dont le close explicite a échoué (issue restée OPEN, verrou éventuellement
+      # réclamé par la réconciliation) NE doit PAS être re-dispatchée → sinon double-livraison. Le label
+      # `stage/merged` (posé AVANT le close) est la garde DURABLE, indépendante du verrou lcars-in-flight.
+      payload = eng_issue(%{"labels" => [%{"name" => "stage/merged"}]})
+      assert {:skip, :merged} = StepDispatcher.decide(payload)
+    end
   end
 
   # Seams stubs pour dispatch_issue/2

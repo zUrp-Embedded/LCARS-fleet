@@ -57,14 +57,14 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     refute_received {:worktree_sync, _}
   end
 
-  test "soft-default B-#4 — merge OK mais close ÉCHOUE → seal :ok (merge autoritatif) MAIS log LOUD" do
-    # Repli B-#4 : `_ = close_issue` était jeté sous « a failed close invalidates nothing » (FAUX depuis le
-    # retrait de `Closes #N`) → une brique MERGÉE restait issue OUVERTE → re-dispatchée chaque tick, en silence.
-    # Fix : log LOUD sur close raté (le merge est autoritatif + fait ; le stuck-open doit être visible).
-    # Le token gatekeeper est posé par le setup.
+  test "F-C066 — merge OK mais close ÉCHOUE (persistant) → seal {:error, {:close_after_merge, _}} + log LOUD, projection quand même" do
+    # AVANT (repli B-#4) : `_ = close_issue` jeté → close raté → seal renvoyait `:ok` → brique MERGÉE
+    # restait OUVERTE → re-dispatchée chaque tick, en SILENCE (le RETOUR mentait). F-C066 : retour HONNÊTE
+    # (le merge a réussi mais le close non) après retry borné + log LOUD. L'appelant skippe alors l'unlock
+    # (issue garde lcars-in-flight) et `decide/1` skip `stage/merged` → jamais re-dispatchée. Token posé par le setup.
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :ok =
+        assert {:error, {:close_after_merge, _}} =
                  GatekeeperSeal.seal_and_merge(
                    CloseFailForge,
                    "fleet/myproj",

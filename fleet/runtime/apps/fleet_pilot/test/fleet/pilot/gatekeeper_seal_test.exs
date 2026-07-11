@@ -34,6 +34,32 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     def close_issue(_r, _n, _o), do: {:ok, :closed}
   end
 
+  # F-C066 — merge/comment/stage OK, close TOUJOURS en échec : prouve le retour honnête (pas de :ok menteur).
+  defmodule CloseFailForge do
+    def merge_pr(_r, _pr, _o), do: :ok
+    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
+
+    def close_issue(_r, n, _o) do
+      send(self(), {:close_attempt, n})
+      {:error, {:http, 500, "close boom"}}
+    end
+  end
+
+  # F-C066 — close FLAKY : échoue 2×, réussit la 3e (compteur process-dict) → prouve l'auto-heal par retry.
+  defmodule CloseFlakyForge do
+    def merge_pr(_r, _pr, _o), do: :ok
+    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
+
+    def close_issue(_r, n, _o) do
+      attempt = (Process.get({:close_attempts, n}) || 0) + 1
+      Process.put({:close_attempts, n}, attempt)
+      send(self(), {:close_attempt, n, attempt})
+      if attempt < 3, do: {:error, {:http, 500, "flaky"}}, else: {:ok, :closed}
+    end
+  end
+
   test "merge signé PUIS comment gatekeeper (signature interne as_gatekeeper) + dédup → :ok" do
     # forge_opts BRUTS (token système) : la signature gatekeeper doit être posée EN INTERNE par
     # `seal_and_merge` (writer unique `as_gatekeeper`) — le token de rôle ÉCRASE le système.
@@ -71,5 +97,27 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert :ok = GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
 
     assert_received :merged
+  end
+
+  test "F-C066 : merge OK mais close échoué (persistant) → {:error, {:close_after_merge, _}}, JAMAIS un :ok menteur" do
+    # Le cœur du finding : la fonction retournait `:ok` même quand `close_issue` échouait (log-loud puis
+    # `:ok`) → l'appelant croyait la brique scellée alors que l'issue restait OPEN → re-dispatch →
+    # double-livraison. Désormais : retour HONNÊTE typé (le merge a réussi, mais le close non).
+    assert {:error, {:close_after_merge, {:http, 500, "close boom"}}} =
+             GatekeeperSeal.seal_and_merge(CloseFailForge, "fleet/p", 7, 42, "engineer", [])
+
+    # Retry BORNÉ : 3 tentatives de close avant d'abandonner (puis retour honnête).
+    assert_received {:close_attempt, 42}
+    assert_received {:close_attempt, 42}
+    assert_received {:close_attempt, 42}
+    refute_received {:close_attempt, 42}
+  end
+
+  test "F-C066 : close flaky (échoue 2×, réussit la 3e) → retry → :ok (auto-heal d'un blip transitoire)" do
+    assert :ok = GatekeeperSeal.seal_and_merge(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [])
+
+    assert_received {:close_attempt, 42, 1}
+    assert_received {:close_attempt, 42, 2}
+    assert_received {:close_attempt, 42, 3}
   end
 end

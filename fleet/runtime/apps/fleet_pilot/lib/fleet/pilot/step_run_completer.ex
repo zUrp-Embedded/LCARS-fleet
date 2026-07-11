@@ -316,6 +316,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
+      # F-C066 — merge OK mais close échoué : NON-`:ok` propagé → le `with` de `route/3` court-circuite
+      # AVANT l'unlock (l'issue garde `lcars-in-flight`) ; `decide/1` skip aussi `stage/merged` → jamais
+      # re-dispatchée (pas de double-livraison), un opérateur ferme la brique fusionnée-mais-ouverte.
+      {:error, {:close_after_merge, _}} = err -> err
       # Fail-closed: no gatekeeper role token → the seal refused (no merge/close under the system account).
       {:error, :role_token_unavailable} = err -> err
     end

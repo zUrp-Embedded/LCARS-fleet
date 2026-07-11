@@ -55,6 +55,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constants).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
+  # F-C066 — scoped label `stage/merged` (posé par GatekeeperSeal AVANT le close). Composé des DEUX
+  # autorités Labels (prefix + valeur), pas un littéral forké.
+  @merged_label Fleet.Pilot.Labels.stage_prefix() <> Fleet.Pilot.Labels.stage_merged()
 
   @type decision :: :engage | {:skip, atom()}
 
@@ -76,6 +79,14 @@ defmodule Fleet.Pilot.StepDispatcher do
     cond do
       @in_flight_label in labels ->
         {:skip, :in_flight}
+
+      # F-C066 — a MERGED brick is TERMINAL: never re-engaged, EVEN if its explicit close failed (issue
+      # stuck OPEN). Without this durable guard, a merged-but-open issue (close failure inside
+      # GatekeeperSeal) re-appears in `list_open_issues` → `decide/1` → re-dispatch → DOUBLE-DELIVERY. The
+      # `stage/merged` label is the WS1 "done" marker (set before the close); a compromised-role fake is a
+      # nuke&redeploy threat (same trust model as the other stage/* reads), not this rail's concern.
+      @merged_label in labels ->
+        {:skip, :merged}
 
       # HUMAN lock (gatekeeper verdict escalate/halt/redirect, or anomaly). The issue awaits
       # an action via the arch; the poller does NOT re-dispatch (else a judgment loop after the unlock).

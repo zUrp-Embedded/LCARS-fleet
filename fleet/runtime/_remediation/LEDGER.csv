@@ -64,7 +64,7 @@ F-C062,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/arch_esca
 F-C063,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher.ex:420,DOCTRINE,D4-keep-doc,"Routeless issue onboarding uses a hidden `brief-gate` default workflow map"
 F-C064,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/spawn/naming.ex:56,DOCTRINE,D4-fork,"Forge repo ids are truncated to four decimal digits before session identity"
 F-C065,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_protocol.ex:29,THEORIQUE,unassigned,"`ForgeProtocol.feature_branch/2` can build refs its own parser rejects"
-F-C066,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/gatekeeper_seal.ex:92,DOCTRINE,D1-fork,"Gatekeeper seal returns success after a failed explicit issue close"
+F-C066,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/gatekeeper_seal.ex:92,PERCE,FIXÉ,"Gatekeeper seal returns success after a failed explicit issue close"
 F-C067,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/gatekeeper_seal.ex:29,PERCE-doc,FIXÉ,"`GatekeeperSeal.as_gatekeeper/1` docs still describe system-token fallback"
 F-C068,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client.ex:651,THEORIQUE,unassigned,"Half-written workflow route labels are read as ordinary `:none`"
 F-C069,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/forge_client/jury.ex:75,PERCE,FIXÉ,"PR review reads convert unexpected 2xx shapes into empty jury/feedback/budget facts"

@@ -52,9 +52,13 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   HERE (`as_gatekeeper/1`), no longer by the caller — a merge cannot go out unsigned.
   Returns `:ok | {:error, {:merge, reason}}`; **`{:error, :role_token_unavailable}`** if the gatekeeper
   role token is missing (fail-closed — the merge/close does NOT go out under the system account).
+  **F-C066**: `{:error, {:close_after_merge, reason}}` if the merge succeeded but the EXPLICIT issue close
+  FAILED after retries — NOT a lying `:ok`. The merged brick stays open but the caller skips the unlock
+  (issue keeps `lcars-in-flight`) and `decide/1` skips `stage/merged` → never re-dispatched (no double-delivery).
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
-          :ok | {:error, {:merge, term()} | :role_token_unavailable}
+          :ok
+          | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
   def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts) do
     case as_gatekeeper(forge_opts) do
       {:error, :role_token_unavailable} = err ->
@@ -105,24 +109,26 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
             # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
             # else in the pipeline) — not concerned by this inconsistency.
-            case forge.close_issue(repo, issue_n, gk_opts) do
-              {:error, reason} ->
-                Logger.error(
-                  "GatekeeperSeal: PR ##{pr_number} MERGED but issue ##{issue_n} close FAILED " <>
-                    "(#{inspect(reason)}) — the merged brick re-appears as an OPEN issue " <>
-                    "(re-dispatch churn) until closed"
-                )
-
-              _ ->
-                :ok
-            end
+            close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
 
             # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
             # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
             # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
-            # a failed alignment = disk behind, never a loss (the deliverable is on the forge).
+            # a failed alignment = disk behind, never a loss (the deliverable is on the forge). Independent of the
+            # close (the brick is merged either way).
             _ = worktree_sync().sync(repo)
-            :ok
+
+            case close_result do
+              :ok ->
+                :ok
+
+              {:error, reason} ->
+                # F-C066 — the merge SUCCEEDED but the explicit close FAILED after retries. We do NOT return a
+                # lying `:ok`: `{:error, {:close_after_merge, reason}}` → the caller SKIPS the unlock (the issue
+                # keeps `lcars-in-flight` = immediate guard) and `decide/1` skips `stage/merged` (durable guard)
+                # → the merged brick is NEVER re-dispatched (no double-delivery).
+                {:error, {:close_after_merge, reason}}
+            end
 
           {:error, _} = err ->
             err
@@ -147,6 +153,36 @@ defmodule Fleet.Pilot.GatekeeperSeal do
       :ok -> :ok
       {:ok, _} -> :ok
       {:error, reason} -> {:error, {:merge, reason}}
+    end
+  end
+
+  # F-C066 — BOUNDED retry of the EXPLICIT close (a merged brick MUST leave `list_open_issues`, else it
+  # re-appears as an open issue → re-dispatch → double-delivery). A transient blip (HTTP 500 / lock
+  # contention / GenServer timeout) self-heals on retry; a PERSISTENT failure returns `{:error, reason}` →
+  # `seal_and_merge` surfaces `{:close_after_merge, _}` (no swallowed `:ok`). Immediate retries (no sleep):
+  # this runs in the offloaded completion task, the dominant cause is a MOMENTARY forge/GenServer hiccup.
+  @close_attempts 3
+  defp close_with_retry(forge, repo, issue_n, gk_opts, pr_number, attempt \\ 1) do
+    case forge.close_issue(repo, issue_n, gk_opts) do
+      {:error, reason} when attempt < @close_attempts ->
+        Logger.warning(
+          "GatekeeperSeal: PR ##{pr_number} MERGED, issue ##{issue_n} close attempt " <>
+            "#{attempt}/#{@close_attempts} FAILED (#{inspect(reason)}) — retrying"
+        )
+
+        close_with_retry(forge, repo, issue_n, gk_opts, pr_number, attempt + 1)
+
+      {:error, reason} ->
+        Logger.error(
+          "GatekeeperSeal: PR ##{pr_number} MERGED but issue ##{issue_n} close FAILED after " <>
+            "#{@close_attempts} attempts (#{inspect(reason)}) — merged brick stays OPEN; `decide/1` skips " <>
+            "`stage/merged` (no re-dispatch), an operator must close it"
+        )
+
+        {:error, reason}
+
+      _ ->
+        :ok
     end
   end
 
