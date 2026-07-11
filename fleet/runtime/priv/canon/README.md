@@ -1,5 +1,15 @@
 # priv/canon/ — données canon du runtime LCARS V2
 
+> ⚠️ **LEGACY GELÉ — NON CHARGÉ PAR LE CODE (F-C156/F-C157/F-C153).**
+> Ce répertoire (racine `runtime/priv/canon/`, run #4) est un **2e canon Memory-X en forme non-v2.5**,
+> superseded par les canons d'app (`apps/fleet_cap_profile/priv/canon/`, v2.5) et les monks GELÉS dans
+> `apps/fleet_cap_profile/priv/canon/_frozen-monks/`. **Aucun code runtime ne le lit** (vérifié : ni
+> `Fleet.SPBuilder.Monk` — qui résout depuis `cap-profiles/monks/` — ni la découverte de cap-profiles ne
+> pointent ici). `fleets/memory-alpha·beta.yaml` + `cap-profiles/{monk,archivist}.yaml` co-existent avec
+> les définitions gelées de `_frozen-monks/` (rosters divergents, F-C157) : conservé À DESSEIN comme trace
+> historique (décision keep+doc), pas de fusion. La « réactivation Memory-X » (F-C153) cible le registry
+> `cap-profiles/monks/` (absent = monks gelés) → chemin **dormant par design** jusqu'à un dégel explicite.
+
 **Date** : 2026-05-22 (bascule run #4)
 
 ## Contenu

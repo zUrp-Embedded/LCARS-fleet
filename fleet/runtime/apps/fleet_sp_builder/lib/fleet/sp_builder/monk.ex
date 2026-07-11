@@ -11,6 +11,16 @@ defmodule Fleet.SPBuilder.Monk do
 
   **Pure** functions (FS read only, no process). The composer's public API stays
   `Fleet.SPBuilder.resolve_monk_injection/2` (defdelegate to `resolve/2`).
+
+  ## Monks are FROZEN — reactivation is dormant by design (F-C153)
+
+  The registry root defaults to `app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`, a tree that
+  is **intentionally ABSENT**: the monks were FROZEN into `apps/fleet_cap_profile/priv/canon/_frozen-monks/`
+  (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
+  so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
+  byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent
+  `cap-profiles/monks/` and fail — this is the DORMANT-by-design state (kept, documented) until an explicit
+  thaw wires the frozen tree back as the registry root. See also the LEGACY banner in `runtime/priv/canon/README.md`.
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}
