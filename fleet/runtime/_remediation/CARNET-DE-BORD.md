@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~03h15 (relevé · **BORD FACTUEL DÉFINITIF** — D3+D6 inventoriés, tous clusters fact-backed)
-**Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés · 47 fixes · reste STRICTEMENT décisions user**
+**Dernière révision** : 2026-07-11 ~03h45 (relevé horaire · **BORD FACTUEL VÉRIFIÉ** — 0 ligne unassigned, worktree propre)
+**Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés+tagués · 48 fixes · reste STRICTEMENT décisions user**
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
