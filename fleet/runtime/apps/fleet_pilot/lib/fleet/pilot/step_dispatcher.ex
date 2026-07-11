@@ -338,7 +338,22 @@ defmodule Fleet.Pilot.StepDispatcher do
             # SET of judges = union(VOLATILE requested_reviewers, STABLE review-records). A judge
             # dropped from `requested_reviewers` without voting stays in the jury → `pending` → spawned, never a
             # merge on a half-jury (cf. ForgeClient.pr_review_state).
-            requested = Enum.uniq(requested_field ++ jury)
+            #
+            # F-C061 — the jury is RESTRICTED to the configured judge roles (`reviewer_roles`, the SSOT the
+            # WRITE side lays via `request_reviews_step`). A reviewer login that is NOT a configured judge —
+            # a HUMAN (verified live: humans keep ≥read on fleet repos, the forge does NOT prevent a human
+            # review) or a non-jury role — is NOT a spawn target and does NOT count in the merge decision.
+            # Otherwise it STARVES the jury (`hd(pending)` = human → silent `{:skipped, :no_role}`) or skews
+            # the verdict tally. `brief_kind: judge` was NOT used here: it is a SECURITY axis (defused brief)
+            # that also tags the gatekeeper (a verdict-reader/sealer, not a jury member) — the jury axis is
+            # `reviewer_roles`. A foreign reviewer is surfaced LOUD (not swallowed), never a crash (a benign
+            # human review must not DoS the pipe).
+            jury_roles = MapSet.new(Fleet.Pilot.Roles.reviewer_roles(opts), &String.downcase/1)
+
+            {requested, foreign} =
+              Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))
+
+            warn_foreign_reviewers(foreign, ctx.repo, pr_number, jury_roles)
             ReviewLifecycle.dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
 
           {:error, reason} ->
@@ -360,6 +375,20 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   defp login_of(r), do: r |> Map.get("login", "") |> to_string() |> String.downcase()
+
+  # F-C061 — a reviewer login that is NOT a configured judge role is IGNORED from the jury (not a spawn
+  # target, not counted) but SURFACED loud: a human (or non-jury role) posting/being-requested a review on
+  # a fleet PR is a real, forge-permitted anomaly (the write side only ever lays `reviewer_roles`). Warning,
+  # not a crash: a benign human review must NOT turn into a pipeline DoS.
+  defp warn_foreign_reviewers([], _repo, _pr_number, _jury_roles), do: :ok
+
+  defp warn_foreign_reviewers(foreign, repo, pr_number, jury_roles) do
+    Logger.warning(
+      "StepDispatcher.dispatch_review (F-C061): non-jury reviewer login(s) #{inspect(foreign)} on PR " <>
+        "#{repo}##{pr_number} — IGNORED from the jury (reviewer_roles=#{inspect(MapSet.to_list(jury_roles))}). " <>
+        "A non-fleet-judge (human?) reviewed/was-requested; the forge does not prevent it. Not dispatched, not counted."
+    )
+  end
 
   # Tags the error of a resolution step (preserves the expected {:project_resolution, _}). SHARED by the
   # two flows: called directly by `dispatch_issue` (issue) AND threaded by capture (`err_tagger`) to

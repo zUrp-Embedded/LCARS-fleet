@@ -916,6 +916,39 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:stopped_watch, 42}
     end
 
+    test "F-C061 : un login NON-jury (humain) dans les reviewers est filtré (n'affame pas le jury) + LOUD" do
+      # Un humain (`Lordzurp`) reviewe/est-requesté sur la PR (read suffit — vérifié live, la forge ne
+      # l'empêche PAS). SANS filtre : il n'a pas de verdict → `hd(pending)` = lordzurp →
+      # `RoleDispatch.load_role_or_skip` échoue → `{:skipped, :no_role}` SILENCIEUX → le jury (qualifier +
+      # reviewer, tous APPROVED) est AFFAMÉ, pas de merge. AVEC le filtre `reviewer_roles` : lordzurp exclu
+      # du jury → tous les juges approved → merge, et le reviewer non-jury est signalé LOUD (pas avalé).
+      pr =
+        pr(%{
+          "requested_reviewers" => [
+            %{"login" => "Qualifier"},
+            %{"login" => "Reviewer"},
+            %{"login" => "Lordzurp"}
+          ],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved}]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          # comportement : le login humain non-jury n'affame pas le merge.
+          assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
+        end)
+
+      # LOUD : le reviewer non-jury est signalé (F-C061), pas absorbé en silence.
+      assert log =~ "F-C061" and log =~ "lordzurp"
+      # jamais dispatché comme un rôle.
+      refute_received {:spawned, _, "lordzurp"}
+    end
+
     # ── Angle « la machine lit l'état-forge complet » : échec de merge CLASSIFIÉ (2026-07-07) ──
     # Remplace l'ancien fourre-tout « tout échec = conflit → eng rebase » (impossible car forge-aveugle →
     # mur live). L'échec est relu de l'objet PR (MergeOutcome) et aiguillé sur sa cause RÉELLE.
@@ -1156,9 +1189,22 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "reviewer = role inconnu -> skip :no_role" do
+    test "F-C061 : reviewer = login non-jury (humain/inconnu) SEUL → filtré + LOUD, PAS de skip muet" do
+      # Ancien contrat (bug F-C061) : un login inconnu → `{:skipped, :no_role}` SILENCIEUX. Nouveau : un
+      # login non-jury (ici `lordzurp`, humain) est FILTRÉ du jury → la PR se retrouve sans juge → ADOPTION
+      # (on pose le jury, review au tick suivant), et le login foreign est signalé LOUD (jamais avalé).
       pr = pr(%{"requested_reviewers" => [%{"login" => "lordzurp"}]})
-      assert {:skipped, :no_role} = StepDispatcher.dispatch_review(pr, dispatch_opts())
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, {:adopted, _pr_number, reviewers}} =
+                   StepDispatcher.dispatch_review(pr, dispatch_opts())
+
+          assert reviewers != []
+        end)
+
+      assert log =~ "F-C061" and log =~ "lordzurp"
+      refute_received {:spawned, _, "lordzurp"}
     end
 
     test "F181 : echec POST-verrou (enqueue KO) -> verrou PR retire + pod tue" do

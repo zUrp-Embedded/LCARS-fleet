@@ -59,7 +59,7 @@ F-C057,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_completer.ex:3
 F-C058,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/labels.ex:2,DOCTRINE,D1-best-effort-OK,"Producer `stage/review` transition failure is swallowed even though labels are the forge state machine"
 F-C059,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/spawn.ex:312,PERCE,FIXÉ,"Pipe pod state probe failure is conflated with 'dead' and can authorize a fresh spawn/reset"
 F-C060,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/review_lifecycle.ex:203,THEORIQUE,unassigned,"Poller-driven PR promotion reports merge success even if issue unlock fails"
-F-C061,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/review_lifecycle.ex:138,DOCTRINE,D-review-fork,"Unknown PR reviewer roles are skipped as normal dispatch outcomes"
+F-C061,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/review_lifecycle.ex:138,DOCTRINE,FIXÉ,"Unknown PR reviewer roles are skipped as normal dispatch outcomes"
 F-C062,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/arch_escalation.ex:60,THEORIQUE,unassigned,"Arch escalation returns `{:skipped, _escalated}` even when the throttle label was not written"
 F-C063,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher.ex:420,DOCTRINE,D4-keep-doc,"Routeless issue onboarding uses a hidden `brief-gate` default workflow map"
 F-C064,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/spawn/naming.ex:56,DOCTRINE,D4-fork,"Forge repo ids are truncated to four decimal digits before session identity"
