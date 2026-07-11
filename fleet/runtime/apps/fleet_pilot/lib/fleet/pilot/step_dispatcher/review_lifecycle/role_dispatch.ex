@@ -156,49 +156,62 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
         :ok ->
           # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
-          brief =
-            review_brief(
-              kind,
-              profile,
-              role,
-              forge,
-              repo,
-              issue_n,
-              forge_opts,
-              route,
-              pr_number
-            )
+          case review_brief(
+                 kind,
+                 profile,
+                 role,
+                 forge,
+                 repo,
+                 issue_n,
+                 forge_opts,
+                 route,
+                 pr_number
+               ) do
+            {:ok, brief} ->
+              spawn_opts =
+                [brief: brief, pod_id: pod_id, rc_name: Naming.rc_name(repo, role)]
+                |> Opts.maybe_put(:project, project)
+                |> Naming.maybe_put_route(route)
+                |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
 
-          spawn_opts =
-            [brief: brief, pod_id: pod_id, rc_name: Naming.rc_name(repo, role)]
-            |> Opts.maybe_put(:project, project)
-            |> Naming.maybe_put_route(route)
-            |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
+              # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
+              # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
+              # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
+              # seams, not the whole `ctx` — hardened boundary).
+              log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
-          # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
-          # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
-          # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
-          # seams, not the whole `ctx` — hardened boundary).
-          log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
+              Spawn.spawn_step(
+                %Spawn.Seams{
+                  forge: ctx.forge,
+                  spawner: ctx.spawner,
+                  task_queue: ctx.task_queue,
+                  repo: ctx.repo,
+                  forge_opts: ctx.forge_opts,
+                  wake_recovery: ctx.wake_recovery
+                },
+                pod_id,
+                role,
+                profile,
+                brief,
+                spawn_opts,
+                pr_number,
+                issue_n,
+                log_ctx
+              )
 
-          Spawn.spawn_step(
-            %Spawn.Seams{
-              forge: ctx.forge,
-              spawner: ctx.spawner,
-              task_queue: ctx.task_queue,
-              repo: ctx.repo,
-              forge_opts: ctx.forge_opts,
-              wake_recovery: ctx.wake_recovery
-            },
-            pod_id,
-            role,
-            profile,
-            brief,
-            spawn_opts,
-            pr_number,
-            issue_n,
-            log_ctx
-          )
+            # F-C083 — the DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
+            # (transient/unreachable). We REFUSE to spawn a criterion-less judge (the diff without a
+            # criterion → blind approval = false GREEN) → we DEFER. The judge is instance-scoped
+            # (`serialize_project_scope` returned `:ok` WITHOUT taking a lock) → nothing to release; the
+            # poller re-dispatches on the next tick (read-error ≠ absence).
+            {:error, {:criterion_unavailable, reason}} ->
+              Logger.warning(
+                "StepDispatcher: judge criterion unavailable role=#{role} pr=#{repo}##{pr_number} → " <>
+                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
+              )
+
+              {:skipped, :criterion_unavailable}
+          end
       end
     else
       {:error, {phase, reason}} ->
@@ -224,6 +237,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # PR-judge path — no workflow_map step here (PR-driven judges) → `step_spec = %{}`:
   # build_brief falls back to the profile's `brief_kind` (judge for qualifier/reviewer) AND to the
   # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
+  # `{:ok, brief} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
+  # deliverable-judge path (F-C083: a forge read-error on the criterion DEFERS, never a criterion-less
+  # judge). rework/resolve build unconditionally (feedback in hand / no criterion) → always `{:ok, _}`.
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
       BriefBuilder.build_brief(
@@ -239,7 +255,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       )
 
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
-    do: BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route)
+    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route)}
 
   defp review_brief(
          :resolve_conflict,
@@ -252,5 +268,5 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          route,
          pr
        ),
-       do: BriefBuilder.resolve_conflict_brief(role, forge, repo, pr, forge_opts, route)
+       do: {:ok, BriefBuilder.resolve_conflict_brief(role, forge, repo, pr, forge_opts, route)}
 end

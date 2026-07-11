@@ -175,59 +175,73 @@ defmodule Fleet.Pilot.StepDispatcher do
           # Computed ONCE → serves the spawn-file AND the TaskQueue brief (that the pod pulls via get_work_item).
           # Without it, enqueue_brief would re-enqueue the raw `issue["body"]` → a judge would pull the executable
           # BUILD brief instead of the GateBrief.
-          brief =
-            BriefBuilder.build_brief(
-              profile,
-              role,
-              forge,
-              repo,
-              number,
-              issue,
-              forge_opts,
-              route,
-              step_spec
-            )
+          case BriefBuilder.build_brief(
+                 profile,
+                 role,
+                 forge,
+                 repo,
+                 number,
+                 issue,
+                 forge_opts,
+                 route,
+                 step_spec
+               ) do
+            {:ok, brief} ->
+              spawn_opts =
+                [
+                  brief: brief,
+                  pod_id: pod_id,
+                  rc_name: Naming.rc_name(repo, role),
+                  # Speaking LOCAL branch name (sanitized issue title), not
+                  # the pod_id. Used by phase.ex → `feature/<slug>`. Computed once (reused by the gate
+                  # for the in-place reprovision of a pipe: same branch at reset as at spawn).
+                  slug: slug
+                ]
+                |> Opts.maybe_put(:project, project)
+                |> Naming.maybe_put_route(route)
+                |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
 
-          spawn_opts =
-            [
-              brief: brief,
-              pod_id: pod_id,
-              rc_name: Naming.rc_name(repo, role),
-              # Speaking LOCAL branch name (sanitized issue title), not
-              # the pod_id. Used by phase.ex → `feature/<slug>`. Computed once (reused by the gate
-              # for the in-place reprovision of a pipe: same branch at reset as at spawn).
-              slug: slug
-            ]
-            |> Opts.maybe_put(:project, project)
-            |> Naming.maybe_put_route(route)
-            |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
+              # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
+              # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
+              # seams struct at this site (the 6 seams, not the whole `opts` — armored boundary).
+              log_ctx =
+                "issue=#{repo}##{number} " <>
+                  "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
 
-          # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
-          # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
-          # seams struct at this site (the 6 seams, not the whole `opts` — armored boundary).
-          log_ctx =
-            "issue=#{repo}##{number} " <>
-              "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
+              Spawn.spawn_step(
+                %Spawn.Seams{
+                  forge: forge,
+                  spawner: spawner,
+                  task_queue: task_queue,
+                  repo: repo,
+                  forge_opts: forge_opts,
+                  # Wake recovery seam (default = the real fn) threaded from opts.
+                  wake_recovery:
+                    Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
+                },
+                pod_id,
+                role,
+                profile,
+                brief,
+                spawn_opts,
+                number,
+                number,
+                log_ctx
+              )
 
-          Spawn.spawn_step(
-            %Spawn.Seams{
-              forge: forge,
-              spawner: spawner,
-              task_queue: task_queue,
-              repo: repo,
-              forge_opts: forge_opts,
-              # Wake recovery seam (default = the real fn) threaded from opts.
-              wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
-            },
-            pod_id,
-            role,
-            profile,
-            brief,
-            spawn_opts,
-            number,
-            number,
-            log_ctx
-          )
+            # F-C083 — a DELIVERABLE-judge STEP (multi-step workflow_map) whose criterion (issue body)
+            # can't be READ from the forge → we REFUSE a criterion-less judge (the diff without a criterion
+            # → blind approval = false GREEN) and DEFER. A judge step is instance-scoped
+            # (`serialize_project_scope` returned `:ok` WITHOUT a lock) → nothing to release; the poller
+            # re-dispatches next tick (read-error ≠ absence).
+            {:error, {:criterion_unavailable, reason}} ->
+              Logger.warning(
+                "StepDispatcher: judge criterion unavailable issue=#{repo}##{number} role=#{role} → " <>
+                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
+              )
+
+              {:skipped, :criterion_unavailable}
+          end
         else
           {:skipped, :role_busy} ->
             # Project-scoped role already occupied by another issue of the repo → DEFERRED without lock or

@@ -81,7 +81,7 @@ F-C079,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/wake_recovery.ex:6,THEORI
 F-C080,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/wake_recovery.ex:8,DOCTRINE,D5-keep-doc,"WakeRecovery ignores the re-spawn result before re-waking"
 F-C081,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/worktree_sync.ex:46,DOCTRINE,D5-keep-doc,"WorktreeSync derives the local clone path from an unparsed repo string"
 F-C082,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/write_spacing.ex:14,DOCTRINE,R08-défensif,"Invalid forge write spacing config disables the spacing silently"
-F-C083,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/brief_builder.ex:22,DOCTRINE,D5-keep-doc,"BriefBuilder turns forge read failures into empty or generic brief inputs"
+F-C083,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/brief_builder.ex:22,PERCE,FIXÉ,"BriefBuilder turns forge read failures into empty or generic brief inputs"
 F-C084,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard.ex:13,DOCTRINE,D2-fork,"ProjectOnboard treats repo-already-exists as success before proving the repo is safe to mutate"
 F-C085,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard.ex:101,THEORIQUE,unassigned,"ProjectOnboard.import derives local clone identity from a malformed-accepting `full_name`"
 F-C086,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard/scaffold.ex:23,PERCE,FIXÉ,"Scaffold mkdir failures escape the typed scaffold error contract"

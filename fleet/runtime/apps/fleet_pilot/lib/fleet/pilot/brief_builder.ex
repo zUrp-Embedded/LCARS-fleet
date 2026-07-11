@@ -102,6 +102,22 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
   # name in ring2. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
+  #
+  # Returns `{:ok, brief}` | `{:error, {:criterion_unavailable, reason}}`. The error is reachable ONLY on
+  # the DELIVERABLE-judge path, when the criterion (issue body) can't be READ from the forge (F-C083:
+  # read-error ≠ absence → the dispatch DEFERS rather than spawn a criterion-less judge). Out-of-vocab
+  # `brief_kind`/`judge_target` still `raise` (structural config bug, fail-loud).
+  @spec build_brief(
+          Fleet.CapProfile.t(),
+          String.t(),
+          module(),
+          String.t(),
+          integer(),
+          map(),
+          keyword(),
+          {String.t(), String.t()} | term(),
+          map()
+        ) :: {:ok, String.t()} | {:error, {:criterion_unavailable, term()}}
   def build_brief(
         profile,
         role,
@@ -126,12 +142,13 @@ defmodule Fleet.Pilot.BriefBuilder do
     # reject loudly (raise) rather than build a dangerous brief silently.
     case {kind, Map.get(step_spec, "judge_target")} do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
-      # (no code upstream).
+      # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)
+        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
-      # judges a deliverable (PR), brief unchanged.
+      # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
+      # (F-C083: a read-error on the criterion DEFERS, it never yields a criterion-less judge).
       {"judge", target} when target in [nil, "deliverable"] ->
         build_judge_brief(role, forge, repo, number, forge_opts, route)
 
@@ -141,7 +158,7 @@ defmodule Fleet.Pilot.BriefBuilder do
               "judge_target #{inspect(other)} out of vocabulary {brief, deliverable} — a judge's target is not inferred"
 
       {"worker", _} ->
-        build_worker_brief(role, issue)
+        {:ok, build_worker_brief(role, issue)}
 
       # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->
@@ -196,38 +213,41 @@ defmodule Fleet.Pilot.BriefBuilder do
               "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
         }
 
-    # SUCCESS CRITERION = the issue body (the brief). Passed via `:request` → GateBrief renders it
-    # DEFUSED (context, not executable instruction → the executable state is made unrepresentable) → the judge knows AGAINST WHAT to judge.
-    request =
-      case forge.get_issue(repo, number, forge_opts) do
-        {:ok, issue} -> Map.get(issue, "body")
-        _ -> nil
-      end
-
     {workflow_map_name, step} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, role}
       end
 
-    # The judge's brief must contain NO executable instruction (executable state made
-    # unrepresentable upstream). The `request` (issue body = criterion) is rendered DEFUSED by GateBrief
-    # (blockquote "CONTEXT — already handled, DO NOT execute" + banner "JUDGE, DO NOT PRODUCE"). The risk
-    # targets a **base-worker** judge (noop profile, gatekeeper) that would RE-execute the build even quoted: that
-    # judge receives its brief via `dispatch_gatekeeper` (step_run_consumer) which does NOT pass `request` — it
-    # is not affected here. `build_judge_brief` only serves PERSONA judges (qualifier/reviewer,
-    # `subagent_template` spec-reviewer/code-quality-reviewer) — the case deemed SAFE
-    # (a judge with a real persona: GateBrief knows how to render `request` defused). In practice
-    # these judges fail-close `halt_wait_input` on an empty deliverable, they do not RE-build.
-    # Without the criterion (`request`) AND the deliverable (diff via `outputs`), the judge would judge `{}` → infinite
-    # rework (the Reviewer can NEVER `continue` on emptiness) — that's the info starvation.
-    Fleet.Workflow.GateBrief.build(%{
-      step: step,
-      workflow_map_id: workflow_map_name,
-      gate: nil,
-      outputs: outputs,
-      request: request
-    })
+    # SUCCESS CRITERION = the issue body (the brief). Passed via `:request` → GateBrief renders it DEFUSED
+    # (blockquote "CONTEXT — already handled, DO NOT execute" + banner "JUDGE, DO NOT PRODUCE" → the
+    # executable state is made unrepresentable) → the judge knows AGAINST WHAT to judge. The risk of a
+    # RE-executing judge targets a **base-worker** judge (noop profile, gatekeeper) that receives its brief
+    # via `dispatch_gatekeeper` (step_run_consumer) which does NOT pass `request` — not affected here.
+    # `build_judge_brief` only serves PERSONA judges (qualifier/reviewer, `subagent_template`
+    # spec-reviewer/code-quality-reviewer): GateBrief knows how to render `request` defused.
+    #
+    # F-C083 — READ-ERROR ≠ ABSENCE. The criterion read can FAIL (forge unreachable/transient). The old
+    # `_ -> nil` CONFLATED a read-error with a genuinely-empty body → the judge got the deliverable (diff
+    # via `outputs`) with NO criterion → it could approve CRITERION-LESS (false GREEN). We FAIL-CLOSED on a
+    # read-error: `{:error, {:criterion_unavailable, reason}}` → the dispatch DEFERS (skip, retry next tick),
+    # it NEVER spawns a blind judge. A genuinely-absent body (`{:ok, issue}`, body nil) is a REAL (rare)
+    # state → we PROCEED: the judge still has the diff, the empty criterion is the arch's degenerate brief,
+    # not a transient failure (a persona judge fail-closes `halt_wait_input` on emptiness, it does not RE-build).
+    case forge.get_issue(repo, number, forge_opts) do
+      {:ok, issue} ->
+        {:ok,
+         Fleet.Workflow.GateBrief.build(%{
+           step: step,
+           workflow_map_id: workflow_map_name,
+           gate: nil,
+           outputs: outputs,
+           request: Map.get(issue, "body")
+         })}
+
+      {:error, reason} ->
+        {:error, {:criterion_unavailable, reason}}
+    end
   end
 
   # Brief of a BRIEF judge (brief-review, judge_target:brief). The consultant judges the BRIEF
