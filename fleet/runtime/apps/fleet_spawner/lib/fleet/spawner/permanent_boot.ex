@@ -271,13 +271,60 @@ defmodule Fleet.Spawner.PermanentBoot do
   defp boot_opts(name, pod_id) do
     path = base_seed_path(name)
 
-    case File.exists?(path) && base_seed_uuid(path) do
-      uuid when is_binary(uuid) ->
+    cond do
+      # No base = a FRESH permanent pod (nominal) → recreate, SILENT (normal, not an incident).
+      not File.exists?(path) ->
+        [pod_id: pod_id]
+
+      is_binary(uuid = base_seed_uuid(path)) ->
         [pod_id: pod_id, session_id: uuid, resume: true, recall_seed_jsonl: path]
 
-      _ ->
+      # F-C043 — base PRESENT but no valid session UUID (unreadable / no `sessionId`) = a CORRUPT versioned
+      # seed. The permanent pod boots FRESH (a NEW Desktop entry each boot → accumulation, its STABLE
+      # identity lost). We KEEP booting (availability > this non-safety optimization) but ESCALATE it as an
+      # INCIDENT, not merely a log (user decision F-C043).
+      true ->
+        escalate_corrupt_seed(name, pod_id, path)
         [pod_id: pod_id]
     end
+  end
+
+  # F-C043 — a corrupt permanent base seed is a CERTAIN config problem (a versioned artifact in `priv` is
+  # broken), not a probabilistic strike. We log LOUD and emit `pod.drift` (source `:spawner`) with
+  # `drift_count` AT the DriftMonitor threshold → the anomaly rail (DriftMonitor → Cat5Escalator) escalates
+  # it on the FIRST occurrence (an operator repairs the seed). Best-effort (`Bus.safe_emit`): the incident
+  # signal never blocks/crashes the boot — the pod still comes up (degraded).
+  # @drift_escalate_count must be ≥ `Fleet.Starfleet.DriftMonitor`'s threshold (3, a protocol constant;
+  # fleet_spawner→fleet_starfleet is not a dependency, so it is asserted by a comment, not referenced).
+  @drift_escalate_count 3
+  @doc false
+  def escalate_corrupt_seed(name, pod_id, path) do
+    Logger.error(
+      "PermanentBoot: base seed #{path} (role #{name}) present but NO valid session UUID — booting a " <>
+        "FRESH session (new Desktop entry each boot, accumulation, stable identity lost). Escalating as " <>
+        "INCIDENT (pod.drift → Cat5). FIX the versioned seed."
+    )
+
+    _ =
+      Fleet.EventRouter.Bus.safe_emit(
+        :spawner,
+        :"pod.drift",
+        [
+          payload: %{
+            "pod_id" => pod_id,
+            "role" => name,
+            "drift_count" => @drift_escalate_count,
+            "reason" => "base_seed_corrupt",
+            "path" => path,
+            "detail" =>
+              "permanent base seed present but no valid session UUID — booting fresh (Desktop-entry accumulation)"
+          }
+        ],
+        on_unregistered: :log,
+        context: "PermanentBoot corrupt base seed (role #{name})"
+      )
+
+    :ok
   end
 
   # Base seed of a permanent: clean resumable anchor, captured out-of-fleet (pure claude), versioned in priv.
@@ -296,18 +343,9 @@ defmodule Fleet.Spawner.PermanentBoot do
       end
     end)
   rescue
-    e ->
-      # A MISSING base is normal (fresh permanent pod → recreate) and stays silent. A PRESENT-but-unreadable
-      # base is NOT the same: for a PERMANENT pod (architect/gatekeeper) the base carries the FIXED session
-      # UUID = the single reused Desktop entry. Falling back to nil then mints a FRESH session (a NEW Desktop
-      # entry) at EVERY boot → accumulation, with zero trace. Distinguish, and log the corrupt case LOUD.
-      if File.exists?(path) do
-        Logger.warning(
-          "PermanentBoot: base seed #{path} present but unreadable (#{Exception.message(e)}) — the fixed " <>
-            "session UUID is lost, falling back to a FRESH session (a new Desktop entry each boot, accumulation)"
-        )
-      end
-
-      nil
+    # Unreadable base (permission / truncated file) → nil. A MISSING base is normal (fresh permanent pod)
+    # and is filtered UPSTREAM by `boot_opts` (`File.exists?`); a PRESENT-but-unreadable/invalid base is the
+    # CORRUPT case → `boot_opts` escalates it (F-C043, `escalate_corrupt_seed`), the single log+incident site.
+    _e -> nil
   end
 end

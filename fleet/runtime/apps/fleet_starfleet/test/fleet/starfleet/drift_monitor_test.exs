@@ -59,8 +59,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Application.get_env(:fleet_starfleet, :coord_invocations, [])
   end
 
-  # `source` défaut `:event_router` (les 2 types encore DORMANTS matchent type-only) ; les 2 producteurs
-  # draft (workflow_map.failed / audit.verdict) exigent `source: :workflow` (invariant anti-spoof DriftMonitor).
+  # `source` défaut `:event_router`. Les producteurs WIRÉS exigent leur source (anti-spoof DriftMonitor) :
+  # workflow_map.failed / audit.verdict → `:workflow` ; pod.drift → `:spawner` (F-C043). Seul
+  # oauth.refresh.failed reste type-only (dormant, pas de producteur).
   defp emit_canon(type, payload, opts \\ []) do
     Bus.broadcast(
       "fleet.events",
@@ -72,12 +73,13 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     )
   end
 
-  describe "pod.drift event" do
-    test "drift_count >= 3 → Cat5 escalade" do
+  describe "pod.drift event (source :spawner, F-C043)" do
+    test "source :spawner + drift_count >= 3 → Cat5 escalade" do
       :ok =
         emit_canon(:"pod.drift", %{"pod_id" => "drifty", "drift_count" => 3},
           cid: "cid-1",
-          pod_id: "drifty"
+          pod_id: "drifty",
+          source: :spawner
         )
 
       wait_drift_monitor_drain()
@@ -95,8 +97,25 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "drift_count < 3 → no escalade" do
-      :ok = emit_canon(:"pod.drift", %{"pod_id" => "early", "drift_count" => 2})
+    test "source :spawner + drift_count < 3 → no escalade" do
+      :ok =
+        emit_canon(:"pod.drift", %{"pod_id" => "early", "drift_count" => 2}, source: :spawner)
+
+      wait_drift_monitor_drain()
+
+      refute Enum.any?(coord_invocations(), fn
+               {:escalation, :pod_drift, _, _} -> true
+               _ -> false
+             end)
+    end
+
+    test "anti-spoof : pod.drift drift_count 3 mais source ≠ :spawner (spoof) → PAS d'escalade" do
+      # F-C043 : le handler exige `source: :spawner` (le producteur = PermanentBoot). Un pod.drift
+      # broadcasté sur une autre source (spoof) NE PEUT PLUS déclencher la Cat 5.
+      :ok =
+        emit_canon(:"pod.drift", %{"pod_id" => "spoof", "drift_count" => 3},
+          source: :event_router
+        )
 
       wait_drift_monitor_drain()
 

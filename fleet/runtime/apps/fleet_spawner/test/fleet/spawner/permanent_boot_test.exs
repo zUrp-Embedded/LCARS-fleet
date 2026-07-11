@@ -339,4 +339,32 @@ defmodule Fleet.Spawner.PermanentBootTest do
       refute PermanentBoot.auto_boot_enabled?()
     end
   end
+
+  describe "escalate_corrupt_seed/3 (F-C043 — seed permanent corrompu → INCIDENT, pas juste un log)" do
+    test "émet pod.drift (source :spawner, drift_count au seuil DriftMonitor) → escalade au 1er coup" do
+      # Décision user F-C043 : garder le boot (fleet vivante) MAIS escalader la corruption en incident.
+      # `drift_count` = 3 (seuil) : un seed VERSIONNÉ corrompu est un problème CERTAIN, pas un strike à
+      # accumuler → DriftMonitor (source :spawner) escalade dès la 1re occurrence.
+      Fleet.EventRouter.Bus.subscribe()
+
+      assert :ok =
+               PermanentBoot.escalate_corrupt_seed(
+                 "architect",
+                 "permanent-architect",
+                 "/priv/base_seeds/architect.jsonl"
+               )
+
+      assert_receive %Fleet.Event{
+                       source: :spawner,
+                       type: :"pod.drift",
+                       payload: %{
+                         "role" => "architect",
+                         "pod_id" => "permanent-architect",
+                         "drift_count" => 3,
+                         "reason" => "base_seed_corrupt"
+                       }
+                     },
+                     500
+    end
+  end
 end

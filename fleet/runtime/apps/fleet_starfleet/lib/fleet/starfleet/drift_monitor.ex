@@ -13,8 +13,11 @@ defmodule Fleet.Starfleet.DriftMonitor do
     `:workflow`) on an escalation-worthy judge verdict (halt/`halt_invalid` → freeze-to-arch), translated
     to a decision-v1 `{decision: "escalate", reason: "audit_verdict", details: <real verdict>}`. Routed
     DIRECTLY to `CoordBackend` (`handle_decision`), NOT via `Cat5Escalator`.
-  - `pod.drift` — STILL DORMANT: the intended emitter (a pod-side IPC strike filter) was never built;
-    there is no honest signal source to fabricate today. Handler wired + anti-spoof-ready, waiting.
+  - `pod.drift` — LIVE (F-C043) via `Fleet.Spawner.PermanentBoot` (source `:spawner`): emitted when a
+    permanent pod's base SEED is CORRUPT (present but no valid session UUID), with `drift_count` at the
+    threshold → escalate on the FIRST occurrence (a corrupt versioned seed is a certain problem, not a
+    strike to accumulate). Routes to `Cat5Escalator`. (The originally-intended pod-side IPC strike filter
+    is still unbuilt — this is a distinct, honest producer.)
   - `oauth.refresh.failed` — STILL DORMANT: no producer on the launcher/credentials side yet.
 
   All handlers stay ready — the dormant two route as soon as a real producer emits.
@@ -23,7 +26,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   | event_type | source match | Cat 5 trigger |
   |---|---|---|
-  | `pod.drift` | type-only (dormant) | if `drift_count >= 3` |
+  | `pod.drift` | `:spawner` (F-C043) | if `drift_count >= 3` |
   | `workflow_map.failed` | `:workflow` (draft producer) | unconditional → `Cat5Escalator` |
   | `oauth.refresh.failed` | type-only (dormant) | unconditional |
   | `audit.verdict` | `:workflow` (draft producer) | validate decision JSON → `CoordBackend` |
@@ -63,15 +66,19 @@ defmodule Fleet.Starfleet.DriftMonitor do
   # Pattern-match on the strict canonical %Fleet.Event{} schema. The legacy tuple
   # format was removed (producers migrated to the canonical schema).
   #
-  # R2-16 / Q2 anti-spoof: the two DRAFT-wired types (`workflow_map.failed`, `audit.verdict`) now ALSO
-  # match `source: :workflow` — their producers live in `Pilot.StepRunConsumer` (the workflow rail). Per
-  # the invariant, matching the source means a SPOOFED-source event of that type (e.g. a pod broadcasting
-  # `audit.verdict` on `:event_router`) CANNOT trigger the Cat 5 escalation. The two DORMANT types
-  # (`pod.drift`, `oauth.refresh.failed`) stay TYPE-ONLY: no producer exists, so there is no legit source
-  # to match yet — whoever wires them MUST add its `source:` (same anti-spoof rule).
+  # R2-16 / Q2 anti-spoof: the WIRED types match their producer's source — `workflow_map.failed` +
+  # `audit.verdict` on `:workflow` (`Pilot.StepRunConsumer`), and now `pod.drift` on `:spawner`
+  # (`Spawner.PermanentBoot`, F-C043). Matching the source means a SPOOFED-source event of that type (e.g. a
+  # pod broadcasting `audit.verdict` on `:event_router`, or `pod.drift` on `:pod`) CANNOT trigger the Cat 5
+  # escalation. The remaining DORMANT type (`oauth.refresh.failed`) stays TYPE-ONLY: no producer exists yet,
+  # so there is no legit source to match — whoever wires it MUST add its `source:` (same anti-spoof rule).
 
+  # F-C043 — `pod.drift` now has a REAL producer: `Fleet.Spawner.PermanentBoot` emits it (source
+  # `:spawner`) when a permanent pod's base seed is CORRUPT, with `drift_count` at the threshold (a corrupt
+  # versioned seed is a CERTAIN problem → escalate on first occurrence). Per the anti-spoof rule, we now
+  # match `source: :spawner` — a spoofed `pod.drift` on another source can NO LONGER trigger the Cat 5.
   def handle_info(
-        %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
+        %Fleet.Event{source: :spawner, type: :"pod.drift", payload: payload, correlation_id: cid},
         state
       ) do
     if drift_count(payload) >= @drift_threshold do
