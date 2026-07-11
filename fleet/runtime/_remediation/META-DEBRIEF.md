@@ -78,3 +78,10 @@
   garder-vs-resserrer, direction-SSOT = JUGEMENT, pas data). Re-analyser ça aurait été décider à la place du
   user + du churn pour ne pas idler. Corollaire du débrief best-effort/flemme : **le churn est l'AUTRE face de
   la paresse** (s'acharner sur du non-sujet pour éviter le vrai). La décision user EST le gate — on s'arrête là.
+
+- **R-14 (2026-07-11)** — *Ne PAS prédire le verdict/le nombre de fixes d'un cluster avant le consequence-check.*
+  Vécu : j'ai annoncé « D1 = ~4-5 fail-loud » (résultat : 0) et « F-C048 = fix comme F-C041 » (réfuté : transitoire
+  + re-pollé, ≠ F-C041 durable/silencieux). Mes prédictions étaient HAUTES parce que je lisais le RAPPORT (« ça a
+  l'air d'un trou »), pas le CODE (R-01 appliqué aux prédictions). Le pattern doctrine-phase le confirme : le code
+  applique déjà la doctrine → ~1 fix/cluster, pas N. **Déléguer la classif SANS annoncer un compte ; laisser la
+  vérif trancher.** Corollaire de R-06/R-09 : « ça a l'air percé » ≠ « c'est percé + fixable ».

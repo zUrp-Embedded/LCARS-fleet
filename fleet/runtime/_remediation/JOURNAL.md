@@ -179,3 +179,11 @@
 ### D5 RÉSOLU — 0 fix mécanique (2 workers, 11 tolérances)
 - Toutes légitimes (documentées+LOUD+backstop) : F-C001/016/033/045/048/080/081 KEEP ; F-C021 DOWNGRADE (prod persist:false). Mon pari « F-C048=fix » RÉFUTÉ (transitoire+re-poll, ≠ F-C041 durable/silencieux).
 - 2 résidus réels → design-fork user : F-C050 (orphelin permanent au cas issue-terminale ; fix=state-split publishing, PAS exclure :completed), F-C083 (critère judge perdu sur read-error ; fix=typed-per-kind). Reco : resserrer via le design correct, pas la forme naïve.
+
+---
+## RELEVÉ DE POSTE — 2026-07-11 ~02h30
+- **Phase** : DOCTRINE (le user a dit « go » sur la flemme-correction : je fais la classif factuelle des clusters, pas la lui faire décider). D1/D4/D5/D2 traités.
+- **Compteurs** : 167/167 vérifiés · **40 fixes** (15 code + 25 doc) · verrous : + `resolved_conforming` (F-C041), `roles_for_display` (F-C125). Règles R-01→R-14.
+- **Bougé cette heure** : D1 (0 fix code — code déjà correct — + 3 doc-drifts F-C046/051/102), D4 (F-C041 garde launch_backend + 3 R-08-défensifs), D5 (0 fix, 2 design-forks F-C050/083), D2 (F-C125 catalogue-error surfacé + F-C124 additif pending + F-C118 décision). **Pattern honnête : ~1 fix/cluster, le code applique déjà la doctrine.**
+- **Dérive attrapée** : j'ai PRÉDIT des fixes (« D1 ~4-5 », « F-C048=fix ») → réfutés par la vérif. Je lisais le rapport, pas le code. Règle R-14 (ne pas prédire le compte avant le consequence-check).
+- **Décisions en attente user** : forward-guard D1 · F-C034/036/056 (R-08) · F-C050/083 (state-fork) · F-C118 (contrat public) · F-C135 (provisioning N0) · D3 (canon) · D6 (SSOT). Le paquet monte.
