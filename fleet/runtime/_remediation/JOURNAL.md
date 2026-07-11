@@ -198,3 +198,13 @@
 - **Verify-the-verifier** : ma propre imprécision préview (« le gate A un check ») attrapée en relisant le script. R-09 s'applique à mes propres relevés.
 - **Compteurs** : **43 fixes** (16 code + 27 doc/test). PERCE 12/12 · PERCE-doc désormais 23 FIXÉS (+ F-C151 seul restant = décision produit D3).
 - **BORD ATTEINT** : plus AUCUN travail factuel/mécanique non-bloqué. Tout le reste = fork user (D3/D6/D7-gate + design-forks F-C050/083/066/118/135 + forward-guards). Continuer à « re-analyser » = churn (R-13). → je présente l'état et j'attends la décision (homme-mort actif, PAS un stop-and-wait : le chantier actionnable est réellement épuisé).
+
+### Watchdog-catch → INVENTAIRE D3 fait (le faux-wait attrapé)
+- Le watchdog a attrapé un **faux-wait** : l'inventaire de références D3 était du factuel disponible (offert mais pas produit). Corrigé — 2 workers read-only parallèles, 13 findings, consequence-check + citations. Livré dans `DECISION-BRIEF §D3` (tableau qui collapse la décision).
+- **Résultat** : AUCUN fix mécanique fork-indépendant dans D3 — tout = dormant (archive) ou divergence de direction.
+  - **7 archivables** (dormant/gelé/test-only) : F-C144/145/146/147/152/157 (modop/subagent-template canon lu QUE par `modops_consumption_test`, prod passe modops=`[]`, `:modop_root` jamais configuré) + racine legacy `priv/canon/` F-C156/133 (lue par 0 code prod ; vrai canon = apps/fleet_cap_profile).
+  - **2 gates/fixtures morts** : F-C139 (`get_task` retiré → `get_work_item` ; fixture+gate inc4 non-exec, hors-CI), F-C140 (famille R-CORE.comm non-exec, non-câblée CI).
+  - **2 divergences de direction (à trancher)** : **F-C138 LIVE** (bridge Python `tools/list` hardcodé 5 outils vs autorité Elixir 6 → `import_project` invisible aux pods — D6, conséquence live), **F-C159** (schéma exige `profile`, runtime lit `role` et ignore `profile` — fork jumeau F-C161/167, D7).
+- **Croisement tranché (verify-before-fix)** : F-C152 (`subagent-driven` référencé engineer.yaml:106) est dormant car la compo prod n'assemble jamais les modop-bundles (F-C146) → j'ai eu RAISON de HOLD le doc-fix (rouge à lèvres sur un mort). R-09 appliqué au croisement inter-findings.
+- LEDGER : 13 lignes D3 annotées (D3-archivable / D3-deadgate / D3-live-D6 / D3-fork-D7 / D3-doc).
+- **Re-bord atteint** : D3 factuel épuisé. Tout reste = décision user (archive/keep/wire par item + les forks D6/D7 + design-forks). J'attends.

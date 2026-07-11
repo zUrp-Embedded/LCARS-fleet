@@ -60,6 +60,28 @@ Je peux te sortir un inventaire « qui référence quoi » pour décider vite.
 → **Décision demandée** : veux-tu l'inventaire de références d'abord ? puis tu marques archive/keep/wire par item.
 **Effort** : inventaire délégable ; l'action = déplacements/suppressions mécaniques une fois ta liste posée.
 
+> **INVENTAIRE D3 FAIT (2 workers read-only, cité, consequence-check).** Aucun de ces 13 findings n'est un fix
+> mécanique fork-indépendant : tous se réduisent à « canon dormant → décision archive/keep » ou à une divergence
+> de direction (SSOT). Le tableau collapse ta décision :
+>
+> | Finding | Verdict factuel (consommateur/cible réel) | Ta décision |
+> |---|---|---|
+> | **F-C138** | **DUPLIQUÉ-AUTORITÉ, DIVERGENT + LIVE** — bridge Python (transport pod↔central de PROD) répond `tools/list` depuis une liste HARDCODÉE de 5 outils ; l'autorité Elixir `pod_tools.ex` en a **6** → **`import_project` invisible aux pods** (appelable si forwardé, mais non-découvrable). | **D6 : quel SSOT ?** dériver le catalogue Python de l'autorité (bon fix) vs sync-manuel (entérine le 2e SSOT). Conséquence live = à prioriser. |
+> | **F-C159** | **schéma exige `profile`, runtime l'IGNORE** (prod lit `step["role"]` ; grep `["profile"]` prod = 0). Touche AUSSI les maps actives standard-qa/audit-only/brief-gate. | **fork jumeau F-C161/167 : durcir runtime (consommer profile) vs relâcher schéma** (retirer le require). |
+> | **F-C144** | ORPHELIN — noop en 2 copies ; `canon/modop/noop` sous aucune racine, `cap-profiles/modop/noop` atteint QUE via `compose/2` = test-only. Prod = `CapProfile.load/1` (0 modop). | archivable |
+> | **F-C145** | ORPHELIN — overlays modop lus QUE par `read_modops`←`compose/2` (test-only). Prod = `SPBuilder.compose(cap, [], …)` (0 overlay). | archivable |
+> | **F-C146** | TEST-ONLY — prod passe modops=`[]` → `read_modop_fragments([])` ne lit rien ; `:modop_root` jamais configuré (`{:error, :modop_root_unconfigured}`, verrouillé moduledoc « never required in prod »). Seul lecteur : `modops_consumption_test.exs`. | archivable OU câbler la feature modop (dormante par conception) |
+> | **F-C147** | TEST-ONLY — `subagent-templates/*.md` lus par AUCUN code prod (grep hors-test = 0). Seul lecteur : `modops_consumption_test.exs:39`. | archivable / keep-wire |
+> | **F-C152** | dormant (dépend de F-C146) — `subagent-driven` listé `engineer.yaml:106 modop_set.optional` MAIS modop_set jamais assemblé en prod (cf F-C146) → référence morte. Doc-drift « cap-profile implementer » (n'existe pas ; = subagent-template sur engineer) inutile à fixer tant que dormant. | suit la décision modop-bundle (F-C146) |
+> | **F-C157** | GELÉ — injection monk lit `cap-profiles/monks/` (`monk.ex:52`) = **dir inexistant** ; `_frozen-monks/` non-scanné ; tous les cap-profiles prod ont `monk_registry: null` → `:not_a_monk`. Alpha/beta divergents vivent tous sous `_frozen-monks/`. | archivable (gel délibéré, documenté) |
+> | **F-C156** | ORPHELIN — `priv/canon/` RACINE (8 fichiers : README, cap-profiles/{archivist,monk}, fleets/*, sp/*) lu par AUCUN code prod ; vrai canon = `apps/fleet_cap_profile/…`. Forme non-v2.5. | relocate vs **supprimer** (doublon legacy, 0 risque) |
+> | **F-C133** | DOC-DRIFT (sur README de F-C156) — décrit `Fleet.Instance.Loader` **jamais écrit** (0 occurrence) + source v1.5 morte `/local/LCARS-v1.5/sp/`. | part avec F-C156 (si supprimé) sinon réécrire |
+> | **F-C139** | CIBLE-ABSENTE — `get_task` retiré (autorité = `get_work_item`, work_item_id MANDATORY). Fixture `mcp_submit_server.py` + gate inc4 **morts** (inc4.sh non-exec, hors-CI). | supprimer le harnais legacy vs réécrire vers get_work_item |
+> | **F-C140** | gate `inc3b1` vise une cible VIVANTE (`pod_tools_test.exs`) mais toute la famille R-CORE.comm est non-exécutable + non-câblée CI (gates manuels orphelins). | rendre exec + câbler CI vs archiver (doublon `mix test`) |
+> | **F-C153** | CIBLE-ABSENTE — `cap-profiles/monks/` inexistant ; glob `catalog.ex:111` = scaffolding INERTE documenté ; `_FROZEN-README` honnête (« ne PAS remettre dans monks/ »). | rien de cassé ; nettoyer avec F-C157 si archive monks |
+>
+> **Synthèse** : 7 archivables (dormant/gelé/test-only : 144/145/146/147/152/157 + racine 156/133) · 2 gates/fixtures morts (139/140) · **2 divergences de direction à trancher (138 live D6, 159 schéma-vs-runtime D7-twin)**. Rien ne bouge sans ta ligne archive/keep/wire — mais la décision est maintenant à plat.
+
 ---
 
 ## D4 — Config opérateur : require-au-boot vs soft-default
