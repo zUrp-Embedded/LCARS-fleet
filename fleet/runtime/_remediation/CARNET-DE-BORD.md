@@ -62,7 +62,7 @@
 | **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b ; D1/D2/D4/D5 traités, reste D3/D6/D7-forks) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **48** (16 code + 32 doc/test) |
+| **fixés (commit)** | **49** (16 code + 33 doc/test) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-15 |
 
