@@ -10,9 +10,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
   It is a **mechanical rail** (structural compliance): the arch *triggers* via the MCP
   tool `create_project`, the SYSTEM *executes* this deterministic sequence — the arch never types git.
 
-  Sequence (repo idempotence via `create_repo` 409; fails clearly if the local folder already exists):
+  Sequence (F-C084: FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
+  scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
+  clearly if the local folder already exists):
 
-    1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable)
+    1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
     2. `git clone --branch main` → `/home/projects/<name>`
     3. scaffold `main` (README, .gitignore, .editorconfig, docs/spec.md)
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
@@ -226,13 +228,30 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-
-    case ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc)) do
-      {:ok, full_name} when is_binary(full_name) -> {:ok, full_name}
-      {:ok, :already_exists} -> {:ok, "#{org}/#{name}"}
-      {:error, _} = err -> err
-    end
+    result = ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
+    classify_create_repo(result, org, name)
   end
+
+  @doc false
+  # F-C084 — a PRE-EXISTING repo is NOT a safe `onboard` target: onboard CREATES (it scaffolds `main` +
+  # pushes over it). `{:ok, :already_exists}` (create_repo 409) → the repo pre-existed → we FAIL-LOUD
+  # instead of scaffolding OVER it (which would CLOBBER a real repo's `main` — a human's repo onboarded by
+  # mistake, or a completed project re-onboarded). The operator uses `import_project` (ADOPTS an existing
+  # repo, content INTACT) or deletes the stale/partial repo — consistent with this module's own doctrine
+  # (« no auto rollback: a mid-way failure leaves partial state — the operator cleans up before re-run »).
+  # A GENUINE create (`{:ok, full_name}`) proceeds: onboard owns the fresh repo it just made.
+  @spec classify_create_repo(
+          {:ok, String.t() | :already_exists} | {:error, term()},
+          String.t(),
+          String.t()
+        ) :: {:ok, String.t()} | {:error, term()}
+  def classify_create_repo({:ok, full_name}, _org, _name) when is_binary(full_name),
+    do: {:ok, full_name}
+
+  def classify_create_repo({:ok, :already_exists}, org, name),
+    do: {:error, {:repo_already_exists, "#{org}/#{name}"}}
+
+  def classify_create_repo({:error, _} = err, _org, _name), do: err
 
   defp repo_url(full_name, opts) do
     base =
