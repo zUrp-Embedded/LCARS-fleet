@@ -141,6 +141,25 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
            "un cap-profile sans brief_kind doit être REJETÉ au load (worker=exécute par omission = fail-open)"
   end
 
+  test "négatif — spec.scope.allowedTools / disallowedTools MANQUANT rejeté (F-C141 : hard-requis par claude_launch)",
+       %{schema: schema} do
+    # `bin/claude_launch.sh` fait `jq -r '.spec.scope.allowedTools | join(",")' || exit 1` (idem
+    # disallowedTools) : un champ ABSENT → `join` sur null → jq rc=5 → le `|| exit 1` fire → le pod ne se
+    # lance JAMAIS (crash au spawn). Verrou-amont D4 : le schéma DOIT rejeter au LOAD un profil qui
+    # crasherait le launcher, pas le laisser passer pour exploser au spawn. Les 7 profils canon les portent.
+    base =
+      @canon_dir
+      |> Path.join("engineer.yaml")
+      |> YamlElixir.read_from_file!()
+
+    for field <- ["allowedTools", "disallowedTools"] do
+      {_, bad} = pop_in(base, ["spec", "scope", field])
+
+      assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad),
+             "un cap-profile sans spec.scope.#{field} doit être REJETÉ au load (hard-requis par claude_launch, F-C141)"
+    end
+  end
+
   test "négatif — champ INCONNU (typo) rejeté à chaque niveau (additionalProperties:false, R0-CAP-001)",
        %{schema: schema} do
     base =

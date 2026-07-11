@@ -54,6 +54,8 @@
         "scope": {
           "type": "object",
           "additionalProperties": false,
+          "required": ["allowedTools", "disallowedTools"],
+          "$comment": "F-C141 : allowedTools ET disallowedTools sont HARD-REQUIS par bin/claude_launch.sh (`jq -r '.spec.scope.<champ> | join(\",\")' || exit 1` — un champ absent → `join` sur null → jq rc=5 → le pod ne se lance JAMAIS). D4 : l'état invalide (profil qui crasherait le launcher) est rejeté au LOAD, pas au spawn. Les 7 profils canon les portent déjà.",
           "properties": {
             "allowedTools": {
               "type": "array",
@@ -164,7 +166,7 @@
         "deliverable_mode": {
           "type": "string",
           "enum": ["payload", "git_native"],
-          "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les steps avec post_extract.git)."
+          "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les steps avec post_extract.git). F-C143 (D4, résolu KEEP) — OPTIONNEL-avec-défaut assumé, à l'inverse de son dual `brief_kind` (REQUIS). Asymétrie DÉLIBÉRÉE, pas un oubli : un défaut `payload` erroné est fail-SAFE (le code `StepRunConsumer.default_deliverable_mode` traite un rôle non-résolu comme `payload` = NON-producteur → son output n'est JAMAIS poussé comme code non-vérifié ; seul un `git_native` EXPLICITE entre dans la gate I-CBC), tandis qu'un défaut `brief_kind` erroné (`worker`) est fail-OPEN (un juge exécuterait le contenu attaquant) → d'où `brief_kind` requis et `deliverable_mode` non. Seul le producteur (engineer) déclare `git_native` ; les juges/système omettent = défaut `payload` correct."
         },
         "brief_kind": {
           "type": "string",

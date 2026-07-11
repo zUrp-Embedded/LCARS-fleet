@@ -35,6 +35,10 @@ defmodule Fleet.CapProfileTest do
     spec:
       brief_kind: worker
       scope:
+        allowedTools:
+          - Read
+          - Grep
+          - Bash
         disallowedTools:
           - web_search
           - web_fetch
@@ -82,6 +86,7 @@ defmodule Fleet.CapProfileTest do
       metadata: %{"name" => "test", "containment" => "bwrap"},
       spec: %{
         "scope" => %{
+          "allowedTools" => ["Read", "Grep", "Bash"],
           "disallowedTools" => [
             "web_search",
             "web_fetch",
