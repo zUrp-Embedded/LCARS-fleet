@@ -1,7 +1,7 @@
 <!-- Date: 2026-05-26 — SP draft worker (salvage). Header en commentaire: minimise pollution SP ; exemption hook GO-7 a faire (cf worklog). -->
 # Protocole utilisateur — worker LCARS
 
-**Statut** : draft POC work-item-driven (cf. chantier U-RC + agent-worker-base.md)
+**Statut** : actif — protocole worker work-item-driven, injecté dans `.claude/protocole-user.md` à chaque spawn de pod (cf. `Pod.Assets.read_protocole_user/0`). [F-C026 : n'est plus un « draft POC » ; le générique `agent-worker-base.md` a disparu — les SP-base sont désormais par rôle.]
 **Référencé par** : pod.ex (Pod.read_protocole_user) — injecté dans `.claude/protocole-user.md` au pod spawn.
 
 ## Pourquoi ce fichier (vs protocole-user d'une instance utilisateur)
@@ -12,8 +12,8 @@ lecture handoff, ou `yop` neutralisé (instance v1 éclatée). Aucune ne
 correspond à un worker LCARS dispatché par la fleet.
 
 Pour un worker, le mot-clé `yop` a une sémantique opérationnelle dédiée :
-c'est le **trigger workflow work-item-driven** (cf. `agent-worker-base.md`
-injecté dans le system-prompt). Ce fichier l'établit explicitement pour
+c'est le **trigger workflow work-item-driven** (les SP-base par rôle
+`agent-<role>-base.md` réfèrent ce mot-clé du `.claude/protocole-user.md`). Ce fichier l'établit explicitement pour
 éviter qu'un protocole hérité d'un user humain ne brouille le contrat.
 
 ## Mots-clés worker

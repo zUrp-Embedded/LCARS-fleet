@@ -24,7 +24,7 @@ F-C022,high,confirmed,apps/fleet_sp_builder/lib/fleet/sp_builder.ex:122,THEORIQU
 F-C023,medium,confirmed,apps/fleet_sp_builder/lib/fleet/sp_builder/blocks.ex:3,DOCTRINE,D6-SSoT,"The active architect system prompt is a non-canonical historical draft outside the block source of truth"
 F-C024,medium,confirmed,apps/fleet_sp_builder/lib/fleet/sp_builder/monk.ex:29,THEORIQUE,unassigned,"Monk registry resolution documents an in-root basename but accepts unconstrained relative paths while its tests are skipped"
 F-C025,hygiene,confirmed,apps/fleet_sp_builder/lib/fleet/sp_builder/blocks.ex:27,THEORIQUE,unassigned,"`sp-map.yaml` entries are not validated as a closed block map before the generator reads/writes paths"
-F-C026,hygiene,confirmed,apps/fleet_sp_builder/priv/sp_drafts/protocole-user-worker.md:4,DOCTRINE,D3-doc,"The active worker protocol still labels itself as a POC draft and points to obsolete `agent-worker-base.md`"
+F-C026,hygiene,confirmed,apps/fleet_sp_builder/priv/sp_drafts/protocole-user-worker.md:4,DOCTRINE,FIXÉ,"The active worker protocol still labels itself as a POC draft and points to obsolete `agent-worker-base.md`"
 F-C027,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/spawn/naming.ex:28,THEORIQUE,unassigned,"Initial project clone drops the dispatcher slug and always falls back to `feature/work`"
 F-C028,high,confirmed,apps/fleet_project_bootstrap/lib/fleet/project_bootstrap/phase.ex:106,THEORIQUE,unassigned,"Project clone with `repo_path` can proceed without a pinned `base_sha`"
 F-C029,medium,confirmed,apps/fleet_project_bootstrap/lib/fleet/project_bootstrap/phase.ex:96,THEORIQUE,unassigned,"`work_branch` reaches `git clone --branch` without the GitRef validation used for code branches"
