@@ -591,12 +591,29 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # gate decision and StepRunBuild); local wrapper that reads the `deliverable_mode_fun` seam of the state.
   defp producer?(role, state), do: GateEngine.producer?(role, state.deliverable_mode_fun)
 
+  @doc false
   # Seam default: resolves the role's deliverable_mode via the cap-profile catalogue (single source).
-  # Unresolvable → `"payload"` (fail-safe: a non-loadable role is not treated as a producer).
-  defp default_deliverable_mode(role) do
+  #
+  # F-C053 — an UNLOADABLE cap-profile is a config PROBLEM (missing/corrupt profile), NOT the valid
+  # absent-`deliverable_mode` of F-C143. It is only reachable as a TRANSIENT load failure (a role whose
+  # profile can't load could never be SPAWNED, so it could never reach completion — the profile was there
+  # at spawn, unreadable now). We keep the fail-SAFE default `"payload"` (a non-loadable role is NOT treated
+  # as a producer → its output is never pushed as unverified code), but we LOG LOUD instead of classifying
+  # SILENTLY: silently defaulting would MASK the misconfiguration (a real producer mishandled as a judge,
+  # its code never pushed). D1 — observable > silent; the safe default avoids wedging on a transient blip.
+  def default_deliverable_mode(role) do
     case Fleet.CapProfile.load(role) do
-      {:ok, cap} -> Fleet.CapProfile.deliverable_mode(cap)
-      _ -> "payload"
+      {:ok, cap} ->
+        Fleet.CapProfile.deliverable_mode(cap)
+
+      other ->
+        Logger.error(
+          "StepRunConsumer: cap-profile for role #{inspect(role)} UNLOADABLE (#{inspect(other)}) — " <>
+            "deliverable_mode defaults to \"payload\" (fail-safe: NOT a producer, no unverified push). " <>
+            "FIX the role's cap-profile; a real producer would be mishandled as a judge."
+        )
+
+        "payload"
     end
   end
 

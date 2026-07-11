@@ -505,4 +505,22 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       GenServer.stop(pid)
     end
   end
+
+  describe "default_deliverable_mode/1 (F-C053 — rôle non-chargeable ≠ absent)" do
+    test "rôle NON-CHARGEABLE (profil manquant/corrompu) → \"payload\" (fail-safe) MAIS log LOUD (plus de classification silencieuse)" do
+      # Le cœur du finding : un profil non-chargeable est un PROBLÈME de config, pas un deliverable_mode
+      # absent (F-C143). On garde le défaut fail-SAFE `payload` (non-producteur → pas de push non-vérifié)
+      # mais on LOG LOUD : classer en silence masquerait la mis-config (un vrai producteur traité en juge,
+      # son code jamais poussé). D1 — observable > silencieux.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert "payload" =
+                   StepRunConsumer.default_deliverable_mode(
+                     "role-inexistant-#{System.unique_integer([:positive])}"
+                   )
+        end)
+
+      assert log =~ "UNLOADABLE"
+    end
+  end
 end

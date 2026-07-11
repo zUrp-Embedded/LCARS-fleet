@@ -51,7 +51,7 @@ F-C049,hygiene,confirmed,apps/fleet_mcp/mix.exs:30,DOCTRINE,D4-hygiène-deferred
 F-C050,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:177,PERCE,FIXÉ,"A project-pipe `:completed` work item can mask an orphaned issue lock after lost/offloaded completion"
 F-C051,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:703,DOCTRINE,D1-doc-FIXÉ,"Cat-5 `workflow_map.failed` and `audit.verdict` producers are draft best-effort signals without a settled reliability policy"
 F-C052,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:195,DOCTRINE,D4-fork,"Step-run repo/remote has a legacy config fallback despite the event being the stated source of truth"
-F-C053,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:590,DOCTRINE,D4-fork,"Unloadable cap-profile roles are classified as payload judges by default"
+F-C053,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:590,PERCE,FIXÉ,"Unloadable cap-profile roles are classified as payload judges by default"
 F-C054,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/issue_id.ex:12,THEORIQUE,unassigned,"`IssueId.compose/1` accepts non-integer issue identifiers despite being the writer-side authority"
 F-C055,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/pod_id.ex:3,THEORIQUE,unassigned,"`PodId` repo scoping is lossy and can collide for distinct forge repositories"
 F-C056,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/roles.ex:12,DOCTRINE,R08-défensif,"Runtime role accessors return unvalidated override/config strings as canonical roles and pod ids"
