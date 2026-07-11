@@ -55,12 +55,20 @@ defmodule Fleet.Observation.Deck do
   # as `/api/pods` (`Fleet.Spawner.list_pods/0`); rendering is delegated to the pure view
   # (`View.table_page/2`), the controller only collects roles + grouped pods.
   get "/table" do
-    roles = dashboard_roles()
-    by_role = Enum.group_by(Fleet.Spawner.list_pods(), &Map.get(&1, :role))
+    case dashboard_roles() do
+      {:ok, roles} ->
+        by_role = Enum.group_by(Fleet.Spawner.list_pods(), &Map.get(&1, :role))
 
-    conn
-    |> put_resp_content_type("text/html")
-    |> send_resp(200, View.table_page(roles, by_role))
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(200, View.table_page(roles, by_role))
+
+      {:error, reason} ->
+        # F-C125 — surface the swallowed catalogue-error instead of a silent-empty table lying "no roles".
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(200, View.error_page(reason))
+    end
   end
 
   get "/health" do
@@ -141,20 +149,24 @@ defmodule Fleet.Observation.Deck do
   end
 
   # Roles to display = cap-profiles catalogue (`Fleet.CapProfile.list/0`, single source of the domain)
-  # filtered to roles that run as a fleet POD (so they can have a state). Sorted for a stable
-  # order. Unreadable catalogue → `[]` (safe degradation, never a deck crash).
-  defp dashboard_roles do
-    case Fleet.CapProfile.list() do
-      {:ok, names} ->
-        names
-        |> Enum.reject(&memory_x_role?/1)
-        |> Enum.filter(&pod_role?/1)
-        |> Enum.sort()
+  # filtered to roles that run as a fleet POD (so they can have a state). Sorted for a stable order.
+  # F-C125 — an UNREADABLE catalogue is NOT `[]`: `CapProfile.list/0` is DELIBERATELY fail-loud (unreadable/
+  # corrupt ≠ empty), so we PROPAGATE the error (the `/table` route surfaces it) instead of a silent-empty
+  # table that would lie "no roles" during a broken cap-profile deploy.
+  defp dashboard_roles, do: roles_for_display(Fleet.CapProfile.list())
 
-      {:error, _} ->
-        []
-    end
+  @doc false
+  # Testable split of the catalogue result: `{:ok, names}` → display-filtered roles ; `{:error, reason}` →
+  # propagated (the /table route renders `View.error_page/1`, not a silent-empty table).
+  def roles_for_display({:ok, names}) do
+    {:ok,
+     names
+     |> Enum.reject(&memory_x_role?/1)
+     |> Enum.filter(&pod_role?/1)
+     |> Enum.sort()}
   end
+
+  def roles_for_display({:error, _reason} = err), do: err
 
   # Temporary HARD-CODED guard (user-validated): `CapProfile.list/0` also picks up the Memory-X profiles
   # from the `monks/` / `archivistes/` subfolders — these are not agent roles to display. Absent

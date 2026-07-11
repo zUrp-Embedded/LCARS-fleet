@@ -187,6 +187,30 @@ defmodule Fleet.Observation.Deck.View do
     """
   end
 
+  @doc """
+  HTML shown when the role catalogue can NOT be read (F-C125). `Fleet.CapProfile.list/0` is DELIBERATELY
+  fail-loud (an unreadable/corrupt catalogue ≠ an empty one), so the deck surfaces that error instead of a
+  silent-empty table that would lie "no roles" during a broken cap-profile deploy. `reason` is an internal
+  error term (`inspect`-ed), not client input.
+  """
+  def error_page(reason) do
+    """
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="3">
+    <title>fleet pods — catalogue illisible</title>
+    </head>
+    <body>
+    <p style="color:#c00"><strong>⚠ catalogue de rôles illisible</strong></p>
+    <p>#{inspect(reason)}</p>
+    <p>(cap-profile catalogue error — ce n'est PAS « aucun rôle » : le déploiement cap-profile est cassé.)</p>
+    </body>
+    </html>
+    """
+  end
+
   defp role_rows(role, []) do
     "<tr><td>#{h(role)}</td><td colspan=\"6\">— absent —</td></tr>"
   end

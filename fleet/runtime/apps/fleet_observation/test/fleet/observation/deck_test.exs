@@ -12,6 +12,23 @@ defmodule Fleet.Observation.DeckTest do
     conn(method, path) |> Fleet.Observation.Deck.call(@opts)
   end
 
+  describe "roles_for_display/1 — F-C125 (catalogue illisible ≠ vide)" do
+    test "{:error, reason} → propagé (PAS écrasé en []) — /table surfacera l'erreur, pas un « aucun rôle » menteur" do
+      # `Fleet.CapProfile.list/0` est DÉLIBÉRÉMENT fail-loud (dir absent :enoent / YAML corrompu / collision).
+      # Le deck ne doit PAS collapser ça en [] (mensonge pendant un déploiement cap-profile cassé).
+      assert {:error, :enoent} = Fleet.Observation.Deck.roles_for_display({:error, :enoent})
+
+      assert {:error, {:invalid_yaml, "x"}} =
+               Fleet.Observation.Deck.roles_for_display({:error, {:invalid_yaml, "x"}})
+    end
+
+    test "{:ok, names} → {:ok, liste filtrée} (Memory-X exclus, forme typée)" do
+      assert {:ok, []} = Fleet.Observation.Deck.roles_for_display({:ok, []})
+      assert {:ok, roles} = Fleet.Observation.Deck.roles_for_display({:ok, ["monk-archivist"]})
+      refute "monk-archivist" in roles
+    end
+  end
+
   test "GET /health → 200 JSON status ok" do
     conn = call(:get, "/health")
     assert %Plug.Conn{status: 200} = conn
