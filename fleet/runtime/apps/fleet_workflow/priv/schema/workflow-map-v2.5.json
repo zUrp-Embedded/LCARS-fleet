@@ -75,11 +75,9 @@
                         "type": {"enum": ["hard", "soft", "terminal"]},
                         "rules": {"type": "array", "items": {"type": "string"}},
                         "human_approval_required": {"type": "boolean"},
-                        "approval_prompt": {"type": "string"},
-                        "fallback_invoke_gatekeeper": {"type": "boolean"},
-                        "on_blocking_severity": {"type": "string"},
-                        "on_revision_severity": {"type": "string"}
+                        "approval_prompt": {"type": "string"}
                       },
+                      "$comment": "F-C110 : les ex-knobs fallback_invoke_gatekeeper / on_blocking_severity / on_revision_severity ont été RETIRÉS — acceptés au schéma + présents au canon mais AUCUN code ne les consommait (couche d'orchestration de sévérité jamais construite). L'escalade gatekeeper vient du `type` (soft/terminal → StepRunConsumer {:dispatch_gatekeeper}) ; le gating par sévérité vit dans `rules` (opérande `severity_max` évalué par Gates.Predicate). additionalProperties:false → un map qui les re-déclare est désormais rejeté au load.",
                       "allOf": [
                         {
                           "$comment": "soft-default #4 : une hard-gate DOIT porter ≥1 règle — sinon Enum.all?([]) la fait passer à vide (fail-open, gate qui n'applique rien). rules REQUIS + minItems 1 pour type=hard ; terminal garde rules optionnel/vide (la gate `finish` est terminal + human_approval sans règle).",

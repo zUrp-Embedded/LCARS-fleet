@@ -39,15 +39,12 @@ spec:
       outputs:
         - audits/consultant-{date}.json
       gate:
+        # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
+        # (le chemin terminal-string ne les évaluait pas), avoués tels quels. L'escalade gatekeeper vient
+        # du type: terminal (StepRunConsumer {:dispatch_gatekeeper} sur règle en échec).
         type: terminal
         rules:
           - "audit_doc_exists AND audit_doc_non_empty"
-        # NB (B/§L441, rev3) : `fallback_invoke_gatekeeper`/`on_blocking_severity` sont
-        # INERTES — le chemin terminal-string (`Gates.eval_terminal_string`) ne les
-        # évalue pas (pas de branche :nontranchable en v2.5). Conservés comme marqueur
-        # de l'escalade à re-encoder en B (cf. en-tête). Pas un step gatekeeper.
-        fallback_invoke_gatekeeper: true
-        on_blocking_severity: critical
       timeout_sec: 1800
 
 # Metadata cycle

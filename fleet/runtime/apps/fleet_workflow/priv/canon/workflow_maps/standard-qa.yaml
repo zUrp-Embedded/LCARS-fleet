@@ -89,12 +89,13 @@ spec:
       outputs:
         - audits/spec-review-{date}.json
       gate:
+        # type: terminal → une règle en échec (severity_max == critical) déclenche DÉJÀ l'escalade
+        # gatekeeper (StepRunConsumer {:dispatch_gatekeeper}). F-C110 : les ex-knobs
+        # fallback_invoke_gatekeeper/on_*_severity étaient une 2e couche morte (aucun code ne les lisait) —
+        # retirés. Le gating par sévérité vit dans `rules` (opérande évalué par Gates.Predicate).
         type: terminal
         rules:
           - "severity_max != critical"
-        fallback_invoke_gatekeeper: true  # si severity_max == important, gatekeeper décide proceed/revision
-        on_blocking_severity: critical
-        on_revision_severity: important
       timeout_sec: 600
 
     # --- Step 5: code-review (reviewer — code quality) ---
@@ -108,12 +109,11 @@ spec:
       outputs:
         - audits/code-review-{date}.json
       gate:
+        # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_*_severity retirés (morts). L'escalade gatekeeper
+        # vient du type: terminal ; le gating par sévérité de `rules`.
         type: terminal
         rules:
           - "severity_max != critical"
-        fallback_invoke_gatekeeper: true
-        on_blocking_severity: critical
-        on_revision_severity: important
       timeout_sec: 600
 
     # --- Step 6: finish (merge/PR/keep/discard) ---
