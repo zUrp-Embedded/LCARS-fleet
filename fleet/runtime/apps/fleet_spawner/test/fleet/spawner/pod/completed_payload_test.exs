@@ -9,7 +9,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
   # le projet statique (`spec["project"]`, résolu via `LaunchSpec.effective_project`). On le laisse vide
   # par défaut → le projet EFFECTIF vient des `opts[:project]` du data (dynamique), ce que pose le
   # dispatcher en prod.
-  defp cap_profile(spec \\ %{}) do
+  defp cap_profile(spec) do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer"},
