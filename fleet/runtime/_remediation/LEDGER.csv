@@ -157,7 +157,7 @@ F-C155,medium,confirmed,apps/fleet_cap_profile/priv/canon/_frozen-monks/archivis
 F-C156,medium,confirmed,priv/canon/README.md:1,DOCTRINE,D3-archivable,"runtime priv/canon keeps a second legacy Memory-X canon in non-v2.5 shape"
 F-C157,medium,confirmed,apps/fleet_cap_profile/priv/canon/_frozen-monks/alpha.yaml:7,DOCTRINE,D3-archivable,"Memory-X alpha/beta are defined twice with divergent rosters and corpus partitions"
 F-C158,low,confirmed,apps/fleet_coord/priv/schema/coord-policies-v1.json:5,PERCE-doc,FIXÉ,"coord-policies schema still describes the obsolete 05_data-canon source path"
-F-C159,low,confirmed,apps/fleet_workflow/priv/schema/workflow-map-v2.5.json:49,DOCTRINE,D3-fork-D7,"smoke/draft workflow maps use profile as a modop/placeholder while the current contract treats it as cap-profile-ish"
+F-C159,low,confirmed,apps/fleet_workflow/priv/schema/workflow-map-v2.5.json:49,PERCE,D7-keep-doc,"smoke/draft workflow maps use profile as a modop/placeholder while the current contract treats it as cap-profile-ish"
 F-C160,low,confirmed,apps/fleet_workflow/priv/canon/workflow_maps/brief-gate.yaml:4,PERCE,FIXÉ,"active brief-gate workflow map is excluded from current canonical workflow-map conformance tests"
 F-C161,medium,confirmed,apps/fleet_workflow/priv/schema/gate-decision-v1.json:4,PERCE,FIXÉ,"gate-decision schema requires reason but runtime verdict decoding only enforces the decision enum"
 F-C162,low,confirmed,apps/fleet_observation/DESIGN-observabilite.md:117,PERCE-doc,FIXÉ,"observation design still says fleet_api has auth HMAC after the API moved to no-auth by design"

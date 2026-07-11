@@ -50,7 +50,11 @@
               "additionalProperties": false,
               "properties": {
                 "role": {"type": "string", "minLength": 1},
-                "profile": {"type": "string", "minLength": 1},
+                "profile": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "F-C159 — champ ACTUELLEMENT NON-CONSOMMÉ par le runtime : le cap-profile du step est chargé par `role` (StepDispatcher role_resolution → CapProfile.load(role)), jamais par `profile` (aucune lecture de step[\"profile\"] dans le code). Usage canon INCOHÉRENT (dette C8, auto-documentée dans poc-helloworld) : cap-profile-FICHIER (`qualifier.yaml`) dans standard-qa/brief-gate/audit-only, mais MODOP overlay (`noop`, `fire-mode`) dans gk-smoke/poc-helloworld. Gardé `required` comme marqueur d'intention (futur override cap-profile par step, non câblé) mais NE PAS s'y fier pour la résolution tant que le contrat n'est pas tranché."
+                },
                 "brief_kind": {"enum": ["worker", "judge"]},
                 "judge_target": {"enum": ["brief", "deliverable"]},
                 "effect": {
