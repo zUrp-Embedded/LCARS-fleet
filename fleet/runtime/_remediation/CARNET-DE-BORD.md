@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~08h45 (relevé horaire · attente stable, rien bougé · **BORD VÉRIFIÉ+AUDITÉ** — 0 unassigned, 49 fixes)
+**Dernière révision** : 2026-07-11 (SESSION USER · crons coupés · F-C007 + F-C061 FIXÉS · mandat forge A en attente · **51 fixes**)
 **Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés+tagués · 49 fixes · reste STRICTEMENT décisions user (2 flags « bloqués » revérifiés : F-C026 fixé, F-C023 doc-intentionnel)**
 **Référencé par** : `PLAYBOOK.md`
 
@@ -62,7 +62,7 @@
 | **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b ; D1/D2/D4/D5 traités, reste D3/D6/D7-forks) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **49** (16 code + 33 doc/test) |
+| **fixés (commit)** | **51** (18 code + 33 doc/test) — +F-C007, F-C061 (session user) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-15 |
 
