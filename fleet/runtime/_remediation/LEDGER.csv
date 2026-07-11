@@ -136,7 +136,7 @@ F-C134,low,confirmed,apps/fleet_workflow/README.md:24,PERCE-doc,FIXÉ,"fleet_wor
 F-C135,medium,confirmed,bin/bwrap_launch.sh:65,DOCTRINE,D2-keep-doc,"bwrap launcher still makes a dormant git mirror mandatory"
 F-C136,high,confirmed,bin/claude_launch.sh:265,DOCTRINE,D2-downgrade,"claude launcher starts without the MCP config it calls an iron law"
 F-C137,medium,confirmed,bin/host_launch.sh:33,PERCE-doc,FIXÉ-doc,"host launch documentation and integration test still assert the removed inline-SP command shape"
-F-C138,high,confirmed,bin/fleet_mcp_stdio_bridge.py:31,DOCTRINE,D3-live-D6,"Python MCP bridge owns a second hand-written tool catalogue beside the Elixir authority"
+F-C138,high,confirmed,bin/fleet_mcp_stdio_bridge.py:31,DOCTRINE,FIXÉ-structurel,"Python MCP bridge owns a second hand-written tool catalogue beside the Elixir authority"
 F-C139,medium,confirmed,test/fixtures/mcp_submit_server.py:6,DOCTRINE,D3-deadgate,"Legacy MCP fixture and inc4 gate still use the removed get_task/no-work_item_id protocol"
 F-C140,medium,confirmed,test/gate-r-core-comm-inc3b1.sh:6,DOCTRINE,D3-deadgate,"R-CORE.comm shell gate inventory contains non-runnable and superseded gates"
 F-C141,medium,confirmed,apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json:54,DOCTRINE,D7-fork,"cap-profile schema does not require the allowedTools field that claude_launch hard-requires"
