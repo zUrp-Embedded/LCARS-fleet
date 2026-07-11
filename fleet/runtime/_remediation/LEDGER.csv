@@ -45,7 +45,7 @@ F-C043,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/permanent_boot.ex:2
 F-C044,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/publish_consumer.ex:13,PERCE,FIXÉ,"`admin.spawn.request` only emits `spawn.failed` for raised exceptions, not ordinary dispatch failures"
 F-C045,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner.ex:148,DOCTRINE,D5-keep-doc,"Seed-store recall conflates absent seeds with present corrupt seed metadata"
 F-C046,medium,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools/work_items.ex:57,DOCTRINE,D1-doc-FIXÉ,"MCP `submit_result` presents broadcast failure as retryable even though a retry becomes a success-shaped double submit"
-F-C047,high,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools.ex:157,DOCTRINE,D6-fork,"`get_issue_status` exposes `delivered: true` for any closed issue, not a proven merge delivery"
+F-C047,high,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools.ex:157,PERCE,FIXÉ,"`get_issue_status` exposes `delivered: true` for any closed issue, not a proven merge delivery"
 F-C048,hygiene,confirmed,apps/fleet_mcp/lib/fleet/mcp/supervisor.ex:80,DOCTRINE,D5-keep-doc,"MCP pod-facing readiness can report operational when the socket-file cross-check failed"
 F-C049,hygiene,confirmed,apps/fleet_mcp/mix.exs:30,DOCTRINE,D4-hygiène-deferred,"`fleet_mcp` still declares a direct `fleet_event_router` application/dependency while the code says it is vestigial"
 F-C050,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex:177,PERCE,FIXÉ,"A project-pipe `:completed` work item can mask an orphaned issue lock after lost/offloaded completion"

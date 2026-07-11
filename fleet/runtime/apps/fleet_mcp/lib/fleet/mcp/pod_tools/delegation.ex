@@ -124,6 +124,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). LITERAL, not a ref to
+  # `Fleet.Pilot.Labels`: fleet_mcp→fleet_pilot is an UPWARD-forbidden compile edge (cf. § Seams — the
+  # forge seam is runtime-dispatched precisely to avoid it). SSOT = `Fleet.Pilot.Labels`
+  # (`stage_prefix() <> stage_merged()` = "stage/merged"); this literal must track it (stable protocol constant).
+  @merged_label "stage/merged"
+
   @doc """
   Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
   delegation stays reserved to the architect, consistent with `create_issue`/`create_project`).
@@ -137,26 +143,30 @@ defmodule Fleet.MCP.PodTools.Delegation do
   def issue_status(repo, number, state) when is_binary(repo) and is_integer(number) do
     with {:ok, _role} <- require_architect(state),
          {:ok, forge} <- conforming_forge() do
-      issue_state =
+      {issue_state, issue_labels} =
         case forge.get_issue(repo, number, []) do
-          {:ok, issue} -> Map.get(issue, "state", "unknown")
-          _ -> "unknown"
+          {:ok, issue} ->
+            {Map.get(issue, "state", "unknown"),
+             Enum.map(Map.get(issue, "labels") || [], & &1["name"])}
+
+          _ ->
+            {"unknown", []}
         end
 
       result = %{
         "repo" => repo,
         "issue" => number,
         "issue_state" => issue_state,
-        # "delivered" = the PR closed the issue (FF merge `Closes #N`). Multi-issue sequencing signal:
-        # the arch only chains issue N+1 on `delivered: true`.
+        # "delivered" = closed BY A MERGE — a multi-issue sequencing signal (the arch only chains issue
+        # N+1 on `delivered: true`).
         #
-        # ⚠ KNOWN LIMIT (seen live 2026-07-04): `closed` ALONE conflates "closed by a merge"
-        # (real delivery) and "closed without delivery" (onboarding marker `[lcars-onboarded]`,
-        # manual closure) → false `delivered:true`. The CORRECT fix requires proving a MERGE (new
-        # forge request: PR merged for the issue — `issue_pr_status` only sees OPEN PRs, nil at
-        # merge). Deferred to the auditability batch. The TRIGGER is neutralized: create_issue
-        # now returns the real number → the arch no longer GUESSES and no longer queries the marker by mistake.
-        "delivered" => issue_state == "closed",
+        # F-C047 (fix; seen live 2026-07-04): `closed` ALONE conflated a real delivery ("closed by a
+        # merge") with a NON-delivery closure (onboarding marker `[lcars-onboarded]` / manual close) →
+        # false `delivered:true` → the arch chained N+1 on an ABANDONED brick. We now PROVE the merge via
+        # the `stage/merged` label (WS1, set by the gatekeeper seal AT MERGE, before the explicit close).
+        # A rare missing label (set_stage is best-effort) → false-NEGATIVE (the arch WAITS) = SAFE, the
+        # opposite of the old false-positive that mis-sequenced.
+        "delivered" => issue_state == "closed" and @merged_label in issue_labels,
         "pr" => issue_pr_status(forge, repo, number)
       }
 

@@ -217,7 +217,18 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
-      {:ok, %{"state" => Application.get_env(:fleet_mcp, :test_issue_state, "open")}}
+
+      # F-C047 — labels pilotables (`:test_issue_labels`, liste de noms) : `delivered` exige `stage/merged`,
+      # plus `closed` seul. Défaut [] → une issue fermée SANS preuve de merge = non-livrée.
+      labels =
+        Application.get_env(:fleet_mcp, :test_issue_labels, [])
+        |> Enum.map(&%{"name" => &1})
+
+      {:ok,
+       %{
+         "state" => Application.get_env(:fleet_mcp, :test_issue_state, "open"),
+         "labels" => labels
+       }}
     end
 
     @impl true
@@ -247,8 +258,9 @@ defmodule Fleet.MCP.PodToolsTest do
         {:ok, %{role: "architect"}}
       end)
 
-      # :test_issue_state est posé par certains tests (état d'issue du RecordingForge) — restauration seule.
+      # :test_issue_state / :test_issue_labels sont posés par certains tests (RecordingForge) — restauration seule.
       TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_state)
+      TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_labels)
 
       :ok
     end
@@ -287,8 +299,9 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["issue"] == 42
     end
 
-    test "`delivered: true` quand l'issue est fermée (séquencement multi-issue)" do
+    test "F-C047 : `delivered: true` quand l'issue est fermée ET porte `stage/merged` (preuve de merge)" do
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
+      Application.put_env(:fleet_mcp, :test_issue_labels, ["stage/merged"])
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -301,6 +314,26 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, result} = Jason.decode(txt)
       assert result["issue_state"] == "closed"
       assert result["delivered"] == true
+    end
+
+    test "F-C047 : issue FERMÉE SANS `stage/merged` (fermeture non-livraison : onboarding/manuelle) → `delivered: false`" do
+      # Le cœur du finding : `closed` seul confondait livraison-par-merge et fermeture-sans-livraison
+      # (marqueur d'onboarding / close manuel) → faux `delivered:true` → l'arch chaînait N+1 sur une
+      # brique ABANDONNÉE. Fermée mais sans preuve de merge = NON livrée (l'arch attend, direction sûre).
+      Application.put_env(:fleet_mcp, :test_issue_state, "closed")
+      Application.put_env(:fleet_mcp, :test_issue_labels, ["lcars-onboarded"])
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 7, "project" => "fleet/other"},
+                 pod_state(pod)
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["issue_state"] == "closed"
+      assert result["delivered"] == false
     end
 
     test "REFUSE si `project` omis — pas de routage par défaut (miroir create_issue)" do
