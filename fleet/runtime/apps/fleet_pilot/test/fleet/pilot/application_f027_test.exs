@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.ApplicationF027Test do
   # async: false — mute la config globale :fleet_pilot (step_dispatch?/poll_repo/...).
   use ExUnit.Case, async: false
 
-  @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge]
+  @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge, :reviewer_roles]
 
   setup do
     # Les tests posent ces clés eux-mêmes ; on n'enregistre ici que leur restauration.
@@ -47,5 +47,29 @@ defmodule Fleet.Pilot.ApplicationF027Test do
     children = Fleet.Pilot.Application.step_children_for_test()
     assert Enum.any?(children, &match?({Fleet.Pilot.Poller, _}, &1))
     assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
+  end
+
+  # F-C061 Vecteur 2 (own-goal config) : `:reviewer_roles` est fail-loud sur l'ABSENCE mais pas sur un
+  # contenu absurde. Un login non-rôle y serait posé sur les PR + bumperait required_approvals, puis
+  # wedgerait en silence au dispatch. La garde boot valide que chaque juré résout en cap-profile judge.
+  test "F-C061 V2 : :reviewer_roles avec un login NON-rôle (humain) → raise au boot" do
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+    Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "lordzurp"])
+
+    assert_raise RuntimeError, ~r/does NOT resolve/, fn ->
+      Fleet.Pilot.Application.step_children_for_test()
+    end
+  end
+
+  test "F-C061 V2 : :reviewer_roles avec un rôle NON-juge (worker) → raise au boot" do
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+    # engineer résout (cap-profile) mais brief_kind: worker → pas un juré valide.
+    Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "engineer"])
+
+    assert_raise RuntimeError, ~r/NOT a judge/, fn ->
+      Fleet.Pilot.Application.step_children_for_test()
+    end
   end
 end

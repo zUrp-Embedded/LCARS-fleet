@@ -123,6 +123,8 @@ defmodule Fleet.Pilot.Application do
               "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
 
+    validate_reviewer_roles!()
+
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
     [
@@ -151,6 +153,34 @@ defmodule Fleet.Pilot.Application do
       {Fleet.Pilot.StepRunConsumer,
        forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/1}
     ]
+  end
+
+  # F-C061 (Vecteur 2 — own-goal config) — the jury config `:reviewer_roles` is fail-loud on ABSENCE
+  # (`fetch_env!`) but NOT on absurd CONTENT: a non-role login there would be LAID on PRs
+  # (`request_reviews_step`) and bumped into `required_approvals`, then WEDGE at dispatch (no cap-profile →
+  # silent `:no_role`). We validate at boot that EVERY jury role resolves to a `brief_kind: judge`
+  # cap-profile — a jury that can't judge = a broken deploy, fail-loud HERE, not a silent wedge on the
+  # first PR. (Symmetric to the read-frontier filter in `StepDispatcher.dispatch_review`, which restricts
+  # the forge-sourced reviewer set to `reviewer_roles`: this guards the config side, that guards the forge side.)
+  defp validate_reviewer_roles! do
+    for role <- Fleet.Pilot.Roles.reviewer_roles([]) do
+      case Fleet.CapProfile.load(role) do
+        {:ok, cp} ->
+          kind = Fleet.CapProfile.brief_kind(cp)
+
+          unless kind == "judge" do
+            raise "fleet_pilot: :reviewer_roles contains #{inspect(role)} whose cap-profile is NOT a judge " <>
+                    "(brief_kind=#{inspect(kind)}) — the jury must be judge roles. Fix config :fleet_pilot, :reviewer_roles."
+          end
+
+        {:error, reason} ->
+          raise "fleet_pilot: :reviewer_roles contains #{inspect(role)} that does NOT resolve to a cap-profile " <>
+                  "(#{inspect(reason)}) — a non-role login in the jury WEDGES at dispatch (no cap-profile → " <>
+                  ":no_role). Fix config :fleet_pilot, :reviewer_roles."
+      end
+    end
+
+    :ok
   end
 
   # Resolved forge base_url (app config `:forge`). `nil` if absent/empty. Source of the fail-loud guard

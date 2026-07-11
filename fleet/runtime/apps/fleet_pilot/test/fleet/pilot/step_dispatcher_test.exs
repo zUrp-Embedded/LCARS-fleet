@@ -949,6 +949,40 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, "lordzurp"}
     end
 
+    test "F-C061 : un REQUEST_CHANGES d'un login NON-jury (humain) ne déclenche PAS de rework parasite" do
+      # 2e vecteur du même trou : un humain POSTE un verdict (pas juste requested) → il entre dans `verdicts`
+      # ET le jury (review-record REQUEST_CHANGES). SANS filtre : `Map.take(verdicts, requested)` inclut
+      # lordzurp → `dispatch_rework` PARASITE (cycle de rework déclenché par un humain). AVEC le filtre
+      # `reviewer_roles` : lordzurp exclu de `requested` → sa voix ne compte pas → le jury (qualifier +
+      # reviewer, approved) → merge. Login humain signalé LOUD.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_reviewers: ["qualifier", "reviewer", "lordzurp"],
+            _test_verdicts: %{
+              "qualifier" => :approved,
+              "reviewer" => :approved,
+              "lordzurp" => :changes_requested
+            }
+          ]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          # le REQUEST_CHANGES humain est IGNORÉ (pas de rework) → jury tout-approved → merge.
+          assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
+        end)
+
+      assert log =~ "F-C061" and log =~ "lordzurp"
+      refute_received {:spawned, _, "reviewer"}
+    end
+
     # ── Angle « la machine lit l'état-forge complet » : échec de merge CLASSIFIÉ (2026-07-07) ──
     # Remplace l'ancien fourre-tout « tout échec = conflit → eng rebase » (impossible car forge-aveugle →
     # mur live). L'échec est relu de l'objet PR (MergeOutcome) et aiguillé sur sa cause RÉELLE.
