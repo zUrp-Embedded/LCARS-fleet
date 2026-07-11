@@ -220,3 +220,13 @@
 - **6 décisions de direction** (→ user) : **F-C110** (fail-open silencieux HIGH : knobs escalade canoniques lus par 0 code → `important` proceed sans gatekeeper) · F-C143 (deliverable_mode défaut, latent) · F-C138/142 (import_project code-mort pod-side, dual-SSOT) · F-C165 (stale `vulcan`→`starfleet`, ops-surface) · F-C007 (barrière forge-aveugle manquante, sécurité, architect le + exposé) · F-C109-policy (selection_priority fantôme) · F-C013 (test-infra).
 - LEDGER : 11 lignes D6 annotées. **47 fixes** (16 code + 31 doc/test).
 - **BORD FACTUEL DÉFINITIF** : TOUS les clusters (D1-D7) ont désormais leur inventaire fact-backed. Plus aucun factuel non-bloqué. Reste = 100% décision user. J'attends.
+
+### Watchdog-catch #3 : bord « définitif » PRÉMATURÉ — 29 lignes DOCTRINE non-taguées
+- Le count LEDGER a montré 29 lignes `DOCTRINE,unassigned` : verdicts cluster jamais reportés par-ligne. J'avais déclaré « done » dessus = petit mensonge. Le homme-mort l'attrape (3e faux-wait consécutif attrapé). Toutes taguées.
+- **Le sweep a trouvé des « mal-rangés » classés-mais-jamais-faits** :
+  - **F-C040 FIXÉ** ✅ : README spawner affirmait TOUS les knobs env-drivés + « catalogue in template » — faux (runtime.exs n'en rend qu'un sous-ensemble ; `:pod_dir_root` a perdu son knob). README réécrit fidèle.
+  - **F-C049 — R-14 sur MON PROPRE brief** : j'avais écrit « dep vestigiale » → FAUX. verify-before-fix : `%Fleet.Event{}` matché dans result_event_test.exs → la dep compile-time est nécessaire ; SEULE l'entrée extra_applications est vestigiale, mais gardée pour ordre-de-boot (risque #576), non-prouvable par mix test. Retirer aurait cassé (ou risqué boot). **Presque agi sur ma propre mauvaise classif.** Leçon gravée : R-14 s'applique à MES relevés, pas juste au rapport Codex.
+  - **F-C061 edge-case fail-open VÉRIFIÉE** (R-09) : login rôle-inconnu → `{:skipped,:no_role}` silencieux ; `dispatch_by_verdicts` ne pick que `hd(pending)` → un humain reviewer en tête affame un juge fleet. Correctement DOCTRINE (dépend ordre liste+backstops) → décision design `D-review-fork`.
+  - **F-C026/023 flaggés** (doc-drift POC+pointeur mort / architect SP hors block-SoT) : fix needs contexte produit.
+- LEDGER : **0 ligne unassigned**. Distribution complète. **48 fixes** (16 code + 32 doc/test, +F-C040).
+- **Vrai bord cette fois** : 0 unassigned, tout vérifié-ou-tagué. Reste = décisions user. La leçon du tick : « bord définitif » est une affirmation à VÉRIFIER (grep le residual), pas à proclamer.

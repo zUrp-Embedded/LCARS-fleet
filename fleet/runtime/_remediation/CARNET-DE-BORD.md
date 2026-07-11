@@ -40,7 +40,8 @@
 - **Sécurité/latent notables** : F-C110 (knobs escalade sans effet = fail-open silencieux) · F-C007 (architect a `fleet-forge.*` + `git_ops_denied:[]`).
 - **F-C151** (dernier PERCE-doc) : dual-review canon — autorité juge = sp_drafts vs bundle ? (produit, D3).
 
-**47 fixes livrés** (16 code + 31 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops + F-C108/111/011/109 (doc/test doctrine).
+**48 fixes livrés** (16 code + 32 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops + F-C108/111/011/109 + F-C040 (doc/test doctrine).
+**Sweep watchdog-catch #3** : 29 lignes DOCTRINE non-taguées → toutes taguées (0 unassigned). F-C049 = correction R-14 de mon propre brief (dep PAS vestigiale, verify-before-fix). F-C061 = edge-case fail-open vérifiée (juge fleet affamé par humain en tête de pending) → D-review-fork. F-C026/023 flaggés.
 **Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
@@ -61,9 +62,9 @@
 | **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b ; D1/D2/D4/D5 traités, reste D3/D6/D7-forks) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **47** (16 code + 31 doc/test) |
+| **fixés (commit)** | **48** (16 code + 32 doc/test) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
-| règles méta posées | R-01 → R-13 |
+| règles méta posées | R-01 → R-15 |
 
 ## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
 

@@ -85,3 +85,12 @@
   l'air d'un trou »), pas le CODE (R-01 appliqué aux prédictions). Le pattern doctrine-phase le confirme : le code
   applique déjà la doctrine → ~1 fix/cluster, pas N. **Déléguer la classif SANS annoncer un compte ; laisser la
   vérif trancher.** Corollaire de R-06/R-09 : « ça a l'air percé » ≠ « c'est percé + fixable ».
+
+- **R-15 (2026-07-11)** — *Le verify-before-fix s'applique à MES PROPRES classifications, pas seulement au rapport
+  Codex ; et « bord atteint » est une affirmation à VÉRIFIER (grep le residual), pas à proclamer.* Vécu (watchdog-catch
+  #3) : mon DECISION-BRIEF disait « F-C049 = dep `fleet_event_router` vestigiale » ; en allant au code AVANT de retirer,
+  `%Fleet.Event{}` est matché dans un test → la dep compile-time est nécessaire (retrait aurait cassé). J'ai failli agir
+  sur ma propre mauvaise classif (elle-même issue de la lecture du rapport, R-14). De plus j'ai proclamé « bord factuel
+  DÉFINITIF » alors que 29 lignes DOCTRINE restaient `unassigned` (verdicts jamais reportés) — un `grep -c unassigned`
+  l'aurait montré. **Une classif de MA main n'est pas une vérité ; un « done » global se prouve par un compteur à zéro,
+  pas par une sensation.** Corollaire de R-01 (don't trust the report → y compris quand le « rapport » est mon propre relevé).
