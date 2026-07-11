@@ -256,3 +256,8 @@
 - **Bougé cette heure** : RIEN. Aucun worker en vol, aucune entrée user, aucun fix (plus aucun factuel fork-indépendant après F-C026). Que des confirmations watchdog (homme-mort : je confirme vivant + validement bloqué, je ne churn pas).
 - **Dérive attrapée** : aucune. Pas de nouvelle règle. J'ai résisté à (a) ré-inventer des inventaires déjà faits, (b) construire des livrables spéculatifs non-demandés (dashboard décision) = ce serait du churn. Le bon comportement à ce stade = attendre, pas fabriquer de l'activité.
 - **Décision en attente user** : inchangée. Tout est prêt dans DECISION-BRIEF.md (table synthèse D1-D7 + inventaires par cluster + top-3). Le chantier reprend dès que l'user tranche (ou dit « push »).
+
+---
+## RELEVÉ DE POSTE — 2026-07-11 ~06h45
+- **Phase** : DOCTRINE — attente stable. **Rien bougé** (aucune entrée user, aucun worker). Compteurs INCHANGÉS : 167/167 vérifiés · 49 fixes (16 code + 33 doc/test) · 0 unassigned · R-01→R-15. Vérif réelle du tick précédent : HEAD/worktree/branche intacts (aucun changement externe).
+- **Dérive attrapée** : aucune. Floor vérifié+audité tenu ; pas de churn, pas de livrable spéculatif. Décision en attente = inchangée (DECISION-BRIEF.md).
