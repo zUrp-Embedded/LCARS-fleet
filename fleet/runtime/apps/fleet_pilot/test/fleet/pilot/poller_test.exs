@@ -249,7 +249,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # TaskQueue stub : le pod a une tâche ACTIVE → il POSSÈDE légitimement son verrou.
   defmodule ActiveTaskQueue do
-    def pod_status(_pod_id), do: {:ok, :running}
+    def pod_status(_pod_id), do: {:ok, :in_progress}
   end
 
   # SLOT-FREEZE : un eng PIPE project-scoped (pod_id `<repo>-engineer`, SANS `-issue-N-` — l'eng resident
@@ -261,19 +261,22 @@ defmodule Fleet.Pilot.PollerTest do
 
   # TaskQueue stub : l'eng project travaille la BRIQUE 8 (issue_id "issue-8") -> il possede #8.
   defmodule ProjectTaskQueueIssue8 do
-    def pod_status(_pod_id), do: {:ok, :running}
+    def pod_status(_pod_id), do: {:ok, :in_progress}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
   # TaskQueue stub : l'eng project travaille une AUTRE brique (9) -> il ne possede PAS #8.
   defmodule ProjectTaskQueueIssue9 do
-    def pod_status(_pod_id), do: {:ok, :running}
+    def pod_status(_pod_id), do: {:ok, :in_progress}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
-  # TaskQueue stub : l'eng project a LIVRÉ #8 (tâche `:completed`, fenêtre de publication) — config
-  # martine-o-matic. `pod_status` rend `:completed` (non-nil → compté « actif » pour le verrou-ISSUE),
-  # `pod_active_issue_id` rend encore "issue-8". NE doit PAS protéger le verrou PR d'un juge mort.
+  # TaskQueue stub : l'eng project a LIVRÉ #8 (tâche `:completed`) — configs martine + F-C050. `:completed`
+  # est TERMINAL (`WorkItem.active?/1` → false) : l'eng livré ne possède PLUS son verrou. Deux tests :
+  # martine (PR#6 ouverte → issue exclue via pr_issue_ids, le verrou PR d'un juge mort est réclamé) et
+  # F-C050 (PAS de PR → l'orphelin ISSUE, jadis masqué par `:completed`, est enfin réclamé).
+  # `pod_active_issue_id` rend "issue-8" mais n'est plus atteint : le filtre `pod_has_active_task?`
+  # court-circuite avant (un `:completed` n'est plus actif).
   defmodule ProjectTaskQueueCompletedIssue8 do
     def pod_status(_pod_id), do: {:ok, :completed}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
@@ -536,11 +539,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "RÉGRESSION martine : un engineer :completed possédant l'issue ne protège PAS le verrou PR d'un juge mort" do
       # Bug 2026-07-07 (introduit puis reverté le même jour) : une augmentation « PR dont l'issue parente
-      # est possédée = possédée » protégeait la PR de la réclamation. MAIS `pod_status` rend `:completed`
-      # (fenêtre de publication) → un engineer LIVRÉ « possède » encore son issue → il protégeait le
-      # verrou PR d'un JUGE MORT (verrou PR en review = du juge, pas du producteur) → juge jamais
-      # re-dispatché = MUR (martine-o-matic PR#2). Ici : engineer `:completed` sur issue-8, PR#6 en review
-      # dont le juge est MORT (aucun pod pr-6-* vivant). Le verrou PR#6 DOIT être réclamé (grâce 2-tick).
+      # est possédée = possédée » protégeait la PR de la réclamation → verrou PR d'un JUGE MORT jamais
+      # réclamé (verrou PR en review = du juge, pas du producteur) → juge jamais re-dispatché = MUR
+      # (martine-o-matic PR#2). On NE dérive PAS le verrou PR de l'ownership de l'issue. Depuis F-C050 la
+      # garde est DOUBLE : un engineer `:completed` ne possède MÊME PLUS son issue (`:completed` terminal).
+      # Ici : engineer `:completed` sur issue-8, PR#6 en review dont le juge est MORT (aucun pod pr-6-*
+      # vivant). issue-8 PR-backed → jamais réclamée (pr_issue_ids). Le verrou PR#6 DOIT être réclamé (grâce 2-tick).
       issues = [
         %{
           "number" => 8,
@@ -582,6 +586,56 @@ defmodule Fleet.Pilot.PollerTest do
       Poller.force_poll(name)
       assert_received {:remove_label, 6, _}
       refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "F-C050 : un eng PIPE :completed (publication PERDUE, PAS de PR) ne masque PAS l'orphelin — réclamé au 2e tick" do
+      # F-C050 : une complétion OFFLOADÉE perdue (crash/redémarrage BEAM AVANT l'ouverture de PR) laisse le
+      # verrou lcars-in-flight sur l'issue. L'eng project VIVANT dont la DERNIÈRE tâche est `:completed`
+      # (livré, publication perdue) MASQUAIT ce verrou à jamais (pod_has_active_task? comptait `:completed`
+      # comme actif) → wedge permanent silencieux (le poller ne re-dispatche jamais, la brique est morte).
+      # `:completed` est TERMINAL (@active_states) : un eng LIVRÉ ne possède plus son verrou → l'orphelin est
+      # réclamé (grâce 2-tick), le prochain tick re-dispatche. Sûr : la fenêtre légitime de publication
+      # (push ≤30s) retire le label bien avant le 2e tick (grâce ≈60s), et la séquence de complétion est
+      # idempotente (open_pr replay-safe, unlock no-op-si-absent) → un reclaim tardif = replay inoffensif.
+      # DISTINCT du cas martine (PR ouverte) : ICI pas de PR → pas d'exclusion pr_issue_ids → le seul rempart
+      # était (à tort) l'ownership `:completed`.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_c050_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          # PAS de _test_pulls → aucune PR : la publication a été perdue AVANT open_pr.
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          # eng project VIVANT, dernière tâche `:completed` (livré) sur issue-8 — publication perdue.
+          spawner: ProjectPipeSpawner,
+          task_queue: ProjectTaskQueueCompletedIssue8
+        )
+
+      # 1er tick : #8 devient SUSPECT (grace 2-tick), pas encore réclamé.
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      # 2e tick : orphelin CONFIRMÉ → verrou réclamé (un `:completed` ne masque plus). AVANT le fix :
+      # l'eng `:completed` « possédait » #8 → jamais réclamé (ce assert échouait = le wedge F-C050).
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
 
       GenServer.stop(pid)
     end
@@ -1130,7 +1184,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     defmodule ActiveTaskQueue2 do
-      def pod_status(_pod_id), do: {:ok, :running}
+      def pod_status(_pod_id), do: {:ok, :in_progress}
     end
 
     test "un pod vivant #8/repoB NE masque PAS l'orphelin #8/repoA (réclamé) ET ne fait PAS réclamer #8/repoB" do

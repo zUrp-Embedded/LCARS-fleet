@@ -101,17 +101,19 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       owned ->
         repo = seams.repo
 
-        # NB (lesson 2026-07-07): we do NOT derive the PR lock from the ownership of the ISSUE. Naive
-        # temptation: "a PR whose parent issue is owned is owned too" (to cover a
-        # project-scoped producer in rework that holds the PR lock but whose pod only derives
-        # the issue). BUT `pod_status` yields `:completed` (publication window → `pod_has_active_task?`
-        # counts `:completed` as active, correct for the ISSUE-lock): a DELIVERED engineer (`:completed`,
-        # in review) still "owns" its issue → it would then protect the PR lock of a DEAD JUDGE
-        # (the PR lock in review belongs to the judge, not the producer) → judge never re-dispatched = WALL
-        # (seen live martine-o-matic PR#2). The churn of the PR lock during a REAL producer rework is
-        # minor and self-heals (serialize `:role_busy` prevents the double-spawn) — we accept it rather
-        # than masking the judge orphans. A clean fix (strict `@active_states` set, excluding
-        # `:completed`) requires a rework repro — deferred, no trick under pressure.
+        # NB (lesson 2026-07-07 + F-C050): we do NOT derive the PR lock from the ownership of the ISSUE.
+        # Naive temptation: "a PR whose parent issue is owned is owned too". TWO reasons it stays wrong:
+        #  (1) a DELIVERED engineer would protect the PR lock of a DEAD JUDGE (the PR lock in review belongs
+        #      to the judge, not the producer) → judge never re-dispatched = WALL (seen live
+        #      martine-o-matic PR#2). The PR-lock churn during a REAL producer rework is minor and
+        #      self-heals (serialize `:role_busy` prevents the double-spawn).
+        #  (2) `pod_has_active_task?` no longer counts `:completed` as owning (F-C050 fix): `:completed` is
+        #      TERMINAL (`WorkItem.active?/1`) — a delivered engineer's completion (push → open PR →
+        #      unlock) is running-or-done, its lock is released at the END. Counting it as active masked an
+        #      orphaned ISSUE lock FOREVER when the completion was LOST before open_pr (permanent silent
+        #      wedge). The legitimate publication window (push ≤30s) is covered by the 2-tick grace (~60s)
+        #      + the idempotent completion sequence (a late reclaim = a harmless replay), so excluding
+        #      `:completed` reclaims the lost-completion orphan WITHOUT churning the nominal window.
 
         # REPO-QUALIFIED orphans (`{repo, :issue|:pr, n}`): the lock key carries the repo, so
         # `owned` (repo-scoped refs of the live pods of THIS repo) and `prior_suspects` (cross-tick, all
@@ -227,12 +229,14 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _, _ -> []
   end
 
-  # Does a pod have an ACTIVE task (assigned, not closed)? `{:ok, nil}` = idle. Tolerant (any
-  # anomaly → `false`: a pod whose activity cannot be established does not mask an orphan).
+  # Does a pod have an ACTIVE task (owns its slot/lock)? The state of the pod's latest task (`pod_status`)
+  # must be ACTIVE per the SINGLE AUTHORITY `WorkItem.active?/1` (`:pending`/`:assigned`/`:in_progress`).
+  # `{:ok, nil}` (idle) and the TERMINAL states (`:completed`/`:failed`/`:cleared`) → `false`: a delivered
+  # (`:completed`) pod no longer owns its lock (F-C050 — else a completion LOST before open_pr wedges the
+  # lock forever). Tolerant (any anomaly → `false`: a pod whose activity cannot be established masks no orphan).
   defp pod_has_active_task?(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
-      {:ok, nil} -> false
-      {:ok, _status} -> true
+      {:ok, state} -> Fleet.TaskQueue.WorkItem.active?(state)
       _ -> false
     end
   rescue

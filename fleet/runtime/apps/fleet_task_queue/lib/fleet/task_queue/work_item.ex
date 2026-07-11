@@ -45,6 +45,23 @@ defmodule Fleet.TaskQueue.WorkItem do
     metadata: %{}
   ]
 
+  # ACTIVE states = a work item still OWNS its pod's slot/lock. The TERMINAL states
+  # (`:completed`/`:failed`/`:cleared`) do NOT: a `:completed` item is DELIVERED — its completion
+  # sequence (push → open PR → unlock) is running-or-done, and the lock it held is released at the END of
+  # that sequence. SINGLE AUTHORITY shared by the Server (supersede / deadline / list_active / prune) AND
+  # the poller's lock reconciliation (`pod_has_active_task?`): a dead-or-idle pod whose LAST task is
+  # `:completed` no longer owns its lock → an orphaned lock (e.g. a completion LOST before open_pr) is
+  # reclaimable (F-C050). Kept here — the owner of the `state` type — not forked per-caller.
+  @active_states [:pending, :assigned, :in_progress]
+
+  @doc "The states in which a work item still OWNS its pod's slot/lock (single authority — see NB)."
+  @spec active_states() :: [state()]
+  def active_states, do: @active_states
+
+  @doc "Whether `state` is ACTIVE (owns the slot/lock). Terminal states (`:completed`/`:failed`/`:cleared`) are NOT."
+  @spec active?(state()) :: boolean()
+  def active?(state), do: state in @active_states
+
   @doc "Serializes a work item into a JSON-able map (persistence `state.json`)."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = t) do

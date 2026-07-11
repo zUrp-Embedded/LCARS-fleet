@@ -71,7 +71,11 @@ defmodule Fleet.TaskQueue.Server do
   alias Fleet.TaskQueue.Store
   alias Fleet.TaskQueue.WorkItem
 
-  @active_states [:pending, :assigned, :in_progress]
+  # SINGLE AUTHORITY `WorkItem.active_states/0` (the owner of the `state` type) — NOT a 2nd copy of the
+  # vocabulary here. Shared with the poller's lock reconciliation (`pod_has_active_task?`, F-C050): both
+  # sides agree byte-for-byte on which states OWN a slot/lock. Resolved at compile time (literal list) →
+  # usable in the guards below (`s in @active_states`).
+  @active_states WorkItem.active_states()
 
   # Portable-safe ceiling for `Process.send_after/3` (2^32-1 ms ≈ 49.7 days): the historic ERTS timer
   # max, valid on EVERY OTP. A deadline further out (up to the max Elixir DateTime, year 9999 ≈ 8000
