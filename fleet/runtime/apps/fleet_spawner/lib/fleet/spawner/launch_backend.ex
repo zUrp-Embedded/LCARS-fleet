@@ -81,7 +81,10 @@ defmodule Fleet.Spawner.LaunchBackend do
     # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
     _ = Code.ensure_loaded(mod)
 
-    if is_atom(mod) and function_exported?(mod, :launch, 2) do
+    # Pas de `is_atom(mod)` : `resolved/0` étant typé `module()`, Dialyzer prouve `is_atom`
+    # toujours vrai → branche `false` morte → gate ROUGE. `function_exported?` seul couvre
+    # typo/absent/nil (tous atomes) — miroir EXACT de `Pod.McpProvision.conforming_provisioner`.
+    if function_exported?(mod, :launch, 2) do
       {:ok, mod}
     else
       {:error, {:launch_backend_misconfigured, mod}}
