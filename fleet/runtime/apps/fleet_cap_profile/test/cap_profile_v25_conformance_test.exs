@@ -90,9 +90,28 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     end
   end
 
-  test "négatif — apiVersion manquant rejeté", %{schema: schema} do
-    bad = %{"kind" => "CapabilityProfile", "metadata" => %{}, "spec" => %{}}
-    assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
+  test "négatif — apiVersion (champ legacy v2.4 RETIRÉ) rejeté au lieu d'être ignoré (F-C006)",
+       %{schema: schema} do
+    # `apiVersion` a été RETIRÉ du schéma v2.5 (il n'est ni property ni required). Le nom historique de ce
+    # test (« apiVersion manquant rejeté ») était devenu un MENSONGE : son `bad` (metadata/spec vides) était
+    # rejeté pour `required` manquant, PAS pour apiVersion — le concept n'existe plus. On teste ce qui est
+    # RÉELLEMENT vérifiable et load-bearing : un profil legacy portant ENCORE `apiVersion` doit être REJETÉ
+    # (root additionalProperties:false, R0-CAP-001), jamais silencieusement accepté. On part d'un profil canon
+    # VALIDE et on n'ajoute QUE apiVersion → la seule cause de rejet possible est ce champ inconnu (sinon le
+    # test prouverait autre chose, cf. l'ancienne version).
+    base =
+      @canon_dir
+      |> Path.join("engineer.yaml")
+      |> YamlElixir.read_from_file!()
+
+    assert :ok = ExJsonSchema.Validator.validate(schema, base),
+           "le profil canon de base doit être valide, sinon l'isolation d'apiVersion ne tient pas : " <>
+             inspect(ExJsonSchema.Validator.validate(schema, base))
+
+    with_api_version = Map.put(base, "apiVersion", "lcars/v2.4")
+
+    assert {:error, _} = ExJsonSchema.Validator.validate(schema, with_api_version),
+           "un profil portant encore `apiVersion` (legacy v2.4) doit être REJETÉ (additionalProperties:false)"
   end
 
   test "négatif — spec.invocation.lifetime_scope hors enum rejeté", %{schema: schema} do
