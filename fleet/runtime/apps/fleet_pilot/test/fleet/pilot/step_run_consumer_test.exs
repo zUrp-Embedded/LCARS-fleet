@@ -34,7 +34,10 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     # Map producteur-TERMINALE (façon brief-gate) : le dernier step est un producteur (build/engineer) ;
     # il n'y a PAS de step `review`/`merged` (ceux-ci sont des stages lifecycle PR posés POST-map).
     def load!("gate-terminal") do
-      %{"name" => "gate-terminal", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+      %{
+        "name" => "gate-terminal",
+        "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
+      }
     end
 
     def load!(_), do: raise("workflow_map introuvable")
@@ -275,7 +278,11 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # :unknown_step} (le juge PR bouclait, re-spawn à l'infini, jamais de merge). Un stage lifecycle absent
       # de la map -> résolution no-workflow_map -> :reviewed (le merge revient au quorum dispatch_review).
       payload =
-        step_payload(%{"role" => "qualifier", "workflow_map" => "gate-terminal", "step" => "review"})
+        step_payload(%{
+          "role" => "qualifier",
+          "workflow_map" => "gate-terminal",
+          "step" => "review"
+        })
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
@@ -326,7 +333,13 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
             {"halt_wait_input", :request_changes},
             {"garbage_unparseable", :request_changes}
           ] do
-        payload = step_payload(%{"role" => "qualifier", "result" => %{"decision" => decision}})
+        # `reason` présent (F-C161 : requis) → seule la DÉCISION distingue les cas ; `garbage_unparseable`
+        # reste halt_invalid via l'enum, pas via le motif.
+        payload =
+          step_payload(%{
+            "role" => "qualifier",
+            "result" => %{"decision" => decision, "reason" => "motif"}
+          })
 
         # forge_client: StubForge → le juge resout la branche producteur via la PR ouverte (pas de HTTP).
         assert {:ok, :captured} =

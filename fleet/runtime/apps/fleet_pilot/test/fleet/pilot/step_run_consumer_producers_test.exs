@@ -113,7 +113,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
         "role" => "consultant",
         "workflow_map" => "judgemap-q2",
         "step" => "gate",
-        "result" => %{"decision" => "halt_wait_input"}
+        "result" => %{"decision" => "halt_wait_input", "reason" => "info manquante"}
       }
 
       StepRunConsumer.maybe_complete(payload, state())

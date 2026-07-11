@@ -45,12 +45,22 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def gate_result(_), do: nil
 
   @doc false
-  # Fail-closed: nil/unknown → "halt_invalid" (never "continue" on an absent/malformed decision →
-  # routes to await_arch). `halt_invalid` is NOT in the canon list (it is the internal fallback).
+  # Fail-closed: nil/unknown decision OR missing/empty `reason` → "halt_invalid" (never "continue" on an
+  # absent/malformed verdict → routes to await_arch). `halt_invalid` is NOT in the canon list (internal fallback).
+  #
+  # F-C161 — `reason` is ENFORCED here, not only in the schema. gate-decision-v1.json declares
+  # `required: [decision, reason]` (reason minLength 1), but the decoder used to validate ONLY the decision
+  # enum → a `continue` with NO reason crossed the gate = an approval with no durable justification (the
+  # verdict trace is what sank v1 by its absence). We now require BOTH: a valid decision AND a non-empty
+  # reason, else fail-closed `halt_invalid` (→ human escalation). A judge is instructed to justify (GateBrief
+  # `gate-decision-v1` contract); a decision without a reason is a malformed verdict, not a silent approval.
   def gate_decision(result) when is_map(result) do
-    case result["decision"] do
-      d when d in @gate_decisions -> d
-      _ -> "halt_invalid"
+    reason = result["reason"]
+
+    if result["decision"] in @gate_decisions and is_binary(reason) and reason != "" do
+      result["decision"]
+    else
+      "halt_invalid"
     end
   end
 

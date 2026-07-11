@@ -410,7 +410,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   test "verdict continue ENVELOPPE %{status,result} -> deplie (gate_result), avance" do
-    raw = %{result: %{"status" => "ok", "result" => %{"decision" => "continue"}}}
+    raw = %{
+      result: %{
+        "status" => "ok",
+        "result" => %{"decision" => "continue", "reason" => "critère satisfait"}
+      }
+    }
+
     assert {:ok, :review_requested} = StepRunConsumer.resume_gate(soft_ctx(), raw, hc())
     assert_received {:route, "soft", "review"}
   end
@@ -419,7 +425,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert {:ok, :completed} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "abandon"}},
+               %{"result" => %{"decision" => "abandon", "reason" => "travail non récupérable"}},
                hc()
              )
 
@@ -437,7 +443,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "escalate_user"}},
+               %{
+                 "result" => %{"decision" => "escalate_user", "reason" => "au-delà du gatekeeper"}
+               },
                hc()
              )
 
@@ -458,7 +466,37 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "halt_wait_input"}},
+               %{"result" => %{"decision" => "halt_wait_input", "reason" => "info manquante"}},
+               hc()
+             )
+
+    assert_received {:label, "lcars-awaits-arch"}
+  end
+
+  test "F-C161 : verdict valide SANS reason non-vide → halt_invalid (fail-closed, pas d'approbation sans justification)" do
+    # gate-decision-v1.json exige `reason` (minLength 1) ; le décodeur l'ENFORCE désormais (plus seulement
+    # l'enum decision). Un `continue` sans motif = approbation sans trace durable (ce qui a coulé v1) →
+    # refusé : halt_invalid → escalade humaine. La décision reste valide, mais le verdict est malformé.
+    assert "continue" ==
+             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+               "decision" => "continue",
+               "reason" => "critère ok"
+             })
+
+    assert "halt_invalid" ==
+             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{"decision" => "continue"})
+
+    assert "halt_invalid" ==
+             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+               "decision" => "continue",
+               "reason" => ""
+             })
+
+    # Bout-en-bout : un `continue` sans reason ne PROMEUT/AVANCE pas — il escalade (await_arch), jamais un merge.
+    assert {:ok, :awaiting_arch} =
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "continue"}},
                hc()
              )
 
@@ -581,7 +619,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   test "#8.E brief-review abandon -> close (brief jeté), PAS de PR ni de push" do
     assert {:ok, :completed} =
-             StepRunConsumer.maybe_complete(brief_done(%{"decision" => "abandon"}), hc())
+             StepRunConsumer.maybe_complete(
+               brief_done(%{"decision" => "abandon", "reason" => "brief jeté"}),
+               hc()
+             )
 
     assert_received :closed
     refute_received {:open_pr, _, _, _}
@@ -785,7 +826,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       pid,
       Fleet.Event.new(:task_queue, :"work_item.completed",
         correlation_id: "corr-1",
-        payload: %{result: %{"decision" => "abandon"}, metadata: gate_eval_meta()}
+        payload: %{
+          result: %{"decision" => "abandon", "reason" => "reconstruit"},
+          metadata: gate_eval_meta()
+        }
       )
     )
 

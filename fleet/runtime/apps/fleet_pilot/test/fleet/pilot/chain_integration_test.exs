@@ -501,7 +501,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert {:ok, :promoted} =
              StepRunConsumer.resume_gate(
                eval_ctx,
-               %{"result" => %{"decision" => "continue"}},
+               %{"result" => %{"decision" => "continue", "reason" => "critère satisfait"}},
                hc()
              )
 
