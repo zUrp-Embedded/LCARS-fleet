@@ -59,7 +59,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
         cp_path = Path.join(@cap_profiles, profile)
 
         assert File.exists?(cp_path),
-               "#{pname}/#{sname} : profile #{profile} introuvable dans 05_data-canon/cap-profiles/"
+               "#{pname}/#{sname} : profile #{profile} introuvable (#{cp_path})"
       end
     end
   end
