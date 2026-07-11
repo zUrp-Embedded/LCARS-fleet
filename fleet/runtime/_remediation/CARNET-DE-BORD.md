@@ -2,7 +2,7 @@
 
 **Date** : 2026-07-10
 **Dernière révision** : 2026-07-11 ~03h45 (relevé horaire · **BORD FACTUEL VÉRIFIÉ** — 0 ligne unassigned, worktree propre)
-**Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés+tagués · 48 fixes · reste STRICTEMENT décisions user**
+**Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés+tagués · 49 fixes · reste STRICTEMENT décisions user (2 flags « bloqués » revérifiés : F-C026 fixé, F-C023 doc-intentionnel)**
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -40,8 +40,8 @@
 - **Sécurité/latent notables** : F-C110 (knobs escalade sans effet = fail-open silencieux) · F-C007 (architect a `fleet-forge.*` + `git_ops_denied:[]`).
 - **F-C151** (dernier PERCE-doc) : dual-review canon — autorité juge = sp_drafts vs bundle ? (produit, D3).
 
-**48 fixes livrés** (16 code + 32 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops + F-C108/111/011/109 + F-C040 (doc/test doctrine).
-**Sweep watchdog-catch #3** : 29 lignes DOCTRINE non-taguées → toutes taguées (0 unassigned). F-C049 = correction R-14 de mon propre brief (dep PAS vestigiale, verify-before-fix). F-C061 = edge-case fail-open vérifiée (juge fleet affamé par humain en tête de pending) → D-review-fork. F-C026/023 flaggés.
+**49 fixes livrés** (16 code + 33 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops + F-C108/111/011/109 + F-C040 + F-C026 (doc/test doctrine).
+**Sweep watchdog-catch #3-4** : 29 lignes DOCTRINE non-taguées → toutes taguées (0 unassigned). F-C049 = correction R-14 de mon propre brief (dep PAS vestigiale, verify-before-fix). F-C061 = edge-case fail-open vérifiée (juge fleet affamé par humain en tête de pending) → D-review-fork. **F-C026 = punt levé → FIXÉ** (protocole actif, pointeur mort corrigé). **F-C023 = vraie décision, prémisse vérifiée** (architect SP hors block-SoT documenté-intentionnel, sp-map.yaml:8).
 **Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
