@@ -298,7 +298,11 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Brief.maybe_enqueue_brief(data),
          # Provision the per-pod MCP socket BEFORE the launch (the bwrap bind fails if the socket
          # file does not exist yet). Failure → propagated to the `with` → transition_failed.
-         {:ok, mcp_socket_path} <- McpProvision.ensure_pod_socket(data.pod_id),
+         {:ok, mcp_socket_path} <-
+           McpProvision.ensure_pod_socket(
+             data.pod_id,
+             Fleet.CapProfile.mcp_fleet_tools(data.cap_profile)
+           ),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
              data.pod_dir,

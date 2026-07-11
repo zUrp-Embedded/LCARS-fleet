@@ -54,7 +54,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
     # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
     _ = Code.ensure_loaded(mod)
 
-    if function_exported?(mod, :ensure_pod_socket, 1) and
+    if function_exported?(mod, :ensure_pod_socket, 2) and
          function_exported?(mod, :release_pod_socket, 1) do
       {:ok, mod}
     else
@@ -67,10 +67,12 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   (idempotent on the central side) and returns `{:ok, socket_path}` (host path). The file MUST exist
   before the bwrap bind — a failure is propagated to the `with` → `transition_failed`.
   """
-  @spec ensure_pod_socket(String.t()) :: {:ok, Path.t()} | {:error, term()}
-  def ensure_pod_socket(pod_id) when is_binary(pod_id) do
+  @spec ensure_pod_socket(String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, term()}
+  def ensure_pod_socket(pod_id, tools \\ []) when is_binary(pod_id) and is_list(tools) do
     with {:ok, mod} <- conforming_provisioner() do
-      apply(mod, :ensure_pod_socket, [pod_id])
+      # F-C138 — `tools` = the pod's role-gated MCP tool names (from the cap-profile `allowedTools`),
+      # threaded to the central acceptor so it serves `tools/list` = base + these (single source).
+      apply(mod, :ensure_pod_socket, [pod_id, tools])
     end
   end
 

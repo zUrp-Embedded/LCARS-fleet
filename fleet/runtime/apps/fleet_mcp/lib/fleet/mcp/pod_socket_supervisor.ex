@@ -60,11 +60,15 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   Starts (or finds) `pod_id`'s socket acceptor and returns the host path of the
   socket file. Idempotent: if the acceptor is already running, returns the same path.
   """
-  @spec ensure_pod_socket(String.t()) :: {:ok, Path.t()} | {:error, term()}
-  def ensure_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
+  @spec ensure_pod_socket(String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, term()}
+  def ensure_pod_socket(pod_id, tools \\ [])
+      when is_binary(pod_id) and pod_id != "" and is_list(tools) do
     if safe_pod_id?(pod_id) do
       path = socket_path(pod_id)
-      spec = {PodSocketAcceptor, pod_id: pod_id, socket_path: path}
+
+      # F-C138 — `tools` = the role-gated MCP tool names (derived from the cap-profile `allowedTools`),
+      # threaded to the acceptor so it serves `tools/list` = base + these (single source, no bridge catalogue).
+      spec = {PodSocketAcceptor, pod_id: pod_id, socket_path: path, tools: tools}
 
       case DynamicSupervisor.start_child(__MODULE__, spec) do
         {:ok, _pid} -> {:ok, path}

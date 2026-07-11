@@ -71,11 +71,15 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def init(opts) do
     pod_id = Keyword.fetch!(opts, :pod_id)
     path = Keyword.fetch!(opts, :socket_path)
+    # F-C138 — role-GATED MCP tool names, threaded by the spawner (derived from the cap-profile
+    # `allowedTools`). `tools/list` = base (universal) + these. `[]` = base-only (e.g. a judge role).
+    tools = Keyword.get(opts, :tools, [])
 
     with :ok <- ensure_parent_dir(path),
          :ok <- rm_stale(path),
          {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]) do
-      {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock}, {:continue, :accept}}
+      {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools},
+       {:continue, :accept}}
     else
       {:error, reason} -> {:stop, {:socket_init_failed, reason}}
     end
@@ -86,7 +90,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
 
   @impl GenServer
-  def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
+  def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id, tools: tools} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
         # CONCURRENT: each connection is served in its OWN Task, never inline here. Serving
@@ -97,7 +101,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
         # affects only its connection. `controlling_process` gives the socket to the worker (the acceptor can
         # re-accept / die without killing the in-flight connections); transfer failed (worker already dead) →
         # we close the socket rather than leak it.
-        case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id) end) do
+        case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id, tools) end) do
           {:ok, pid} ->
             case :gen_tcp.controlling_process(sock, pid) do
               :ok -> :ok
@@ -141,16 +145,16 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Serves a connection line by line until the peer closes (the bridge does one
   # call = one line, then reads the response; it may chain several over the same
   # connection). On close / error, we hand control back to the accept loop.
-  defp serve(sock, pod_id) do
+  defp serve(sock, pod_id, tools) do
     case :gen_tcp.recv(sock, 0) do
       {:ok, line} ->
         _ =
-          case handle_line(line, pod_id) do
+          case handle_line(line, pod_id, tools) do
             nil -> :ok
             frame -> :gen_tcp.send(sock, frame)
           end
 
-        serve(sock, pod_id)
+        serve(sock, pod_id, tools)
 
       {:error, _reason} ->
         :gen_tcp.close(sock)
@@ -163,10 +167,18 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # silently — swallowing turned every invalid line into a 30 s timeout
   # indistinguable on the bridge side, zero BEAM trace (seen live 2026-07-04). Another `method`
   # with an `id` (anomaly: `initialize`/`tools/list` are served by the bridge) -> -32601.
-  defp handle_line(line, pod_id) do
+  defp handle_line(line, pod_id, tools) do
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})
+
+      # F-C138 — the pod socket NOW serves `tools/list` (it was answered by the stdio bridge from a
+      # hard-coded catalogue that DRIFTED from the deftools — `import_project` was invisible to pods). Single
+      # source: the schemas come from `PodTools.get_tools/0` (the `deftool` authority), filtered to this
+      # pod's surface = base (universal) + the role-gated names threaded at spawn (derived from the
+      # cap-profile `allowedTools`). Presence = authorization, per role. The bridge now forwards blindly.
+      {:ok, %{"method" => "tools/list", "id" => id}} ->
+        encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
       {:ok, %{"method" => method, "id" => id}} when not is_nil(id) ->
         encode(%{
@@ -245,6 +257,16 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # `PodTools.handle_tool_call` only returns error atoms/tuples (never a binary) → one clause
   # suffices; `inspect/1` renders any reason readable in the text field of the MCP error response.
   defp error_text(reason), do: inspect(reason)
+
+  # F-C138 — the pod's tool SURFACE for `tools/list`: the deftool schemas (single source,
+  # `PodTools.get_tools/0` = %{name => schema}) filtered to base (universal pod interface) + the role-gated
+  # names threaded at spawn. `Map.take` silently drops a threaded name absent from the deftools (a stale
+  # cap-profile entry can't invent a tool); the base is always present. We use `PodTools` directly (the
+  # static catalogue authority), NOT the injectable `tool_handler` seam (which only swaps the CALL path).
+  defp list_tools(threaded) do
+    allowed = PodTools.base_tool_names() ++ threaded
+    PodTools.get_tools() |> Map.take(allowed) |> Map.values()
+  end
 
   defp encode(map), do: Jason.encode!(map) <> "\n"
 

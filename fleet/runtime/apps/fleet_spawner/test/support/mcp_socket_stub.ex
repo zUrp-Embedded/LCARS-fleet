@@ -16,7 +16,7 @@ defmodule Fleet.Spawner.MCPSocketStub do
   Rend `{:ok, socket_path}` (chemin fictif sous tmp, dépendant du pod_id) SANS créer de socket.
   """
   @impl Fleet.Spawner.McpSocketProvisioner
-  def ensure_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
+  def ensure_pod_socket(pod_id, _tools) when is_binary(pod_id) and pod_id != "" do
     {:ok, Path.join([System.tmp_dir!(), "lcars-stub-mcp", pod_id, "sock"])}
   end
 

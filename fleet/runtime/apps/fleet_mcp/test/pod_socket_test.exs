@@ -63,6 +63,34 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
+  test "F-C138 : tools/list servi par la socket = base + tools rôle threadés (schémas depuis les deftool)" do
+    # rôle-délégateur : le spawner thread create_issue + import_project (dérivés de allowedTools canon).
+    pod = uniq("arch")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["create_issue", "import_project"])
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    assert %{"result" => %{"tools" => tools}} = rpc(path, 10, "tools/list")
+    names = tools |> Enum.map(& &1["name"]) |> Enum.sort()
+
+    # base universelle TOUJOURS + les tools rôle threadés ; schémas depuis les deftool (single source),
+    # import_project INCLUS (invisible avant F-C138). Un tool non-threadé (create_project) N'est PAS servi.
+    assert "get_work_item" in names and "submit_result" in names
+    assert "create_issue" in names and "import_project" in names
+    refute "create_project" in names
+
+    # objets-tool réels venant des deftool (single source `PodTools.get_tools`) — pas des noms nus.
+    assert Enum.all?(tools, &(is_map(&1) and Map.has_key?(&1, "name")))
+  end
+
+  test "F-C138 : rôle-juge (aucun tool threadé) → tools/list = base seule (presence=authorization)" do
+    pod = uniq("judge")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    assert %{"result" => %{"tools" => tools}} = rpc(path, 11, "tools/list")
+    assert Enum.map(tools, & &1["name"]) |> Enum.sort() == ["get_work_item", "submit_result"]
+  end
+
   test "ensure_pod_socket refuse un pod_id non-path-safe (frontière FS mcp), zéro acceptor" do
     for bad <- ["../escape", "a/b", "..", ".", "z\0y", String.duplicate("q", 200)] do
       assert {:error, {:unsafe_pod_id, _}} = PodSocketSupervisor.ensure_pod_socket(bad),
@@ -275,5 +303,24 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   # Décode le JSON du premier bloc text d'un résultat tool (le payload métier get_work_item/submit_result).
+  # Envoie une méthode JSON-RPC BRUTE (sans wrapper tools/call) — pour tools/list (F-C138). Buffer 1 MiB
+  # côté client : la réponse tools/list (N schémas) dépasse le défaut inet ~1460 B → tronquée sinon
+  # (`{:packet, :line}`), même symptôme que la garde buffer côté acceptor.
+  defp rpc(path, id, method) do
+    {:ok, sock} =
+      :gen_tcp.connect({:local, path}, 0, [
+        :binary,
+        {:packet, :line},
+        {:active, false},
+        {:buffer, 1_048_576}
+      ])
+
+    req = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method})
+    :ok = :gen_tcp.send(sock, req <> "\n")
+    {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
+    :gen_tcp.close(sock)
+    Jason.decode!(line)
+  end
+
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
 end

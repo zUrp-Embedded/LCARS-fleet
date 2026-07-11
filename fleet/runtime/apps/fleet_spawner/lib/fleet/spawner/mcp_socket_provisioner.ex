@@ -33,7 +33,8 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   no duplicate). The file MUST exist on return: otherwise the bwrap bind would
   fail (the launcher mounts the socket into the pod's sandbox).
   """
-  @callback ensure_pod_socket(pod_id :: String.t()) :: {:ok, Path.t()} | {:error, term()}
+  @callback ensure_pod_socket(pod_id :: String.t(), tools :: [String.t()]) ::
+              {:ok, Path.t()} | {:error, term()}
 
   @doc """
   RELEASE (teardown): stops the listener AND removes the socket file (closing the
