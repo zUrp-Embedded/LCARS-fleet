@@ -33,7 +33,13 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
 
   describe "POST /webhook/gitea" do
     test "HMAC valide → 200 + broadcast event gitea.<action>", %{secret: secret} do
-      body = %{"action" => "opened", "issue" => %{"id" => 42}}
+      # Un vrai webhook Gitea porte TOUJOURS `repository.full_name` → l'issue_ref le reflète (multi-repo).
+      body = %{
+        "action" => "opened",
+        "issue" => %{"id" => 42},
+        "repository" => %{"full_name" => "fleet/demo"}
+      }
+
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
@@ -42,7 +48,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{
                        source: :event_router,
                        type: :"gitea.opened",
-                       payload: %{"action" => "opened", "issue_id" => "fleet/lcars#42"}
+                       payload: %{"action" => "opened", "issue_id" => "fleet/demo#42"}
                      },
                      500
     end
@@ -88,7 +94,12 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     end
 
     test "M21 : issue extrait d'une pull request (pas seulement issue)", %{secret: secret} do
-      body = %{"action" => "opened", "pull_request" => %{"id" => 99}}
+      body = %{
+        "action" => "opened",
+        "pull_request" => %{"id" => 99},
+        "repository" => %{"full_name" => "fleet/demo"}
+      }
+
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
@@ -96,7 +107,24 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{
                        source: :event_router,
                        type: :"gitea.opened",
-                       payload: %{"issue_id" => "fleet/lcars#99"}
+                       payload: %{"issue_id" => "fleet/demo#99"}
+                     },
+                     500
+    end
+
+    test "F-C010 : webhook SANS repository.full_name (payload dégénéré) → sentinelle `unknown`, PAS un vrai repo fabriqué",
+         %{secret: secret} do
+      # Un vrai webhook Gitea porte toujours full_name ; un payload sans = malformé. On NE fabrique PAS
+      # `fleet/lcars` (impersone un vrai repo dans l'event display) → sentinelle honnête `unknown`.
+      body = %{"action" => "opened", "issue" => %{"id" => 7}}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+
+      assert_receive %Fleet.Event{
+                       source: :event_router,
+                       type: :"gitea.opened",
+                       payload: %{"issue_id" => "unknown#7"}
                      },
                      500
     end

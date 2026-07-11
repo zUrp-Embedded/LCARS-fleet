@@ -216,8 +216,9 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   defp extract_issue(_), do: nil
 
   # `<repository.full_name>#<id>` — the repo comes from the webhook PAYLOAD, not hardcoded (multi-repo
-  # correct). Fallback `"fleet/lcars"` only when the payload omits `repository.full_name` (the single-repo
-  # default + backward-compat for a body without the field — a real Gitea webhook always carries it).
+  # correct). F-C010 — a real Gitea webhook ALWAYS carries `repository.full_name`; a body without it is
+  # DEGENERATE/malformed. We fall back to an explicit sentinel `"unknown"`, NOT a fabricated real repo name
+  # (`"fleet/lcars"` would IMPERSONATE an actual repo in the display event) — honest: we don't know the repo.
   # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). This divergence
   # is LATENT today (F-C011): the legacy webhook→pilot correlation rail (AutoDispatcher, Ring 3) was REMOVED
   # (2026-06-16, cf. Fleet.Pilot.Application history) — the only live `gitea.*` consumers are display
@@ -225,7 +226,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   # API keyed on `number` independently. If a webhook→pod correlation is ever re-wired, switch to `number`
   # (the Poller's key), not `id` — not a unilateral R0 edit until then.
   defp issue_ref(body, id) do
-    repo = get_in(body, ["repository", "full_name"]) || "fleet/lcars"
+    repo = get_in(body, ["repository", "full_name"]) || "unknown"
     "#{repo}##{id}"
   end
 end
