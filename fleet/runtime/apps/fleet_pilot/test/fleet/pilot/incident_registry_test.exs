@@ -230,11 +230,13 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:label, "fleet/lcars", 1, "error_system"}
     end
 
-    test "record_or_escalate : add_label ÉCHOUE → escalade tient ({:escalated}) MAIS log LOUD (pas de swallow)",
+    test "F-C075 : add_label ÉCHOUE (persistant) → {:escalation_failed, {:discovery_label_failed,_}}, JAMAIS un {:escalated} menteur",
          %{tmp_dir: tmp} do
-      # Repli B-#5 : `error_system` = LE signal de découverte durable ; add_label était jeté (`_ =`) sous un
-      # commentaire menteur « fail-loud » → label raté = alarme sysadmin invisible au filtre-label, en silence.
-      # Fix : log LOUD (l'issue existe + assignée, mais découverte dégradée → l'opérateur doit SAVOIR).
+      # `error_system` = LE signal de découverte durable (le poller/l'humain trouve l'issue PAR ce label).
+      # AVANT (repli B-#5) : label raté → escalate rendait `{:ok, 1}` → record_or_escalate → {:escalated, 1}
+      # = alarme « délivrée » alors que l'incident est INTROUVABLE au filtre-label. F-C075 : après retry
+      # borné, on SURFACE l'échec → {:escalation_failed, {:discovery_label_failed, num, reason}} (l'alarme
+      # re-tire à la récurrence, l'opérateur doit agir ; l'issue existe, son numéro voyage dans le reason).
       sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
 
       name =
@@ -247,7 +249,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:escalated, 1} =
+          assert {:escalation_failed,
+                  {:discovery_label_failed, 1, {:label_not_added, "error_system"}}} =
                    Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                      server: name,
                      create_issue_fun: fn _r, _t, _b, _o -> {:ok, 1} end,
@@ -257,7 +260,32 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                    )
         end)
 
-      assert log =~ "NOT added"
+      assert log =~ "NOT added after retries"
+    end
+
+    test "F-C075 : add_label FLAKY (échoue 1×, réussit) → retry → {:escalated, 1} (self-heal transitoire)",
+         %{tmp_dir: tmp} do
+      sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 1}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      # Compteur process-dict : 1er appel échoue, 2e réussit → le retry borné auto-guérit.
+      assert {:escalated, 1} =
+               Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
+                 server: name,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 1} end,
+                 add_label_fun: fn _r, _n, _l, _o ->
+                   n = (Process.get(:label_calls) || 0) + 1
+                   Process.put(:label_calls, n)
+                   if n < 2, do: {:error, {:label_not_added, "flaky"}}, else: {:ok, :added}
+                 end
+               )
     end
 
     test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun issue)",

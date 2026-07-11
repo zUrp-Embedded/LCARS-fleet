@@ -10,10 +10,12 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   ## Contract
 
-    * Label `error_system` = DURABLE signal (the poller/human finds the issue by it);
-      sysadmin assignee best-effort (account absent → retry WITHOUT assignee: escalation
-      takes precedence over naming).
-    * Forge down → `{:error, _}` propagated (`record_or_escalate` renders it as
+    * Label `error_system` = DURABLE signal (the poller/human finds the issue by it); added with a
+      BOUNDED retry. A PERSISTENT label failure (F-C075) → `{:error, {:discovery_label_failed, num, _}}`
+      → `record_or_escalate` renders `{:escalation_failed, _}` (never a lying `{:escalated}` for an
+      unfindable incident). Sysadmin assignee best-effort (account absent → retry WITHOUT assignee:
+      escalation takes precedence over naming).
+    * Forge down (create) → `{:error, _}` propagated (`record_or_escalate` renders it as
       `{:escalation_failed, _}`, never a lying `{:escalated}`).
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
       SP suspect) — the diagnosis guides the sysadmin toward the root-cause.
@@ -61,29 +63,63 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     # 2026-07-04 (run poc-morse), the sysadmin escalation created NO issue (silent dead rail).
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
       # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
-      # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log)
-      # → a failed label would leave the sysadmin issue INVISIBLE to label-filtered discovery (and, combined
-      # with the assignee-retry, possibly with no assignee either) under a LYING `{:ok}`. So we LOG LOUD on
-      # failure: the issue still exists + is usually assigned (the escalation happened), but its discovery
-      # signal is degraded — an operator must KNOW, not a silent swallow.
-      case add_label_fun.(repo, number, label, []) do
-        {:ok, _} ->
-          :ok
+      # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log).
+      case add_discovery_label(add_label_fun, repo, number, label) do
+        :ok ->
+          {:ok, number}
 
         {:error, reason} ->
+          # F-C075 — a PERSISTENTLY failing discovery label (after retries) leaves the sysadmin issue
+          # INVISIBLE to label-filtered discovery. We do NOT report a clean `{:ok, number}` (which
+          # `record_or_escalate` turns into a LYING `{:escalated}` — the alarm looks delivered while the
+          # incident is unfindable). We SURFACE it → mapped to `{:escalation_failed, _}`: the alarm keeps
+          # firing on recurrence, an operator must act. The issue EXISTS (created + usually assigned); its
+          # number rides in the reason for cleanup / label-repair.
           Logger.error(
             "IncidentRegistry.Escalation: sysadmin issue ##{number} created but discovery label " <>
-              "#{inspect(label)} NOT added (#{inspect(reason)}) — findable by assignee only, not by label filter"
+              "#{inspect(label)} NOT added after retries (#{inspect(reason)}) — NOT label-discoverable, " <>
+              "escalation SURFACED as failed (never a lying {:escalated})"
           )
-      end
 
-      {:ok, number}
+          {:error, {:discovery_label_failed, number, reason}}
+      end
+    end
+  end
+
+  # F-C075 — BOUNDED retry of the DISCOVERY label (`error_system`): a transient forge blip (name→id
+  # resolution / org-label auto-create / HTTP 500) self-heals; a persistent failure is SURFACED by
+  # `escalate/5` (no lying `{:escalated}`). Immediate retries (no sleep): `escalate` is a stateless act off
+  # the hot path, the dominant cause is a momentary forge hiccup.
+  @label_attempts 3
+  defp add_discovery_label(add_label_fun, repo, number, label, attempt \\ 1) do
+    case add_label_fun.(repo, number, label, []) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} when attempt < @label_attempts ->
+        Logger.warning(
+          "IncidentRegistry.Escalation: issue ##{number} discovery label #{inspect(label)} attempt " <>
+            "#{attempt}/#{@label_attempts} FAILED (#{inspect(reason)}) — retrying"
+        )
+
+        add_discovery_label(add_label_fun, repo, number, label, attempt + 1)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   # Creates the system issue with the sysadmin assignee; nonexistent assignee (account absent) -> retry WITHOUT
   # assignee (best-effort: escalation takes precedence over naming). Forge down on both attempts -> {:error, _}
   # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
+  #
+  # F-C076 (KEEP, D1): the retry drops the assignee on ANY first error, not only an invalid-assignee 422.
+  # Assessed harmless → KEPT: a real forge-down fails BOTH attempts (→ {:error}, no spurious drop); the
+  # invalid-assignee case is exactly when dropping is correct; only a transient error resolving BETWEEN the
+  # two attempts drops a valid assignee — a rare race. And the assignee is a BEST-EFFORT discovery path: the
+  # DURABLE one is the `error_system` label (now retried + fail-loud-surfaced, F-C075), so a dropped assignee
+  # loses NO discoverability. A precise "drop only on a 422-assignee error" would couple to the forge HTTP
+  # error shape (fragile) for a negligible gain — not worth it.
   defp create_system_issue(create_fun, repo, title, body, assignee) do
     case create_fun.(repo, title, body, assignees: [assignee]) do
       {:ok, _} = ok -> ok
