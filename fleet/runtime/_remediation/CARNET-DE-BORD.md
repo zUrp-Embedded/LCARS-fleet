@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~03h45 (relevé horaire · **BORD FACTUEL VÉRIFIÉ** — 0 ligne unassigned, worktree propre)
+**Dernière révision** : 2026-07-11 ~04h45 (relevé horaire · **BORD FACTUEL VÉRIFIÉ ET AUDITÉ** — flags « bloqués » revérifiés, 0 unassigned)
 **Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés+tagués · 49 fixes · reste STRICTEMENT décisions user (2 flags « bloqués » revérifiés : F-C026 fixé, F-C023 doc-intentionnel)**
 **Référencé par** : `PLAYBOOK.md`
 
