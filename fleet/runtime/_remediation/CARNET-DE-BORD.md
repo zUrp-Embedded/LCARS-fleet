@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~02h30 (relevé · PHASE DOCTRINE en cours — user « go » sur la classif factuelle)
-**Statut** : mécanique 100% close · **DOCTRINE : D1/D4/D5/D2 traités** (2 fixes code + 3 doc) · reste D3/D6/D7-F167 + décisions user
+**Dernière révision** : 2026-07-11 ~02h45 (relevé · **BORD FACTUEL ATTEINT** — plus aucun travail non-bloqué)
+**Statut** : mécanique 100% close · **DOCTRINE : D1/D2/D4/D5 traités + F-C124/F-C006/F-C167-inventaire faits** · reste STRICTEMENT décisions user
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -21,18 +21,21 @@
 
 ## Prochaine action précise
 
-**PHASE DOCTRINE en cours** (user « go » sur la classif factuelle : je classe/fixe, je ne fais pas décider ce qui est factuel).
-**Traité : D1, D4, D5, D2** → 2 fixes code (F-C041 garde launch_backend, F-C125 catalogue-error) + 3 doc-drifts (D1). Pattern : ~1 fix/cluster, le code applique déjà la doctrine.
-**Prochaine action** :
-1. **F-C124** (D2, additif) : `/api/projection` champ `status`/`subscribed?` (read-model down/deaf visible). Je le fais.
-2. **D7-F167** : nettoyer les ~7 refs stale `05_data-canon` + gate qui enforce (voir preview D7 journal).
-3. **F-C006** : le vrai test conformance apiVersion-inconnu.
-4. **D3 (canon) + D6 (SSOT)** = irréductiblement user (connaissance produit / direction déployée).
+**PHASE DOCTRINE — BORD FACTUEL ATTEINT.** Tous les items fork-indépendants sont faits. Le reste est STRICTEMENT décisionnel (fork user) → continuer à re-analyser = churn (R-13). **Je présente l'état et j'attends la décision** (homme-mort actif, PAS un stop-and-wait : le chantier actionnable est réellement épuisé).
 
-**DÉCISIONS QUI S'ACCUMULENT (→ user)** : forward-guard D1 · F-C034/036/056 (R-08 config) · F-C050/083 (state-fork) · F-C118 (contrat public 501-vs-câbler) · F-C135 (provisioning N0, sanctuaire) · D3 · D6. (Détail dans DECISION-BRIEF.md.)
+**Traité : D1, D2, D4, D5 + F-C124 + F-C006 + inventaire F-C167.** Pattern : ~1 fix/cluster, le code applique déjà la doctrine.
+- **F-C124 FIXÉ** (D2, additif) : `/api/projection` expose `_status` (:live|:unavailable) via `projection_status/0`. read-model DOWN ≠ fleet calme.
+- **F-C006 FIXÉ** (test-integrity) : test « apiVersion » menteur → garde de migration réel (profil valide + apiVersion → rejeté, additionalProperties:false).
+- **F-C167 inventaire** : gate creux (`check_app` défini-jamais-appelé → exit 0 sans grep). 7 refs `05_data-canon` = TOUTES mentions historiques, 0 dep vivante. modops:62 (seul misleading indep-fork) FIXÉ. **Fork réduit → reco : supprimer le scaffold** (câbler ferait des faux-positifs sur les commentaires exacts). Détail : DECISION-BRIEF.md §D7.
 
-**35 fixes mécaniques (pré-« go »)** : 13 code (166/160/097/098/059/069/119/018/044/035/037/086/**087**) + 22 doc.
-**+5 fixes doctrine-phase** : F-C041, F-C125 (code) · F-C046/051/102 (doc). **Total 40.**
+**CE QUI RESTE = 100% DÉCISION USER** (rien d'actionnable sans toi) :
+- **D3** (canon Memory-X/legacy) · **D6** (SSOT cross-surface) = connaissance produit.
+- **D7** : fork gate F-C167 (supprimer-vs-câbler) + rallumer Credo/Sobelow/Dialyzer.
+- **Design-forks** : F-C050 (state-split publishing) · F-C083 (typed-per-kind judge) · F-C066 (catch-all promote) · F-C118 (contrat public 501) · F-C135 (provisioning N0, sanctuaire).
+- **Forward-guards (1 ligne)** : D1 (rail escalate_human sans jumeau forge → fail-loud) · F-C034/036/056 (R-08 require-vs-soft).
+- **F-C151** (dernier PERCE-doc) : dual-review canon — autorité juge = sp_drafts vs bundle ? (produit, D3).
+
+**43 fixes livrés** (16 code + 27 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops (doc/test doctrine).
 **Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
@@ -49,11 +52,11 @@
 | findings totaux | 167 |
 | vérifiés (1er + 2e passage) | 167 / 167 |
 | **PERCE** (verify_verdict) | **12** (TOUS FIXÉS ✅) |
-| **PERCE-doc** | 25 (**22 FIXÉS** ✅ + 3 décisions : F-C006/087/151) |
-| **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C151 + F-C059-b, voir DECISION-BRIEF.md) |
+| **PERCE-doc** | 25 (**24 FIXÉS** ✅ + 1 décision produit : F-C151) |
+| **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b ; D1/D2/D4/D5 traités, reste D3/D6/D7-forks) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **34** (12 code + 22 doc) |
+| **fixés (commit)** | **43** (16 code + 27 doc/test) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-13 |
 

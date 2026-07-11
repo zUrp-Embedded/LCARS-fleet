@@ -140,6 +140,26 @@ vérif OU supprimer le scaffold obsolète + les 5 refs mortes — **fork à tran
 obsolète (+ nettoyer les 5 refs) ? (b) OK pour rallumer Credo/Sobelow/Dialyzer incrémentalement ?
 **Effort** : F-C167 selon ton fork ; le reste incrémental.
 
+> **Inventaire F-C167 (fait, data concrète — le fork est réduit)** :
+> - **Le gate est ENCORE PLUS creux que le préview ne disait** : `check_app()` est **défini mais JAMAIS
+>   appelé** (le bloc `mcp` l.33-36 n'est qu'un commentaire). `FAIL` reste 0 → `exit 0` inconditionnel,
+>   AUCUN `grep` exécuté. (Ma note préview « le gate A un check qui tourne » était fausse — corrigée.)
+> - **Les 7 refs `05_data-canon` sont TOUTES des mentions historiques/provenance, ZÉRO dépendance vivante** :
+>   permanent_boot.ex:199 (commentaire-rationale du mismatch évité, EXACT), permanent_boot_test.exs:280
+>   (« Plus de path 05_data-canon »), events_schema_test.exs:7 (« @canon_path **pointait** », historique),
+>   coord_policies_schema_test.exs:8 (« Repath fix »), intensity-v1.json:5 + coord-policies-v1.json:5
+>   (`description` schéma, provenance ; coord dit déjà « ancien chemin doctrine, repath post-bascule »).
+>   **Aucun `@canon_path` vivant hors-repo, aucun READ cassé** — l'invariant fonctionnel est DÉJÀ satisfait.
+> - **1 seul ref misleading-indépendamment-du-fork → DÉJÀ FIXÉ** : modops:62 (message d'échec nommait
+>   `05_data-canon/cap-profiles/` alors que le path testé est `@cap_profiles` in-repo) → imprime `cp_path`.
+>
+> → **Fork réduit** : puisqu'il n'y a AUCUNE dépendance vivante, « câbler le grep-gate » ferait des
+> FAUX POSITIFS sur les commentaires historiques EXACTS (« Plus de path 05_data-canon » tripperait le grep).
+> **Ma reco affinée : SUPPRIMER le scaffold** (`test/gate-r0.8-canon.sh` — hollow + grep trop naïf pour
+> distinguer dep-vivante d'une note historique) ; garder les 6 mentions (doc de migration valable). Si tu
+> tiens à un garde, il doit chercher un `@canon_path`/`File.read` vivant vers `05_data-canon`, pas la string
+> nue. **Action = ton call** (supprimer un gate CI = direction outillage).
+
 ---
 
 ## Synthèse — ce dont j'ai besoin de toi
