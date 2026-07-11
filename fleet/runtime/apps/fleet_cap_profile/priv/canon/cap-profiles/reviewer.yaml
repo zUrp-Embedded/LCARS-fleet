@@ -62,7 +62,7 @@ spec:
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     subagent_template: code-quality-reviewer
-    mcp_channels: ["fleet-control.reviewer.*", "fleet-forge.reviewer"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
+    mcp_channels: ["fleet-control.reviewer.*"]  # fleet-control: Memory-X + coord. PAS de fleet-forge (F-C007) : juge = clone in-pod + verdict payload → RIEN à faire avec la forge.
     host_native: false
     max_alive_sec: 1800
     heartbeat_keepalive: false

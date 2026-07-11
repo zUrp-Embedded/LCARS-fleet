@@ -54,11 +54,12 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   # producteurs de la chaîne (engineer livrable, gatekeeper verdict) NE touchent
   # JAMAIS la forge — le SYSTÈME (lcars-system) écrit. Vérifié ici, pas seulement
   # commenté dans le yaml (méta-finding audit v2 : « barrières = affiches »).
-  # NB hors-scope tracé : architect/consultant/qualifier/reviewer ont encore
-  # `fleet-forge.*` ; sous forge-state-machine §4 ils devraient aussi être
-  # forge-aveugles (finding complétude barrière, séparé). starfleet = système
-  # writer (forge OK, légitime).
-  @forge_blind ~w(engineer gatekeeper)
+  # F-C007 (résolu, user-validé) : les JUGES (qualifier, reviewer — brief_kind: judge) reçoivent un clone
+  # in-pod, bossent dessus, rendent un verdict payload → RIEN à faire avec la forge → forge-aveugles.
+  # architect = user-facing (répond de l'état forge à l'user en lecture, initie clone/branch/feature sur
+  # demande — sécu déléguée au classifier Anthropic) → GARDE fleet-forge (hors @forge_blind, légitime).
+  # consultant = worker (juge seulement via override per-step) → cas à part, non tranché. starfleet = système.
+  @forge_blind ~w(engineer gatekeeper qualifier reviewer)
   @forge_write_tools [
     "Bash(git push:*)",
     "Bash(tea issues edit:*)",

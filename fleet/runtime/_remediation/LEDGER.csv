@@ -5,7 +5,7 @@ F-C003,hygiene,confirmed,apps/fleet_cap_profile/lib/fleet/cap_profile/catalog.ex
 F-C004,hygiene,confirmed,apps/fleet_cap_profile/lib/fleet/cap_profile.ex:17,PERCE-doc,FIXÉ,"CapProfile moduledoc still says schema is pinned to an `apiVersion` field that was removed"
 F-C005,high,confirmed,apps/fleet_cap_profile/lib/fleet/cap_profile.ex:131,THEORIQUE,unassigned,"CapProfile.validate/1 can return :ok for structs missing schema-required/routing-critical fields"
 F-C006,hygiene,confirmed,apps/fleet_cap_profile/test/cap_profile_v25_conformance_test.exs:93,PERCE-doc,FIXÉ,"V25 conformance test still has an `apiVersion` negative test name after apiVersion removal"
-F-C007,medium,needs_repro,apps/fleet_cap_profile/test/cap_profile_v25_conformance_test.exs:52,DOCTRINE,D6-sécurité,"Forge-blind conformance comment records an unenforced broader role barrier"
+F-C007,medium,needs_repro,apps/fleet_cap_profile/test/cap_profile_v25_conformance_test.exs:52,DOCTRINE,FIXÉ,"Forge-blind conformance comment records an unenforced broader role barrier"
 F-C008,hygiene,confirmed,apps/fleet_event_router/lib/fleet/event.ex:9,PERCE-doc,FIXÉ,"Fleet.Event moduledoc says source enum changes require an events.yaml entry, but events.yaml registers event types"
 F-C009,low,confirmed,apps/fleet_event_router/lib/fleet/event_router/bus.ex:41,PERCE-doc,FIXÉ,"Bus empty-registry docs describe a normal early-boot window that Application.start no longer has"
 F-C010,medium,confirmed,apps/fleet_event_router/lib/fleet/event_router/webhooks_gitea.ex:218,DOCTRINE,D5-fork,"WebhooksGitea fabricates `fleet/lcars` when the webhook payload lacks `repository.full_name`"
