@@ -248,3 +248,11 @@
   - **F-C023 = vraie décision, prémisse VÉRIFIÉE** : architect SP hors block-SoT est documenté-intentionnel (`sp-map.yaml:8` : « user-facing, different socle: a human in front »). Garder-vs-migrer, reco = garder.
 - **Dérive attrapée cette heure** : F-C026 mal-étiqueté « user-blocked » alors qu'investigable = un punt. Attrapé en appliquant R-15 à mes PROPRES flags (pas juste au rapport Codex). **Pas de nouvelle règle** — R-15 couvre exactement ça (« un flag de ma main n'est pas une vérité »). Méta-observation : 4 watchdog-catches successifs, chacun trouvant une couche plus fine ; celui-ci = le dernier punt. Le pattern converge → le floor est réel.
 - **Décision en attente user** : inchangée (surface complète dans DECISION-BRIEF.md). Top-3 : F-C110 (fail-open HIGH), F-C007 (sécurité forge-barrier), F-C061 (juge affamé). Reste 100% décisionnel à prémisse vérifiée.
+
+---
+## RELEVÉ DE POSTE — 2026-07-11 ~05h45
+- **Phase** : DOCTRINE — floor vérifié+audité, **attente stable** (aucune entrée user cette heure).
+- **Compteurs** : INCHANGÉS — 167/167 vérifiés · PERCE 12/12 · PERCE-doc 24/25 (F-C151 décision) · **49 fixes (16 code + 33 doc/test)** · 0 unassigned · R-01→R-15.
+- **Bougé cette heure** : RIEN. Aucun worker en vol, aucune entrée user, aucun fix (plus aucun factuel fork-indépendant après F-C026). Que des confirmations watchdog (homme-mort : je confirme vivant + validement bloqué, je ne churn pas).
+- **Dérive attrapée** : aucune. Pas de nouvelle règle. J'ai résisté à (a) ré-inventer des inventaires déjà faits, (b) construire des livrables spéculatifs non-demandés (dashboard décision) = ce serait du churn. Le bon comportement à ce stade = attendre, pas fabriquer de l'activité.
+- **Décision en attente user** : inchangée. Tout est prêt dans DECISION-BRIEF.md (table synthèse D1-D7 + inventaires par cluster + top-3). Le chantier reprend dès que l'user tranche (ou dit « push »).
