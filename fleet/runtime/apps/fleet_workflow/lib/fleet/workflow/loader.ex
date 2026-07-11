@@ -87,10 +87,12 @@ defmodule Fleet.Workflow.Loader do
   end
 
   # Normalizer. The schema has already guaranteed the structure (`spec.steps` present). We
-  # unwrap the envelope into `%{"name", "steps"}`. The unconsumed envelope fields
-  # (`metadata` other than `name`, `spec.on_escalation`/`on_failure`, `cycle`,
-  # `selection_priority`) are deliberately discarded — extend this form when a real
-  # consumer appears (no speculative porting).
+  # unwrap the envelope into `%{"name", "steps", "max_rework_rounds"}`. The unconsumed OPTIONAL envelope
+  # fields (`metadata.description`/`applicable_intensity`/`applicable_regime`, the `cycle` block,
+  # `selection_priority`) are deliberately discarded — extend this form when a real consumer appears (no
+  # speculative porting). All schema-`required` fields (name, steps, max_rework_rounds) are KEPT.
+  # (F-C109: `spec.on_escalation`/`on_failure` are NOT droppable — `spec` is additionalProperties:false, so
+  # the schema rejects them upstream; they never reach here.)
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{
       "name" => get_in(yaml, ["metadata", "name"]),

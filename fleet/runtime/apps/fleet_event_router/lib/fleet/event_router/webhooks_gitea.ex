@@ -218,9 +218,12 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   # `<repository.full_name>#<id>` — the repo comes from the webhook PAYLOAD, not hardcoded (multi-repo
   # correct). Fallback `"fleet/lcars"` only when the payload omits `repository.full_name` (the single-repo
   # default + backward-compat for a body without the field — a real Gitea webhook always carries it).
-  # NB: still the issue's INTERNAL `id`; switching to the repo-scoped `number` (the user-facing ref) is a
-  # SEPARATE change — it alters the correlation key the downstream pilot (Ring 3) matches on, so it needs
-  # coordination with that consumer, not a unilateral R0 edit.
+  # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). This divergence
+  # is LATENT today (F-C011): the legacy webhook→pilot correlation rail (AutoDispatcher, Ring 3) was REMOVED
+  # (2026-06-16, cf. Fleet.Pilot.Application history) — the only live `gitea.*` consumers are display
+  # (observation read-model / API WS), which don't key on this ref. The Poller ingests issues via the forge
+  # API keyed on `number` independently. If a webhook→pod correlation is ever re-wired, switch to `number`
+  # (the Poller's key), not `id` — not a unilateral R0 edit until then.
   defp issue_ref(body, id) do
     repo = get_in(body, ["repository", "full_name"]) || "fleet/lcars"
     "#{repo}##{id}"

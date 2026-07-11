@@ -9,8 +9,11 @@ defmodule Fleet.Workflow.Application do
   `mix.exs`). The real content is the lib consumed by the forge rail + 4 apps:
   `Loader` / `Gates` / `Gate` / `GateBrief` / `Deliverable` / `DeliverableGate` / `Git` / `Gatekeeper`.
 
-  Still pre-registers the `workflow_map.*` event atoms (no longer emitted, but the Bus authorizes them via
-  `String.to_existing_atom/1`).
+  Still pre-registers the `workflow_map.*` event atoms so the Bus authorizes them via
+  `String.to_existing_atom/1`: `workflow_map.failed` IS emitted by a DRAFT producer
+  (`Fleet.Pilot.StepRunConsumer.emit_workflow_map_failed_draft/3`, source `:workflow`) → its atom must
+  pre-exist ; `workflow_map.completed`/`.step.completed` have no producer yet (kept, ready — cf.
+  `events.yaml`). (F-C108: was wrongly documented as "no longer emitted".)
   """
 
   use Application

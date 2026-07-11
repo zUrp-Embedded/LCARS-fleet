@@ -40,16 +40,18 @@ defmodule Fleet.Workflow.Gatekeeper do
   require Logger
 
   @pt_key {__MODULE__, :pod_id}
-  # Permanent singleton → BARE name by role (`gatekeeper`), no redundant `permanent` qualifier. It does
+  # Singleton work-session gatekeeper (scope `pipe`, not `forever`) → BARE name by role (`gatekeeper`), no
+  # `permanent-*` qualifier. It does
   # NOT match the PermanentWarden's `permanent-*` prefix — intended: the gatekeeper SELF-manages (boot +
   # `@pt_key` registry + reboot via wake_recovery), outside the generic warden. (The architect, by contrast,
   # IS warden-managed → it keeps `permanent-architect`, the prefix is its warden signal, not decoration.)
   @pod_id "gatekeeper"
-  # Context pseudo-issue for the permanent pod (spawn arg distinct from pod_id; not a real issue).
+  # Context pseudo-issue (spawn arg distinct from pod_id; not a real issue). The `permanent-` prefix in the
+  # VALUE is a legacy label (test-locked), NOT a permanence claim — the gatekeeper is a work-session pod.
   @issue_id "permanent-gatekeeper"
 
   @doc """
-  `pod_id` of the permanent gatekeeper to address, or `nil` if none is booted.
+  `pod_id` of the singleton gatekeeper to address, or `nil` if none is booted.
   Config override (`:gatekeeper_pod_id`) takes priority over the runtime registry.
   """
   @spec pod_id() :: String.t() | nil
@@ -59,7 +61,7 @@ defmodule Fleet.Workflow.Gatekeeper do
   end
 
   @doc """
-  Ensures a permanent gatekeeper is booted + registered (idempotent). No-op if
+  Ensures the singleton gatekeeper is booted + registered (idempotent). No-op if
   already REGISTERED (the `:persistent_term` singleton or a config override) or if autoboot is disabled.
 
   ⚠ PRESENCE, not liveness (SOC-OTP-002): `{:ok, pod_id}` proves a pod_id is REGISTERED in
@@ -87,7 +89,7 @@ defmodule Fleet.Workflow.Gatekeeper do
   end
 
   @doc """
-  Reboot of the permanent gatekeeper: reap the surviving holder (ghost case), de-register, re-boot fresh.
+  Reboot of the singleton gatekeeper: reap the surviving holder (ghost case), de-register, re-boot fresh.
   Serves as the `respawn_fun` for `Fleet.Pilot.WakeRecovery`'s re-roll when the gatekeeper is unreachable
   (`ensure_booted` alone is not enough: presence-based, it no-ops on a registered-but-broken pod).
   Same returns as `ensure_booted/1`.
@@ -107,7 +109,7 @@ defmodule Fleet.Workflow.Gatekeeper do
     with {:ok, cp} <- loader.("gatekeeper"),
          :ok <- do_spawn(spawner, cp) do
       :persistent_term.put(@pt_key, @pod_id)
-      Logger.info("Gatekeeper: permanent booted + registered pod=#{@pod_id}")
+      Logger.info("Gatekeeper: booted + registered pod=#{@pod_id}")
       {:ok, @pod_id}
     else
       {:error, reason} = err ->
