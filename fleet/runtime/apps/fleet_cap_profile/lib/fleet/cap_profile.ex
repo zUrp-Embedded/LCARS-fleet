@@ -434,6 +434,22 @@ defmodule Fleet.CapProfile do
     get_in(spec, ["brief_kind"])
   end
 
+  @doc """
+  The role's fleet-MCP tool surface, DERIVED from `spec.scope.allowedTools` — the `mcp__fleet__<tool>`
+  entries, stripped to `<tool>`. **Single source** (F-C138): the pod-facing MCP `tools/list` is BUILT from
+  this (the central serves it, filtered per role by the names the spawner threads from HERE) — the stdio
+  bridge no longer hard-codes a second, divergent catalogue. The UNIVERSAL base
+  (`get_work_item`/`submit_result` — every pod is a task-worker) is NOT here: it is the pod interface,
+  added by the MCP authority; this returns only the role-GATED extras. Absent/empty `allowedTools` → `[]`.
+  """
+  @spec mcp_fleet_tools(t()) :: [String.t()]
+  def mcp_fleet_tools(%__MODULE__{spec: spec}) do
+    (get_in(spec, ["scope", "allowedTools"]) || [])
+    |> Enum.filter(&(is_binary(&1) and String.starts_with?(&1, "mcp__fleet__")))
+    |> Enum.map(&String.replace_prefix(&1, "mcp__fleet__", ""))
+    |> Enum.uniq()
+  end
+
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),

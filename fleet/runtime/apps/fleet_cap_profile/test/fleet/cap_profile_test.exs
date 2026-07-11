@@ -913,4 +913,28 @@ defmodule Fleet.CapProfileTest do
       assert :g24_1 in codes
     end
   end
+
+  describe "mcp_fleet_tools/1 — F-C138 (surface MCP dérivée du canon, SSOT)" do
+    defp cp_scope(tools) do
+      %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r", "containment" => "bwrap", "slot_scope" => "instance"},
+        spec: %{"brief_kind" => "worker", "scope" => %{"allowedTools" => tools}}
+      }
+    end
+
+    test "extrait les mcp__fleet__ de allowedTools, strippés du préfixe (ordre préservé)" do
+      cp = cp_scope(["Read", "mcp__fleet__create_issue", "Bash", "mcp__fleet__import_project"])
+      assert Fleet.CapProfile.mcp_fleet_tools(cp) == ["create_issue", "import_project"]
+    end
+
+    test "aucun mcp__fleet__ (rôle-juge : Read/Bash/… seulement) → []" do
+      assert Fleet.CapProfile.mcp_fleet_tools(cp_scope(["Read", "Bash", "ToolSearch"])) == []
+    end
+
+    test "allowedTools/scope absent → [] (pas de crash)" do
+      bare = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}
+      assert Fleet.CapProfile.mcp_fleet_tools(bare) == []
+    end
+  end
 end
