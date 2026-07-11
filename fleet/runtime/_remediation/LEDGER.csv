@@ -140,7 +140,7 @@ F-C138,high,confirmed,bin/fleet_mcp_stdio_bridge.py:31,DOCTRINE,FIXÉ-structurel
 F-C139,medium,confirmed,test/fixtures/mcp_submit_server.py:6,DOCTRINE,D3-deadgate,"Legacy MCP fixture and inc4 gate still use the removed get_task/no-work_item_id protocol"
 F-C140,medium,confirmed,test/gate-r-core-comm-inc3b1.sh:6,DOCTRINE,D3-deadgate,"R-CORE.comm shell gate inventory contains non-runnable and superseded gates"
 F-C141,medium,confirmed,apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json:54,DOCTRINE,D7-fork,"cap-profile schema does not require the allowedTools field that claude_launch hard-requires"
-F-C142,medium,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools.ex:129,DOCTRINE,D6-dualSSOT,"import_project exists in the central MCP authority but is not exposed by the active architect profile"
+F-C142,medium,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools.ex:129,DOCTRINE,FIXÉ,"import_project exists in the central MCP authority but is not exposed by the active architect profile"
 F-C143,medium,confirmed,apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json:164,DOCTRINE,D6-fork,"deliverable_mode remains an implicit payload default instead of a required catalogue property"
 F-C144,low,confirmed,apps/fleet_cap_profile/priv/canon/cap-profiles/modop/noop/profile.yaml:1,DOCTRINE,D3-archivable,"noop modop exists in two canon locations with different ownership stories"
 F-C145,low,confirmed,apps/fleet_cap_profile/priv/canon/cap-profiles/modop/archive-mode/profile.yaml:1,DOCTRINE,D3-archivable,"active modop overlay profiles are empty stubs while behavior lives in separate prompt bundles"

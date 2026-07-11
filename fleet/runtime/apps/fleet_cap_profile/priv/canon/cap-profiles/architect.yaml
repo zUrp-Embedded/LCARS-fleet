@@ -45,6 +45,7 @@ spec:
       # MCP fleet role-specific de l'arch (délégation) — requis en --permission-mode default (sinon prompt).
       # get_work_item/submit_result (universels) viennent du launcher #kill-yolo.
       - mcp__fleet__create_project
+      - mcp__fleet__import_project   # jumeau de create_project : ADOPTE un repo existant (F-C142/F-C138)
       - mcp__fleet__create_issue
       - mcp__fleet__get_issue_status
     disallowedTools:

@@ -186,4 +186,16 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     schema_ss = get_in(raw, ["properties", "metadata", "properties", "slot_scope", "enum"])
     assert schema_ss == ["project", "instance"]
   end
+
+  test "F-C138/F-C142 : architect expose import_project via mcp_fleet_tools (canon → surface MCP, single source)" do
+    # Le canon (`architect.yaml` allowedTools) est la SEULE source de la surface MCP rôle : le spawner la
+    # thread au central qui sert `tools/list`. `import_project` (jumeau de create_project, deftool câblé)
+    # doit y figurer maintenant qu'il est déclaré — plus jamais de dérive Python↔Elixir.
+    canon = @canon_dir |> Path.join("architect.yaml") |> YamlElixir.read_from_file!()
+    cp = %Fleet.CapProfile{kind: canon["kind"], metadata: canon["metadata"], spec: canon["spec"]}
+    tools = Fleet.CapProfile.mcp_fleet_tools(cp)
+
+    assert "import_project" in tools
+    assert "create_project" in tools and "create_issue" in tools and "get_issue_status" in tools
+  end
 end
