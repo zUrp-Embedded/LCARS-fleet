@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~02h45 (relevé · **BORD FACTUEL ATTEINT** — plus aucun travail non-bloqué)
-**Statut** : mécanique 100% close · **DOCTRINE : D1/D2/D4/D5 traités + F-C124/F-C006/F-C167-inventaire faits** · reste STRICTEMENT décisions user
+**Dernière révision** : 2026-07-11 ~03h15 (relevé · **BORD FACTUEL DÉFINITIF** — D3+D6 inventoriés, tous clusters fact-backed)
+**Statut** : mécanique 100% close · **DOCTRINE : D1-D7 tous inventoriés · 47 fixes · reste STRICTEMENT décisions user**
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -28,14 +28,19 @@
 - **F-C006 FIXÉ** (test-integrity) : test « apiVersion » menteur → garde de migration réel (profil valide + apiVersion → rejeté, additionalProperties:false).
 - **F-C167 inventaire** : gate creux (`check_app` défini-jamais-appelé → exit 0 sans grep). 7 refs `05_data-canon` = TOUTES mentions historiques, 0 dep vivante. modops:62 (seul misleading indep-fork) FIXÉ. **Fork réduit → reco : supprimer le scaffold** (câbler ferait des faux-positifs sur les commentaires exacts). Détail : DECISION-BRIEF.md §D7.
 
+**INVENTAIRES D3 + D6 FAITS (2+2 workers, cités).** TOUS les clusters D1-D7 ont désormais une table décision fact-backed dans DECISION-BRIEF.md. **Bord factuel DÉFINITIF.**
+- **D3** : aucun fix mécanique fork-indep ; 7 archivables (dormant/gelé/test-only) + 2 gates morts (139/140) + 2 divergences (138-live, 159-schéma).
+- **D6** : **4 doc-drifts FIXÉS** (F-C108/111/011/109-comment) + 1 PERCE blanchie (F-C112, backstop WakeRecovery) + 6 décisions direction (F-C110 fail-open HIGH · F-C143 · F-C138/142 dual-SSOT · F-C165 stale-vulcan ops · F-C007 sécurité · F-C013 test-infra).
+
 **CE QUI RESTE = 100% DÉCISION USER** (rien d'actionnable sans toi) :
-- **D3** (canon Memory-X/legacy) · **D6** (SSOT cross-surface) = connaissance produit.
-- **D7** : fork gate F-C167 (supprimer-vs-câbler) + rallumer Credo/Sobelow/Dialyzer.
+- **D3** : archive/keep/wire par item (tableau prêt) · **D6** : forks durcir-vs-relâcher + dual-SSOT (tableau prêt).
+- **D7** : fork gate F-C167 (supprimer-vs-câbler) + rallumer Credo/Sobelow/Dialyzer + F-C161.
 - **Design-forks** : F-C050 (state-split publishing) · F-C083 (typed-per-kind judge) · F-C066 (catch-all promote) · F-C118 (contrat public 501) · F-C135 (provisioning N0, sanctuaire).
 - **Forward-guards (1 ligne)** : D1 (rail escalate_human sans jumeau forge → fail-loud) · F-C034/036/056 (R-08 require-vs-soft).
+- **Sécurité/latent notables** : F-C110 (knobs escalade sans effet = fail-open silencieux) · F-C007 (architect a `fleet-forge.*` + `git_ops_denied:[]`).
 - **F-C151** (dernier PERCE-doc) : dual-review canon — autorité juge = sp_drafts vs bundle ? (produit, D3).
 
-**43 fixes livrés** (16 code + 27 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops (doc/test doctrine).
+**47 fixes livrés** (16 code + 31 doc/test) : 13 code pré-« go » (166/160/097/098/059/069/119/018/044/035/037/086/087) + F-C041/F-C125/F-C124 (code doctrine) + 22 doc pré-« go » + F-C046/051/102/006/167-modops + F-C108/111/011/109 (doc/test doctrine).
 **Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
@@ -56,7 +61,7 @@
 | **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b ; D1/D2/D4/D5 traités, reste D3/D6/D7-forks) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **43** (16 code + 27 doc/test) |
+| **fixés (commit)** | **47** (16 code + 31 doc/test) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-13 |
 

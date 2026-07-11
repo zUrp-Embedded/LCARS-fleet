@@ -137,6 +137,25 @@ dériver, pas diverger. Je propose la direction, tu confirmes avant de câbler (
 tu valides une par une ? Certaines nécessitent une coordination consommateur (id-vs-number = clé de corrélation).
 **Effort** : variable ; certaines mécaniques (dériver une liste), d'autres cross-cutting.
 
+> **INVENTAIRE D6 FAIT (2 workers read-only, cité, consequence-check).** 4 doc-drifts fork-indépendants FIXÉS ;
+> le reste = décisions de direction (fork ou dual-SSOT). Une PERCE potentielle blanchie (F-C112).
+>
+> | Finding | Verdict factuel | État / Ta décision |
+> |---|---|---|
+> | **F-C108** | DOC-DRIFT — `application.ex:12` « no longer emitted » faux (`workflow_map.failed` a un draft producer vivant). | **FIXÉ** (aligné events.yaml) |
+> | **F-C111** | DOC-DRIFT — vocabulaire « permanent » vs scope réel `pipe`/`boot_at_start:false`. | **FIXÉ** (comments/@docs/log ; valeur `@issue_id` test-locked laissée) |
+> | **F-C011** | DOC-DRIFT — commentaire affirme un conso Ring-3 corrélant sur `id`, rail retiré 2026-06-16 ; divergence id-vs-number LATENTE. | **FIXÉ** (commentaire) — si re-câblage webhook→pod, utiliser `number` (décision différée) |
+> | **F-C109** | commentaire loader cite `on_escalation`/`on_failure` (impossibles, schéma les rejette). Champs optionnels réels droppés (`selection_priority`/`applicable_*`/`cycle`) = **policy fantôme** (0 lecteur). | commentaire **FIXÉ** ; **fork policy** : câbler un sélecteur qui lit ces champs vs les retirer schéma+canon |
+> | **F-C110** | **SCHÉMA-ACCEPTE-RUNTIME-IGNORE, conséquence LIVE** — 3 knobs escalade (`fallback_invoke_gatekeeper`/`on_*_severity`) canoniques (standard-qa.yaml:95) lus par 0 code → un finding `important` file en `:pass`/proceed SANS gatekeeper alors que l'auteur croit qu'il y est routé = **fail-open silencieux**. La « separate layer » promise (gates.ex:125) n'existe pas. | **fork durcir-vs-relâcher, HIGH** : câbler l'orchestration severity→gatekeeper (moyen) vs retirer les 3 knobs schéma+canon (faible). Le plus load-bearing du cluster. |
+> | **F-C143** | fork — `deliverable_mode` défaut `payload` documenté-intentionnel ; CONSOMMÉ ; 0 divergence live (seul engineer=git_native, les 6 autres omettent→payload correct). Risque LATENT (futur rôle-producteur oubliant le champ → commits git ignorés). | **fork durcir** (add `required` + peupler 7 profils + retirer `|| default`) **vs keep-documented** |
+> | **F-C142** + **F-C138** | `import_project` = **code mort pod-side** — défini/exécutable au central (`pod_tools.ex:129`) mais caché par 2 gates : catalogue Python (`ARCHITECT_TOOLS` sans lui, DÉCISIF = invisible à `tools/list`) + scope `architect.yaml` allowedTools (redondant). | **D6 dual-SSOT** : dériver le catalogue Python de l'autorité Elixir (bon fix) vs sync-manuel bilatérale. Conséquence : un outil pod-facing invisible. |
+> | **F-C165** | DUAL-LIST — diff exacte **1 rôle** : `.sh` a `vulcan` (stale), canon a `starfleet` (renommé il y a 6 sem, 2026-05-27) ; le .sh écrit APRÈS (2026-07-05). `vulcan.gitea_token` orphelin → provisioning **exit 2** sur rôle fantôme. starfleet inert (host-native, 0 conso token). | **ops-surface (tu as réservé)** : reco = **retirer `vulcan`** (starfleet n'a pas besoin de token) ; SSOT propre = flag `needs_role_token` + glob canon. |
+> | **F-C007** | **DIVERGENCE-DÉCISION sécurité** — barrière §4 forge-aveugle RÉELLEMENT manquante : architect/consultant/qualifier/reviewer ont des canaux `fleet-forge.*` ; **architect le plus exposé** (`git_ops_denied:[]` + `fleet-forge.*` wildcard). Le test ne l'enforce que sur engineer+gatekeeper. Commentaire EXACT (pas périmé). | **décision défense-en-profondeur** : resserrer les 4 profils (retirer canaux forge + push denied architect) + élargir `@forge_blind`. |
+> | **F-C112** | **DÉJÀ-COHÉRENT (PERCE blanchie)** — presence≠liveness assumé (SOC-OTP-002) MAIS backstop : dispatch enqueue le brief + kick via WakeRecovery→reboot sur injoignable→escalade starfleet fail-loud. `@pod_id` constant → brief reste valide post-reboot. Pas de dispatch-dans-le-vide. | rien (correctement DOCTRINE) |
+> | **F-C013** | test-only — `lcars.contracts.check` sans API fixture-root ; gardes hollow-green jamais RED en isolation (que sur le vrai repo, vert). Gardes corrects, juste pas testés négativement. | test-infra : ajouter `run_checks(root)` + fixtures repo-cassé (mécanique, séparé) |
+>
+> **Synthèse D6** : 4 doc-drifts FIXÉS (108/111/011/109-comment) · 1 PERCE blanchie (112) · **6 décisions de direction** : F-C110 (fail-open HIGH) · F-C143 (latent) · F-C138/142 (dual-SSOT import_project) · F-C165 (ops, stale vulcan) · F-C007 (sécurité forge-barrier) · F-C109-policy (phantom selection) · F-C013 (test-infra).
+
 ---
 
 ## D7 — Outillage : réactiver les gardes

@@ -208,3 +208,15 @@
 - **Croisement tranché (verify-before-fix)** : F-C152 (`subagent-driven` référencé engineer.yaml:106) est dormant car la compo prod n'assemble jamais les modop-bundles (F-C146) → j'ai eu RAISON de HOLD le doc-fix (rouge à lèvres sur un mort). R-09 appliqué au croisement inter-findings.
 - LEDGER : 13 lignes D3 annotées (D3-archivable / D3-deadgate / D3-live-D6 / D3-fork-D7 / D3-doc).
 - **Re-bord atteint** : D3 factuel épuisé. Tout reste = décision user (archive/keep/wire par item + les forks D6/D7 + design-forks). J'attends.
+
+### INVENTAIRE D6 fait (2 workers) → 4 doc-drifts FIXÉS + 1 PERCE blanchie
+- Dernier cluster sans inventaire factuel. 2 workers read-only (schéma-vs-runtime+listes / doc-vs-runtime+correctness), 11 findings, consequence-check + citations. Livré `DECISION-BRIEF §D6`.
+- **4 doc-drifts fork-indépendants FIXÉS** (TDD-inutile, doc pure ; compile+140/74 verts) :
+  - **F-C108** application.ex:12 « no longer emitted » faux (`workflow_map.failed` a un draft producer vivant) — même drift que F-C051, autre fichier.
+  - **F-C111** gatekeeper.ex ×6 : « permanent » vs scope réel `pipe`/`boot_at_start:false`. VALEUR `@issue_id "permanent-gatekeeper"` laissée (test-locked gatekeeper_test.exs:62, R-10).
+  - **F-C011** webhooks_gitea.ex:221 : commentaire affirmait un conso Ring-3 corrélant sur `id`, rail AutoDispatcher retiré 2026-06-16 → divergence id-vs-number LATENTE.
+  - **F-C109** loader.ex:91 : commentaire citait `on_escalation`/`on_failure` (impossibles, schéma additionalProperties:false les rejette) → corrigé vers les vrais champs optionnels droppés.
+- **PERCE potentielle BLANCHIE (verify-the-verifier)** : **F-C112** (pod-id enregistré traité comme vivant même si liveness inconnue) → PAS une perce : presence≠liveness assumé (SOC-OTP-002) MAIS backstop réel (dispatch enqueue brief + kick WakeRecovery→reboot sur injoignable→escalade starfleet fail-loud ; `@pod_id` constant → brief valide post-reboot). Correctement DOCTRINE. R-09 confirme.
+- **6 décisions de direction** (→ user) : **F-C110** (fail-open silencieux HIGH : knobs escalade canoniques lus par 0 code → `important` proceed sans gatekeeper) · F-C143 (deliverable_mode défaut, latent) · F-C138/142 (import_project code-mort pod-side, dual-SSOT) · F-C165 (stale `vulcan`→`starfleet`, ops-surface) · F-C007 (barrière forge-aveugle manquante, sécurité, architect le + exposé) · F-C109-policy (selection_priority fantôme) · F-C013 (test-infra).
+- LEDGER : 11 lignes D6 annotées. **47 fixes** (16 code + 31 doc/test).
+- **BORD FACTUEL DÉFINITIF** : TOUS les clusters (D1-D7) ont désormais leur inventaire fact-backed. Plus aucun factuel non-bloqué. Reste = 100% décision user. J'attends.
