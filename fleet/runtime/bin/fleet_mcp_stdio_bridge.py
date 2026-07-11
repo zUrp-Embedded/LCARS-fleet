@@ -28,8 +28,8 @@
 # ENV :
 #   LCARS_FLEET_MCP_SOCKET : chemin de la socket AF_UNIX du central pour CE pod (un fichier socket
 #                            per-pod, monté dans le sandbox). REQUIS.
-#   LCARS_ROLE             : rôle du pod ; sélectionne LOCALEMENT sa surface de tools
-#                            (BASE_TOOLS, + ARCHITECT_TOOLS si "architect"). OPT.
+# (F-C138 — plus de LCARS_ROLE : le filtrage par rôle est fait par le central depuis la socket per-pod,
+#  le pont ne sélectionne plus aucune surface localement.)
 # Protocole : JSON-RPC newline-framed sur stdin/stdout (côté claude) ; même JSON-RPC newline-framed sur
 # la socket AF_UNIX (côté central) — une requête = une ligne, une réponse = une ligne.
 import json
@@ -39,7 +39,6 @@ import sys
 import time
 
 SOCKET_PATH = os.environ.get("LCARS_FLEET_MCP_SOCKET", "")
-ROLE = os.environ.get("LCARS_ROLE", "")
 PROTO = "2024-11-05"
 _req_id = [1000]
 
@@ -99,111 +98,12 @@ def central_call(method, params):
     return payload.get("result", {})
 
 
-# Surface de tools du pod = DÉRIVÉE de son rôle (LCARS_ROLE). Principe : la PRÉSENCE EST
-# l'AUTORISATION — un pod ne voit (donc ne peut lister, chercher via ToolSearch, ni appeler) QUE
-# les tools que son rôle EST. Deny-par-défaut par construction : absent de la surface du rôle =
-# inexistant pour lui (rien à interdire, rien à ré-autoriser). Pas de champ allowlist : le rôle EST
-# la surface. (alwaysLoad — visibilité hors-déferral — est porté par .mcp-fleet.json.)
-
-# Base — tout pod EST un task-worker : pull get_work_item IN / push submit_result OUT.
-BASE_TOOLS = [
-    {
-        "name": "get_work_item",
-        "description": "Recupere ta prochaine tache aupres du fleet LCARS. Retourne {\"done\":true} "
-                       "quand il n'y a plus de tache (tu t'arretes alors), sinon {\"done\":false,\"work_item\":{...}}.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "submit_result",
-        # MA-19 : schema SYNCHRONISE avec le central (apps/fleet_mcp/.../pod_tools.ex `submit_result`).
-        # `work_item_id` est REQUIS cote central (le broker rejette un work_item_id != brief actif du pod).
-        # Le bridge doit l'annoncer, sinon claude omet le champ et le central refuse (:work_item_id_required).
-        "description": "Retourne le resultat structure d'une tache au fleet LCARS, dans `payload`. "
-                       "`work_item_id` REQUIS = le work_item_id rendu par get_work_item (la tache que tu clos) : "
-                       "le fleet correle ton livrable a CETTE tache precise, jamais a la derniere en date.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "payload": {"type": "object"},
-                "work_item_id": {"type": "string"},
-            },
-            "required": ["payload", "work_item_id"],
-        },
-    },
-]
-
-# Délégateur — l'ARCHITECTE EST celui qui ONBOARDE (create_project), DÉLÈGUE (create_issue) et SUIT
-# l'avancement (get_issue_status). Ces tools n'existent QUE dans son monde ; un worker/juge ne les
-# voit pas du tout. tools/call forwarde au central (qui porte la logique : assignee=humain, etc.).
-ARCHITECT_TOOLS = [
-    {
-        "name": "create_issue",
-        # MA-19 : schéma SYNCHRONISÉ avec le central (apps/fleet_mcp/.../pod_tools.ex `create_issue`).
-        # `project` est OBLIGATOIRE côté central (refus structurel sans lui — F-TICKET-ROUTE-FOOTGUN : pas de
-        # routage par défaut, jamais de misroute silencieux). Le bridge l'exposait SANS `project` → l'arch
-        # lisait un schéma stale, omettait `project`, et le central refusait. Toute évolution du schéma
-        # central se reflète ICI (sync cross-langage Python↔Elixir manuelle — outil LAN, pas de dérivation).
-        "description": "Delegue une brique d'implementation a la fleet LCARS : cree une issue forge "
-                       "pret pour la livraison forge-native (engineer -> PR -> review -> merge). Utilise-le pour "
-                       "DELEGUER plutot que de coder toi-meme (la fleet livre mieux et preserve ton contexte). "
-                       "`brief` = le brief clair pour l'engineer. `project` = le repo `owner/name` OU LIVRER, "
-                       "OBLIGATOIRE : le repo retourne par `create_project`, ou le projet designe par l'humain. "
-                       "Sans `project`, l'issue est REFUSEE (jamais de misroute silencieux vers un autre projet).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "brief": {"type": "string"},
-                "project": {"type": "string"},
-            },
-            "required": ["title", "brief", "project"],
-        },
-    },
-    {
-        "name": "create_project",
-        "description": "Demarre un NOUVEAU projet : cree le repo forge + les 2 dossiers dual-dir "
-                       "(/home/projects/<name> sur main, /home/projects.work/<name> sur work/ops) + le "
-                       "scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet "
-                       "neuf. `name` = slug kebab-case. Le projet cree devient la cible de delegation : "
-                       "enchaine ensuite create_issue pour l'implementation.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "pitch": {"type": "string"},
-                "description": {"type": "string"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "get_issue_status",
-        # MA-19 : schema SYNCHRONISE avec le central (apps/fleet_mcp/.../pod_tools.ex `get_issue_status`).
-        # `project` est OBLIGATOIRE cote central (refus structurel sans lui : pas de routage par defaut,
-        # jamais de lecture sur le mauvais projet). Le bridge l'expose donc, sinon l'arch omet `project`
-        # et le central refuse (:project_required).
-        "description": "Consulte l'etat d'un issue delegue (issue + PR liee) : issue ouverte/fermee, PR "
-                       "mergee ou non, verdicts de review. Utilise-le pour SUIVRE un issue avant d'enchainer — "
-                       "ex: valider la livraison (issue fermee par le merge) du issue N AVANT de poster le "
-                       "issue N+1. `number` = le numero d'issue. `project` = le repo `owner/name` DU issue, "
-                       "OBLIGATOIRE : le repo retourne par create_project (ou celui passe a create_issue). "
-                       "Sans `project`, la lecture est REFUSEE (jamais d'etat lu sur le mauvais projet).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "number": {"type": "integer"},
-                "project": {"type": "string"},
-            },
-            "required": ["number", "project"],
-        },
-    },
-]
-
-# La surface = dérivée du rôle, point. Un nouveau tool puissant n'est servi à personne tant qu'il
-# n'est pas rattaché à un rôle ; un nouveau rôle n'a que sa base tant qu'on ne lui en grant pas plus.
-TOOLS = BASE_TOOLS + (ARCHITECT_TOOLS if ROLE == "architect" else [])
 
 
+# F-C138 — le pont ne porte PLUS aucun catalogue de tools : `tools/list` ET `tools/call` sont forwardés au
+# central, source UNIQUE des schémas (`deftool`) et du filtrage par rôle (dérivé du cap-profile, indexé sur
+# la socket per-pod = l'identité par le canal). Transport-shim pur enfin tenu : zéro logique, zéro liste —
+# fini la dérive Python↔Elixir (dont `import_project` invisible aux pods était le symptôme).
 def main():
     if not SOCKET_PATH:
         log("FATAL: LCARS_FLEET_MCP_SOCKET non défini — le pont n'a pas de socket central à joindre")
@@ -226,7 +126,15 @@ def main():
         elif method == "notifications/initialized":
             pass
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+            # F-C138 — FORWARD au central (comme tools/call), plus de catalogue local : le central est la
+            # source unique des schémas (deftool) ET du filtrage par rôle (dérivé du cap-profile, indexé
+            # sur la socket per-pod). Le pont ne connaît plus aucun tool par cœur.
+            try:
+                result = central_call("tools/list", msg.get("params", {}))
+                send({"jsonrpc": "2.0", "id": mid, "result": result})
+            except Exception as e:
+                log(f"tools/list forward fail: {e}")
+                send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": str(e)}})
         elif method == "tools/call":
             p = msg.get("params", {})
             try:

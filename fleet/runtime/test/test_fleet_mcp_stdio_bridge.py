@@ -42,9 +42,18 @@ class Stub(socketserver.StreamRequestHandler):
             return
         body = json.loads(line.decode())
         received.append(body)
-        resp = {"jsonrpc": "2.0", "id": body.get("id"),
-                "result": {"done": False, "task": {"id": "T1"},
-                           "_echo_args": body.get("params", {}).get("arguments")}}
+        # F-C138 — le central est desormais la source de tools/list (filtre par role, cote serveur). Le
+        # pont le FORWARDE (comme tools/call) : on stubbe une reponse tools/list distincte pour prouver le
+        # relai. tools/call renvoie l'echo (non-injection d'identite, coeur R9).
+        if body.get("method") == "tools/list":
+            result = {"tools": [
+                {"name": "get_work_item", "inputSchema": {"type": "object", "properties": {}}},
+                {"name": "submit_result", "inputSchema": {"type": "object", "properties": {}}},
+            ]}
+        else:
+            result = {"done": False, "task": {"id": "T1"},
+                      "_echo_args": body.get("params", {}).get("arguments")}
+        resp = {"jsonrpc": "2.0", "id": body.get("id"), "result": result}
         self.wfile.write((json.dumps(resp) + "\n").encode())
         self.wfile.flush()
 
@@ -91,7 +100,10 @@ check(init.get("protocolVersion") == "2024-11-05", "initialize -> protocolVersio
 check("tools" in init.get("capabilities", {}), "initialize -> capabilities.tools")
 check("experimental" not in init.get("capabilities", {}), "initialize -> pas de capability experimental")
 tools = sorted(t["name"] for t in by_id.get(2, {}).get("result", {}).get("tools", []))
-check(tools == ["get_work_item", "submit_result"], f"tools/list -> {tools}")
+# F-C138 — tools/list est FORWARDE au central (plus de catalogue local) : le pont relaie la liste du
+# central telle quelle, et le central a bien RECU la methode tools/list.
+check(tools == ["get_work_item", "submit_result"], f"tools/list FORWARDE, tools du central relayes -> {tools}")
+check(any(r.get("method") == "tools/list" for r in received), "central a recu method=tools/list (forward, plus de catalogue local)")
 check(by_id.get(3, {}).get("result", {}).get("task", {}).get("id") == "T1", "tools/call -> result central renvoye")
 check(received and received[-1].get("method") == "tools/call", "central a recu method=tools/call")
 # NON-injection d'identite : les arguments arrivent au central EXACTEMENT comme envoyes par claude,
@@ -113,25 +125,11 @@ print("--- Test C : methode inconnue -> JSON-RPC error -32601 ---")
 by_id3 = run_bridge(base, [{"jsonrpc": "2.0", "id": 9, "method": "bogus/method", "params": {}}])
 check(by_id3.get(9, {}).get("error", {}).get("code") == -32601, "methode inconnue -> error -32601")
 
-print("--- Test D (MA-19) : create_issue exige `project` en mode architecte ---")
-# Le central (apps/fleet_mcp/.../pod_tools.ex) REFUSE create_issue (ex-create_ticket) sans `project`
-# (F-TICKET-ROUTE-FOOTGUN : aucun routage par defaut → :project_required). Le bridge DOIT exposer le
-# meme schema, sinon l'arch lit un schema stale, omet `project`, et le central refuse. On verifie que
-# `project` est present dans properties ET required du tool d'onboarding/delegation create_issue (mode
-# arch) : c'est l'invariant anti-footgun, teste sous le nom COURANT (le renommage vocab ne le retire pas).
-arch = dict(base, LCARS_ROLE="architect")
-by_id4 = run_bridge(arch, [{"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}}])
-arch_tools = {t["name"]: t for t in by_id4.get(4, {}).get("result", {}).get("tools", [])}
-check("create_issue" in arch_tools, f"mode architecte expose create_issue ({sorted(arch_tools)})")
-ci_schema = arch_tools.get("create_issue", {}).get("inputSchema", {})
-ci_required = ci_schema.get("required", [])
-ci_props = ci_schema.get("properties", {})
-check("project" in ci_props, f"create_issue.properties contient `project` ({sorted(ci_props)})")
-check("project" in ci_required, f"create_issue.required contient `project` ({ci_required})")
-# Anti-regression : un pod NON-architecte ne voit PAS create_issue (deny-par-defaut par role).
-by_id5 = run_bridge(base, [{"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}])
-worker_tools = {t["name"] for t in by_id5.get(5, {}).get("result", {}).get("tools", [])}
-check("create_issue" not in worker_tools, f"role non-arch ne voit PAS create_issue ({sorted(worker_tools)})")
+# F-C138 — l'ancien Test D (bridge expose create_issue+schema en mode architecte) + l'anti-regression
+# role-filtering ONT ETE RETIRES : le pont ne hardcode plus de catalogue ni de filtrage par role. Le
+# schema create_issue (invariant MA-19 `project` requis) et le filtrage par role sont desormais servis
+# par le CENTRAL, couverts cote Elixir par apps/fleet_mcp/test/pod_socket_test.exs (tools/list = base +
+# tools rôle threades, deftool comme source unique) + le conformance test du schema cap-profile.
 
 srv.shutdown()
 try:
