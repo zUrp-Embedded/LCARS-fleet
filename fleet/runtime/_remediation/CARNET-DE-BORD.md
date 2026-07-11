@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~01h30 (relevé horaire · mécanique 100% close · D7 previewé · attente décisions user)
-**Statut** : PHASES 1-5 CODE+DOC CLOSES · reste = DÉCISIONS USER (87 doctrine + 5 doc-forks) + cleanup crons
+**Dernière révision** : 2026-07-11 ~02h30 (relevé · PHASE DOCTRINE en cours — user « go » sur la classif factuelle)
+**Statut** : mécanique 100% close · **DOCTRINE : D1/D4/D5/D2 traités** (2 fixes code + 3 doc) · reste D3/D6/D7-F167 + décisions user
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -21,16 +21,18 @@
 
 ## Prochaine action précise
 
-**REMÉDIATION MÉCANIQUE COMPLÈTE (12 code + 22 doc, gate vert).** Il ne reste que des DÉCISIONS USER + cleanup :
-1. **TRIAGE DOCTRINE (87 findings)** : `DECISION-BRIEF.md` (7 clusters D1-D7 + ajouts pass-2/2b + F-C151/F-C059-b),
-   prêt à décider, ma reco par cluster. **C'est le GROS du reste → attend l'user.**
-2. **5 doc-forks (→ user, petits)** : F-C006 (test conformance fausse-couverture : renommer vs vrai test apiVersion-inconnu),
-   F-C132-test + F-C137-test (tests intégration SHELL asserte un contrat retiré — hors gate mix, réécriture),
-   F-C151 (canon dual-review live vs sp_drafts → D3), F-C087 (dates hardcodées scaffold → mini seam horloge, cosmétique).
-3. **CLEANUP fin** : `CronDelete a73c2099 b1dc7bc3`.
+**PHASE DOCTRINE en cours** (user « go » sur la classif factuelle : je classe/fixe, je ne fais pas décider ce qui est factuel).
+**Traité : D1, D4, D5, D2** → 2 fixes code (F-C041 garde launch_backend, F-C125 catalogue-error) + 3 doc-drifts (D1). Pattern : ~1 fix/cluster, le code applique déjà la doctrine.
+**Prochaine action** :
+1. **F-C124** (D2, additif) : `/api/projection` champ `status`/`subscribed?` (read-model down/deaf visible). Je le fais.
+2. **D7-F167** : nettoyer les ~7 refs stale `05_data-canon` + gate qui enforce (voir preview D7 journal).
+3. **F-C006** : le vrai test conformance apiVersion-inconnu.
+4. **D3 (canon) + D6 (SSOT)** = irréductiblement user (connaissance produit / direction déployée).
 
-**12 CODE-FIXÉS (TDD)** : F-C166/160/097/098/059/069/119/018/044/035/037/086.
-**22 DOC-FIXÉS** : F-C002/003/004/008/009/012/014/017/067/070/071/072/088/090/128/131/134/148/158/162 (+ F-C132/137 part-doc).
+**DÉCISIONS QUI S'ACCUMULENT (→ user)** : forward-guard D1 · F-C034/036/056 (R-08 config) · F-C050/083 (state-fork) · F-C118 (contrat public 501-vs-câbler) · F-C135 (provisioning N0, sanctuaire) · D3 · D6. (Détail dans DECISION-BRIEF.md.)
+
+**35 fixes mécaniques (pré-« go »)** : 13 code (166/160/097/098/059/069/119/018/044/035/037/086/**087**) + 22 doc.
+**+5 fixes doctrine-phase** : F-C041, F-C125 (code) · F-C046/051/102 (doc). **Total 40.**
 **Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
