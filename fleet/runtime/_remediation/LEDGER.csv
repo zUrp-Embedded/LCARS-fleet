@@ -116,7 +116,7 @@ F-C114,medium,confirmed,apps/fleet_workflow/lib/fleet/workflow/deliverable.ex:91
 F-C115,high,confirmed,apps/fleet_workflow/lib/fleet/workflow/git.ex:13,THEORIQUE,unassigned,"Git force-push retry is not constrained to a system-owned branch value"
 F-C116,high,confirmed,apps/fleet_workflow/lib/fleet/workflow/deliverable.ex:47,THEORIQUE,unassigned,"git_native deliverables do not require the role coauthor trailer"
 F-C117,medium,confirmed,apps/fleet_workflow/lib/fleet/workflow/git.ex:369,DOCTRINE,R08-défensif,"Workflow git timeout config is raw and can disable the intended bound"
-F-C118,medium,confirmed,apps/fleet_api/lib/fleet/api.ex:10,DOCTRINE,D2-décision,"fleet_api state-read endpoints return successful empty snapshots"
+F-C118,medium,confirmed,apps/fleet_api/lib/fleet/api.ex:10,DOCTRINE,FIXÉ,"fleet_api state-read endpoints return successful empty snapshots"
 F-C119,medium,confirmed,apps/fleet_api/lib/fleet/api/spawn_admission.ex:60,PERCE,FIXÉ,"admin.spawn issue_id is admitted as any JSON value then stringified downstream"
 F-C120,low,confirmed,apps/fleet_api/lib/fleet/api/build_info.ex:99,DOCTRINE,D2-downgrade,"BuildInfo release parsing turns malformed embedded facts into release-sourced defaults"
 F-C121,low,confirmed,apps/fleet_api/lib/fleet/api/ws.ex:75,DOCTRINE,D7,"fleet_api WS seam test still describes a red legacy tuple path while excluded by default"

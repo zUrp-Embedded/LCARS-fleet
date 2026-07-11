@@ -51,20 +51,23 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "GET endpoints (lecture état)" do
-    test "GET /api/workflow_runs → 200 JSON" do
+    # F-C118 — les 3 lectures d'état étaient des empty-200 menteurs (indistinguables d'un état vide) sur
+    # surface publique. Désormais 501 honnête (l'observabilité réelle = fleet_observation), jamais un vide
+    # qui se fait passer pour un succès.
+    test "GET /api/workflow_runs → 501 not_implemented (plus d'empty-200 menteur)" do
       conn = conn(:get, "/api/workflow_runs") |> Rest.call(@opts)
-      assert conn.status == 200
-      assert {:ok, %{"workflow_runs" => _}} = Jason.decode(conn.resp_body)
+      assert conn.status == 501
+      assert {:ok, %{"error" => "not_implemented"}} = Jason.decode(conn.resp_body)
     end
 
-    test "GET /api/issues → 200 JSON" do
+    test "GET /api/issues → 501 not_implemented" do
       conn = conn(:get, "/api/issues") |> Rest.call(@opts)
-      assert conn.status == 200
+      assert conn.status == 501
     end
 
-    test "GET /api/pods → 200 JSON" do
+    test "GET /api/pods → 501 not_implemented (observabilité réelle = fleet_observation)" do
       conn = conn(:get, "/api/pods") |> Rest.call(@opts)
-      assert conn.status == 200
+      assert conn.status == 501
     end
 
     test "GET /api/version → 200 + JSON version constatable (sha/dirty/ref/source)" do

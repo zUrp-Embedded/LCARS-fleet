@@ -8,7 +8,8 @@ defmodule Fleet.API.Rest do
     * `GET /api/version` — the deployed build stamp (`Fleet.API.BuildInfo`)
     * `GET /api/readiness/deep` — LIVE operational state via
       `Fleet.API.Readiness.deep/0` — anti-hollow-green
-    * `GET /api/workflow_runs` / `issues` / `pods` — state read (MVP stubs)
+    * `GET /api/workflow_runs` / `issues` / `pods` — **501 not_implemented** (F-C118 : ex-empty-200
+      menteurs ; l'observabilité réelle est servie par fleet_observation, deck :8091)
     * `POST /api/admin/spawn` — filters the payload by DTO allowlist (422 if an internal spawner
       field / an unknown key is present), validates the cap-profile (400 if absent, 422 if
       unknown / host-native), requires a `brief` for a one-shot cap-profile (422 otherwise — mirror
@@ -54,16 +55,22 @@ defmodule Fleet.API.Rest do
     send_json(conn, Fleet.API.Readiness.deep())
   end
 
+  # F-C118 — ces 3 lectures d'état étaient des empty-200 (MVP stubs) : un `{pods: []}` en 200 est
+  # INDISTINGUABLE de « aucun pod » — un faux-succès sur surface PUBLIQUE. L'observabilité réelle (pods
+  # live + projection événementielle) est servie par fleet_observation (`/api/pods`, `/api/projection`,
+  # deck :8091). Ici : 501 honnête (not implemented sur CETTE surface) au lieu d'un vide menteur. On NE
+  # câble PAS ici (ce serait doublonner fleet_observation = 2 SSoT), on ne supprime pas non plus (contrat
+  # public — décision réservée) : on cesse juste de mentir.
   get "/api/workflow_runs" do
-    send_json(conn, %{workflow_runs: []})
+    not_implemented(conn, "workflow_runs")
   end
 
   get "/api/issues" do
-    send_json(conn, %{issues: []})
+    not_implemented(conn, "issues")
   end
 
   get "/api/pods" do
-    send_json(conn, %{pods: []})
+    not_implemented(conn, "pods")
   end
 
   # Version of the served build — short git SHA + dirty + ref + source (cf.
@@ -193,4 +200,13 @@ defmodule Fleet.API.Rest do
   # R6: parameterizable status (200 default) — no more divergent inline send_resp+encode.
   defp send_json(conn, payload), do: send_json(conn, 200, payload)
   defp send_json(conn, status, payload), do: send_resp(conn, status, Jason.encode!(payload))
+
+  # F-C118 — 501 explicite : la lecture d'état n'est PAS servie ici (surface publique) ; l'observabilité
+  # réelle vit dans fleet_observation. Honnête, jamais un empty-200 qui se fait passer pour un état.
+  defp not_implemented(conn, what) do
+    send_json(conn, 501, %{
+      error: "not_implemented",
+      detail: "#{what} state-read is served by fleet_observation (deck :8091), not fleet_api"
+    })
+  end
 end
