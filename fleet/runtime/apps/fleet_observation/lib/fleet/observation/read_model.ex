@@ -100,6 +100,18 @@ defmodule Fleet.Observation.ReadModel do
       empty()
   end
 
+  @doc """
+  Health of the read-model behind `projection/0` (F-C124): `:live` if the ETS table exists, `:unavailable`
+  if it is DOWN (table gone → `projection/0` reads `empty()`, INDISTINGUISHABLE from a quiet-healthy fleet
+  without this signal). Surfaced in `/api/projection` (`_status` field) so a client sees a DEAD read-model
+  instead of a false "quiet fleet". (A `:live` table can still be transiently stale on a fresh boot — that
+  window is brief and silent by design; only the DOWN blind-spot is load-bearing to surface.)
+  """
+  @spec projection_status() :: :live | :unavailable
+  def projection_status do
+    if :ets.whereis(@table) == :undefined, do: :unavailable, else: :live
+  end
+
   # ── Server ──────────────────────────────────────────────────────────────────
 
   @impl GenServer

@@ -69,4 +69,14 @@ defmodule Fleet.Observation.ReadModelTest do
     # aucun ReadModel ici → table absente → rescue → projection vide
     assert %{total: 0, stream: [], counts: %{}} = ReadModel.projection()
   end
+
+  test "F-C124 : projection_status/0 distingue read-model DOWN (:unavailable) de vivant (:live)" do
+    # sans ReadModel démarré → table absente → :unavailable (le vide n'est PAS une fleet calme, c'est un DOWN
+    # que /api/projection expose via `_status`, au lieu de le faire passer pour « fleet saine »).
+    assert :unavailable = ReadModel.projection_status()
+
+    # ReadModel démarré → table présente → :live
+    start_supervised!({ReadModel, subscribe: false})
+    assert :live = ReadModel.projection_status()
+  end
 end

@@ -93,7 +93,10 @@ defmodule Fleet.Observation.Deck do
   # Event-derived projection (read-model): feeds FLOW/GATEKEEPER/
   # STREAM/COORDINATION/DIAGNOSTICS/BRIDGE. Direct ETS read (bypass GenServer).
   get "/api/projection" do
-    body = Jason.encode!(Fleet.Observation.ReadModel.projection())
+    # F-C124 — include the read-model HEALTH so a DOWN read-model (whose projection reads empty) is not
+    # indistinguishable from a quiet-healthy fleet. `_status` = :live | :unavailable (additive field).
+    proj = Fleet.Observation.ReadModel.projection()
+    body = Jason.encode!(Map.put(proj, :_status, Fleet.Observation.ReadModel.projection_status()))
 
     conn
     |> put_resp_content_type("application/json")

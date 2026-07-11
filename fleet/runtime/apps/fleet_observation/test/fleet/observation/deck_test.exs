@@ -57,10 +57,14 @@ defmodule Fleet.Observation.DeckTest do
     assert count == length(pods)
   end
 
-  test "GET /api/projection → 200 JSON (read-model éteint → projection vide, pas de crash)" do
+  test "GET /api/projection → 200 JSON (read-model éteint → projection vide + _status:unavailable, pas de crash)" do
     conn = call(:get, "/api/projection")
     assert %Plug.Conn{status: 200} = conn
-    assert %{"total" => 0, "stream" => [], "counts" => %{}} = Jason.decode!(conn.resp_body)
+
+    # F-C124 — read-model éteint ici : le vide est accompagné de `_status:"unavailable"` (DOWN explicite),
+    # pas d'un 200 vide indistinguable d'une fleet calme.
+    assert %{"total" => 0, "stream" => [], "counts" => %{}, "_status" => "unavailable"} =
+             Jason.decode!(conn.resp_body)
   end
 
   test "route inconnue → 404 JSON" do
