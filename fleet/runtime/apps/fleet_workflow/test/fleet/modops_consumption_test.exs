@@ -13,11 +13,13 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   """
   use ExUnit.Case, async: true
 
-  # R0.8-brick6 : canon réabsorbé in-repo. modop-bundles + subagent-templates +
-  # pipelines vivent dans `apps/fleet_workflow/priv/canon/` ; cap-profiles dans
-  # `apps/fleet_cap_profile/priv/canon/cap-profiles/` (R0.7). Pattern identique
-  # brick1 MonkTest + brick5 PermanentBootTest (Application.app_dir).
+  # R0.8-brick6 : canon réabsorbé in-repo. Les `workflow_maps` vivent dans
+  # `apps/fleet_workflow/priv/canon/` ; les modop-bundles + subagent-templates ont été DÉPLACÉS
+  # (F-C146/PORT) dans `apps/fleet_cap_profile/priv/canon/` (co-localisés avec les overlay profiles +
+  # atteignables par SPBuilder, un dep de fleet_cap_profile) ; cap-profiles dans
+  # `apps/fleet_cap_profile/priv/canon/cap-profiles/` (R0.7). Pattern app_dir (brick1/brick5).
   @canon Application.app_dir(:fleet_workflow, "priv/canon")
+  @modop_canon Application.app_dir(:fleet_cap_profile, "priv/canon")
   @cap_profiles Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
 
   @bundles ~w(archive-mode brainstorming dual-review fire-mode long-session-discipline
@@ -27,7 +29,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
 
   test "9 modop-bundles présents avec sp.md bien formé (header GO-7 + non-vide)" do
     for b <- @bundles do
-      sp = Path.join([@canon, "modop-bundles", b, "sp.md"])
+      sp = Path.join([@modop_canon, "modop-bundles", b, "sp.md"])
       assert File.exists?(sp), "modop-bundle absent: #{sp}"
       content = File.read!(sp)
       assert byte_size(content) > 200, "#{b}/sp.md trop court (non-formé ?)"
@@ -38,7 +40,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
 
   test "3 subagent-templates présents + bien formés" do
     for t <- @subagent_templates do
-      f = Path.join([@canon, "subagent-templates", "#{t}.md"])
+      f = Path.join([@modop_canon, "subagent-templates", "#{t}.md"])
       assert File.exists?(f), "subagent-template absent: #{f}"
       c = File.read!(f)
       assert byte_size(c) > 150 and c =~ ~r/^#\s/, "#{t}.md non-formé"
@@ -66,9 +68,9 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
 
   test "catalogue modop-bundles == 9 exact (pas de bundle orphelin/manquant)" do
     dirs =
-      Path.join([@canon, "modop-bundles"])
+      Path.join([@modop_canon, "modop-bundles"])
       |> File.ls!()
-      |> Enum.filter(&File.dir?(Path.join([@canon, "modop-bundles", &1])))
+      |> Enum.filter(&File.dir?(Path.join([@modop_canon, "modop-bundles", &1])))
       |> Enum.sort()
 
     assert dirs == Enum.sort(@bundles),

@@ -164,15 +164,19 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.filter_skills(profile, root)
     end
 
-    test "modop_root config-OBLIGATOIRE : modop sans config → {:error, :modop_root_unconfigured} (fail-loud)" do
-      # EXERCE le DÉFAUT runtime (sans put_env) : on retire l'override du setup → modop_root non configuré.
-      # cap-profile sans systemPrompt (cas prod) → sp_role_base vide, on isole le modop_root non configuré.
-      # Plus de défaut relatif `"modop"` (qui donnait un `:enoent` muet en release) : fail-loud explicite.
+    test "modop_root a un DÉFAUT (fleet_cap_profile/modop-bundles) : modop sans config explicite → composé (F-C146/PORT)" do
+      # EXERCE le DÉFAUT runtime : on retire l'override → modop_root non configuré → défaut
+      # app_dir(:fleet_cap_profile, "priv/canon/modop-bundles") (les bundles y ont été déplacés, un dep de
+      # sp_builder). `fire-mode` y existe → composé. Plus de :modop_root_unconfigured : le PORT a câblé le
+      # défaut, comme sp_role_root — c'est ce qui rend les overlays modop enfin appliqués au spawn.
       Application.delete_env(:fleet_sp_builder, :modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
-      assert {:error, :modop_root_unconfigured} =
+      assert {:ok, %{sp_md: sp_md, metadata: %{modop_bundles_used: ["fire-mode"]}}} =
                Fleet.SPBuilder.compose(profile, ["fire-mode"])
+
+      # Le fragment SP du modop fire-mode est bien INJECTÉ dans le system-prompt.
+      assert sp_md =~ "fire-mode"
     end
 
     test "preloaded_paths section is included when given", %{sp_role_root: sp_root} do

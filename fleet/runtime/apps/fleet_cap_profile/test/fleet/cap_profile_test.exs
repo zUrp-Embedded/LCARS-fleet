@@ -942,4 +942,27 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.mcp_fleet_tools(bare) == []
     end
   end
+
+  describe "default_modops/1 (F-C146/PORT — overlays modop appliqués au spawn)" do
+    defp cp_with_spec(spec),
+      do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: spec}
+
+    test "spec avec modop_set.default (liste) → la liste des overlays" do
+      cp = cp_with_spec(%{"modop_set" => %{"default" => ["fire-mode", "tdd"]}})
+      assert ["fire-mode", "tdd"] = Fleet.CapProfile.default_modops(cp)
+    end
+
+    test "modop_set absent → [] (rôle sans overlay)" do
+      assert [] = Fleet.CapProfile.default_modops(cp_with_spec(%{}))
+    end
+
+    test "modop_set MALFORMÉ (liste au lieu d'un map, ou default non-liste) → [] (défensif, pas de crash spawn)" do
+      assert [] = Fleet.CapProfile.default_modops(cp_with_spec(%{"modop_set" => ["default"]}))
+
+      assert [] =
+               Fleet.CapProfile.default_modops(
+                 cp_with_spec(%{"modop_set" => %{"default" => "x"}})
+               )
+    end
+  end
 end

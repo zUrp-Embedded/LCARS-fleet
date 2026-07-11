@@ -312,31 +312,27 @@ defmodule Fleet.SPBuilder do
   defp read_modop_fragments([]), do: {:ok, []}
 
   defp read_modop_fragments(modop_bundles) do
-    case modop_root() do
-      {:ok, root} ->
-        result =
-          Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-            # Confine the modop leaf under `root`: a malformed `name` (`..`, `/`, absolute) never reaches
-            # the FS (R1-02/03) — same patron as `Fleet.CapProfile.Catalog.read_modops`.
-            case Fleet.Slug.confined_join(root, name) do
-              {:ok, dir} ->
-                case File.read(Path.join(dir, "sp.md")) do
-                  {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
-                  {:error, _reason} -> {:halt, {:error, {:modop_bundle_missing, name}}}
-                end
+    root = modop_root()
 
-              {:error, reason} ->
-                {:halt, {:error, {:modop_bundle_unsafe, {name, reason}}}}
+    result =
+      Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
+        # Confine the modop leaf under `root`: a malformed `name` (`..`, `/`, absolute) never reaches
+        # the FS (R1-02/03) — same patron as `Fleet.CapProfile.Catalog.read_modops`.
+        case Fleet.Slug.confined_join(root, name) do
+          {:ok, dir} ->
+            case File.read(Path.join(dir, "sp.md")) do
+              {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+              {:error, _reason} -> {:halt, {:error, {:modop_bundle_missing, name}}}
             end
-          end)
 
-        case result do
-          {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
-          error -> error
+          {:error, reason} ->
+            {:halt, {:error, {:modop_bundle_unsafe, {name, reason}}}}
         end
+      end)
 
-      :error ->
-        {:error, :modop_root_unconfigured}
+    case result do
+      {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
+      error -> error
     end
   end
 
@@ -386,17 +382,15 @@ defmodule Fleet.SPBuilder do
       Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
   end
 
-  # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). CONFIG-MANDATORY (fail-loud):
-  # the canon fragments live in `fleet_workflow/priv/canon/modop-bundles` (Ring 2), OUTSIDE sp_builder's
-  # dep graph (Ring 1) → we can NOT point a bundled default there without violating the ring (and
-  # `Application.app_dir(:fleet_workflow, …)` would raise "unknown application" in an isolated test). So NO
-  # misleading relative default (the old `"modop"` relative to CWD = silent `:enoent` in release): without config,
-  # `:error` → `read_modop_fragments` returns `{:error, :modop_root_unconfigured}` (explicit fail-loud). The
-  # PROD spawn chain passes no modop (`compose(cap, [], …)`) → this root is never required in prod.
+  # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). Config-overridable, with a
+  # BUNDLED DEFAULT = `Application.app_dir(:fleet_cap_profile, "priv/canon/modop-bundles")` — the SAME
+  # source as `sp_role_root` (the modop-bundles canon was MOVED here from fleet_workflow, F-C146/PORT). This
+  # is safe: fleet_cap_profile IS in sp_builder's dep graph (Ring edge exists) → started before sp_builder,
+  # `app_dir` resolves in prod AND in an isolated sp_builder test (unlike the ex-fleet_workflow path, out of
+  # the ring, which would raise "unknown application"). The prod spawn chain now passes the cap-profile's
+  # `modop_set.default` (`compose(cap, modops, …)`) → this root IS required and resolves.
   defp modop_root do
-    case Application.fetch_env(:fleet_sp_builder, :modop_root) do
-      {:ok, root} -> {:ok, root}
-      :error -> :error
-    end
+    Application.get_env(:fleet_sp_builder, :modop_root) ||
+      Application.app_dir(:fleet_cap_profile, "priv/canon/modop-bundles")
   end
 end

@@ -135,6 +135,20 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
+  The role's DEFAULT modops — `spec.modop_set.default` — the overlays applied AT SPAWN (their SP fragments
+  are composed into the pod's system prompt by `SPBuilder.compose`, F-C146/PORT). `[]` if absent, or if
+  `modop_set`/`default` is any shape other than a map holding a list (defensive: a malformed/stub spec
+  yields no overlay rather than crashing the spawn).
+  """
+  @spec default_modops(t()) :: [String.t()]
+  def default_modops(%__MODULE__{spec: spec}) do
+    case spec do
+      %{"modop_set" => %{"default" => defaults}} when is_list(defaults) -> defaults
+      _ -> []
+    end
+  end
+
+  @doc """
   Validates a `%Fleet.CapProfile{}` against the pure G24 semantic invariants
   (cap-profile canon v2.5 + containment gate). Pure: no process or FS read
   (same struct ⇒ same verdict).

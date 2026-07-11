@@ -266,7 +266,15 @@ defmodule Fleet.Spawner.Pod do
     issues_dir = Path.join(data.pod_dir, "issues")
 
     with {:ok, sp_compose} <-
-           SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.issue_id),
+           SPBuilder.compose(
+             data.cap_profile,
+             # F-C146/PORT : les overlays modop du rôle (`spec.modop_set.default`) sont enfin composés dans
+             # le system-prompt du pod (ex-`[]` = feature déclarée jamais appliquée). Un modop déclaré sans
+             # bundle → `{:error, {:modop_bundle_missing, _}}` remonte ici (fail-loud : le pod ne se lance pas).
+             Fleet.CapProfile.default_modops(data.cap_profile),
+             pod_id: data.pod_id,
+             job_id: data.issue_id
+           ),
          {:ok, claude_md} <-
            SPBuilder.compose_claude_md(data.cap_profile, Assets.maybe_path(repo_md)),
          {:ok, _skills_paths} <- Assets.maybe_filter_skills(data.cap_profile, skills_root),
