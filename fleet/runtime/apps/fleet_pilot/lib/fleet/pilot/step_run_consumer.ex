@@ -413,6 +413,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # (`Fleet.Spawner.Pod.CompletedPayload`: `"repository" => %{"full_name"}` + `"remote"`). Bare payload
   # (without repo: test/single-repo legacy) → we keep the config state (fallback). `remote` absent but
   # repo present → fallback remote (rare; a well-onboarded project carries both).
+  #
+  # F-C052 (KEEP, D4): the config fallback co-exists with « the event is the source of truth » ON PURPOSE —
+  # it is a BACK-COMPAT valid-default for single-repo-legacy + bare-payload tests, NEVER hit on the prod
+  # multi-project path (the enriched event always carries the repo). It does NOT mask a wrong repo: a
+  # MALFORMED prod event (no repo) falls back to the multi-project config repo = `nil` → downstream forge
+  # calls fail (nil repo), not a SILENT-wrong-repo. Removing it would break the legacy/test path for no
+  # prod gain → kept + documented (same shape as F-C143's valid-default-so-no-required).
   defp step_run_state(payload, state) do
     case payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->

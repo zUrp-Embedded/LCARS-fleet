@@ -60,8 +60,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn.Naming do
   (no `:repo_id` put — `Opts.maybe_put` swallows the nil at the call site). A project-bound role
   spawned WITHOUT a repo is then an ANOMALY: the mint (`Fleet.Spawner.Pod.SessionMint`) FAILS-LOUD (raises)
   — we NEVER fabricate a random UUID to mask an unresolved forge (forge = organ of
-  LCARS, forge down = stop). `rem(id, 10000)`: `<REPO4>` = 4 decimal digits → assumed DEBT,
-  repo 10000 collides with repo 0 (we will not reopen the old one; cf. SessionId moduledoc).
+  LCARS, forge down = stop). `rem(id, 10000)`: `<REPO4>` = 4 decimal digits → assumed DEBT (F-C064, KEEP),
+  repo 10000 collides with repo 0. Collision threshold = 10 000 repos in the org (far); a fix would widen
+  the fixed `<REPO4>` segment = a SessionId FORMAT redesign — disproportionate vs the documented debt.
+  (We will not reopen the old one; cf. SessionId moduledoc.)
   """
   @spec resolve_repo_id(module(), String.t(), keyword()) :: non_neg_integer() | nil
   def resolve_repo_id(forge, repo, forge_opts) do
