@@ -145,7 +145,7 @@ F-C143,medium,confirmed,apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
 F-C144,low,confirmed,apps/fleet_cap_profile/priv/canon/cap-profiles/modop/noop/profile.yaml:1,PERCE,FIXÉ,"noop modop exists in two canon locations with different ownership stories"
 F-C145,low,confirmed,apps/fleet_cap_profile/priv/canon/cap-profiles/modop/archive-mode/profile.yaml:1,PERCE,FIXÉ,"active modop overlay profiles are empty stubs while behavior lives in separate prompt bundles"
 F-C146,high,confirmed,apps/fleet_workflow/priv/canon/modop-bundles/archive-mode/sp.md:5,PERCE,FIXÉ,"active modop prompt bundles are not wired into the production spawn composition path"
-F-C147,medium,confirmed,apps/fleet_workflow/priv/canon/subagent-templates/subagent-code-quality-reviewer.md:5,DOCTRINE,D3-archivable,"subagent-template canon is active data but no production composer consumes it"
+F-C147,medium,confirmed,apps/fleet_workflow/priv/canon/subagent-templates/subagent-code-quality-reviewer.md:5,PERCE,FIXÉ,"subagent-template canon is active data but no production composer consumes it"
 F-C148,low,confirmed,apps/fleet_workflow/priv/canon/modop-bundles/brainstorming/sp.md:10,PERCE-doc,FIXÉ,"brainstorming prompt has a hard no-exception gate and a skip rule for trivial tasks"
 F-C149,medium,confirmed,apps/fleet_workflow/priv/canon/modop-bundles/fire-mode/sp.md:10,THEORIQUE,unassigned,"engineer declares fire-mode while its active invocation is pipe/text"
 F-C150,medium,confirmed,apps/fleet_workflow/priv/canon/modop-bundles/fire-mode/sp.md:12,THEORIQUE,unassigned,"consultant combines fire-mode and archive-mode despite opposite lifetime/communication semantics"

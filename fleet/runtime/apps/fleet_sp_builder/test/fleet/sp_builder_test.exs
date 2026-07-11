@@ -179,6 +179,33 @@ defmodule Fleet.SPBuilderTest do
       assert sp_md =~ "fire-mode"
     end
 
+    test "subagent_template (F-C147/PORT) : le fragment SP est injecté ; fichier absent → fail-loud" do
+      # reviewer→code-quality-reviewer : subagent-code-quality-reviewer.md existe dans le canon (root défaut
+      # = app_dir(:fleet_cap_profile, "priv/canon/subagent-templates"), non overridé par le setup).
+      profile =
+        valid_cap_profile(%{
+          "systemPrompt" => nil,
+          "invocation" => %{
+            "lifetime_scope" => "one-shot",
+            "subagent_template" => "code-quality-reviewer"
+          }
+        })
+
+      assert {:ok, %{sp_md: sp_md}} = Fleet.SPBuilder.compose(profile, [])
+      assert sp_md =~ "subagent-template:code-quality-reviewer"
+      assert sp_md =~ "code-quality-reviewer"
+
+      # Déclaré mais fichier absent → fail-loud (le pod ne se lance pas sur un SP à moitié composé).
+      bad =
+        valid_cap_profile(%{
+          "systemPrompt" => nil,
+          "invocation" => %{"subagent_template" => "inexistant-xyz"}
+        })
+
+      assert {:error, {:subagent_template_missing, "inexistant-xyz"}} =
+               Fleet.SPBuilder.compose(bad, [])
+    end
+
     test "preloaded_paths section is included when given", %{sp_role_root: sp_root} do
       write_sp_role(sp_root, "engineer-role.md", "# Role")
 

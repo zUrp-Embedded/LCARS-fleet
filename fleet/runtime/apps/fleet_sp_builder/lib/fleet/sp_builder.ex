@@ -112,12 +112,17 @@ defmodule Fleet.SPBuilder do
     with :ok <- validate_compose_opts(opts),
          {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
          {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
+         {:ok, subagent_fragment} <- read_subagent_template(cap_profile),
          {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
       preloaded_paths =
         Keyword.get(opts, :preloaded_paths, []) ++ monk_inj.corpus_paths
 
+      # F-C147/PORT — the cap-profile's `invocation.subagent_template` fragment (e.g. reviewer →
+      # code-quality-reviewer, qualifier → spec-reviewer) is injected here, next to the modop fragments
+      # (both are SP overlays keyed on the cap-profile). Was declared-but-never-composed before.
       modop_concat =
-        modop_fragments_concat(modop_fragments) <> Monk.persona_section(monk_inj)
+        modop_fragments_concat(modop_fragments) <>
+          subagent_fragment <> Monk.persona_section(monk_inj)
 
       stable_concat =
         IO.iodata_to_binary([
@@ -334,6 +339,39 @@ defmodule Fleet.SPBuilder do
       {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
       error -> error
     end
+  end
+
+  # F-C147/PORT — reads the SINGLE `subagent_template` SP fragment the cap-profile declares
+  # (`invocation.subagent_template` → `subagent-<name>.md`). Pattern-match (no `get_in`) so a malformed
+  # `invocation` never crashes the spawn. Non-null → the fragment (prefixed with a newline for separation);
+  # null/absent → "". A DECLARED-but-missing/unsafe template → fail-loud (the pod does not launch on a
+  # half-composed SP), same policy as a missing modop bundle.
+  defp read_subagent_template(%Fleet.CapProfile{
+         spec: %{"invocation" => %{"subagent_template" => name}}
+       })
+       when is_binary(name) and name != "" do
+    # `confined_join` VALIDATES `name` as a safe slug (kebab, no `.`/`..`/`/`) confined under the root —
+    # same guard as the modops. The flat template file is then `subagent-<name>.md` (a filename carries a
+    # `.` so it can't be the slug leaf itself); we build it under the same root once `name` is proven safe.
+    case Fleet.Slug.confined_join(subagent_template_root(), name) do
+      {:ok, _confined} ->
+        path = Path.join(subagent_template_root(), "subagent-#{name}.md")
+
+        case File.read(path) do
+          {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
+          {:error, _} -> {:error, {:subagent_template_missing, name}}
+        end
+
+      {:error, reason} ->
+        {:error, {:subagent_template_unsafe, {name, reason}}}
+    end
+  end
+
+  defp read_subagent_template(_cap_profile), do: {:ok, ""}
+
+  defp subagent_template_root do
+    Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
+      Application.app_dir(:fleet_cap_profile, "priv/canon/subagent-templates")
   end
 
   defp modop_fragments_concat([]), do: ""
