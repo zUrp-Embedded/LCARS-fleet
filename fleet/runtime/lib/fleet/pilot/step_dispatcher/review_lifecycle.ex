@@ -35,15 +35,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   silently). The sub-modules re-build `Spawn.Seams`/`ArchEscalation.Seams` from this `Ctx` at the
   call site of each leaf (narrow boundary preserved).
 
-  ## Helpers SHARED with the core, threaded WITHOUT cycle or fork
+  ## Helpers SHARED with the core — pris à la SOURCE, sans cycle ni fork (Z6c 2026-07-13)
 
-  `route_for/4` (reading the engraved route) and `tag_err/2` (tagging a resolution error) are
-  used by BOTH flows (issue `dispatch_issue` AT THE CORE + review here). They STAY defined at the core
-  (their home: the issue flow calls them directly) and are threaded into the review flow by CAPTURE
-  in the `Ctx` (`route_reader` / `err_tagger`), exactly like `resolver`/`wake_recovery` — the
-  capture is created AT THE CORE, so this flow has no compile-time reference to
-  `StepDispatcher` (strictly uni-directional dependency, no cycle) without duplicating the two
-  helpers (no fork).
+  `Spawn.route_for/4` (lecture de la route gravée) et `Opts.tag_err/2` (tag d'erreur de
+  résolution) servent les DEUX flux (issue au core + review ici) depuis leurs modules
+  d'autorité — plus de captures dans le `Ctx` (l'ancien détour `route_reader`/`err_tagger`
+  évitait un renvoi vers `StepDispatcher` ; les prendre à la source garde
+  l'unidirectionnalité core→ReviewLifecycle→Spawn sans fn dans un struct, sans fork).
   """
 
   require Logger

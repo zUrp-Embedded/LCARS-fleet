@@ -297,9 +297,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   def dispatch_review(pr, opts) when is_map(pr) do
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
-    # `ctx.<typo>` does not compile. (Les ex-captures route_reader/err_tagger sont mortes en Z6c :
-    # (`route_for/4`/`tag_err/2`, shared with `dispatch_issue`) — like `resolver`/`wake_recovery`, the
-    # capture is created HERE → ReviewLifecycle never references this module (uni-directional, no cycle).
+    # `ctx.<typo>` does not compile. Données PURES depuis Z6c (2026-07-13) : les ex-captures
+    # route_reader/err_tagger sont mortes — les deux flux prennent Spawn.route_for/Opts.tag_err
+    # à la source ; ReviewLifecycle ne référence toujours pas ce module (unidirectionnel, pas de cycle).
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
       loader: Keyword.get(opts, :loader, Fleet.CapProfile),
