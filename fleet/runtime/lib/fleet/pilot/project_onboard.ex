@@ -217,9 +217,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # (cf. ForgeClient.Repo « managed UPSTREAM ») — le runtime VÉRIFIE (lecture seule),
   # il ne provisionne PAS (auto-provision = capability admin que le runtime n'a pas ;
   # arbitrage A-04 du chantier migration si l'user la veut un jour).
-  # Tri-état STRICT : forge en panne ≠ humain absent → :forge_preflight_failed SANS
-  # instructions (ne jamais envoyer l'opérateur créer un compte sur une panne réseau).
-  # Seam `:forge_users` (défaut ForgeClient.Repo) : stub en test, pas de flip de config.
+  # États : absent PROUVÉ (404) → gestes admin ; forge en PANNE → :forge_preflight_failed
+  # SANS instructions (ne jamais envoyer l'opérateur créer un compte sur une panne réseau) ;
+  # NON-VÉRIFIABLE (403 sur la lecture team, token non org-admin) → dégrade + procède (cf.
+  # clause 403 plus bas — bricole vécue e2e migration 2026-07-12 : le garde bloquait un
+  # humain PROVISIONNÉ faute de droit de lecture). Seam `:forge_users` (défaut
+  # ForgeClient.Repo) : stub en test, pas de flip de config.
   defp ensure_human_provisioned(org, opts) do
     users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
     human = Keyword.get(opts, :human) || Fleet.Credentials.Human.current!()
@@ -239,6 +242,24 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
           {:ok, false} ->
             {:error, {:human_not_provisioned, human, provisioning_gestures(:team, human, org)}}
+
+          # QUATRIÈME état (≠ le tri-état ci-dessus) : 403 = le token runtime n'a pas le
+          # DROIT de LIRE l'appartenance team. Le compte de service est un simple membre
+          # d'org (ni owner, ni membre de `humans`) → Gitea refuse GET /teams/<id>/members/<u>.
+          # « Ne PEUT PAS vérifier » ≠ « humain ABSENT » (404) : fail-closer ici briquerait
+          # TOUT onboarding sur une forge où le token n'est pas org-admin — alors que
+          # create_repo/issue/PR, eux, marchent avec ce même token. On DÉGRADE (warning +
+          # on procède) : le garde F2 protège là où il PEUT lire ; là où il ne peut pas,
+          # create_issue en aval reste le filet (le 422 forge explicite d'avant F2). NE PAS
+          # convertir en :ok muet — le warning est load-bearing (dit POURQUOI le garde saute).
+          {:error, {:http, 403, _}} ->
+            Logger.warning(
+              "ProjectOnboard: preflight team-check `humans` NON VÉRIFIABLE pour #{human} " <>
+                "(403 — le token runtime ne peut pas lire l'appartenance team) → on procède " <>
+                "sans le garde team (create_issue en aval reste le filet)."
+            )
+
+            :ok
 
           {:error, reason} ->
             {:error, {:forge_preflight_failed, reason}}

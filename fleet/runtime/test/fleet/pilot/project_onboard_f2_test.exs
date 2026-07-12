@@ -7,6 +7,7 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
   preflight est transparent (la séquence continue). Seam :forge_users — aucun réseau.
   """
   use ExUnit.Case, async: true
+  import ExUnit.CaptureLog
 
   alias Fleet.Pilot.ProjectOnboard
 
@@ -28,6 +29,14 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
   defmodule DownForge do
     def user_exists?(_u, _fc), do: {:error, {:transport, :econnrefused}}
     def team_member?(_org, _t, _u, _fc), do: {:error, {:transport, :econnrefused}}
+  end
+
+  defmodule ForbiddenTeamUsers do
+    # Compte OK, mais le token runtime ne peut PAS lire l'appartenance team (403) : cas réel
+    # forge — le compte de service est un simple membre d'org (ni owner, ni membre de `humans`),
+    # Gitea refuse GET /teams/<id>/members/<u>. « Ne peut pas vérifier » ≠ « humain absent ».
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def team_member?(_org, "humans", _u, _fc), do: {:error, {:http, 403, %{"message" => "Forbidden"}}}
   end
 
   defp opts(tmp, users),
@@ -74,6 +83,26 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
     # le preflight PASSE (sinon on aurait human_not_provisioned) ; l'étape suivante
     # (refute_existing) attrape le dossier pré-existant → preuve d'ordre et de passage.
     assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
+  end
+
+  @tag :tmp_dir
+  test "team NON VÉRIFIABLE (403, token non org-admin) → preflight dégrade + procède (warning LOUD), jamais un blocage",
+       %{tmp_dir: tmp} do
+    o = opts(tmp, ForbiddenTeamUsers)
+    proj = Path.join([tmp, "projects", "poc-f2"])
+    File.mkdir_p!(proj)
+
+    log =
+      capture_log(fn ->
+        # Le preflight PASSE malgré le 403 (sinon human_not_provisioned / forge_preflight_failed) :
+        # la séquence continue et attrape le dossier pré-existant → preuve de passage. Régression
+        # e2e migration 2026-07-12 : le garde bloquait un humain PROVISIONNÉ faute de droit de lecture.
+        assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
+      end)
+
+    # La dégradation est LOUD (dit POURQUOI le garde saute) — jamais un :ok muet.
+    assert log =~ "NON VÉRIFIABLE"
+    assert log =~ "403"
   end
 
   @tag :tmp_dir
