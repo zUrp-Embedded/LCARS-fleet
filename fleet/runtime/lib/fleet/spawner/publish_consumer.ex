@@ -87,40 +87,38 @@ defmodule Fleet.Spawner.PublishConsumer do
 
     opts = Map.get(payload, "opts", []) |> to_keyword()
 
-    cond do
-      not is_binary(name) or name == "" ->
-        Logger.warning(
-          "PublishConsumer: admin.spawn.request invalid — name missing/empty " <>
-            "(payload=#{inspect(payload)})"
-        )
+    if not is_binary(name) or name == "" do
+      Logger.warning(
+        "PublishConsumer: admin.spawn.request invalid — name missing/empty " <>
+          "(payload=#{inspect(payload)})"
+      )
+    else
+      case Fleet.CapProfile.load(name) do
+        {:ok, cap_profile} ->
+          case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
+            {:ok, _pod_ref} ->
+              Logger.info("PublishConsumer: spawn dispatched name=#{name} issue=#{issue_id}")
 
-      true ->
-        case Fleet.CapProfile.load(name) do
-          {:ok, cap_profile} ->
-            case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
-              {:ok, _pod_ref} ->
-                Logger.info("PublishConsumer: spawn dispatched name=#{name} issue=#{issue_id}")
+            {:error, reason} ->
+              Logger.warning(
+                "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
+                  "reason=#{inspect(reason)}"
+              )
 
-              {:error, reason} ->
-                Logger.warning(
-                  "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
-                    "reason=#{inspect(reason)}"
-                )
+              # F-C044 — the API already answered 202 "queued"; an ordinary `{:error}` (not only a raise)
+              # also DROPS the spawn → emit `spawn.failed` so the drop reaches the read-model observation
+              # the admin queries, not just the server log (same alarm as the rescue path).
+              emit_spawn_failed(payload, {:spawn_pod, reason})
+          end
 
-                # F-C044 — the API already answered 202 "queued"; an ordinary `{:error}` (not only a raise)
-                # also DROPS the spawn → emit `spawn.failed` so the drop reaches the read-model observation
-                # the admin queries, not just the server log (same alarm as the rescue path).
-                emit_spawn_failed(payload, {:spawn_pod, reason})
-            end
+        {:error, reason} ->
+          Logger.warning(
+            "PublishConsumer: CapProfile.load fail name=#{name} reason=#{inspect(reason)}"
+          )
 
-          {:error, reason} ->
-            Logger.warning(
-              "PublishConsumer: CapProfile.load fail name=#{name} reason=#{inspect(reason)}"
-            )
-
-            # F-C044 — a load failure drops the spawn just as visibly as a spawn_pod failure: alarm it too.
-            emit_spawn_failed(payload, {:cap_profile_load, reason})
-        end
+          # F-C044 — a load failure drops the spawn just as visibly as a spawn_pod failure: alarm it too.
+          emit_spawn_failed(payload, {:cap_profile_load, reason})
+      end
     end
   end
 

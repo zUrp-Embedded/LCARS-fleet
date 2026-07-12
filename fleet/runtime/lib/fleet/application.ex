@@ -16,6 +16,7 @@ defmodule Fleet.Application do
       Fleet.Observation
     ],
     exports: []
+
   @moduledoc """
   Racine OTP de l'app unique `:lcars_fleet` — l'UNIQUE callback `Application` du runtime
   depuis le collapse de l'umbrella (migration Z2, 2026-07-12).

@@ -6,8 +6,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Starfleet.Shutdown.AggregateDispatcher
   alias Fleet.Shutdown.Quiesce
+  alias Fleet.Starfleet.Shutdown.AggregateDispatcher
 
   # Stubs injectés via le seam `:fleet_starfleet, :spawner_mod` pour induire un comptage de pods
   # défaillant (Spawner injoignable = restart en plein quiesce) sans toucher le vrai Spawner.

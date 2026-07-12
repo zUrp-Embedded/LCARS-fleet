@@ -213,7 +213,9 @@ defmodule Fleet.API.ReadinessTest do
     test "degraded quand PublishConsumer absent (start_publish_consumer off — ambient test)" do
       # config/test.exs pose start_publish_consumer=false → le consumer n'est jamais démarré.
       refute is_pid(Process.whereis(Fleet.Spawner.PublishConsumer))
-      assert %{state: :degraded, detail: %{consumer: false}} = sub(Readiness.deep(), "spawn.dispatch")
+
+      assert %{state: :degraded, detail: %{consumer: false}} =
+               sub(Readiness.deep(), "spawn.dispatch")
     end
 
     test "operational quand PublishConsumer vivant ET abonné" do

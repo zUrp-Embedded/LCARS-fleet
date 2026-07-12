@@ -62,9 +62,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   def next_step(workflow_map, current_step) when is_binary(current_step) do
     steps = steps(workflow_map)
 
-    if not Map.has_key?(steps, current_step) do
-      {:error, :unknown_step}
-    else
+    if Map.has_key?(steps, current_step) do
       successors =
         Enum.filter(steps, fn {_name, spec} -> current_step in needs(spec) end)
 
@@ -73,6 +71,8 @@ defmodule Fleet.Pilot.WorkflowMapNav do
         [{name, spec}] -> {:ok, {name, role(spec)}}
         _ -> {:error, :dag_not_supported}
       end
+    else
+      {:error, :unknown_step}
     end
   end
 

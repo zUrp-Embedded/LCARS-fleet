@@ -75,7 +75,9 @@ defmodule Fleet.Spawner.Pod.McpProvision do
     with {:ok, mod} <- conforming_provisioner() do
       # F-C138 — `tools` = the pod's role-gated MCP tool names (from the cap-profile `allowedTools`),
       # threaded to the central acceptor so it serves `tools/list` = base + these (single source).
-      apply(mod, :ensure_pod_socket, [pod_id, tools])
+      # Dispatch via a runtime-resolved `mod` variable (seam spawner→mcp) — NOT a compile alias
+      # (an alias here = upward compile dep boundary would refuse). `mod.fun/…` ≡ `apply`, seam intact.
+      mod.ensure_pod_socket(pod_id, tools)
     end
   end
 
@@ -89,7 +91,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   def release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
     case conforming_provisioner() do
       {:ok, mod} ->
-        _ = apply(mod, :release_pod_socket, [pod_id])
+        _ = mod.release_pod_socket(pod_id)
 
       {:error, reason} ->
         Logger.warning("pod #{pod_id} release_pod_socket skipped — #{inspect(reason)}")

@@ -116,7 +116,8 @@ defmodule Fleet.Spawner.Application do
          %{
            consumer: true,
            subscribed: false,
-           note: "PublishConsumer alive but NOT subscribed to fleet.events — 202 into the void (0 pod)"
+           note:
+             "PublishConsumer alive but NOT subscribed to fleet.events — 202 into the void (0 pod)"
          }}
 
       true ->

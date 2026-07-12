@@ -58,9 +58,8 @@ defmodule Fleet.Workflow.GraphValidator do
     with :ok <- check_no_phantom_edges(steps),
          {:ok, root} <- check_single_root(steps),
          :ok <- check_all_reachable(steps, successors, root),
-         :ok <- check_acyclic(steps, successors),
-         :ok <- check_no_fan_out(successors) do
-      :ok
+         :ok <- check_acyclic(steps, successors) do
+      check_no_fan_out(successors)
     end
   end
 

@@ -436,58 +436,56 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_step_run(payload, n, state) do
     role = payload["role"]
 
-    cond do
-      # A PRODUCER that cannot deliver (missing dependency/info) marks
-      # `blocked: true` in its result → human ESCALATION via `await_arch` (posted reason = its
-      # `summary` voice + `lcars-awaits-arch` + unlock → poller SKIPS, the human decides via the arch). OTHERWISE the
-      # publish without a commit fail-loud `:no_deliverable_commit` = silent WEDGE (an honest eng refuses
-      # to guess → un-escalated blockage). Reuses the whole await_arch safety net.
-      producer?(role, state) and
-          TerminalEscalation.blocked_flag?(
-            Verdict.unwrap_worker_envelope(payload["result"] || %{})
-          ) ->
-        TerminalEscalation.escalate_blocked_producer(payload, n, role, terminal_seams(state))
+    # A PRODUCER that cannot deliver (missing dependency/info) marks
+    # `blocked: true` in its result → human ESCALATION via `await_arch` (posted reason = its
+    # `summary` voice + `lcars-awaits-arch` + unlock → poller SKIPS, the human decides via the arch). OTHERWISE the
+    # publish without a commit fail-loud `:no_deliverable_commit` = silent WEDGE (an honest eng refuses
+    # to guess → un-escalated blockage). Reuses the whole await_arch safety net.
+    if producer?(role, state) and
+         TerminalEscalation.blocked_flag?(
+           Verdict.unwrap_worker_envelope(payload["result"] || %{})
+         ) do
+      TerminalEscalation.escalate_blocked_producer(payload, n, role, terminal_seams(state))
+    else
+      # If the payload carries the workflow_map context (workflow_map_name+step), the next step
+      # is computed by WorkflowMapNav (reassign to the next role, or close if terminal).
+      # Without workflow_map context (1-step) → next_assignee nil → close. A workflow_map error
+      # (DAG, unknown step) does NOT misroute: it bubbles up (the system does not advance blindly).
+      case GateEngine.resolve_next(payload, n, gate_seams(state)) do
+        {:error, reason} ->
+          # Q2 DRAFT producer (best-effort, before the escalation): a workflow_map LOAD failure lights
+          # the dormant Cat-5 rail (see emit_workflow_map_failed_draft/3).
+          emit_workflow_map_failed_draft(reason, n, role)
 
-      true ->
-        # If the payload carries the workflow_map context (workflow_map_name+step), the next step
-        # is computed by WorkflowMapNav (reassign to the next role, or close if terminal).
-        # Without workflow_map context (1-step) → next_assignee nil → close. A workflow_map error
-        # (DAG, unknown step) does NOT misroute: it bubbles up (the system does not advance blindly).
-        case GateEngine.resolve_next(payload, n, gate_seams(state)) do
-          {:error, reason} ->
-            # Q2 DRAFT producer (best-effort, before the escalation): a workflow_map LOAD failure lights
-            # the dormant Cat-5 rail (see emit_workflow_map_failed_draft/3).
-            emit_workflow_map_failed_draft(reason, n, role)
+          # G2 (funnel): a NON-TRANSIENT TERMINAL error must NOT bubble up as a log-only `{:noreply}`
+          # — otherwise the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step →
+          # re-fail → infinite CHURN without ever notifying a human (asymmetry with the verdict path which
+          # does escalate). We ESCALATE it to the arch (await_arch: comment + `lcars-awaits-arch` + unlock
+          # → the poller SKIPS the issue, the churn stops, the human decides). The other errors bubble up
+          # unchanged: transient/self-healing (`:no_gatekeeper` = the permanent gatekeeper reboots,
+          # reconciliation re-dispatches) or handled elsewhere (unreadable workflow_map → IncidentRegistry, G6).
+          if TerminalEscalation.terminal_escalate?(reason),
+            do:
+              TerminalEscalation.escalate_terminal_error(
+                reason,
+                n,
+                role,
+                terminal_seams(state)
+              ),
+            else: {:error, reason}
 
-            # G2 (funnel): a NON-TRANSIENT TERMINAL error must NOT bubble up as a log-only `{:noreply}`
-            # — otherwise the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step →
-            # re-fail → infinite CHURN without ever notifying a human (asymmetry with the verdict path which
-            # does escalate). We ESCALATE it to the arch (await_arch: comment + `lcars-awaits-arch` + unlock
-            # → the poller SKIPS the issue, the churn stops, the human decides). The other errors bubble up
-            # unchanged: transient/self-healing (`:no_gatekeeper` = the permanent gatekeeper reboots,
-            # reconciliation re-dispatches) or handled elsewhere (unreadable workflow_map → IncidentRegistry, G6).
-            if TerminalEscalation.terminal_escalate?(reason),
-              do:
-                TerminalEscalation.escalate_terminal_error(
-                  reason,
-                  n,
-                  role,
-                  terminal_seams(state)
-                ),
-              else: {:error, reason}
+        # Gatekeeper escalation: bubbles up to the handle_info that stores `gate_evals`.
+        {:escalate, corr, eval_ctx} ->
+          {:escalate, corr, eval_ctx}
 
-          # Gatekeeper escalation: bubbles up to the handle_info that stores `gate_evals`.
-          {:escalate, corr, eval_ctx} ->
-            {:escalate, corr, eval_ctx}
+        # The finishing step is a JUDGE (brief_kind:judge): its verdict IS the decision →
+        # `apply_verdict` (THE verdict function, shared with the async gatekeeper). No hard gate.
+        {:judge_verdict, decision, trace, ctx} ->
+          apply_verdict(decision, trace, ctx, state)
 
-          # The finishing step is a JUDGE (brief_kind:judge): its verdict IS the decision →
-          # `apply_verdict` (THE verdict function, shared with the async gatekeeper). No hard gate.
-          {:judge_verdict, decision, trace, ctx} ->
-            apply_verdict(decision, trace, ctx, state)
-
-          {:ok, intent, {next_assignee, next_step}} ->
-            complete_business_step_run(payload, n, role, intent, next_assignee, next_step, state)
-        end
+        {:ok, intent, {next_assignee, next_step}} ->
+          complete_business_step_run(payload, n, role, intent, next_assignee, next_step, state)
+      end
     end
   end
 

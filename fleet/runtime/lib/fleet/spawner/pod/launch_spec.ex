@@ -278,8 +278,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       )
     end
 
-    clean
-    |> Enum.map(fn m ->
+    Enum.map_join(clean, "\n", fn m ->
       # `mode` is bound to the closed enum `{ro, rw}` — an out-of-enum value (config typo `"RW"`, nil) is
       # NOT serialized raw into `LCARS_POD_MOUNTS` (which would delegate RW/RO semantics to bwrap_launch's
       # parse — a permissive read of an unknown mode = a write OUT of the sandbox). Unknown → the RESTRICTIVE
@@ -289,7 +288,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       path = Map.get(m, "path") || Map.get(m, :path)
       "#{mode}:#{path}"
     end)
-    |> Enum.join("\n")
   end
 
   defp mounts_env(_), do: ""

@@ -195,22 +195,23 @@ defmodule Fleet.CapProfile.Catalog do
         # FS (fail-closed → `:invalid_modop`, like a reserved/nonconformant fragment).
         modop_root = Path.join(root_dir(), "modop")
 
-        with {:ok, dir} <- Fleet.Slug.confined_join(modop_root, name) do
-          path = Path.join(dir, "profile.yaml")
+        case Fleet.Slug.confined_join(modop_root, name) do
+          {:ok, dir} ->
+            path = Path.join(dir, "profile.yaml")
 
-          if File.exists?(path) do
-            with {:ok, raw} <- decode_yaml(path),
-                 :ok <- Schema.validate_modop_keys(raw),
-                 :ok <- Schema.validate(raw, :modop) do
-              {:cont, {:ok, [raw | acc]}}
+            if File.exists?(path) do
+              with {:ok, raw} <- decode_yaml(path),
+                   :ok <- Schema.validate_modop_keys(raw),
+                   :ok <- Schema.validate(raw, :modop) do
+                {:cont, {:ok, [raw | acc]}}
+              else
+                {:error, reason} -> {:halt, {:error, reason}}
+              end
             else
-              {:error, reason} -> {:halt, {:error, reason}}
+              Logger.warning("Catalog: modop not found: #{inspect(name)} at #{path}")
+              {:halt, {:error, :modop_not_found}}
             end
-          else
-            Logger.warning("Catalog: modop not found: #{inspect(name)} at #{path}")
-            {:halt, {:error, :modop_not_found}}
-          end
-        else
+
           {:error, _slug_or_escape} ->
             Logger.warning(
               "Catalog: modop name not confined (slug/traversal): #{inspect(name)} — refused"

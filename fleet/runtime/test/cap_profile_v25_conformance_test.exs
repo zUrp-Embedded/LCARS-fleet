@@ -12,7 +12,14 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   """
   use ExUnit.Case, async: true
 
-  @schema_path Path.join([__DIR__, "..", "priv", "cap_profile", "schema", "cap-profile-v2.5.json"])
+  @schema_path Path.join([
+                 __DIR__,
+                 "..",
+                 "priv",
+                 "cap_profile",
+                 "schema",
+                 "cap-profile-v2.5.json"
+               ])
   @canon_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles"])
 
   @profiles ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)

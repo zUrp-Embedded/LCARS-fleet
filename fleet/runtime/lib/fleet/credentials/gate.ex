@@ -32,9 +32,8 @@ defmodule Fleet.Credentials.Gate do
           :ok | {:error, {:credentials_invalid, term()}}
   def validate(claude_dir, cap_profile) do
     with {:ok, oauth} <- read_oauth_creds(claude_dir),
-         :ok <- gate_scopes(oauth, cap_profile),
-         :ok <- gate_plan(oauth) do
-      :ok
+         :ok <- gate_scopes(oauth, cap_profile) do
+      gate_plan(oauth)
     end
   end
 

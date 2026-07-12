@@ -4,6 +4,7 @@ defmodule Fleet.EnvParse do
   # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
   # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
+
   @moduledoc """
   Domain-typed parsing of environment variables for `config/runtime.exs` — a PURE, TESTABLE primitive
   (Ring 0, alongside `Fleet.Slug`/`Fleet.GitRef`).

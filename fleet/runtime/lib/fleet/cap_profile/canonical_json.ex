@@ -53,16 +53,13 @@ defmodule Fleet.CapProfile.CanonicalJson do
               "(#{inspect(keys -- Enum.uniq(keys))}) — ambiguous canonical form, cannot hash deterministically"
     end
 
-    body =
-      pairs
-      |> Enum.map(fn {k, v} -> Jason.encode!(k) <> ":" <> v end)
-      |> Enum.join(",")
+    body = Enum.map_join(pairs, ",", fn {k, v} -> Jason.encode!(k) <> ":" <> v end)
 
     "{" <> body <> "}"
   end
 
   def encode(list) when is_list(list) do
-    inner = list |> Enum.map(&encode/1) |> Enum.join(",")
+    inner = Enum.map_join(list, ",", &encode/1)
     "[" <> inner <> "]"
   end
 

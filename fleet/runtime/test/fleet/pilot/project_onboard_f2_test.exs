@@ -36,7 +36,9 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
     # forge — le compte de service est un simple membre d'org (ni owner, ni membre de `humans`),
     # Gitea refuse GET /teams/<id>/members/<u>. « Ne peut pas vérifier » ≠ « humain absent ».
     def user_exists?(_u, _fc), do: {:ok, true}
-    def team_member?(_org, "humans", _u, _fc), do: {:error, {:http, 403, %{"message" => "Forbidden"}}}
+
+    def team_member?(_org, "humans", _u, _fc),
+      do: {:error, {:http, 403, %{"message" => "Forbidden"}}}
   end
 
   defp opts(tmp, users),
@@ -48,7 +50,9 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
     ]
 
   @tag :tmp_dir
-  test "compte forge absent → human_not_provisioned + gestes admin exacts (compte)", %{tmp_dir: tmp} do
+  test "compte forge absent → human_not_provisioned + gestes admin exacts (compte)", %{
+    tmp_dir: tmp
+  } do
     assert {:error, {:human_not_provisioned, "ghost-human", gestures}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, NoAccountUsers))
 
@@ -68,7 +72,9 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
   end
 
   @tag :tmp_dir
-  test "forge en PANNE → forge_preflight_failed, JAMAIS d'instructions de création", %{tmp_dir: tmp} do
+  test "forge en PANNE → forge_preflight_failed, JAMAIS d'instructions de création", %{
+    tmp_dir: tmp
+  } do
     assert {:error, {:forge_preflight_failed, {:transport, :econnrefused}}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, DownForge))
   end

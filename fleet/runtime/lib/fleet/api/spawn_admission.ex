@@ -107,20 +107,18 @@ defmodule Fleet.API.SpawnAdmission do
   defp parse_admin_spawn_dto(raw) when is_map(raw) do
     extraneous = Map.keys(raw) -- @admin_spawn_public_fields
 
-    cond do
-      extraneous != [] ->
-        {:error, {:forbidden_fields, extraneous}}
+    if extraneous != [] do
+      {:error, {:forbidden_fields, extraneous}}
+    else
+      with {:ok, opts} <- build_admin_opts(raw),
+           :ok <- validate_issue_id(raw) do
+        payload =
+          raw
+          |> Map.take(["cap_profile_name", "role", "issue_id"])
+          |> maybe_put_opts(opts)
 
-      true ->
-        with {:ok, opts} <- build_admin_opts(raw),
-             :ok <- validate_issue_id(raw) do
-          payload =
-            raw
-            |> Map.take(["cap_profile_name", "role", "issue_id"])
-            |> maybe_put_opts(opts)
-
-          {:ok, payload}
-        end
+        {:ok, payload}
+      end
     end
   end
 

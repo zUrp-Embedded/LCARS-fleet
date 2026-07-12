@@ -4,6 +4,7 @@ defmodule Fleet.Slug do
   # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
   # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
+
   @moduledoc """
   Smart-constructor for a CONFINED-BY-CONSTRUCTION name used as an FS path
   component or a bounded URL segment.
@@ -168,6 +169,4 @@ defmodule Fleet.Slug do
       if under_root?(abs, root), do: {:ok, abs}, else: {:error, {:path_escape, abs}}
     end
   end
-
-
 end

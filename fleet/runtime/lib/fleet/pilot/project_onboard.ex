@@ -171,9 +171,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
     else
       with :ok <- add_work_ops(proj_dir, work_dir),
            :ok <- Scaffold.work(work_dir, name, opts),
-           :ok <- commit(work_dir, "chore(import): init work/ops"),
-           :ok <- push(work_dir, "work/ops", true) do
-        :ok
+           :ok <- commit(work_dir, "chore(import): init work/ops") do
+        push(work_dir, "work/ops", true)
       end
     end
   end

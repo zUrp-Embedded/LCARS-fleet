@@ -14,6 +14,7 @@ defmodule Fleet.SPBuilder do
       Fleet.CapProfile
     ],
     exports: []
+
   @moduledoc """
   System Prompt builder/composer (LCARS schema v2.5).
 

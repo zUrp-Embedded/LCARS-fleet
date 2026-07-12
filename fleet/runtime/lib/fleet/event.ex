@@ -4,6 +4,7 @@ defmodule Fleet.Event do
   # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
   # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: [UnregisteredError]
+
   @moduledoc """
   Canonical schema of the events published on the Phoenix.PubSub topic `fleet.events`.
 

@@ -212,7 +212,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
 
-      case apply(onboard, :onboard, [name, opts]) do
+      case onboard.onboard(name, opts) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
           {:ok,
            %{
@@ -232,7 +232,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
     with {:ok, onboard} <- conforming_onboard() do
-      case apply(onboard, :import, [full_name, []]) do
+      case onboard.import(full_name, []) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
           {:ok,
            %{
@@ -259,14 +259,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
+        case forge.create_issue(repo, title, brief, issue_opts) do
           {:ok, number} ->
             # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
             # (burning the workflow_map) is NO LONGER here: it is the responsibility of the SYSTEM — the POLLER burns
             # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
             # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
             # onboarded the same way.) type:feature = a visual LABEL (human), best-effort — NEVER routing.
-            _ = apply(forge, :add_label, [repo, number, "type:feature", []])
+            _ = forge.add_label(repo, number, "type:feature", [])
 
             {:ok,
              %{

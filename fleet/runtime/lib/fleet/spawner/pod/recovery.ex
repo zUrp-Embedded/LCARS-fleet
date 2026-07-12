@@ -48,10 +48,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
   """
   @spec recovery_action(atom()) :: :release | :recreate
   def recovery_action(phase) do
-    cond do
-      phase in [:succeeded, :released, :killed] -> :release
-      true -> :recreate
-    end
+    if phase in [:succeeded, :released, :killed], do: :release, else: :recreate
   end
 
   @doc """

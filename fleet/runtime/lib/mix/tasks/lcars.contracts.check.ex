@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Z4 migration — tâche Mix classifiée dans la boundary de son sujet (Fleet.Application).
   use Boundary, classify_to: Fleet.Application
+
   @shortdoc "Verifies inter-module contracts at load (refuses the build if a contract is reopened)"
 
   @moduledoc """
@@ -750,19 +751,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Enum.flat_map(opts.files, fn rel ->
         abs = Path.join(root, rel)
 
-        cond do
-          # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; on an ABSENT file
-          # `grep_lines` returns `[]` (0 residue) → `:pass` FOREVER, even though the target moved/was
-          # deleted and the contract is no longer verified. An absent residue target is therefore a
-          # FAILURE, not a silent green — the check must be told its file vanished.
-          not File.exists?(abs) ->
-            ["#{rel}:MISSING — residue-check target absent (hollow-green guard, R0-EVT-012)"]
-
-          true ->
-            abs
-            |> grep_lines(opts.pattern)
-            |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
-            |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; on an ABSENT file
+        # `grep_lines` returns `[]` (0 residue) → `:pass` FOREVER, even though the target moved/was
+        # deleted and the contract is no longer verified. An absent residue target is therefore a
+        # FAILURE, not a silent green — the check must be told its file vanished.
+        if File.exists?(abs) do
+          abs
+          |> grep_lines(opts.pattern)
+          |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+          |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+        else
+          ["#{rel}:MISSING — residue-check target absent (hollow-green guard, R0-EVT-012)"]
         end
       end)
 
@@ -928,13 +927,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       remediation:
         "retirer du .sh les rôles fantômes (hors catalogue canon) — ou si un rôle neuf est " <>
           "légitime, son cap-profile canon DOIT exister d'abord (le canon est la source)",
-      status: if(is_list(phantoms) and phantoms == [] and catalogue != [], do: :pass, else: :fail),
+      status:
+        if(is_list(phantoms) and phantoms == [] and catalogue != [], do: :pass, else: :fail),
       evidence:
         cond do
-          is_nil(roles) -> ["#{sh_path}: ligne ROLES=\"…\" introuvable — fail-closed"]
-          catalogue == [] -> ["catalogue canon vide/introuvable — fail-closed"]
-          phantoms != [] -> ["rôles fantômes dans le .sh (absents du canon) : #{inspect(phantoms)}"]
-          true -> []
+          is_nil(roles) ->
+            ["#{sh_path}: ligne ROLES=\"…\" introuvable — fail-closed"]
+
+          catalogue == [] ->
+            ["catalogue canon vide/introuvable — fail-closed"]
+
+          phantoms != [] ->
+            ["rôles fantômes dans le .sh (absents du canon) : #{inspect(phantoms)}"]
+
+          true ->
+            []
         end,
       note:
         "provisioning .sh ⊆ catalogue canon (#{length(catalogue)} rôles) — la 2ᵉ liste ne peut " <>
@@ -969,11 +976,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(projection? and asserts?, do: :pass, else: :fail),
       evidence:
         cond do
-          not projection? -> ["#{acceptor}: projection \"inputSchema\" absente du code (F1 rouvert)"]
-          not asserts? -> ["#{test}: paire assert inputSchema / refute input_schema absente"]
-          true -> []
+          not projection? ->
+            ["#{acceptor}: projection \"inputSchema\" absente du code (F1 rouvert)"]
+
+          not asserts? ->
+            ["#{test}: paire assert inputSchema / refute input_schema absente"]
+
+          true ->
+            []
         end,
-      note: "frontière socket = wire (camelCase) ; forme interne ExMCP = snake — F1 verrouillé au gate"
+      note:
+        "frontière socket = wire (camelCase) ; forme interne ExMCP = snake — F1 verrouillé au gate"
     }
   end
 

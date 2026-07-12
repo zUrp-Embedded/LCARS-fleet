@@ -188,7 +188,6 @@ defmodule Fleet.API.Rest do
     end
   end
 
-
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
   end

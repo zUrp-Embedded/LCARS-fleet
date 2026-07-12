@@ -92,9 +92,8 @@ defmodule Fleet.Workflow.Deliverable do
     with :ok <- check_keys(opts, @common_keys),
          :ok <- check_mode(opts.mode),
          :ok <- check_types(opts),
-         :ok <- check_mode_keys(opts),
-         :ok <- check_push_keys(opts) do
-      :ok
+         :ok <- check_mode_keys(opts) do
+      check_push_keys(opts)
     end
   end
 
@@ -131,9 +130,8 @@ defmodule Fleet.Workflow.Deliverable do
   # payload mode: the content keys are required. git_native mode: the content comes from the pod, nothing
   # to supply (the commit's presence is verified at `materialize_content`).
   defp check_mode_keys(%{mode: :payload} = opts) do
-    with :ok <- check_keys(opts, @payload_keys),
-         :ok <- check_keys(opts.identity, @identity_keys) do
-      :ok
+    with :ok <- check_keys(opts, @payload_keys) do
+      check_keys(opts.identity, @identity_keys)
     end
   end
 
@@ -144,9 +142,8 @@ defmodule Fleet.Workflow.Deliverable do
   defp check_push_keys(opts) do
     if push?(opts) do
       with :ok <- check_keys(opts, [:remote, :target_branch]),
-           :ok <- check_ref(opts.target_branch),
-           :ok <- check_ref(local_ref(opts)) do
-        :ok
+           :ok <- check_ref(opts.target_branch) do
+        check_ref(local_ref(opts))
       end
     else
       :ok

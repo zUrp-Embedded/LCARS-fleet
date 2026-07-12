@@ -4,6 +4,7 @@ defmodule Fleet.SchemaCache do
   # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
   # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
+
   @moduledoc """
   Single authority for the "load an artifact once, cache it in `:persistent_term`"
   pattern (resolved JSON schemas, boot-time configs).

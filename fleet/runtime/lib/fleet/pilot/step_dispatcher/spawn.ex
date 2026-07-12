@@ -176,7 +176,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
-            "(lock removed#{if(not alive_before?, do: ", pod killed", else: "")} — re-dispatch on next tick)"
+            "(lock removed#{if(alive_before?, do: "", else: ", pod killed")} — re-dispatch on next tick)"
         )
 
         err
@@ -395,7 +395,6 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # Tout ce qui NOMME/RÉSOUT une identité embarquée dans les spawn_opts : rc_name,
   # feature_slug, maybe_put_route, resolve_repo_id — partagé par les DEUX flux.) ──
 
-
   @doc """
   Desktop RC name = `<project>_<role>` (project = final segment of the repo, e.g.
   `fleet/poc-8` → `poc-8`). EXACT label (claude_launch → `--remote-control "<name>"`, zero auto
@@ -455,7 +454,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   def resolve_repo_id(forge, repo, forge_opts) do
     if function_exported?(forge, :repo_id, 2) do
       case forge.repo_id(repo, forge_opts) do
-        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 10000)
+        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 10_000)
         _ -> nil
       end
     else

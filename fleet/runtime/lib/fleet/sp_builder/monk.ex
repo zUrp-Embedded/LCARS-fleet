@@ -51,26 +51,24 @@ defmodule Fleet.SPBuilder.Monk do
     registry_rel = Map.get(knowledge, "monk_registry")
     instance = Map.get(knowledge, "monk_instance")
 
-    cond do
-      is_nil(registry_rel) or is_nil(instance) ->
-        :not_a_monk
+    if is_nil(registry_rel) or is_nil(instance) do
+      :not_a_monk
+    else
+      root =
+        Keyword.get(opts, :monk_registry_root) ||
+          Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
+          Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
 
-      true ->
-        root =
-          Keyword.get(opts, :monk_registry_root) ||
-            Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
-            Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
+      path = Path.join(root, registry_rel)
 
-        path = Path.join(root, registry_rel)
-
-        with {:ok, reg} <- read_registry(path),
-             {:ok, monk} <- find_monk(reg, instance) do
-          {:ok,
-           %{
-             persona_hint: Map.get(monk, "persona_hint", ""),
-             corpus_paths: Map.get(monk, "corpus_paths", [])
-           }}
-        end
+      with {:ok, reg} <- read_registry(path),
+           {:ok, monk} <- find_monk(reg, instance) do
+        {:ok,
+         %{
+           persona_hint: Map.get(monk, "persona_hint", ""),
+           corpus_paths: Map.get(monk, "corpus_paths", [])
+         }}
+      end
     end
   end
 

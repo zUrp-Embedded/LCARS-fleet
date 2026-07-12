@@ -19,6 +19,7 @@ defmodule Fleet.Spawner do
       Fleet.TaskQueue
     ],
     exports: [Application, PermanentBoot, PodTmux, Pod.McpProvision, LaunchBackend]
+
   @moduledoc """
   Drives the LCARS v2 pod lifecycle (Ring 1 pod primitive).
 

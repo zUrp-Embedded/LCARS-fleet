@@ -14,6 +14,7 @@ defmodule Fleet.TaskQueue do
       Fleet.EventRouter
     ],
     exports: [WorkItem]
+
   @moduledoc """
   Public API of the LCARS cross-pod orchestration broker.
 

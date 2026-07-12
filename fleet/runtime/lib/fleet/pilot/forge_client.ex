@@ -37,9 +37,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   require Logger
 
-  alias Fleet.Pilot.ForgeProtocol
   alias Fleet.Pilot.ForgeClient.Jury
   alias Fleet.Pilot.ForgeClient.Repo
+  alias Fleet.Pilot.ForgeProtocol
 
   # Plumbing pulled from Transport under the historical names → the domain call-sites stay
   # unchanged (`http_get(config, …)`, `paginate(…)`, `resolve_config(opts)`, …).
@@ -590,22 +590,20 @@ defmodule Fleet.Pilot.ForgeClient do
         # signature is NOT believed "already posted" → the system marker IS (re-)posted (at worst a double-post
         # on replay — over-count-safe for the budget — NEVER a silent suppression). Same fail-safe stance as
         # the paginate-error branch below.
+        # NON load-bearing marker (e.g. `[merge:pr-N]`, posted by the gatekeeper ROLE
+        # account and not the system bot) → AUTHOR-AGNOSTIC dedup. The bot-only filter only
+        # protects the COUNTED markers (`[step_run:role:sha]` → count_signed_step_runs): a gatekeeper
+        # seal comment would otherwise escape the bot-only dedup (double-post on replay/retry).
         trusted =
-          cond do
-            # NON load-bearing marker (e.g. `[merge:pr-N]`, posted by the gatekeeper ROLE
-            # account and not the system bot) → AUTHOR-AGNOSTIC dedup. The bot-only filter only
-            # protects the COUNTED markers (`[step_run:role:sha]` → count_signed_step_runs): a gatekeeper
-            # seal comment would otherwise escape the bot-only dedup (double-post on replay/retry).
-            Keyword.get(opts, :dedup_any_author, false) ->
-              comments
-
-            true ->
-              case forge_bot_login(config, opts) do
-                {:ok, bot} -> Enum.filter(comments, &ForgeProtocol.system_authored?(&1, bot))
-                # Unresolvable bot → trust NOBODY (fail-closed), NOT everybody: a forged signature must not
-                # be believed "already posted" (which would SUPPRESS the system marker → undercount).
-                {:error, _} -> []
-              end
+          if Keyword.get(opts, :dedup_any_author, false) do
+            comments
+          else
+            case forge_bot_login(config, opts) do
+              {:ok, bot} -> Enum.filter(comments, &ForgeProtocol.system_authored?(&1, bot))
+              # Unresolvable bot → trust NOBODY (fail-closed), NOT everybody: a forged signature must not
+              # be believed "already posted" (which would SUPPRESS the system marker → undercount).
+              {:error, _} -> []
+            end
           end
 
         Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)

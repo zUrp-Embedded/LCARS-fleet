@@ -4,6 +4,7 @@ defmodule Fleet.Layout do
   # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
   # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
+
   @moduledoc """
   The single authority for the LCARS platform layout — "where things live" on the box.
 

@@ -6,8 +6,8 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Starfleet.BootOrchestrator
   alias Fleet.EventRouter.Bus
+  alias Fleet.Starfleet.BootOrchestrator
 
   setup do
     :ok = Bus.subscribe()

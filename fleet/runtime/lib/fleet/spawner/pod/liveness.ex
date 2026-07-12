@@ -162,12 +162,10 @@ defmodule Fleet.Spawner.Pod.Liveness do
     override = get_in(state.cap_profile.spec, ["timeouts", "response_sec"])
 
     sec =
-      cond do
-        is_number(override) and override > 0 ->
-          override
-
-        true ->
-          default_response_timeout_sec(state.cap_profile)
+      if is_number(override) and override > 0 do
+        override
+      else
+        default_response_timeout_sec(state.cap_profile)
       end
 
     # The native `:result_deadline` state_timeout requires a non-negative integer (ms). `is_number(override)`

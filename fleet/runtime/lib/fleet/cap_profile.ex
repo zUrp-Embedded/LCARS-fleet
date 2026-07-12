@@ -13,6 +13,7 @@ defmodule Fleet.CapProfile do
       Fleet.SchemaCache
     ],
     exports: []
+
   @moduledoc """
   Capability Profile composer/loader/validator (LCARS schema v2.5).
 

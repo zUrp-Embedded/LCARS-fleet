@@ -14,6 +14,7 @@ defmodule Fleet.Coord do
       Fleet.EventRouter
     ],
     exports: []
+
   @moduledoc """
   System-side Elixir module: declarative routing table
   `{verdict, reason} → {action, escalation_path}` LCARS v2 Ring 2

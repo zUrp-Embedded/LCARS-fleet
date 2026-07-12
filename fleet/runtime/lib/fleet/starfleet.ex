@@ -22,6 +22,7 @@ defmodule Fleet.Starfleet do
       Req
     ],
     exports: [Shutdown, CoordBackend]
+
   @moduledoc """
   System-side module consuming the outputs of arbitration pods
   (gatekeeper + other decision-making roles) on the LCARS core Ring 2 side.

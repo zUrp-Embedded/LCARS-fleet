@@ -30,6 +30,7 @@ defmodule Fleet.API do
       Plug.Static
     ],
     exports: [Application]
+
   @moduledoc """
   LCARS v2 public API (Ring 4 — external boundaries): REST + WS.
 

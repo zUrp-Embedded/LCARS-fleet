@@ -32,3 +32,6 @@ priv/api/build_info.txt
 
 # Release installée (artefact de build, posée par le deploy ; cf. etc/README + bin/fleet_v2)
 /rel/
+
+# Généré par `mix boundary.visualize` (graphe de deps régénérable)
+/boundary/

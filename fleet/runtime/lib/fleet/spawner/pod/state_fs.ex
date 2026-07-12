@@ -167,9 +167,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
     # happens anyway).
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
-           :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)),
-           :ok <- File.rename(tmp, state.state_fs_path) do
-        :ok
+           :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)) do
+        File.rename(tmp, state.state_fs_path)
       end
 
     case result do

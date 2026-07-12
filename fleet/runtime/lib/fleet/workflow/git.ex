@@ -92,9 +92,8 @@ defmodule Fleet.Workflow.Git do
     with :ok <- check_required_keys(opts, @commit_required_keys),
          :ok <- check_workspace_string(opts.workspace),
          :ok <- ensure_git_workspace(opts.workspace),
-         :ok <- git_add(opts),
-         {:ok, sha} <- git_commit(opts) do
-      {:ok, sha}
+         :ok <- git_add(opts) do
+      git_commit(opts)
     end
   end
 
@@ -105,9 +104,8 @@ defmodule Fleet.Workflow.Git do
   defp validate_opts(opts) do
     with :ok <- check_required_keys(opts),
          :ok <- check_workspace_string(opts.workspace),
-         :ok <- check_branch(opts.branch),
-         :ok <- check_push_remote(opts) do
-      :ok
+         :ok <- check_branch(opts.branch) do
+      check_push_remote(opts)
     end
   end
 
@@ -195,9 +193,8 @@ defmodule Fleet.Workflow.Git do
   defp validate_add_paths(_), do: {:error, :invalid_add_paths}
 
   defp git_commit(opts) do
-    with :ok <- run_commit(opts),
-         {:ok, sha} <- read_head_sha(opts.workspace) do
-      {:ok, sha}
+    with :ok <- run_commit(opts) do
+      read_head_sha(opts.workspace)
     end
   end
 

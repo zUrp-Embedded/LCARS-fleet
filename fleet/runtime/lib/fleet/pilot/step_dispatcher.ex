@@ -140,7 +140,10 @@ defmodule Fleet.Pilot.StepDispatcher do
         # other callers) → normal read/load (fallback).
         with {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               Opts.tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
+               Opts.tag_err(
+                 resolve_route(opts, forge, repo, number, forge_opts),
+                 :route_resolution
+               ),
              {:ok, route} <-
                ensure_workflow_map_or_onboard(
                  forge,
@@ -412,7 +415,6 @@ defmodule Fleet.Pilot.StepDispatcher do
     )
   end
 
-
   # WorkflowMap-driven role: derives `{role, profile, step_spec}` from the workflow_map POSITION (written route) +
   # profile load. route nil = anomaly → fail-loud (no producer fallback). WorkflowMap/step/
   # profile unresolved = misconfig → `{:error, _}` (fail-loud).
@@ -505,7 +507,6 @@ defmodule Fleet.Pilot.StepDispatcher do
       _ -> {:error, {:workflow_map_step_unknown, workflow_map_name, step}}
     end
   end
-
 
   # ============================================================
   # Internals

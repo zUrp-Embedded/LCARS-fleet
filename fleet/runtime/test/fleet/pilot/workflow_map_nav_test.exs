@@ -77,7 +77,9 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
   describe "step_role/2 + step_spec/2" do
     test "rôle + spec d'un step connu" do
       assert {:ok, "engineer"} = WorkflowMapNav.step_role(poc_cycle(), "build")
-      assert {:ok, %{"gate" => %{"type" => "hard"}}} = WorkflowMapNav.step_spec(poc_cycle(), "build")
+
+      assert {:ok, %{"gate" => %{"type" => "hard"}}} =
+               WorkflowMapNav.step_spec(poc_cycle(), "build")
     end
 
     test "rôle d'un même rôle sur 2 steps — le NOM désambiguïse (le wrinkle DN §8)" do

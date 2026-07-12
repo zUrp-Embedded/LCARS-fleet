@@ -206,9 +206,8 @@ defmodule Fleet.Workflow.DeliverableGate do
   """
   @spec scan_secrets(Path.t(), String.t()) :: :ok | {:error, reason()}
   def scan_secrets(workspace, base_sha) do
-    with :ok <- scan_secret_filenames(workspace, base_sha),
-         :ok <- scan_secret_content(workspace, base_sha) do
-      :ok
+    with :ok <- scan_secret_filenames(workspace, base_sha) do
+      scan_secret_content(workspace, base_sha)
     end
   end
 
