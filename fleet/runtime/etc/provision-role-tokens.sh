@@ -43,7 +43,10 @@ set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="/home/private"
-ROLES="architect consultant engineer gatekeeper qualifier reviewer vulcan"
+# vulcan RETIRÉ (Z7 migration, F-C165) : rôle fantôme — renommé starfleet au canon 2026-05-27,
+# le provisioning sortait en exit 2 dessus. starfleet PAS ajouté : host-native, 0 conso token.
+# Le check contracts `roles.provisioning_in_catalogue` verrouille désormais cette liste au canon.
+ROLES="architect consultant engineer gatekeeper qualifier reviewer"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"

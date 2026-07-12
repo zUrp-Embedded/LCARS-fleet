@@ -95,7 +95,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_verdict_envelope_unwrapped(root),
         check_no_root_runtime_guard(root),
         # ── Topology lock ──
-        check_layering_dependency_graph(root)
+        check_layering_dependency_graph(root),
+        # ── Authority locks (Z7 migration — un fait = une source, cross-langage) ──
+        check_roles_provisioning_in_catalogue(root),
+        check_mcp_wire_inputschema(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -905,6 +908,85 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           note: "cf. commentaire MIGRATION Z3 (D-19) ci-dessus"
         }
     end
+  end
+
+  # Z7 migration (F-C165 / arbitrage D6) — le provisioning de role-tokens porte une 2ᵉ liste
+  # de rôles (etc/provision-role-tokens.sh ROLES=) qui a DÉJÀ divergé du canon une fois
+  # (vulcan fantôme 6 semaines après le rename starfleet → exit 2 sur rôle inexistant).
+  # SSOT minimal vérifiable AUJOURD'HUI : tout rôle du .sh EXISTE au catalogue canon.
+  # (Le SSOT complet — flag needs_role_token dérivant la liste — reste à implémenter si
+  # l'user tranche A-03 ; ce check attrape la classe de bug vécue en attendant.)
+  # Boundary ne verra JAMAIS ça : le .sh est hors-BEAM — c'est exactement le rôle de CE checker.
+  defp check_roles_provisioning_in_catalogue(root) do
+    sh_path = Path.join(root, "etc/provision-role-tokens.sh")
+
+    roles =
+      case Regex.run(~r/^ROLES="([^"]*)"/m, File.read!(sh_path)) do
+        [_, list] -> String.split(list)
+        _ -> nil
+      end
+
+    catalogue =
+      root
+      |> Path.join("priv/cap_profile/canon/cap-profiles/*.yaml")
+      |> Path.wildcard()
+      |> Enum.map(&Path.basename(&1, ".yaml"))
+      |> Enum.reject(&String.starts_with?(&1, "_"))
+
+    phantoms = if roles, do: roles -- catalogue, else: nil
+
+    %{
+      id: "roles.provisioning_in_catalogue",
+      remediation:
+        "retirer du .sh les rôles fantômes (hors catalogue canon) — ou si un rôle neuf est " <>
+          "légitime, son cap-profile canon DOIT exister d'abord (le canon est la source)",
+      status: if(is_list(phantoms) and phantoms == [] and catalogue != [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          is_nil(roles) -> ["#{sh_path}: ligne ROLES=\"…\" introuvable — fail-closed"]
+          catalogue == [] -> ["catalogue canon vide/introuvable — fail-closed"]
+          phantoms != [] -> ["rôles fantômes dans le .sh (absents du canon) : #{inspect(phantoms)}"]
+          true -> []
+        end,
+      note:
+        "provisioning .sh ⊆ catalogue canon (#{length(catalogue)} rôles) — la 2ᵉ liste ne peut " <>
+          "plus dériver en silence"
+    }
+  end
+
+  # Z7 migration (F1 / F-C138-format) — le wire MCP exige inputSchema (camelCase) là où la
+  # forme interne ExMCP est input_schema (snake) : la régression F1 a rendu TOUS les pods
+  # muets (tools silencieusement rejetés par claude). Le fix vit à la frontière socket
+  # (PodSocketAcceptor projette en MCP-wire) + un test de non-régression. CE check verrouille
+  # le CONTRAT au gate : la projection existe dans le code ET le test anti-régression existe
+  # (si quelqu'un supprime le test, le gate le voit — ceinture du filet ExUnit).
+  defp check_mcp_wire_inputschema(root) do
+    acceptor = Path.join(root, "lib/fleet/mcp/pod_socket_acceptor.ex")
+    test = Path.join(root, "test/pod_socket_test.exs")
+
+    projection? =
+      acceptor
+      |> grep_lines(~r/"inputSchema"/)
+      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/"inputSchema"/, strip_comment(line)) end)
+
+    test_src = if File.exists?(test), do: File.read!(test), else: ""
+    asserts? = test_src =~ ~s("inputSchema") and test_src =~ ~s("input_schema")
+
+    %{
+      id: "mcp.wire_inputschema",
+      remediation:
+        "restaurer la projection MCP-wire (inputSchema camelCase) à la frontière socket " <>
+          "(PodSocketAcceptor) + le test assert/refute de pod_socket_test (régression F1 : " <>
+          "pods muets, tools rejetés en silence)",
+      status: if(projection? and asserts?, do: :pass, else: :fail),
+      evidence:
+        cond do
+          not projection? -> ["#{acceptor}: projection \"inputSchema\" absente du code (F1 rouvert)"]
+          not asserts? -> ["#{test}: paire assert inputSchema / refute input_schema absente"]
+          true -> []
+        end,
+      note: "frontière socket = wire (camelCase) ; forme interne ExMCP = snake — F1 verrouillé au gate"
+    }
   end
 
   defp render_yaml(overall, checks) do
