@@ -1,7 +1,8 @@
 defmodule Fleet.Application do
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports: :all = 1ʳᵉ passe
-  # (serrage par façade en Z4b). Le compilateur refuse toute violation — plus de discipline.
+  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
+  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
+  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary,
     deps: [
       Fleet.EventRouter,

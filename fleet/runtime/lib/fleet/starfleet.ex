@@ -1,7 +1,8 @@
 defmodule Fleet.Starfleet do
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports: :all = 1ʳᵉ passe
-  # (serrage par façade en Z4b). Le compilateur refuse toute violation — plus de discipline.
+  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
+  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
+  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -20,7 +21,7 @@ defmodule Fleet.Starfleet do
       # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
       Req
     ],
-    exports: :all
+    exports: [Shutdown, CoordBackend]
   @moduledoc """
   System-side module consuming the outputs of arbitration pods
   (gatekeeper + other decision-making roles) on the LCARS core Ring 2 side.

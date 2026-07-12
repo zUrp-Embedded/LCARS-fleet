@@ -1,7 +1,8 @@
 defmodule Fleet.EventRouter do
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports: :all = 1ʳᵉ passe
-  # (serrage par façade en Z4b). Le compilateur refuse toute violation — plus de discipline.
+  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
+  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
+  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -21,7 +22,7 @@ defmodule Fleet.EventRouter do
       Plug.Router,
       Plug.Router.Utils
     ],
-    exports: :all
+    exports: [Bus, Listener]
   @moduledoc """
   LCARS v2 event bus + event registry (Ring 0 — substrate: PubSub `fleet.events`, 0 deps,
   ~12 apps depend on it; consumption = direct PubSub subscribers, no dispatch table).

@@ -1,8 +1,9 @@
 defmodule Fleet.Slug do
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports: :all = 1ʳᵉ passe
-  # (serrage par façade en Z4b). Le compilateur refuse toute violation — plus de discipline.
-  use Boundary, deps: [], exports: :all
+  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
+  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
+  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  use Boundary, deps: [], exports: []
   @moduledoc """
   Smart-constructor for a CONFINED-BY-CONSTRUCTION name used as an FS path
   component or a bounded URL segment.
