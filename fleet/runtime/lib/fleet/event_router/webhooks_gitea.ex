@@ -231,7 +231,18 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   # API keyed on `number` independently. If a webhook→pod correlation is ever re-wired, switch to `number`
   # (the Poller's key), not `id` — not a unilateral R0 edit until then.
   defp issue_ref(body, id) do
-    repo = get_in(body, ["repository", "full_name"]) || "unknown"
+    # Pattern-match the body STRUCTURE, not `get_in` then a guard: `Plug.Parsers` guarantees `body`
+    # is a map, NOT that `repository` is one. On `{"repository": "x"}` (a forged/malformed body),
+    # `get_in("x", ["full_name"])` raises `FunctionClauseError` in `Access` — and the `|| "unknown"`
+    # only catches `repository` ABSENT, not non-map. That raise fires in `extract_issue/1` at the
+    # call site ABOVE the `try` → Cowboy 500, OUTSIDE the 422-on-drift discipline this module holds.
+    # Same hardening already applied to `action` (is_binary guard) — the twin case, left undone here.
+    repo =
+      case body do
+        %{"repository" => %{"full_name" => full_name}} when is_binary(full_name) -> full_name
+        _ -> "unknown"
+      end
+
     "#{repo}##{id}"
   end
 end

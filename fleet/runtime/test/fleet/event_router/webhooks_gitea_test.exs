@@ -152,6 +152,27 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
+    test "repository NON-MAP (corps forgé) → sentinelle `unknown`, PAS un crash 500 hors discipline 422", %{
+      secret: secret
+    } do
+      # `Plug.Parsers` garantit que `body` est une map, PAS que `repository` en est une. Un corps
+      # forgé `{"repository": "x"}` faisait lever `get_in("x", ["full_name"])` (FunctionClauseError
+      # dans Access) DANS extract_issue, AVANT le `try` → Cowboy 500, hors de la discipline
+      # 422-on-drift du module (le `|| "unknown"` n'attrapait que repository ABSENT). Jumeau exact du
+      # cas `action` non-string déjà durci. Le fix pattern-matche la structure → `unknown`, pas un raise.
+      body = %{"action" => "opened", "issue" => %{"id" => 7}, "repository" => "x"}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+
+      assert_receive %Fleet.Event{
+                       source: :event_router,
+                       type: :"gitea.opened",
+                       payload: %{"issue_id" => "unknown#7"}
+                     },
+                     500
+    end
+
     test "R0-EVT-008 : repo DYNAMIQUE depuis repository.full_name (plus hardcodé fleet/lcars)", %{
       secret: secret
     } do
