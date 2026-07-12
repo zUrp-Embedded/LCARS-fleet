@@ -139,6 +139,64 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     assert_receive {:respawn_attempt, "architect"}, 1_000
   end
 
+  # ── Rail 2 : réconciliation (le rail event est AVEUGLE aux morts silencieuses) ──
+
+  test "tick de réconciliation : un permanent ABSENT du Registry (aucun pod.failed émis) → respawn" do
+    # Un restart du sous-arbre spawner termine ses pods :temporary PROPREMENT → zéro pod.failed →
+    # le warden (purement event-driven) ne voyait RIEN et les permanents restaient morts en
+    # silence jusqu'à une escalade. Le tick re-dérive la vérité : attendus vs Registry vivant.
+    parent = self()
+
+    warden =
+      start_warden(
+        fn role ->
+          send(parent, {:respawn, role})
+          {:ok, "permanent-#{role}"}
+        end,
+        reconcile_ms: 10,
+        expected_roles_fun: fn -> ["architect", "gatekeeper"] end,
+        # gatekeeper vivant, architect DISPARU sans event.
+        live_roles_fun: fn -> ["gatekeeper"] end
+      )
+
+    assert_receive {:respawn, "architect"}, 1_000
+    refute_received {:respawn, "gatekeeper"}
+    assert Process.alive?(warden)
+  end
+
+  test "tick de réconciliation : boot permanent DÉSACTIVÉ (maintenance) → aucun respawn" do
+    # Le mode maintenance documenté (LCARS_BOOT_PERMANENT_AT_START=false) ne doit pas être
+    # défait par un warden qui re-dérive des pods que personne n'a demandés.
+    parent = self()
+
+    start_warden(
+      fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+      reconcile_ms: 10,
+      expected_roles_fun: fn -> ["architect"] end,
+      live_roles_fun: fn -> [] end,
+      reconcile_enabled_fun: fn -> false end
+    )
+
+    refute_receive {:respawn, _}, 200
+  end
+
+  test "tick de réconciliation : énumération qui LÈVE → rien respawné (le filet ne devient jamais un danger)" do
+    # Une énumération cassée (Registry indispo, catalogue illisible) ne doit NI tuer le warden,
+    # NI — pire — rapporter TOUS les permanents comme absents et re-spawner la flotte entière.
+    parent = self()
+
+    warden =
+      start_warden(
+        fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+        reconcile_ms: 10,
+        expected_roles_fun: fn -> raise "catalogue illisible" end,
+        live_roles_fun: fn -> [] end
+      )
+
+    refute_receive {:respawn, _}, 200
+    assert Process.alive?(warden)
+  end
+
   test "backoff_delay/2 : exponentiel plafonné, pur" do
     assert PermanentWarden.backoff_delay(0, 5_000) == 5_000
     assert PermanentWarden.backoff_delay(1, 5_000) == 10_000

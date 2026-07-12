@@ -66,17 +66,31 @@ defmodule Fleet.MCP.Supervisor do
       # (later connections never served → readline timeout). One Task per connection = a slow handler affects
       # only its connection. `restart: :temporary` (Task.Supervisor default): a connection that crashes dies
       # alone, without a restart.
-      # max_children: a pod bridge that leaks its connections can no longer accumulate tasks+fds
-      # without bound — the accept loop receives {:error, :max_children} and refuses the excess connection.
+      # max_children: FLEET-WIDE ceiling on the connection Tasks. A single pod can no longer
+      # consume it (the acceptor caps its own connections per-pod, cf. `PodSocketAcceptor`): this
+      # bound is the last resort against a fleet-wide leak, not the per-pod policy.
       {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor, max_children: 32},
       Fleet.MCP.PodSocketSupervisor
     ]
+
+    children = children ++ socket_warden_child()
 
     Supervisor.init(children,
       strategy: :one_for_one,
       max_restarts: 3,
       max_seconds: 60
     )
+  end
+
+  # Runtime reaper of the sockets orphaned by a brutal teardown (terminate/3 skipped): started
+  # AFTER the Registry + the acceptor DynamicSupervisor it reconciles. Gated `:start_socket_warden`
+  # (default true prod, false test — hermeticity: the tests drive it with explicit seams).
+  defp socket_warden_child do
+    if Application.get_env(:fleet_mcp, :start_socket_warden, true) do
+      [Fleet.MCP.SocketWarden]
+    else
+      []
+    end
   end
 
   @doc """

@@ -143,6 +143,36 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
+  Roles EXPECTED to run as permanents = the catalogue's `boot_at_start?` cap-profiles.
+
+  The SAME selection as `boot_permanent_pods/1` (one authority for "who is permanent"), exposed so
+  the `PermanentWarden` can reconcile expectation against the live Registry — a permanent that dies
+  WITHOUT emitting `pod.failed` (clean sub-tree restart, lost lossy event) is invisible to the
+  event rail. A role whose profile no longer loads is NOT listed (the loud fail-loud belongs to
+  boot; a reconciliation tick must not respawn from a broken artefact — it stays silent about it).
+
+  Seams `:cap_profiles_dir` / `:loader` — same as `boot_permanent_pods/1`.
+  """
+  @spec expected_permanent_roles(keyword()) :: [String.t()]
+  def expected_permanent_roles(opts \\ []) when is_list(opts) do
+    dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
+    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
+
+    case list_roles(dir) do
+      {:ok, roles} ->
+        Enum.flat_map(roles, fn role ->
+          case loader.(role) do
+            {:ok, %Fleet.CapProfile{} = cp} -> if boot_at_start?(cp.spec), do: [role], else: []
+            {:error, _} -> []
+          end
+        end)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc """
   Re-spawn ONE dead permanent pod (rebuildable cattle) — called by `Fleet.Spawner.PermanentWarden`
   on `pod.failed` of a `permanent-<role>` pod. Reuses EXACTLY the boot path (`spawn_one`):
   deterministic idempotent pod_id (`{:already_started}` = no-op if the pod came back in the meantime) +

@@ -15,6 +15,10 @@ config :fleet_mcp, boot_environment: :host
 # résiduels sous :sock_base. Sans cet override il taperait `/run/lcars/mcp` réel (fleet vivante
 # même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
 config :fleet_mcp, sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test")
+# Hermétisme : le SocketWarden réconcilie les sockets contre les pods VIVANTS du spawner — en test
+# il verrait les sockets posées à la main par les cases (aucun pod réel derrière) et les réclamerait
+# sous le nez des tests. Un test qui en a besoin le démarre avec des seams explicites.
+config :fleet_mcp, start_socket_warden: false
 
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot du daemon, même invariant hermétique que fleet_api).

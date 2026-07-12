@@ -783,10 +783,11 @@ defmodule Fleet.Spawner.Pod do
   # port short-circuited, kill tmux no-op on a dead target, File.rm_rf does not raise on the absent),
   # so the double call is harmless. Guarded by rescue/catch: `terminate` must NEVER raise
   # (otherwise it masks the real stop reason). The `after` releases the per-pod MCP socket on every
-  # path that runs `terminate/3` to completion (even if teardown_backend raises). Limit: if the
-  # supervisor brutal-kills a wedged teardown (15s shutdown bound exceeded), the `after` never runs —
-  # the acceptor, AF_UNIX listener, Registry entry and socket file have NO runtime reaper and leak
-  # until the next BEAM boot (cold-boot `PodSocketSupervisor.sweep_stale_sockets/0`).
+  # path that runs `terminate/3` to completion (even if teardown_backend raises). If the supervisor
+  # brutal-kills a wedged teardown (15s shutdown bound exceeded), the `after` never runs — the
+  # acceptor, AF_UNIX listener, Registry entry and socket file survive their pod; `Fleet.MCP.SocketWarden`
+  # reconciles them against the live pods and releases them (2-tick grace), so the leak is bounded by
+  # its tick, not by the next BEAM boot.
   @impl :gen_statem
   def terminate(reason, _state, data) do
     Backend.teardown_backend(data)

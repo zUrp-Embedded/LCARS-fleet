@@ -8,11 +8,23 @@ defmodule Fleet.Spawner.PermanentWarden do
   DEFINITIVE stop until the BEAM restart: the only safety net was the gatekeeper's implicit reboot at
   the next escalation kick — a dead archivist/architect stayed silently absent.
 
-  ## Mechanics
+  ## Mechanics — two rails, one respawn path
 
-  `pod.failed` from a `permanent-*` pod → respawn SCHEDULED with capped exponential backoff, via
-  `PermanentBoot.respawn/2` (the SAME path as boot: deterministic idempotent pod_id + boot-from-base
-  = FRESH context from the versioned base — never the dead pod's accumulated session).
+  1. **Event** (`pod.failed` of a `permanent-*` pod) → respawn SCHEDULED with capped exponential
+     backoff, via `PermanentBoot.respawn/2` (the SAME path as boot: deterministic idempotent
+     pod_id + boot-from-base = FRESH context from the versioned base — never the dead pod's
+     accumulated session).
+  2. **Reconciliation tick** — the event rail is BLIND to a permanent that dies WITHOUT emitting:
+     a restart of the spawner sub-tree terminates its `:temporary` pods CLEANLY (no `pod.failed`),
+     the BootOrchestrator is one-shot at boot, and the Bus is lossy by doctrine. The permanents
+     would stay dead, silently, until an escalation. So the warden also RE-DERIVES the truth
+     periodically: expected permanents (`PermanentBoot.select_permanent`) vs the live Registry —
+     any missing one is respawned through the SAME counter/backoff (a reconciliation cannot spend
+     more than the event rail). The tick is a no-op when the permanent boot is disabled
+     (`LCARS_BOOT_PERMANENT_AT_START=false` — the documented maintenance mode is respected).
+     During a drain, the quiesce gate is expected to live at the mechanical chokepoint
+     (`Fleet.Spawner.spawn_pod` — open arbitration A-13), which covers this tick for free; the
+     seam `:reconcile_enabled_fun` composes it meanwhile.
 
   ## BOUNDED spend (the failure mode = spend, never a churn)
 
@@ -37,6 +49,10 @@ defmodule Fleet.Spawner.PermanentWarden do
     * `:respawn_fun` (default `&Fleet.Spawner.PermanentBoot.respawn/1`) — `(role) -> {:ok, pod_id} | {:error, _}`.
     * `:backoff_base_ms` (default 5_000) — backoff base (reduced in test).
     * `:min_uptime_ms` (default 60_000) — survival threshold that resets the attempt counter.
+    * `:reconcile_ms` (default 60_000) — cadence of the reconciliation tick; `nil` disables it.
+    * `:expected_roles_fun` — `() -> [role]` (default = the permanent roles of the catalogue).
+    * `:live_roles_fun` — `() -> [role]` (default = the `permanent-*` pods live in the Registry).
+    * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
   """
 
@@ -61,10 +77,26 @@ defmodule Fleet.Spawner.PermanentWarden do
     respawn_fun = Keyword.get(opts, :respawn_fun, &Fleet.Spawner.PermanentBoot.respawn/1)
     base = Keyword.get(opts, :backoff_base_ms, 5_000)
     min_uptime = Keyword.get(opts, :min_uptime_ms, 60_000)
-    # attempts: role => {count, last_respawn_mono_ms | nil} — count = consecutive attempts,
-    # stamp = last WARDEN respawn ({:ok, _} from respawn_fun; nil when the last attempt failed
-    # or none happened). Monotonic clock: wall-clock jumps must not fake a survival.
-    {:ok, %{respawn_fun: respawn_fun, base: base, min_uptime: min_uptime, attempts: %{}}}
+    reconcile_ms = Keyword.get(opts, :reconcile_ms, 60_000)
+
+    state = %{
+      respawn_fun: respawn_fun,
+      base: base,
+      min_uptime: min_uptime,
+      reconcile_ms: reconcile_ms,
+      expected_roles_fun: Keyword.get(opts, :expected_roles_fun, &default_expected_roles/0),
+      live_roles_fun: Keyword.get(opts, :live_roles_fun, &default_live_roles/0),
+      reconcile_enabled_fun:
+        Keyword.get(opts, :reconcile_enabled_fun, &default_reconcile_enabled?/0),
+      # attempts: role => {count, last_respawn_mono_ms | nil} — count = consecutive attempts,
+      # stamp = last WARDEN respawn ({:ok, _} from respawn_fun; nil when the last attempt failed
+      # or none happened). Monotonic clock: wall-clock jumps must not fake a survival.
+      attempts: %{}
+    }
+
+    if is_integer(reconcile_ms), do: Process.send_after(self(), :reconcile, reconcile_ms)
+
+    {:ok, state}
   end
 
   @impl true
@@ -137,8 +169,86 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
+  # RECONCILIATION tick — re-derives the truth instead of waiting for an event that may never
+  # come (a cleanly-terminated pod emits no `pod.failed`; the Bus is lossy). Expected permanents
+  # vs live Registry: the missing ones go through the SAME respawn path (counter/backoff shared
+  # with the event rail → a reconciliation can never spend more than an event storm would).
+  def handle_info(:reconcile, state) do
+    if is_integer(state.reconcile_ms),
+      do: Process.send_after(self(), :reconcile, state.reconcile_ms)
+
+    if state.reconcile_enabled_fun.() do
+      missing = expected_missing(state)
+
+      for role <- missing do
+        Logger.warning(
+          "PermanentWarden: permanent #{role} MISSING at reconciliation (no pod.failed seen — " <>
+            "sub-tree restart? lost event?) → respawn"
+        )
+      end
+
+      {:noreply, Enum.reduce(missing, state, &schedule_respawn/2)}
+    else
+      # Permanent boot disabled (maintenance) or fleet quiescing (drain): re-deriving would fight
+      # the operator's own intent. The tick keeps ticking — the gate is a state, not a stop.
+      {:noreply, state}
+    end
+  end
+
   # Any other event / message → no-op (filtering consumer, like PublishConsumer).
   def handle_info(_other, state), do: {:noreply, state}
+
+  # Expected − live, computed defensively: an enumeration that raises (Registry unavailable,
+  # catalogue unreadable) must never kill the warden nor — worse — report EVERY permanent as
+  # missing and respawn the whole fleet. A failed reconciliation yields NOTHING to respawn: the
+  # tick is a safety net, it never becomes a hazard of its own.
+  defp expected_missing(state) do
+    expected = MapSet.new(state.expected_roles_fun.())
+    live = MapSet.new(state.live_roles_fun.())
+
+    expected |> MapSet.difference(live) |> MapSet.to_list()
+  rescue
+    e ->
+      Logger.warning(
+        "PermanentWarden: reconciliation enumeration failed (#{inspect(e)}) — nothing respawned this tick"
+      )
+
+      []
+  catch
+    _, _ -> []
+  end
+
+  # Same counter/backoff/HALT as the event rail (single mechanism — `handle_permanent_death/2`):
+  # a role already exhausted stays HALTed, a reconciliation does not re-arm the spend.
+  defp schedule_respawn(role, state) do
+    {:noreply, new_state} = handle_permanent_death(role, state)
+    new_state
+  end
+
+  # Single authority for "who is permanent" — the SAME selection the boot uses (no fork of the
+  # `boot_at_start?` rule here).
+  defp default_expected_roles, do: Fleet.Spawner.PermanentBoot.expected_permanent_roles()
+
+  defp default_live_roles do
+    Fleet.Spawner.list_pods()
+    |> Enum.flat_map(fn pod ->
+      case Fleet.Spawner.PermanentBoot.parse_permanent(pod[:pod_id] || "") do
+        {:ok, role} -> [role]
+        :not_permanent -> []
+      end
+    end)
+  end
+
+  # Gate of the reconciliation tick. `auto_boot_enabled?` ONLY: the maintenance mode
+  # (`LCARS_BOOT_PERMANENT_AT_START=false`) must not be defeated by a warden re-deriving pods
+  # nobody asked for.
+  #
+  # NOT gated on `Shutdown.Quiesce.quiescing?` here, deliberately: `Fleet.Spawner` does not declare
+  # `Fleet.Shutdown` in its boundary, and wiring that edge IS the open arbitration A-13
+  # (quiesce at the mechanical chokepoint — `spawn_pod` — rather than sprinkled per caller).
+  # The day A-13 lands, the chokepoint covers this tick for free. Until then the seam
+  # `:reconcile_enabled_fun` lets a caller compose the check without widening the boundary.
+  defp default_reconcile_enabled?, do: Fleet.Spawner.PermanentBoot.auto_boot_enabled?()
 
   defp handle_permanent_death(role, state) do
     now = System.monotonic_time(:millisecond)

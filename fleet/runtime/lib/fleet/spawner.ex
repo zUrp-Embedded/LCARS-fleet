@@ -492,10 +492,11 @@ defmodule Fleet.Spawner do
       # Supervisor SHUTDOWN bound = the TEARDOWN time (kill tmux + rm + seed checkpoint,
       # seconds), NOT the pod's lifetime (the old `max_alive_sec * 1000` = 600s waited
       # 10 min on a pod stubborn to stop — dead config without trap_exit, a real wall with it). 15s then
-      # OTP brutal-kill — which cuts `terminate/3` short: the PodWarden reaps the tmux/pod_dir
-      # footprints, but the per-pod MCP socket (acceptor, AF_UNIX listener, Registry entry, socket
-      # file) has NO runtime reaper on that path — it leaks until the next BEAM boot
-      # (cold-boot `PodSocketSupervisor.sweep_stale_sockets/0`).
+      # OTP brutal-kill — which cuts `terminate/3` short. Both footprints have a RUNTIME reaper on
+      # that path: the PodWarden reconciles the tmux sessions/pod_dirs, and `Fleet.MCP.SocketWarden`
+      # reconciles the per-pod MCP socket (acceptor, AF_UNIX listener, Registry entry, socket file)
+      # against the live pods — same 2-tick grace. Cold boot keeps its own sweep
+      # (`PodSocketSupervisor.sweep_stale_sockets/0`) for what a BEAM crash left behind.
       shutdown: 15_000,
       type: :worker
     }

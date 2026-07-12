@@ -20,6 +20,15 @@ defmodule Fleet.MCP.PodSocketSupervisor do
       Idempotent. The `File.rm` is MANDATORY: closing the socket frees the
       descriptor, NOT the file — without `rm` the file leaks.
 
+  ## Orphan reaping (`Fleet.MCP.SocketWarden`)
+
+  `release_pod_socket/1` runs from the pod's `terminate/3` — which a brutal kill (wedged tmux
+  teardown) never reaches: the acceptor, its AF_UNIX listener, its Registry entry and the file
+  would then leak until the next BEAM boot (`sweep_stale_sockets/0` only covers cold boot). The
+  `SocketWarden` closes that asymmetry at RUNTIME: it reconciles the sockets it owns against the
+  pods the spawner reports live, and releases the orphans (grace: 2 ticks, same doctrine as the
+  PodWarden — a socket provisioned for a pod that has not registered yet is not an orphan).
+
   ⚠ CROSS-CONTRACT: these two functions are the REAL (default) impl of the
   `Fleet.Spawner.McpSocketProvisioner` behaviour (the contract of the seam
   `:mcp_socket_provisioner`, on the `fleet_spawner` consumer side). We keep it
@@ -127,6 +136,16 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec base_dir() :: Path.t()
   def base_dir, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
+
+  @doc """
+  Pod ids whose acceptor is LIVE (Registry keys). The reconciliation source of the
+  `Fleet.MCP.SocketWarden`: what this domain believes it is serving, to be confronted with the
+  pods the spawner actually reports live.
+  """
+  @spec live_pod_ids() :: [String.t()]
+  def live_pod_ids do
+    Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
 
   @doc """
   COLD-BOOT sweep of residual per-pod socket files. A `kill -9` of the BEAM skips every `terminate/3`
