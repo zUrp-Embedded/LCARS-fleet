@@ -427,8 +427,11 @@ defmodule Fleet.SPBuilder do
   # ============================================================
 
   # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
-  # the BUNDLED cap-profiles canon (`Application.app_dir(:lcars_fleet, "priv/cap_profile/…")`, the SAME
-  # source as `Fleet.CapProfile.root_dir/0`) → resolves in RELEASE as in dev WITHOUT env.
+  # the BUNDLED cap-profiles canon (`Application.app_dir(:lcars_fleet, "priv/cap_profile/…")`, the
+  # SAME source as `Fleet.CapProfile.root_dir/0`'s DEFAULT — true of the defaults ONLY:
+  # `LCARS_CAPPROFILES_ROOT` repoints the YAML catalogue (`:fleet_cap_profile, :root_dir`) but NOT
+  # this root nor its siblings (modop, subagent_template, monk_registry), which stay on the bundled
+  # priv) → resolves in RELEASE as in dev WITHOUT env.
   # The old relative default `"cap-profiles"` (relative to CWD) gave `:enoent` in release. Config override (test).
   defp sp_role_root do
     Application.get_env(:fleet_sp_builder, :sp_role_root) ||

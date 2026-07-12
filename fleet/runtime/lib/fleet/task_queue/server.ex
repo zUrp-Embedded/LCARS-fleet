@@ -282,8 +282,9 @@ defmodule Fleet.TaskQueue.Server do
             # pod believe "task closed" while the step_run never finishes → lock kept for life): we propagate
             # `{:error, {:broadcast_failed, _}}`. The task STAYS `:completed`+persisted (the deliverable is
             # not lost; the forge-driven rail re-derives as needed), but the pod sees an honest failure.
-            # additive role/issue_id: the DeliveryPublisher stamps the origin agent's identity
-            # onto the forge commit. Existing consumers ignore the extra keys.
+            # additive role/issue_id: KEPT for consumers outside this tree — the Bus feeds the
+            # no-auth WS surface, whose external readers correlate on the origin agent's identity.
+            # No in-tree module reads these keys; existing consumers ignore the extra keys.
             # additive `metadata`: the work_item.completed verdict carries the TASK's metadata (which
             # survives in the broker across a crash of the StepRunConsumer alone). For a gatekeeper eval it carries the
             # resumption context (`gate_eval`/`payload`/`pipeline`/…) → the restarted StepRunConsumer (gate_evals
@@ -372,8 +373,11 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, status}, state}
   end
 
-  # SLOT-FREEZE: issue of the pod's LAST task (covers :completed = the publication window). The
-  # poller uses it so that a project-scoped eng pipe owns the lock of its active/in-progress brick.
+  # SLOT-FREEZE: issue of the pod's LAST task, WHATEVER its state — this query does no state
+  # filtering. Its consumer (the poller's lock reconciliation) pre-filters pods on
+  # `pod_has_active_task?` (F-C050), so only a pod with an ACTIVE task reaches this query. The
+  # publication window (submit → :completed → push) is covered by the reconciliation's 2-tick
+  # grace + the idempotence of the completion sequence, NOT by this query returning terminal tasks.
   def handle_call({:pod_active_issue_id, pod_id}, _from, state) do
     issue =
       case latest_for_pod(state.work_items, pod_id) do

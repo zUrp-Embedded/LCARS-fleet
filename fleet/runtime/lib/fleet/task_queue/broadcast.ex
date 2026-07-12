@@ -17,8 +17,12 @@ defmodule Fleet.TaskQueue.Broadcast do
       warning, always returns `:ok`) — no one FINISHES a step_run on it.
     * `required/3` — load-bearing LIFECYCLE (`work_item.completed`). The failure is NOT
       swallowed: it surfaces `{:error, {:broadcast_failed, _}}` → the caller (`submit_result`
-      on the Server side) propagates it to the pod (which does NOT receive a false "task closed"
-      and can re-submit) instead of an `:ok` that lies.
+      on the Server side) propagates it to the pod, which sees an honest failure instead of a
+      false "task closed". Recovery is NOT a pod re-submit (the item is already
+      `:completed`+persisted BEFORE the broadcast → a re-submit lands in
+      `:double_submit_ignored`): the durable backstop is the forge/poller reconciliation,
+      which reclaims the orphaned lock and re-dispatches the step (cf.
+      `Fleet.MCP.PodTools.WorkItems.submit_result/3`).
 
   In-process `Phoenix.PubSub.broadcast` almost never raises (local supervised process);
   the realistic failure mode is `UnregisteredError` (lifecycle type outside the registry = build/config

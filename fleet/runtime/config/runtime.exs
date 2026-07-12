@@ -412,7 +412,8 @@ if config_env() != :test do
   # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais
   #  une config. Décision 2026-06-09 — cf. pod.ex `runtime_user`/`runtime_home`.)
 
-  # State task-queue (défaut home-relatif `~/.lcars/task-queue/state.json` ; `/var/lib/lcars` = fallback si home irrésoluble).
+  # State task-queue (défaut home-relatif `~/.lcars/task-queue/state.json` ; HOME irrésoluble =
+  # fail-loud délibéré, raise — cf. task_queue/store.ex `default_path/0` ; aucun fallback).
   if path = System.get_env("LCARS_STATE_PATH") do
     config :fleet_task_queue, state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
   end
@@ -447,8 +448,10 @@ if config_env() != :test do
       )
 
   # Seed store (round-1 des pods — optimisation de reprise, JAMAIS requis ; vide = auto-peuplant, le pod
-  # spawne fresh). Défaut repointé sous le home (`~/.lcars/seeds`) : c'est de l'état per-humain, pas du
-  # source/install (seed_store.ex défautait `/home/projects.work`). Override `LCARS_SEED_STORE_ROOT`.
+  # spawne fresh). Override env `LCARS_SEED_STORE_ROOT` du défaut code (`~/.lcars/seeds`, aligné dans
+  # seed_store.ex). Le fallback `/var/lib/lcars` ne sert que si HOME est irrésoluble AU BOOT :
+  # évaluer la config ne doit pas crasher le node pour un store optionnel (le défaut code, lui,
+  # est rescué à l'usage).
   seed_store_root =
     case System.get_env("LCARS_SEED_STORE_ROOT") do
       nil -> Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")

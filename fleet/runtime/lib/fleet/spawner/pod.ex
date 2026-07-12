@@ -406,8 +406,8 @@ defmodule Fleet.Spawner.Pod do
 
         if n >= @extract_retry_max do
           Logger.error(
-            "pod #{data.pod_id} pod.completed UNDELIVERABLE après #{n} retries — résultat NON livré " <>
-              "au step_run → transition_failed (pas de wedge silencieux)"
+            "pod #{data.pod_id} pod.completed UNDELIVERABLE after #{n} retries — result NOT delivered " <>
+              "to the step_run → transition_failed (no silent wedge)"
           )
 
           transition_failed(data, {:pod_completed_undeliverable, n})
@@ -782,8 +782,11 @@ defmodule Fleet.Spawner.Pod do
   # backend a live ORPHAN (claude burns OAuth+RAM). `teardown_backend/1` is idempotent (already-closed
   # port short-circuited, kill tmux no-op on a dead target, File.rm_rf does not raise on the absent),
   # so the double call is harmless. Guarded by rescue/catch: `terminate` must NEVER raise
-  # (otherwise it masks the real stop reason). The `after` releases the per-pod MCP socket on EVERY path
-  # (even if teardown_backend raises) — without it, the socket file + its per-pod dir would LEAK.
+  # (otherwise it masks the real stop reason). The `after` releases the per-pod MCP socket on every
+  # path that runs `terminate/3` to completion (even if teardown_backend raises). Limit: if the
+  # supervisor brutal-kills a wedged teardown (15s shutdown bound exceeded), the `after` never runs —
+  # the acceptor, AF_UNIX listener, Registry entry and socket file have NO runtime reaper and leak
+  # until the next BEAM boot (cold-boot `PodSocketSupervisor.sweep_stale_sockets/0`).
   @impl :gen_statem
   def terminate(reason, _state, data) do
     Backend.teardown_backend(data)

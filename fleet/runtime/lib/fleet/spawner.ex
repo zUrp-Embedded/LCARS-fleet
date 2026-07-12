@@ -167,7 +167,7 @@ defmodule Fleet.Spawner do
 
   @doc """
   Deliberate RECALL: brings the `(projet, role)` agent back alive from its checkpointed seed
-  (`projects.work/<projet>/pods/`). Reads the workflow_map (uuid+jsonl), spawns a pod in resume mode:
+  (`<seed_root>/<projet>/pods/`, cf. `SeedStore`). Reads the workflow_map (uuid+jsonl), spawns a pod in resume mode:
   `session_id` = the seed's uuid, `resume: true`, the seed is restored into the pod BEFORE the launch
   (state :projecting → maybe_recall_restore) → claude `--resume <uuid>` picks up the context. Desktop name
   `<projet>_<role>`. `allow_no_brief` (the pod resumes its context, not idle; no fresh brief).
@@ -492,7 +492,10 @@ defmodule Fleet.Spawner do
       # Supervisor SHUTDOWN bound = the TEARDOWN time (kill tmux + rm + seed checkpoint,
       # seconds), NOT the pod's lifetime (the old `max_alive_sec * 1000` = 600s waited
       # 10 min on a pod stubborn to stop — dead config without trap_exit, a real wall with it). 15s then
-      # OTP brutal-kill; the PodWarden reaps whatever would remain.
+      # OTP brutal-kill — which cuts `terminate/3` short: the PodWarden reaps the tmux/pod_dir
+      # footprints, but the per-pod MCP socket (acceptor, AF_UNIX listener, Registry entry, socket
+      # file) has NO runtime reaper on that path — it leaks until the next BEAM boot
+      # (cold-boot `PodSocketSupervisor.sweep_stale_sockets/0`).
       shutdown: 15_000,
       type: :worker
     }

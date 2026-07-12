@@ -6,8 +6,9 @@
 # gate-r0.8-canon.sh — R0.8. exit 0 ssi les apps réabsorbées ne réfèrent plus `05_data-canon`
 # (chemin doctrine hors-repo) dans leurs tests ET passent 0 fail. Réabsorption incrémentale :
 # chaque sub-brick (mcp, coord, pipeline, spawner, spbuilder) ajoute son bloc ici quand done.
-# NB invocation : les tests à deps umbrella (extra_applications) tournent depuis la RACINE umbrella
-# (`mix test apps/<app>/test/`), PAS depuis l'app-dir (sibling .app hors code-path → boot fail).
+# NB invocation : app unique post-collapse (plus d'arbre apps/) — tout `mix test` tourne depuis la
+# racine du repo, un seul projet mix (le helper check_app garde la forme historique `apps/<app>/`,
+# sans call site depuis F174).
 # PAS de pipefail (mix test exit non-zéro sur fail ≠ échec exécution ; on juge sur "0 failures").
 set -u
 RT="$(cd "$(dirname "$0")/.." && pwd)"

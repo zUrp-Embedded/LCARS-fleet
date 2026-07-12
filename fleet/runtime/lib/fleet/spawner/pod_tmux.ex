@@ -27,9 +27,11 @@ defmodule Fleet.Spawner.PodTmux do
   @tmux_bin "tmux"
 
   @doc """
-  Base of the pod sockets. Config `:fleet_spawner, :tmux_sock_base` (default `~/.lcars/run/tmux-sock`) —
-  SAME default as `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). The `:launching` state sets this env so
-  that both sides (Elixir host / bwrap pod) compute the SAME path.
+  Base of the pod sockets. Config `:fleet_spawner, :tmux_sock_base` (default `~/.lcars/run/tmux-sock`).
+  The alignment invariant with the launchers is the ENV, not the defaults: the `:launching` state
+  ALWAYS exports `LCARS_TMUX_SOCK_BASE` from this value (`Pod.LaunchEnv`), so both sides (Elixir
+  host / launcher pod) compute the SAME path. The launchers' literal fallback
+  (`/run/lcars/tmux-sock`) only covers a direct legacy invocation and need not equal this default.
   """
   @spec sock_base() :: String.t()
   def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, default_sock_base())

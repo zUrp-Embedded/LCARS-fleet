@@ -123,7 +123,9 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def result_block(_), do: ""
 
   @doc false
-  # Pure: extracts the map from the last ```result block of a body, otherwise nil.
+  # Pure: extracts the map from the FIRST ```result block of a body (`Regex.run` = first match),
+  # otherwise nil. The "last wins" semantics lives at the CALLER: `ForgeClient.get_predecessor_result`
+  # reverses the comment list before `find_value`, so the most recent comment's block wins.
   def parse_result_block(body) when is_binary(body) do
     case Regex.run(@result_block_rx, body) do
       [_, json] ->

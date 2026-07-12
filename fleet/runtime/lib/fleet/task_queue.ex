@@ -130,11 +130,13 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:pod_status, pod_id})
 
   @doc """
-  issue_id of the pod's LAST task (`{:ok, issue_id | nil}`). Used by the poller (slot-freeze): a
-  project-scoped PIPE eng (pod_id `<repo>-engineer`, WITHOUT `-issue-N-`) doesn't say in its id which work unit
-  it holds -> lock reconciliation derives it from its active task (the `issue_id`, e.g. `issue-3`).
-  Returns the LAST task (not only :pending/:assigned) to cover the publication window
-  (submit -> :completed -> push) where the pod STILL holds the lock of the delivered work unit. Query Port.
+  issue_id of the pod's LAST task (`{:ok, issue_id | nil}`), WHATEVER its state — no state
+  filtering here. Used by the poller (slot-freeze): a project-scoped PIPE eng (pod_id
+  `<repo>-engineer`, WITHOUT `-issue-N-`) doesn't say in its id which work unit it holds -> lock
+  reconciliation derives it from the task's `issue_id` (e.g. `issue-3`). The reconciliation
+  pre-filters pods on `pod_has_active_task?` (F-C050), so only a pod with an ACTIVE task reaches
+  this query; the publication window (submit -> :completed -> push) is covered by the
+  reconciliation's 2-tick grace + the idempotent completion sequence, NOT by this query. Query Port.
   """
   @spec pod_active_issue_id(String.t()) :: {:ok, String.t() | nil}
   def pod_active_issue_id(pod_id), do: pod_active_issue_id(@server, pod_id)

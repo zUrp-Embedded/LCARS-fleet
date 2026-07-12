@@ -23,7 +23,7 @@ defmodule Fleet.Pilot.Offload do
   @doc """
   Starts `fun` in the `Task.Supervisor` named `supervisor_name`. Returns `{:ok, :offloaded}`
   (the real outcome is logged in the task by the caller). Spawn failure (e.g. `:max_children`
-  reached) → fail-loud: logs `"<consumer>: offload Task échoué (<reason>) — <conséquence>"` +
+  reached) → fail-loud: logs `"<consumer>: offload Task failed (<reason>) — <consequence>"` +
   `{:error, {:offload_failed, reason}}` — the work was NOT launched, and it shows.
 
   `error_label` = `{consumer, consequence}`: the consumer name (log prefix) and the

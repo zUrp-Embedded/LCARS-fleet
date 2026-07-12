@@ -7,7 +7,8 @@ defmodule Fleet.Spawner.SeedStore do
   (which the dying `Pod` discards) and the teardown proceeds. What is lost is only the
   session-memory bonus — the work's durable truth lives on the forge, not in the seed.
 
-  - `seed_root`: `:fleet_spawner, :seed_store_root` (default `/home/projects.work`).
+  - `seed_root`: `:fleet_spawner, :seed_store_root` (default `~/.lcars/seeds` =
+    `Fleet.Layout.state_dir()/seeds`; operator override `LCARS_SEED_STORE_ROOT`, cf. `runtime.exs`).
   - The seed map's `uuid` = the DETERMINISTIC BUILDER of the Desktop slot (the `session_id`
     pre-allocated at spawn, passed as an argument): it is the SINGLE SOURCE of the pod's identity. It is
     NOT derived from the live jsonl's UUID — a `/clear` rotates the live UUID, and a seed that followed it
@@ -54,6 +55,16 @@ defmodule Fleet.Spawner.SeedStore do
 
         {:error, reason}
     end
+  rescue
+    # The "never raises to the caller" contract must cover `root()` too: the default root derives
+    # from `Fleet.Layout.state_dir/0`, which raises on an unresolvable HOME. A raise here must not
+    # kill the dying pod — same downgrade as `do_checkpoint` (logged warning + `{:error, _}`).
+    e ->
+      Logger.warning(
+        "SeedStore: checkpoint #{inspect(projet)}/#{inspect(role)} FAILED (non-fatal): #{inspect(e)}"
+      )
+
+      {:error, e}
   end
 
   defp do_checkpoint(pod_dir, projet, role, session_id, dest_dir) do
@@ -173,6 +184,15 @@ defmodule Fleet.Spawner.SeedStore do
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")
 
+  # Default = per-human state (`~/.lcars/seeds`), the same value `runtime.exs` re-derives for the
+  # `LCARS_SEED_STORE_ROOT` env override. `Fleet.Layout.state_dir/0` raises on an unresolvable
+  # HOME: the no-raise path (`checkpoint/4`) rescues it; `read_map/2` (recall, a deliberate API
+  # call) inherits Layout's fail-loud doctrine.
   defp root,
-    do: Application.get_env(:fleet_spawner, :seed_store_root, Fleet.Layout.work_root())
+    do:
+      Application.get_env(
+        :fleet_spawner,
+        :seed_store_root,
+        Path.join(Fleet.Layout.state_dir(), "seeds")
+      )
 end

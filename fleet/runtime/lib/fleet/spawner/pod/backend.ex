@@ -53,7 +53,7 @@ defmodule Fleet.Spawner.Pod.Backend do
   @spec reap_orphan_pod(String.t()) :: :ok
   def reap_orphan_pod(pod_id) do
     if PodTmux.alive?(pod_id) do
-      Logger.warning("pod #{pod_id}: live orphan detected before launch — reap")
+      Logger.warning("pod #{pod_id} live orphan detected before launch — reap")
       PodTmux.kill_holder(pod_id)
     end
 

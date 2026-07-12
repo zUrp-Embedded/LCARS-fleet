@@ -809,7 +809,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
         case post_route_if_present(forge, repo, n, step_run, forge_opts, :reassign) do
           {:ok, _} ->
             Logger.debug(
-              "StepRunCompleter advance #{repo}##{n} → next step role=#{next} (route recorded, assignee=human unchanged)"
+              "StepRunCompleter: advance #{repo}##{n} → next step role=#{next} (route recorded, assignee=human unchanged)"
             )
 
             {:ok, :reassigned}

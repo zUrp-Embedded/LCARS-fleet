@@ -23,7 +23,7 @@ defmodule Fleet.Spawner.PodWarden do
   accumulation. Here we sweep the tombstones that are TERMINAL (phase `succeeded`/`released`/`killed`)
   and ORPHAN (no live Pod GenServer) and erase both directories via the shared gesture
   `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2` (the re-spawn would re-clone FRESH anyway). Safe because
-  the `--resume` seed lives in the seed-store (`projects.work/<project>/pods/`), NOT in the pod_dir.
+  the `--resume` seed lives in the seed-store (`<seed_root>/<project>/pods/`, default `~/.lcars/seeds` — cf. SeedStore), NOT in the pod_dir.
 
   ## 2-tick grace (both duties)
 

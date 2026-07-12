@@ -82,7 +82,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
           # firing on recurrence, an operator must act. The issue EXISTS (created + usually assigned); its
           # number rides in the reason for cleanup / label-repair.
           Logger.error(
-            "IncidentRegistry.Escalation: sysadmin issue ##{number} created but discovery label " <>
+            "IncidentRegistry: sysadmin issue ##{number} created but discovery label " <>
               "#{inspect(label)} NOT added after retries (#{inspect(reason)}) — NOT label-discoverable, " <>
               "escalation SURFACED as failed (never a lying {:escalated})"
           )
@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
       {:error, reason} when attempt < @label_attempts ->
         Logger.warning(
-          "IncidentRegistry.Escalation: issue ##{number} discovery label #{inspect(label)} attempt " <>
+          "IncidentRegistry: issue ##{number} discovery label #{inspect(label)} attempt " <>
             "#{attempt}/#{@label_attempts} FAILED (#{inspect(reason)}) — retrying"
         )
 

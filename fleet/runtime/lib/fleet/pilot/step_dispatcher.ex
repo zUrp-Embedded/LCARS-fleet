@@ -414,7 +414,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp warn_foreign_reviewers(foreign, repo, pr_number, jury_roles) do
     Logger.warning(
-      "StepDispatcher.dispatch_review (F-C061): non-jury reviewer login(s) #{inspect(foreign)} on PR " <>
+      "StepDispatcher: dispatch_review (F-C061) — non-jury reviewer login(s) #{inspect(foreign)} on PR " <>
         "#{repo}##{pr_number} — IGNORED from the jury (reviewer_roles=#{inspect(MapSet.to_list(jury_roles))}). " <>
         "A non-fleet-judge (human?) reviewed/was-requested; the forge does not prevent it. Not dispatched, not counted."
     )

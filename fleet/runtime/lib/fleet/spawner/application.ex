@@ -77,8 +77,12 @@ defmodule Fleet.Spawner.Application do
     # the :temporary pods survive (never re-registered) made ALL the sockets look orphaned
     # → the PodWarden reaped the LIVE pods at +2 ticks. Restarting the warden re-arms its 2-tick
     # grace (suspects state reset to zero); the pods themselves are not children of this app (their
-    # attachment to the Registry is lost — the reap will claim them as REAL orphans, and
-    # BootOrchestrator/PermanentWarden will bring them back to life: cattle, coherent).
+    # attachment to the Registry is lost — the reap will claim them as REAL orphans). Recovery
+    # coverage after such a reap is PARTIAL by design: PermanentWarden is purely event-driven
+    # (respawns on `pod.failed` ONLY — a pod torn down cleanly emits none) and BootOrchestrator is
+    # one-shot at node boot. The remaining net is WakeRecovery (re-spawn on the next wake/kick of
+    # a pod found dead); a permanent pod not woken by anything stays dead until an escalation or
+    # a human intervention.
     Supervisor.init(children,
       strategy: :rest_for_one,
       # 3/60 explicit (common doctrine).

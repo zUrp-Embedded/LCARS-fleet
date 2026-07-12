@@ -143,8 +143,8 @@ defmodule Fleet.MCP.PodSocketSupervisor do
     |> Path.wildcard()
     |> Enum.each(fn path ->
       Logger.warning(
-        "PodSocketSupervisor: cold-boot sweep du socket résiduel #{path} " <>
-          "(résidu d'instance antérieure — kill -9 ?)"
+        "PodSocketSupervisor: cold-boot sweep of stale socket #{path} " <>
+          "(residue of a previous instance — kill -9?)"
       )
 
       _ = File.rm(path)
@@ -155,7 +155,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   rescue
     e ->
       Logger.warning(
-        "PodSocketSupervisor: cold-boot socket sweep échoué (non-bloquant): #{inspect(e)}"
+        "PodSocketSupervisor: cold-boot socket sweep failed (non-blocking): #{inspect(e)}"
       )
 
       :ok

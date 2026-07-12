@@ -66,8 +66,7 @@ defmodule Fleet.Observation.ReadModel do
     {"mcp.server_crashed", :diagnostics},
     {"sdk.upstream_alert", :diagnostics},
     {"state.corrupt", :diagnostics},
-    {"os.signal", :diagnostics},
-    {"git.", :diagnostics}
+    {"os.signal", :diagnostics}
   ]
 
   # ── Client ────────────────────────────────────────────────────────────────
@@ -92,7 +91,7 @@ defmodule Fleet.Observation.ReadModel do
       # written (fresh boot, transient) → silent `empty()`. Supervised → the absent window is brief.
       if :ets.whereis(@table) == :undefined do
         Logger.warning(
-          "Observation.ReadModel: ETS table #{inspect(@table)} absent — read-model is DOWN, the projection " <>
+          "ReadModel: ETS table #{inspect(@table)} absent — read-model is DOWN, the projection " <>
             "reads EMPTY (a dead read-model looks like a quiet-healthy fleet; the deck is blind until it restarts)"
         )
       end

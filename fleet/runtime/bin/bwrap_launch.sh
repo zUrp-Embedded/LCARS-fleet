@@ -87,8 +87,10 @@ VENDOR_NAME="${LCARS_VENDOR_NAME:-claude}"
 VENDOR_BIN="${LCARS_VENDOR_BIN:-$(readlink -f "$(command -v "$VENDOR_NAME" 2>/dev/null)" 2>/dev/null || true)}"
 VENDOR_SHARE="${LCARS_VENDOR_SHARE:-$([ -n "$VENDOR_BIN" ] && dirname "$(dirname "$VENDOR_BIN")" || true)}"
 
-# Socket-dir par-pod (P1 panel #1 — bind du DIR, pas du fichier inexistant). Parent provisionné à
-# l'install (systemd-tmpfiles.d, `lcars-fleet_service`). Base overridable pour tests (pas de /run perms).
+# Socket-dir par-pod (P1 panel #1 — bind du DIR, pas du fichier inexistant). Le parent est normalement
+# fourni par `bin/fleet_v2`, qui exporte `LCARS_TMUX_SOCK_BASE` sous `~/.lcars/run/tmux-sock` et crée le
+# dir au start. Base overridable pour tests (pas de /run perms).
+# (Le défaut littéral `/run/lcars/tmux-sock` ci-dessous = fallback d'invocation directe legacy seulement.)
 SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
 
 # =============================================================
@@ -184,8 +186,8 @@ fi
 [[ -d "$POD_DIR"     ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 
 # Socket-dir par-pod host-side AVANT le launch (tmux y créera la socket ; on bind le dir). En prod le
-# spawner le crée ; ici idempotent. Parent doit exister (provisionné install) — fail-fast au boundary.
-[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (provisioning systemd-tmpfiles.d / LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
+# spawner le crée ; ici idempotent. Parent doit exister (posé par bin/fleet_v2 au start) — fail-fast au boundary.
+[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (posé par bin/fleet_v2 au start ; override LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
 

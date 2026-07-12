@@ -46,8 +46,10 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   crash would reboot the sequence into a permanent-respawn loop), NOT "the boot succeeded". The
   real outcome lives in the emitted `fleet.boot_*` event (observability only — each outcome is ALSO
   logged info/warning/error by `emit_*` before broadcasting, so a lost event never hides it); the durable
-  fact "which permanent pods run" is re-derivable via the spawner registry + reconciled by
-  `PermanentWarden`. A caller must NOT read `:ok` as boot success.
+  fact "which permanent pods run" is re-derivable via the spawner registry. This orchestrator is
+  ONE-SHOT at node boot; afterwards the only automatic respawn is `PermanentWarden` on `pod.failed`
+  (event-driven — a permanent pod terminated cleanly emits none and is NOT resurrected), plus the
+  partial net of `WakeRecovery` at the next wake/kick. A caller must NOT read `:ok` as boot success.
   """
   @spec run(keyword()) :: :ok
   def run(opts \\ []) do

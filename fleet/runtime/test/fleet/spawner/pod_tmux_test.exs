@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.PodTmuxTest do
       assert byte_size(path) < 108, "sock_path trop long (#{byte_size(path)}o) : #{path}"
     end
 
-    test "sock_base a un défaut (aligné LCARS_TMUX_SOCK_BASE de bwrap_launch.sh)" do
+    test "sock_base a un défaut non-vide (l'accord avec les launchers = l'export LCARS_TMUX_SOCK_BASE, pas l'égalité des défauts)" do
       assert is_binary(PodTmux.sock_base())
       assert PodTmux.sock_base() != ""
     end

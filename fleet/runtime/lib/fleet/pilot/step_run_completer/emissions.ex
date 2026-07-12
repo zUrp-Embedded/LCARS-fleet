@@ -12,8 +12,9 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   idempotence) depends on NO return value from here — the caller discards (`_ =`).
   Failure visibility differs per emission: a missed `deliverable.published` is logged
   warning here and backstopped pod-side (`:publish_deadline` lifts the freeze anyway);
-  a failed eng-voice post is SWALLOWED (discarded, no log) — the ticket simply lacks
-  the note, nothing re-posts it.
+  a failed eng-voice POST is logged warning here too (the ticket lacks the note, nothing
+  re-posts it, the completion is unchanged) — only the missing-role-token skip (`as_role`)
+  stays silent HERE (RoleToken logs it).
 
   Called by `complete_producer` AFTER `open_deliverable_pr` (the push has already READ the
   workspace) and BEFORE `route` (the lock is not yet lifted).
@@ -78,9 +79,10 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   ENG VOICE on the TICKET (OUTGOING info, descriptive and traceable): posts the
   producer's `summary` (what it did on delivery / its response to the review on rework) as an
   ISSUE comment, IN THE NAME OF THE ENG (`as_role` — honest trace; the pod stays forge-blind, it is
-  the SYSTEM that posts). A post failure does NOT break the completion (the deliverable = the
-  commit, already pushed) and is SWALLOWED here (discarded, no log): the only loss is the note's
-  absence on the ticket — nothing re-posts it. Absent/empty → nothing (no empty comment).
+  the SYSTEM that posts). A POST failure does NOT break the completion (the deliverable = the
+  commit, already pushed) and is LOGGED warning here: the only loss is the note's absence on the
+  ticket — nothing re-posts it. Exception: the missing-role-token path (`as_role`) skips SILENTLY
+  here — RoleToken logs it. Absent/empty → nothing (no empty comment).
 
   DEDUP (footprint): the FULL NOTE goes on the ISSUE (the ticket = canonical record of the work,
   "here is what I did" in response to the brief) — the PR NO LONGER receives a copy nor a separate
@@ -115,7 +117,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
                  role_opts
                ) do
           Logger.warning(
-            "Emissions: #{repo}##{n} eng note NOT posted (#{inspect(reason)}) — " <>
+            "StepRunCompleter: #{repo}##{n} eng note NOT posted (#{inspect(reason)}) — " <>
               "ticket without the #{role} summary, no re-post rail (deliverable truth unaffected)"
           )
         end

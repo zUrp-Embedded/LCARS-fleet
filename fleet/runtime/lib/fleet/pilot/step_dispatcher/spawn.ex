@@ -275,7 +275,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # A RAISE from wake_pod is NOT a successful wake — returning `:ok` would report a woken pod that never
       # woke (false `dispatched` tally, silent). Surface it as `{:error}` so WakeRecovery re-rolls/escalates.
       Logger.warning(
-        "Spawn.safe_wake: wake_pod RAISED for #{inspect(pod_id)} (#{inspect(e)}) → {:error}"
+        "StepDispatcher: safe_wake — wake_pod RAISED for #{inspect(pod_id)} (#{inspect(e)}) → {:error}"
       )
 
       {:error, {:wake_raised, pod_id}}
@@ -310,7 +310,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   rescue
     e ->
       Logger.warning(
-        "Spawn.has_capacity?: RAISED (#{inspect(e)}) → assume room (fail-open; max_children still enforces)"
+        "StepDispatcher: has_capacity? RAISED (#{inspect(e)}) → assume room (fail-open; max_children still enforces)"
       )
 
       true
@@ -328,7 +328,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # classed dead → double-spawn on the deterministic pod_id AND `safe_kill` of the LIVING eng + its
       # context. Fail-CLOSED → assume ALIVE (no destructive action; a wrong "alive" at worst wastes a rebrief).
       Logger.warning(
-        "Spawn.pod_alive?: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → assume ALIVE (fail-closed)"
+        "StepDispatcher: pod_alive? — pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → assume ALIVE (fail-closed)"
       )
 
       true
@@ -468,7 +468,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # We return `:unknown` (NOT `:error`): `pipe_rebrief_state` DEFERS on unknown (fail-closed), never
       # cold-resets/kills a maybe-LIVING pipe. Surfaced. (Mirror of `pod_alive?`'s "assume ALIVE" on raise.)
       Logger.warning(
-        "Spawn.safe_pod_info: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → :unknown (fail-closed defer)"
+        "StepDispatcher: safe_pod_info — pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → :unknown (fail-closed defer)"
       )
 
       :unknown
