@@ -106,6 +106,13 @@ if config_env() != :test do
   # F161/F036 : ON-SWITCH du listener webhook Gitea (:8081 HMAC). Sans lui, `:start_webhooks` restait
   # à `false` partout → WebhooksGitea + le secret + les clés gitea.* du registre étaient une surface
   # de config qui ne pouvait JAMAIS démarrer. Défaut OFF (intégration forge opt-in). Port surchargeable.
+  #
+  # ⚠ DÉCISION (user 2026-07-13) — reste OFF DÉLIBÉRÉMENT, ce n'est PAS juste « pas encore branché ».
+  # Le webhook n'est qu'un ACCÉLÉRATEUR de poll : il fait réagir le Poller à un changement forge tout
+  # de suite au lieu d'attendre le prochain tick (~30 s). Or (a) c'est un hint LOSSY qui peut foirer /
+  # se perdre (la vérité durable vit dans le poll, doctrine D1), et (b) gagner 30 s ne pèse rien quand
+  # la réaction des agents se compte en MINUTES. Le rapport coût/risque/bénéfice ne le justifie pas.
+  # Ne pas le rallumer « pour la latence » sans re-poser cette question à l'humain.
   if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
     config :fleet_event_router, start_webhooks: true
 
