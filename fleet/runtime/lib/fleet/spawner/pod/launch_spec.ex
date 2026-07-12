@@ -256,7 +256,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # (`--ro-bind /usr`); since the install (`/local/LCARS_v2/bin`) or the dev source (`/home/.../bin`) it must
   # be bound explicitly. Derived from the launcher path (= install parameter) → follows the deployment without hardcode.
   # Goes through the catalogue channel `LCARS_POD_MOUNTS` (applied AFTER `--tmpfs /home` → re-exposes even a
-  # `/home/...` path) ⇒ `bwrap_launch.sh` sanctuary INTACT. Skip if already under `/usr` (covered by
+  # `/home/...` path) ⇒ le sanctuaire du pod reste INTACT. Skip if already under `/usr` (covered by
   # `--ro-bind /usr` → useless redundant bind; the legacy default `/usr/local/bin` case, incl. its tests).
   defp system_mounts(claude_launch_path) do
     bin = Path.dirname(claude_launch_path)

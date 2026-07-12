@@ -95,7 +95,7 @@ nouveau `bin/<vendor>_launch.sh`, même forme d'arguments ; aucun flag vendor ne
 mix gate
 ├─ compile --warnings-as-errors   # + le compilateur boundary (arêtes montantes = build cassé)
 ├─ test                            # suite ExUnit hermétique (aucune socket, aucun spawn réel)
-├─ tests hors-mix                  # bridge MCP stdio (python) + sanctuaires bwrap/launch (bats)
+├─ tests hors-mix                  # bridge MCP stdio (python) + tests bats des launchers (bwrap/claude)
 ├─ lcars.contracts.check          # contrats inter-modules — 20 invariants à cliquet
 └─ dialyzer                        # strict (unmatched_returns, error_handling, extra_return…)
 ```

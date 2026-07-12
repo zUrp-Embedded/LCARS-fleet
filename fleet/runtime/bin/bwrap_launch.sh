@@ -4,11 +4,15 @@
 # STARDATE: 2026-06-01
 # STATUS: PROD-V2 — containment N0 + tmux PTY persistant + socket-dir par-pod + holder bwrap-PID1 + die-with-parent
 #
-# Sanctuaire (N0, Ring 1 pod primitive, vendor-agnostic). Déroule la DN
+# Projette le SANCTUAIRE DU POD (N0, Ring 1 pod primitive, vendor-agnostic). Déroule la DN
 # `beyond_#5/design-notes/spawn/containment-bwrap.md` (DRAFT, REWORK PROVEN terrain 2026-05-31).
-# bwrap N'EST PAS une prison qui isole une menace — c'est un SANCTUAIRE : il PROJETTE un monde clos
-# (« qu'est-ce qu'on fournit », default vide-sauf-provision), donc « les murs portent la sécurité, pas
-# le SP » (I-CBC : ce qui n'est pas projeté n'existe pas → pas de règle à mettre dans la tête de l'agent).
+# RENVERSEMENT de la sandbox : bwrap ne CAGE pas l'agent pour protéger le monde de lui — il protège
+# l'AGENT du monde. Le sanctuaire, c'est le monde clos qu'il PROJETTE pour l'agent (« qu'est-ce qu'on
+# fournit », default vide-sauf-provision) : l'agent a EXACTEMENT ce dont il a besoin, ne peut rien casser,
+# donc « les murs portent la sécurité, pas le SP » (I-CBC : ce qui n'est pas projeté n'existe pas → pas de
+# règle à mettre dans la tête de l'agent). CE FICHIER n'est PAS le sanctuaire : c'est le CODE qui le
+# projette — édité et testé (bats) comme le reste. AUCUN CODE N'EST SACRÉ. Un containment différent = un
+# launcher co-localisé de plus (un launcher par mode), pas parce que ce fichier serait intouchable.
 #
 # Modèle ADR-G : le command (`claude_launch.sh`, opaque) tourne dans un **PTY tmux persistant** DANS
 # bwrap, via une **socket-DIR par-pod**. `tmux new-session -d` détache la session ; un **HOLDER**

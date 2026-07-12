@@ -219,7 +219,7 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   # ALLOCATE — non-bang I/O via safe_* (error → clean transition_failed, no brutal crash).
-  # `with_resolved_disallowed_tools` may raise on a corrupt baseline (untouchable fail-closed)
+  # `with_resolved_disallowed_tools` may raise on a corrupt baseline (fail-closed, non-bypassable)
   # → caught via safe_resolve_disallowed + transition_failed.
   def handle_event(:internal, :proceed, :allocating, data) do
     cap_profile_path = Path.join(data.pod_dir, ".cap-profile.json")

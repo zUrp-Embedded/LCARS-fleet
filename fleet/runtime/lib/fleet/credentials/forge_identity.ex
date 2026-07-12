@@ -63,7 +63,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   ## Identity destination (contract, 2026-07-04)
 
   These identities are those of the LOCAL FORGE (real role accounts, emails mapped → avatars/traceability).
-  The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (sanctuary: it sets
+  The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (which sets
   GIT_AUTHOR/COMMITTER `<role>@lcars.local` in env at launch) — a divergence is caught
   STRUCTURALLY by the commit-identity gate (push rejected fail-closed).
 

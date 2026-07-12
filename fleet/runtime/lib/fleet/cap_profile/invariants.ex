@@ -39,12 +39,11 @@ defmodule Fleet.CapProfile.Invariants do
 
   @kind_pinned "CapabilityProfile"
 
-  # g24_9 — deny Anthropic's native server-tools: they run server-side, NOT inside the pod → the bwrap
-  # sandbox does not contain them by construction.
-  # LOUP-FLAG (sanctuary vs sandbox pass): the framing "the sandbox does not contain them" is
-  # containment-flavored; the constructive framing is "these run outside the pod's sanctuary, which
-  # grants only what runs inside it". Reframe deferred to the coordinated sanctuary-vocabulary pass —
-  # the mechanism (structural deny) is already sanctuary-aligned; only the wording drifts.
+  # g24_9 — deny Anthropic's native server-tools: they run SERVER-SIDE, outside the pod → outside the
+  # pod's SANCTUARY. The sanctuary grants the agent ONLY what runs INSIDE it (constructive framing:
+  # "what is not projected does not exist"), so these server-side tools — which escape the projection —
+  # are denied by construction. Not "the sandbox does not contain them" (containment framing): "they live
+  # outside the world we project FOR the agent".
   # Strict entries = equality, prefix entries = `String.starts_with?/2`.
   @disallowed_minimum_strict ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution)
   @disallowed_minimum_prefix ~w(tool_search_)

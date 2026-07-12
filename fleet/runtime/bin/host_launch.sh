@@ -18,8 +18,8 @@
 #
 # Frontière N0/N1 (cf. bwrap_launch IX.2/IX.3) : tmux = N0 (tient n'importe quel REPL). host_launch ne
 # connaît PAS les flags `claude` — le command (`claude_launch.sh …`, opaque) est dans `${COMMAND[@]}`.
-# JAMAIS éditer bwrap_launch.sh (sanctuaire) : un nouveau besoin de containment = un nouveau launcher
-# co-localisé, même argv-shape.
+# Un nouveau besoin de containment = un nouveau launcher co-localisé (un launcher par mode, même
+# argv-shape) : motif d'extension propre, PAS parce que bwrap_launch serait intouchable. Aucun code n'est sacré.
 #
 # Env identité/session (posés par le spawner, hérités du Port — PAS de --setenv, pas de namespace à
 # repeupler ; le pod tourne dans l'env réel du daemon, qui tourne `User=<humain>`) :

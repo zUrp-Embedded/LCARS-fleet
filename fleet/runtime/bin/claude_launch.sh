@@ -83,9 +83,9 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<h
 
 # Permission (#kill-yolo 2026-06-22) : le monde est shapé (bwrap RO/RW + cap-profile allow/deny) → on
 # N'utilise PLUS --dangerously-skip-permissions, qui NEUTRALISAIT nos listes (héritage « agents dans la
-# nature », d'avant le sanctuaire bwrap). Le mode vient du CAP-PROFILE (`.spec.invocation.permission_mode`,
+# nature », d'avant le containment bwrap). Le mode vient du CAP-PROFILE (`.spec.invocation.permission_mode`,
 # défaut `default` → listes ENFORCED) — canal IN-SANDBOX (la JSON est dans POD_DIR, lisible), PAS l'env
-# (bwrap --clearenv stripperait LCARS_PERMISSION_MODE, et bwrap_launch est SANCTUAIRE). Override host =
+# (bwrap --clearenv stripperait LCARS_PERMISSION_MODE → on passe le mode par la JSON, pas par l'env). Override host =
 # LCARS_PERMISSION_MODE (host_launch propage l'env). Dérivation DÉFÉRÉE après CAP_PROFILE_JSON (infra).
 PERM_ENV_OVERRIDE="${LCARS_PERMISSION_MODE:-}"
 # --settings est ADDITIF ⇒ --setting-sources DOIT exclure 'user' (sinon le settings de

@@ -92,7 +92,7 @@ defmodule LcarsFleet.MixProject do
   end
 
   # Étape `mix gate` : filet des tests HORS-mix (python du bridge MCP stdio + bats
-  # sanctuaire) que `mix test` (ExUnit) ne voit pas. Sans ce câblage,
+  # des launchers) que `mix test` (ExUnit) ne voit pas. Sans ce câblage,
   # test/test_fleet_mcp_stdio_bridge.py peut virer ROUGE en silence — personne ne le
   # rejoue — exactement le bug (bridge renommé, test jamais rejoué) qui a motivé le filet.
   # (Historique : la forme fonction-step vient de l'époque umbrella où `mix cmd` était
@@ -100,7 +100,7 @@ defmodule LcarsFleet.MixProject do
   # BATS_MISSING_FATAL et un message d'échec riche que cmd ne donne pas.)
   #
   # Durci : BATS_MISSING_FATAL=1 → l'absence de bats FAIT ÉCHOUER `mix gate` (message
-  # d'install clair). Le sanctuaire bwrap (35 tests) + claude_launch (31) sont vérifiés à
+  # d'install clair). Les tests bats des launchers — bwrap (35) + claude_launch (31) — sont vérifiés à
   # CHAQUE gate — plus jamais absents en silence (régression-invisible vécue : test
   # claude_launch resté stale sur l'ancien contrat 4-args).
   defp shell_gate(_args) do
@@ -114,7 +114,7 @@ defmodule LcarsFleet.MixProject do
     if status != 0 do
       Mix.raise(
         "shell_gate (filet tests hors-mix) : ECHEC (exit #{status}) — test python du bridge MCP rouge, " <>
-          "coquille vide (0 test lance), ou bats absent/rouge (sanctuaire bwrap+claude_launch). Voir la sortie."
+          "coquille vide (0 test lance), ou bats absent/rouge (launchers bwrap+claude_launch). Voir la sortie."
       )
     end
   end

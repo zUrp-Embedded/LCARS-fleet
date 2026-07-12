@@ -203,7 +203,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # Builds the `fleet` MCP server entry of the `.mcp-fleet.json`, provisioning
   # the stdio bridge INTO the pod_dir.
   #
-  # The bwrap is a SANCTUARY — it mounts only
+  # bwrap projects the pod's SANCTUARY — it mounts only
   # `/usr`, `/etc`, `/sys`, `$POD_DIR`, `$GIT_MIRROR`, the vendor and the sock-dir.
   # `/var/lib/lcars` is NOT mounted there. Launching the bridge via its HOST path
   # (`/var/lib/lcars/bin/...py`) with a log under `/var/lib/lcars/` would fail:

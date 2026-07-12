@@ -9,10 +9,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `{:error, reason}` ALREADY tagged. `build/4` touches neither Port, nor timer, nor state machine: it returns a
   value, the `Pod` (state `:launching`) wires it onto `do_launch_backend` or `transition_failed`.
 
-  ## CREDENTIAL MECHANISM — sanctuary moved as-is
+  ## CREDENTIAL MECHANISM (déplacé verbatim depuis Pod)
 
   The creds helpers (`claude_dir*`, `passwd_home`, `claude_bin_in_home`, `maybe_put_*`) and the boxed
-  "DO NOT TOUCH" block that caps them were moved VERBATIM from `Pod`: per-human
+  credential-invariant block that caps them were moved VERBATIM from `Pod`: per-human
   YES, shared-writable YES, broker NO (cf. the boxed block below). The auth stays single-valued
   `LCARS_AUTH_MODE=bind` — no switch, no variant.
 
@@ -148,7 +148,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   # ════════════════════════════════════════════════════════════════════════════════════════
-  # CREDENTIAL MECHANISM — DO NOT TOUCH (and above all not to "harden" it).
+  # CREDENTIAL MECHANISM — lis le POURQUOI avant de le changer (surtout avant de le "durcir").
   #
   # The pod authenticates by mounting the OAuth `.credentials.json` of ITS human (the `~/.claude`
   # of the runtime user), bound RW by the launcher. This file is SHARED and WRITABLE across all
@@ -170,7 +170,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   #     (= our interactive mode);
   #   - injecting the live access-token = ~8h cliff with no refresh (already tried, already reverted);
   #   - an apiKeyHelper / an API key = METERED billing = leaving the subscription (forbidden).
-  # So: per-human YES, shared-writable YES, broker NO. DO NOT "improve" this.
+  # So: per-human YES, shared-writable YES, broker NO. Pas du code sacré — du code au POURQUOI
+  # contre-intuitif : le "durcir"/"améliorer" sans lire ci-dessus CASSE l'auth (déjà tenté, déjà reverté).
   # ════════════════════════════════════════════════════════════════════════════════════════
   # Pod creds = the HUMAN's `~/.claude` (= the runtime user). Config override `:claude_dir` honored
   # (tests / non-standard deployment); else derived from their passwd home. Per-human by construction

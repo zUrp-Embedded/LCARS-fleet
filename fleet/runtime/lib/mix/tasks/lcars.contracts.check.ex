@@ -132,8 +132,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     })
   end
 
-  # The Loader must normalize v1/v2.5 to a single internal form (unwrap
-  # spec.steps). Without it a consumer reads `pipeline["steps"]=nil` on v2.5.
+  # The Loader must unwrap the v2.5 ENVELOPE (kind/metadata/spec.steps) into the single internal
+  # FLAT form. There is NO v1: a flat/enveloppe-less YAML fails the v2.5 schema before `normalize`.
+  # « v1/v2.5 » = external envelope vs internal flat (same version, two shapes), NOT two versions.
+  # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   defp check_pipeline_v25_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)

@@ -7,7 +7,7 @@
 #
 # F094 (invariant CARDINAL, non-testable en hermétique) : « l'agent ne voit AUCUNE trace LCARS ». Dépend
 # de la VUE sandbox bwrap → seul un bwrap RÉEL peut le prouver. Ce test lance `bin/bwrap_launch.sh` (le
-# sanctuaire, NON modifié — on l'EXÉCUTE) avec un COMMAND FACTICE (pas de claude/OAuth) qui inspecte SA
+# launcher RÉEL, NON modifié — on l'EXÉCUTE) avec un COMMAND FACTICE (pas de claude/OAuth) qui inspecte SA
 # PROPRE vue depuis l'intérieur du sandbox et écrit ses constats dans POD_DIR (bind RW → lisible host-side).
 #
 # Assertions (la vue de l'agent) :
@@ -16,7 +16,7 @@
 #   - HOME = POD_DIR (monde clos) ;
 #   - le token OAuth injecté est présent (auth), MAIS l'env ambiant host ne fuit pas (--clearenv).
 #
-# Standalone (nécessite bwrap + userns + tmux) — hors `mix test`. bwrap NON édité (sanctuaire) : lu/exécuté.
+# Standalone (nécessite bwrap + userns + tmux) — hors `mix test`. bwrap NON édité ICI (on prouve le launcher RÉEL) : lu/exécuté.
 
 set -uo pipefail
 
@@ -93,7 +93,7 @@ INS
 chmod +x "$INSPECT"
 
 # ------------------------------------------------------------------
-step "1. Lancer bwrap_launch.sh (sanctuaire) avec COMMAND factice"
+step "1. Lancer bwrap_launch.sh (le launcher réel) avec COMMAND factice"
 
 LCARS_BWRAP_NO_CLEANUP=1 \
 LCARS_BWRAP_BIN="$BWRAP_BIN" \
@@ -135,14 +135,14 @@ if [ -f "$OUT" ]; then
   grep -qxF "home_env=$POD_DIR"      "$OUT" && ok "HOME = POD_DIR (monde clos)"                               || ko "HOME inattendu : $(grep home_env= "$OUT")"
   grep -qxF "oauth_token=set"        "$OUT" && ok "token OAuth injecté présent (auth)"                        || ko "token OAuth absent (auth cassée)"
 
-  # FINDING (PAS un FAIL — fix = bwrap_launch.sh = SANCTUAIRE, décision user) : bwrap_launch `--ro-bind
+  # FINDING (PAS un FAIL — fix = éditer bwrap_launch.sh : ro-bind /etc sélectif ; décision user) : bwrap_launch `--ro-bind
   # /etc /etc` expose TOUT /etc, dont `/etc/fleet` (lcars-fleet.env = FORGE_TOKEN/RELEASE_COOKIE,
   # api-secret, webhook-secret). Un agent qui DÉRIVE (le seul thread intra reconnu, ADR-C « contenir le
   # pod ») peut les lire → le sandbox ne contient PAS les secrets fleet. Remontée user, pas un fix de nuit.
   if grep -qxF "etc_fleet=VISIBLE" "$OUT"; then
     echo "  ⚠ FINDING (no-trace partiel) : /etc/fleet VISIBLE dans le pod (bwrap --ro-bind /etc) →" >&2
     echo "    secrets fleet (lcars-fleet.env, *-secret) lisibles par un agent dérivant. Fix = masquer" >&2
-    echo "    /etc/fleet (--tmpfs) ou ro-bind /etc sélectif dans bwrap_launch.sh (SANCTUAIRE → décision user)." >&2
+    echo "    /etc/fleet (--tmpfs) ou ro-bind /etc sélectif dans bwrap_launch.sh (décision user)." >&2
   else
     ok "/etc/fleet invisible (pas de fuite secrets fleet)"
   fi

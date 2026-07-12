@@ -2,7 +2,7 @@
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
 # STARDATE: 0000.000
-# STATUS: filet des tests HORS-mix (python + bats sanctuaire) — le trou que `mix gate` ne voit pas.
+# STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
 # test shell/python. Un test comme test/test_fleet_mcp_stdio_bridge.py peut donc devenir ROUGE en
@@ -30,7 +30,7 @@ BATS_MISSING_FATAL="${BATS_MISSING_FATAL:-0}"
 
 GATE_FAIL=0
 
-echo "=== shell_gate : tests hors-mix (python + bats sanctuaire) ==="
+echo "=== shell_gate : tests hors-mix (python + bats des launchers) ==="
 
 # ---------------------------------------------------------------------------
 # 1) Test python du bridge MCP stdio.
@@ -77,8 +77,8 @@ elif [[ "$FAIL_N" -gt 0 || "$PY_RC" -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2) Tests bats sanctuaire (bwrap_launch, claude_launch). Ranges en sous-dossiers → recherche
-#    recursive (pas un simple glob test/*.bats). LE test du sanctuaire bwrap ne se contourne pas :
+# 2) Tests bats des launchers (bwrap_launch, claude_launch). Ranges en sous-dossiers → recherche
+#    recursive (pas un simple glob test/*.bats). LE test bats de bwrap_launch ne se contourne pas :
 #    s'il est joignable (bats present) il DOIT etre vert.
 # ---------------------------------------------------------------------------
 mapfile -t BATS_FILES < <(find "$HERE" -type f -name '*.bats' | sort)
@@ -93,7 +93,7 @@ fi
 if [[ "$BATS_FILE_COUNT" -eq 0 ]]; then
   echo "--- bats : aucun fichier .bats trouve sous $HERE (rien a lancer) ---"
 elif command -v bats >/dev/null 2>&1; then
-  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) sanctuaire — execution ---"
+  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers — execution ---"
   set +e
   bats "${BATS_FILES[@]}"
   BATS_RC=$?
@@ -106,7 +106,7 @@ elif command -v bats >/dev/null 2>&1; then
   fi
 else
   # bats ABSENT : on ne saute pas en silence — on COMPTE les tests non joues et on avertit fort.
-  echo "AVERTISSEMENT: bats absent — $BATS_TEST_COUNT test(s) sanctuaire NON executes" \
+  echo "AVERTISSEMENT: bats absent — $BATS_TEST_COUNT test(s) launchers NON executes" \
        "($BATS_FILE_COUNT fichier(s) : bwrap_launch/claude_launch). Installer : apt/brew install bats-core." >&2
   if [[ "$BATS_MISSING_FATAL" != "0" ]]; then
     echo "ECHEC: bats absent et BATS_MISSING_FATAL=$BATS_MISSING_FATAL — durcissement actif." >&2
