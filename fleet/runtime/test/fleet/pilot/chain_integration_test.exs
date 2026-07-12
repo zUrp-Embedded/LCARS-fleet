@@ -54,16 +54,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp rm_lbl(m, l),
       do: Map.put(m, "labels", Enum.reject(m["labels"] || [], &(&1["name"] == l)))
 
-    # state/assignee/comments/route : sur l'ISSUE (le pipeline-state y reste).
-    def set_state_label(pid, _r, _n, st, _o) do
-      upd_issue(pid, fn i ->
-        kept = Enum.reject(i["labels"] || [], &String.starts_with?(&1["name"], "state:"))
-        Map.put(i, "labels", kept ++ [%{"name" => st}])
-      end)
-
-      {:ok, :set}
-    end
-
+    # assignee/comments/route : sur l'ISSUE (le pipeline-state y reste).
     def set_assignee(pid, _r, _n, login, _o) do
       upd_issue(pid, &Map.put(&1, "assignees", [%{"login" => login}]))
       {:ok, :set}
@@ -229,7 +220,6 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def remove_label(r, n, l, o), do: Sim.remove_label(p(), r, n, l, o)
     def start_stopwatch(r, n, o), do: Sim.start_stopwatch(p(), r, n, o)
     def stop_stopwatch(r, n, o), do: Sim.stop_stopwatch(p(), r, n, o)
-    def set_state_label(r, n, s, o), do: Sim.set_state_label(p(), r, n, s, o)
     def set_assignee(r, n, l, o), do: Sim.set_assignee(p(), r, n, l, o)
     def post_comment(r, n, b, o), do: Sim.post_comment(p(), r, n, b, o)
     def post_route(r, n, pi, st, o), do: Sim.post_route(p(), r, n, pi, st, o)

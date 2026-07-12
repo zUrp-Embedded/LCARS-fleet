@@ -15,9 +15,11 @@ defmodule Fleet.Pilot.ForgeStubs do
     / `{:merge, repo, pr, opts}`) pour prouver l'ORDRE des écritures du sceau et leur SIGNATURE
     (le token de rôle dans `opts`).
     """
+    # Forme réelle `ForgeClient.post_comment/4` = {:ok, :posted | :already}, PAS {:ok, 1}
+    # (un id numérique n'est jamais rendu — stub aligné, lot 5 audit).
     def post_comment(repo, n, body, opts) do
       send(self(), {:comment, repo, n, body, opts})
-      {:ok, 1}
+      {:ok, :posted}
     end
 
     def merge_pr(repo, pr, opts) do
@@ -41,7 +43,7 @@ defmodule Fleet.Pilot.ForgeStubs do
 
   defmodule CloseFailForge do
     @moduledoc "Merge OK mais `close_issue` ÉCHOUE — prouve que le sceau LOG LOUD (brique mergée reste OUVERTE)."
-    def post_comment(_repo, _n, _body, _opts), do: {:ok, 1}
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def merge_pr(_repo, _pr, _opts), do: :ok
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
     def close_issue(_repo, _n, _opts), do: {:error, {:http, 500, "close boom"}}
@@ -59,7 +61,7 @@ defmodule Fleet.Pilot.ForgeStubs do
 
     def post_comment(repo, n, body, opts) do
       send(self(), {:comment, repo, n, body, opts})
-      {:ok, 1}
+      {:ok, :posted}
     end
 
     def merge_pr(_repo, _pr, _opts), do: {:error, {:http, 409, "not fast-forward"}}

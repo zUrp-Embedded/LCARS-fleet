@@ -8,9 +8,11 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   alias Fleet.Spawner.PublishConsumer
 
   defmodule StubSpawner do
+    # PASSE-9 — forme réelle `Spawner.spawn_pod/3` = {:ok, pid()}, JAMAIS {:ok, :stub_pod} : un
+    # consommateur qui ré-interpole le pid casserait en prod.
     def spawn_pod(_cap_profile, issue_id, opts) do
       send(Process.get(:test_pid), {:spawn_called, issue_id, opts})
-      {:ok, :stub_pod}
+      {:ok, self()}
     end
   end
 
@@ -54,7 +56,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   # menteur). La 1re couche (SpawnAdmission) ne broadcast plus de clés vides, mais le Bus est
   # no-auth : tout process peut émettre — ce consumer normalise AUSSI.
   defmodule OkSpawner do
-    def spawn_pod(_cap_profile, _issue_id, _opts), do: {:ok, :stub_pod}
+    def spawn_pod(_cap_profile, _issue_id, _opts), do: {:ok, self()}
   end
 
   test "acte4 #32 : cap_profile_name vide + role valide → le role est résolu (spawn tiré)" do

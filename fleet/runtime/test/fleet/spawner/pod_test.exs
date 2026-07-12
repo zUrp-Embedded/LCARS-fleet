@@ -172,11 +172,14 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   # Modèle interactif : le backend ouvre le Port et retourne immédiatement (pas de frame NDJSON).
+  # Forme réelle `LauncherPortBackend.launch/2` = %{port:, tmux_session:} — AUCUN session_id
+  # (vestige NDJSON : le session_id est PRÉ-ALLOUÉ côté pod, jamais rendu par le backend).
+  # tmux_session nil = pod non-kickable, le comportement StubBackend attendu par ces tests.
   defp interactive_reply(opts \\ []) do
     {:ok,
      %{
        port: Keyword.get(opts, :port),
-       session_id: Keyword.get(opts, :session_id, "stub-sess")
+       tmux_session: nil
      }}
   end
 
@@ -216,7 +219,7 @@ defmodule Fleet.Spawner.PodTest do
   describe "happy path interactif (event résultat → stop)" do
     test "pod.result_submitted reçu → extract → release → arrêt :normal" do
       Process.flag(:trap_exit, true)
-      StubBackend.set_reply(interactive_reply(session_id: "s-happy"))
+      StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-happy-#{System.unique_integer([:positive])}"
 
@@ -242,7 +245,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "R1-20 : state.json PRÉSENT mais CORROMPU → recover LOUD (error), pas de fresh init silencieux" do
       Process.flag(:trap_exit, true)
-      StubBackend.set_reply(interactive_reply(session_id: "s-corrupt"))
+      StubBackend.set_reply(interactive_reply())
       pod_id = "pod-corrupt-#{System.unique_integer([:positive])}"
 
       # point de recovery cassé : fichier présent, JSON illisible (≠ absent = fresh pod normal)
@@ -262,7 +265,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "R1-20 : state.json ABSENT → fresh init SILENCIEUX (pas de faux warning corrupt)" do
       Process.flag(:trap_exit, true)
-      StubBackend.set_reply(interactive_reply(session_id: "s-fresh"))
+      StubBackend.set_reply(interactive_reply())
       pod_id = "pod-fresh-#{System.unique_integer([:positive])}"
 
       log =
@@ -284,7 +287,7 @@ defmodule Fleet.Spawner.PodTest do
       Application.put_env(:fleet_spawner, :event_bus, RaiseBus)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :event_bus) end)
 
-      StubBackend.set_reply(interactive_reply(session_id: "s-ma04"))
+      StubBackend.set_reply(interactive_reply())
       pod_id = "pod-ma04-#{System.unique_integer([:positive])}"
 
       assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
@@ -316,7 +319,7 @@ defmodule Fleet.Spawner.PodTest do
         Application.delete_env(:fleet_spawner, :flaky_agent)
       end)
 
-      StubBackend.set_reply(interactive_reply(session_id: "s-ma04b"))
+      StubBackend.set_reply(interactive_reply())
       pod_id = "pod-ma04b-#{System.unique_integer([:positive])}"
 
       assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
@@ -342,7 +345,7 @@ defmodule Fleet.Spawner.PodTest do
       # qui pousse HEAD:lcars/issue-N) doit porter "issue-3", la brique reellement traitee.
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
-      StubBackend.set_reply(interactive_reply(session_id: "s-adopt"))
+      StubBackend.set_reply(interactive_reply())
       pod_id = "pod-adopt-#{System.unique_integer([:positive])}"
 
       assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-4"))

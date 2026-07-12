@@ -297,9 +297,11 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   defmodule StepStubSpawner do
+    # PASSE-9 — forme réelle `Spawner.spawn_pod/3` = {:ok, pid()}, JAMAIS une string : un
+    # consommateur qui ré-interpole le pid casserait en prod.
     def spawn_pod(_profile, issue_id, opts) do
       send(self(), {:spawned, issue_id, opts})
-      {:ok, "pod-#{issue_id}"}
+      {:ok, self()}
     end
 
     # Réconciliation (B) : aucun pod vivant par défaut → tout verrou `lcars-in-flight` est candidat
@@ -316,7 +318,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # F-037 / #25 : un pod VIVANT à pod_id REPO-SCOPÉ (`<repo-slug>-issue-<n>-<role>`, format PodId réel).
   defmodule LivePodSpawner do
-    def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
+    def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-engineer"}]
   end
 
@@ -328,7 +330,7 @@ defmodule Fleet.Pilot.PollerTest do
   # SLOT-FREEZE : un eng PIPE project-scoped (pod_id `<repo>-engineer`, SANS `-issue-N-` — l'eng resident
   # qui traite N issues sequentiellement, 1 process = 1 slot Desktop).
   defmodule ProjectPipeSpawner do
-    def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
+    def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-engineer"}]
   end
 
@@ -1252,7 +1254,7 @@ defmodule Fleet.Pilot.PollerTest do
 
     # Un seul pod vivant : `repoB#8` (pod_id repo-scopé pour repoB). repoA n'a AUCUN pod.
     defmodule RepoBPodSpawner do
-      def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
+      def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
       def list_pods, do: [%{pod_id: "owner-repoB-issue-8-engineer"}]
     end
 

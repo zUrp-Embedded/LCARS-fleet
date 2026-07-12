@@ -16,12 +16,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   defmodule LabelFailForge do
     # comment EXPLICATIF OK (non porteur — le porteur est le label) ; add_label ÉCHOUE → le
     # throttle ne prend jamais.
-    def post_comment(_repo, _n, _body, _opts), do: {:ok, 1}
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "label boom"}}
   end
 
   defmodule OkForge do
-    def post_comment(_repo, _n, _body, _opts), do: {:ok, 1}
+    # Forme réelle `ForgeClient.post_comment/4` = {:ok, :posted | :already}, PAS {:ok, 1}.
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
   end
 

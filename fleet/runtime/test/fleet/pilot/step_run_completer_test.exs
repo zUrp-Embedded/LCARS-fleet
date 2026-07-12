@@ -60,9 +60,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     # Sceau gatekeeper (F-arch-MCP) : promote poste le commentaire de fin avant le merge.
+    # Forme réelle `ForgeClient.post_comment/4` = {:ok, :posted | :already}, PAS {:ok, 1}.
     def post_comment(_repo, n, body, opts) do
       send(self(), {:comment, n, body, opts})
-      {:ok, 1}
+      {:ok, :posted}
     end
 
     def merge_pr(_repo, pr, _opts) do
@@ -83,7 +84,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     # au site d'appel soit PROBANT (s'il l'était par régression comment-before-merge, le test le verrait).
     def post_comment(_r, n, body, opts) do
       send(self(), {:comment, n, body, opts})
-      {:ok, 1}
+      {:ok, :posted}
     end
 
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}

@@ -148,7 +148,8 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
   # du pod_info — stub dédié) : décision pré-resolver, action post-resolver.
   test "A-09 (2) : pipe :ready → décision SANS project, reprovision AVEC project (ordre décision→resolver→action)" do
     defmodule ReadyPipeSpawner do
-      def pod_info(_pod_id), do: {:ok, %{conditions: MapSet.new(), has_active_task: false}}
+      # Forme réelle `Pod` :info : conditions = LISTE (MapSet.to_list dans pod_info), pas un MapSet.
+      def pod_info(_pod_id), do: {:ok, %{conditions: [], has_active_task: false}}
 
       def reprovision_pipe_workspace(pod_id, project, slug: slug) do
         send(self(), {:reprovisioned, pod_id, project["base_sha"], slug})

@@ -17,7 +17,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   # Sim forge : §5 (abandon/await) + primitives PR (Corr.3). Compteur de step_runs via forge_opts[:_step_runs].
   defmodule StubForge do
     def post_comment(_r, _n, body, _o), do: send(self(), {:comment, body}) && {:ok, :posted}
-    def set_state_label(_r, _n, _s, _o), do: {:ok, :set}
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
@@ -735,7 +734,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   defmodule RelayForge do
     defp relay(opts, msg), do: send(Keyword.fetch!(opts, :test_pid), msg)
     def post_comment(_r, _n, body, o), do: relay(o, {:comment, body}) && {:ok, :posted}
-    def set_state_label(_r, _n, _s, _o), do: {:ok, :set}
     def set_assignee(_r, _n, l, o), do: relay(o, {:assignee, l}) && {:ok, :set}
     def remove_label(_r, _n, _l, o), do: relay(o, :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, o), do: relay(o, {:label, label}) && {:ok, :added}
