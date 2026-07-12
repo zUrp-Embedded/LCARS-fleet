@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check do
+  # Z4 migration — tâche Mix classifiée dans la boundary de son sujet (Fleet.Application).
+  use Boundary, classify_to: Fleet.Application
   @shortdoc "Verifies inter-module contracts at load (refuses the build if a contract is reopened)"
 
   @moduledoc """

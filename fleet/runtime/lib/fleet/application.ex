@@ -1,4 +1,22 @@
 defmodule Fleet.Application do
+  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
+  # régularisé (successeur mécanique du verrou topologie, D-19), exports: :all = 1ʳᵉ passe
+  # (serrage par façade en Z4b). Le compilateur refuse toute violation — plus de discipline.
+  use Boundary,
+    deps: [
+      Fleet.EventRouter,
+      Fleet.TaskQueue,
+      Fleet.ProjectBootstrap,
+      Fleet.MCP,
+      Fleet.Spawner,
+      Fleet.Workflow,
+      Fleet.Coord,
+      Fleet.Starfleet,
+      Fleet.Pilot,
+      Fleet.API,
+      Fleet.Observation
+    ],
+    exports: []
   @moduledoc """
   Racine OTP de l'app unique `:lcars_fleet` — l'UNIQUE callback `Application` du runtime
   depuis le collapse de l'umbrella (migration Z2, 2026-07-12).

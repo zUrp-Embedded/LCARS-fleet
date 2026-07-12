@@ -11,6 +11,9 @@ defmodule LcarsFleet.MixProject do
       app: :lcars_fleet,
       version: "0.1.0",
       elixir: "~> 1.18",
+      # Z4 migration — boundary = gardien compilé de l'architecture (deps inter-domaines
+      # + exports de façades). Successeur mécanique du verrou topologie umbrella (D-19).
+      compilers: [:boundary | Mix.compilers()],
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -156,6 +159,8 @@ defmodule LcarsFleet.MixProject do
       {:finch, "~> 0.22"},
       # — divers runtime —
       {:uuid, "~> 1.1"},
+      # — architecture (compile-time tracer, zéro coût runtime) —
+      {:boundary, "~> 0.10", runtime: false},
       # — test/outillage (union des flags les plus larges des ex-apps) —
       {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

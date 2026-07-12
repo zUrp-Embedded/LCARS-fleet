@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
+  # Z4 migration — tâche Mix classifiée dans la boundary de son sujet (Fleet.SPBuilder).
+  use Boundary, classify_to: Fleet.SPBuilder
   @shortdoc "Compose per-role SPs: priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
   @moduledoc """
   Generate the per-role system prompts by composing blocks (`Fleet.SPBuilder.Blocks`).
