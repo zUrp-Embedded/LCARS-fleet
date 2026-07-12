@@ -23,15 +23,12 @@ erl_crash.dump
 .DS_Store
 *~
 
-# ExUnit @tag :tmp_dir artefacts (jamais versionnés)
-apps/*/tmp/
-
 # ExUnit scratch dirs (per-app)
 tmp/
 
 # Version du build embarquée au `mix release` (générée par le step
 # write_build_info/1 — JAMAIS dans le source ; le runtime source la dérive de git)
-apps/fleet_api/priv/build_info.txt
+priv/api/build_info.txt
 
 # Release installée (artefact de build, posée par le deploy ; cf. etc/README + bin/fleet_v2)
 /rel/

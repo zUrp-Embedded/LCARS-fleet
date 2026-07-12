@@ -328,27 +328,10 @@ defmodule Fleet.Spawner do
   point (app boundary: external consumers do not depend on the internal `pod/*` tree); the
   AUTHORITY of the computation (the `"workspace"` literal) lives in `Pod.Paths.pod_workspace_path/1`
   — the `Pod.*` islands (LaunchSpec, CompletedPayload) call it directly, without going back up to the facade.
-  `pod_workspace_dir/1` remains the registry path: the world reads where IT placed the pod, never where the pod
-  claims to be.
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
     do: Fleet.Spawner.Pod.Paths.pod_workspace_path(pod_dir)
-
-  @doc """
-  Resolves a pod's deliverable workspace (`<pod_dir>/workspace`) from the REGISTERED pod_dir.
-  The world reads where IT placed the pod (spawner record via `pod_info`), not a pod assertion:
-  the pod never names the path of its own audit. Serves the forge-driven rail
-  (`Pilot.StepRunCompleter` → `Deliverable`) to gate the workspace in `git_native` mode.
-  """
-  @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
-  def pod_workspace_dir(pod_id) when is_binary(pod_id) do
-    case pod_info(pod_id) do
-      {:ok, %{pod_dir: dir}} when is_binary(dir) -> {:ok, pod_workspace_path(dir)}
-      {:ok, _} -> {:error, :not_found}
-      {:error, _} = err -> err
-    end
-  end
 
   @doc """
   Returns a pod's current state (`%{phase, conditions, ...}`).

@@ -89,10 +89,6 @@ defmodule Fleet.CapProfile.Invariants do
   @spec lifetime_scope_enum() :: [String.t()]
   def lifetime_scope_enum, do: @lifetime_scope_enum
 
-  @doc "Closed enum of `metadata.containment` (`g24_1`). Code-only SSoT (the schema leaves containment a free string; `g24_1` is the enforcer)."
-  @spec containment_enum() :: [String.t()]
-  def containment_enum, do: @containment_enum
-
   # ============================================================
   # G24 invariants (one function per check)
   # ============================================================

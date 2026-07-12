@@ -1,22 +1,23 @@
 defmodule Fleet.Pilot.ForgeClient.Repo do
   @moduledoc """
   **Repo provisioning** in the agent machine — sub-domain of `Fleet.Pilot.ForgeClient`:
-  repo creation, collaborators, discovery by org-membership (WS3), branch-protection, the repo's forge
+  repo creation, discovery by org-membership (WS3), branch-protection, the repo's forge
   identity. (The `post_onboard_marker`/`admitted?` admission seal + the topic discovery
   `search_repos_by_topic`/`add_topic` are REMOVED — admission is org membership, managed
-  UPSTREAM by the human admin; no more server-side marker to set/read.)
+  UPSTREAM by the human admin; no more server-side marker to set/read. The collaborator
+  cluster `add_collaborator`/`collaborator?`/`last_worked_repo` is REMOVED for the same
+  reason: superseded by the org-membership admission, zero caller.)
 
   The *seam-faced* ops (`repo_id`, `list_org_repos`) are forwarded by `ForgeClient` (the module injected
-  by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `add_collaborator`,
-  `protect_branch`) are called directly by `Fleet.Pilot.ProjectOnboard`.
+  by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
+  are called directly by `Fleet.Pilot.ProjectOnboard`.
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
     only: [
       resolve_config: 1,
       http_get: 2,
-      http_post: 3,
-      http_put: 3
+      http_post: 3
     ]
 
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
@@ -53,29 +54,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       case http_post(config, path, body) do
         {:ok, %{"full_name" => full_name}} -> {:ok, full_name}
         {:error, {:http, 409, _}} -> {:ok, :already_exists}
-        {:error, _} = err -> err
-      end
-    end
-  end
-
-  @doc """
-  Adds/updates a **collaborator** on `repo` with `permission` (`"read"|"write"|"admin"`) —
-  Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = same perm). Requires
-  repo-admin (system token). Onboarding grants **write** to the role accounts (engineer/
-  qualifier/reviewer/gatekeeper) so that their reviews count at the branch-protection gate and so that
-  the gatekeeper can merge.
-  """
-  @spec add_collaborator(String.t(), String.t(), String.t(), Keyword.t()) ::
-          :ok | {:error, term()}
-  def add_collaborator(repo, username, permission, opts \\ [])
-      when is_binary(repo) and is_binary(username) and is_binary(permission) do
-    with {:ok, config} <- resolve_config(opts) do
-      case http_put(
-             config,
-             "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}",
-             %{permission: permission}
-           ) do
-        {:ok, _} -> :ok
         {:error, _} = err -> err
       end
     end
@@ -128,56 +106,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       true
     else
       _ -> false
-    end
-  end
-
-  @doc """
-  Is `username` a collaborator of `repo`? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = yes,
-  404 = no). `false` on any error (config/transport/404) — fail-safe (we do NOT default on an
-  inaccessible repo). Serves the "default project = repos where the human is a collaborator" scoping (create_issue).
-  """
-  @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
-  def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <-
-           http_get(config, "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}") do
-      true
-    else
-      _ -> false
-    end
-  end
-
-  @doc """
-  Repo of the **last issue worked** by `human`, SCOPED to repos where they are a **collaborator**. Serves as
-  the default project when the arch calls `create_issue` without an explicit `project` (≠ "last created", judged
-  wrong). Mechanics: global issue-search `assigned_by=<human>` → CLIENT-SIDE sort
-  by `updated_at` desc (Gitea's `sort=` proved unreliable) → 1st issue whose repo passes
-  `collaborator?/3` (`assigned_by` alone includes non-collaborator repos, e.g. old test issues). `:none`
-  if nothing (fresh fleet / forge down). There is no more global config fallback: a delegation's target repo
-  is now passed explicitly by the arch (`project`), never read from a "current project" memory.
-  """
-  @spec last_worked_repo(String.t(), Keyword.t()) :: {:ok, String.t()} | :none
-  def last_worked_repo(human, opts \\ []) when is_binary(human) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, issues} <-
-           http_get(
-             config,
-             "/repos/issues/search?type=issues&state=all&limit=30&assigned_by=" <>
-               URI.encode_www_form(human)
-           ) do
-      issues
-      |> List.wrap()
-      |> Enum.sort_by(&(&1["updated_at"] || ""), :desc)
-      |> Enum.map(&get_in(&1, ["repository", "full_name"]))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-      |> Enum.find(&collaborator?(&1, human, opts))
-      |> case do
-        repo when is_binary(repo) -> {:ok, repo}
-        nil -> :none
-      end
-    else
-      _ -> :none
     end
   end
 

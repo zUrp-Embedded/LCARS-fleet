@@ -36,7 +36,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   @doc """
   Deliverable workspace from a known `pod_dir`: `<pod_dir>/workspace`. PURE computation — single
   authority for the placement convention (the `"workspace"` literal lives only here on the spawner side).
-  Called by the facade (`Fleet.Spawner.pod_workspace_path/1`/`pod_workspace_dir/1`),
+  Called by the facade (`Fleet.Spawner.pod_workspace_path/1`),
   `Pod.LaunchSpec` (cwd bind) and `Pod.CompletedPayload` (payload's `workspace` key).
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()

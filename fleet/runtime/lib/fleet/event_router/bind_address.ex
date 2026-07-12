@@ -58,23 +58,6 @@ defmodule Fleet.EventRouter.BindAddress do
     end
   end
 
-  @doc """
-  The bind address as a STRING (`"127.0.0.1"`), for transports that want a textual host and
-  not a tuple. ExMCP CONTRACT: `ExMCP.Server.Transport.start_http_server/4` does
-  `Logger.info("…on \#{host}:…")` — i.e. `to_string(host)` — BEFORE its `parse_host`, which CRASHES
-  (`Protocol.UndefinedError String.Chars` for Tuple) if we pass it the `ip/1` tuple. So we pass it
-  this string; ExMCP re-parses it into a tuple on the ranch side. (Plug.Cowboy, on the other hand,
-  wants `options: [ip: <tuple>]` → use `ip/1` for Cowboy, `host_string/1` for ExMCP.)
-  """
-  @spec host_string(String.t() | nil) :: String.t()
-  def host_string(surface_env \\ nil) do
-    surface_env |> ip() |> :inet.ntoa() |> to_string()
-  end
-
-  @doc "The IPv4 loopback — safe default exposed for tests."
-  @spec loopback() :: :inet.ip_address()
-  def loopback, do: @loopback
-
   # Per-surface override (if named and set) THEN global override. An empty env
   # ("") does not count as an override — an accidentally emptied export must not
   # re-expose a listener.

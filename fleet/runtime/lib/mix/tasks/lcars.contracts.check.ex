@@ -394,7 +394,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # The events.yaml key IS the event `type` (the `source` is a separate field,
-  # validated by `Fleet.Event.canonical_sources/0`); the registry is keyed by type, there
+  # validated by `Fleet.Event.valid_source?/1`); the registry is keyed by type, there
   # is no dispatch table keyed otherwise. Invariant guarded here: every **consumed**
   # type (`handle_info(%Fleet.Event{type: :X})`, moduledoc examples included)
   # must be a registry key — otherwise the consumer is dead (it waits for a type

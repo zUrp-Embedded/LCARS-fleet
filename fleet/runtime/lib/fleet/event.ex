@@ -57,10 +57,6 @@ defmodule Fleet.Event do
   # Closed enum of sources — the SOLE authority for `source`. (events.yaml registers event *types*, not sources.)
   @canonical_sources ~w(spawner task_queue mcp coord workflow starfleet event_router credentials capprofile spbuilder doctrine api)a
 
-  @doc "The canonical sources (closed enum)."
-  @spec canonical_sources() :: [source()]
-  def canonical_sources, do: @canonical_sources
-
   @doc "True if the source belongs to the canonical closed enum."
   @spec valid_source?(atom()) :: boolean()
   def valid_source?(source), do: source in @canonical_sources
@@ -132,28 +128,6 @@ defmodule Fleet.Event do
   defp canon_payload!(v) do
     raise ArgumentError,
           "Fleet.Event.new/3: payload #{inspect(v)} is not a map — an event payload is always a map"
-  end
-
-  @doc """
-  Canonical string-keyed representation of the envelope (payload **nested**, not
-  hoisted). For dual-stack consumers that still read `event["…"]`: a struct does
-  not implement `Access`, so `event["event_type"]` would return `nil` there
-  (this was the cause of a silent skip on the webhook→workflow consumer path).
-  The `payload` keeps its own keys (already string on the webhook JSON side).
-  Canonical helper provided here rather than copied by each consumer, so the
-  string-keyed shape stays single and does not drift.
-  """
-  @spec to_string_map(t()) :: %{optional(String.t()) => any()}
-  def to_string_map(%__MODULE__{} = e) do
-    %{
-      "event_type" => Atom.to_string(e.type),
-      "type" => Atom.to_string(e.type),
-      "source" => to_string(e.source),
-      "pod_id" => e.pod_id,
-      "correlation_id" => e.correlation_id,
-      "timestamp" => e.timestamp,
-      "payload" => e.payload || %{}
-    }
   end
 
   defmodule UnregisteredError do

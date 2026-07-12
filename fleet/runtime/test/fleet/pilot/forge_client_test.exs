@@ -52,18 +52,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
     ]
   end
 
-  describe "collaborator?/3" do
-    test "204 → true, 404 → false" do
-      h = %{
-        {"GET", "/api/v1/repos/fleet/a/collaborators/bob"} => {204, ""},
-        {"GET", "/api/v1/repos/fleet/b/collaborators/bob"} => {404, %{}}
-      }
-
-      assert ForgeClient.Repo.collaborator?("fleet/a", "bob", opts(h))
-      refute ForgeClient.Repo.collaborator?("fleet/b", "bob", opts(h))
-    end
-  end
-
   describe "repo_id/2 — id forge du repo (source de vérité pour <REPO4>, BL-055)" do
     test "GET /repos/<repo> → {:ok, id} entier" do
       h = %{
@@ -82,55 +70,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
     test "réponse sans champ id → {:error, :no_id}" do
       h = %{{"GET", "/api/v1/repos/fleet/weird"} => {200, %{"full_name" => "fleet/weird"}}}
       assert {:error, :no_id} = ForgeClient.repo_id("fleet/weird", opts(h))
-    end
-  end
-
-  describe "last_worked_repo/2 — défaut create_issue (dernier travaillé, scopé collaborateur)" do
-    test "tri client-side par updated_at desc + filtre collaborateur (le plus récent non-collab est écarté)" do
-      # Input volontairement DANS LE DÉSORDRE + le plus récent (poc-old, 23:00) est NON-collaborateur.
-      # Attendu : tri desc → [poc-old, alpha, beta] ; poc-old écarté (404) → alpha (22:38, le 1er collab).
-      # (Isole le tri : alpha est APRÈS beta dans l'input mais plus récent → sans tri on rendrait beta.)
-      issues = [
-        %{"updated_at" => "2026-06-21T22:05:44Z", "repository" => %{"full_name" => "fleet/beta"}},
-        %{
-          "updated_at" => "2026-06-21T22:38:04Z",
-          "repository" => %{"full_name" => "fleet/alpha"}
-        },
-        %{
-          "updated_at" => "2026-06-21T23:00:00Z",
-          "repository" => %{"full_name" => "fleet/poc-old"}
-        }
-      ]
-
-      h = %{
-        {"GET", "/api/v1/repos/issues/search"} => {200, issues},
-        {"GET", "/api/v1/repos/fleet/poc-old/collaborators/bob"} => {404, %{}},
-        {"GET", "/api/v1/repos/fleet/alpha/collaborators/bob"} => {204, ""},
-        {"GET", "/api/v1/repos/fleet/beta/collaborators/bob"} => {204, ""}
-      }
-
-      assert {:ok, "fleet/alpha"} = ForgeClient.Repo.last_worked_repo("bob", opts(h))
-    end
-
-    test "aucun repo collaborateur → :none (l'appelant retombe sur le fallback config)" do
-      issues = [
-        %{
-          "updated_at" => "2026-06-21T23:00:00Z",
-          "repository" => %{"full_name" => "fleet/poc-old"}
-        }
-      ]
-
-      h = %{
-        {"GET", "/api/v1/repos/issues/search"} => {200, issues},
-        {"GET", "/api/v1/repos/fleet/poc-old/collaborators/bob"} => {404, %{}}
-      }
-
-      assert :none = ForgeClient.Repo.last_worked_repo("bob", opts(h))
-    end
-
-    test "issue-search vide → :none" do
-      h = %{{"GET", "/api/v1/repos/issues/search"} => {200, []}}
-      assert :none = ForgeClient.Repo.last_worked_repo("bob", opts(h))
     end
   end
 
@@ -246,71 +185,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       assert {:error, {:label_not_added, "lcars-awaits-arch"}} =
                ForgeClient.add_label("fleet/lcars", 42, "lcars-awaits-arch", opts(handlers))
-    end
-  end
-
-  describe "list_open_issues_without_label/3" do
-    test "filtre client-side les issues avec le label exclu" do
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues"} =>
-          {200,
-           [
-             %{
-               "number" => 1,
-               "title" => "Issue dispatchable",
-               "labels" => [%{"name" => "type:poc"}]
-             },
-             %{
-               "number" => 2,
-               "title" => "Issue déjà dispatchée",
-               "labels" => [%{"name" => "type:poc"}, %{"name" => "lcars-dispatched"}]
-             },
-             %{
-               "number" => 3,
-               "title" => "Autre dispatchable",
-               "labels" => []
-             }
-           ]}
-      }
-
-      assert {:ok, [%{"number" => 1}, %{"number" => 3}]} =
-               ForgeClient.list_open_issues_without_label(
-                 "fleet/lcars",
-                 "lcars-dispatched",
-                 opts(handlers)
-               )
-    end
-
-    test "renvoie liste vide si toutes les issues ont le label exclu" do
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues"} =>
-          {200,
-           [
-             %{"number" => 1, "labels" => [%{"name" => "lcars-dispatched"}]},
-             %{"number" => 2, "labels" => [%{"name" => "lcars-dispatched"}]}
-           ]}
-      }
-
-      assert {:ok, []} =
-               ForgeClient.list_open_issues_without_label(
-                 "fleet/lcars",
-                 "lcars-dispatched",
-                 opts(handlers)
-               )
-    end
-
-    test "propage erreurs HTTP" do
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues"} =>
-          {503, %{"message" => "Service Unavailable"}}
-      }
-
-      assert {:error, {:http, 503, _}} =
-               ForgeClient.list_open_issues_without_label(
-                 "fleet/lcars",
-                 "lcars-dispatched",
-                 opts(handlers)
-               )
     end
   end
 
@@ -1039,21 +913,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "add_collaborator/4 + protect_branch/3 (onboarding : gate forge-enforcé)" do
-    test "add_collaborator → PUT collaborators/{user} {permission}, :ok" do
-      handlers = %{
-        {"PUT", "/api/v1/repos/fleet/proj/collaborators/engineer"} => {204, ""}
-      }
-
-      assert :ok =
-               ForgeClient.Repo.add_collaborator(
-                 "fleet/proj",
-                 "engineer",
-                 "write",
-                 opts(handlers)
-               )
-    end
-
+  describe "protect_branch/3 (onboarding : gate forge-enforcé)" do
     test "protect_branch → POST branch_protections, :ok" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>

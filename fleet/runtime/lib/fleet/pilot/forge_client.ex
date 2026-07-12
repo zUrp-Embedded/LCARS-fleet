@@ -95,37 +95,6 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Lists the open issues of `repo` that do NOT have the label `exclude_label`
-  (client-side filtering: Gitea does not expose negation on the query side).
-  Used by `Fleet.Pilot.Poller` (catch-up on issues without
-  `lcars-dispatched`).
-
-  ## Returns
-
-    * `{:ok, [issue]}` — filtered issues, raw Gitea payloads
-    * `{:error, term()}` — propagation of HTTP/transport/config errors
-
-  ## Pagination
-
-  Paginated: delegates to `list_open_issues/2` → `list_scoped_issues/3` → `Transport.paginate/3`,
-  so issue discovery is source-of-truth complete (all pages read), not a single hard-coded page.
-  """
-  @spec list_open_issues_without_label(String.t(), String.t(), Keyword.t()) ::
-          {:ok, [map()]} | {:error, term()}
-  def list_open_issues_without_label(repo, exclude_label, opts \\ [])
-      when is_binary(repo) and is_binary(exclude_label) do
-    with {:ok, issues} <- list_open_issues(repo, opts) do
-      filtered =
-        Enum.reject(issues, fn issue ->
-          labels = Map.get(issue, "labels", [])
-          Enum.any?(labels, fn l -> Map.get(l, "name") == exclude_label end)
-        end)
-
-      {:ok, filtered}
-    end
-  end
-
-  @doc """
   Lists the open issues of `repo` ASSIGNED TO ME (forge-side multi-user scoping). Building block of the
   repo-serialised dispatch lease (counts active pipelines, in-flight included). PAGINATED. Delegates to
   `list_scoped_issues` — issues AND PRs go through the SAME `/issues?type=…` endpoint (a single scoping code path).
@@ -317,7 +286,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # ============================================================
   # Repo / onboarding — DELEGATED to `Fleet.Pilot.ForgeClient.Repo`.
-  # Provisioning (create_repo/add_collaborator/protect_branch) + discovery by org-membership
+  # Provisioning (create_repo/protect_branch) + discovery by org-membership
   # (list_org_repos, WS3). The provisioning ops are called DIRECTLY on `ForgeClient.Repo` (by
   # `ProjectOnboard`); only the SEAM-FACED ops below are forwarded (the module injected by the
   # seam stays THIS module). Doc + logic live in `Repo`.
