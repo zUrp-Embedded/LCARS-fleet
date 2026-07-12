@@ -18,7 +18,7 @@ Trois dashboards préexistent et **restent en vie** (on coupe rien maintenant, m
 
 | Port | Quoi | Statut |
 |---|---|---|
-| `:8090` | dashboard Python v1.5 | DÉCOMMISSIONNÉ (cf. Fleet.API.Dashboard) |
+| `:8090` | dashboard Python v1.5 | DÉCOMMISSIONNÉ (retiré) |
 | `:8089` | `fleet_dashboard` (branche sœur `dashboard/observability-8089`) | squelette observation deck |
 | **`:8091`** | **`fleet_observation` (CE design)** | **nouveau — la prise propre BL-026** |
 
@@ -175,7 +175,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 ## 5. Décisions techniques (P4 — tranché, exposé)
 
 1. **App** : `fleet_observation` (OTP `:fleet_observation`, `Fleet.Observation.*`). Distinct du
-   sœur `fleet_dashboard`/`:8089` et de `Fleet.API.Dashboard`/`:8080` → **coexistence**, ménage
+   sœur `fleet_dashboard`/`:8089` (le dashboard `:8080/dashboard` a été RETIRÉ, acte3 vague B) → ménage
    au final. Vocab aligné BL-026 (`Fleet.Observability`/`ReadModel`).
    - **Flag convergence** : à la fusion des branches, 2 « dashboards » natifs cohabiteront
      (`fleet_dashboard` :8089 et `fleet_observation` :8091). Décision de ménage = user, plus tard.

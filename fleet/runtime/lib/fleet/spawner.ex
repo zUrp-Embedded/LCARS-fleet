@@ -24,9 +24,8 @@ defmodule Fleet.Spawner do
 
   Spawns, watches and terminates ephemeral agent pods. Each pod is a
   `Fleet.Spawner.Pod` (`gen_statem`) supervised by `Fleet.Spawner.Supervisor`:
-  its STATES are the 8 phases of the canonical cycle (`:allocating → :cleaning →
-  :projecting → :injecting → :launching → :monitoring → :extracting →
-  :releasing`).
+  its STATES are the 7 phases of the canonical cycle (`:allocating → :cleaning →
+  :projecting → :launching → :monitoring → :extracting → :releasing`).
 
   ## API
 

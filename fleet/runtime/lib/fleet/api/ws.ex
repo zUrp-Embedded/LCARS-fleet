@@ -17,13 +17,13 @@ defmodule Fleet.API.WS do
       {"type": "connected"}                   ← initial handshake
       {"type": "subscribed", "topics": [...]} ← subscribe ack
       {"type": "ping"}                        ← 30s heartbeat
-      {"type": "event", "event_type": "workflow_map.completed", "payload": {...}}
+      {"type": "event", "event_type": "workflow_map.failed", "payload": {...}}
       {"type": "error", "reason": "..."}
 
   ## Topic filter
 
   Simple pattern: exact match OR `*` suffix wildcard (e.g.
-  `"workflow_map.*"` matches `"workflow_map.completed"`).
+  `"workflow_map.*"` matches `"workflow_map.failed"`).
   """
 
   @behaviour :cowboy_websocket

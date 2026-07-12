@@ -88,7 +88,6 @@ defmodule Fleet.Spawner.Pod.Recovery do
     {:allocating, :allocate},
     {:cleaning, :clean},
     {:projecting, :project},
-    {:injecting, :inject},
     {:launching, :launch},
     {:monitoring, :monitor},
     {:extracting, :extract},
