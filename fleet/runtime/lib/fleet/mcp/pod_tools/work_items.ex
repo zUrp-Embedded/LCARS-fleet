@@ -106,14 +106,15 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   defp present_work_item_id(_), do: nil
 
   # JSON envelope of the brief exposed to the pod — work_item_id = correlation_id.
+  # (No `retry_count`: removed with the vestigial WorkItem field, acte4 A-15 — it was always 0,
+  # no SP/pod ever read it.)
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
       "work_item_id" => t.id,
       "issue_id" => t.issue_id,
       "role" => t.role,
       "brief" => t.brief,
-      "deadline" => iso(t.deadline),
-      "retry_count" => t.retry_count
+      "deadline" => iso(t.deadline)
     }
   end
 

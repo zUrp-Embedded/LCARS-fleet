@@ -15,7 +15,6 @@ defmodule Fleet.TaskQueue.WorkItem do
           role: String.t() | nil,
           brief: String.t() | nil,
           deadline: DateTime.t() | nil,
-          retry_count: non_neg_integer(),
           enqueued_at: DateTime.t(),
           assigned_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
@@ -37,13 +36,13 @@ defmodule Fleet.TaskQueue.WorkItem do
     :completed_at,
     :result,
     state: :pending,
-    # NB: VESTIGIAL field, never incremented (always 0). The system-side bounded retry is NOT
-    # here (it must not be influenceable by the pod): the forge-driven rail is what bounds the
-    # rework, outside the pod-facing work item. Kept for schema compat (serialized); to be wired as
-    # an observability mirror or removed (a design decision, not an oversight).
-    retry_count: 0,
     metadata: %{}
   ]
+
+  # (No `retry_count` field: it was vestigial — never incremented, always 0, serialized for
+  # nothing. The system-side bounded retry deliberately does NOT live here (it must not be
+  # pod-influenceable): the forge-driven rail (`max_rework_rounds`) bounds the rework. Removed
+  # acte4 A-15; an old `state.json` carrying the key is simply ignored by `from_map`.)
 
   # ACTIVE states = a work item still OWNS its pod's slot/lock. The TERMINAL states
   # (`:completed`/`:failed`/`:cleared`) do NOT: a `:completed` item is DELIVERED — its completion
@@ -72,7 +71,6 @@ defmodule Fleet.TaskQueue.WorkItem do
       "role" => t.role,
       "brief" => t.brief,
       "deadline" => iso(t.deadline),
-      "retry_count" => t.retry_count,
       "enqueued_at" => iso(t.enqueued_at),
       "assigned_at" => iso(t.assigned_at),
       "completed_at" => iso(t.completed_at),
@@ -98,8 +96,8 @@ defmodule Fleet.TaskQueue.WorkItem do
   string keys) to the struct types — `deadline` (DateTime | ISO string → DateTime | nil), `metadata`
   (a map), `issue_id`/`role`/`brief` (binary | nil) — so the queue never stores a semi-typed struct
   (a string `deadline` would silently arm no watchdog; a non-map `metadata` would crash any JSON-event
-  consumer). `id` (UUID v4) + `enqueued_at` (now) + `state: :pending` are set here; `retry_count` stays
-  0 (never pod-influenceable). `{:error, {:bad_attr, {field, value}}}` on a malformed attr.
+  consumer). `id` (UUID v4) + `enqueued_at` (now) + `state: :pending` are set here.
+  `{:error, {:bad_attr, {field, value}}}` on a malformed attr.
   """
   @spec new(String.t(), map()) :: {:ok, t()} | {:error, {:bad_attr, term()}}
   def new(pod_id, attrs) when is_binary(pod_id) and is_map(attrs) do
@@ -135,14 +133,13 @@ defmodule Fleet.TaskQueue.WorkItem do
     # must FAIL-LOUD here, NOT silently become nil (otherwise boot OK then crash at sort time).
     # The other DateTimes (deadline/assigned/completed) are optional → nil OK.
     # Optional fields via the SAME casters as `new/2` (SSoT): a malformed one (non-map metadata/result,
-    # non-neg-int retry_count, non-binary id/role/brief) is CORRUPTION → `:invalid` (→ the Server's
+    # non-binary id/role/brief) is CORRUPTION → `:invalid` (→ the Server's
     # `state.corrupt` path), NOT a silent coercion that would crash a downstream reader.
     with {:ok, st} <- parse_state(state),
          {:ok, eat} <- parse_required_dt(enq),
          {:ok, issue_id} <- cast_str_nil(m["issue_id"], :issue_id),
          {:ok, role} <- cast_str_nil(m["role"], :role),
          {:ok, brief} <- cast_str_nil(m["brief"], :brief),
-         {:ok, retry_count} <- cast_retry(m["retry_count"]),
          {:ok, result} <- cast_result(m["result"], :result),
          {:ok, metadata} <- cast_map(m["metadata"] || %{}, :metadata) do
       {:ok,
@@ -155,7 +152,6 @@ defmodule Fleet.TaskQueue.WorkItem do
          # deadline/assigned/completed stay TOLERANT (parse → nil on a bad ISO): an optional timestamp
          # that no longer parses just becomes nil on recovery (no re-arm), not a corrupt-the-whole-state.
          deadline: parse(m["deadline"]),
-         retry_count: retry_count,
          enqueued_at: eat,
          assigned_at: parse(m["assigned_at"]),
          completed_at: parse(m["completed_at"]),
@@ -210,10 +206,6 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_str_nil(nil, _field), do: {:ok, nil}
   defp cast_str_nil(s, _field) when is_binary(s), do: {:ok, s}
   defp cast_str_nil(v, field), do: {:error, {:bad_attr, {field, v}}}
-
-  defp cast_retry(nil), do: {:ok, 0}
-  defp cast_retry(n) when is_integer(n) and n >= 0, do: {:ok, n}
-  defp cast_retry(v), do: {:error, {:bad_attr, {:retry_count, v}}}
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

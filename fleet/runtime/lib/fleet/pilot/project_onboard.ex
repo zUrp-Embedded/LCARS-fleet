@@ -167,7 +167,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts) do
     if ForgeClient.Repo.branch_exists?(full_name, "work/ops", fc_opts(opts)) do
       File.mkdir_p!(Path.dirname(work_dir))
-      GitOps.run(["clone", "--branch", "work/ops", url, work_dir], cd: nil, auth: true)
+      GitOps.run(["clone", "--branch", "work/ops", url, work_dir], auth: true)
     else
       with :ok <- add_work_ops(proj_dir, work_dir),
            :ok <- Scaffold.work(work_dir, name, opts),
@@ -344,7 +344,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp clone_main(url, proj_dir) do
     File.mkdir_p!(Path.dirname(proj_dir))
-    GitOps.run(["clone", "--branch", "main", url, proj_dir], cd: nil, auth: true)
+    GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
   end
 
   defp add_work_ops(proj_dir, work_dir) do

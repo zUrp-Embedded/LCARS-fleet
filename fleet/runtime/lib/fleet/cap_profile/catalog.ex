@@ -114,11 +114,12 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
-  # `<dir>/monks/*.yaml`. The `monks/` scan is INERT scaffolding: # ... FROZEN under `priv/cap_profile/canon/_frozen-monks/` (deliberately NOT scanned ...
-  # ~17 pods on one shared corpus). `monks/` does not exist today; the scan is here for when they are
-  # re-homed (the re-home adds their slot_scope then). The `modop/` dir stays excluded: overlays have
-  # no role identity. A fragment without `metadata.name` → ignored (baseline/overlay).
+  # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
+  # NO `monks/` scan: the monks are FROZEN under `priv/cap_profile/canon/_frozen-monks/`
+  # (deliberately out of the boot loop, F-C153) and a `monks/` dir does not exist — a wildcard
+  # on it was speculative scaffolding (YAGNI); the re-home that thaws them adds their scan
+  # (and their slot_scope) THEN. The `modop/` dir stays excluded: overlays have no role
+  # identity. A fragment without `metadata.name` → ignored (baseline/overlay).
   # Collision `name` → fail-loud (`:name_collision`).
   #
   # A NON-DECODABLE YAML in the catalogue is NOT silently skipped (otherwise the role would be
@@ -131,8 +132,7 @@ defmodule Fleet.CapProfile.Catalog do
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
-        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"])) ++
-        Path.wildcard(Path.join([dir, "monks", "*.yaml"]))
+        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"]))
 
     Enum.reduce_while(files, {:ok, %{}}, fn path, {:ok, acc} ->
       case decode_yaml(path) do

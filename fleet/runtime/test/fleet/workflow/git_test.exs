@@ -46,23 +46,23 @@ defmodule Fleet.GitTest do
       author_email: "engineer@lcars.local",
       committer_name: "Fixture Committer",
       committer_email: "committer@fixture.test",
-      message: "feat: payload from worker",
-      branch: "main"
+      message: "feat: payload from worker"
     }
   end
 
   # ============================================================
-  # publish/1 — add+commit (sans push)
+  # commit/1 — add+commit (sans push ; le mode payload de Deliverable)
+  # (acte4 #20 : publish/1 — le chemin couplé add+commit+push legacy, ZÉRO caller prod —
+  # est SUPPRIMÉ ; ses cas partagés sont couverts ici via commit/1, le push via push/3.)
   # ============================================================
 
-  describe "publish/1 — commit local sans push" do
+  describe "commit/1 — commit local sans push" do
     test "commit créé avec auteur et committer corrects (D-04)", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws"))
       commit_initial(ws)
       File.write!(Path.join(ws, "feature.md"), "delivered by worker\n")
 
-      assert {:ok, %{commit_sha: <<_::binary-size(40)>>, pushed?: false}} =
-               Fleet.Workflow.Git.publish(valid_opts(ws))
+      assert {:ok, <<_::binary-size(40)>>} = Fleet.Workflow.Git.commit(valid_opts(ws))
 
       {author_line, 0} = System.cmd("git", ["log", "-1", "--format=%an <%ae>"], cd: ws)
       {committer_line, 0} = System.cmd("git", ["log", "-1", "--format=%cn <%ce>"], cd: ws)
@@ -82,7 +82,7 @@ defmodule Fleet.GitTest do
       File.write!(Path.join(ws, "ignored.txt"), "should not be committed\n")
 
       opts = Map.put(valid_opts(ws), :add_paths, ["docs/"])
-      assert {:ok, _} = Fleet.Workflow.Git.publish(opts)
+      assert {:ok, _} = Fleet.Workflow.Git.commit(opts)
 
       {staged_files, 0} = System.cmd("git", ["show", "--name-only", "--format=", "HEAD"], cd: ws)
       assert String.trim(staged_files) == "docs/X.md"
@@ -90,21 +90,21 @@ defmodule Fleet.GitTest do
 
     test "fail-closed : workspace absent", %{tmp_dir: tmp} do
       assert {:error, :workspace_missing} =
-               Fleet.Workflow.Git.publish(valid_opts(Path.join(tmp, "nope")))
+               Fleet.Workflow.Git.commit(valid_opts(Path.join(tmp, "nope")))
     end
 
     test "fail-closed : workspace pas un repo git", %{tmp_dir: tmp} do
       ws = Path.join(tmp, "not-git")
       File.mkdir_p!(ws)
 
-      assert {:error, :not_a_git_workspace} = Fleet.Workflow.Git.publish(valid_opts(ws))
+      assert {:error, :not_a_git_workspace} = Fleet.Workflow.Git.commit(valid_opts(ws))
     end
 
     test "fail-closed : rien à committer → :nothing_to_commit", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-empty"))
       commit_initial(ws)
       # AUCUNE modification après le seed → git commit refuse.
-      assert {:error, :nothing_to_commit} = Fleet.Workflow.Git.publish(valid_opts(ws))
+      assert {:error, :nothing_to_commit} = Fleet.Workflow.Git.commit(valid_opts(ws))
     end
 
     test "fail-closed : opts manquants", %{tmp_dir: tmp} do
@@ -112,31 +112,9 @@ defmodule Fleet.GitTest do
       commit_initial(ws)
 
       opts = valid_opts(ws) |> Map.delete(:author_email) |> Map.delete(:message)
-      assert {:error, {:missing_opts, missing}} = Fleet.Workflow.Git.publish(opts)
+      assert {:error, {:missing_opts, missing}} = Fleet.Workflow.Git.commit(opts)
       assert :author_email in missing
       assert :message in missing
-    end
-
-    test "fail-closed : branche invalide (espace, --, ..)", %{tmp_dir: tmp} do
-      ws = init_workspace(Path.join(tmp, "ws-branch"))
-      commit_initial(ws)
-      File.write!(Path.join(ws, "x.txt"), "x\n")
-
-      Enum.each(["foo bar", "--force", "..", "foo;rm", ""], fn bad ->
-        opts = Map.put(valid_opts(ws), :branch, bad)
-
-        assert {:error, :invalid_branch} = Fleet.Workflow.Git.publish(opts),
-               "branch #{inspect(bad)}"
-      end)
-    end
-
-    test "fail-closed : push? sans remote", %{tmp_dir: tmp} do
-      ws = init_workspace(Path.join(tmp, "ws-push-no-remote"))
-      commit_initial(ws)
-      File.write!(Path.join(ws, "x.txt"), "x\n")
-
-      opts = Map.put(valid_opts(ws), :push?, true)
-      assert {:error, :push_requires_remote} = Fleet.Workflow.Git.publish(opts)
     end
   end
 
@@ -155,7 +133,7 @@ defmodule Fleet.GitTest do
 
       # Sans `--`, `git add --all` staterait sneaky.txt → {:ok}. Avec `--`, "--all" est un pathspec
       # littéral (absent) → échec : l'option-injection est neutralisée (rien n'est stagé-en-masse).
-      assert {:error, _} = Fleet.Workflow.Git.publish(opts)
+      assert {:error, _} = Fleet.Workflow.Git.commit(opts)
     end
 
     test "F-014 : add_paths invalide (vide / non-binaire / élément vide) → :invalid_add_paths",
@@ -167,7 +145,7 @@ defmodule Fleet.GitTest do
       for bad <- [[], [123], ["", "ok"], "not-a-list"] do
         opts = Map.put(valid_opts(ws), :add_paths, bad)
 
-        assert {:error, :invalid_add_paths} = Fleet.Workflow.Git.publish(opts),
+        assert {:error, :invalid_add_paths} = Fleet.Workflow.Git.commit(opts),
                "add_paths #{inspect(bad)}"
       end
     end
@@ -189,22 +167,14 @@ defmodule Fleet.GitTest do
                Fleet.Workflow.Git.push(ws, "origin", "--force")
     end
 
-    test "F-046 : publish avec remote leading-`-` rejeté tôt (check_push_remote)", %{tmp_dir: tmp} do
-      ws = init_workspace(Path.join(tmp, "ws-f046c"))
-      commit_initial(ws)
-      File.write!(Path.join(ws, "x.txt"), "x\n")
-
-      opts = valid_opts(ws) |> Map.merge(%{remote: "--receive-pack=evil", push?: true})
-      assert {:error, {:invalid_remote, "--receive-pack=evil"}} = Fleet.Workflow.Git.publish(opts)
-    end
   end
 
   # ============================================================
-  # publish/1 — push vers bare repo local
+  # commit/1 → push/3 — le chaînage payload réel (CONTENT puis PUBLICATION)
   # ============================================================
 
-  describe "publish/1 — push vers bare repo" do
-    test "commit pousse sur le remote (bare repo local)", %{tmp_dir: tmp} do
+  describe "commit/1 puis push/3 — chaînage vers bare repo" do
+    test "le commit local atterrit sur le remote via push/3 (bare repo local)", %{tmp_dir: tmp} do
       bare = init_bare_repo(Path.join(tmp, "bare.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws)
@@ -214,28 +184,15 @@ defmodule Fleet.GitTest do
 
       File.write!(Path.join(ws, "feature.md"), "post-extract payload\n")
 
-      opts = valid_opts(ws) |> Map.merge(%{remote: "origin", push?: true})
-      assert {:ok, %{commit_sha: sha, pushed?: true}} = Fleet.Workflow.Git.publish(opts)
+      assert {:ok, sha} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      # commit/1 ne touche PAS le remote (séparation contenu/publication)…
+      {bare_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
+      refute String.trim(bare_head) == sha
 
-      # Vérifie côté bare : le commit y est arrivé.
+      # …c'est push/3 qui publie.
+      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "main:main")
       {bare_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(bare_sha) == sha
-    end
-
-    test "push? false ne touche pas le remote", %{tmp_dir: tmp} do
-      bare = init_bare_repo(Path.join(tmp, "bare.git"))
-      ws = init_workspace(Path.join(tmp, "ws-nopush"), remote_url: bare)
-      commit_initial(ws)
-      {_, 0} = System.cmd("git", ["push", "origin", "main"], cd: ws)
-
-      {bare_head_before, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
-      File.write!(Path.join(ws, "feature.md"), "local only\n")
-
-      opts = valid_opts(ws) |> Map.merge(%{remote: "origin", push?: false})
-      assert {:ok, %{pushed?: false}} = Fleet.Workflow.Git.publish(opts)
-
-      {bare_head_after, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
-      assert bare_head_before == bare_head_after
     end
   end
 

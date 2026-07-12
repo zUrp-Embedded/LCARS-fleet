@@ -614,9 +614,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     do: {:error, {:request_review, :no_reviewers}}
 
   defp request_reviews_step(forge, repo, pr, reviewers, forge_opts) do
+    # Exhaustif sur le @spec RÉEL de request_review (`:ok | {:error, term()}`) — une clause
+    # `{:ok, _}` ici serait morte face au contrat du callee (et divergerait du jumeau request_review_step).
     case forge.request_review(repo, pr, reviewers, forge_opts) do
       :ok -> :ok
-      {:ok, _} -> :ok
       {:error, reason} -> {:error, {:request_review, reason}}
     end
   end
@@ -743,20 +744,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # ── Step 2: signed comment [step_run:role:sha], dedup ──────────────────────────
-  # The signature AND the result block come from ForgeProtocol (pure vocab, co-located with their
-  # parsers `step_run_marker?` / `parse_result_block`). We do NOT go through the `forge` seam
-  # (a stub must not be able to desync the format from the real parser).
-  #
-  # NB `:outputs`: carries the `result_K` of the finishing step → readable without a separate query
-  # (recovery, context). StepRunConsumer no longer sets `:outputs` (the "advance toward a
-  # gatekeeper-step" case no longer exists) → generic seam, inactive on the StepRunConsumer side
-  # but kept (other callers / extensibility).
+  # The signature comes from ForgeProtocol (pure vocab, co-located with its parser
+  # `step_run_marker?`). We do NOT go through the `forge` seam (a stub must not be able to
+  # desync the format from the real parser).
+  # (No `:outputs`/result_block threading anymore: NO caller ever set `:outputs` since the
+  # gatekeeper-step advance was removed — `result_block(nil)` always yielded "". The READ side,
+  # `parse_result_block`, stays alive in ForgeProtocol/ForgeClient for existing forge comments.)
   defp step2_comment(forge, repo, n, role, sha, step_run, forge_opts) do
     signature = ForgeProtocol.step_run_marker(role, sha)
 
     body =
       Map.get(step_run, :comment_body, Texts.step_run_comment(role, sha)) <>
-        ForgeProtocol.result_block(Map.get(step_run, :outputs)) <> "\n\n" <> signature
+        "\n\n" <> signature
 
     # The signed step_run comment is IN THE NAME OF THE ROLE that finishes (`as_role`: consultant verdict /
     # eng deliverable → forge author = the role, not the system account; same gesture as the PR/review/seal).

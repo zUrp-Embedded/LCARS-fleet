@@ -4,11 +4,13 @@ defmodule Fleet.Workflow.Git do
   orchestration rail on `pod.completed`, when the step declares `post_extract.git`,
   to turn the pod's work into a commit (then push) on the world side.
 
-  Pure data → action:
-    * input  : workspace path, author/committer identities, message, branch,
-      add_paths, remote, push?
-    * action : `git add <paths> → git commit → [git push <remote> <branch>]`
-    * output : `{:ok, %{commit_sha, pushed?}}` or `{:error, term()}`
+  Pure data → action. Two INDEPENDENT primitives (composed by `Fleet.Workflow.Deliverable`,
+  which separates CONTENT from PUBLICATION — the deliverable gate runs between the two):
+    * `commit/1` — `git add <paths> → git commit` in workspace (no push); input = workspace,
+      author/committer identities, message, add_paths; output = `{:ok, commit_sha}`.
+    * `push/3` — bounded `git push <remote> <refspec>` (no add/commit).
+  (No coupled add+commit+push entry point: the legacy `publish/1` had ZERO production caller —
+  Deliverable always goes commit → gate → push — and only its own tests kept it alive.)
 
   Fail-closed on inputs: neither `--force` nor `--no-verify` is ever composed
   from caller data or as a default option. `--no-verify` is never composed at all.
@@ -31,25 +33,19 @@ defmodule Fleet.Workflow.Git do
           required(:committer_name) => String.t(),
           required(:committer_email) => String.t(),
           required(:message) => String.t(),
-          required(:branch) => String.t(),
-          optional(:remote) => String.t(),
-          optional(:add_paths) => [String.t()],
-          optional(:push?) => boolean()
+          optional(:add_paths) => [String.t()]
         }
 
-  @required_keys [
+  # `commit/1` does not push → no `:branch`/`:remote`/`:push?` (push concerns live in `push/3`'s
+  # positional args). The identity (author/committer) + message + workspace are enough.
+  @commit_required_keys [
     :workspace,
     :author_name,
     :author_email,
     :committer_name,
     :committer_email,
-    :message,
-    :branch
+    :message
   ]
-
-  # `commit/1` does not push → `:branch`/`:remote` are push concerns, absent
-  # here. The identity (author/committer) + message + workspace are enough.
-  @commit_required_keys @required_keys -- [:branch]
 
   # The workspace is CO-WRITTEN by an adversarial pod; `.git/hooks/`, `.git/config` and an in-tree
   # `.gitattributes` are all placeable there by the pod. `git add`/`git commit`/`git push` are run HERE,
@@ -67,25 +63,10 @@ defmodule Fleet.Workflow.Git do
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   @doc """
-  Composes the system-side git sequence (add → commit → [push]) in
-  `workspace`. Pure data → action; no state kept.
-  """
-  @spec publish(opts) :: {:ok, %{commit_sha: String.t(), pushed?: boolean()}} | {:error, term()}
-  def publish(opts) when is_map(opts) do
-    with :ok <- validate_opts(opts),
-         :ok <- ensure_git_workspace(opts.workspace),
-         :ok <- git_add(opts),
-         {:ok, sha} <- git_commit(opts),
-         {:ok, pushed?} <- maybe_push(opts) do
-      {:ok, %{commit_sha: sha, pushed?: pushed?}}
-    end
-  end
-
-  @doc """
   Commit-only — `git add <paths> → git commit` in `workspace`, **without push**. Separates the
-  CONTENT (the system commits the payload) from the PUBLICATION (`push/3` after the deliverable gate). Used
-  by `Fleet.Workflow.Deliverable` in `payload` mode; `publish/1` stays the legacy coupled path
-  (add+commit+push in one). No `:branch`/`:remote` required (push concerns). Returns the SHA of the committed HEAD.
+  CONTENT (the system commits the payload) from the PUBLICATION (`push/3` after the deliverable
+  gate). Used by `Fleet.Workflow.Deliverable` in `payload` mode. No `:branch`/`:remote`
+  (push concerns live in `push/3`). Returns the SHA of the committed HEAD.
   """
   @spec commit(opts) :: {:ok, String.t()} | {:error, term()}
   def commit(opts) when is_map(opts) do
@@ -100,16 +81,8 @@ defmodule Fleet.Workflow.Git do
   # ============================================================
   # Validation
   # ============================================================
-
-  defp validate_opts(opts) do
-    with :ok <- check_required_keys(opts),
-         :ok <- check_workspace_string(opts.workspace),
-         :ok <- check_branch(opts.branch) do
-      check_push_remote(opts)
-    end
-  end
-
-  defp check_required_keys(opts), do: check_required_keys(opts, @required_keys)
+  # (Ref validation lives with the callers: `Deliverable` validates its target refs via the
+  # Ring-0 authority `Fleet.GitRef`; `push/3` fail-closes leading-`-` remote/refspec itself.)
 
   defp check_required_keys(opts, keys) do
     case Enum.reject(keys, &Map.has_key?(opts, &1)) do
@@ -120,25 +93,6 @@ defmodule Fleet.Workflow.Git do
 
   defp check_workspace_string(ws) when is_binary(ws) and ws != "", do: :ok
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
-
-  # Branch validation delegated to the SINGLE AUTHORITY `Fleet.GitRef` (Ring 0 primitive; the
-  # check-ref-format regex used to live here, duplicated with `Deliverable`). We keep the typed error shape.
-  defp check_branch(branch) do
-    if Fleet.GitRef.valid?(branch), do: :ok, else: {:error, :invalid_branch}
-  end
-
-  defp check_push_remote(%{push?: true} = opts) do
-    case Map.get(opts, :remote) do
-      # Reject leading-`-` as early as possible (publish/maybe_push) — `push/3` re-validates too.
-      r when is_binary(r) and r != "" ->
-        if String.starts_with?(r, "-"), do: {:error, {:invalid_remote, r}}, else: :ok
-
-      _ ->
-        {:error, :push_requires_remote}
-    end
-  end
-
-  defp check_push_remote(_opts), do: :ok
 
   defp ensure_git_workspace(ws) do
     case {File.dir?(ws), File.dir?(Path.join(ws, ".git"))} do
@@ -275,9 +229,9 @@ defmodule Fleet.Workflow.Git do
 
   @doc """
   Push-only — pushes `refspec` from `workspace` to `remote`, **bounded** (timeout). NO add/commit:
-  the branch is already committed (by the pod in `git_native` mode, or by `publish/1` in `payload` mode).
-  `refspec` can be `local_ref:target_branch` so that the pushed ref is **chosen by the system**.
-  Shared by `Fleet.Workflow.Deliverable` (both modes) and `maybe_push/1` (`publish/1` compat).
+  the branch is already committed (by the pod in `git_native` mode, or by `commit/1` in `payload`
+  mode). `refspec` can be `local_ref:target_branch` so that the pushed ref is **chosen by the
+  system**. Sole caller: `Fleet.Workflow.Deliverable` (both modes).
   """
   @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) do
@@ -357,11 +311,6 @@ defmodule Fleet.Workflow.Git do
 
     String.contains?(o, "non-fast-forward") or String.contains?(o, "fetch first")
   end
-
-  defp maybe_push(%{push?: true} = opts),
-    do: push(opts.workspace, Map.fetch!(opts, :remote), opts.branch)
-
-  defp maybe_push(_opts), do: {:ok, false}
 
   # Timeout for network `git push`. Default 30s (enough for LAN/local forge,
   # guard against indefinite WAN hang). Override via :fleet_workflow,

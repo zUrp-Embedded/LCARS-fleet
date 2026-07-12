@@ -85,9 +85,9 @@ defmodule Fleet.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Effets de bord de fin de boot (READY=1 systemd + trace build) : APRÈS le
-        # start_link OK = fleet entière up, listener api bindé inclus. Contrat détaillé
-        # dans `Fleet.API.Application.post_boot/0`.
+        # Effet de bord de fin de boot (trace build-info) : APRÈS le start_link OK = fleet
+        # entière up, listener api bindé inclus. Contrat détaillé dans
+        # `Fleet.API.Application.post_boot/0`.
         Fleet.API.Application.post_boot()
         {:ok, pid}
 

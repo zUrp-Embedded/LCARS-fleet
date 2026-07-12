@@ -23,20 +23,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   ## Output
 
   YAML `status + checks[] + evidence (file:line)`. `status: fail` if at
-  least one check is `fail`. The `pending` checks (not yet implemented) are
-  listed explicitly — no silent cap: a gap not yet covered
-  is visible, not masked as "pass".
+  least one check is `fail`. Every check is IMPLEMENTED and grounded in the real
+  code (grep/introspection) — there is no "pending/declared-only" tier: a contract
+  either has an executable check or it is not listed.
   """
 
   use Mix.Task
 
   @recursive false
 
-  # Each check: %{id, remediation, status: :pass|:fail|:pending, evidence: [..], note}
-  # The IMPLEMENTED checks are grounded in the real code (grep/introspection).
-  # The PENDING ones would name the remediation that would make them executable.
-  # All checks are implemented: `@pending_checks` is empty.
-  @pending_checks []
+  # Each check: %{id, remediation, status: :pass|:fail, evidence: [..], note}
+  # (The `@pending_checks` machinery — a list that was ALWAYS empty, a counter that always
+  # printed "0 pending" — was inert ceremony, removed acte4 A-16. Reintroduce a pending tier
+  # only the day a real declared-but-not-yet-executable check exists.)
 
   @impl Mix.Task
   def run(args) do
@@ -48,10 +47,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     unless quiet?, do: IO.puts(render_yaml(overall, checks))
 
     fails = Enum.count(checks, &(&1.status == :fail))
-    pend = Enum.count(checks, &(&1.status == :pending))
 
     Mix.shell().info(
-      "contracts.check: #{overall} — #{fails} fail, #{pend} pending, " <>
+      "contracts.check: #{overall} — #{fails} fail, " <>
         "#{Enum.count(checks, &(&1.status == :pass))} pass"
     )
 
@@ -103,7 +101,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
-      ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
+      ]
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
 

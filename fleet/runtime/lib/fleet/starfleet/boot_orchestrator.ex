@@ -112,9 +112,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           _ -> {:partial, oks, errs}
         end
 
-      {:ok, pods} when is_list(pods) ->
-        {:ok, pods}
-
+      # (No `{:ok, list}` clause: `PermanentBoot.boot_permanent_pods/0` yields a BARE list of
+      # per-pod results or `{:error, _}` — never a wrapped list; such a clause was dead code.)
       {:error, reason} ->
         {:failed, reason}
 

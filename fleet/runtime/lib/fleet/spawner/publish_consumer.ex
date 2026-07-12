@@ -45,7 +45,7 @@ defmodule Fleet.Spawner.PublishConsumer do
       )
       when is_map(payload) do
     try do
-      handle_spawn_request(payload, payload, state)
+      handle_spawn_request(payload, state)
     rescue
       e ->
         # The dispatch RAISED → the spawn is dropped. BUT the REST API already answered HTTP 202 "queued"
@@ -75,15 +75,13 @@ defmodule Fleet.Spawner.PublishConsumer do
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
-  # `payload` = application map; `envelope` = struct/map that may carry `issue_id`
-  # at the root (legacy tuple case — the canonical struct carries it in the payload too).
-  defp handle_spawn_request(payload, envelope, state) do
+  # `payload` = application map (the canonical %Fleet.Event{} carries issue_id IN the payload).
+  # (No `envelope` param anymore: it was a vestige of the legacy `{atom, map}` tuple clause the
+  # moduledoc declares dead — the fallback read of a root-level issue_id could never fire.)
+  defp handle_spawn_request(payload, state) do
     name = Map.get(payload, "cap_profile_name") || Map.get(payload, "role")
 
-    issue_id =
-      Map.get(payload, "issue_id") ||
-        (is_map(envelope) and Map.get(envelope, "issue_id")) ||
-        ""
+    issue_id = Map.get(payload, "issue_id") || ""
 
     opts = Map.get(payload, "opts", []) |> to_keyword()
 

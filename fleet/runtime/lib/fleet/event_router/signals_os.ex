@@ -43,30 +43,7 @@ defmodule Fleet.EventRouter.SignalsOS do
             "them). The fix is a gen_event handler on :erl_signal_server, not this GenServer."
   end
 
-  @impl GenServer
-  def handle_info({:signal, sig}, state) when is_atom(sig) do
-    # Strict canonical schema: %Fleet.Event{source: :event_router}.
-    type_str = "os.signal.#{sig}"
-
-    _ =
-      try do
-        type_atom = String.to_existing_atom(type_str)
-
-        _ =
-          Fleet.EventRouter.Bus.emit(:event_router, type_atom,
-            payload: %{"signal" => Atom.to_string(sig)}
-          )
-      rescue
-        ArgumentError ->
-          require Logger
-          Logger.warning("SignalsOS: unknown signal atom #{inspect(type_str)} — skip broadcast")
-
-        _e in Fleet.Event.UnregisteredError ->
-          :ok
-      end
-
-    {:noreply, state}
-  end
-
-  def handle_info(_other, state), do: {:noreply, state}
+  # No handle_info: `init/1` always raises, so no message can ever reach this process — and the
+  # future real implementation is a DIFFERENT callback shape anyway (gen_event `handle_event/2`
+  # on :erl_signal_server, not a GenServer handle_info). A skeleton here would only mislead.
 end

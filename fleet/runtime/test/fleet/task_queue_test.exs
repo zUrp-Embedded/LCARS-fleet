@@ -288,7 +288,7 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
   end
 
-  test "6e. from_map REFUSE un optionnel malformé (metadata/result non-map, retry_count non-int≥0, id non-binaire) → :invalid" do
+  test "6e. from_map REFUSE un optionnel malformé (metadata/result non-map, id non-binaire) → :invalid" do
     base = %{
       "id" => "t1",
       "pod_id" => "p1",
@@ -299,13 +299,15 @@ defmodule Fleet.TaskQueueTest do
     for bad <- [
           Map.put(base, "metadata", "not-a-map"),
           Map.put(base, "result", ["not", "a", "map"]),
-          Map.put(base, "retry_count", -1),
-          Map.put(base, "retry_count", "3"),
           Map.put(base, "issue_id", 42)
         ] do
       assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad),
              "map #{inspect(bad)} devrait être :invalid"
     end
+
+    # A-15 : un ANCIEN state.json portant la clé vestigiale retry_count reste lisible (clé ignorée).
+    assert {:ok, %Fleet.TaskQueue.WorkItem{}} =
+             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "retry_count", 0))
   end
 
   test "6f. WorkItem.new/2 = smart-constructor : caste (deadline ISO→DateTime), refuse un attr malformé" do
@@ -315,8 +317,7 @@ defmodule Fleet.TaskQueueTest do
             %WorkItem{
               deadline: %DateTime{},
               metadata: %{"k" => "v"},
-              state: :pending,
-              retry_count: 0
+              state: :pending
             }} =
              WorkItem.new("p1", %{deadline: "2026-06-02T00:00:00Z", metadata: %{"k" => "v"}})
 

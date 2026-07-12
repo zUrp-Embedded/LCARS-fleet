@@ -45,17 +45,16 @@ defmodule Fleet.API.Application do
   @doc """
   Post-boot side effects — called by `Fleet.Application` AFTER the root
   `Supervisor.start_link` returned `{:ok, _}` (i.e. the WHOLE fleet is up, this
-  domain's Cowboy listener included).
+  domain's Cowboy listener included). Currently: the build-info boot trace.
+  Total — never raises.
 
-  Pre-collapse these ran in this module's `Application.start/2` after ITS OWN
-  tree was up; hoisting them to the root END-of-boot preserves the original
-  intent (never signal READY before the listener is bound — `sd_notify` stays a
-  no-op outside systemd, which is retired (cf. `etc/README.md`), kept inert)
-  and strengthens it (READY now means the full fleet, not just the api).
-  Both are total: notify no-ops without $NOTIFY_SOCKET, log never raises.
+  (The sd_notify `READY=1` branch was REMOVED (acte4 A-14): systemd deployment
+  is retired (cf. `etc/README.md`), the fleet is launched by a human via
+  `bin/fleet_v2` → `NOTIFY_SOCKET` is never set and the whole gen_udp branch
+  was dead ceremony. If systemd ever returns, reintroduce a notify step HERE —
+  the "never signal READY before the full fleet is up" placement is the invariant.)
   """
   def post_boot do
-    notify_systemd_ready()
     log_build_info()
     :ok
   end
@@ -72,33 +71,6 @@ defmodule Fleet.API.Application do
     Logger.info(
       "API: LCARS fleet — build #{info.sha}#{dirty} ref=#{info.ref} (source=#{info.source})"
     )
-  end
-
-  # Minimal sd_notify — protocol: open AF_UNIX SOCK_DGRAM, write
-  # "READY=1\n" to $NOTIFY_SOCKET (Unix path). Abstract socket case
-  # (\0/@ prefix) not handled (rare in practice for systemd).
-  defp notify_systemd_ready do
-    case System.get_env("NOTIFY_SOCKET") do
-      socket when is_binary(socket) and socket != "" and binary_part(socket, 0, 1) == "/" ->
-        try do
-          {:ok, s} = :gen_udp.open(0, [:local, :binary])
-          :ok = :gen_udp.send(s, {:local, socket}, 0, "READY=1\n")
-          :gen_udp.close(s)
-          require Logger
-          Logger.info("API: sd_notify READY=1 sent to #{socket}")
-          :ok
-        rescue
-          e ->
-            require Logger
-            Logger.warning("API: sd_notify failed (non-fatal): #{inspect(e)}")
-            :ok
-        end
-
-      _ ->
-        # NOTIFY_SOCKET absent/empty/abstract → no-op (dev, test, run
-        # outside systemd, or unhandled abstract socket setup).
-        :ok
-    end
   end
 
   @doc """

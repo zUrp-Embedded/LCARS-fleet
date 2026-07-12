@@ -11,9 +11,11 @@ defmodule Fleet.Spawner.Pod.Recovery do
     `--resume` on a server-side dead session (= zombie pod, proven live).
   - `apply_recovery/4` — projects this decision into the `state` (`:recreate` leaves the base intact =
     fresh session; `:release` records the terminal phase + the release flag).
-  - `first_continue_for/1` — picks the RESUME POINT (an `:allocate`/`:launch`/… atom, NOT a gen_statem
-    state) from the state's `recovery`/`phase` (`:recreate` → `:allocate`, `:release` → `:release`,
-    otherwise maps the observed phase); `Pod.init/1` maps it to a starting state via `continue_to_phase/1`.
+  - `first_continue_for/1` — picks the RESUME POINT from the state's `recovery` decision. It is
+    BINARY by construction (`:allocate` = from scratch | `:release` = terminal, nothing to relaunch):
+    `recovery_action/1` collapses every non-terminal phase into `:recreate`, so a mid-flight resume
+    point (`:launch`, `:monitor`, …) CANNOT exist — resuming mid-flight on a dead backend is exactly
+    what this module forbids. `Pod.init/1` maps it to a starting state via `continue_to_phase/1`.
   - `phase_from_string/1` — decodes the `state.json` phase string into an existing atom (`nil` if unknown).
 
   Only deterministic `Map`/`String` operations: no external dependency (no `Logger`, no
@@ -65,49 +67,27 @@ defmodule Fleet.Spawner.Pod.Recovery do
   end
 
   @doc """
-  `:continue` resume point for a (re)spawned pod (an `:allocate`/`:launch`/… atom, NOT a
-  gen_statem state — `Pod.init/1` maps it via `continue_to_phase/1`). A pod with a snapshot follows the
-  explicit decision of `recover_or_init`/`recovery_action/1`: `:recreate` restarts from scratch
-  (`:allocate`, fresh session), `:release` stops (terminal phase, nothing to relaunch). NEVER
-  resume at `:monitor` on a dead backend (the supervisor never resuscitates under `:temporary`).
+  `:continue` resume point for a (re)spawned pod — BINARY by construction: `:allocate` (from
+  scratch, fresh session) | `:release` (terminal, nothing to relaunch). `recover_or_init` produces
+  exactly two state shapes: a valid snapshot → `apply_recovery` ALWAYS sets `:recovery`
+  (`:recreate`/`:release`, first two clauses); no/corrupt snapshot → no `:recovery` key, phase
+  left `:pending` (fallback clause → from scratch). A mid-flight resume point (`:launch`,
+  `:monitor`, …) cannot exist — `recovery_action/1` collapses every non-terminal phase into
+  `:recreate`; the old per-phase mapping clauses were unreachable AND, had they fired, would have
+  resumed onto a dead backend (the exact move this module forbids).
   """
-  @spec first_continue_for(map()) :: atom()
+  @spec first_continue_for(map()) :: :allocate | :release
   def first_continue_for(%{recovery: :recreate}), do: :allocate
   def first_continue_for(%{recovery: :release}), do: :release
-  def first_continue_for(%{phase: :pending}), do: :allocate
-  def first_continue_for(%{phase: :launching}), do: :launch
-  def first_continue_for(%{phase: phase}), do: phase_to_continue(phase)
-
-  # Bijection phase (persisted gen_statem state name) ↔ `:continue` resume point. SINGLE SOURCE
-  # for both directions: `phase_to_continue/1` (resume from a phase) and `continue_to_phase/1` (starting
-  # state name for the state machine, called by `Pod.init/1`). Written ONCE here.
-  @phases [
-    {:allocating, :allocate},
-    {:cleaning, :clean},
-    {:projecting, :project},
-    {:launching, :launch},
-    {:monitoring, :monitor},
-    {:extracting, :extract},
-    {:releasing, :release}
-  ]
-
-  # persisted phase → resume point. `:allocate` fallback: an unknown phase (snapshot from an
-  # earlier version) restarts cleanly from the beginning.
-  for {phase, continue} <- @phases do
-    defp phase_to_continue(unquote(phase)), do: unquote(continue)
-  end
-
-  defp phase_to_continue(_), do: :allocate
+  def first_continue_for(_fresh_or_corrupt), do: :allocate
 
   @doc """
   `:continue` resume point (output of `first_continue_for/1`) → starting gen_statem state NAME.
-  EXACT INVERSE of `phase_to_continue/1`. No fallback: `first_continue_for/1` produces ONLY
-  catalogued `:continue` values, so an atom outside the bijection is an upstream bug we let crash (visible).
+  Total over the BINARY resume domain; an atom outside it is an upstream bug we let crash (visible).
   """
-  @spec continue_to_phase(atom()) :: atom()
-  for {phase, continue} <- @phases do
-    def continue_to_phase(unquote(continue)), do: unquote(phase)
-  end
+  @spec continue_to_phase(:allocate | :release) :: :allocating | :releasing
+  def continue_to_phase(:allocate), do: :allocating
+  def continue_to_phase(:release), do: :releasing
 
   @doc """
   Decodes the `state.json` phase string into an EXISTING atom (`nil` if unknown — snapshot from an

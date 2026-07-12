@@ -21,13 +21,12 @@ only pointed at.
 - `Fleet.API.SpawnAdmission` — the `POST /api/admin/spawn` admission pipeline (DTO allowlist → path-safe `pod_id` → cap-profile → host-native fail-closed → brief-required, mirror of R18); pure functions
 - `Fleet.API.Readiness` — LIVE operational state (anti-hollow-green); `deep/0` → `operational|degraded` + subsystems
 - `Fleet.API.BuildInfo` — observable build stamp (`current/0` → `sha`/`dirty`/`ref`/`source`); total, memoized
-- `Fleet.API.Application` — `:one_for_one` supervisor; starts the Cowboy listener + sd_notify `READY=1` after bind
+- `Fleet.API.Application` — `:one_for_one` supervisor; starts the Cowboy listener; `post_boot/0` = build-info trace (sd_notify retired, acte4 A-14)
 
 ## Config & deps
 
 - Knob `:fleet_api, :http_port` — Cowboy port, `fetch_env!` fail-loud (A7); set by `runtime.exs` from `FLEET_API_PORT` (per-human, `bin/fleet_v2`); `0` in `:test`.
 - Knob `:fleet_api, :start_listener` (default `true`; `false` in `:test` — REST via `Plug.Test`, WS via direct callbacks).
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — listener bind IP; local-only by default (frontier = network isolation).
-- Env `NOTIFY_SOCKET` — systemd sd_notify target; no-op off systemd.
 - Deps (all descending, Ring 4 → down): `fleet_event_router` (R0, Bus + listener), `fleet_pilot` (R3, readiness step probe), `fleet_mcp` (R2, readiness pod-facing probe), `fleet_spawner` (R1, admission + backend), `fleet_starfleet` (R2, shutdown dispatcher), `fleet_cap_profile` (R0, cap-profile validation), + `plug`/`plug_cowboy`/`jason`. See `mix.exs`.
 - Vendor frontier: N0 (vendor-agnostic). Split (D1): deferred — see design note `fleet_api.md`.
