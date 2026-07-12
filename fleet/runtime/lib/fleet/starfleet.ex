@@ -49,8 +49,9 @@ defmodule Fleet.Starfleet do
       (default `NotWiredYet`)
     * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
       (lifecycle + security, log prefix `AUDIT <event.type>`)
-    * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator
-      (`:transient` Task, emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
+    * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
+      Task triggered via `boot_orchestrate/0` by the root AFTER full boot — acte4 A-08;
+      emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
     * `Fleet.Starfleet.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
       `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
     * `Fleet.Starfleet.MCPMonitor` — passive health check of the pod-facing
@@ -64,4 +65,23 @@ defmodule Fleet.Starfleet do
 
   N0 (vendor-agnostic, no direct SDK call).
   """
+
+  @doc """
+  Post-boot trigger of the `BootOrchestrator` (spawn of the permanent pods = REAL claude
+  spend) — called by `Fleet.Application` AFTER the root `Supervisor.start_link` returned
+  `{:ok, _}` (acte4 A-08: "post-readiness" made mechanical; an aborted boot spawns nothing).
+  THE domain owns its gate (`:start_boot_orchestrator`, strict-boolean via `boot_enabled?/2` —
+  `false` in test → hermetic) and its trigger; the root only says "now". `Task.start`
+  non-linked: `run/1` never exits abnormally (its "never crashes the daemon" contract), and
+  the resurrection rail for permanents is `PermanentWarden`, not a restart of this Task.
+  """
+  @spec boot_orchestrate() :: :ok
+  def boot_orchestrate do
+    if Fleet.Starfleet.Application.boot_enabled?(:start_boot_orchestrator, true) do
+      {:ok, _task} = Task.start(Fleet.Starfleet.BootOrchestrator, :run, [[]])
+      :ok
+    else
+      :ok
+    end
+  end
 end

@@ -38,10 +38,13 @@ defmodule Fleet.Application do
       démarré avant lui crashe à l'init. Sa mort escalade délibérément jusqu'au node
       (cf. `Bus.EscalatingSupervisor`, max_restarts: 0 — un PubSub ressuscité seul
       laisserait tous les subscribers sourds à vie).
-    * `mcp` AVANT `starfleet` (seam RUNTIME, pas une dep compile) : le BootOrchestrator
-      de starfleet spawn les pods permanents → chaque pod exige `ensure_pod_socket`
-      (`Fleet.MCP.PodSocketSupervisor`) déjà vivant.
-    * `starfleet` APRÈS `spawner` (BootOrchestrator → `PermanentBoot.boot_permanent_pods`).
+    * `mcp` AVANT `spawner` (seam RUNTIME, pas une dep compile) : tout spawn de pod exige
+      `ensure_pod_socket` (`Fleet.MCP.PodSocketSupervisor`) déjà vivant — et le
+      PublishConsumer de spawner peut recevoir un `admin.spawn.request` dès son subscribe.
+    * (Les contraintes historiques `mcp < starfleet` et `spawner < starfleet` sont TOMBÉES
+      avec l'acte4 A-08 : le BootOrchestrator — seule cause de ces contraintes — n'est plus
+      un child mid-boot de starfleet ; il est déclenché ci-dessous APRÈS le start_link OK,
+      quand la fleet ENTIÈRE est prouvée up. « Post-readiness » est devenu mécanique.)
     * `api` avant-dernier (readiness interroge pilot/mcp/spawner/starfleet),
       `observation` DERNIER (read-only, rien du core n'en dépend).
 
@@ -89,6 +92,17 @@ defmodule Fleet.Application do
         # entière up, listener api bindé inclus. Contrat détaillé dans
         # `Fleet.API.Application.post_boot/0`.
         Fleet.API.Application.post_boot()
+
+        # BootOrchestrator (spawn des pods permanents = dépense claude RÉELLE) déclenché ICI,
+        # structurellement POST-boot (acte4 A-08) : avant, child mid-boot de starfleet, son Task
+        # async pouvait spawner AVANT que pilot/api soient up — si un ring tardif ratait son
+        # start_link (port pris), les permanents étaient déjà lancés dans une fleet à moitié
+        # morte (spend gaspillé, process orphelins). Ici, si le boot avorte, AUCUN spawn n'a eu
+        # lieu. Via la FAÇADE (le domaine possède son gate `:start_boot_orchestrator` — false en
+        # test, hermétique — et son trigger ; la racine dit juste « maintenant ») : boundary a
+        # refusé l'appel direct à Starfleet.Application, à raison — la façade EST la surface.
+        Fleet.Starfleet.boot_orchestrate()
+
         {:ok, pid}
 
       error ->

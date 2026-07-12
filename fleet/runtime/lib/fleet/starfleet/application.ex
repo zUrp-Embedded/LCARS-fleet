@@ -11,23 +11,28 @@ defmodule Fleet.Starfleet.Application do
     2. Pre-registers the `starfleet.audit_cat5_*`, `audit.verdict`, `fleet.boot_*`,
        `sdk.upstream_alert` and `mcp.server_crashed` event atoms (compile-time via a
        module attribute, atom-leak DoS mitigation)
-    3. Supervises six opt-in children, each gated by a `:start_*` config knob:
+    3. Supervises five opt-in children, each gated by a `:start_*` config knob:
        * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
          `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
        * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
-       * `BootOrchestrator` (default `true`, Task `:transient`) — boots the permanent
-         pods then emits `fleet.boot_complete|partial|failed`
        * `MCPWatcher` (default `false`) — HTTP egress to Hex.pm (SDK upstream alert),
          opt-in only where outbound is allowed
        * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
+
+  `BootOrchestrator` is NOT a child here anymore (acte4 A-08): as a mid-boot Task it could
+  spawn permanent pods (real claude spend) BEFORE the later rings (pilot/api) were up — its
+  "post-readiness" claim was a promise, not a mechanism. It is now TRIGGERED by
+  `Fleet.Application` AFTER the root `Supervisor.start_link` returns `{:ok, _}` (the whole
+  fleet is provably up), still gated by `:start_boot_orchestrator` (read via `boot_enabled?/2`).
 
   ## Configuration
 
   One boolean `:start_*` knob per child (all under `:fleet_starfleet`):
   `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
-  `:start_boot_orchestrator` (default `true`), `:start_mcp_watcher` (default `false`),
-  `:start_mcp_monitor` (default `true`). Tests set a knob to `false` to start that
+  `:start_mcp_watcher` (default `false`), `:start_mcp_monitor` (default `true`) —
+  plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
+  (`Fleet.Application`), not by this tree. Tests set a knob to `false` to start that
   child manually via `start_supervised/1`.
 
   ## Strategy
@@ -84,20 +89,6 @@ defmodule Fleet.Starfleet.Application do
           do: [Fleet.Starfleet.AuditConsumer],
           else: []
         ) ++
-        if boot_enabled?(:start_boot_orchestrator, true) do
-          # Task :transient post-start sequence:
-          # boot_permanent_pods + emit fleet.boot_complete|partial|failed.
-          [
-            %{
-              id: Fleet.Starfleet.BootOrchestrator,
-              start: {Fleet.Starfleet.BootOrchestrator, :start_link, [[]]},
-              restart: :transient,
-              type: :worker
-            }
-          ]
-        else
-          []
-        end ++
         if(boot_enabled?(:start_mcp_watcher, false),
           do: [Fleet.Starfleet.MCPWatcher],
           else: []

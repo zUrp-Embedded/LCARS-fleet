@@ -856,28 +856,34 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
+    # A-08 (acte4) : les contraintes `mcp < starfleet` / `spawner < starfleet` sont TOMBÉES —
+    # leur seule cause (le BootOrchestrator child mid-boot de starfleet qui spawnait les
+    # permanents) est déplacée en trigger POST-boot racine. Restent : event_router PREMIER
+    # (le Bus est le substrat de tout subscriber) et mcp AVANT spawner (le PublishConsumer de
+    # spawner peut recevoir un admin.spawn.request dès son subscribe → ensure_pod_socket exige
+    # le substrat mcp vivant).
     with [block] <- Regex.run(~r/children = \[(.*?)\n    \]/s, app_src, capture: :all_but_first),
          positions = %{
            er: :binary.match(block, "Fleet.EventRouter.Application"),
            mcp: :binary.match(block, "Fleet.MCP.Supervisor"),
-           spw: :binary.match(block, "Fleet.Spawner.Application"),
-           stf: :binary.match(block, "Fleet.Starfleet.Application")
+           spw: :binary.match(block, "Fleet.Spawner.Application")
          },
          false <- Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
-      %{er: {er, _}, mcp: {mcp, _}, spw: {spw, _}, stf: {stf, _}} = positions
-      # er = MIN des quatre (le Bus boote avant tout consommateur potentiel) — PAS er==0 :
+      %{er: {er, _}, mcp: {mcp, _}, spw: {spw, _}} = positions
+      # er = MIN des trois (le Bus boote avant tout consommateur potentiel) — PAS er==0 :
       # le bloc children commence par un COMMENTAIRE, l'offset du module n'est jamais 0.
-      ok? = er < mcp and er < spw and mcp < stf and spw < stf
+      ok? = er < mcp and mcp < spw
 
       %{
         id: "boot.order_f8",
         remediation:
           "réordonner les children de Fleet.Application : event_router EN TÊTE, " <>
-            "mcp AVANT starfleet, starfleet APRÈS spawner (cicatrice F8 du moduledoc)",
+            "mcp AVANT spawner (cicatrice F8 du moduledoc ; les contraintes starfleet " <>
+            "sont tombées avec A-08 — BootOrchestrator déclenché post-boot racine)",
         status: if(ok?, do: :pass, else: :fail),
         evidence: [
           "ordre children (offsets dans le bloc) : event_router=#{er} mcp=#{mcp} " <>
-            "spawner=#{spw} starfleet=#{stf} — contraintes : er<mcp, er<spw, mcp<stf, spw<stf"
+            "spawner=#{spw} — contraintes : er<mcp, mcp<spw"
         ],
         note:
           "successeur du verrou topologie umbrella (retiré avec les mix.exs d'apps) ; " <>

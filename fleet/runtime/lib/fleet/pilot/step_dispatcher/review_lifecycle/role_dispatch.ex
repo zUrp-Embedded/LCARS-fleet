@@ -106,100 +106,101 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     # architect since 2026-07-07, the pod is forge-blind and cannot rebase; cf. `ArchEscalation`.)
     review_opts = Keyword.put(opts, :base_branch, head)
 
-    # PROJECT + ROUTE resolved BEFORE any forge write (read-only): a failure leaves no
-    # orphan lock. The route (workflow_map_name, step) is read on the ISSUE (the pipeline-state stays there).
+    # Read-only pre-lock phase, CHEAP GATES FIRST (acte4 A-09 — SAME rule/order as dispatch_issue,
+    # lockstep): route (light forge GET on the issue) → pod identity → LOCAL scope gate → project
+    # resolver (the heavy network call, 1-2× ls-remote) on the passing path only → reprovision
+    # action. The forge LOCK (spawn_step) still comes after everything — no orphan lock on a
+    # transient failure (invariant unchanged).
     # Z6c : plus de captures — Spawn.route_for/Opts.tag_err pris à la source (partagés avec le flux issue).
-    with {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
-         {:ok, route} <-
-           Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
-      # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
-      # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
-      # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
-      # changing the pod identity loses no context.
-      pod_id =
-        case kind do
-          :rework ->
-            Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
+    with {:ok, route} <-
+           Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution),
+         # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
+         # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
+         # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
+         # changing the pod identity loses no context.
+         pod_id =
+           (case kind do
+              :rework ->
+                Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
-          _ ->
-            Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
-        end
-
-      # Serialization gate (SAME rule as dispatch_issue): a project-scoped producer already alive
-      # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
-      # instance rework → `:ok` (no-op, never gated). Uniform call via `slot_scope`. `{:skipped,
-      # :role_busy}` bubbles up to the poller (which handles `{:skipped, _}` → retry on the next tick).
-      case Spawn.serialize_project_scope(
+              _ ->
+                Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
+            end),
+         # Scope DECISION (SAME rule as dispatch_issue): a project-scoped producer already alive
+         # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
+         # instance rework → `:proceed` (never gated). `{:skipped, :role_busy}` bubbles up to the
+         # poller (which handles `{:skipped, _}` → retry on the next tick).
+         decision =
+           Spawn.project_scope_decision(
              Fleet.CapProfile.slot_scope(profile),
              Fleet.CapProfile.lifetime_scope(profile),
              ctx.spawner,
-             pod_id,
-             project,
-             "work"
+             pod_id
+           ),
+         :ok <- Spawn.gate_scope_decision(decision),
+         {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
+         :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work") do
+      # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
+      case review_brief(
+             kind,
+             profile,
+             role,
+             forge,
+             repo,
+             issue_n,
+             forge_opts,
+             route,
+             pr_number
            ) do
-        {:skipped, :role_busy} ->
-          {:skipped, :role_busy}
+        {:ok, brief} ->
+          spawn_opts =
+            [brief: brief, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
+            |> Opts.maybe_put(:project, project)
+            |> Spawn.maybe_put_route(route)
+            |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
 
-        :ok ->
-          # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
-          case review_brief(
-                 kind,
-                 profile,
-                 role,
-                 forge,
-                 repo,
-                 issue_n,
-                 forge_opts,
-                 route,
-                 pr_number
-               ) do
-            {:ok, brief} ->
-              spawn_opts =
-                [brief: brief, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
-                |> Opts.maybe_put(:project, project)
-                |> Spawn.maybe_put_route(route)
-                |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
+          # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
+          # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
+          # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
+          # seams, not the whole `ctx` — hardened boundary).
+          log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
-              # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
-              # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
-              # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
-              # seams, not the whole `ctx` — hardened boundary).
-              log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
+          Spawn.spawn_step(
+            %Spawn.Seams{
+              forge: ctx.forge,
+              spawner: ctx.spawner,
+              task_queue: ctx.task_queue,
+              repo: ctx.repo,
+              forge_opts: ctx.forge_opts,
+              wake_recovery: ctx.wake_recovery
+            },
+            pod_id,
+            role,
+            profile,
+            brief,
+            spawn_opts,
+            pr_number,
+            issue_n,
+            log_ctx
+          )
 
-              Spawn.spawn_step(
-                %Spawn.Seams{
-                  forge: ctx.forge,
-                  spawner: ctx.spawner,
-                  task_queue: ctx.task_queue,
-                  repo: ctx.repo,
-                  forge_opts: ctx.forge_opts,
-                  wake_recovery: ctx.wake_recovery
-                },
-                pod_id,
-                role,
-                profile,
-                brief,
-                spawn_opts,
-                pr_number,
-                issue_n,
-                log_ctx
-              )
+        # F-C083 — the DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
+        # (transient/unreachable). We REFUSE to spawn a criterion-less judge (the diff without a
+        # criterion → blind approval = false GREEN) → we DEFER. The judge is instance-scoped
+        # (the scope gate returned `:proceed` WITHOUT taking a lock) → nothing to release; the
+        # poller re-dispatches on the next tick (read-error ≠ absence).
+        {:error, {:criterion_unavailable, reason}} ->
+          Logger.warning(
+            "StepDispatcher: judge criterion unavailable role=#{role} pr=#{repo}##{pr_number} → " <>
+              "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
+          )
 
-            # F-C083 — the DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
-            # (transient/unreachable). We REFUSE to spawn a criterion-less judge (the diff without a
-            # criterion → blind approval = false GREEN) → we DEFER. The judge is instance-scoped
-            # (`serialize_project_scope` returned `:ok` WITHOUT taking a lock) → nothing to release; the
-            # poller re-dispatches on the next tick (read-error ≠ absence).
-            {:error, {:criterion_unavailable, reason}} ->
-              Logger.warning(
-                "StepDispatcher: judge criterion unavailable role=#{role} pr=#{repo}##{pr_number} → " <>
-                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
-              )
-
-              {:skipped, :criterion_unavailable}
-          end
+          {:skipped, :criterion_unavailable}
       end
     else
+      {:skipped, :role_busy} ->
+        {:skipped, :role_busy}
+
       {:error, {phase, reason}} ->
         Logger.warning(
           "StepDispatcher: #{phase} review role=#{role} pr=#{repo}##{pr_number} → #{inspect(reason)} (skip, no lock)"

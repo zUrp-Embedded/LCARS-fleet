@@ -1,6 +1,11 @@
 defmodule Fleet.Starfleet.BootOrchestrator do
   @moduledoc """
-  Post-readiness orchestrator (`:transient` Task).
+  Post-readiness orchestrator — a fire-and-forget Task TRIGGERED by `Fleet.Application`
+  AFTER the root `Supervisor.start_link` returned `{:ok, _}` (acte4 A-08): "post-readiness"
+  is MECHANICAL (the whole fleet — pilot, api listener included — is provably up before the
+  first permanent pod spawns; an aborted boot spawns nothing). It is NOT a supervised child:
+  `run/1` never exits abnormally (rescue+catch below), and the resurrection rail for permanent
+  pods is `PermanentWarden`, not a restart of this Task.
 
   Simplified architecture spec (Option (b): direct subscribe via supervised
   consumer GenServers in their respective apps):
@@ -25,18 +30,13 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
   ## Config-gated
 
-    * `:fleet_starfleet, :start_boot_orchestrator` — boolean
-      (default `true`). Tests pass `false` to start it
-      manually with stubs.
+    * `:fleet_starfleet, :start_boot_orchestrator` — boolean (default `true`), read by the
+      ROOT trigger (`Fleet.Application`, via `Starfleet.Application.boot_enabled?/2`).
+      `false` in test (hermetic — no real spawn); tests call `run/1` directly with stubs.
   """
 
   require Logger
   alias Fleet.EventRouter.Bus
-
-  @spec start_link(keyword()) :: {:ok, pid()}
-  def start_link(opts \\ []) do
-    Task.start_link(__MODULE__, :run, [opts])
-  end
 
   @doc """
   Orchestration sequence. Spawner backend injectable (test).

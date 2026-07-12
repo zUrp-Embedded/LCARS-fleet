@@ -4,7 +4,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   The dispatcher's TWO flows — issue (`dispatch_issue`, producer) AND PR (`do_dispatch_review`,
   judge/rework/resolution) — CONVERGE here: a single spawn point (`spawn_step/9`), a single
-  pod identity (`pod_id_for_scope/4`), a single scope serialization (`serialize_project_scope/6`).
+  pod identity (`pod_id_for_scope/4`), a single scope serialization (decision
+  `project_scope_decision/4` + gate `gate_scope_decision/1` BEFORE the project resolver,
+  action `maybe_reprovision/5` after — acte4 A-09 split).
   This module DECIDES nothing (route, role, verdict, budget stay in the `StepDispatcher` core): it
   EXECUTES the spawn sequence. There is only ONE copy of each — never an issue/review fork.
   (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
@@ -109,7 +111,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     alive_before? = pod_alive?(spawner, pod_id)
 
     # Capacity pre-flight BEFORE the forge lock (acte4 A-11) — admission condition at the same
-    # stage as `serialize_project_scope` ("gate BEFORE any lock"). At saturation the old flow
+    # stage as the scope gate (`gate_scope_decision`, "gate BEFORE any lock"). At saturation the old flow
     # locked → discovered `:max_children` at spawn → compensated (unlock) EVERY tick: ~4 forge
     # writes/issue/30s polluting the timeline, and "full" tallied as an ERROR (poller backoff as
     # if the forge were down). Deferral is a SKIP (truth: "full, waiting"), not an error.
@@ -343,42 +345,72 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     do: Fleet.Pilot.PodId.for_issue(repo, number, role)
 
   @doc """
-  Serialization of project-scoped roles: ONE identity (repo, role) alive at a time (1 Desktop slot).
-  Modulated by the lifetime:
-    instance         -> never gated (distinct ids per issue, fan-out assumed).
-    project one-shot  -> alive = occupied by another issue -> DEFERRED; it dies at the end of the task +
-                         fresh spawn at the next issue (baseline behavior, UNCHANGED).
-    project pipe      -> RESIDENT process, per its state (pipe_rebrief_state):
-                           dead  -> :ok (fresh spawn, 1st issue);
-                           busy  -> DEFERRED (still working a task OR publishing its last deliverable:
-                                    resetting its workspace now would corrupt it / race the push);
-                           ready -> COLD in-place reset of the workspace for the new brief + /clear, THEN
-                                    :ok (spawn_step re-briefs on a clean workspace, right branch).
-  All BEFORE the lock/enqueue (else we would lock an issue we are not processing). `{:skipped,
-  :role_busy}` surfaces to the poller (retry at the next tick). The reset base = `project["base_sha"]`:
-  new issue -> main tip (fresh); rework -> tip of the PR (continues the eng's work). 1 single fn.
+  Scope-serialization DECISION (acte4 A-09: split from the reprovision ACTION so the call sites
+  can gate BEFORE the network project resolver — a `:role_busy` tick used to re-pay 1-2×
+  `git ls-remote` (~15-30s) just to throw the result away, and under a slow forge that stalled
+  the whole sequential poll tick).
+
+  ONE identity (repo, role) alive at a time (1 Desktop slot), modulated by the lifetime:
+    instance         -> `:proceed` (never gated: distinct ids per issue, fan-out assumed).
+    project one-shot -> alive = occupied by another issue -> `:role_busy`; it dies at the end of
+                        the task + fresh spawn at the next issue (baseline behavior, UNCHANGED).
+    project pipe     -> RESIDENT process, per its state (pipe_rebrief_state):
+                          dead  -> `:proceed` (fresh spawn, 1st issue);
+                          busy  -> `:role_busy` (still working a task OR publishing its last
+                                   deliverable: resetting its workspace now would corrupt it /
+                                   race the push);
+                          ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
+                                   needs the resolved `project["base_sha"]`) runs AFTER the
+                                   resolver via `maybe_reprovision/5`, on the passing path only.
+
+  Requires NO project (pure liveness/slot reads) — that is the point of the split. The decision→
+  action gap now spans the resolver call (~15s worst case); the single sequential dispatcher per
+  poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
+  still hold if the pipe state moved meanwhile.
   """
-  @spec serialize_project_scope(
-          String.t(),
-          String.t(),
+  @spec project_scope_decision(String.t(), String.t(), module(), String.t()) ::
+          :proceed | :role_busy | :ready_needs_reprovision
+  def project_scope_decision("instance", _lifetime, _spawner, _pod_id), do: :proceed
+
+  def project_scope_decision("project", "one-shot", spawner, pod_id) do
+    if pod_alive?(spawner, pod_id), do: :role_busy, else: :proceed
+  end
+
+  def project_scope_decision("project", _pipe, spawner, pod_id) do
+    case pipe_rebrief_state(spawner, pod_id) do
+      :dead -> :proceed
+      :busy -> :role_busy
+      :ready -> :ready_needs_reprovision
+    end
+  end
+
+  @doc """
+  `with`-friendly gate on the decision: `:role_busy` → `{:skipped, :role_busy}` (surfaces to the
+  poller, retry next tick), anything else → `:ok`. Placed BEFORE the project resolver at both
+  call sites (dispatch_issue + RoleDispatch — SAME rule, lockstep).
+  """
+  @spec gate_scope_decision(:proceed | :role_busy | :ready_needs_reprovision) ::
+          :ok | {:skipped, :role_busy}
+  def gate_scope_decision(:role_busy), do: {:skipped, :role_busy}
+  def gate_scope_decision(_proceed_or_reprovision), do: :ok
+
+  @doc """
+  The reprovision ACTION, on the passing path (project resolved): `:ready_needs_reprovision` →
+  cold in-place workspace reset for the new brief + /clear (`spawn_step` then re-briefs on a
+  clean workspace). The reset base = `project["base_sha"]`: new issue -> main tip (fresh);
+  rework -> tip of the PR (continues the eng's work). Other decisions → no-op `:ok`.
+  """
+  @spec maybe_reprovision(
+          :proceed | :ready_needs_reprovision,
           module(),
           String.t(),
           map() | nil,
           String.t()
         ) :: :ok | {:skipped, :role_busy}
-  def serialize_project_scope("instance", _lifetime, _spawner, _pod_id, _project, _slug), do: :ok
+  def maybe_reprovision(:ready_needs_reprovision, spawner, pod_id, project, slug),
+    do: reprovision_then_proceed(spawner, pod_id, project, slug)
 
-  def serialize_project_scope("project", "one-shot", spawner, pod_id, _project, _slug) do
-    if pod_alive?(spawner, pod_id), do: {:skipped, :role_busy}, else: :ok
-  end
-
-  def serialize_project_scope("project", _pipe, spawner, pod_id, project, slug) do
-    case pipe_rebrief_state(spawner, pod_id) do
-      :dead -> :ok
-      :busy -> {:skipped, :role_busy}
-      :ready -> reprovision_then_proceed(spawner, pod_id, project, slug)
-    end
-  end
+  def maybe_reprovision(:proceed, _spawner, _pod_id, _project, _slug), do: :ok
 
   # State of a project-scoped pipe facing a NEW brief. :ready = idle AND last deliverable confirmed (neither
   # active task nor :publishing) — the ONLY situation where resetting the workspace is safe (the push already read

@@ -44,8 +44,9 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # SINGLE-AUTHORITY spawn leaf extracted: the TWO flows (issue + review) CONVERGE on
   # `Spawn.spawn_step/9` (order lock→pod→enqueue→wake + compensation + `wake_unreached` contract),
-  # `Spawn.pod_id_for_scope/4` (pod identity) and `Spawn.serialize_project_scope/6` (scope gate) — one
-  # copy each, never a fork. The core DECIDES (route/role/verdict), Spawn EXECUTES.
+  # `Spawn.pod_id_for_scope/4` (pod identity) and the scope gate (`project_scope_decision/4` +
+  # `gate_scope_decision/1` + `maybe_reprovision/5`) — one copy each, never a fork. The core
+  # DECIDES (route/role/verdict), Spawn EXECUTES.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
   # Spawn opts builders / naming (rc_name / feature_slug / maybe_put_route / resolve_repo_id) —
@@ -129,8 +130,13 @@ defmodule Fleet.Pilot.StepDispatcher do
         repo = Keyword.fetch!(opts, :repo)
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
-        # PROJECT + ROUTE resolved BEFORE any forge write (read-only): a transient failure leaves no
-        # orphan lock. project = pinned base_sha (out-of-pod); route = (workflow_map_name, step) written forge-side.
+        # Read-only pre-lock phase, CHEAP GATES FIRST (acte4 A-09): route/role read from the
+        # poller's prefetch (local), then the LOCAL scope gate — the project resolver (the only
+        # NETWORK call of the path, 1-2× `git ls-remote` ~15s worst case) runs LAST, on the
+        # passing path only. A recurring `:role_busy` tick used to re-pay the resolver every
+        # 30s for nothing, and under a degraded forge stalled the whole sequential poll tick.
+        # The forge LOCK (add_label in spawn_step) still comes after EVERYTHING here — a
+        # transient failure anywhere in this phase leaves no orphan lock (invariant unchanged).
         # ROUTELESS = not yet onboarded (create_issue no longer writes it) → `ensure_workflow_map_or_onboard`
         # writes the default workflow_map + returns `{:onboarded, _}` → we DEFER (skip; the next tick sees it
         # routed). Routed → `workflow_map_role` derives the role from the workflow_map POSITION (NO hardcoded producer;
@@ -138,8 +144,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         # Route + workflow_map pre-read by the poller (lease classification) → reused via opts
         # (`resolve_route` / `:prefetched_workflow_map`) instead of a 2nd get_route + 2nd workflow_map load. Absent (tests,
         # other callers) → normal read/load (fallback).
-        with {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
-             {:ok, route} <-
+        with {:ok, route} <-
                Opts.tag_err(
                  resolve_route(opts, forge, repo, number, forge_opts),
                  :route_resolution
@@ -165,21 +170,21 @@ defmodule Fleet.Pilot.StepDispatcher do
                ),
              # Pod identity + serialization READ from the catalogue (`slot_scope`), never guessed:
              # `pod_id_for_scope/4` (instance → for_issue, fan-out per issue | project → for_repo, ONE
-             # identity per project) and `serialize_project_scope/6` (gate BEFORE any lock: a
-             # project-scoped role already alive → we defer `{:skipped, :role_busy}`, else we would lock
-             # an issue we are not processing; the poller re-dispatches at the next tick).
+             # identity per project). The scope DECISION (local liveness/slot reads, no project) gates
+             # BEFORE the resolver; its reprovision ACTION (needs project["base_sha"]) runs after.
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
              slug = Spawn.feature_slug(issue),
-             :ok <-
-               Spawn.serialize_project_scope(
+             decision =
+               Spawn.project_scope_decision(
                  scope,
                  Fleet.CapProfile.lifetime_scope(profile),
                  spawner,
-                 pod_id,
-                 project,
-                 slug
-               ) do
+                 pod_id
+               ),
+             :ok <- Spawn.gate_scope_decision(decision),
+             {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
+             :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
 
@@ -245,7 +250,7 @@ defmodule Fleet.Pilot.StepDispatcher do
             # F-C083 — a DELIVERABLE-judge STEP (multi-step workflow_map) whose criterion (issue body)
             # can't be READ from the forge → we REFUSE a criterion-less judge (the diff without a criterion
             # → blind approval = false GREEN) and DEFER. A judge step is instance-scoped
-            # (`serialize_project_scope` returned `:ok` WITHOUT a lock) → nothing to release; the poller
+            # (the scope gate returned `:proceed` WITHOUT a lock) → nothing to release; the poller
             # re-dispatches next tick (read-error ≠ absence).
             {:error, {:criterion_unavailable, reason}} ->
               Logger.warning(
