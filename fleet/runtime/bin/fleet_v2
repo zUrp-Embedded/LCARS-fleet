@@ -326,7 +326,11 @@ cmd_status() {
 cmd_version() {
   local rel_root="$RUNTIME_DIR/rel/fleet_umbrella"
   local build_file
-  build_file="$(ls -1 "$rel_root"/lib/fleet_api-*/priv/build_info.txt 2>/dev/null | head -1 || true)"
+  # App UNIQUE post-collapse : le priv vit sous `lcars_fleet-<vsn>`, NAMESPACÉ par domaine
+  # (`priv/api/`, plus de priv par-app umbrella). CE chemin DOIT suivre le writer/reader BEAM
+  # (`Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")`, build_info.ex) — sinon le glob
+  # rate, on tombe sur git (absent au runtime release) et le statut ment « build unknown ».
+  build_file="$(ls -1 "$rel_root"/lib/lcars_fleet-*/priv/api/build_info.txt 2>/dev/null | head -1 || true)"
 
   if [[ -n "$build_file" && -f "$build_file" ]]; then
     # RELEASE : lire le fichier embarqué (clef=valeur, posé par write_build_info/1).
