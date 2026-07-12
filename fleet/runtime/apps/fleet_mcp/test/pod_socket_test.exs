@@ -80,6 +80,19 @@ defmodule Fleet.MCP.PodSocketTest do
 
     # objets-tool réels venant des deftool (single source `PodTools.get_tools`) — pas des noms nus.
     assert Enum.all?(tools, &(is_map(&1) and Map.has_key?(&1, "name")))
+
+    # F1 — CE `tools/list` EST le wire MCP (le pont stdio le forwarde VERBATIM à claude) → il DOIT porter
+    # `inputSchema` (camel MCP), JAMAIS `input_schema` (snake, la forme INTERNE d'ExMCP). Un `input_schema`
+    # snake = claude ne parse pas le schéma → tool REJETÉ (« No such tool available »). Régression F-C138
+    # (forward du catalogue central au lieu du catalogue camelCase local du pont), attrapée en e2e alors que
+    # le gate ne couvrait que les NOMS — gardée ICI.
+    ci = Enum.find(tools, &(&1["name"] == "create_issue"))
+    assert Map.has_key?(ci, "inputSchema"), "tools/list wire DOIT porter inputSchema (camel MCP)"
+
+    refute Map.has_key?(ci, "input_schema"),
+           "tools/list wire ne DOIT PAS porter input_schema (snake interne ExMCP)"
+
+    assert %{"type" => "object", "properties" => _, "required" => _} = ci["inputSchema"]
   end
 
   test "F-C138 : rôle-juge (aucun tool threadé) → tools/list = base seule (presence=authorization)" do

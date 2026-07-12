@@ -265,7 +265,18 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # static catalogue authority), NOT the injectable `tool_handler` seam (which only swaps the CALL path).
   defp list_tools(threaded) do
     allowed = PodTools.base_tool_names() ++ threaded
-    PodTools.get_tools() |> Map.take(allowed) |> Map.values()
+    PodTools.get_tools() |> Map.take(allowed) |> Map.values() |> Enum.map(&to_mcp_wire/1)
+  end
+
+  # F1 — `get_tools/0` (ExMCP) rend sa forme INTERNE : `input_schema` (snake) + `display_name`/`meta`. Or CE
+  # `tools/list` EST le wire MCP (le pont stdio le forwarde VERBATIM à claude), et le protocole MCP exige
+  # `inputSchema` (camel). Un `input_schema` snake = claude ne parse pas le schéma → tool REJETÉ (« No such
+  # tool available », claude re-`tools/list` en boucle sans jamais registrer). Avant F-C138 le pont portait un
+  # catalogue camelCase à la main ; le passage au forward (single-source) a perdu la conversion. On projette
+  # ICI, à la frontière socket=wire, vers les 3 champs MCP standard : central MCP-compliant, pont pur pass-through.
+  defp to_mcp_wire(tool) do
+    t = Map.new(tool, fn {k, v} -> {to_string(k), v} end)
+    %{"name" => t["name"], "description" => t["description"], "inputSchema" => t["input_schema"]}
   end
 
   defp encode(map), do: Jason.encode!(map) <> "\n"
