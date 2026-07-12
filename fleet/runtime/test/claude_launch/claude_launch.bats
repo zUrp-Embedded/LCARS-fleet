@@ -244,9 +244,10 @@ teardown() {
 # Settings pod (.lcars/settings.json) : provisioning INCONDITIONNEL + pass-through --settings (flagSettings).
 # #kill-yolo (2026-06-22) : PERM_MODE default → plus de --dangerously-skip-permissions ni de
 # skipDangerousModePermissionPrompt dans le chemin par défaut. Le fichier porte autoMemoryEnabled:false
-# (F-POD-AUTOMEM : auto-memory pod coupée). Le skip-dialog reste réservé au skip-mode (PERM_MODE vide),
-# non atteint dès qu'un mode permission est imposé (défaut ou override). --settings = source flagSettings,
-# indépendante de --setting-sources.
+# (F-POD-AUTOMEM : auto-memory pod coupée). Le skip-dialog est réservé à PERM_MODE=bypassPermissions
+# (la valeur réelle de l'enum — PERM_MODE n'est JAMAIS vide, défaut "default" ; l'ancienne garde -z
+# était morte, audit lot 6 2026-07-12). --settings = source flagSettings, indépendante de
+# --setting-sources.
 # =============================================================
 
 @test "settings: provisionne .lcars/settings.json (autoMemory coupée) + le passe via --settings" {
@@ -270,8 +271,57 @@ teardown() {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
   # Le fichier existe (autoMemoryEnabled INCONDITIONNEL) mais SANS skipDangerousModePermissionPrompt :
-  # le skip-dialog est réservé au skip-mode (PERM_MODE vide), jamais atteint quand un mode est imposé.
+  # le skip-dialog est réservé à PERM_MODE=bypassPermissions, jamais pour un mode bridé/défaut.
   ! grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+}
+
+@test "settings: PERM_MODE=bypassPermissions (override env) provisionne le skip-dialog (pré-acceptation, pas de hang)" {
+  # Régression audit lot 6 : la garde historique `-z "$PERM_MODE"` était MORTE (PERM_MODE jamais vide,
+  # défaut "default") → un pod bypassPermissions hangait au boot sur le dialogue « Yes I accept ».
+  # La garde est keyée sur la valeur réelle de l'enum (launch_spec.ex @permission_modes).
+  export LCARS_PERMISSION_MODE=bypassPermissions
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--permission-mode bypassPermissions"* ]]
+  grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
+}
+
+@test "settings: cap-profile permission_mode=bypassPermissions provisionne le skip-dialog (canal in-sandbox)" {
+  # Même invariant que ci-dessus mais par le canal PROD : `.spec.invocation.permission_mode` du
+  # cap-profile JSON (l'env est strippé par bwrap --clearenv — la JSON est LE canal du mode).
+  cat > "$POD_DIR/.cap-profile.json" <<'EOF'
+{
+  "api_version": "lcars/v2.5",
+  "kind": "CapabilityProfile",
+  "metadata": {"name": "engineer"},
+  "spec": {
+    "invocation": {"permission_mode": "bypassPermissions"},
+    "scope": {"allowedTools": ["Read"], "disallowedTools": []}
+  }
+}
+EOF
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--permission-mode bypassPermissions"* ]]
+  grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
+}
+
+@test "version: claude --version au format inattendu → fallback 2.1.150, PAS de mort pipefail" {
+  # Régression audit lot 6 : `VER=$(... | grep ...)` sous set -euo pipefail mourait (exit 1 opaque,
+  # TOUS les pods) quand le format --version changeait — le fallback ${VER:-2.1.150} était
+  # inatteignable pour ce chemin. Le pipeline doit être non-fatal et le fallback effectif.
+  cat > "$CLAUDE_STUB" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then echo "Claude Code (dev build, no semver here)"; exit 0; fi
+printf 'STUB_ARGS:'
+for a in "$@"; do printf ' %s' "$a"; done
+printf '\n'
+exit 0
+EOF
+  chmod +x "$CLAUDE_STUB"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  grep -q '"lastOnboardingVersion": "2.1.150"' "$POD_DIR/.claude.json"
 }
 
 # =============================================================

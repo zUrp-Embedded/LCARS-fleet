@@ -150,7 +150,15 @@ dbg "step CAP_PROFILE OK"
 #  MIGRÉ vers settings.json/`skipDangerousModePermissionPrompt` — cf. bloc « bypass dialog » infra.)
 # =============================================================
 
-VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+# `|| true` OBLIGATOIRE : sous `set -euo pipefail`, un `--version` au format inattendu (grep sans
+# match, rc=1) tuait le launcher ICI, exit 1 opaque, AVANT le fallback ${VER:-2.1.150} ci-dessous
+# (inatteignable pour ce chemin) → TOUS les pods morts sur un simple changement de format vendor.
+# Non-fatal par construction : VER vide ⇒ le fallback joue, on trace (dbg + stderr) au lieu de mourir.
+VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+if [[ -z "$VER" ]]; then
+  dbg "WARN: version vendor indétectable ('$CLAUDE_BIN --version' sans motif x.y.z) — fallback lastOnboardingVersion 2.1.150"
+  echo "WARN: claude --version au format inattendu — fallback lastOnboardingVersion 2.1.150" >&2
+fi
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
 # Visibilité Claude Desktop — flag lu ICI car il GATE remoteControlAtStartup du .claude.json ci-dessous.
 # `spec.invocation.remote_control: false` (juges qualifier/reviewer) = pod INVISIBLE Desktop. Il y a DEUX
@@ -224,22 +232,25 @@ dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
 
 POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
 
-# Bypass dialog : en mode skip-permissions, pré-accepter le DIALOGUE interactif (« 1. No / 2. Yes I
-# accept ») qui hang un pod headless. Mécanisme (src leak v2.1.88, vérifié e2e 2026-06-01) :
+# Bypass dialog : en PERM_MODE=bypassPermissions, pré-accepter le DIALOGUE interactif (« 1. No /
+# 2. Yes I accept ») qui hang un pod headless. Mécanisme (src leak v2.1.88, vérifié e2e 2026-06-01) :
 # interactiveHelpers.tsx montre le dialogue ssi `!hasSkipDangerousModePermissionPrompt()`, qui lit
 # `skipDangerousModePermissionPrompt` depuis userSettings|localSettings|flagSettings|policySettings.
 # `--settings <file>` = source **flagSettings** ⇒ dans la liste, INDÉPENDANT de --setting-sources.
 # On provisionne donc le flag dans le settings pod (merge si présent), claude_launch reste le
-# propriétaire bout-en-bout du mode bypass (le flag + la levée du dialogue). Non-skip (rôle bridé
-# par cap-profile) : on n'y touche pas. (Ex `bypassPermissionsModeAccepted` du global config :
-# DÉPRÉCIÉ/migré — ne plus l'écrire.)
-# F-POD-AUTOMEM (2026-06-22) : settings pod INCONDITIONNEL (avant : skip-mode seul → or tous les pods sont
+# propriétaire bout-en-bout du mode bypass (le flag + la levée du dialogue). Hors bypass (défaut ou
+# rôle bridé par cap-profile) : on n'y touche pas. (Ex `bypassPermissionsModeAccepted` du global
+# config : DÉPRÉCIÉ/migré — ne plus l'écrire.)
+# F-POD-AUTOMEM (2026-06-22) : settings pod INCONDITIONNEL (avant : bypass seul → or tous les pods sont
 # en --permission-mode default depuis kill-yolo → jamais écrit). `autoMemoryEnabled:false` coupe l'auto-memory
-# claude du pod (mémoire siloée, inutile à la fleet, pollution doctrine BUG-3) — TOUS PERM_MODE. En skip-mode
-# (PERM_MODE vide) on AJOUTE `skipDangerousModePermissionPrompt:true` (pré-accepte le dialogue qui hang headless).
+# claude du pod (mémoire siloée, inutile à la fleet, pollution doctrine BUG-3) — TOUS PERM_MODE.
+# GARDE keyée sur la VALEUR RÉELLE de l'enum (`bypassPermissions`, launch_spec.ex @permission_modes) :
+# PERM_MODE n'est JAMAIS vide (défaut "default" posé plus haut) → l'ancienne garde `-z "$PERM_MODE"`
+# était MORTE et un pod bypassPermissions HANGAIT au boot sur le dialogue non pré-accepté. Latent
+# (aucun cap-profile canon en bypass aujourd'hui) — geste défensif, audit lot 6 2026-07-12.
 mkdir -p "$POD_DIR/.lcars"
 POD_SETTINGS_JSON='{"autoMemoryEnabled":false}'
-[[ -z "$PERM_MODE" ]] && POD_SETTINGS_JSON="$("$JQ_BIN" -nc --argjson b "$POD_SETTINGS_JSON" '$b + {skipDangerousModePermissionPrompt:true}')"
+[[ "$PERM_MODE" == "bypassPermissions" ]] && POD_SETTINGS_JSON="$("$JQ_BIN" -nc --argjson b "$POD_SETTINGS_JSON" '$b + {skipDangerousModePermissionPrompt:true}')"
 if [[ -f "$POD_SETTINGS_FILE" ]]; then
   _merged="$("$JQ_BIN" --argjson add "$POD_SETTINGS_JSON" '. + $add' "$POD_SETTINGS_FILE")" \
     && printf '%s\n' "$_merged" > "$POD_SETTINGS_FILE" \

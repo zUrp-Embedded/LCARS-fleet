@@ -10,6 +10,17 @@
 # racine du repo, un seul projet mix (le helper check_app garde la forme historique `apps/<app>/`,
 # sans call site depuis F174).
 # PAS de pipefail (mix test exit non-zéro sur fail ≠ échec exécution ; on juge sur "0 failures").
+# ── GATE RETIRÉ (audit lot 6, 2026-07-12) ─────────────────────────────────────
+# Ce gate était un FAUX-VERT structurel (famille F-C166/167) : `check_app` n'a plus AUCUN call-site
+# depuis F174, et ses greps ciblent l'arbre `apps/` MORT au collapse umbrella → FAIL reste 0 →
+# exit 0 en ne vérifiant RIEN. Le check « 05_data-canon » n'a plus de cible vivante : le re-cibler
+# sur lib/ par grep de la string nue ferait des faux positifs sur ~6 commentaires historiques
+# (inventaire F-C167), et l'invariant fonctionnel (domaines auto-suffisants, canon vendoré) est
+# déjà porté par la suite `mix test` de l'app unique. Conservé comme ARCHIVE d'incrément ;
+# exit 3 EXPLICITE — jamais un faux-vert silencieux.
+echo "GATE RETIRÉ — check 05_data-canon sans cible vivante post-collapse (cf. header) ; invariant couvert par mix test. Archive, exit 3." >&2
+exit 3
+
 set -u
 RT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$RT" || exit 1

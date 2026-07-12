@@ -6,9 +6,10 @@
 #
 # Modèle v2 = ASYNC détaché (bwrap → tmux new-session -d → command ; bwrap rend 0, exit non propagé).
 # Donc on stube bwrap (echo de l'invocation) et on asserte l'ASSEMBLAGE des flags v2. La vraie
-# isolation-sanctuaire (/ RO, /home tmpfs, env exposé) passe en e2e (real bwrap+tmux+pod), pas en bats
-# sur du détaché. Couvre : args, session :?, setup checks, assemblage (clearenv/die-with-parent/binds/
-# setenv/sock-dir/tmux), trap pré-exec, frontière N0/N1.
+# isolation-sanctuaire (/ RO, /home tmpfs, env clos) N'est PAS testée ici : sa preuve e2e est
+# test/gate-r0.1-bwrap.sh (sonde INTÉRIEURE sur vrai bwrap+tmux+vendor, réécrite audit lot 6
+# 2026-07-12 — manuelle/opt-in, exige les syscalls bwrap). Couvre ICI : args, session :?, setup
+# checks, assemblage (clearenv/die-with-parent/binds/setenv/sock-dir/tmux), trap pré-exec, frontière N0/N1.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/bwrap_launch.sh"

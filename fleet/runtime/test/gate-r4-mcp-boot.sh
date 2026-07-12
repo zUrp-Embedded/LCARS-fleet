@@ -15,6 +15,22 @@
 # rend {:error,:no_task}. Le broker vit dans l'app fleet_task_queue (ensure_all_started).
 # --no-start : on démarre le superviseur fleet_mcp MANUELLEMENT avec le port (sinon conflit de nom).
 set -uo pipefail
+
+# ── GATE SUPERSEDED (audit lot 6, 2026-07-12) — script MORT sur l'app unique ──
+# Trois ruptures post-collapse/vocab le tuent au premier pas :
+#   1. `Application.ensure_all_started(:fleet_event_router)` / `(:fleet_task_queue)` → MatchError :
+#      les apps OTP `:fleet_*` n'existent plus (app unique `:lcars_fleet` ; les atoms `:fleet_<dom>`
+#      ne survivent QUE comme clés de config, décision D-07 migration).
+#   2. Tool "get_task" périmé — le vocab courant est `get_work_item`.
+#   3. Le transport HTTP pod-facing (PodTools :http, `:pod_facing_port`) est RETIRÉ — remplacé par
+#      la socket AF_UNIX per-pod (PodSocketAcceptor/PodSocketSupervisor).
+# NE PAS réparer : une réécriture fidèle = ré-implémenter test/pod_socket_test.exs, qui EXISTE et
+# prouve le round-trip get_work_item/submit_result sur le canal per-pod réel.
+# PREUVE VIVANTE : test/pod_socket_test.exs (mix test test/pod_socket_test.exs).
+# Corps historique conservé ci-dessous (archive) ; exit 2 EXPLICITE — jamais un faux-vert silencieux.
+echo "SUPERSEDED — central HTTP + get_task morts sur l'app unique. Preuve vivante : test/pod_socket_test.exs (mix test). exit 2." >&2
+exit 2
+
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"
 
 cat > "$RT/.gate-r4.exs" <<'EXS'

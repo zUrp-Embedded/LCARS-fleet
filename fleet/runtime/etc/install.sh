@@ -23,7 +23,7 @@ SRC_BIN="$RUNTIME_DIR/bin"
 say() { echo "install: $*" >&2; }
 die() { echo "install: ERREUR — $*" >&2; exit 1; }
 
-[[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas l'umbrella source ($RUNTIME_DIR/mix.exs absent)"
+[[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour bâtir la release)"
 
 # --- 1. Build la release prod (self-contained, ERTS bundlé ; verrou contracts R7 = gate) ------------

@@ -29,8 +29,10 @@ set -uo pipefail
 # natif), file globale Fleet.MCP.TaskQueue.push/results (pré-per-pod Fleet.TaskQueue), listener
 # channel HTTP (purgé ADR-G C5.1). Réécriture contre l'archi courante (per-pod + bwrap/RC) = exige
 # un vrai claude+bwrap → chantier deploy-env, non faisable en sandbox. Round-trip MCP per-pod prouvé
-# par gate-r4-mcp-boot.sh (réécrit + validé). Corps historique conservé ci-dessous (archive).
-echo "SUPERSEDED — gate e2e archi coffre/MCP-channel (pré-ADR-F/ADR-G). Réécriture = deploy-env. cf. gate-r4-mcp-boot.sh"
+# par test/pod_socket_test.exs (mix test — get_work_item/submit_result sur la socket AF_UNIX per-pod ;
+# pointeur réaligné audit lot 6 2026-07-12 : gate-r4-mcp-boot.sh est lui-même SUPERSEDED, script mort
+# sur l'app unique). Corps historique conservé ci-dessous (archive).
+echo "SUPERSEDED — gate e2e archi coffre/MCP-channel (pré-ADR-F/ADR-G). Réécriture = deploy-env. Preuve vivante : test/pod_socket_test.exs (mix test)"
 exit 2
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"; BIN="$RT/bin"
 WORK="$(mktemp -d)"; POD="$WORK/pod"

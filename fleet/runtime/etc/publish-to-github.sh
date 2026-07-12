@@ -103,33 +103,46 @@ HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
 
 echo "publish-to-github: réécriture (git filter-repo) — author système→humain ($HUMAN_NAME), co-author rôle→vendor ($VENDOR_NAME)"
-(cd "$OUT_DIR" && "$FILTER_REPO_BIN" --commit-callback "
-import re
-SYSTEM_EMAIL = ${SYSTEM_EMAIL@Q}.encode()
-VENDOR_NAME = ${VENDOR_NAME@Q}.encode()
-VENDOR_EMAIL = ${VENDOR_EMAIL@Q}.encode()
-HUMAN_NAME = ${HUMAN_NAME@Q}.encode()
-HUMAN_EMAIL = ${HUMAN_EMAIL@Q}.encode()
+# Les 5 valeurs passent par l'ENVIRONNEMENT (os.environb côté callback), JAMAIS par interpolation bash
+# dans le source Python : un nom d'auteur est une donnée NON CONTRÔLÉE (git log %cn) — l'ancien
+# `${VAR@Q}` produisait, sur une apostrophe (O'Brien), un littéral bash `$'...'` INVALIDE en Python →
+# SyntaxError git-filter-repo, exit 2 opaque. Le callback est un texte FIXE (quote simple bash, aucune
+# apostrophe dedans) ; `os.environb` rend les bytes exacts (zéro décodage/réencodage, noms non-UTF-8 ok).
+(cd "$OUT_DIR" && \
+  LCARS_PUB_SYSTEM_EMAIL="$SYSTEM_EMAIL" \
+  LCARS_PUB_VENDOR_NAME="$VENDOR_NAME" \
+  LCARS_PUB_VENDOR_EMAIL="$VENDOR_EMAIL" \
+  LCARS_PUB_HUMAN_NAME="$HUMAN_NAME" \
+  LCARS_PUB_HUMAN_EMAIL="$HUMAN_EMAIL" \
+  "$FILTER_REPO_BIN" --commit-callback '
+import re, os
+SYSTEM_EMAIL = os.environb[b"LCARS_PUB_SYSTEM_EMAIL"]
+VENDOR_NAME = os.environb[b"LCARS_PUB_VENDOR_NAME"]
+VENDOR_EMAIL = os.environb[b"LCARS_PUB_VENDOR_EMAIL"]
+HUMAN_NAME = os.environb[b"LCARS_PUB_HUMAN_NAME"]
+HUMAN_EMAIL = os.environb[b"LCARS_PUB_HUMAN_EMAIL"]
 
 if commit.author_email == SYSTEM_EMAIL:
     if commit.committer_email != SYSTEM_EMAIL:
         commit.author_name = commit.committer_name
         commit.author_email = commit.committer_email
     else:
-        # auto_init Gitea (Initial commit) : committer AUSSI système, aucune trace humaine sur CE commit
-        # → fallback sur l'humain trouvé ailleurs dans le repo (HUMAN_NAME/EMAIL, scanné en amont).
+        # auto_init Gitea (Initial commit) : committer AUSSI systeme, aucune trace humaine sur CE
+        # commit -> fallback sur HUMAN_NAME/EMAIL (identite humaine scannee en amont, hors callback).
+        # NB : ce bloc est une chaine bash single-quotee -> AUCUNE apostrophe ASCII ici (sinon la
+        # quote casse — la classe de bug exacte que le passage par env corrige).
         commit.author_name = HUMAN_NAME
         commit.author_email = HUMAN_EMAIL
         commit.committer_name = HUMAN_NAME
         commit.committer_email = HUMAN_EMAIL
 
 commit.message = re.sub(
-    rb'Co-authored-by:\s*LCARS-\S+\s*<[^>]+@lcars\.local>',
-    b'Co-Authored-By: ' + VENDOR_NAME + b' <' + VENDOR_EMAIL + b'>',
+    rb"Co-authored-by:\s*LCARS-\S+\s*<[^>]+@lcars\.local>",
+    b"Co-Authored-By: " + VENDOR_NAME + b" <" + VENDOR_EMAIL + b">",
     commit.message,
     flags=re.IGNORECASE,
 )
-")
+')
 
 echo ""
 echo "publish-to-github: clone réécrit prêt → $OUT_DIR"

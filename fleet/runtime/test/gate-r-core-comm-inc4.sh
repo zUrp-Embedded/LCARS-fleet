@@ -10,6 +10,21 @@
 # le pod l'a forcément récupérée via get_task. Via le VRAI claude_launch (.mcp-fleet.json + --strict).
 # Serveur = fixture bidirectionnelle test/fixtures/mcp_submit_server.py. Bin+fixture hors /home,/tmp.
 set -uo pipefail
+
+# ── GATE SUPERSEDED (audit lot 6, 2026-07-12) — harness e2e pré-ADR-F/ADR-G ──
+# Le harness est intégralement périmé : il invoque claude_launch.sh avec 5 args (contrat courant =
+# 3 STRICT → exit usage immédiat ; fail-fast `${CLAUDE_DIR:?}` en amont → aucun timeout brûlé),
+# attend le SP en $POD/.claude/system-prompt.md (courant : .lcars/system-prompt.md via
+# --system-prompt-file), parle le tool "get_task" (vocab courant : get_work_item) et provisionne le
+# coffre LCARS_CREDS_ROOT (fossile pré-ADR-F — l'auth courante = bind RW du .credentials.json du
+# claudeDir humain). Son ROUGE est TROMPEUR : il suggère « canal MCP cassé » alors que seul le
+# harness est mort. Réécriture fidèle = un vrai claude+bwrap (chantier deploy-env), et le canal
+# IN/OUT MCP per-pod a déjà sa preuve vivante.
+# PREUVE VIVANTE : test/pod_socket_test.exs (mix test test/pod_socket_test.exs).
+# Corps historique conservé ci-dessous (archive) ; exit 2 EXPLICITE — jamais un rouge trompeur.
+echo "SUPERSEDED — harness pré-ADR-F/ADR-G (5 args, get_task, coffre creds). Preuve vivante : test/pod_socket_test.exs (mix test). exit 2." >&2
+exit 2
+
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"; BIN="$RT/bin"
 WORK="$(mktemp -d)"; POD="$WORK/pod"; FAIL=0
 BINV="$(mktemp -d -p /var/tmp lcars-gate-inc4.XXXXXX)"; SRVV="$BINV/mcp_submit_server.py"
