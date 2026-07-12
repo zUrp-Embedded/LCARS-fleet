@@ -43,9 +43,14 @@ set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="/home/private"
-# vulcan RETIRÉ (Z7 migration, F-C165) : rôle fantôme — renommé starfleet au canon 2026-05-27,
-# le provisioning sortait en exit 2 dessus. starfleet PAS ajouté : host-native, 0 conso token.
-# Le check contracts `roles.provisioning_in_catalogue` verrouille désormais cette liste au canon.
+# vulcan ABSENT du provisioning, à raison : vulcan = l'agent Codex (OpenAI), EXTERNE à la fleet
+# PAR CONSTRUCTION — la frontière vendor N1 n'a qu'un launcher Claude (bin/claude_launch.sh), pas
+# de bridge OpenAI (CLAUDE.md : « futur OpenAI », non construit). Il ne tourne donc JAMAIS comme
+# pod fleet → ni cap-profile, ni role-token. ⚠ Le commentaire précédent « rôle fantôme renommé
+# starfleet » était une CONFUSION propagée : un agent a pris l'agent EXTERNE vulcan pour le rôle
+# gatekeeper `starfleet` (corrigée 2026-07-13 ; vérifié : aucun vulcan.yaml, aucun launcher OpenAI).
+# starfleet, LUI, est un vrai rôle fleet mais host-native → 0 conso token, absent aussi.
+# Le check contracts `roles.provisioning_in_catalogue` verrouille cette liste au canon.
 ROLES="architect consultant engineer gatekeeper qualifier reviewer"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"

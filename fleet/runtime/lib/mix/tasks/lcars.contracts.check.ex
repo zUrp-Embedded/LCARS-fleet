@@ -906,7 +906,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Z7 migration (F-C165 / arbitrage D6) — le provisioning de role-tokens porte une 2ᵉ liste
   # de rôles (etc/provision-role-tokens.sh ROLES=) qui a DÉJÀ divergé du canon une fois
-  # (vulcan fantôme 6 semaines après le rename starfleet → exit 2 sur rôle inexistant).
+  # (`vulcan` — l'agent Codex/OpenAI, EXTERNE à la fleet par construction (pas de bridge OpenAI),
+  # donc PAS un rôle-pod — figurait dans le .sh sans exister au canon → exit 2 sur rôle inexistant.
+  # Le « rename starfleet » jadis écrit ici était une confusion agent-externe↔rôle, corrigée 2026-07-13.)
   # SSOT minimal vérifiable AUJOURD'HUI : tout rôle du .sh EXISTE au catalogue canon.
   # (Le SSOT complet — flag needs_role_token dérivant la liste — reste à implémenter si
   # l'user tranche A-03 ; ce check attrape la classe de bug vécue en attendant.)
