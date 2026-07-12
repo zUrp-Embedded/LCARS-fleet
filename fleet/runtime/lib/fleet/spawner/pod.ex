@@ -385,6 +385,13 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # EXTRACT — the result comes from the Bus event (data.submitted_result), not from a file.
+  # RELAIS EN DEUX BONDS, PAS UNE REDONDANCE (Z6f 2026-07-13, requalifié après lecture) :
+  # `work_item.completed` (broker→pod) est le signal de fin de MANDAT — c'est le réveil
+  # événementiel de CE pod hors de :monitoring (remplaçant délibéré du polling fichier) ;
+  # `pod.completed` (pod→pilot) est la fin d'ÉTAPE, enrichie ICI (workspace/base_sha/repo
+  # via CompletedPayload — le pod est le SEUL à les connaître). Unifier les deux exigerait
+  # soit que le pod consomme son propre event, soit de ré-introduire du state partagé :
+  # les deux bonds sont irréductibles. (Cf. chantier migration, arbitrage A-02.)
   # `pod.completed` is load-bearing LIFECYCLE (the StepRunConsumer depends on it to finish the step_run).
   # Broadcast via `required_broadcast`: its failure is NOT swallowed. If it fails, we do NOT progress
   # to release/kill (one-shot) nor to the re-monitoring that DROPS `submitted_result`
