@@ -81,6 +81,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
     # push) and one after push main (main IS pushed before work/ops) suffice for the 3 visible events.
     with :ok <- validate_name(name),
+         :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
          {:ok, full_name} <- create_repo(name, org, opts),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
@@ -126,6 +127,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
     with :ok <- validate_name(name),
+         :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
          :ok <- require_org_membership(full_name, org),
          :ok <- require_default_branch_main(full_name, opts),
@@ -206,6 +208,59 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
+
+  # F2 (Z7c migration, débrief architecte 2026-07-12) — preflight fail-loud AVANT toute
+  # création : un humain OS sans compte forge ou hors team `humans` produisait des 422
+  # OPAQUES en aval (« Assignee does not exist » au premier create_issue — vécu e2e,
+  # débloqué à la main). On échoue ICI avec les gestes admin EXACTS dans l'erreur.
+  # DOCTRINE CONSERVÉE : l'admission org/team est gérée EN AMONT par l'humain admin
+  # (cf. ForgeClient.Repo « managed UPSTREAM ») — le runtime VÉRIFIE (lecture seule),
+  # il ne provisionne PAS (auto-provision = capability admin que le runtime n'a pas ;
+  # arbitrage A-04 du chantier migration si l'user la veut un jour).
+  # Tri-état STRICT : forge en panne ≠ humain absent → :forge_preflight_failed SANS
+  # instructions (ne jamais envoyer l'opérateur créer un compte sur une panne réseau).
+  # Seam `:forge_users` (défaut ForgeClient.Repo) : stub en test, pas de flip de config.
+  defp ensure_human_provisioned(org, opts) do
+    users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
+    human = Keyword.get(opts, :human) || Fleet.Credentials.Human.current!()
+    fc = fc_opts(opts)
+
+    case users.user_exists?(human, fc) do
+      {:ok, false} ->
+        {:error, {:human_not_provisioned, human, provisioning_gestures(:account, human, org)}}
+
+      {:error, reason} ->
+        {:error, {:forge_preflight_failed, reason}}
+
+      {:ok, true} ->
+        case users.team_member?(org, "humans", human, fc) do
+          {:ok, true} ->
+            :ok
+
+          {:ok, false} ->
+            {:error, {:human_not_provisioned, human, provisioning_gestures(:team, human, org)}}
+
+          {:error, reason} ->
+            {:error, {:forge_preflight_failed, reason}}
+        end
+    end
+  end
+
+  # Les gestes admin exacts, dans l'erreur elle-même : l'opérateur (ou l'architecte qui
+  # relaie) n'a RIEN à chercher. Formulés API Gitea — la forme stable, UI/CLI équivalents.
+  defp provisioning_gestures(:account, human, org) do
+    "le compte forge '#{human}' n'existe pas — gestes admin (token admin requis) : " <>
+      "1) POST /api/v1/admin/users {\"username\":\"#{human}\",\"email\":\"#{human}@lcars.local\"," <>
+      "\"password\":\"<initial>\",\"must_change_password\":true} ; " <>
+      "2) l'ajouter à la team 'humans' de l'org '#{org}' (cf. geste :team). " <>
+      "Puis relancer l'onboarding."
+  end
+
+  defp provisioning_gestures(:team, human, org) do
+    "le compte '#{human}' existe mais n'est PAS membre de la team 'humans' de l'org '#{org}' — " <>
+      "geste admin : GET /api/v1/orgs/#{org}/teams → id de 'humans', puis " <>
+      "PUT /api/v1/teams/<id>/members/#{human}. Puis relancer l'onboarding."
+  end
 
   # ── slug / preconditions ─────────────────────────────────────────────────
 

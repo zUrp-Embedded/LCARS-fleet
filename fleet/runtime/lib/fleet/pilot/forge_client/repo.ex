@@ -110,6 +110,55 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
+  Le compte forge `username` existe-t-il ? (`GET /users/<u>`). Distingue l'ABSENCE PROUVÉE
+  (`{:ok, false}`, http 404) de la forge en panne (`{:error, _}`) — F2 (Z7c migration) :
+  le preflight d'onboarding ne dit « crée le compte » QUE sur absence prouvée, jamais
+  sur une panne (sinon on enverrait l'opérateur créer un compte qui existe).
+  """
+  @spec user_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
+  def user_exists?(username, opts \\ []) when is_binary(username) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/users/#{encode_seg(username)}") do
+        {:ok, _} -> {:ok, true}
+        {:error, {:http, 404, _}} -> {:ok, false}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  `username` est-il membre de la team `team` de l'org ? (2 GET : liste des teams de l'org
+  → membership). Même contrat tri-état que `user_exists?/2` : `{:ok, false}` = absence
+  PROUVÉE (team trouvée, membre 404 — ou team inexistante : un humain ne peut pas être
+  membre d'une team absente, c'est le MÊME geste admin qui crée les deux), `{:error, _}`
+  = forge en panne. F2 (Z7c migration) — la team `humans` est la porte d'admission des
+  humains (modèle tofu-teams, cf. ProjectOnboard).
+  """
+  @spec team_member?(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, boolean()} | {:error, term()}
+  def team_member?(org, team, username, opts \\ [])
+      when is_binary(org) and is_binary(team) and is_binary(username) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, teams} when is_list(teams) <-
+           http_get(config, "/orgs/#{encode_seg(org)}/teams") do
+      case Enum.find(teams, &(is_map(&1) and &1["name"] == team)) do
+        nil ->
+          {:ok, false}
+
+        %{"id" => id} ->
+          case http_get(config, "/teams/#{id}/members/#{encode_seg(username)}") do
+            {:ok, _} -> {:ok, true}
+            {:error, {:http, 404, _}} -> {:ok, false}
+            {:error, _} = err -> err
+          end
+      end
+    else
+      {:ok, other} -> {:error, {:unexpected_teams_shape, other}}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   The repo's **numeric forge id** (`GET /repos/<repo>` → `.id`). It's the project's identity for the
   deterministic `session_id` (`Fleet.Spawner.SessionId`, `<REPO4>` segment): the FORGE is the
   source of truth, we do NOT derive an id from nothing. Gitea id = stable sequential integer (e.g.
