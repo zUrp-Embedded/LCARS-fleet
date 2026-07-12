@@ -134,6 +134,24 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
     end
 
+    test "acte4 #27 : collision metadata.name → {:error, :name_collision}, PAS un CaseClauseError",
+         %{tmp_dir: tmp_dir} do
+      # Deux fichiers du catalogue portant le MÊME metadata.name = artefact de deploy cassé.
+      # `name_index` rend {:error, :name_collision} (fail-loud, loggué) — mais le `case` de
+      # `read_role` ne captait pas cette variante → CaseClauseError opaque sur load/spawn au
+      # lieu du tag prévu. `list/1` la propageait déjà ; `read_role` (le chemin load/compose)
+      # doit faire pareil.
+      yaml =
+        String.replace(valid_profile_yaml(), ~r/^(\s*name:).*$/m, "\\1 collide", global: false)
+
+      File.write!(Path.join(tmp_dir, "dup-a.yaml"), yaml)
+      File.write!(Path.join(tmp_dir, "dup-b.yaml"), yaml)
+
+      assert {:error, :name_collision} = Fleet.CapProfile.Catalog.read_role("collide")
+      # le chemin public complet propage le même tag (jamais un crash)
+      assert {:error, :name_collision} = Fleet.CapProfile.load("collide")
+    end
+
     test "F-040 : YAML NON-décodable dans le catalogue → :invalid_schema (pas :not_found)",
          %{tmp_dir: tmp_dir} do
       # Avant F-040, `name_index` skippait en silence un .yaml corrompu → le rôle paraissait ABSENT

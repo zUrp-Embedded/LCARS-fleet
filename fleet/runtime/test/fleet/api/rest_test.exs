@@ -127,6 +127,23 @@ defmodule Fleet.API.RestTest do
       assert conn.status == 400
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
+
+    # Régression acte4 #32 — en Elixir "" est TRUTHY : `cap_profile_name:"" || role` renvoyait ""
+    # qui tombait dans le fourre-tout `:missing_cap_profile` en IGNORANT le role valide fourni.
+    # Fix presence/1 : "" ≈ absent → le fallback atteint le role.
+    test "acte4 #32 : cap_profile_name vide + role valide → le role est résolu (202)" do
+      conn =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{cap_profile_name: "", role: "engineer"})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 202
+      assert_receive %Fleet.Event{type: :"admin.spawn.request"}, 500
+    end
   end
 
   # ============================================================

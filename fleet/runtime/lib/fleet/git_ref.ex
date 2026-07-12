@@ -19,7 +19,10 @@ defmodule Fleet.GitRef do
   typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized.
   """
 
-  @ref_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/
+  # `\A…\z`, NOT `^…$`: in PCRE `$` also matches just BEFORE a trailing newline, so `^…$` declares
+  # "main\n" VALID and the ref reaches git clone/push/commit — the exact class this module exists to
+  # stop. Same trap, same fix as `Fleet.Slug` (its `valid_pod_id?` twin documents it too).
+  @ref_re ~r/\A[A-Za-z0-9][A-Za-z0-9._\/\-]*\z/
 
   @doc """
   `true` if `ref` is a well-formed branch/ref name per `git check-ref-format`. Binary, matches

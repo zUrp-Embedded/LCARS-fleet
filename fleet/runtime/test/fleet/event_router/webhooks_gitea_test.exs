@@ -93,6 +93,29 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
     end
 
+    # Régression acte4 #24 — Plug.Parsers garantit que body est une MAP, pas que `action` est une
+    # string. Un `{"action": 123}` signé nourrissait `"gitea." <> 123` AVANT le try → ArgumentError
+    # hors try → Cowboy 500, contournant la discipline « jamais ACK un drop, 422 sur dérive ».
+    # Fix : action non-string ≈ absent → même chemin que M20 (fallback header, sinon gitea.unknown).
+    test "acte4 #24 : action non-string → pas de crash ; traité comme absent (header sinon unknown)",
+         %{secret: secret} do
+      # sans header → gitea.unknown, comme « sans action »
+      body = %{"action" => 123, "ref" => "refs/heads/main"}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+      assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
+
+      # avec header → le fallback header route (toujours pas de crash)
+      conn2 =
+        post_with_sig(%{"action" => %{"nested" => true}}, secret)
+        |> put_req_header("x-gitea-event", "push")
+        |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn2.status == 200
+      assert_receive %Fleet.Event{source: :event_router, type: :"gitea.push"}, 500
+    end
+
     test "M21 : issue extrait d'une pull request (pas seulement issue)", %{secret: secret} do
       body = %{
         "action" => "opened",

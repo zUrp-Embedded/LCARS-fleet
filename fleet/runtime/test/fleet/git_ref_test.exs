@@ -31,4 +31,18 @@ defmodule Fleet.GitRefTest do
       assert GitRef.valid?(ok), "ref #{inspect(ok)} devrait rester valide"
     end
   end
+
+  # Régression acte4 #39 — ancres PCRE : `$` matche AVANT un newline final, donc `^…$` déclarait
+  # "main\n" VALIDE (vérifié à l'exécution) et le ref malformé atteignait git clone/push/commit.
+  # `\A…\z` ferme le trou pour tout control-char terminal. Même piège déjà fixé dans Fleet.Slug.
+  test "acte4 #39 : newline/control-char terminal rejeté (\\A..\\z, pas ^..$)" do
+    for bad <- ["main\n", "main\r\n", "feature/work\n", "a\n"] do
+      refute GitRef.valid?(bad), "ref #{inspect(bad)} (newline terminal) devrait être rejetée"
+    end
+
+    # les refs propres équivalentes restent valides (pas de sur-serrage)
+    for ok <- ["main", "feature/work"] do
+      assert GitRef.valid?(ok)
+    end
+  end
 end

@@ -231,6 +231,33 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "list_org_repos/2 (discovery WS3 — org-membership = admission)" do
+    test "nominal : liste de repos → full_names (les entrées sans full_name sont écartées)" do
+      handlers = %{
+        {"GET", "/api/v1/orgs/fleet/repos"} =>
+          {200, [%{"full_name" => "fleet/lcars"}, %{"full_name" => "fleet/demo"}, %{"id" => 3}]}
+      }
+
+      assert {:ok, ["fleet/lcars", "fleet/demo"]} =
+               ForgeClient.list_org_repos("fleet", opts(handlers))
+    end
+
+    # Régression acte4 #9 — LE reader de collection de la discovery coerçait un 2xx non-liste via
+    # `List.wrap` → `{:ok, []}` silencieux = le poller croit « aucun repo » sans trace, pile le
+    # faux-vert que MA-20 a chassé sur paginate. Même doctrine : forme 2xx inattendue → fail-loud.
+    test "acte4 #9 : 2xx non-liste → {:error, :unexpected_repos_shape}, PAS {:ok, []}" do
+      handlers = %{
+        {"GET", "/api/v1/orgs/fleet/repos"} => {200, %{"message" => "this is not a list"}}
+      }
+
+      result = ForgeClient.list_org_repos("fleet", opts(handlers))
+
+      assert {:error, {:unexpected_repos_shape, %{"message" => _}}} = result
+      # Garde anti-régression : surtout PAS un succès vide menteur.
+      refute match?({:ok, []}, result)
+    end
+  end
+
   describe "list_open_pulls/2 + get_pull/3 (dispatch juge PR-driven)" do
     test "hybride : /issues?type=pulls (numéros filtrés) PUIS get_pull (shape PR complète)" do
       handlers = %{

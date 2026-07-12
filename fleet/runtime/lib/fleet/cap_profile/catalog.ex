@@ -62,13 +62,17 @@ defmodule Fleet.CapProfile.Catalog do
       YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
   """
   @spec read_role(String.t()) ::
-          {:ok, map()} | {:error, :not_found | :invalid_schema | :catalogue_missing}
+          {:ok, map()} | {:error, :not_found | :invalid_schema | :catalogue_missing | :name_collision}
   def read_role(role) do
     # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
     # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,
     # which masks the config error as a mere typo'd role name). `list/1` already distinguishes; so must
     # `read_role`, the path `load/1`/`compose/2` take for a single role.
     if File.dir?(root_dir()) do
+      # EXHAUSTIVE on name_index's tagged returns: it also yields `{:error, :name_collision}`
+      # (two catalogue files with the same metadata.name — broken deploy artifact). An uncaught
+      # variant here crashed load/spawn with an opaque CaseClauseError instead of the fail-loud
+      # tag (name_index already logged the colliding path). Propagated as-is, like `list/1`.
       case name_index(root_dir()) do
         {:ok, index} ->
           case Map.fetch(index, role) do
@@ -78,6 +82,9 @@ defmodule Fleet.CapProfile.Catalog do
 
         {:error, {:invalid_yaml, _path}} ->
           {:error, :invalid_schema}
+
+        {:error, :name_collision} = err ->
+          err
       end
     else
       {:error, :catalogue_missing}

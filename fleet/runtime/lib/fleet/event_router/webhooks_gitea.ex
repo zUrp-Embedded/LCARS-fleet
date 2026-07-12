@@ -55,7 +55,12 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         # Do NOT blindly default to "push": prefer the action (routed by
         # events.yaml, e.g. gitea.opened/closed), otherwise the authoritative event (header X-Gitea-Event),
         # otherwise "unknown" — an event with no action and non-push must not be mislabeled "push".
-        event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
+        # Plug.Parsers guarantees `body` is a map, NOT that `action` is a string: a non-string action
+        # (e.g. `{"action": 123}`) fed to `<>` would raise OUTSIDE the try below → Cowboy 500,
+        # bypassing the 422-on-drift discipline. Non-string ≈ absent (unusable) → same header fallback.
+        action = body["action"]
+        action = if is_binary(action), do: action, else: nil
+        event_type = "gitea." <> (action || gitea_event_header(conn) || "unknown")
         issue_id = extract_issue(body)
 
         # Strict canonical schema: %Fleet.Event{source: :event_router}.

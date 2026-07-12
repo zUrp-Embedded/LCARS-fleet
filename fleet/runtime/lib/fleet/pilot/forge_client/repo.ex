@@ -68,9 +68,17 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   """
   @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []) when is_binary(org) do
+    # `when is_list(body)` — fail-loud on an unexpected 2xx shape (error envelope, proxy HTML page),
+    # NOT `List.wrap` which coerced it into a silent `{:ok, []}` = the poller believes "no repos"
+    # with zero trace. THE load-bearing collection reader of discovery (WS3): same doctrine as
+    # `paginate` (:unexpected_page_shape) and `team_member?` below — this was the odd-one-out.
     with {:ok, config} <- resolve_config(opts),
-         {:ok, body} <- http_get(config, "/orgs/#{encode_seg(org)}/repos?limit=50") do
-      {:ok, body |> List.wrap() |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+         {:ok, body} when is_list(body) <-
+           http_get(config, "/orgs/#{encode_seg(org)}/repos?limit=50") do
+      {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+    else
+      {:ok, other} -> {:error, {:unexpected_repos_shape, other}}
+      {:error, _} = err -> err
     end
   end
 

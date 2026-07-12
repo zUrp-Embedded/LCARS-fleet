@@ -164,6 +164,11 @@ defmodule Fleet.API.SpawnAdmission do
   # the spawner side, which owns the paths and sockets derived from the pod_id; the API does not copy the regex.
   defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
 
+  # A usable name is a non-empty string; anything else (nil, "", non-string) counts as ABSENT
+  # so the `||` fallback chain can reach the next candidate instead of short-circuiting on "".
+  defp presence(v) when is_binary(v) and v != "", do: v
+  defp presence(_), do: nil
+
   # Resolves the requested cap-profile (`cap_profile_name` or `role`, same keys as
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing_cap_profile}`; load KO →
   # `{:error, {:cap_profile, name, reason}}`; HOST-NATIVE (`containment != bwrap`) →
@@ -172,8 +177,12 @@ defmodule Fleet.API.SpawnAdmission do
   # same containment read as the spawner (single source `Fleet.CapProfile`) → no
   # verdict divergence between the API and the real launch.
   defp validate_cap_profile(payload) do
-    case Map.get(payload, "cap_profile_name") || Map.get(payload, "role") do
-      name when is_binary(name) and name != "" ->
+    # `presence/1` normalizes "" (and any non-string) to nil BEFORE the fallback: in Elixir ""
+    # is TRUTHY, so `Map.get(p, "cap_profile_name") || Map.get(p, "role")` returned "" for
+    # `{cap_profile_name: "", role: "reviewer"}` — silently IGNORING the valid role and answering
+    # `:missing_cap_profile`. Fail-closed by luck, wrong verdict by construction.
+    case presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role")) do
+      name when is_binary(name) ->
         case Fleet.CapProfile.load(name) do
           {:ok, cap} ->
             if Fleet.CapProfile.bwrap?(cap),
