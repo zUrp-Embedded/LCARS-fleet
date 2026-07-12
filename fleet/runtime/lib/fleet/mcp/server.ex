@@ -10,7 +10,7 @@ defmodule Fleet.MCP.Server do
   (`config :fleet_mcp, boot_environment: :host` in `runtime.exs` on the daemon boot, and in
   `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
   permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
-  (Residual, wire-time: a pod running the full umbrella BEAM would still run `runtime.exs` → `:host`;
+  (Residual, wire-time: a pod running the full lcars_fleet BEAM would still run `runtime.exs` → `:host`;
   pods run a `claude` REPL + `bridge.py`, NOT the BEAM, so this is latent — a per-boot host signal from
   `bin/fleet_v2` would harden it further.)
 

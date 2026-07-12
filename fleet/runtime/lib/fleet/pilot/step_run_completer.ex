@@ -293,10 +293,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  **PR-native** — PROMOTE: merges the PR **fast-forward-only**. This is the `:pass` terminal
-  of the last step — the issue is closed EXPLICITLY via `GatekeeperSeal.seal_and_merge` (no more `Closes #N`). Under a serial lease + append-only
-  funnel, the feature is a linear descendant of `main` → FF guaranteed. FF failure = serial invariant
-  violated (two branches on the same code) → fail-loud `{:merge, _}`, NOT a conflict to resolve.
+  **PR-native** — PROMOTE: merges the PR via **rebase** (linear history, no merge commit) —
+  delegated to `GatekeeperSeal.seal_and_merge` → `ForgeClient.merge_pr` (`Do: rebase`). This is
+  the `:pass` terminal of the last step — the issue is closed EXPLICITLY via
+  `GatekeeperSeal.seal_and_merge` (no more `Closes #N`). Rebase (NOT fast-forward-only) is
+  deliberate: a parallel merge can advance `main` under this PR (2 disjoint issues off the same
+  base → no longer FF-able but still mergeable) → `rebase` replays the commits onto the new `main`
+  (FF-only would wedge it forever, cf. `ForgeClient.merge_pr`). A real conflict / missing
+  approvals → fail-loud `{:merge, _}`.
 
   `step_run`: `:repo`, `:pr_number`. Returns `{:ok, :promoted}` | `{:error, {:merge, reason}}`.
   """

@@ -21,9 +21,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   ## Protocol
 
-  JSON-RPC newline-framed (`{:packet, :line}`), one message = one line. Only
-  `method == "tools/call"` is served here: `initialize` / `tools/list` are
-  answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). The
+  JSON-RPC newline-framed (`{:packet, :line}`), one message = one line.
+  `tools/call` AND `tools/list` are both served here (`tools/list` per F-C138 — the
+  `deftool` schemas filtered to this pod's role-gated surface, see `list_tools/1`); only
+  `initialize` is answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). The
   response frame reuses `Fleet.MCP.PodTools.handle_tool_call/3`:
 
     * `{:ok, content, _}`  → `result` = that `content` (already in MCP format);
@@ -166,7 +167,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # INVALID JSON (truncated/broken line) -> -32700 response + warning: NEVER swallowed
   # silently — swallowing turned every invalid line into a 30 s timeout
   # indistinguable on the bridge side, zero BEAM trace (seen live 2026-07-04). Another `method`
-  # with an `id` (anomaly: `initialize`/`tools/list` are served by the bridge) -> -32601.
+  # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled above) -> -32601.
   defp handle_line(line, pod_id, tools) do
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->

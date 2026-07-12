@@ -5,13 +5,13 @@ defmodule Fleet.Starfleet.Gatekeeper do
 
   Proven, frozen pattern established in a proof-of-concept: JSON output
   `{decision, reason, details, chain?}`. Strict schema
-  `priv/schema/decision-v1.json`, `ex_json_schema` validation at load,
+  `priv/starfleet/schema/decision-v1.json`, `ex_json_schema` validation at load,
   fail-fast.
 
   ## Schema cache
 
   Schema resolved **once** at boot via
-  `Fleet.Starfleet.Application.start/2` → `init_schema!/0`, delegated to
+  `Fleet.Starfleet.Application.init/1` → `init_schema!/0`, delegated to
   the Ring 0 authority `Fleet.SchemaCache` (`:persistent_term` cache, key
   `{__MODULE__, :decision_schema}`) — dedup, the read+decode+resolve
   pipeline used to live copied here.
@@ -76,7 +76,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
   Loads the decision JSON schema and persists it in `:persistent_term`
   via `Fleet.SchemaCache` (Ring 0 authority for the load-and-cache pattern).
 
-  Called at boot by `Fleet.Starfleet.Application.start/2`. Fail-fast:
+  Called at boot by `Fleet.Starfleet.Application.init/1`. Fail-fast:
   raises if the schema file is absent or the JSON is malformed. Idempotent
   by key: a second call does not re-read the file (the priv schema is
   immutable across the BEAM's lifetime).

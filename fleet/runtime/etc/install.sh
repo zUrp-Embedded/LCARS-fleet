@@ -17,7 +17,7 @@ PREFIX="${LCARS_INSTALL_PREFIX:-/local/LCARS_v2}"
 
 SELF="$(readlink -f "$0")"
 ETC_DIR="$(dirname "$SELF")"
-RUNTIME_DIR="$(dirname "$ETC_DIR")"          # etc/.. = l'umbrella source
+RUNTIME_DIR="$(dirname "$ETC_DIR")"          # etc/.. = la racine du runtime source
 SRC_BIN="$RUNTIME_DIR/bin"
 
 say() { echo "install: $*" >&2; }

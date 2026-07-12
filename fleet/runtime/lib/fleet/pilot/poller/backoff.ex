@@ -10,8 +10,9 @@ defmodule Fleet.Pilot.Poller.Backoff do
     * **Jitter ±10 %** — N daemons that restart together must not hammer the
       forge in phase (anti thundering-herd). 1 s floor (never a null/negative delay).
     * **Exponential backoff** on errors (×2 per failed tick, capped at 5 min) — a
-      forge that is down floods neither the logs nor the API. The streak comes from the poller's state
-      (LIST errors, but also per-item DISPATCH errors: partial backoff).
+      forge that is down floods neither the logs nor the API. The streak comes from the
+      poller's state (incremented when the org-repo discovery `list_org_repos` fails;
+      per-item DISPATCH errors do NOT feed it — they surface via `last_tally_errors`/telemetry).
   """
 
   # Backoff cap: a forge that is down never pushes the wait beyond 5 min

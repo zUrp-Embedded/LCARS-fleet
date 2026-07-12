@@ -10,8 +10,8 @@ defmodule Fleet.ProjectBootstrap.Application do
 
   Invoked synchronously by `Fleet.Spawner.Pod` in the PROJECT phase.
 
-  `:one_for_one` supervisor with `[]` children — exists for umbrella OTP
-  consistency (`Fleet.Coord.Application` pattern). No GenServer started.
+  `:one_for_one` supervisor with `[]` children — exists for supervision-tree consistency
+  with the sibling domain supervisors (`Fleet.Coord.Application` pattern). No GenServer started.
   """
 
   use Supervisor

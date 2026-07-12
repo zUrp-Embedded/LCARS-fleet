@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.Poller do
     * **PR** with a requested reviewer → spawn the **judge**; PR `REQUEST_CHANGES` without a reviewer → re-spawn
       the **producer** for the rework (`StepDispatcher.dispatch_review`).
     * `lcars-in-flight` lock → skip (a pod is already working the brick). **Repo-serialized lease**:
-      at most one active workflow_run per repo (sequential feature-branches → guaranteed FF merge).
+      at most one active workflow_run per repo (sequential feature-branches → clean rebase merge, linear history; FF NOT guaranteed — cf. `ForgeClient.merge_pr`).
 
   ## Robustness (port from v1.5 `LcarsFleetPoller`, retained)
 
@@ -120,8 +120,10 @@ defmodule Fleet.Pilot.Poller do
     err_streak: 0,
     last_error: nil,
     # nb of DISPATCH errors (per item) of the last tick. The forge list
-    # (`list_open_*`) can succeed while some `dispatch_*` fail — these errors
-    # increment `err_streak` (partial backoff via `next_delay`) instead of being drowned.
+    # (`list_open_*`) can succeed while some `dispatch_*` fail — these errors are surfaced
+    # here for observability (`stats/1`) + telemetry; they do NOT feed `err_streak` (the
+    # multi-project `do_poll` resets the streak to 0 each successful tick, keeping only
+    # `orphan_lock_suspects`) → they do not trigger backoff.
     last_tally_errors: 0,
     # Lock reconciliation: refs `{:issue|:pr, n}` seen ORPHANED (`lcars-in-flight` lock
     # without a live pod) at the previous tick. 2-tick grace (same grace as the PodWarden) → we only reclaim on the 2nd
@@ -455,11 +457,11 @@ defmodule Fleet.Pilot.Poller do
       )
 
       # The forge list succeeded, but PER-ITEM `dispatch_*` may have failed
-      # (`tally.errors > 0` — e.g. broker enqueue KO, spawn KO). If `err_streak` were reset to 0
-      # unconditionally, these errors would NEVER slow the poller down (it would hammer the
-      # forge at full throttle despite the failure). We reuse the `err_streak`/`next_delay` mechanism
-      # (partial backoff): streak incremented as long as items fail, reset to 0 only
-      # when the tick is clean.
+      # (`tally.errors > 0` — e.g. broker enqueue KO, spawn KO). We compute a per-repo
+      # `err_streak` here, BUT the multi-project `do_poll` currently DISCARDS it (it aggregates
+      # only `orphan_lock_suspects` and forces `err_streak` back to 0 each tick, cf. `do_poll`)
+      # → this partial backoff does NOT take effect; dispatch errors still surface via
+      # `last_tally_errors`/telemetry, never as slowdown.
       {next_streak, next_last_error} =
         if tally.errors > 0 do
           {state.err_streak + 1, {:dispatch_errors, tally.errors}}
@@ -495,7 +497,7 @@ defmodule Fleet.Pilot.Poller do
   # FOREVER, silently (the poller only SKIPS it). So we re-kick periodically —
   # THROTTLED (`@awaits_rekick_every` ticks) because a wake can cost a claude turn (bounded spend,
   # Jupiter). Best-effort (the label stays human-released: we nudge the airlock, we never force the verdict).
-  # Reuses the `spawner` seam (default `Fleet.Spawner`) + the authority `Roles.architect_pod_id/0` (SSOT
+  # Uses the `spawner` seam DIRECTLY (no default here — nil ⇒ no-op via the guard; prod does not inject it, cf. `Application.step_children!`) + the authority `Roles.architect_pod_id/0` (SSOT
   # shared with kick_architect). nil spawner (test/config) → no-op.
   defp maybe_rekick_arch(awaits_ids, %__MODULE__{spawner: spawner} = state)
        when not is_nil(spawner) do

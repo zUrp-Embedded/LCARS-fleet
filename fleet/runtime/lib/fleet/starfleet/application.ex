@@ -13,8 +13,8 @@ defmodule Fleet.Starfleet.Application do
        module attribute, atom-leak DoS mitigation)
     3. Supervises six opt-in children, each gated by a `:start_*` config knob:
        * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
-       * `Shutdown` (default `true`) — coordinated graceful shutdown; INERT for now
-         (its systemd ExecStop trigger was removed, awaiting a re-wire onto `fleet_v2 stop`)
+       * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
+         `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
        * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
        * `BootOrchestrator` (default `true`, Task `:transient`) — boots the permanent
          pods then emits `fleet.boot_complete|partial|failed`
@@ -75,8 +75,7 @@ defmodule Fleet.Starfleet.Application do
         ) ++
         if boot_enabled?(:start_shutdown, true) do
           # Coordinated graceful shutdown — must stay alive to serve the shutdown
-          # RPC. INERT for now: its trigger was removed (the systemd ExecStop it
-          # once answered is gone), awaiting a re-wire onto `fleet_v2 stop`.
+          # RPC issued by `bin/fleet_v2 stop` (cmd_stop → `Shutdown.begin` then `:init.stop()`).
           [Fleet.Starfleet.Shutdown]
         else
           []

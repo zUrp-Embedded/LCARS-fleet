@@ -14,9 +14,8 @@ defmodule Fleet.Shutdown.Quiesce do
 
   Current reader: REST `POST /api/admin/spawn` (`Fleet.API.Rest`) — a new
   operator pod is refused while draining. (A workflow-activation reader once
-  lived here too, but that entry point was removed; re-wiring it is part of the
-  graceful-shutdown that is not yet fully active — its trigger
-  `Fleet.Starfleet.Shutdown.begin/1` has no caller today. See that module.)
+  lived here too, but that entry point was removed; re-wiring it is part of the graceful-shutdown; its trigger `Fleet.Starfleet.Shutdown.begin/1` is
+  invoked by the graceful-stop path (`bin/fleet_v2` stop). See that module.)
 
   The **internal** work of already-in-flight work (spawning the next step,
   enqueuing a brief) does NOT consult this flag — otherwise the in-flight work

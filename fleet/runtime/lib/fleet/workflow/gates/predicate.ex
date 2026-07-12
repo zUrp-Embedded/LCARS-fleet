@@ -37,11 +37,10 @@ defmodule Fleet.Workflow.Gates.Predicate do
 
   ## Out-of-scope (not decided here)
 
-  The gate's adjacent orchestration (`human_approval_required`,
-  `fallback_invoke_gatekeeper`, `on_blocking_severity`, `on_revision_severity`)
+  The gate's adjacent orchestration (`human_approval_required`)
   is NOT carried by this evaluator — it does ONLY `rule_string → bool`.
-  The mapping to `:pass`/`:fail`/`:retry` (including the refusal to auto-approve a
-  `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
+  The mapping to `:pass`/`:fail`/`:human_approval`/`:dispatch_gatekeeper` (including the
+  refusal to auto-approve a `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
   """
 
   @ops ~w(>= <= == != > <)

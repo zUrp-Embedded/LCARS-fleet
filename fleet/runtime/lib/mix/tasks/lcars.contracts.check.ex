@@ -695,7 +695,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       confirm: ~r/root/,
       missing: "no anti-root self-check at boot (FORGE-D1)",
       note:
-        "the daemon must refuse getuid()==0 at boot (boot guard); systemd User=lcars alone does not cover a dev/manual run as root"
+        "the daemon must refuse getuid()==0 at boot (boot guard) — a dev/manual run as root resolves ~/.gitea_token to /root's admin token (FORGE-D1)"
     })
   end
 

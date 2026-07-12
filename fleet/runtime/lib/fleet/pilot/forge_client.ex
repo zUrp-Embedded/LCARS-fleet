@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @moduledoc """
   `fleet_pilot`'s Gitea REST API client — the DOMAIN layer of the forge-state-machine
   (the forge IS the state machine). Carries the ops on issues/PRs (idempotent read/write),
-  PR jury state, repo onboarding + admission seal, and the credential→wire adapter
+  PR jury state, repo onboarding, and the credential→wire adapter
   `as_role/2`. It is the module injected by the `:forge_client` seam (StepDispatcher/Poller).
 
   Two layers live BELOW it (re-exported here to preserve the historical contract):
@@ -17,8 +17,9 @@ defmodule Fleet.Pilot.ForgeClient do
   ⚠ CROSS CONTRACT (`fleet_mcp` seam): this module is the REAL (default) impl of the behaviour
   `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
   `get_issue/3`, `list_open_pulls/2`, `parse_feature_branch/1`, `pr_review_verdicts/3`). It CANNOT
-  be adopted as a `@behaviour`: `fleet_pilot` does not depend on `fleet_mcp` and the compile reference
-  would create a new edge (`allowed_graph.yaml` would go red). Duck-typed impl — any evolution of
+  be adopted as a `@behaviour`: `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference
+  would be a Boundary violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps →
+  compile error). Duck-typed impl — any evolution of
   these 6 signatures MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
 
   ## Configuration

@@ -1,9 +1,9 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-11
+**Dernière révision** : 2026-07-12
 **Statut** : design note exploratoire (incrément A — la base de travail). Mode exploration : pas de mauvaise réponse, on teste.
-**Référencé par** : `apps/fleet_observation/README.md` (à venir, incrément B)
+**Référencé par** : `lib/fleet/observation/README.md`
 **Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
 
 ---
@@ -18,7 +18,7 @@ Trois dashboards préexistent et **restent en vie** (on coupe rien maintenant, m
 
 | Port | Quoi | Statut |
 |---|---|---|
-| `:8090` | dashboard Python v1.5 | vivant, conservé en parallèle |
+| `:8090` | dashboard Python v1.5 | DÉCOMMISSIONNÉ (cf. Fleet.API.Dashboard) |
 | `:8080/dashboard` | `Fleet.API.Dashboard` (Plug, #594-D2) | squelette monté sur l'API de commande |
 | `:8089` | `fleet_dashboard` (branche sœur `dashboard/observability-8089`) | squelette observation deck |
 | **`:8091`** | **`fleet_observation` (CE design)** | **nouveau — la prise propre BL-026** |
@@ -42,7 +42,7 @@ Conséquences dures :
   1. le **stream d'events** `%Fleet.Event{}` (la colonne vertébrale, déjà là) ;
   2. des **API de lecture déjà publiques** et stables (`Spawner.list_pods/0`, `Readiness.deep/0`).
 - **Jamais** d'introspection directe de l'état interne d'un GenServer tiers
-  (`:sys.get_state`, `TaskQueue.Server` state, `Executor` state…). Si une donnée n'est pas
+  (`:sys.get_state`, `TaskQueue.Server` state…). Si une donnée n'est pas
   exposée proprement, le manque se **trace** (« seam manquant ») — il ne se contourne pas.
 
 C'est exactement la thèse BL-026 (frontière read-model explicite). Cette couche EST
@@ -102,7 +102,6 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 | **Event stream** | LE flux `%Fleet.Event{}` (type, source, trace_id, ts, payload) | `Fleet.EventRouter.Bus.subscribe/1` |
 | Registry events | clés `events.yaml` (ce qui est registrable) + drift producteur | `events.yaml` |
 | **File de mandats** | tasks pending/active/completed/failed (get_work_item/submit_result) | `fleet_task_queue` |
-| Vocab moniteur | `dispatch_*`, gatekeeper lifecycle, `pipeline_stage_transition`, routage ticket, `memory_query_active` | `Fleet.TaskMonitor.map_event/1` (TM-D1) |
 | Pilot | dispatcher on/off, routes chargées, poll repo/intervalle | `fleet_pilot` |
 
 ### Ring 3 — coordination + policy

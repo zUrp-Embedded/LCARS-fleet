@@ -1,7 +1,12 @@
 # fleet_event_router
 
+**Date** : 2026-07-13
+**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — bus d'événements PubSub `fleet.events` + registry events.yaml (Ring 0)
+**Référencé par** : `04_design-notes/fleet_event_router.md`
+
 Event bus (Phoenix.PubSub topic `fleet.events`) + the `events.yaml` registry
-(Ring 0 — substrate: 0 dependencies, ~12 apps depend on it). Consumption =
+(Ring 0 — substrate: 0 dependencies, ~12 domains depend on it). Consumption =
 direct PubSub subscribers, no dispatch table. Also hosts a handful of
 universal-substrate primitives (bind IP, listener spec, shutdown flag, schema
 cache) that must be reachable downward from any ring without a layering inversion.
@@ -14,7 +19,7 @@ Nothing here is restated, only pointed at.
 - `Fleet.EventRouter` — moduledoc-only facade indexing the sub-modules (no code)
 - `Fleet.Event` — the canonical `%Fleet.Event{}` wire struct (closed `source` enum, `new/3` = "parse, don't validate")
 - `Fleet.EventRouter.Bus` — the `Fleet.PubSub` instance; struct-only broadcast/subscribe, fail-loud registry membership
-- `Fleet.EventRouter.Catalog` — boot-time loader of the `priv/events.yaml` registry (populates `authorized_event_types`)
+- `Fleet.EventRouter.Catalog` — boot-time loader of the `priv/event_router/events.yaml` registry (populates `authorized_event_types`)
 - `Fleet.EventRouter.Application` — app supervisor (boot runs `Catalog.load!` + atom pre-registration; PubSub under its own escalate-to-node supervisor)
 - `Fleet.EventRouter.WebhooksGitea` — Gitea webhook HTTP endpoint (Plug.Router + HMAC SHA256)
 - `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)

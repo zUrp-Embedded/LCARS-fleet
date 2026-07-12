@@ -397,8 +397,9 @@ defmodule Fleet.Spawner do
   the Pod's ack-driven loop (`:arm_kick` — the FALLBACK: send-keys `"wake"` ONLY if the pull does not
   arrive) + re-arms the RESPONSE deadline (`:rearm_deadline`). It does **not** send-keys itself.
 
-  Precondition: the caller has already enqueued the brief in `Fleet.TaskQueue` (targeted at `pod_id`; the pod
-  identifies itself by `_lcars_pod_id` on the thread) BEFORE the call. The CONTENT ALWAYS goes through MCP
+  Precondition: the caller has already enqueued the brief in `Fleet.TaskQueue` (targeted at `pod_id`; the
+  central resolves the target pod from its per-pod MCP socket, not from any wire field) BEFORE the call.
+  The CONTENT ALWAYS goes through MCP
   (`get_work_item`), never through the injected text.
 
   Use-cases:

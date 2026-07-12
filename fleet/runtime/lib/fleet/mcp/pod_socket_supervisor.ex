@@ -22,10 +22,10 @@ defmodule Fleet.MCP.PodSocketSupervisor do
 
   ⚠ CROSS-CONTRACT: these two functions are the REAL (default) impl of the
   `Fleet.Spawner.McpSocketProvisioner` behaviour (the contract of the seam
-  `:mcp_socket_provisioner`, on the `fleet_spawner` consumer side). We CANNOT
-  adopt it as `@behaviour`: `fleet_mcp` does not depend on `fleet_spawner` and the
-  compile reference would create a new edge in the graph (`allowed_graph.yaml`
-  would go red). The impl therefore stays duck-typed — any signature change here
+  `:mcp_socket_provisioner`, on the `fleet_spawner` consumer side). We keep it
+  duck-typed rather than `@behaviour Fleet.Spawner.McpSocketProvisioner`: that
+  compile reference would be rejected by the boundary compiler (`Fleet.Spawner`
+  does not export the `McpSocketProvisioner` behaviour). Any signature change here
   MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
 
   ## Socket path

@@ -4,7 +4,7 @@ defmodule Fleet.Coord.Policies do
   `{verdict, reason} → {action, escalation_path}`.
 
   Lookup table loaded once at boot via `init_policies!/0`
-  from `priv/config/coord-policies.yaml` (or the configured path) and
+  from `priv/coord/config/coord-policies.yaml` (or the configured path) and
   persisted in `:persistent_term` (key
   `{__MODULE__, :policies}`): O(1) read with no process, table frozen
   at boot (same pattern as the read-only caches loaded once).
@@ -76,7 +76,7 @@ defmodule Fleet.Coord.Policies do
     :ok
   end
 
-  # STRUCTURAL validation of the parsed YAML against `priv/schema/coord-policies-v1.json` (ExJsonSchema). The
+  # STRUCTURAL validation of the parsed YAML against `priv/coord/schema/coord-policies-v1.json` (ExJsonSchema). The
   # schema advertised itself as "Validated by ex_json_schema at init_policies!/0" but was NOT: the code
   # only accepted "is a map" → a malformed coord-policies (mapping without `action`, non-array
   # `escalation_path`, key outside the pattern, additional property…) passed silently and then broke every

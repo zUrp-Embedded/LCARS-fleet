@@ -1,5 +1,10 @@
 # fleet_starfleet
 
+**Date** : 2026-07-13
+**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — audit/validation system-side, N0 (Ring 2)
+**Référencé par** : `04_design-notes/fleet_starfleet.md`
+
 System-side audit/validation module (Ring 2), N0 — consumes the outputs of the
 arbitration pods (gatekeeper + other decision roles) on the LCARS core side.
 **No pod, no inference here** — validation, parsing, audit, Cat 5 escalation only.
@@ -13,13 +18,13 @@ restated, only pointed at.
 - `Fleet.Starfleet.Application` — `:one_for_one` supervisor (3/60); boot fail-fast schema load + compile-time event-atom pre-registration + six `:start_*`-gated children
 - `Fleet.Starfleet.Gatekeeper` — pure decision-JSON validation against the frozen `decision-v1.json` schema (boot-loaded into the Ring 0 `Fleet.SchemaCache`)
 - `Fleet.Starfleet.Decision` — the validated `{decision, reason, details, chain}` output struct
-- `Fleet.Starfleet.DriftMonitor` — Bus subscriber routing 4 event types to Cat 5 / coord (`audit.verdict` = the live path; the rest dormant, 0 producer)
+- `Fleet.Starfleet.DriftMonitor` — Bus subscriber routing 4 event types to Cat 5 / coord (`audit.verdict`, `workflow_map.failed`, `pod.drift` have live/draft producers; only `oauth.refresh.failed` is dormant)
 - `Fleet.Starfleet.Cat5Escalator` — pure functions: audit-log write + canonical `starfleet.audit_cat5_<source>` broadcast + coord delegation
 - `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail (lifecycle + security, log-only)
 - `Fleet.Starfleet.AuditLog` — fail-safe NDJSON writer with threshold rotation
 - `Fleet.Starfleet.BootOrchestrator` — post-readiness `:transient` Task: boots permanent pods, emits `fleet.boot_*`, never crashes the daemon
 - `Fleet.Starfleet.CoordBackend` (+ `NotWiredYet`) — behaviour seam over `Fleet.Coord`; `resolved/0` = single source of the wired backend
-- `Fleet.Starfleet.Shutdown` (+ `Shutdown.Dispatcher` behaviour, `NoOpDispatcher`, `AggregateDispatcher`) — coordinated grace-drain (INERT until re-wired); `configured_dispatcher/0` = single source, `AggregateDispatcher` = fail-closed prod in-flight count
+- `Fleet.Starfleet.Shutdown` (+ `Shutdown.Dispatcher` behaviour, `NoOpDispatcher`, `AggregateDispatcher`) — coordinated grace-drain (invoked by `bin/fleet_v2 stop`); `configured_dispatcher/0` = single source, `AggregateDispatcher` = fail-closed prod in-flight count
 - `Fleet.Starfleet.MCPMonitor` / `MCPWatcher` (+ shared `PeriodicCheck`) — the two periodic GenServers: local MCP-substrate liveness and Hex.pm SDK version drift
 
 ## Config & deps

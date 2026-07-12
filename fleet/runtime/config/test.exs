@@ -13,7 +13,7 @@ config :fleet_api, http_port: 0
 config :fleet_mcp, boot_environment: :host
 
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
-# du port → crash boot umbrella, même invariant hermétique que fleet_api).
+# du port → crash boot du daemon, même invariant hermétique que fleet_api).
 config :fleet_observation, start_listener: false
 config :fleet_observation, http_port: 0
 # ReadModel OFF en test (abonné Bus global = consommateur parasite interdit en

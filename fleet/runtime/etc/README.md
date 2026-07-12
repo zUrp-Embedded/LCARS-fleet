@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-11
+**Dernière révision** : 2026-07-12
 **Statut** : modèle humain-lance (systemd retiré 2026-06-16)
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -75,11 +75,11 @@ N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (pos
 
 ## Role-tokens forge (fix A4)
 
-Les comptes de rôle (architect, engineer, qualifier, reviewer, gatekeeper, consultant, vulcan)
+Les comptes de rôle (architect, consultant, engineer, gatekeeper, qualifier, reviewer)
 postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
 
     etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json> \
-        --extra-token lcars-system:system.gitea_token       # les 7 rôles + le token système = A4 complet
+        --extra-token lcars-system:system.gitea_token       # les 6 rôles + le token système = A4 complet
     etc/provision-role-tokens.sh --forge <URL> --check                          # sonde (nuke-drill)
 
 Le `passwords-file` (JSON `{"compte":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :

@@ -1,8 +1,8 @@
 defmodule Fleet.SPBuilder.Blocks do
   @moduledoc """
-  Block-based composition of per-role system prompts. Source: `priv/sp_blocks/` (`core/*`, `method/*`,
+  Block-based composition of per-role system prompts. Source: `priv/sp_builder/sp_blocks/` (`core/*`, `method/*`,
   `role/*`) + the `sp-map.yaml` map (role → ORDERED block list; `role/*` last). The generator
-  (`mix lcars.sp.gen`) writes `priv/sp_drafts/agent-<role>-base.md` — the flat draft that
+  (`mix lcars.sp.gen`) writes `priv/sp_builder/sp_drafts/agent-<role>-base.md` — the flat draft that
   `Fleet.Spawner.Pod.Assets` reads and injects (N2). Split = debuggable + a single source of truth.
 
   Ring boundary: the SP is an APPLICATIVE primitive (it consumes the Ring 0 cap-profile → it lives at
@@ -19,7 +19,7 @@ defmodule Fleet.SPBuilder.Blocks do
   # markdown header. STATIC date (not `Date.utc_today`): generation must stay deterministic (the no-drift
   # test compares the committed flat to a regeneration — a dynamic date would break it the next day). The
   # header text stays FR: it is SP-file content (pod-facing convention).
-  @header "<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis priv/sp_blocks/. " <>
+  @header "<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis priv/sp_builder/sp_blocks/. " <>
             "NE PAS ÉDITER (édite les blocs). Bloc ou rôle manquant → échec dur (no-fallback, cf. no-sp-no-pod-no-fleet). -->"
 
   @doc "Role → ordered block list, read from `<blocks_dir>/sp-map.yaml`."

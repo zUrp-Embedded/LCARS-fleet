@@ -1,7 +1,7 @@
 # Modop — archive-mode (broadcast events, persistent monks)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-14
+**Dernière révision** : 2026-07-12
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : LCARS-v1.5 pattern archive-mode (monks Memory Alpha) + doctrine memory-alpha primitive cognitive (beyond_#2/doctrines/001)
 
@@ -73,7 +73,7 @@ Payload structuré :
 
 ## V1.5 Memory-X V0 → V1
 
-- **V0 actuel** : `apps/fleet_memory` proxy HTTP vers broker v1.5 :8092 (singular contract)
+- SUPPRIMER (la sous-section « V1.5 Memory-X V0 → V1 » décrit un `apps/fleet_memory`/broker :8092 razé au collapse umbrella et un channel MCP `fleet-control` inexistant ; aucune implémentation Memory-X courante).
 - **V1 cible** : monks archive-mode via cap-profile + channel MCP custom `fleet-control` (push events)
   - Pas de module Elixir dédié — la diff est config métier
   - Cap-profile `monk-doctrine.yaml`, `monk-architecture.yaml`, etc.

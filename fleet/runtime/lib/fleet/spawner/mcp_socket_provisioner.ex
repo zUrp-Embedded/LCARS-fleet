@@ -6,22 +6,24 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
 
   ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_spawner` is Ring 1, `fleet_mcp` is Ring 2 (above): a mix.exs dep
-  `fleet_spawner → fleet_mcp` would be an UPWARD dep (low ring → high ring),
+  `fleet_spawner` is Ring 1, `fleet_mcp` is Ring 2 (above): a compile-time dep
+  (boundary edge) `fleet_spawner → fleet_mcp` would be an UPWARD dep (low ring → high ring),
   FORBIDDEN by the layering. The module is therefore resolved at RUNTIME (`resolved/0`:
   app-env + default as a literal atom → NO compile-time dep, hence no cycle).
-  The umbrella starts all the apps → the real impl is live when a pod
-  runs. Seam declared in `fleet_event_router/priv/allowed_graph.yaml`
+  `Fleet.Application` starts the whole domain → the real impl is live when a pod
+  runs. Seam declared in `priv/event_router/allowed_graph.yaml`
   (`seams` section, `up` direction) — the contract lives HERE, at the CONSUMER.
 
   ## Implementations
 
     * `Fleet.MCP.PodSocketSupervisor` — REAL impl (canonical default). It lives in
-      `fleet_mcp`, which does NOT depend on `fleet_spawner`: it CANNOT adopt
-      this behaviour (`@behaviour` = a compile reference, would create the forbidden edge)
-      and stays DUCK-TYPED, with a cross-reference comment in its moduledoc. This
-      module is the SOURCE OF TRUTH of the contract — any evolution propagates
-      to both sides by hand.
+      `fleet_mcp`, which DOES declare `Fleet.Spawner` as a boundary dep (`Fleet.MCP`
+      `use Boundary`, for PodTools.Delegation → pod_info, a DOWNWARD call). It nonetheless
+      stays DUCK-TYPED rather than `@behaviour Fleet.Spawner.McpSocketProvisioner`: that
+      module is not in Spawner's `exports`, and the seam it implements is the UPWARD
+      `spawner → mcp` direction (a literal call the other way would close a boundary cycle),
+      with a cross-reference comment in its moduledoc. This module is the SOURCE OF TRUTH
+      of the contract — any evolution propagates to both sides by hand.
     * `Fleet.Spawner.MCPSocketStub` — test stub (same app → adopts the behaviour,
       the compiler checks conformance). Returns a path under tmp WITHOUT creating
       a socket; set by `config/test.exs` (mirror of `launch_backend: StubBackend`).

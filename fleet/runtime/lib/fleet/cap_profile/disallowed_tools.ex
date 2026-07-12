@@ -74,7 +74,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
 
   @doc """
   The `disallowedTools` patterns from the universal baseline
-  (`priv/canon/cap-profiles/_baseline-git-denied.yaml`). Intangible patterns
+  (`priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`). Intangible patterns
   denied to ALL workers regardless of the cap-profile — removing a pattern is an
   explicit architectural decision (edit the baseline file, not a cap-profile
   option).
@@ -98,7 +98,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
   # (lazy-init; an error is not cached — the bang re-raises on the next call).
   # DELIBERATE local copy of the `Fleet.SchemaCache.cached/2` skeleton (fleet_event_router —
   # the Ring 0 authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
-  # fleet_event_router, and we do not add an intra-R0 edge (allowed_graph.yaml) for ten lines.
+  # fleet_event_router, and we do not add an intra-R0 boundary dep (`use Boundary`) for ten lines.
   # If the edge appears one day for another reason, migrate this site (and `CapProfile.Schema`).
   defp load_baseline_git_ops_denied! do
     key = {__MODULE__, :baseline_git_ops_denied}

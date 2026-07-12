@@ -4,8 +4,7 @@ defmodule Fleet.CapProfile.Schema do
 
   Validation cluster extracted from `Fleet.CapProfile`. Distinct from the G24
   business invariants (`Fleet.CapProfile.Invariants`, pure over the composed
-  struct): here we validate the **shape** of a raw map (post-YAML, before
-  `to_struct`) against the JSON-schemas pinned in `priv/schema/` —
+  struct): ... against the JSON-schemas pinned in `priv/cap_profile/schema/` —
 
     * `cap-profile-v2.5.json` — strict schema of the composed profile.
     * `modop-profile.json` — strict schema of the modop fragment (reserved keys
@@ -18,9 +17,7 @@ defmodule Fleet.CapProfile.Schema do
   app). `Fleet.CapProfile.load/1` and `compose/2` call `validate/2`;
   `read_modops/2` (core side) calls `validate_modop_keys/1` then `validate/2`.
 
-  I/O: reads the schema files from the FS. `schema_dir/0` reads the env key
-  `:fleet_cap_profile, :schema_dir` (tests override it via
-  `Application.put_env/3`), default = the bundled `priv/schema`. The
+  I/O: reads the schema files from the FS. ... default = the bundled `priv/cap_profile/schema`. The
   read+decode+resolve is cached in `:persistent_term` (keyed by the RESOLVED path
   → test overrides get their own entry), lazy, errors not cached.
   """
@@ -28,8 +25,7 @@ defmodule Fleet.CapProfile.Schema do
   require Logger
 
   # Fast-path guard for top-level reserved keys. `metadata.containment`
-  # and `metadata.name` are also reserved — enforced by the JSON schema
-  # `priv/schema/modop-profile.json` (`not/anyOf` clause). `kind` stays
+  # ... enforced by the JSON schema `priv/cap_profile/schema/modop-profile.json` (`not/anyOf` clause). `kind` stays
   # reserved (it distinguishes cap-profile vs modop at merge time); `apiVersion`
   # is NOT reserved (no such field — versioning is done by the code).
   @reserved_modop_keys ~w(kind)
@@ -95,7 +91,7 @@ defmodule Fleet.CapProfile.Schema do
   # errors not cached.
   # DELIBERATE local copy of the `Fleet.SchemaCache` pattern (fleet_event_router — the Ring 0
   # authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
-  # fleet_event_router, and we do not add an intra-R0 edge (allowed_graph.yaml) for these lines.
+  # fleet_event_router, and we do not add an intra-R0 boundary dep (`use Boundary`) for these lines.
   # It differs from `cached/2` on one INTENTIONAL point: `{:error, :schema_unavailable}` is NOT
   # cached (retryable). If the edge appears one day for another reason, migrate this site
   # (and `DisallowedTools`).

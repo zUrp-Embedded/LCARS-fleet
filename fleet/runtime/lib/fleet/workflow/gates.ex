@@ -28,9 +28,10 @@ defmodule Fleet.Workflow.Gates do
   `Gates` NEVER returns `:retry` (retry is not a gate decision).
   A BOUNDED retry exists, but it is the **forge-driven rail**
   (`Pilot.StepRunConsumer`) that drives it (bounded rework counter), not the gate;
-  the bound rules out the re-spawn-in-a-loop risk. Severity orchestration
-  (`fallback_invoke_gatekeeper`, `on_*_severity`) stays out of scope of this
-  evaluator.
+  the bound rules out the re-spawn-in-a-loop risk. Severity gating lives in `rules`
+  via the `severity_max` operand (evaluated by `Predicate`); the ex-knobs
+  `fallback_invoke_gatekeeper`/`on_*_severity` were removed (F-C110) — there is no
+  separate severity-orchestration layer.
 
   Any unknown/malformed gate shape falls onto the fail-closed catch-all
   (`{:fail, …}`) — the eval is TOTAL, never a crash, never a silent `:pass`.
@@ -122,7 +123,7 @@ defmodule Fleet.Workflow.Gates do
   # the rail (`StepRunConsumer`) routes DIRECTLY to the arch (await_arch) instead of bouncing into rework
   # (the mechanical engine CANNOT grant the sign-off → bouncing would waste `budget` spawns then
   # escalate anyway). Fail-closed preserved: never a self-approval, never a silent `:pass`.
-  # (3) otherwise → :pass. Severity orchestration (fallback_invoke_gatekeeper, on_*_severity) = separate layer.
+  # (3) otherwise → :pass.
   defp eval_terminal_string(rules, gate, outputs) do
     cond do
       not Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->

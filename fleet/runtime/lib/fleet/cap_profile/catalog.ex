@@ -108,8 +108,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
-  # `<dir>/monks/*.yaml`. The `monks/` scan is INERT scaffolding: the Memory-X monks are currently
-  # FROZEN under `priv/canon/_frozen-monks/` (deliberately NOT scanned — scanning them would boot
+  # `<dir>/monks/*.yaml`. The `monks/` scan is INERT scaffolding: # ... FROZEN under `priv/cap_profile/canon/_frozen-monks/` (deliberately NOT scanned ...
   # ~17 pods on one shared corpus). `monks/` does not exist today; the scan is here for when they are
   # re-homed (the re-home adds their slot_scope then). The `modop/` dir stays excluded: overlays have
   # no role identity. A fragment without `metadata.name` → ignored (baseline/overlay).
@@ -246,7 +245,7 @@ defmodule Fleet.CapProfile.Catalog do
   """
   @spec root_dir() :: String.t()
   def root_dir do
-    # A `:root_dir` explicitly set to nil (e.g. cross-test env leak in the umbrella) must NEVER
+    # A `:root_dir` explicitly set to nil (e.g. a cross-test env leak) must NEVER
     # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
     # Default = the BUNDLED priv (`:code.priv_dir`) → resolves in a RELEASE (lib/lcars_fleet-vsn/priv/…)
     # as in dev (_build/…/priv) WITHOUT any env. The old default `"cap-profiles"` (relative to the CWD) was

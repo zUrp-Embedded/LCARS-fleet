@@ -74,17 +74,18 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   concludes "empty" on an unknown, it waits out its timeout (the safeguard).
   The old `0` was fail-OPEN: under-counting ⇒ drain wrongly declared complete ⇒
   stop WHILE work is in flight. A task_queue app GENUINELY absent from the
-  build stays `0` (there really is nothing to drain) — we distinguish "absent"
-  from "crashed" via the actually-started applications, not the code path
-  (in an umbrella all modules are loadable, that would distinguish nothing).
+  build stays `0` (there really is nothing to drain) — we decide on the
+  actually-running broker PROCESS (`Process.whereis(Fleet.TaskQueue.Server)`),
+  not the code path — in the single app all modules are loadable, so
+  "module loaded" would distinguish nothing.
 
   ## Layering
 
   `fleet_starfleet` depends on `fleet_spawner` (`list_pods` as a direct call — the
   `:spawner_mod` app-env seam exists ONLY to inject a stub in test, default
-  = the real `Fleet.Spawner`). It does NOT depend on `fleet_task_queue` (no
-  inversion) → `list_pending` is read via `apply` (module in a variable, no
-  compile-time dependency), resilient if the app is absent.
+  = the real `Fleet.Spawner`). It DEPENDS on `Fleet.TaskQueue` (declared
+  boundary dep, downward) → `list_pending` is a direct call, guarded by
+  `Process.whereis` + rescue/catch for a broker restarting mid-quiesce.
   """
   @behaviour Fleet.Starfleet.Shutdown.Dispatcher
 
@@ -146,9 +147,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   defp spawner_mod, do: Application.get_env(:fleet_starfleet, :spawner_mod, @spawner_default)
 
-  # Unassigned queued mandates. `fleet_starfleet` does NOT depend on `fleet_task_queue` (no
-  # layering inversion) → call via `apply` (module in a variable: no remote-call reference
-  # → no compile-time dep). Two regimes NOT to confuse:
+  # Unassigned queued mandates via a DIRECT call to `Fleet.TaskQueue.list_pending()`
+  # (dep declared, downward — Z5). Two regimes NOT to confuse:
   #   * task_queue app ABSENT from this build/env (legitimate: isolated starfleet test, deployment without the
   #     broker) → there really is NO queue to drain → HONEST `0` (not a failure mask).
   #   * app PRESENT but the call raises/exits (broker restarting during the quiesce) → ABNORMAL: we do NOT
@@ -200,12 +200,10 @@ end
 
 defmodule Fleet.Starfleet.Shutdown do
   @moduledoc """
-  Coordinated grace shutdown. The historical trigger (systemd `ExecStop` /
-  `lcars-fleet-restart`) was removed (systemd gone 2026-06-16) and is NOT yet
-  re-wired — to be re-wired onto `fleet_v2 stop` (graceful-shutdown backlog). As
-  a result this GenServer starts but NO caller currently invokes `begin/1`: the
-  graceful shutdown is INERT until the trigger is re-wired. The drain logic
-  itself stays valid.
+  Coordinated grace shutdown. The historical systemd `ExecStop`/`lcars-fleet-restart`
+  trigger was removed (systemd gone 2026-06-16) and RE-WIRED onto `fleet_v2 stop`:
+  `bin/fleet_v2` cmd_stop RPCs `Fleet.Starfleet.Shutdown.begin(grace_ms: …)` then
+  `:init.stop()`. The GenServer serves that RPC; the drain is LIVE.
 
   Three phases:
   1. `begin/1` — refuse new jobs (dispatcher gate), drain queue

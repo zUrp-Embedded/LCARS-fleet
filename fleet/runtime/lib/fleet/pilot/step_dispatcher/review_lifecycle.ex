@@ -10,8 +10,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     * `RoleDispatch` — shared EXECUTION leaf: prepares and spawns ONE role on the PR
       (judge / rework / resolution). It's the cut that makes the graph acyclic: routing AND
       remediation both converge on it (splitting routing↔rework in two would have created a cycle).
-    * `Remediation` — BOUNDED rework/conflict (forge-native budget, IncidentRegistry) → beyond that,
-      arch escalation, never infinite churn.
+    * `Remediation` — BOUNDED rework/conflict (forge-native rework budget + honest merge-failure
+      classification) → beyond that, arch escalation, never infinite churn.
 
   Promotion stays HERE: its error-path (`{:error, {:merge, _}}`) immediately re-enters
   routing (`Remediation.route_merge_failure`, which re-reads the PR object and classifies the REAL
@@ -50,7 +50,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # judge/rework spawn (via RoleDispatch), never a fork.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
-  # BOUNDED remediation (rework forge-native budget / conflict via IncidentRegistry) — DECIDES, then
+  # BOUNDED remediation (rework forge-native budget / merge-failure classification) — DECIDES, then
   # descends back onto RoleDispatch (producer re-spawn) or ArchEscalation (human wall).
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation
 
@@ -100,9 +100,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
             forge_opts: keyword(),
             # Injected wake recovery (seam `:wake_recovery`, default `&Fleet.Pilot.WakeRecovery.wake/3`).
             wake_recovery: (String.t(), (-> any()), keyword() -> :ok | {:error, term()}),
-            # The raw dispatch `opts` keyword (base of `review_opts`, budgets, incident registry seam).
-            opts: keyword(),
-            # Capture of `StepDispatcher.route_for/4` (reading the engraved route) — shared with the issue flow.
+            # The raw dispatch `opts` keyword (base of `review_opts`; source of the `:reviewer_roles` override).
+            opts: keyword()
           }
   end
 

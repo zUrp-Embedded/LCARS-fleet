@@ -12,8 +12,7 @@ defmodule Fleet.SchemaCache do
   + `:persistent_term` cache lived copied across `fleet_workflow` (Loader),
   `fleet_starfleet` (Gatekeeper) and `fleet_coord` (Policies — which re-read and
   re-resolved the schema file on EVERY validation, without a cache). A single
-  implementation here, Ring 0: workflow/starfleet/coord already depend on
-  `fleet_event_router`, zero new edge in `priv/allowed_graph.yaml`.
+  implementation here, Ring 0: workflow/starfleet/coord already depend on the event_router domain, zero new dependency edge (deps are enforced by `use Boundary`).
 
   ## Why `:persistent_term` (and not ETS / a GenServer)
 

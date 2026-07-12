@@ -31,8 +31,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   ⚠ CROSS CONTRACT (seam `fleet_mcp`): `onboard/2` is the REAL impl (default) of the behaviour
   `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. It CANNOT be adopted as `@behaviour`:
-  `fleet_pilot` does not depend on `fleet_mcp` and the compile reference would create a new edge
-  (`allowed_graph.yaml` would go red). Duck-typed impl — any evolution of the signature/of the
+  `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference would be a Boundary
+  violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps → compile error).
+  Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
   """
 

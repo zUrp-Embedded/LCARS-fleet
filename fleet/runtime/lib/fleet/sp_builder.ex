@@ -326,9 +326,9 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  # No modop requested (PROD path: `SPBuilder.compose(cap, [], …)` on the pod.ex side) → nothing to read,
-  # `modop_root` never resolved: this root serves ONLY the (config-driven) modop-fragments
-  # feature, not wired into the current spawn chain.
+  # No modop requested → nothing to read (this `[]` clause). A role with NO default modops takes it; a
+  # role WITH modops (consultant/starfleet) goes through the clause below, where `modop_root` IS resolved
+  # and IS wired into the spawn chain (cf. pod.ex `compose(cap, default_modops(cap), …)`).
   defp read_modop_fragments([]), do: {:ok, []}
 
   defp read_modop_fragments(modop_bundles) do

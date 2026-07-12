@@ -10,11 +10,11 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a mix.exs dep
-  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden. The module is resolved at
+  `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a compile dep
+  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden (the boundary compiler would reject it). The module is resolved at
   RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
   dep, no cycle). Seam declared in
-  `fleet_event_router/priv/allowed_graph.yaml` (`seams` section, direction `up`).
+  `priv/event_router/allowed_graph.yaml` (`seams` section, direction `up`).
 
   ## Implementations
 

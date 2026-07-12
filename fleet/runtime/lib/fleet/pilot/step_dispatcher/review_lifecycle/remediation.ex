@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   require Logger
 
   # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
-  # IncidentRegistry), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
+  # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx

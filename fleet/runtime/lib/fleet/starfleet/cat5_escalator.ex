@@ -22,8 +22,9 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       `Pilot.StepRunConsumer` emits it on a `:workflow_map_load_failed` in the forge-driven
       rail (`step_run_consumer.ex` `emit_workflow_map_failed_draft/3`) → routed here via
       DriftMonitor. Honest-but-partial (covers the main dispatch load-failure, not every rail).
-    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). DORMANT: the intended emitter (pod-side
-      IPC strike filter) was never built → 0 producer.
+    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). LIVE (F-C043) via `Fleet.Spawner.PermanentBoot`
+      (source `:spawner`), emitted on a corrupt permanent-pod base seed. (The originally-intended
+      pod-side IPC strike filter is still unbuilt — a distinct producer.)
     * `:oauth_refresh_failed` — on `oauth.refresh.failed`. DORMANT: no wired producer.
 
   ## Broadcast payload format

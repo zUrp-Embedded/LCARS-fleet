@@ -21,7 +21,7 @@ set -euo pipefail
 
 SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
-RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = l'umbrella
+RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = la racine du runtime
 
 # CWD sûr, INCONDITIONNEL (bug vécu 2026-07-07 : lancé depuis /root — un humain root sans accès au
 # home lordzurp — le node Erlang TEMPORAIRE de `cmd_stop` (`fleet_umbrella rpc`, un node de connexion

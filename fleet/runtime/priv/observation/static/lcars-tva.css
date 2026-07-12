@@ -4,7 +4,7 @@
  * Source originale : /local/LCARS-v1.5/dashboard/static/lcars-tva.css
  * Attribution     : starfleet#1 (LCARS v1.5 esthétique TVA), starfleet#2 (refinements)
  * Copy date       : 2026-05-20 (chantier #594 D2 dashboard V2 Elixir natif)
- * Modifications   : aucune (copy intégral pour preserve look-and-feel)
+ * Modifications   : terminologie issues/tickets (divergente de priv/api/dashboard/static/lcars-tva.css)
  *
  * Per plan-dashboard.md ruling user 2026-05-20 : seule l'esthétique est
  * canonique, le code Python est rebuild Elixir from scratch. CSS reste

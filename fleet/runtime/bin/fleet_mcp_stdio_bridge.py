@@ -14,7 +14,7 @@
 #
 # IRON LAW : c'est le mécanisme de comm pod UNIQUE (MCP/stdio côté pod). Pas une variante — le pont
 # EST le canal. Le central (fleet_mcp) est le backend d'état, jamais joint en direct par le pod.
-# Transport-shim pur (zéro logique fleet) : la logique vit côté Elixir central.
+# Transport-shim quasi-pur (zéro logique FLEET — la logique métier vit côté Elixir central) : le pont termine seulement le handshake `initialize` localement (protocolVersion épinglé) et forwarde tout le reste.
 #
 # IDENTITÉ = LE CANAL : chaque pod a SA propre socket AF_UNIX, montée dans son seul sandbox. Le central
 # dérive le pod_id de la socket sur laquelle il reçoit ; le pont n'injecte plus AUCUNE identité dans les

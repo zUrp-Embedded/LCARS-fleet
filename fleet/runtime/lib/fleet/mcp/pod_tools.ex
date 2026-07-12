@@ -23,6 +23,8 @@ defmodule Fleet.MCP.PodTools do
       `require_architect` gate):
       - `create_issue`     : the arch delegates an implementation brick (forge issue).
       - `create_project`   : the arch starts a fresh project (repo + dual-dir + scaffold).
+      - `import_project`   : the arch imports an EXISTING forge repo (dual-dir, main content
+        intact — ≠ create_project which starts a fresh one).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `delivered`).
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly

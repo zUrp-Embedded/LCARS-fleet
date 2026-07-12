@@ -1,7 +1,7 @@
 defmodule Fleet.Workflow.Loader do
   @moduledoc """
   Pure functions: parse the YAML `workflow_maps/<name>.yaml` via `yaml_elixir`
-  + validate against the strict schema `priv/schema/workflow-map-v2.5.json` at
+  + validate against the strict schema `priv/workflow/schema/workflow-map-v2.5.json` at
   load (`ex_json_schema` fail-fast), then validate the GRAPH (`Fleet.Workflow.GraphValidator`).
 
   The schema validates each step IN ISOLATION (draft-07 cannot express an

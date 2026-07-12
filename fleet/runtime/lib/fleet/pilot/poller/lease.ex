@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
   Repo-serialized lease of the step rail (extracted from `Fleet.Pilot.Poller`): **at most ONE
   active workflow_run per repo**. Classifies each issue of the tick (ENGAGED / QUEUED), then
-  dispatches under this lease — the feature-branches stay sequential → guaranteed FF merge.
+  dispatches under this lease — dispatches under this lease — the feature-branches stay sequential → clean rebase merge (linear history; FF is NOT guaranteed, `main` advances under parallel PRs — cf. `ForgeClient.merge_pr` `Do: rebase`).
 
   ## The decision (business core)
 
@@ -107,7 +107,7 @@ defmodule Fleet.Pilot.Poller.Lease do
     #   - ENGAGED (in-flight, or route advanced beyond the 1st step = workflow_run started) → holds the lease;
     #     we dispatch its current step (continues the step_run, or skips if in-flight).
     #   - QUEUED (routed at the 1st step, or routeless to be onboarded, not yet dispatched) → starts only
-    #     if the lease is free; otherwise waits (serialization → sequential feature-branches → FF merge).
+    #     if the lease is free; otherwise waits (serialization → sequential feature-branches → rebase merge, cf. `ForgeClient.merge_pr`).
     # `classify_issue` reads the route (+ loads the workflow_map) ONCE and THREADS it to the dispatch via
     # `prefetch` (merged into the opts) → end of the double get_route / double workflow_map load (the lease classif and the
     # dispatch read the SAME data 2×).

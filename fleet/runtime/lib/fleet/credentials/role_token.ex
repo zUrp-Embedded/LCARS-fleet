@@ -18,8 +18,10 @@ defmodule Fleet.Credentials.RoleToken do
   ## Agnosticity
 
   The `role` is a **parameter** — never a role name hardcoded in the code. It comes from the identity
-  of the calling pod (`metadata.name` of the cap-profile = the business role, propagated in env `LCARS_ROLE` then
-  injected into the tool calls by the MCP bridge). `role` is validated **path-safe** (interpolated into a path).
+  of the calling pod (`metadata.name` of the cap-profile = the business role), resolved SERVER-SIDE
+  from the pod's spawn (`Fleet.Spawner.pod_info` keyed by the channel `pod_id`, cf.
+  `Fleet.MCP.PodTools.Delegation.require_architect/1`) — NEVER from the wire `_lcars_role` a pod could
+  forge. `role` is validated **path-safe** (interpolated into a path).
   """
 
   require Logger

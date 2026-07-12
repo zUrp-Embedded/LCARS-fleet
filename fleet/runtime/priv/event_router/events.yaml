@@ -24,19 +24,17 @@ events:
   # producer if pod progression becomes observable.
   pod.completed: []
   pod.failed: []
-  # pod.drift: kept — consumed by DriftMonitor; its missing producer
-  # (nonexistent fleet_ipc_filter) = a hollow CONSUMER on the starfleet side (out-of-fleet),
-  # not a hollow producer; not touched here.
+  # pod.drift: consumed by DriftMonitor; producer LIVE (F-C043) — Fleet.Spawner.PermanentBoot
+  # emits it (source :spawner) on a corrupt versioned base seed. drift_count>=3 => Cat5Escalator.
   pod.drift: []
   # CAT-5 CHAIN (partially wired, Q2 2026-07-09): `workflow_map.failed` and `audit.verdict` now have a
   # DRAFT producer (`Pilot.StepRunConsumer`, source `:workflow`) → the DriftMonitor→Cat5Escalator/
   # CoordBackend→coord rail BLINKS end-to-end on a real signal (draft, not the final signal — see the
-  # per-key comments). STILL DORMANT: `pod.drift` (intended pod-side IPC filter never built) and
-  # `oauth.refresh.failed` (never implemented on the launcher/credentials side) — no honest signal to
-  # emit yet. Keys kept: consumers wired + tested, ready.
+  # per-key comments). STILL DORMANT: `oauth.refresh.failed` (never implemented on the launcher/credentials side) — no
+  # honest signal to emit yet. (`pod.drift` is now LIVE via Fleet.Spawner.PermanentBoot, F-C043.) Keys kept: consumers wired + tested, ready.
   # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
   # attempts (agent never acked) — payload `pod_id`/`reason`/`pane`. Consumed by
-  # `Pilot.StepRunConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
+  # `Fleet.Pilot.IncidentConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
   # Real producer AND consumer → legitimate key (was absent = consumed-outside-registry, contracts-check red).
   wake.failed: []
   # spawn.failed: emitted by `Spawner.PublishConsumer` (source :spawner) when the dispatch of an
@@ -92,9 +90,8 @@ events:
   fleet.boot_failed: []
 
   # --- Coord (Policies, source :coord) ---
-  # INTENDED ASYMMETRY (real producer, 0 routed consumer): `Coord.Policies` emits
-  # these 3 events (notify_dashboard / escalate_human / others), but no subscriber
-  # listens on `coord.*` on the Bus yet. Legitimate keys (a producer emits them → silent
+  # Real producer (`Coord.Policies` → `Coord.Emitter`); consumed by `Fleet.Observation.ReadModel`
+  # (routes `coord.*` into the coordination / gatekeeper decks, cf. read_model.ex @deck_prefixes). Legitimate keys (a producer emits them → silent
   # drop avoided); a consumer (dashboard / operator) will come and subscribe.
   coord.notification_routed: []
   coord.escalation_triggered: []

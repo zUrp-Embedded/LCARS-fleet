@@ -3,14 +3,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Architect's "forge delegation" domain + authorization gate — extracted from
   `Fleet.MCP.PodTools` (which keeps the `handle_tool_call/3` routing table and the
   MCP content format). Named after the code's vocabulary ("DELEGATION channel",
-  `delegation_org`, `delegation_target`): the three tools form the channel through which
+  `delegation_org`, `delegation_target`): the four tools form the channel through which
   the architect delegates work to the fleet and tracks it.
 
     * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
     * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + dual-dir).
+    * `import_project/2` — ONBOARDING channel (variant): imports an EXISTING forge repo into
+      the machine (dual-worktree, `main` content intact — ≠ `create_project`).
     * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
 
-  ## Architect gate (common to the three)
+  ## Architect gate (common to the four)
 
   These tools are ARCHITECT acts: create a forge repo, write/push into
   `/home/projects`, delegate work, track a delegation. The barrier is
@@ -18,10 +20,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   (`state.pod_id`, carried by the socket acceptor — not a wire field) THEN requires
   that this role burned in at spawn be `architect`. A worker pod (engineer, reviewer), a
   nil/unknown role or a pod absent from the registry → REFUSAL. Fail-closed end to end:
-  no case falls back onto an authorized access. (The bridge-side visibility filter stays
-  a UX convenience — do not show an unusable tool — but the authorization lives HERE.)
+  no case falls back onto an authorized access. (The tool-visibility filter now lives
+  SERVER-side — the acceptor's `tools/list` lists only this role's tools, F-C138; the
+  bridge forwards blindly. A UX convenience, but the authorization has always lived HERE.)
 
-  The three functions take the MCP `state` as their last argument and read ONLY
+  The four functions take the MCP `state` as their last argument and read ONLY
   `pod_id` from it (the gate) — never an identity from the wire arguments.
 
   ## Seams (app-env `:fleet_mcp`)
@@ -323,7 +326,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Architect gate + role resolution
   # ============================================================
 
-  # Common gate of the three tools: resolves the role from the channel identity (`state.pod_id`)
+  # Common gate of the four tools: resolves the role from the channel identity (`state.pod_id`)
   # THEN requires `architect`. State without pod_id = acceptor anomaly → :pod_id_required
   # (fail-closed, never anonymous access).
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do

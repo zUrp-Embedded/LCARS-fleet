@@ -8,7 +8,7 @@ defmodule Fleet.Workflow.GateDecision do
   absent/unknown decision) both consume this list → the statement and the validation can no
   longer diverge.
 
-  The WIRE contract `priv/schema/gate-decision-v1.json` (field `decision.enum`) stays the JSON
+  The WIRE contract `priv/workflow/schema/gate-decision-v1.json` (field `decision.enum`) stays the JSON
   mirror of this list; a regression test verifies the schema ⇔ module equality.
 
   `halt_invalid` (the StepRunConsumer's internal fail-closed fallback when the verdict is absent

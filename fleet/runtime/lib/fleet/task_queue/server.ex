@@ -586,7 +586,4 @@ defmodule Fleet.TaskQueue.Server do
   defp load_state(_path, false), do: :empty
   defp load_state(nil, _persist), do: :empty
   defp load_state(path, true), do: Store.load(path)
-
-  # UUID v4 (`correlation_id = work_item.id`) via the `:uuid` dep (already shipped in the umbrella) —
-  # single source, no hand-rolled `:crypto` generation in parallel.
 end

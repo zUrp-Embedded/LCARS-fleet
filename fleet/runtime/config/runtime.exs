@@ -8,7 +8,7 @@
 # inexistantes en test) et il est évalué APRÈS `config/test.exs`. Sans la
 # garde, `config :fleet_api, start_listener: true` (l.~) override le
 # `start_listener: false` hermétique de test.exs → fleet_api démarre le
-# listener Cowboy en test → crash boot → umbrella mort. (Régression B8
+# listener Cowboy en test → crash boot → boot du daemon mort. (Régression B8
 # avérée par StarFleet : `rel/runtime.exs` orphelin ne tournait jamais ;
 # déplacé en config/runtime.exs il s'active partout — d'où la garde.)
 # Cohérent discipline hermétique B4/B5 (config runtime ≠ tests).

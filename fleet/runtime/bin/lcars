@@ -10,7 +10,7 @@
 #                              est dispatché ASYNC (event admin.spawn.request → spawn_pod) : la réponse 202
 #                              = « mis en file », PAS « pod vivant ». Vérifier ensuite avec `lcars list`.
 #   - `lcars list`             pods VIVANTS lus directement sur la substrate (socks tmux par-pod = la
-#                              liveness réelle ; /api/pods est un stub). Dependency-free, marche même API down.
+#                              liveness réelle ; /api/pods de fleet_api renvoie 501 not_implemented, F-C118). Dependency-free, marche même API down.
 #   - `lcars attach <pod_id>`  attache le terminal à la session tmux du pod (`tmux -S <sock> attach`).
 #                              Ctrl-b d pour détacher SANS tuer le pod.
 #

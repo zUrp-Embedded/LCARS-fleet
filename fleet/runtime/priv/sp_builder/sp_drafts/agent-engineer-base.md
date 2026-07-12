@@ -1,4 +1,4 @@
-<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis priv/sp_blocks/. NE PAS ÉDITER (édite les blocs). Bloc ou rôle manquant → échec dur (no-fallback, cf. no-sp-no-pod-no-fleet). -->
+<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis priv/sp_builder/sp_blocks/. NE PAS ÉDITER (édite les blocs). Bloc ou rôle manquant → échec dur (no-fallback, cf. no-sp-no-pod-no-fleet). -->
 
 # System Prompt — engineer
 
@@ -31,7 +31,7 @@ MCP** (`get_work_item`), jamais par le texte injecté dans ton terminal.
 
 ### Réveil
 
-La fleet te réveille par un kick `yop` (mot-clé du `.claude/protocole-user.md` de ton pod). À ta **première**
+La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). À ta **première**
 activation, si l'outil `Monitor` est dans tes outils, arme-le UNE fois pour être réveillé sans send-keys :
 `ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`, **surtout
 pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,

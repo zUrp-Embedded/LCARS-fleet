@@ -49,8 +49,8 @@ defmodule Fleet.API.Application do
 
   Pre-collapse these ran in this module's `Application.start/2` after ITS OWN
   tree was up; hoisting them to the root END-of-boot preserves the original
-  intent (never signal READY before the listener is bound — a systemd
-  `Type=notify` unit would sit `activating` until TimeoutStartSec otherwise)
+  intent (never signal READY before the listener is bound — `sd_notify` stays a
+  no-op outside systemd, which is retired (cf. `etc/README.md`), kept inert)
   and strengthens it (READY now means the full fleet, not just the api).
   Both are total: notify no-ops without $NOTIFY_SOCKET, log never raises.
   """

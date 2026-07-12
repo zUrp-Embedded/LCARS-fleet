@@ -1,5 +1,5 @@
 # Role → SP block map. List order = assembly order; `role/*` always last.
-# The generator (`mix lcars.sp.gen`) composes these blocks → `priv/sp_drafts/agent-<role>-base.md`.
+# The generator (`mix lcars.sp.gen`) composes these blocks → `priv/sp_builder/sp_drafts/agent-<role>-base.md`.
 #
 # HARD RULE (no-fallback, cf. memory no-sp-no-pod-no-fleet): a catalogue role with no entry here, OR a listed
 # block absent from disk → the generator FAILS (fail-loud). No SP → no pod → no fleet.

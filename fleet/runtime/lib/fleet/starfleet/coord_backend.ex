@@ -1,11 +1,11 @@
 defmodule Fleet.Starfleet.CoordBackend do
   @moduledoc """
-  Behaviour wrapper around `Fleet.Coord`.
+  Behaviour seam over `Fleet.Coord`.
 
-  Lets the `fleet_coord` dep be deferred until coord is wired.
-  The `NotWiredYet` default returns `:ok` (Cat 5 escalation is audit-only, no
-  runtime side effect). Consistent with the deny-by-default + fail-safe stance
-  (the audit log is written even if coord is not wired).
+  Default `NotWiredYet` (test/fallback, returns `:ok` — Cat 5 escalation is
+  audit-only, no runtime side effect); prod wires `Fleet.Coord` via `runtime.exs`
+  (`:fleet_starfleet, :coord_backend`). Consistent with the deny-by-default +
+  fail-safe stance (the audit log is written regardless of the backend).
 
   The `/1` and `/2` compat shims were removed — only the canonical arities with
   an explicit correlation_id are kept.

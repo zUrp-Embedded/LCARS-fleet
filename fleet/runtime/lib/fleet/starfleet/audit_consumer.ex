@@ -11,8 +11,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
     * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
       `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
 
-  Single DORMANT handler: `:"pod.drift"` (canonical type-only clause — producer not yet born,
-  cf. events.yaml; also consumed by DriftMonitor). `pod.refuse_pattern_match` left with the
+  `:"pod.drift"` handler (type-only clause): producer LIVE — `Fleet.Spawner.PermanentBoot`
+  (source `:spawner`, F-C043); also consumed by DriftMonitor. `pod.refuse_pattern_match` left with the
   legacy stack (removed from the registry, 0 producer / 0 consumer).
 
   GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
@@ -101,9 +101,9 @@ defmodule Fleet.Starfleet.AuditConsumer do
   # raze, 0 consumer → both keys are now REMOVED from events.yaml too (registry-lie cleanup: a 0/0 key
   # must not linger claiming "consumer wired"). Re-add a clause here only if a producer + registry key return.
 
-  # pod.drift: migrated from the legacy stack (conformance 2026-07-04). Producer not yet born (events.yaml:
-  # "producer missing") but consumed by DriftMonitor — type-only match ALIGNED with DriftMonitor
-  # (the future producer's source is not yet fixed; we do not invent it here).
+  # pod.drift: producer LIVE via `Fleet.Spawner.PermanentBoot` (source :spawner, F-C043). This
+  # AuditConsumer clause stays TYPE-ONLY (audit rail, no anti-spoof), UNLIKE DriftMonitor which
+  # matches source: :spawner.
   def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
     Logger.warning(
       "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>

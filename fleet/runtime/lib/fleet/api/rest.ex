@@ -4,7 +4,7 @@ defmodule Fleet.API.Rest do
 
   ## MVP routes
 
-    * `GET /api/health` — readiness probe (200 as soon as Cowboy binds; consumed by `lcars-readiness`)
+    * `GET /api/health` — readiness probe (200 as soon as Cowboy binds)
     * `GET /api/version` — the deployed build stamp (`Fleet.API.BuildInfo`)
     * `GET /api/readiness/deep` — LIVE operational state via
       `Fleet.API.Readiness.deep/0` — anti-hollow-green
@@ -43,7 +43,7 @@ defmodule Fleet.API.Rest do
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, length: 1_048_576)
   plug(:dispatch)
 
-  # Public health probe (200 as soon as Cowboy binds, consumed by `lcars-readiness`)
+  # Public health probe (200 as soon as Cowboy binds)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
   end

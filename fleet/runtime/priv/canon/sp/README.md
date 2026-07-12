@@ -1,7 +1,7 @@
 # priv/canon/sp/ — system prompts canon (versionnés)
 
 **Date** : 2026-05-22 (bascule run #4)
-**Statut** : copie versionnée des SPs cap-profile, **runtime actuel les charge encore depuis `/local/LCARS-v1.5/sp/`** (path historique).
+**Statut** : copie versionnée des SPs cap-profile archivist/monk — **GELÉS (F-C153), non chargés par le runtime** (les profils archivist/monk sont hors catalogue actif).
 
 ## Contenu
 

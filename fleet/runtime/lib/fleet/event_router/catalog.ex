@@ -1,10 +1,10 @@
 defmodule Fleet.EventRouter.Catalog do
   @moduledoc """
-  Boot-time loader of the **event registry** (`priv/events.yaml`).
+  Boot-time loader of the **event registry** (`priv/event_router/events.yaml`).
 
   Pure boot-time function (NOT a GenServer — Iron Law: we do not wrap a
   stateless write-once function in a process). Called by
-  `Fleet.EventRouter.Application.start/2`.
+  `Fleet.EventRouter.Application.init/1`.
 
   Role: `events.yaml` is a **pure registry** — its keys are the authorized event
   types. Consumption happens through **direct subscribers** (`Bus.subscribe` +
@@ -26,8 +26,7 @@ defmodule Fleet.EventRouter.Catalog do
     * `:fleet_event_router, :load_event_registry` — bool, default `true`. Set to
       `false` in `:test` (hermeticity: empty registry → escape-hatch
       `assert_authorized!` `MapSet.size == 0` → broadcast not validated in test).
-    * `:fleet_event_router, :events_yaml_path` — path override (default
-      `priv/events.yaml`).
+    * `:fleet_event_router, :events_yaml_path` — path override (default `priv/event_router/events.yaml`).
   """
 
   require Logger
@@ -74,7 +73,7 @@ defmodule Fleet.EventRouter.Catalog do
         # not come up, the launcher redeploys. We do NOT start a Bus without validation.
         raise "fleet_event_router: events.yaml absent or invalid at #{events_yaml_path()} — " <>
                 "event registry not loadable (broken deploy). Fail-loud at boot: a Bus without a " <>
-                "registry would validate any type. Repair/redeploy priv/events.yaml."
+                "registry would validate any type. Repair/redeploy priv/event_router/events.yaml."
     end
   end
 

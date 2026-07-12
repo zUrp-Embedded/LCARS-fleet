@@ -81,8 +81,7 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   @doc """
-  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in
-  `priv/schema/cap-profile-v2.5.json` (the schema validates it structurally, `g24_4` semantically) — a
+  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in `priv/cap_profile/schema/cap-profile-v2.5.json` ... — a
   physical dedup is impossible (JSON schema can't reference Elixir), so a drift test locks the two copies
   (R0-CAP-011). Exposed as the code-side SSoT that test reads.
   """

@@ -26,16 +26,14 @@ defmodule Fleet.EventRouter.Bus do
   ## Why struct-only (no tuple shim)
 
   There is NO `broadcast(event_type, payload[, opts])` variant that would construct
-  an event + soft-validate a JSON + emit a `{atom, map}` tuple. ALL producers (pod,
-  executor, starfleet, coord, webhooks, signals) emit the struct via `broadcast/2`.
+  an event + soft-validate a JSON + emit a `{atom, map}` tuple. ALL producers (pod, starfleet, coord, webhooks, signals) emit the struct via `broadcast/2`.
   That is why there is neither `Fleet.Event.SchemaError` nor
   `Fleet.EventRouter.Schema`: no JSON soft-validate, the only validation is the
   registry (`UnregisteredError`).
 
   ## Mandatory registry
 
-  The `authorized_event_types` set is loaded by `Fleet.EventRouter.Catalog` at boot
-  from `priv/events.yaml` via `:persistent_term`. As soon as it is populated, any event
+  ... at boot from `priv/event_router/events.yaml` via `:persistent_term`. As soon as it is populated, any event
   outside the set raises `UnregisteredError`.
 
   The behavior when the set is EMPTY (test `load_event_registry: false`, or any config that disables
@@ -231,9 +229,7 @@ defmodule Fleet.EventRouter.Bus do
   #
   # The registry is empty in legitimate situations: in tests with `load_event_registry: false`
   # (hermeticity — no full boot to validate a type), or any deployment that disables the boot-time
-  # `Catalog.load!`. (Normal prod boot is NOT one of them: `Application.start/2` runs `Catalog.load!/0`
-  # BEFORE starting the supervisor children, so the registry is already populated when the Bus process
-  # starts — see application.ex.) In these windows, validating against an empty set would reject
+  # `Catalog.load!`. (Normal prod boot is NOT one of them: `Application.init/1` runs `Catalog.load!/0` BEFORE starting the supervisor children, so the registry is already populated when the Bus process starts — see application.ex.) In these windows, validating against an empty set would reject
   # EVERY event. The `:permit_when_registry_empty` flag chooses the regime:
   #
   #   * `true` (default) — empty registry ⇒ LET THROUGH. INTENDED safety-net: do not force each test

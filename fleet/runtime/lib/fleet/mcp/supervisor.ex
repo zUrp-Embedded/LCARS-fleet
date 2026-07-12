@@ -32,8 +32,9 @@ defmodule Fleet.MCP.Supervisor do
   Containment: if `boot_environment == :pod`, `Fleet.MCP.Server.start_link/1`
   returns `{:error, :forbidden_in_pod}` → the child fails → this supervisor fails
   → `fleet_mcp` does not boot inside a pod (system-side server, outside bwrap).
-  Phoenix.PubSub `Fleet.PubSub` is started by `fleet_event_router` (umbrella
-  dependency), not started here (no double-start).
+  Phoenix.PubSub `Fleet.PubSub` is started by the event_router domain
+  (`Fleet.EventRouter.Application`, Ring 0, launched by `Fleet.Application`), not started
+  here (no double-start).
   """
 
   use Supervisor

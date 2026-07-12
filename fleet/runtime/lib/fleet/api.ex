@@ -33,7 +33,7 @@ defmodule Fleet.API do
   @moduledoc """
   LCARS v2 public API (Ring 4 — external boundaries): REST + WS.
 
-  **Client-agnostic API** — the v1.5 `:8090` web dashboard is *one*
+  **Client-agnostic API** — the native dashboard / observation deck is *one*
   possible consumer among others, not coupled to the v2 arch.
 
   ## Sub-modules
@@ -47,7 +47,7 @@ defmodule Fleet.API do
 
   ## Deferred split
 
-  MVP: 1 single `fleet_api` umbrella app (REST + WS in the same
+  MVP: 1 single `fleet_api` domain (REST + WS in the same
   supervision). No duplicated bus subscribe, OTP supervision-tree
   simplicity.
 
