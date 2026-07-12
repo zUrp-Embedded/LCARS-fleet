@@ -177,19 +177,21 @@ defmodule Fleet.Workflow.Deliverable do
   # The "HEAD != base but history rewritten" case passes here (advanced) and is caught by the gate
   # (`base_not_ancestor`) — no double check here.
   defp materialize_content(%{mode: :git_native} = opts) do
-    if head_advanced?(opts.workspace, opts.base_sha),
-      do: :ok,
-      else: {:error, :no_deliverable_commit}
+    head_advanced(opts.workspace, opts.base_sha)
   end
 
   # HEAD read delegated to the BOUNDED authority Fleet.Workflow.Git.read_head_sha/1 (2026-07-04:
   # this site was a RAW System.cmd with no deadline — a hung rev-parse blocked publication).
-  # Read failure → false = "no commit detected" → the caller returns
-  # {:error, :no_deliverable_commit} (EXPLICIT failure, not a silence).
-  defp head_advanced?(workspace, base_sha) do
+  # Tagged verdict, NOT a boolean: a REAL git read failure (corrupt workspace, sick FS,
+  # rev-parse timeout — read_head_sha's typed reasons) is NOT "the agent produced no commit".
+  # Collapsing both into :no_deliverable_commit made an infra failure indistinguishable from an
+  # empty delivery in the trace; the typed cause is propagated (`:head_read_failed`) like the
+  # rest of this file does (head_sha/1 propagates the same typed reasons).
+  defp head_advanced(workspace, base_sha) do
     case Fleet.Workflow.Git.read_head_sha(workspace) do
-      {:ok, sha} -> sha != base_sha
-      {:error, _} -> false
+      {:ok, sha} when sha != base_sha -> :ok
+      {:ok, _same_as_base} -> {:error, :no_deliverable_commit}
+      {:error, reason} -> {:error, {:head_read_failed, reason}}
     end
   end
 

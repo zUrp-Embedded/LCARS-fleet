@@ -152,7 +152,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
             {Map.get(issue, "state", "unknown"),
              Enum.map(Map.get(issue, "labels") || [], & &1["name"])}
 
-          _ ->
+          # LOUD before the fallback: without the warning, a forge outage was folded into
+          # {issue_state: "unknown", delivered: false} — a green result indistinguishable from a
+          # real "issue open, no PR yet". delivered:false stays SAFE (the arch waits), but the
+          # operator must be able to tell a mute forge from a genuine non-delivery.
+          err ->
+            Logger.warning(
+              "Delegation: issue_status #{repo}##{number} forge unreachable (get_issue → " <>
+                "#{inspect(err)}) — falling back to issue_state=unknown"
+            )
+
             {"unknown", []}
         end
 
@@ -306,8 +315,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
                 case forge.pr_review_verdicts(repo, pr["number"],
                        head_sha: get_in(pr, ["head", "sha"])
                      ) do
-                  {:ok, v} -> v
-                  _ -> %{}
+                  {:ok, v} ->
+                    v
+
+                  # LOUD before the fallback (same stance as get_issue above): a mute forge must
+                  # not read as "no verdicts yet".
+                  err ->
+                    Logger.warning(
+                      "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
+                        "(pr_review_verdicts → #{inspect(err)}) — falling back to verdicts={}"
+                    )
+
+                    %{}
                 end
 
               %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
@@ -317,7 +336,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
           end
         end)
 
-      _ ->
+      # LOUD before the fallback: pr=nil must mean "no fleet PR for this issue", never a
+      # swallowed forge outage.
+      err ->
+        Logger.warning(
+          "Delegation: issue_status #{repo} forge unreachable (list_open_pulls → " <>
+            "#{inspect(err)}) — falling back to pr=nil"
+        )
+
         nil
     end
   end

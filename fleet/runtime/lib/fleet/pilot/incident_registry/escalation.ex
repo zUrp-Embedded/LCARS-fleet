@@ -53,7 +53,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
     Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
     (Issue auto — durcissement #5.2.)
-    #{pane_block(opts[:pane])}
+    #{correlation_block(opts[:correlation_id])}#{pane_block(opts[:pane])}
     """
 
     # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
@@ -134,6 +134,14 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp pane_block(_), do: ""
 
+  # Lien incident ↔ mandat (correlation_id = l'issue source, posée bout-en-bout depuis la vague E) :
+  # l'opérateur remonte du symptôme Cat-5 au mandat qui l'a causé sans fouiller les logs.
+  defp correlation_block(corr) when is_binary(corr) and corr != "" do
+    "Mandat lié (correlation_id) : `#{corr}`.\n"
+  end
+
+  defp correlation_block(_), do: ""
+
   defp kind_describe(:recurrence),
     do: {"récurrence", "Déjà vu (registre `work/ops`) — pattern, pas random → ROOT-CAUSE requis."}
 
@@ -153,4 +161,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
        "Le wake-fallback de ce rôle a déjà raté (registre `work/ops`). Avec de l'inférence, 1× = random ; " <>
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
+
+  defp kind_describe(:cat5),
+    do:
+      {"Cat-5 (sévérité MAX)",
+       "Escalade Cat-5 (seed permanent corrompu / workflow_map illisible / oauth) — issue dès la " <>
+         "PREMIÈRE occurrence, PAS de gate de récurrence : la sévérité max ne s'échantillonne pas."}
 end

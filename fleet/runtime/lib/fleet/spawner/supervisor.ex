@@ -26,9 +26,10 @@ defmodule Fleet.Spawner.Supervisor do
     # max_children: GLOBAL CAP of live pods — a spawn flood (admin/spawn no-auth
     # loopback, or a rail gone haywire) cannot launch N claude sessions (each = a real
     # OS process + tokens). Beyond it -> {:error, :max_children} returned by spawn_pod (fail-loud at
-    # the caller). Config `:fleet_spawner, :max_pods` (default 24: wide margin above the real —
-    # ~6 permanents + step workers; the bound targets the ANOMALY, not the nominal).
-    max = Application.get_env(:fleet_spawner, :max_pods, 24)
+    # the caller). Cap read from the SINGLE authority `Fleet.Spawner.max_pods/0` (default 24: wide
+    # margin above the real — ~6 permanents + step workers; the bound targets the ANOMALY, not the
+    # nominal) — shared with the dispatcher's `has_capacity?` pre-flight, no default drift.
+    max = Fleet.Spawner.max_pods()
 
     DynamicSupervisor.init(
       strategy: :one_for_one,

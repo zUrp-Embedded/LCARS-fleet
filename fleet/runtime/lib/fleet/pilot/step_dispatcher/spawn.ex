@@ -88,7 +88,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           integer(),
           integer(),
           String.t()
-        ) :: {:ok, {:spawned, String.t(), String.t()}} | {:error, term()}
+        ) ::
+          {:ok, {:spawned, String.t(), String.t()}}
+          | {:skipped, :at_capacity}
+          | {:error, term()}
   def spawn_step(
         %Seams{} = seams,
         pod_id,
@@ -100,18 +103,62 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         issue_number,
         log_ctx
       ) do
-    %Seams{
-      forge: forge,
-      spawner: spawner,
-      task_queue: task_queue,
-      repo: repo,
-      forge_opts: forge_opts,
-      wake_recovery: wake_recovery
-    } = seams
+    %Seams{spawner: spawner} = seams
 
     issue_id = Fleet.Pilot.IssueId.compose(issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
+    # Capacity pre-flight BEFORE the forge lock (acte4 A-11) — admission condition at the same
+    # stage as `serialize_project_scope` ("gate BEFORE any lock"). At saturation the old flow
+    # locked → discovered `:max_children` at spawn → compensated (unlock) EVERY tick: ~4 forge
+    # writes/issue/30s polluting the timeline, and "full" tallied as an ERROR (poller backoff as
+    # if the forge were down). Deferral is a SKIP (truth: "full, waiting"), not an error.
+    # `not alive_before?` is load-bearing: a re-brief of a LIVE pipe pod starts no child — gating
+    # it at saturation would starve the pipe. The residual TOCTOU stays covered by
+    # `max_children` + the compensation below (now the rare exception, not the steady state).
+    if not alive_before? and not has_capacity?(spawner) do
+      Logger.info(
+        "StepDispatcher: at capacity (max_pods) → defer role=#{role} pod=#{pod_id} #{log_ctx} " <>
+          "(no lock taken; re-dispatch when a slot frees)"
+      )
+
+      {:skipped, :at_capacity}
+    else
+      locked_spawn_step(
+        seams,
+        pod_id,
+        role,
+        profile,
+        brief,
+        spawn_opts,
+        lock_target,
+        {issue_id, issue_number},
+        alive_before?,
+        log_ctx
+      )
+    end
+  end
+
+  # The lock→spawn→enqueue→wake sequence + compensation, reached only past the pre-flight gates.
+  defp locked_spawn_step(
+         %Seams{
+           forge: forge,
+           spawner: spawner,
+           task_queue: task_queue,
+           repo: repo,
+           forge_opts: forge_opts,
+           wake_recovery: wake_recovery
+         },
+         pod_id,
+         role,
+         profile,
+         brief,
+         spawn_opts,
+         lock_target,
+         {issue_id, issue_number},
+         alive_before?,
+         log_ctx
+       ) do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          # Native time-tracking (best-effort, discard): STARTS the stopwatch on the SAME object as the
          # lock (issue or PR) — global mechanic, role-agnostic (cf. § Time-tracking, ForgeClient).
@@ -242,6 +289,22 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     if function_exported?(spawner, :kill_pod, 1), do: spawner.kill_pod(pod_id), else: :ok
   rescue
     _ -> :ok
+  end
+
+  # Capacity pre-flight (A-11). Default-ALLOW when the seam does not expose `has_capacity?/0`
+  # (test stubs — mirror of safe_wake/pod_alive?) and fail-OPEN on raise: this gate is an
+  # admission OPTIMIZATION, the real cap stays enforced by the supervisor's `max_children` +
+  # the caller's compensation. A broken capacity check must never STARVE the dispatch (a wrong
+  # "full" would freeze the whole fleet); a wrong "room" at worst pays one lock/unlock cycle.
+  defp has_capacity?(spawner) do
+    not function_exported?(spawner, :has_capacity?, 0) or spawner.has_capacity?()
+  rescue
+    e ->
+      Logger.warning(
+        "Spawn.has_capacity?: RAISED (#{inspect(e)}) → assume room (fail-open; max_children still enforces)"
+      )
+
+      true
   end
 
   # Idempotent dispatch. An already-ALIVE pod (stable deterministic id) = the long-lived pipe eng

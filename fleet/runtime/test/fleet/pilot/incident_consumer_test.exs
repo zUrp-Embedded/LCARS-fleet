@@ -95,4 +95,82 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
     refute_receive :rec, 100
   end
+
+  # ── Régression acte4 A-06 — Cat-5 durable ────────────────────────────────
+  # AVANT : l'escalade Cat-5 (sévérité MAX — seed permanent corrompu, workflow_map illisible)
+  # ne laissait qu'un NDJSON local + 2 broadcasts Bus lossy → ÉVAPORÉE si personne ne tail,
+  # pendant que le rail incident basse-sévérité ouvrait, lui, une issue forge durable
+  # (inversion sévérité/durabilité). APRÈS : consumer → IncidentRegistry.escalate/5 DIRECT
+  # (issue dès la 1re occurrence, label error_cat5 — pas de gate de récurrence), le
+  # correlation_id (vague E) reliant l'issue au mandat causant.
+
+  defp start_cat5(escalate_fun) do
+    start_supervised!(
+      {IncidentConsumer,
+       subscribe: false, record_fun: fn _, _, _, _ -> :recorded end, escalate_fun: escalate_fun}
+    )
+  end
+
+  defp cat5_echo do
+    me = self()
+
+    fn kind, subject, reason, sig, opts ->
+      send(me, {:esc, kind, subject, reason, sig, opts})
+      {:ok, 77}
+    end
+  end
+
+  test "A-06 : cat5 pod_drift → escalate(:cat5) DIRECT, label error_cat5, correlation_id lié" do
+    pid = start_cat5(cat5_echo())
+
+    send(
+      pid,
+      Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_pod_drift",
+        pod_id: "permanent-architect",
+        correlation_id: "issue-42",
+        payload: %{"pod_id" => "permanent-architect", "reason" => "seed corrompu"}
+      )
+    )
+
+    assert_receive {:esc, :cat5, "permanent-architect", "seed corrompu", sig, opts}
+    assert sig == "cat5:pod_drift:permanent-architect"
+    assert Keyword.get(opts, :label) == "error_cat5"
+    assert Keyword.get(opts, :correlation_id) == "issue-42"
+  end
+
+  test "A-06 : cat5 workflow_map_failed sans pod_id → subject = la source (jamais un crash)" do
+    pid = start_cat5(cat5_echo())
+
+    send(
+      pid,
+      Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_workflow_map_failed",
+        correlation_id: "issue-7",
+        payload: %{"reason" => "load KO"}
+      )
+    )
+
+    assert_receive {:esc, :cat5, "workflow_map_failed", "load KO", sig, _opts}
+    assert sig == "cat5:workflow_map_failed:workflow_map_failed"
+  end
+
+  test "A-06 : échec d'escalade cat5 → LOUD (Logger.error), le consumer survit" do
+    pid = start_cat5(fn _, _, _, _, _ -> {:error, :forge_down} end)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(
+          pid,
+          Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_oauth_refresh_failed",
+            payload: %{"reason" => "refresh KO"}
+          )
+        )
+
+        # synchronise : le handle_info est traité avant le retour du call
+        _ = :sys.get_state(pid)
+      end)
+
+    assert log =~ "Cat-5"
+    assert log =~ "escalation FAILED"
+    assert Process.alive?(pid)
+  end
 end

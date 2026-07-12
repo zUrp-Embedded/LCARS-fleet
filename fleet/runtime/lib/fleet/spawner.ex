@@ -386,6 +386,29 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Global live-pod cap — SINGLE authority for the `:fleet_spawner, :max_pods` default (24).
+  Read by the DynamicSupervisor (`max_children`, the enforcing side) AND `has_capacity?/0`
+  (the pre-flight side): one default, no drift between the two readers.
+  """
+  @spec max_pods() :: pos_integer()
+  def max_pods, do: Application.get_env(:fleet_spawner, :max_pods, 24)
+
+  @doc """
+  Is there room to START a new pod? Same count/cap pair the DynamicSupervisor enforces
+  (`count_children` vs `max_pods/0`) — the pre-flight twin of its `max_children` refusal,
+  for callers that must gate BEFORE side effects. Raison d'être: the dispatcher LOCKS the
+  issue on the forge before spawning; discovering saturation only at `spawn_pod`
+  (`{:error, :max_children}`) forced a lock→unlock compensation on EVERY tick at saturation
+  (~4 forge writes/issue/30s polluting the issue timeline, and the tally counted "full" as
+  an ERROR → poller backoff as if the forge were down). Pre-flight = defer without a write.
+  The residual TOCTOU (last slot stolen between check and spawn) still lands on
+  `max_children` + the caller's compensation — this gate makes that the rare exception,
+  not the steady-state mechanism.
+  """
+  @spec has_capacity?() :: boolean()
+  def has_capacity?, do: count_pods() < max_pods()
+
+  @doc """
   Wakes a long-lived pod (lifetime_scope != one-shot) for a new cycle.
 
   **Load-bearing rail = wake-by-flag** (`turn.flag` + in-pod Monitor tool), touched HERE. Triggers the

@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   - `build(state, role, containment, claude_launch_path)` — called by the `:launching` state; returns
     `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
     `{:error, reason}` ALREADY tagged `:launch_env_unresolved` (raise from human/passwd/vendor-bin resolution),
-    `:credentials_invalid` (scope/plan gate) or `:auth_token_required` (auth/git identity). Order
+    `:credentials_invalid` (scope/plan gate) or `:git_identity_unresolved` (forge commit identity). Order
     auth → git → gate preserved. The `:launching` state wires it onto `do_launch_backend` / `transition_failed`.
 
   Depends on `Pod.LaunchSpec` (env builders), `Pod.McpProvision` (`mcp_channel_env`),
@@ -37,7 +37,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   Builds the COMPLETE pod launch env + resolves/validates the credentials.
 
   Returns `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
-  `{:error, reason}` tagged (`:launch_env_unresolved` | `:credentials_invalid` | `:auth_token_required`),
+  `{:error, reason}` tagged (`:launch_env_unresolved` | `:credentials_invalid` | `:git_identity_unresolved`),
   wired by the `:launching` state onto `do_launch_backend` / `transition_failed`. `role`/`containment`/
   `claude_launch_path` are resolved on the `Pod` side (state `:launching`) and passed here: `role` ==
   `cap_profile_name(state.cap_profile)` (same value, computed the same way) → we avoid the dependency on
@@ -134,7 +134,11 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           {:ok, env}
         else
           {:error, {:credentials_invalid, _} = reason} -> {:error, reason}
-          {:error, reason} -> {:error, {:auth_token_required, reason}}
+          # Tag honnête : `maybe_put_auth_token` est inconditionnel (ne peut pas échouer) — la
+          # seule erreur atteignant cette clause vient de `maybe_put_git_identity` (identité de
+          # commit forge irrésolue). L'ancien tag `:auth_token_required` nommait une cause qui ne
+          # pouvait JAMAIS être la vraie → un opérateur traçant ce tag cherchait un problème OAuth.
+          {:error, reason} -> {:error, {:git_identity_unresolved, reason}}
         end
 
       {:error, reason} ->

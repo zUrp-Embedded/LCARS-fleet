@@ -25,6 +25,17 @@ defmodule Fleet.Pilot.IncidentConsumer do
       (no pod created → no pod_id). Subject = `cap_profile_name` (the role: recurrence = "this role keeps
       failing to spawn"; issue_id is per-request → never recurs). op="spawn", default recurrence escalation.
 
+  ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (acte4 A-06)
+
+  `starfleet.audit_cat5_<pod_drift|workflow_map_failed|oauth_refresh_failed>` — the max-severity
+  rail (`Cat5Escalator`). Before this consumer it only left a LOCAL NDJSON line + two lossy Bus
+  broadcasts: the LOW-severity incident rail opened a durable forge issue while the MAX-severity
+  one evaporated if nobody tailed the file (severity/durability inversion). Routed here to the
+  SAME durable forge sink — but via `IncidentRegistry.escalate/5` DIRECTLY (issue on FIRST
+  occurrence, label `error_cat5`): max severity is not sampled by a recurrence gate. The event's
+  `correlation_id` (wave E) links the issue back to the causing mandate. No new compile dep:
+  the event is plain data on the Bus, its 3 atoms are registry-declared.
+
   ## Offload (`:runner`)
 
   `record_or_escalate` touches the forge (registry read/write) → OFFLOAD into a
@@ -37,6 +48,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
     * `:subscribe` — bool default `true` (tests: `false` + manual sending via `send/2`).
     * `:record_fun` — `fn op, subject, reason, opts -> :recorded | {:escalated|…, _} end`
       (default `&Fleet.Pilot.IncidentRegistry.record_or_escalate/4`). Test seam (zero forge).
+    * `:escalate_fun` — `fn kind, subject, reason, sig, opts -> {:ok, n} | {:error, _} end`
+      (default `&Fleet.Pilot.IncidentRegistry.escalate/5`). Cat-5 direct path (no recurrence gate).
     * `:runner` — offload seam (see above). Default `nil` → sync.
   """
 
@@ -49,7 +62,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # this consumer) and `offload_async/1`. Specific to this consumer (not the StepRunConsumer's): clean separation.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
-  defstruct record_fun: nil, runner: nil
+  defstruct record_fun: nil, escalate_fun: nil, runner: nil
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -82,6 +95,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
     state = %__MODULE__{
       record_fun:
         Keyword.get(opts, :record_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4),
+      escalate_fun: Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate/5),
       runner: Keyword.get(opts, :runner)
     }
 
@@ -122,6 +136,34 @@ defmodule Fleet.Pilot.IncidentConsumer do
     # role): recurrence = "this role keeps failing to spawn" (issue_id is per-request → never recurs).
     # op="spawn", default :recurrence escalation. Was ORPHANED: produced, never consumed → the 202 lied silently.
     record(state, "spawn", name, p["reason"], [])
+    {:noreply, state}
+  end
+
+  # ── Cat-5 (source :starfleet) — DIRECT escalation, no recurrence gate (max severity). ──
+  # The 3 types are LITERAL matches (atoms pre-registered by starfleet/application.ex + events.yaml)
+  # — no dynamic atom construction. Sig = "cat5:<source>:<subject>" (per-subject dedup lives in the
+  # issue timeline, not a gate); correlation_id (wave E) links the issue to the causing mandate.
+  def handle_info(
+        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_pod_drift"} = ev,
+        state
+      ) do
+    escalate_cat5(state, "pod_drift", ev)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_workflow_map_failed"} = ev,
+        state
+      ) do
+    escalate_cat5(state, "workflow_map_failed", ev)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_oauth_refresh_failed"} = ev,
+        state
+      ) do
+    escalate_cat5(state, "oauth_refresh_failed", ev)
     {:noreply, state}
   end
 
@@ -167,4 +209,38 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   defp run_sync(fun), do: fun.()
+
+  # Cat-5 → issue forge durable IMMÉDIATE via `IncidentRegistry.escalate/5` (label `error_cat5`,
+  # triage sysadmin distinct des crashs pod). Offloadée comme `record/5` (touche la forge).
+  # L'échec d'escalade est LOUD : perdre l'alarme re-silencierait exactement l'évaporation que
+  # ce rail vient de fermer (l'inversion sévérité/durabilité, acte4 A-06).
+  defp escalate_cat5(state, source, %Fleet.Event{} = ev) do
+    subject = ev.pod_id || source
+    reason = extract_cat5_reason(ev.payload)
+    sig = "cat5:#{source}:#{subject}"
+
+    exec = fn ->
+      case state.escalate_fun.(:cat5, subject, reason, sig,
+             label: "error_cat5",
+             correlation_id: ev.correlation_id
+           ) do
+        {:ok, number} ->
+          Logger.warning(
+            "IncidentConsumer: Cat-5 #{source} #{subject} → sysadmin issue ##{number} " <>
+              "(error_cat5, 1st occurrence — no recurrence gate)"
+          )
+
+        {:error, e} ->
+          Logger.error(
+            "IncidentConsumer: Cat-5 #{source} #{subject} escalation FAILED — NO durable issue " <>
+              "(forge down ?) : #{inspect(e)} — the max-severity alarm is NOT engraved"
+          )
+      end
+    end
+
+    (state.runner || (&run_sync/1)).(exec)
+  end
+
+  defp extract_cat5_reason(%{"reason" => reason}), do: reason
+  defp extract_cat5_reason(payload), do: payload
 end

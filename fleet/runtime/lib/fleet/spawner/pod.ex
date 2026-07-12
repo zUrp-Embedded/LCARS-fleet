@@ -363,7 +363,7 @@ defmodule Fleet.Spawner.Pod do
 
     # Build the full env + resolve/validate the credentials in `Pod.LaunchEnv.build/4`.
     # Returns `{:ok, env}` (auth bind placed + the human's git identity + scope/plan gate passed) or an
-    # ALREADY-tagged `{:error, reason}` (:launch_env_unresolved / :credentials_invalid / :auth_token_required)
+    # ALREADY-tagged `{:error, reason}` (:launch_env_unresolved / :credentials_invalid / :git_identity_unresolved)
     # → transition_failed (same cleanup as the other launch failures).
     case LaunchEnv.build(data, role, containment, Backend.claude_launch_path()) do
       {:ok, env} -> do_launch_backend(data, args, env)
