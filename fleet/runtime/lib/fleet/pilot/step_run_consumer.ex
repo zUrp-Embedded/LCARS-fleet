@@ -743,6 +743,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
            :workflow,
            :"workflow_map.failed",
            [
+             # Traceability (acte3 vague E): correlate to the issue → DriftMonitor forwards this cid to
+             # Cat5 (was nil, breaking the incident↔mandate link on the max-severity rail).
+             correlation_id: to_string(n),
              payload: %{
                "workflow_map" => name,
                "issue" => n,

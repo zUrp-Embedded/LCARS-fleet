@@ -38,6 +38,8 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         result =
           Fleet.EventRouter.Bus.emit(:workflow, :"deliverable.published",
             pod_id: pod_id,
+            # Traceability (acte3 vague E): correlate to the issue (end-to-end key).
+            correlation_id: to_string(Map.fetch!(step_run, :issue_number)),
             payload: %{
               "repo" => Map.fetch!(step_run, :repo),
               "issue" => Map.fetch!(step_run, :issue_number),

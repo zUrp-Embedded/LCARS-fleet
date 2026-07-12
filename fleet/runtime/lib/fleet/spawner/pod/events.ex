@@ -64,7 +64,14 @@ defmodule Fleet.Spawner.Pod.Events do
       Bus.safe_emit(
         :spawner,
         event_type,
-        [pod_id: Map.get(payload, "pod_id"), payload: payload],
+        [
+          pod_id: Map.get(payload, "pod_id"),
+          # Traceability: correlate the pod-lifecycle event to the ISSUE it serves (the end-to-end key
+          # spawn→work→complete→review→merge). Without it every pod.failed/wake.failed went `nil` and no
+          # incident was tie-able to the mandate that caused it (acte3 vague E).
+          correlation_id: Map.get(payload, "issue_id"),
+          payload: payload
+        ],
         context: "Pod best_effort_broadcast #{event_type} (non-fatal)"
       )
 
@@ -115,6 +122,8 @@ defmodule Fleet.Spawner.Pod.Events do
   defp build_spawner_event(event_type, payload) do
     Fleet.Event.new(:spawner, String.to_existing_atom(event_type),
       pod_id: Map.get(payload, "pod_id"),
+      # Traceability: correlate to the ISSUE the pod serves (end-to-end key) — cf. best_effort_broadcast.
+      correlation_id: Map.get(payload, "issue_id"),
       payload: payload
     )
   end
