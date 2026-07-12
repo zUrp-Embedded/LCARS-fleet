@@ -9,6 +9,11 @@ defmodule Fleet.API.R1SeamWSTest do
   use ExUnit.Case, async: true
 
   @moduletag :r1_seam
+  # Migration Z1 : l'exclusion de :r1_seam vivait dans le test_helper de fleet_api
+  # (`exclude: [:r1_seam]`) ; helper fusionné → l'exclusion devient locale à CE fichier
+  # (rouge-par-design tant que la couture R2 n'est pas faite). Les :r1_seam d'event_router
+  # tournent, eux — ne pas ré-exclure globalement.
+  @moduletag skip: "rouge-par-design (couture WS R1) — exclu via l'helper fleet_api pré-collapse"
 
   alias Fleet.API.WS
 
