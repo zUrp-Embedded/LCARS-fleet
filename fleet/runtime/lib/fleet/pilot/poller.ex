@@ -85,6 +85,9 @@ defmodule Fleet.Pilot.Poller do
   # an issue FOREVER, rare enough not to hammer the human airlock.
   @awaits_rekick_every 10
 
+  # Fenêtre de coalescence du kick webhook (Z6e) : une rafale d'events dans la fenêtre = UN poll.
+  @gitea_kick_debounce_ms 1_000
+
   defstruct [
     :repo,
     :interval_ms,
@@ -109,6 +112,9 @@ defmodule Fleet.Pilot.Poller do
     # G6 seam: escalation of an unreadable workflow_map (default nil → `IncidentRegistry.record_or_escalate/4`).
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
+    # Z6e (D-13, 2026-07-13) — coalescence du kick webhook : true = un poll accéléré est
+    # déjà programmé, les events gitea.* suivants de la rafale ne re-programment RIEN.
+    gitea_kick_pending?: false,
     poll_count: 0,
     error_count: 0,
     err_streak: 0,
@@ -193,6 +199,17 @@ defmodule Fleet.Pilot.Poller do
         schedule(Backoff.jitter(state.interval_ms))
       end
 
+    # Z6e (D-13) — le webhook gitea.* redevient UTILE : accélérateur de latence du poll
+    # (le rail était MORT pour le dispatch depuis le retrait de l'AutoDispatcher 2026-06-16,
+    # il n'alimentait plus que l'observation). Doctrine INCHANGÉE : le poll reste LA vérité
+    # (forge-state-machine) — l'event est un HINT, jamais une donnée (payload ignoré).
+    # Opt-in (défaut false = hermétisme test : pas de subscribe Bus parasite en async) ;
+    # câblé true par Application.step_children! (prod).
+    _ =
+      if Keyword.get(opts, :subscribe_gitea, false) do
+        :ok = Fleet.EventRouter.Bus.subscribe()
+      end
+
     Logger.info(
       "Poller: start mode=step MULTI-PROJECT org=#{state.org} human=#{state.my_human} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
@@ -208,7 +225,28 @@ defmodule Fleet.Pilot.Poller do
     {:noreply, new_state}
   end
 
+  # Z6e — hint webhook : un event gitea.* = « la forge a bougé » → poll accéléré via un
+  # message DÉDIÉ :gitea_kick (⚠ PAS :poll — son handler re-programme le tick suivant :
+  # injecter :poll créerait une CHAÎNE PARALLÈLE permanente ; :gitea_kick polle sans
+  # toucher la chaîne). Coalescence 1s : une rafale de N webhooks = 1 poll.
+  def handle_info(%Fleet.Event{type: type}, %__MODULE__{} = state) do
+    if gitea_event?(type) and not state.gitea_kick_pending? do
+      _ = Process.send_after(self(), :gitea_kick, @gitea_kick_debounce_ms)
+      {:noreply, %{state | gitea_kick_pending?: true}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:gitea_kick, state) do
+    {_result, new_state} = safe_poll(%{state | gitea_kick_pending?: false})
+    {:noreply, new_state}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp gitea_event?(type) when is_atom(type),
+    do: String.starts_with?(Atom.to_string(type), "gitea.")
 
   @impl GenServer
   def handle_call(:force_poll, _from, state) do
