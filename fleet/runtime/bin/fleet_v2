@@ -246,7 +246,7 @@ cmd_start() {
     launch_cmd="exec '$rel_bin' start"
   else
     mode="dev (mix run, MIX_ENV=$mix_env)"
-    export LCARS_CAPPROFILES_ROOT="${LCARS_CAPPROFILES_ROOT:-$RUNTIME_DIR/apps/fleet_cap_profile/priv/canon/cap-profiles}"
+    export LCARS_CAPPROFILES_ROOT="${LCARS_CAPPROFILES_ROOT:-$RUNTIME_DIR/priv/cap_profile/canon/cap-profiles}"
     [[ -n "$dist_on" ]] && export ELIXIR_ERL_OPTIONS="-name $erl_node -setcookie $erl_cookie ${ELIXIR_ERL_OPTIONS:-}"
     launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
   fi

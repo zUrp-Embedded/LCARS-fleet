@@ -1,10 +1,17 @@
-defmodule LcarsFleetRuntime.MixProject do
+defmodule LcarsFleet.MixProject do
   use Mix.Project
 
+  # App UNIQUE :lcars_fleet — collapse de l'umbrella (migration Z3, 2026-07-12).
+  # Les 14 ex-apps sont des domaines sous lib/fleet/, supervisés par Fleet.Application
+  # (l'ordre de boot vit LÀ-BAS, cicatrice F8 inline — plus dans une liste release).
+  # Les atoms de config legacy (`config :fleet_spawner, …`) restent valides : la config
+  # ETS est keyed par atom indépendamment de l'existence d'une app OTP (décision D-07).
   def project do
     [
-      apps_path: "apps",
+      app: :lcars_fleet,
       version: "0.1.0",
+      elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
@@ -13,35 +20,33 @@ defmodule LcarsFleetRuntime.MixProject do
     ]
   end
 
-  # R0.6 — filet de types de l'umbrella (Dialyxir). Le PLT couvre TOUTES les apps
-  # umbrella (elles s'analysent ensemble depuis la racine) + `:mix`/`:ex_unit` car
-  # des modules touchent des tâches Mix (verrou release, tâches lcars.*) et le code
-  # de test. PLT stocké sous `_build/plts` (dossier partagé, stable entre envs —
-  # évite de reconstruire un PLT par MIX_ENV).
+  def application do
+    [
+      mod: {Fleet.Application, []},
+      # Union des extra_applications des 14 ex-apps : :crypto (cap_profile/sp_builder,
+      # sha256), :eex (sp_builder/project_bootstrap, templates). Le
+      # `:fleet_event_router` qu'un mix.exs forçait ici (ordre de boot inter-app) est
+      # mort avec l'umbrella : l'ordre est porté par les children de Fleet.Application.
+      extra_applications: [:logger, :crypto, :eex]
+    ]
+  end
+
+  # test/support compilé en :test (ex-elixirc_paths de chaque app, fusionnés —
+  # les stubs/TestEnv vivent sous test/support/<domaine>/).
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  # R0.6 — filet de types (Dialyxir). Post-collapse le PLT couvre l'app unique +
+  # `:mix`/`:ex_unit` (tâches Mix : verrou release, lcars.* ; code de test). PLT sous
+  # `_build/plts` (stable entre envs). Les 14 atoms fleet_* d'avant NE DOIVENT PAS
+  # revenir dans plt_add_apps : plus des apps → dialyzer crash « unknown application ».
   defp dialyzer do
     [
-      plt_add_apps: [
-        :mix,
-        :ex_unit,
-        :fleet_api,
-        :fleet_cap_profile,
-        :fleet_coord,
-        :fleet_credentials,
-        :fleet_event_router,
-        :fleet_mcp,
-        :fleet_observation,
-        :fleet_pilot,
-        :fleet_workflow,
-        :fleet_project_bootstrap,
-        :fleet_sp_builder,
-        :fleet_spawner,
-        :fleet_starfleet,
-        :fleet_task_queue
-      ],
+      plt_add_apps: [:mix, :ex_unit],
       plt_core_path: "_build/plts",
       plt_local_path: "_build/plts",
       ignore_warnings: ".dialyzer_ignore.exs",
-      # signale un filtre d'ignore devenu obsolète (code déplacé/corrigé à l'éclatement) → on le nettoie.
+      # signale un filtre d'ignore devenu obsolète (code déplacé/corrigé) → on le nettoie.
       list_unused_filters: true,
       # E5 (2026-07-04) — mode STRICT au-delà du défaut : :unmatched_returns (un retour {:error,_}
       # jeté sans `_ =` = échec potentiellement avalé), :error_handling (fonctions qui ne peuvent que
@@ -51,16 +56,14 @@ defmodule LcarsFleetRuntime.MixProject do
     ]
   end
 
-  # R7 — `mix gate` doit tourner en :test (sinon l'étape `test` de l'alias
-  # s'exécute dans l'env ambiant `:dev` et Mix refuse / la suite ne boote pas
-  # dans le bon env). `preferred_envs` force MIX_ENV=test pour la tâche `gate`.
+  # R7 — `mix gate` doit tourner en :test (sinon l'étape `test` de l'alias s'exécute dans
+  # l'env ambiant `:dev` et Mix refuse / la suite ne boote pas dans le bon env).
   def cli do
     [preferred_envs: [gate: :test]]
   end
 
-  # R7 verrou I-CBC — gate CI/dev composable : compile strict + suite + le
-  # tableau de bord des contrats inter-module. `mix gate` exit≠0 si un contrat
-  # est rouge (le jumeau runtime du gate doctrine §11-PATH). À câbler en CI.
+  # R7 verrou I-CBC — gate CI/dev composable : compile strict + suite + contrats
+  # inter-module + Dialyzer strict. `mix gate` exit≠0 si un contrat est rouge.
   defp aliases do
     [
       gate: [
@@ -68,28 +71,26 @@ defmodule LcarsFleetRuntime.MixProject do
         "test",
         &shell_gate/1,
         "lcars.contracts.check",
-        # Dialyzer STRICT (E5) DANS le gate — la carte d'entrée le promettait, l'alias ne le
-        # portait pas (divergence doc↔code résorbée côté code : le ratchet types est mécanique,
-        # pas une discipline « penser à le lancer »). Dernier de la chaîne : le plus long à froid
-        # (build PLT une fois par _build) ; à chaud ~2s. Tourne en MIX_ENV=test comme le reste
-        # (preferred_envs) — même env que la suite, un seul _build analysé.
+        # Dialyzer STRICT (E5) DANS le gate — dernier de la chaîne : le plus long à froid
+        # (build PLT une fois par _build) ; à chaud ~2s. Tourne en MIX_ENV=test comme le
+        # reste (preferred_envs) — même env que la suite, un seul _build analysé.
         "dialyzer"
       ]
     ]
   end
 
-  # Etape `mix gate` : filet des tests HORS-mix (python du bridge MCP stdio + bats sanctuaire) que
-  # `mix test` (ExUnit) ne voit pas. Sans ce cablage, test/test_fleet_mcp_stdio_bridge.py peut virer
-  # ROUGE en silence — personne ne le rejoue — exactement le bug (bridge renomme, test jamais rejoue)
-  # qui a motive le filet. Fonction-etape et PAS `mix cmd bash ...` : `cmd` est RECURSIF en umbrella
-  # (il tournerait une fois par app, avec un cwd d'app ou test/shell_gate.sh n'existe pas). Ici la
-  # fonction s'execute UNE fois, a la racine de l'umbrella.
+  # Étape `mix gate` : filet des tests HORS-mix (python du bridge MCP stdio + bats
+  # sanctuaire) que `mix test` (ExUnit) ne voit pas. Sans ce câblage,
+  # test/test_fleet_mcp_stdio_bridge.py peut virer ROUGE en silence — personne ne le
+  # rejoue — exactement le bug (bridge renommé, test jamais rejoué) qui a motivé le filet.
+  # (Historique : la forme fonction-step vient de l'époque umbrella où `mix cmd` était
+  # récursif par-app ; en single-app `mix cmd` marcherait, la fonction reste : elle porte
+  # BATS_MISSING_FATAL et un message d'échec riche que cmd ne donne pas.)
   #
-  # Durci (bats-core = prerequis d'outillage dev pose) : on passe BATS_MISSING_FATAL=1 a shell_gate.sh, donc
-  # l'absence de bats FAIT ECHOUER `mix gate` (message d'install clair). Le sanctuaire bwrap (35 tests) +
-  # claude_launch (31) sont ainsi verifies a CHAQUE gate — plus jamais absents en silence (c'est precisement
-  # cette regression-invisible qui avait laisse le test claude_launch stale sur l'ancien contrat 4-args).
-  # Le python bloque de toute facon (FAIL>0 ou coquille vide → Mix.raise ci-dessous).
+  # Durci : BATS_MISSING_FATAL=1 → l'absence de bats FAIT ÉCHOUER `mix gate` (message
+  # d'install clair). Le sanctuaire bwrap (35 tests) + claude_launch (31) sont vérifiés à
+  # CHAQUE gate — plus jamais absents en silence (régression-invisible vécue : test
+  # claude_launch resté stale sur l'ancien contrat 4-args).
   defp shell_gate(_args) do
     script = Path.join([__DIR__, "test", "shell_gate.sh"])
 
@@ -106,15 +107,14 @@ defmodule LcarsFleetRuntime.MixProject do
     end
   end
 
-  # R7 verrou I-CBC — step de `mix release` : refuse de bâtir la release si un
-  # contrat inter-module est rouge. Aucune release rouge ne se construit ⇒
-  # réalisation mécanique de « le boot refuse si un contrat est rouvert »
-  # (PLAN R7). Tourne après la phase compile, avant :assemble (sources
-  # présentes au build → checks grep/introspection valides).
+  # R7 verrou I-CBC — step de `mix release` : refuse de bâtir la release si un contrat
+  # inter-module est rouge. Aucune release rouge ne se construit ⇒ réalisation mécanique
+  # de « le boot refuse si un contrat est rouvert ». Tourne après la phase compile,
+  # avant :assemble (sources présentes au build → checks grep/introspection valides).
   defp verrou_contracts(release) do
-    # Fail-closed : un check qui CRASH (fichier absent, YAML invalide…) rend
-    # le statut des contrats inconnu → on refuse la release avec un message
-    # clair (pas une stacktrace brute opaque), comme pour un contrat rouge.
+    # Fail-closed : un check qui CRASH (fichier absent, YAML invalide…) rend le statut
+    # des contrats inconnu → on refuse la release avec un message clair, comme pour un
+    # contrat rouge.
     {overall, checks} =
       try do
         Mix.Tasks.Lcars.Contracts.Check.run_checks()
@@ -140,74 +140,48 @@ defmodule LcarsFleetRuntime.MixProject do
   end
 
   defp deps do
-    # R0.6 — outillage statique (gap VÉRIFIÉ : deps umbrella vide, aucun lint/type/sécu ;
-    # rien dans le canon ne le justifie). Sert aussi à VÉRIFIER les rapports d'audit de façon
-    # indépendante (Sobelow ↔ holes injection, Dialyzer ↔ @spec, Credo ↔ cohérence).
     [
+      # — substrat & wire —
+      {:phoenix_pubsub, "~> 2.1"},
+      {:plug, "~> 1.19"},
+      {:plug_cowboy, "~> 2.8"},
+      {:jason, "~> 1.4"},
+      {:ex_json_schema, "~> 0.11"},
+      {:yaml_elixir, "~> 2.12"},
+      # — MCP (frontière pod) —
+      {:ex_mcp, "~> 0.9.1"},
+      {:jose, "1.11.10", override: true},
+      # — HTTP forge (pilot/starfleet) —
+      {:req, "~> 0.5"},
+      {:finch, "~> 0.22"},
+      # — divers runtime —
+      {:uuid, "~> 1.1"},
+      # — test/outillage (union des flags les plus larges des ex-apps) —
+      {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev], runtime: false}
     ]
   end
 
-  # Mix release Elixir 1.9+ stdlib (chantier 16 — lancement per-humain via bin/fleet_v2).
-  # Génère `_build/prod/rel/fleet_umbrella/bin/fleet_umbrella` self-contained
-  # (ERTS + toutes apps umbrella).
+  # Mix release (lancement per-humain via bin/fleet_v2). Le NOM `fleet_umbrella` est
+  # CONSERVÉ post-collapse (D-08) : bin/fleet_v2 pointe `rel/fleet_umbrella/bin/fleet_umbrella`
+  # — le renommer casserait le launcher pour un gain cosmétique. Une seule app :permanent ;
+  # l'ordre de boot des domaines vit dans Fleet.Application (cicatrice F8 là-bas).
   defp releases do
     [
       fleet_umbrella: [
         include_executables_for: [:unix],
-        # F8 (E1) : l'ORDRE de cette liste est un invariant de boot pour les paires reliées par un
-        # seam RUNTIME (sans dep compile, Mix ne peut pas les ordonner) : fleet_mcp AVANT
-        # fleet_starfleet (BootOrchestrator spawn les permanents → ensure_pod_socket via seam).
-        # Filet si l'ordre casse : spawn échoue → boot_partial HONNÊTE + retry PermanentWarden
-        # (converge), pas un silence — mais ne pas compter dessus : garder l'ordre.
-        applications: [
-          fleet_cap_profile: :permanent,
-          fleet_sp_builder: :permanent,
-          fleet_credentials: :permanent,
-          # D1 #578 fix : fleet_mcp = OTP app (mod: Fleet.MCP.Application,
-          # supervision tree). Canon ring4 actif (mcp-channels-substrate +
-          # Memory-X V1 FleetControl channel + critère opérationnel #1).
-          # Absence → MCP server inopérant au boot release.
-          fleet_mcp: :permanent,
-          # D2 #578 fix : fleet_project_bootstrap = OTP app (mod:
-          # Fleet.ProjectBootstrap.Application). Canon ring1 actif.
-          # Invoqué par Fleet.Spawner.Pod phase PROJECT. Absence → spawn
-          # pod éphémère cassé runtime (PortBackend.launch sur pod_dir
-          # non initialisé). Critère opérationnel #3.
-          fleet_project_bootstrap: :permanent,
-          fleet_spawner: :permanent,
-          fleet_event_router: :permanent,
-          # broker central de mandats (Ring 2, run #5) — absent du :releases (audit deep-05 C3) ⇒
-          # contrat release faux + ambiguïté boot/supervision pour une app OTP centrale (get_task/
-          # submit_result). Ajouté explicite.
-          fleet_task_queue: :permanent,
-          fleet_workflow: :permanent,
-          fleet_starfleet: :permanent,
-          fleet_coord: :permanent,
-          fleet_api: :permanent,
-          # M-033 chantier 1 brique 1 : webhook handler dispatch tickets
-          # Gitea (subscribe Bus `gitea.*` → Routing catalogue → lock label
-          # `lcars-dispatched` via ForgeClient → invoke pipeline). OFF par
-          # défaut (LCARS_PILOT_DISPATCHER=true pour activer).
-          fleet_pilot: :permanent,
-          # observation deck read-only :8091 (Ring 4, BL-026 read-frontier).
-          # Lecture seule, no-auth intra-release ; ne touche pas au core.
-          fleet_observation: :permanent
-        ],
+        applications: [lcars_fleet: :permanent],
         steps: [&verrou_contracts/1, :assemble, &write_build_info/1, :tar]
       ]
     ]
   end
 
-  # Step de `mix release` : embarque la version du build (SHA git court + dirty
-  # + ref) dans le priv de `fleet_api` assemblé, AVANT le tar. Le runtime
-  # relira ce fichier (`source=release`) → la version servie est constatable
-  # sans git ni repo (la release est auto-contenue). Tourne après `:assemble`
-  # (le priv est copié, on écrit dedans avant l'archivage). Délègue à
-  # `Fleet.API.BuildInfo` — module disponible sur le code path au release, comme
-  # `Mix.Tasks.Lcars.Contracts.Check` l'est pour `verrou_contracts/1`.
+  # Step de `mix release` : embarque la version du build (SHA git court + dirty + ref)
+  # dans le priv assemblé (priv/api/), AVANT le tar. Le runtime relira ce fichier
+  # (`source=release`) → version constatable sans git ni repo. Délègue à
+  # `Fleet.API.BuildInfo` (module sur le code path au release, comme le checker).
   defp write_build_info(release) do
     Fleet.API.BuildInfo.write_release_file(release)
   end

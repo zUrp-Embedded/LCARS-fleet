@@ -15,8 +15,8 @@ defmodule Fleet.CapProfile.DisallowedTools do
   `Fleet.CapProfile.*` does not move. Calls NEITHER `Schema` NOR `Invariants` NOR the
   `load`/`compose` core.
 
-  I/O: reads the IMMUTABLE priv baseline `priv/canon/cap-profiles/_baseline-git-denied.yaml`
-  (resolved via `:code.priv_dir(:fleet_cap_profile)` — the same file as before the
+  I/O: reads the IMMUTABLE priv baseline `priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`
+  (resolved via `:code.priv_dir(:lcars_fleet)` — the same file as before the
   extraction), read+parse cached once in `:persistent_term` (lazy-init; errors not
   cached — the bang re-raises on the next call).
   """
@@ -116,10 +116,10 @@ defmodule Fleet.CapProfile.DisallowedTools do
 
   defp read_baseline_git_ops_denied! do
     path =
-      :fleet_cap_profile
+      :lcars_fleet
       |> :code.priv_dir()
       |> to_string()
-      |> Path.join("canon/cap-profiles/_baseline-git-denied.yaml")
+      |> Path.join("cap_profile/canon/cap-profiles/_baseline-git-denied.yaml")
 
     case YamlElixir.read_from_file(path) do
       {:ok, %{"git_ops_denied" => entries}} when is_list(entries) ->

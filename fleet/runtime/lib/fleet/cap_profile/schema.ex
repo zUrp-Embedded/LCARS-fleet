@@ -139,7 +139,7 @@ defmodule Fleet.CapProfile.Schema do
 
   defp schema_dir do
     case Application.get_env(:fleet_cap_profile, :schema_dir) do
-      nil -> Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "schema")
+      nil -> Path.join(to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/schema")
       dir -> dir
     end
   end

@@ -371,7 +371,7 @@ defmodule Fleet.SPBuilder do
 
   defp subagent_template_root do
     Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
-      Application.app_dir(:fleet_cap_profile, "priv/canon/subagent-templates")
+      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates")
   end
 
   defp modop_fragments_concat([]), do: ""
@@ -404,7 +404,7 @@ defmodule Fleet.SPBuilder do
   end
 
   defp template_path(name) do
-    Path.join([to_string(:code.priv_dir(:fleet_sp_builder)), "templates", name])
+    Path.join([to_string(:code.priv_dir(:lcars_fleet)), "sp_builder/templates", name])
   end
 
   # ============================================================
@@ -412,23 +412,22 @@ defmodule Fleet.SPBuilder do
   # ============================================================
 
   # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
-  # the BUNDLED cap-profiles canon (`Application.app_dir(:fleet_cap_profile, …)`, the SAME source as
-  # `Fleet.CapProfile.root_dir/0`, which sp_builder already depends on) → resolves in RELEASE as in dev WITHOUT env.
+  # the BUNDLED cap-profiles canon (`Application.app_dir(:lcars_fleet, "priv/cap_profile/…")`, the SAME
+  # source as `Fleet.CapProfile.root_dir/0`) → resolves in RELEASE as in dev WITHOUT env.
   # The old relative default `"cap-profiles"` (relative to CWD) gave `:enoent` in release. Config override (test).
   defp sp_role_root do
     Application.get_env(:fleet_sp_builder, :sp_role_root) ||
-      Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
+      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
   end
 
   # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). Config-overridable, with a
-  # BUNDLED DEFAULT = `Application.app_dir(:fleet_cap_profile, "priv/canon/modop-bundles")` — the SAME
-  # source as `sp_role_root` (the modop-bundles canon was MOVED here from fleet_workflow, F-C146/PORT). This
-  # is safe: fleet_cap_profile IS in sp_builder's dep graph (Ring edge exists) → started before sp_builder,
-  # `app_dir` resolves in prod AND in an isolated sp_builder test (unlike the ex-fleet_workflow path, out of
-  # the ring, which would raise "unknown application"). The prod spawn chain now passes the cap-profile's
+  # BUNDLED DEFAULT = `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")` — the
+  # SAME source as `sp_role_root` (the modop-bundles canon was MOVED to the cap_profile priv from the
+  # ex-fleet_workflow one, F-C146/PORT — the old path would not resolve in an isolated sp_builder test).
+  # The prod spawn chain now passes the cap-profile's
   # `modop_set.default` (`compose(cap, modops, …)`) → this root IS required and resolves.
   defp modop_root do
     Application.get_env(:fleet_sp_builder, :modop_root) ||
-      Application.app_dir(:fleet_cap_profile, "priv/canon/modop-bundles")
+      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")
   end
 end

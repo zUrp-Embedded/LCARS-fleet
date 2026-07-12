@@ -14,13 +14,13 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   use ExUnit.Case, async: true
 
   # R0.8-brick6 : canon réabsorbé in-repo. Les `workflow_maps` vivent dans
-  # `apps/fleet_workflow/priv/canon/` ; les modop-bundles + subagent-templates ont été DÉPLACÉS
-  # (F-C146/PORT) dans `apps/fleet_cap_profile/priv/canon/` (co-localisés avec les overlay profiles +
-  # atteignables par SPBuilder, un dep de fleet_cap_profile) ; cap-profiles dans
-  # `apps/fleet_cap_profile/priv/canon/cap-profiles/` (R0.7). Pattern app_dir (brick1/brick5).
-  @canon Application.app_dir(:fleet_workflow, "priv/canon")
-  @modop_canon Application.app_dir(:fleet_cap_profile, "priv/canon")
-  @cap_profiles Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
+  # `priv/workflow/canon/` ; les modop-bundles + subagent-templates ont été DÉPLACÉS
+  # (F-C146/PORT) dans `priv/cap_profile/canon/` (co-localisés avec les overlay profiles +
+  # atteignables par SPBuilder) ; cap-profiles dans
+  # `priv/cap_profile/canon/cap-profiles/` (R0.7). Pattern app_dir (brick1/brick5).
+  @canon Application.app_dir(:lcars_fleet, "priv/workflow/canon")
+  @modop_canon Application.app_dir(:lcars_fleet, "priv/cap_profile/canon")
+  @cap_profiles Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
 
   @bundles ~w(archive-mode brainstorming dual-review fire-mode long-session-discipline
               persuasion-discipline rubber-duck subagent-driven tdd)

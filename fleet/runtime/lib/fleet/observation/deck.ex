@@ -13,7 +13,7 @@ defmodule Fleet.Observation.Deck do
       (`Fleet.Observation.ReadModel`: pods + the `%Fleet.Event{}` stream).
     * `GET /table` — role-by-role table (one row per role, "absent" if no
       live pod carries it).
-    * `GET /static/*` — assets (`priv/static/lcars-tva.css`, `assets/*.svg`).
+    * `GET /static/*` — assets (`priv/observation/static/lcars-tva.css`, `assets/*.svg`).
 
   ## Read frontier
 
@@ -36,7 +36,7 @@ defmodule Fleet.Observation.Deck do
 
   plug(Plug.Static,
     at: "/static",
-    from: {:fleet_observation, "priv/static"},
+    from: {:lcars_fleet, "priv/observation/static"},
     gzip: false,
     only: ~w(lcars-tva.css assets)
   )
@@ -131,13 +131,13 @@ defmodule Fleet.Observation.Deck do
   end
 
   # DISPLAY catalogue (role → dedicated SVG icon) DERIVED from the assets actually present in
-  # `priv/static/assets`: any `<role>.svg` dropped there is recognized automatically → no more hard-coded
+  # `priv/observation/static/assets`: any `<role>.svg` dropped there is recognized automatically → no more hard-coded
   # list to keep in sync with the files (the list↔assets duplication disappears, the asset is the authority).
   # Exclusions: the `favicon*.svg` (chrome, not a role) and `starfleet` (out-of-band system domain,
   # the asset exists but no panel instruments it). `File.ls` KO (dir absent) → `[]`: safe degradation
   # (all pods on the generic icon, never a crash). Resolved via `app_dir` = same priv as `Plug.Static`.
   defp display_roles do
-    case File.ls(Application.app_dir(:fleet_observation, "priv/static/assets")) do
+    case File.ls(Application.app_dir(:lcars_fleet, "priv/observation/static/assets")) do
       {:ok, files} ->
         for f <- files,
             String.ends_with?(f, ".svg"),

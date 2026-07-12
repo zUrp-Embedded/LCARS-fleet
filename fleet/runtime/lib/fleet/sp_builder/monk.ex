@@ -14,8 +14,8 @@ defmodule Fleet.SPBuilder.Monk do
 
   ## Monks are FROZEN — reactivation is dormant by design (F-C153)
 
-  The registry root defaults to `app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`, a tree that
-  is **intentionally ABSENT**: the monks were FROZEN into `apps/fleet_cap_profile/priv/canon/_frozen-monks/`
+  The registry root defaults to `app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`, a tree
+  that is **intentionally ABSENT**: the monks were FROZEN into `priv/cap_profile/canon/_frozen-monks/`
   (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
   so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
   byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent
@@ -38,7 +38,7 @@ defmodule Fleet.SPBuilder.Monk do
 
     * `:monk_registry_root` — root resolving the registry's relative path
       (test-seam; defaults to config `:fleet_sp_builder, :monk_registry_root`
-      then `Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`).
+      then `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`).
 
   The `monk_registry` field in the cap-profile = basename (e.g. `alpha.yaml`)
   — the code resolves it via `:monk_registry_root`. It is NOT an absolute path:
@@ -59,7 +59,7 @@ defmodule Fleet.SPBuilder.Monk do
         root =
           Keyword.get(opts, :monk_registry_root) ||
             Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
-            Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")
+            Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
 
         path = Path.join(root, registry_rel)
 

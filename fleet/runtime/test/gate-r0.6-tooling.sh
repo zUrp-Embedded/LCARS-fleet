@@ -22,7 +22,7 @@ else
   echo "FAIL CREDO   ne tourne pas"; FAIL=1
 fi
 
-if timeout 90 mix sobelow --root apps/fleet_api 2>&1 | grep -qi "Running Sobelow"; then
+if timeout 90 mix sobelow --root . 2>&1 | grep -qi "Running Sobelow"; then
   echo "PASS SOBELOW runnable (--root apps/<app>, per-app umbrella)"
 else
   echo "FAIL SOBELOW ne tourne pas"; FAIL=1

@@ -16,7 +16,10 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     ids = Enum.map(checks, & &1.id)
     # les deux checks durcis R0-EVT-012/014 tournent
     assert "events.handlers.exist" in ids
-    assert "layering.dependency_graph" in ids
+    # MIGRATION Z3 (D-19) : layering.dependency_graph est RETIRÉ avec sa matière première
+    # (edges in_umbrella des mix.exs d'apps) — successeur mécanique = boundary (Z4).
+    # Son remplaçant vérifiable aujourd'hui : boot.order_f8 (ordre des children racine).
+    assert "boot.order_f8" in ids
 
     fails = Enum.filter(checks, &(&1.status != :pass))
     assert fails == [], "checks non-verts : #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"

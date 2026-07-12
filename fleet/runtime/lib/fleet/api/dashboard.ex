@@ -11,9 +11,9 @@ defmodule Fleet.API.Dashboard do
 
   ## Routes
 
-    * `GET /dashboard` — renders EEx layout `priv/dashboard/index.html.eex`
+    * `GET /dashboard` — renders EEx layout `priv/api/dashboard/index.html.eex`
       (LCARS header + nav rail + main grid panel placeholders)
-    * `GET /dashboard/static/*` — serves `priv/dashboard/static/` via
+    * `GET /dashboard/static/*` — serves `priv/api/dashboard/static/` via
       `Plug.Static` (lcars-tva.css, future panel JS/images)
 
   ## Auth
@@ -36,16 +36,16 @@ defmodule Fleet.API.Dashboard do
   # re-read+recompilation on every hit, nor a runtime 500 on a missing template on an UN-
   # authenticated route). `function_from_file` generates `render_dashboard/1` at build; a missing template
   # breaks the BUILD (detected early), not a 500. `@external_resource` → recompiles if the `.eex` changes.
-  @dashboard_template Path.expand("../../../priv/dashboard/index.html.eex", __DIR__)
+  @dashboard_template Path.expand("../../../priv/api/dashboard/index.html.eex", __DIR__)
   @external_resource @dashboard_template
   EEx.function_from_file(:defp, :render_dashboard, @dashboard_template, [:assigns])
 
-  # Static assets under /dashboard/static (served from priv/dashboard/static).
+  # Static assets under /dashboard/static (served from priv/api/dashboard/static).
   # `at:` = URL prefix after the parent mount point. The `/dashboard` forward
   # in rest.ex consumes the `/dashboard` prefix, so here we see `/static/*`.
   plug(Plug.Static,
     at: "/static",
-    from: {:fleet_api, "priv/dashboard/static"},
+    from: {:lcars_fleet, "priv/api/dashboard/static"},
     gzip: false,
     only: ~w(lcars-tva.css favicon.ico)
   )
@@ -70,6 +70,6 @@ defmodule Fleet.API.Dashboard do
 
   @doc false
   def template_path do
-    Path.join(:code.priv_dir(:fleet_api) |> to_string(), "dashboard/index.html.eex")
+    Path.join(:code.priv_dir(:lcars_fleet) |> to_string(), "api/dashboard/index.html.eex")
   end
 end

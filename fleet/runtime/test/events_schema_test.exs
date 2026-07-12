@@ -11,8 +11,8 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
   """
   use ExUnit.Case, async: true
 
-  @schema_path Path.join([__DIR__, "..", "priv", "schema", "events-v1.json"])
-  @canon_path Path.join([__DIR__, "..", "priv", "events.yaml"])
+  @schema_path Path.join([__DIR__, "..", "priv", "event_router", "schema", "events-v1.json"])
+  @canon_path Path.join([__DIR__, "..", "priv", "event_router", "events.yaml"])
 
   setup_all do
     assert File.exists?(@schema_path), "schema absent: #{@schema_path}"

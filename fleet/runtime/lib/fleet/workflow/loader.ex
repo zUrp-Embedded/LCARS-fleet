@@ -13,9 +13,9 @@ defmodule Fleet.Workflow.Loader do
   ## Configuration
 
     * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root
-      (default `Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")`)
+      (default `Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")`)
     * `:fleet_workflow, :schema_path` — JSON schema path
-      (default `priv/schema/workflow-map-v2.5.json` from the package)
+      (default `priv/workflow/schema/workflow-map-v2.5.json` from the package)
 
   ## Explicit opts for async tests
 
@@ -106,7 +106,7 @@ defmodule Fleet.Workflow.Loader do
   defp workflow_maps_root(opts) do
     Keyword.get(opts, :workflow_maps_root) ||
       Application.get_env(:fleet_workflow, :workflow_maps_root) ||
-      Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")
+      Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
   end
 
   # Resolved schema (read+decode+resolve) via the Ring 0 authority `Fleet.SchemaCache`
@@ -120,6 +120,6 @@ defmodule Fleet.Workflow.Loader do
 
   defp schema_path(opts) do
     Keyword.get(opts, :schema_path) || Application.get_env(:fleet_workflow, :schema_path) ||
-      :code.priv_dir(:fleet_workflow) |> to_string() |> Path.join("schema/#{@schema_file}")
+      :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{@schema_file}")
   end
 end

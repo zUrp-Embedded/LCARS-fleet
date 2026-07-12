@@ -113,7 +113,7 @@ defmodule Fleet.EventRouter.Catalog do
     Application.get_env(
       :fleet_event_router,
       :events_yaml_path,
-      Path.join(to_string(:code.priv_dir(:fleet_event_router)), "events.yaml")
+      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/events.yaml")
     )
   end
 end

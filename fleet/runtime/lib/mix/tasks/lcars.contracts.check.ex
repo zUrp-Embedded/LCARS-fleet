@@ -70,7 +70,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   """
   @spec run_checks() :: {:pass | :fail, [map()]}
   def run_checks do
-    root = umbrella_root()
+    root = project_root()
 
     checks =
       [
@@ -119,7 +119,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     residue_check(root, %{
       id: "event.consumers.canon",
       remediation: "R03/R10 (R2)",
-      files: ["apps/fleet_api/lib/fleet/api/ws.ex"],
+      files: ["lib/fleet/api/ws.ex"],
       pattern: ~r/"event_type"\s*=>/,
       confirm: ~r/"event_type"\s*=>/,
       note: "consumers still on the legacy \"event_type\" tuple"
@@ -129,7 +129,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The Loader must normalize v1/v2.5 to a single internal form (unwrap
   # spec.steps). Without it a consumer reads `pipeline["steps"]=nil` on v2.5.
   defp check_pipeline_v25_normalized(root) do
-    rel = "apps/fleet_workflow/lib/fleet/workflow/loader.ex"
+    rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
 
     # Anti-hollow-green: matching `~r/normalize|déball/i` over the WHOLE source would turn the rail green as soon as a
@@ -173,7 +173,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Every handler referenced in events.yaml must exist, otherwise the route is a
   # phantom handler tolerated silently.
   defp check_events_handlers_exist(root) do
-    yaml = Path.join(root, "apps/fleet_event_router/priv/events.yaml")
+    yaml = Path.join(root, "priv/event_router/events.yaml")
 
     missing =
       case YamlElixir.read_from_file(yaml) do
@@ -219,7 +219,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # dead file) for the `NotWiredYet` placeholder that must not reappear
     # in the coord gate-path.
     notwired =
-      Path.wildcard(Path.join(root, "apps/fleet_coord/lib/**/*.ex"))
+      Path.wildcard(Path.join(root, "lib/fleet/coord/**/*.ex"))
       |> Enum.flat_map(fn file ->
         file
         |> grep_lines(~r/NotWiredYet/)
@@ -227,12 +227,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       end)
 
     gates_coord_dep =
-      Path.join(root, "apps/fleet_workflow/lib/fleet/workflow/gates.ex")
+      Path.join(root, "lib/fleet/workflow/gates.ex")
       |> grep_lines(~r/coord_backend|CoordBackend/)
       |> Enum.filter(fn {_ln, line} ->
         Regex.match?(~r/coord_backend|CoordBackend/, strip_comment(line))
       end)
-      |> Enum.map(fn {ln, _} -> "apps/fleet_workflow/lib/fleet/workflow/gates.ex:#{ln}" end)
+      |> Enum.map(fn {ln, _} -> "lib/fleet/workflow/gates.ex:#{ln}" end)
 
     evidence = notwired ++ gates_coord_dep
 
@@ -257,7 +257,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
       remediation: "R12",
-      files: ["apps/fleet_sp_builder/lib/fleet/sp_builder.ex"],
+      files: ["lib/fleet/sp_builder.ex"],
       pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
         "compose_claude_md reads spec.lifetime_scope (pre-v2.5) instead of spec.invocation.lifetime_scope"
@@ -277,8 +277,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # The guarded function (check_modop_incompatible) was EXTRACTED to invariants.ex — the rail
       # watches BOTH (the wrong path can come back in either one).
       files: [
-        "apps/fleet_cap_profile/lib/fleet/cap_profile.ex",
-        "apps/fleet_cap_profile/lib/fleet/cap_profile/invariants.ex"
+        "lib/fleet/cap_profile.ex",
+        "lib/fleet/cap_profile/invariants.ex"
       ],
       pattern: ~r/Map\.get\(spec,\s*"modop_incompatible"/,
       confirm: ~r/modop_incompatible/,
@@ -298,7 +298,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # a resurrection signal to flag.
   defp check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
-    tb = "apps/fleet_spawner/lib/fleet/spawner/launch_backend/tmux_backend.ex"
+    tb = "lib/fleet/spawner/launch_backend/tmux_backend.ex"
 
     evidence_check(
       %{
@@ -335,8 +335,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # the doc line (prose prefixed by a backtick, not `{:error,`) does not count. Unwiring the
   # real clause turns it RED again, whatever the doc says.
   defp check_mcp_required_real_backend(root) do
-    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
-    mcp = "apps/fleet_spawner/lib/fleet/spawner/pod/mcp_provision.ex"
+    pod = "lib/fleet/spawner/pod.ex"
+    mcp = "lib/fleet/spawner/pod/mcp_provision.ex"
 
     evidence_check(
       %{
@@ -366,7 +366,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     presence_check(root, %{
       id: "spawn.has_brief",
       remediation: "R18",
-      file: "apps/fleet_spawner/lib/fleet/spawner.ex",
+      file: "lib/fleet/spawner.ex",
       pattern: ~r/:brief_required/,
       missing: "no :brief_required guard at the spawn_pod boundary",
       note: "spawn_pod must refuse a one-shot pod without a brief (except allow_no_brief)"
@@ -381,7 +381,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     presence_check(root, %{
       id: "skills.declared_present",
       remediation: "R11",
-      file: "apps/fleet_sp_builder/lib/fleet/sp_builder.ex",
+      file: "lib/fleet/sp_builder.ex",
       pattern: ~r/:skills_missing/,
       missing: "filter_skills silently filters out missing skills",
       note: "filter_skills must fail-loud {:skills_missing} on a missing plain skill"
@@ -400,7 +400,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     registry = registry_event_keys(root)
 
     consumed =
-      Path.wildcard(Path.join(root, "apps/*/lib/**/*.ex"))
+      Path.wildcard(Path.join(root, "lib/**/*.ex"))
       |> Enum.flat_map(&consumed_event_types/1)
       |> Enum.uniq()
 
@@ -416,7 +416,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   defp registry_event_keys(root) do
-    yaml = Path.join(root, "apps/fleet_event_router/priv/events.yaml")
+    yaml = Path.join(root, "priv/event_router/events.yaml")
 
     case YamlElixir.read_from_file(yaml) do
       {:ok, %{"events" => events}} when is_map(events) -> MapSet.new(Map.keys(events))
@@ -450,10 +450,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
   # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
   defp check_no_cowboy_bypass(root) do
-    builder = "apps/fleet_event_router/lib/fleet/event_router/listener.ex"
+    builder = "lib/fleet/event_router/listener.ex"
 
     bypass =
-      Path.wildcard(Path.join(root, "apps/*/lib/**/*.ex"))
+      Path.wildcard(Path.join(root, "lib/**/*.ex"))
       |> Enum.reject(&(Path.relative_to(&1, root) == builder))
       |> Enum.flat_map(fn file ->
         file
@@ -498,7 +498,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #       would arrive without ever leaving `:monitoring` → deadline not cancelled → kill at cycle 2).
   # Red if one is missing, OR if the band-aid `"forever" -> 60_000` (a HACK) reappears.
   defp check_result_deadline_cancelled(root) do
-    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+    pod = "lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
 
     # (a) :result_deadline handled as state_timeout (one CODE line carries both tokens:
@@ -561,14 +561,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Red if one is missing. A gate that runs only in test, or a wired gate that
   # delegates nothing, guards nothing in prod.
   defp check_spawn_gates_wired(root) do
-    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+    pod = "lib/fleet/spawner/pod.ex"
 
     # The env construction + the credentials gate live in Pod.LaunchEnv (the env/creds cluster extracted
     # from do_launch). do_launch (pod.ex) calls LaunchEnv.build, which wires Gate.validate. The gate is
     # thus wired to the spawn by TWO conjoint facts: pod.ex calls LaunchEnv.build AND LaunchEnv.build
     # contains Gate.validate (stronger than the old single-file check where everything was inline in pod.ex).
-    launch_env = "apps/fleet_spawner/lib/fleet/spawner/pod/launch_env.ex"
-    gate = "apps/fleet_credentials/lib/fleet/credentials/gate.ex"
+    launch_env = "lib/fleet/spawner/pod/launch_env.ex"
+    gate = "lib/fleet/credentials/gate.ex"
 
     # Each check = {relative_file, regex, label}. The label names the expected file.
     items =
@@ -606,7 +606,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
   defp check_gatekeeper_not_a_step(root) do
-    dir = "apps/fleet_workflow/priv/canon/workflow_maps"
+    dir = "priv/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
 
     evidence =
@@ -640,7 +640,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # decision (resume_gate/gate_result) OR evaluating the gate (gate_decide) — otherwise
   # decision/outputs stay buried → false escalation / wrongful hard-gate.
   defp check_verdict_envelope_unwrapped(root) do
-    step_run = "apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex"
+    step_run = "lib/fleet/pilot/step_run_consumer.ex"
     abs = Path.join(root, step_run)
 
     # Anti-hollow-green: a `not File.exists?(abs) or …` would turn the rail GREEN if `step_run_consumer.ex` were
@@ -832,126 +832,78 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  defp umbrella_root do
-    cwd = File.cwd!()
-    if File.dir?(Path.join(cwd, "apps")), do: cwd, else: Path.expand("../..", cwd)
-  end
+  # MIGRATION Z3 : plus d'umbrella — la tâche tourne toujours à la racine du projet single-app
+  # (Mix pose le cwd à la racine ; l'ancienne détection « pas de dossier `apps/` → remonter de
+  # deux niveaux » servait au lancement depuis une app umbrella, un cas qui n'existe plus et qui,
+  # gardé, renverrait un `../..` HORS projet dès que le leftover `apps/` sera supprimé).
+  defp project_root, do: File.cwd!()
 
   # ── Topology lock ──────────────────────────────────────────────
-  # `priv/allowed_graph.yaml` freezes the REAL dep graph. Three facets, all fail-closed:
-  #   (a) mix.exs BIDIRECTIONAL: real compile edge not declared = fail; declared phantom edge = fail.
-  #   (d) RING monotonicity: an UPWARD compile dep (lower ring -> upper) that is non-seam = fail (the PubSub via
-  #       event_router R0 is exempt by construction — it is not a layer dep).
-  #   (b) LIVE seams: each declared seam carries a `marker` that MUST match code of the `from` app;
-  #       if it no longer matches, the seam is dead (the code moved) and the yaml is stale -> fail.
-  # Encodes the CURRENT graph -> born GREEN; any dep addition/removal turns it red until the yaml is
-  # re-declared (forces awareness of a topology change). Unreadable yaml -> fail-closed.
+  # MIGRATION Z3 : check OBSOLÈTE post-collapse — fail explicite, à retransposer.
+  # Pré-collapse, ce rail figeait le graphe de deps compile RÉEL de l'umbrella :
+  # `apps/fleet_event_router/priv/allowed_graph.yaml` (rings + edges + seams) diffé
+  # BIDIRECTIONNELLEMENT contre les edges `{:fleet_x, in_umbrella: true}` des `apps/*/mix.exs`,
+  # + monotonicité de ring (dep compile montante non-seam = fail), + seams vivants (marker greppé
+  # dans le code de l'app `from`). Post-collapse (app unique), la matière première du check
+  # n'existe plus : plus de mix.exs par domaine, plus de deps in_umbrella — grepper les
+  # `apps/*/mix.exs` LEFTOVER mesurerait un graphe qui ne gouverne plus le build (faux-vert),
+  # et l'équivalent single-app (xref inter-domaines `lib/fleet/<x>/` projeté sur les rings du
+  # yaml, désormais `priv/event_router/allowed_graph.yaml`) est un REDESIGN, pas une
+  # transposition évidente. Fail-closed en attendant : le verrou release reste rouge tant que
+  # la propriété « topologie déclarée = topologie réelle » n'a pas retrouvé une mesure vraie.
+  # MIGRATION Z3 (D-19) — l'ancien `layering.dependency_graph` est RETIRÉ avec sa matière
+  # première : il lisait les edges `in_umbrella:` des apps/*/mix.exs, qui n'existent plus.
+  # Son successeur MÉCANIQUE est boundary (Z4) : chaque domaine déclarera ses deps dans
+  # `use Boundary` et le COMPILATEUR refusera les violations — plus fort que ce grep.
+  # FENÊTRE ASSUMÉE entre Z3 et Z4 : la direction des deps inter-domaines n'est enforcée
+  # nulle part. Ce qui RESTE vérifiable ici, et que l'umbrella ne portait pas, c'est
+  # l'invariant de BOOT : l'ordre des children de Fleet.Application est le SEUL porteur
+  # de F8 (event_router premier ; mcp avant starfleet ; starfleet après spawner) — le
+  # réordonner casse le boot sans erreur de compile. C'est ce que ce check verrouille,
+  # sous un id honnête (`boot.order_f8`).
   defp check_layering_dependency_graph(root) do
-    yaml = Path.join(root, "apps/fleet_event_router/priv/allowed_graph.yaml")
+    app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
-    case YamlElixir.read_from_file(yaml) do
-      {:ok, %{"rings" => rings, "edges" => declared_edges} = spec} ->
-        seam_list = spec["seams"] || []
-        seams = MapSet.new(seam_list, &{&1["from"], &1["to"]})
-        declared = MapSet.new(declared_edges, &{&1["from"], &1["to"]})
-        real = MapSet.new(real_mix_edges(root))
+    with [block] <- Regex.run(~r/children = \[(.*?)\n    \]/s, app_src, capture: :all_but_first),
+         positions = %{
+           er: :binary.match(block, "Fleet.EventRouter.Application"),
+           mcp: :binary.match(block, "Fleet.MCP.Supervisor"),
+           spw: :binary.match(block, "Fleet.Spawner.Application"),
+           stf: :binary.match(block, "Fleet.Starfleet.Application")
+         },
+         false <- Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
+      %{er: {er, _}, mcp: {mcp, _}, spw: {spw, _}, stf: {stf, _}} = positions
+      # er = MIN des quatre (le Bus boote avant tout consommateur potentiel) — PAS er==0 :
+      # le bloc children commence par un COMMENTAIRE, l'offset du module n'est jamais 0.
+      ok? = er < mcp and er < spw and mcp < stf and spw < stf
 
-        undeclared =
-          for {f, t} <- MapSet.difference(real, declared),
-              do: "REAL compile edge not declared: #{f} -> #{t}"
-
-        phantom =
-          for {f, t} <- MapSet.difference(declared, real),
-              do: "DECLARED phantom edge (absent from the mix.exs files): #{f} -> #{t}"
-
-        upward =
-          for {f, t} <- real,
-              rf = rings[f],
-              rt = rings[t],
-              is_integer(rf) and is_integer(rt) and rf < rt and not MapSet.member?(seams, {f, t}),
-              do: "UPWARD non-seam compile dep: #{f}(R#{rf}) -> #{t}(R#{rt})"
-
-        well_formed =
-          Enum.filter(
-            seam_list,
-            &(is_binary(&1["from"]) and is_binary(&1["to"]) and is_binary(&1["marker"]))
-          )
-
-        # HOLLOW-GREEN GUARD (R0-EVT-014): a MALFORMED seam entry (missing/non-string from/to/marker) used
-        # to fall through `seam_alive?/3`'s permissive fallback → counted ALIVE → silently accepted (a
-        # typo'd marker would make the liveness check vacuously pass). A malformed seam is unverifiable →
-        # FAIL explicitly, distinct from a genuinely dead seam.
-        malformed =
-          for s <- seam_list,
-              s not in well_formed,
-              do: "MALFORMED seam entry (needs string from/to/marker): #{inspect(s)}"
-
-        dead_seams =
-          for s <- well_formed,
-              not seam_alive?(root, s["from"], s["marker"]),
-              do:
-                "DEAD seam (marker `#{s["marker"]}` absent from the code of #{s["from"]}): #{s["from"]} -> #{s["to"]}"
-
-        evidence = undeclared ++ phantom ++ upward ++ malformed ++ dead_seams
-
-        %{
-          id: "layering.dependency_graph",
-          remediation:
-            "D4/A2 — update apps/fleet_event_router/priv/allowed_graph.yaml, or fix the dep/seam",
-          status: if(evidence == [], do: :pass, else: :fail),
-          evidence: evidence,
-          note:
-            "declared topology = real compile graph (bidirectional) + ring monotonicity + live seams; " <>
-              "PubSub (Bus, R0) exempt"
-        }
-
+      %{
+        id: "boot.order_f8",
+        remediation:
+          "réordonner les children de Fleet.Application : event_router EN TÊTE, " <>
+            "mcp AVANT starfleet, starfleet APRÈS spawner (cicatrice F8 du moduledoc)",
+        status: if(ok?, do: :pass, else: :fail),
+        evidence: [
+          "ordre children (offsets dans le bloc) : event_router=#{er} mcp=#{mcp} " <>
+            "spawner=#{spw} starfleet=#{stf} — contraintes : er<mcp, er<spw, mcp<stf, spw<stf"
+        ],
+        note:
+          "successeur du verrou topologie umbrella (retiré avec les mix.exs d'apps) ; " <>
+            "l'enforcement de la DIRECTION des deps arrive avec boundary (Z4)"
+      }
+    else
       _ ->
         %{
-          id: "layering.dependency_graph",
-          remediation: "D4/A2",
+          id: "boot.order_f8",
+          remediation:
+            "children de Fleet.Application introuvables (bloc `children = [...]` ou un " <>
+              "superviseur de domaine attendu manquant) — restaurer la liste + cicatrice F8",
           status: :fail,
-          evidence: ["priv/allowed_graph.yaml unreadable or malformed (fail-closed)"],
-          note: "topology yaml absent/invalid"
+          evidence: ["extraction du bloc children impossible — fail-closed"],
+          note: "cf. commentaire MIGRATION Z3 (D-19) ci-dessus"
         }
     end
   end
-
-  # Real compile edges extracted from the mix.exs files (`{:fleet_x, in_umbrella: true}`), comment stripped (a
-  # dep in a comment does not count). Returns a set of `{from_app, to_app}` tuples.
-  defp real_mix_edges(root) do
-    dep_re = ~r/\{:(fleet_\w+),\s*in_umbrella:\s*true\}/
-
-    Path.wildcard(Path.join(root, "apps/fleet_*/mix.exs"))
-    |> Enum.flat_map(fn mix_path ->
-      from = mix_path |> Path.dirname() |> Path.basename()
-
-      mix_path
-      |> grep_lines(dep_re)
-      |> Enum.flat_map(fn {_ln, line} ->
-        dep_re
-        |> Regex.scan(strip_comment(line))
-        |> Enum.map(fn [_full, to] -> {from, to} end)
-      end)
-    end)
-  end
-
-  # A seam is LIVE if its `marker` (regex) matches a code line (comment stripped) of the `from` app.
-  defp seam_alive?(root, from_app, marker) when is_binary(from_app) and is_binary(marker) do
-    re = Regex.compile!(marker)
-
-    root
-    |> Path.join("apps/#{from_app}/lib/**/*.ex")
-    |> Path.wildcard()
-    |> Enum.any?(fn f ->
-      f
-      |> grep_lines(re)
-      |> Enum.any?(fn {_ln, line} -> Regex.match?(re, strip_comment(line)) end)
-    end)
-  end
-
-  # Fallback: a seam called with a non-string from/marker (a malformed entry) is NOT alive — it is
-  # caught explicitly upstream as `malformed`, but defense-in-depth: never report a malformed seam as live.
-  defp seam_alive?(_root, _from, _marker), do: false
 
   defp render_yaml(overall, checks) do
     header = "status: #{overall}\nchecks:"

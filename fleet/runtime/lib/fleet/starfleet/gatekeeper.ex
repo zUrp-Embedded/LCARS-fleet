@@ -99,8 +99,8 @@ defmodule Fleet.Starfleet.Gatekeeper do
   end
 
   defp default_schema_path do
-    :code.priv_dir(:fleet_starfleet)
+    :code.priv_dir(:lcars_fleet)
     |> to_string()
-    |> Path.join("schema/decision-v1.json")
+    |> Path.join("starfleet/schema/decision-v1.json")
   end
 end

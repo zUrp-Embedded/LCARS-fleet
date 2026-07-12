@@ -86,9 +86,9 @@ defmodule Fleet.Coord.Policies do
   # escalation targets stay verified at runtime by Fleet.Coord, not here.
   defp validate_against_schema!(data, path) do
     schema_path =
-      :code.priv_dir(:fleet_coord)
+      :code.priv_dir(:lcars_fleet)
       |> to_string()
-      |> Path.join("schema/coord-policies-v1.json")
+      |> Path.join("coord/schema/coord-policies-v1.json")
 
     # IMMUTABLE priv schema, resolved ONCE via the Ring 0 authority `Fleet.SchemaCache`
     # (dedup: before, re-read+decode+resolve of the file on EACH call, no cache).
@@ -182,8 +182,8 @@ defmodule Fleet.Coord.Policies do
   end
 
   defp default_policies_path do
-    :code.priv_dir(:fleet_coord)
+    :code.priv_dir(:lcars_fleet)
     |> to_string()
-    |> Path.join("config/coord-policies.yaml")
+    |> Path.join("coord/config/coord-policies.yaml")
   end
 end

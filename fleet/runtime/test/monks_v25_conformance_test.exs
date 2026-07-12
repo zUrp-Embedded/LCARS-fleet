@@ -21,8 +21,8 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
   @moduletag skip:
                "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
 
-  @schema_path Path.join([__DIR__, "..", "priv", "schema", "cap-profile-v2.5.json"])
-  @monks_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles", "monks"])
+  @schema_path Path.join([__DIR__, "..", "priv", "cap_profile", "schema", "cap-profile-v2.5.json"])
+  @monks_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles", "monks"])
 
   setup_all do
     schema = @schema_path |> File.read!() |> Jason.decode!() |> ExJsonSchema.Schema.resolve()

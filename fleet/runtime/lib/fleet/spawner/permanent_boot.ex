@@ -329,7 +329,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   # Base seed of a permanent: clean resumable anchor, captured out-of-fleet (pure claude), versioned in priv.
   defp base_seed_path(name) do
-    Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "#{name}.jsonl"])
+    Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "#{name}.jsonl"])
   end
 
   # Fixed UUID = 1st `sessionId` found in the base. nil if absent (→ boot_opts falls back to recreate).

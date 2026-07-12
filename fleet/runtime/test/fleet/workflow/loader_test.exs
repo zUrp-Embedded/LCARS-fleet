@@ -232,7 +232,7 @@ defmodule Fleet.Workflow.LoaderTest do
     # Garde-fou anti-régression : toutes les workflow_maps canon doivent passer le linter de graphe.
     # Une workflow_map canon qui échoue ici = soit un vrai bug de workflow_map, soit un invariant trop strict.
     test "toutes les workflow_maps canon passent le linter" do
-      canon_dir = Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")
+      canon_dir = Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
       names =
         canon_dir

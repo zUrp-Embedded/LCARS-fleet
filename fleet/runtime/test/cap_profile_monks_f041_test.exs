@@ -10,7 +10,7 @@ defmodule Fleet.CapProfile.MonksF041Test do
 
   alias Fleet.CapProfile
 
-  @canon_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles"]) |> Path.expand()
+  @canon_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles"]) |> Path.expand()
 
   setup do
     prev = Application.get_env(:fleet_cap_profile, :root_dir)

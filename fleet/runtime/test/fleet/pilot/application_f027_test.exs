@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.ApplicationF027Test do
     Application.delete_env(:fleet_pilot, :forge)
 
     assert_raise RuntimeError, ~r/base_url/, fn ->
-      Fleet.Pilot.Application.start(:normal, [])
+      Fleet.Pilot.Application.init([])
     end
   end
 
@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.ApplicationF027Test do
     Application.put_env(:fleet_pilot, :forge, token: "x")
 
     assert_raise RuntimeError, ~r/base_url/, fn ->
-      Fleet.Pilot.Application.start(:normal, [])
+      Fleet.Pilot.Application.init([])
     end
   end
 

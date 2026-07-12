@@ -15,8 +15,8 @@ defmodule Fleet.Workflow.GateDecisionTest do
 
   test "le module est le miroir EXACT de l'enum `decision` du schema wire gate-decision-v1.json" do
     schema =
-      :fleet_workflow
-      |> Application.app_dir("priv/schema/gate-decision-v1.json")
+      :lcars_fleet
+      |> Application.app_dir("priv/workflow/schema/gate-decision-v1.json")
       |> File.read!()
       |> Jason.decode!()
 

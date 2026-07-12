@@ -166,8 +166,8 @@ defmodule Fleet.SPBuilderTest do
 
     test "modop_root a un DÉFAUT (fleet_cap_profile/modop-bundles) : modop sans config explicite → composé (F-C146/PORT)" do
       # EXERCE le DÉFAUT runtime : on retire l'override → modop_root non configuré → défaut
-      # app_dir(:fleet_cap_profile, "priv/canon/modop-bundles") (les bundles y ont été déplacés, un dep de
-      # sp_builder). `fire-mode` y existe → composé. Plus de :modop_root_unconfigured : le PORT a câblé le
+      # app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles") (les bundles y ont été
+      # déplacés). `fire-mode` y existe → composé. Plus de :modop_root_unconfigured : le PORT a câblé le
       # défaut, comme sp_role_root — c'est ce qui rend les overlays modop enfin appliqués au spawn.
       Application.delete_env(:fleet_sp_builder, :modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
@@ -181,7 +181,7 @@ defmodule Fleet.SPBuilderTest do
 
     test "subagent_template (F-C147/PORT) : le fragment SP est injecté ; fichier absent → fail-loud" do
       # reviewer→code-quality-reviewer : subagent-code-quality-reviewer.md existe dans le canon (root défaut
-      # = app_dir(:fleet_cap_profile, "priv/canon/subagent-templates"), non overridé par le setup).
+      # = app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates"), non overridé par le setup).
       profile =
         valid_cap_profile(%{
           "systemPrompt" => nil,

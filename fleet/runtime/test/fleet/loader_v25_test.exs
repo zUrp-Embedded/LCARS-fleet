@@ -15,7 +15,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   alias Fleet.Workflow.Loader
 
   # R0.8-brick6 : canon pipelines réabsorbés in-repo.
-  @canon_pipelines Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")
+  @canon_pipelines Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
   test "canon standard-qa.yaml (V2.5) normalisé → name + steps top-level" do
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)

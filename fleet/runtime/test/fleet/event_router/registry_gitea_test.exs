@@ -9,9 +9,9 @@ defmodule Fleet.EventRouter.RegistryGiteaTest do
 
   test "toutes les actions gitea pré-enregistrées sont des clés events.yaml (pas de drop muet #9)" do
     registry =
-      :fleet_event_router
+      :lcars_fleet
       |> :code.priv_dir()
-      |> Path.join("events.yaml")
+      |> Path.join("event_router/events.yaml")
       |> YamlElixir.read_from_file!()
       |> Map.fetch!("events")
       |> Map.keys()

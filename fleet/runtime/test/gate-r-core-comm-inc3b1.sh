@@ -11,7 +11,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"
 echo "== Gate R-CORE.comm inc3b.1 — tool layer ExMCP.Server (get_task IN / submit_result OUT) =="
-cd "$RT" && mix test apps/fleet_mcp/test/pod_tools_test.exs
+cd "$RT" && mix test test/pod_tools_test.exs
 RC=$?
 echo "---"
 if [ "$RC" -eq 0 ]; then

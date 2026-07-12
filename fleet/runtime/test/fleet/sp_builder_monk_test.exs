@@ -20,7 +20,7 @@ defmodule Fleet.SPBuilder.MonkTest do
 
   # R0.8-brick1 : root canon in-repo (R0.7 réabsorption), pas path doctrine
   # 05_data-canon/... (inexistant en standard install).
-  @monks_dir Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")
+  @monks_dir Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
 
   defp monk_cp(instance) do
     %Fleet.CapProfile{

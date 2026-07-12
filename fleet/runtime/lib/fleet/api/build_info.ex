@@ -73,7 +73,7 @@ defmodule Fleet.API.BuildInfo do
   The destination path is computed exactly as Mix copies the app
   (`<release.path>/lib/<app>-<vsn>/priv`, cf. `Mix.Release` `copy_app`) — not
   a hand-rolled glob. The runtime will re-read this file via
-  `Application.app_dir(:fleet_api, "priv/build_info.txt")` → `source: :release`.
+  `Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")` → `source: :release`.
 
   Best-effort on the capture: if git fails at build, we write `unknown` facts
   rather than breaking the release build.
@@ -86,9 +86,11 @@ defmodule Fleet.API.BuildInfo do
         :error -> %{sha: "unknown", dirty: false, ref: nil}
       end
 
-    properties = Map.fetch!(release.applications, :fleet_api)
+    properties = Map.fetch!(release.applications, :lcars_fleet)
     vsn = Keyword.fetch!(properties, :vsn)
-    priv_dir = Path.join([release.path, "lib", "fleet_api-#{vsn}", "priv"])
+    # `priv/api` (not `priv/`): MUST land exactly where `release_file_path/0` re-reads it —
+    # `app_dir(:lcars_fleet, "priv/api/build_info.txt")` = `lib/lcars_fleet-<vsn>/priv/api/` in the release.
+    priv_dir = Path.join([release.path, "lib", "lcars_fleet-#{vsn}", "priv", "api"])
 
     File.mkdir_p!(priv_dir)
     File.write!(Path.join(priv_dir, "build_info.txt"), serialize(facts))
@@ -130,7 +132,7 @@ defmodule Fleet.API.BuildInfo do
   end
 
   defp release_file_path do
-    Application.app_dir(:fleet_api, "priv/build_info.txt")
+    Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")
   end
 
   defp resolve_working_tree do

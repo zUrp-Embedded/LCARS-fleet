@@ -68,7 +68,7 @@ defmodule Fleet.Spawner.Pod.Assets do
     # cap-profile (fail-loud), not a fallback.
     if Fleet.Slug.valid?(role) do
       read_tagged(
-        Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/agent-#{role}-base.md"),
+        Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts/agent-#{role}-base.md"),
         :agent_draft_missing
       )
     else
@@ -78,7 +78,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   @doc """
   The pod's `protocole-user.md` (custom keywords `yop`/`SeeU`). Default =
-  `priv/sp_drafts/protocole-user-worker.md` shipped with `fleet_sp_builder`: the WORKER version
+  `priv/sp_builder/sp_drafts/protocole-user-worker.md` shipped in the bundled priv: the WORKER version
   (`yop` = trigger the issue-driven workflow, `SeeU` = no-op). Override via config
   `:fleet_spawner, :protocole_user_path` (custom user instance).
 
@@ -91,8 +91,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   def read_protocole_user do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
-        :fleet_sp_builder
-        |> Application.app_dir("priv/sp_drafts/protocole-user-worker.md")
+        :lcars_fleet
+        |> Application.app_dir("priv/sp_builder/sp_drafts/protocole-user-worker.md")
         |> read_tagged(:protocole_user_worker_missing)
 
       path when is_binary(path) ->
@@ -135,13 +135,13 @@ defmodule Fleet.Spawner.Pod.Assets do
   @doc """
   Provisions the in-pod monitor (`watch.sh`) into the pod_dir (= bwrap HOME). The agent arms it via
   the native `Monitor` tool (cf. the role's SP, `core/runtime-contract` block) → wake-by-flag
-  (`turn.flag` touched by the fleet), zero CONTENT send-keys. The asset lives in `fleet_spawner`'s
-  `priv/` (resolved via `app_dir`, like the SP draft). chmod best-effort: the agent runs
+  (`turn.flag` touched by the fleet), zero CONTENT send-keys. The asset lives in the bundled
+  `priv/spawner/` (resolved via `app_dir`, like the SP draft). chmod best-effort: the agent runs
   `bash ~/watch.sh`, the exec bit is not required.
   """
   @spec provision_monitor_watch(map()) :: :ok | {:error, term()}
   def provision_monitor_watch(state) do
-    src = Application.app_dir(:fleet_spawner, "priv/watch.sh")
+    src = Application.app_dir(:lcars_fleet, "priv/spawner/watch.sh")
     dst = Path.join(state.pod_dir, "watch.sh")
 
     case File.read(src) do

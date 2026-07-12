@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.SessionIdTest do
 
   describe "verrou anti-drift seed↔encodeur" do
     test "le base seed arch porte EXACTEMENT le session_id encodé (= ce que permanent_boot extrait)" do
-      seed = Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "architect.jsonl"])
+      seed = Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "architect.jsonl"])
 
       # même extraction que Fleet.Spawner.PermanentBoot.base_seed_uuid/1 (1er sessionId).
       [_, first_session_id] = Regex.run(~r/"sessionId":"([^"]+)"/, File.read!(seed))

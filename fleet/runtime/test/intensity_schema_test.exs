@@ -5,8 +5,8 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
   """
   use ExUnit.Case, async: true
 
-  @schema_path Path.join([__DIR__, "..", "priv", "schema", "intensity-v1.json"])
-  @canon_path Path.join([__DIR__, "..", "priv", "canon", "config", "intensity-template.json"])
+  @schema_path Path.join([__DIR__, "..", "priv", "cap_profile", "schema", "intensity-v1.json"])
+  @canon_path Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "config", "intensity-template.json"])
 
   setup_all do
     assert File.exists?(@schema_path), "schema absent: #{@schema_path}"

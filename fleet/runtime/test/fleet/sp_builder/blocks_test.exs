@@ -4,8 +4,8 @@ defmodule Fleet.SPBuilder.BlocksTest do
   alias Fleet.SPBuilder.Blocks
 
   # `priv` resolved at RUNTIME (the app is started in test) — `_build` mirrors the source at the last compile.
-  defp blocks_dir, do: :fleet_sp_builder |> Application.app_dir("priv") |> Path.join("sp_blocks")
-  defp drafts_dir, do: :fleet_sp_builder |> Application.app_dir("priv") |> Path.join("sp_drafts")
+  defp blocks_dir, do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_blocks")
+  defp drafts_dir, do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_drafts")
 
   test "each role in the map composes a non-empty, titled SP" do
     roles = Blocks.role_map(blocks_dir())

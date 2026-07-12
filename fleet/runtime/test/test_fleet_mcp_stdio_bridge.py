@@ -128,7 +128,7 @@ check(by_id3.get(9, {}).get("error", {}).get("code") == -32601, "methode inconnu
 # F-C138 — l'ancien Test D (bridge expose create_issue+schema en mode architecte) + l'anti-regression
 # role-filtering ONT ETE RETIRES : le pont ne hardcode plus de catalogue ni de filtrage par role. Le
 # schema create_issue (invariant MA-19 `project` requis) et le filtrage par role sont desormais servis
-# par le CENTRAL, couverts cote Elixir par apps/fleet_mcp/test/pod_socket_test.exs (tools/list = base +
+# par le CENTRAL, couverts cote Elixir par test/pod_socket_test.exs (tools/list = base +
 # tools rôle threades, deftool comme source unique) + le conformance test du schema cap-profile.
 
 srv.shutdown()

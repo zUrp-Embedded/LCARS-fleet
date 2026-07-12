@@ -14,8 +14,8 @@ defmodule Fleet.Coord.CoordPoliciesSchemaTest do
   """
   use ExUnit.Case, async: true
 
-  @schema_path Path.join([__DIR__, "..", "priv", "schema", "coord-policies-v1.json"])
-  @canon_path Path.join([__DIR__, "..", "priv", "config", "coord-policies.yaml"])
+  @schema_path Path.join([__DIR__, "..", "priv", "coord", "schema", "coord-policies-v1.json"])
+  @canon_path Path.join([__DIR__, "..", "priv", "coord", "config", "coord-policies.yaml"])
 
   setup_all do
     assert File.exists?(@schema_path), "schema absent: #{@schema_path}"
