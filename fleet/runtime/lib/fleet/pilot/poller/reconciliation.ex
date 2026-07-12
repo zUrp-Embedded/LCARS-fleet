@@ -16,17 +16,20 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   poller state. The **2-tick grace** (only accumulate a suspect over two consecutive ticks) and
   the **cross-repo aggregation** (`MapSet.union` of the suspects of all the repos of a tick) are
   CROSS-TICK state: they STAY at the core (`Fleet.Pilot.Poller` — `do_poll`/`step_do_poll` passes
-  the suspects of the previous tick as `prior_suspects` and re-writes the yielded set into the state).
+  THIS repo's subset of the previous tick's suspects as `prior_suspects` and re-writes the yielded
+  set into the state).
 
-  ## 2-tick grace + REPO-QUALIFIED refs (load-bearing semantics, verbatim)
+  ## 2-REGULAR-tick grace + REPO-QUALIFIED refs (load-bearing semantics, verbatim)
 
   We only reclaim a CONFIRMED orphan: `reconcile/5` intersects the orphans seen THIS tick with
   `prior_suspects` (the orphans seen at the PREVIOUS tick) — never a freshly dispatched pod (not
-  yet registered) or one in the process of dying. The lock refs are REPO-QUALIFIED
-  (`{repo, :issue|:pr, n}`): the key carries the repo, so the refs of the live pods (`owned`, scoped
-  to the current repo) and the cross-tick suspects (all repos) no longer collide on the number alone.
-  An orphan #N/repoA is no longer masked by a live pod #N/repoB, and the grace no longer contaminates
-  across repos.
+  yet registered) or one in the process of dying. The grace unit is the REGULAR tick (~30s):
+  webhook kick-polls are dispatch-only and NEVER call `reconcile/5` (counting them compressed
+  the ~60s grace to the webhook rate — reclaim mid-publication, double dispatch; Z6e class).
+  The lock refs are REPO-QUALIFIED (`{repo, :issue|:pr, n}`): the key carries the repo, so the
+  refs of the live pods (`owned`, scoped to the current repo) and the suspects (repo-scoped by
+  the caller) no longer collide on the number alone. An orphan #N/repoA is no longer masked by
+  a live pod #N/repoB, and the grace no longer contaminates across repos.
 
   ## Fail-safe (verbatim)
 
@@ -83,9 +86,11 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   Reconciles the orphaned `lcars-in-flight` locks of the repo `seams.repo` and yields the NEW set of
   suspects (`MapSet.t()` of repo-qualified refs `{repo, :issue|:pr, n}`).
 
-  `prior_suspects` = the orphans seen at the PREVIOUS tick (2-tick grace, carried by the core). Side
-  effect: removes the forge label (`reclaim_lock/2`) of the CONFIRMED orphans (seen at both ticks). The
-  yielded set = the orphans of THIS tick not yet reclaimed (those awaiting their 2nd confirmation).
+  `prior_suspects` = THIS repo's orphans seen at the PREVIOUS regular tick (2-tick grace, carried
+  by the core — the caller passes the repo-scoped subset, never the whole cross-repo union: the
+  union let an error branch resurrect suspects resolved on other repos). Side effect: removes the
+  forge label (`reclaim_lock/2`) of the CONFIRMED orphans (seen at both ticks). The yielded set =
+  the orphans of THIS tick not yet reclaimed (those awaiting their 2nd confirmation).
 
   Fail-safe: if the enumeration of the pods fails (`:error`), yields `prior_suspects` unchanged (reclaims
   nothing blindly).
@@ -111,14 +116,16 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         #      TERMINAL (`WorkItem.active?/1`) — a delivered engineer's completion (push → open PR →
         #      unlock) is running-or-done, its lock is released at the END. Counting it as active masked an
         #      orphaned ISSUE lock FOREVER when the completion was LOST before open_pr (permanent silent
-        #      wedge). The legitimate publication window (push ≤30s) is covered by the 2-tick grace (~60s)
+        #      wedge). The legitimate publication window (push ≤30s) is covered by the 2-REGULAR-tick
+        #      grace (~60s at the 30s interval — webhook kick-polls never enter reconcile, so the forge
+        #      traffic of the completion sequence itself cannot compress this window; Z6e)
         #      + the idempotent completion sequence (a late reclaim = a harmless replay), so excluding
         #      `:completed` reclaims the lost-completion orphan WITHOUT churning the nominal window.
 
         # REPO-QUALIFIED orphans (`{repo, :issue|:pr, n}`): the lock key carries the repo, so
-        # `owned` (repo-scoped refs of the live pods of THIS repo) and `prior_suspects` (cross-tick, all
-        # repos) no longer collide on the number alone. An orphan #N/repoA is no longer masked by a
-        # live pod #N/repoB, and the 2-tick grace no longer contaminates across repos.
+        # `owned` (repo-scoped refs of the live pods of THIS repo) and `prior_suspects` (cross-tick,
+        # repo-scoped by the caller) no longer collide on the number alone. An orphan #N/repoA is no
+        # longer masked by a live pod #N/repoB, and the 2-tick grace no longer contaminates across repos.
         issue_orphans =
           for i <- issues,
               n = i["number"],
