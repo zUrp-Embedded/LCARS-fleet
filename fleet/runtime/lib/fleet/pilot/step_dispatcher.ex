@@ -50,7 +50,6 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # Spawn opts builders / naming (rc_name / feature_slug / maybe_put_route / resolve_repo_id) —
   # shared with the review flow (RoleDispatch), one copy.
-  alias Fleet.Pilot.StepDispatcher.Spawn.Naming
 
   # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constants).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
@@ -139,9 +138,9 @@ defmodule Fleet.Pilot.StepDispatcher do
         # Route + workflow_map pre-read by the poller (lease classification) → reused via opts
         # (`resolve_route` / `:prefetched_workflow_map`) instead of a 2nd get_route + 2nd workflow_map load. Absent (tests,
         # other callers) → normal read/load (fallback).
-        with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
+        with {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
+               Opts.tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
              {:ok, route} <-
                ensure_workflow_map_or_onboard(
                  forge,
@@ -152,7 +151,7 @@ defmodule Fleet.Pilot.StepDispatcher do
                  forge_opts
                ),
              {:ok, {role, profile, step_spec}} <-
-               tag_err(
+               Opts.tag_err(
                  workflow_map_role(
                    route,
                    &loader.load/1,
@@ -168,7 +167,7 @@ defmodule Fleet.Pilot.StepDispatcher do
              # an issue we are not processing; the poller re-dispatches at the next tick).
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
-             slug = Naming.feature_slug(issue),
+             slug = Spawn.feature_slug(issue),
              :ok <-
                Spawn.serialize_project_scope(
                  scope,
@@ -202,15 +201,15 @@ defmodule Fleet.Pilot.StepDispatcher do
                 [
                   brief: brief,
                   pod_id: pod_id,
-                  rc_name: Naming.rc_name(repo, role),
+                  rc_name: Spawn.rc_name(repo, role),
                   # Speaking LOCAL branch name (sanitized issue title), not
                   # the pod_id. Used by phase.ex → `feature/<slug>`. Computed once (reused by the gate
                   # for the in-place reprovision of a pipe: same branch at reset as at spawn).
                   slug: slug
                 ]
                 |> Opts.maybe_put(:project, project)
-                |> Naming.maybe_put_route(route)
-                |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
+                |> Spawn.maybe_put_route(route)
+                |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
 
               # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
               # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
@@ -298,7 +297,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   def dispatch_review(pr, opts) when is_map(pr) do
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
-    # `ctx.<typo>` does not compile. `route_reader`/`err_tagger` = captures of the core helpers
+    # `ctx.<typo>` does not compile. (Les ex-captures route_reader/err_tagger sont mortes en Z6c :
     # (`route_for/4`/`tag_err/2`, shared with `dispatch_issue`) — like `resolver`/`wake_recovery`, the
     # capture is created HERE → ReviewLifecycle never references this module (uni-directional, no cycle).
     ctx = %ReviewLifecycle.Ctx{
@@ -313,9 +312,7 @@ defmodule Fleet.Pilot.StepDispatcher do
       forge_opts: Keyword.get(opts, :forge_opts, []),
       # Wake recovery seam (default = the real fn) threaded from opts.
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
-      opts: opts,
-      route_reader: &route_for/4,
-      err_tagger: &tag_err/2
+      opts: opts
     }
 
     pr_number = pr["number"]
@@ -415,11 +412,6 @@ defmodule Fleet.Pilot.StepDispatcher do
     )
   end
 
-  # Tags the error of a resolution step (preserves the expected {:project_resolution, _}). SHARED by the
-  # two flows: called directly by `dispatch_issue` (issue) AND threaded by capture (`err_tagger`) to
-  # `ReviewLifecycle` (review) — one copy, no fork, no upward reference (no cycle).
-  defp tag_err({:ok, _} = ok, _tag), do: ok
-  defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
 
   # WorkflowMap-driven role: derives `{role, profile, step_spec}` from the workflow_map POSITION (written route) +
   # profile load. route nil = anomaly → fail-loud (no producer fallback). WorkflowMap/step/
@@ -467,7 +459,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp resolve_route(opts, forge, repo, number, forge_opts) do
     case Keyword.fetch(opts, :prefetched_route) do
       {:ok, route} -> {:ok, route}
-      :error -> route_for(forge, repo, number, forge_opts)
+      :error -> Spawn.route_for(forge, repo, number, forge_opts)
     end
   end
 
@@ -514,17 +506,6 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # Reads the workflow_map position (workflow_map_name, step) written on the forge. `:none` (off-workflow_map /
-  # 1-step) → `{:ok, nil}` (direct producer). HTTP error → propagated (skip without lock). SHARED by the
-  # two flows: called directly by `resolve_route` (issue) AND threaded by capture (`route_reader`) to
-  # `ReviewLifecycle` (review) — one copy, no fork, no upward reference (no cycle).
-  defp route_for(forge, repo, number, forge_opts) do
-    case forge.get_route(repo, number, forge_opts) do
-      {:ok, {_p, _s} = route} -> {:ok, route}
-      :none -> {:ok, nil}
-      {:error, reason} -> {:error, reason}
-    end
-  end
 
   # ============================================================
   # Internals

@@ -47,7 +47,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   # Spawn opts builders / naming (rc_name / maybe_put_route / resolve_repo_id) — shared
   # with the issue flow (StepDispatcher), a single copy.
-  alias Fleet.Pilot.StepDispatcher.Spawn.Naming
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
@@ -122,10 +121,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
     # PROJECT + ROUTE resolved BEFORE any forge write (read-only): a failure leaves no
     # orphan lock. The route (workflow_map_name, step) is read on the ISSUE (the pipeline-state stays there).
-    # `route_reader`/`err_tagger` = captures of the core's helpers (route_for/tag_err), shared with the issue flow.
-    with {:ok, project} <- ctx.err_tagger.(resolver.(repo, review_opts), :project_resolution),
+    # Z6c : plus de captures — Spawn.route_for/Opts.tag_err pris à la source (partagés avec le flux issue).
+    with {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <-
-           ctx.err_tagger.(ctx.route_reader.(forge, repo, issue_n, forge_opts), :route_resolution) do
+           Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
       # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
       # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
       # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
@@ -169,10 +168,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
                ) do
             {:ok, brief} ->
               spawn_opts =
-                [brief: brief, pod_id: pod_id, rc_name: Naming.rc_name(repo, role)]
+                [brief: brief, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
                 |> Opts.maybe_put(:project, project)
-                |> Naming.maybe_put_route(route)
-                |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
+                |> Spawn.maybe_put_route(route)
+                |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
 
               # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
               # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the

@@ -85,7 +85,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # budget. Routeless / unreadable map → `{:error}`: the caller escalates (never a blind loop).
   defp pr_rework_budget(%Ctx{} = ctx, issue_n) do
     with {:ok, {map_name, _step}} when is_binary(map_name) <-
-           ctx.route_reader.(ctx.forge, ctx.repo, issue_n, ctx.forge_opts),
+           Fleet.Pilot.StepDispatcher.Spawn.route_for(ctx.forge, ctx.repo, issue_n, ctx.forge_opts),
          {:ok, workflow_map} <-
            Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
       {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}

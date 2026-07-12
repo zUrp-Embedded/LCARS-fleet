@@ -64,8 +64,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     @moduledoc """
     Full context of the review flow, built at the SINGLE site `StepDispatcher.dispatch_review/2` and
     threaded through routing/rework/promotion. DEDICATED struct (not a map): `@enforce_keys`
-    forces every field, a `ctx.<typo>` access does not compile. `route_reader`/`err_tagger` are the
-    captures of the core's helpers (`route_for`/`tag_err`) shared with the issue flow.
+    forces every field, a `ctx.<typo>` access does not compile. (Z6c migration 2026-07-13 :
+    les captures `route_reader`/`err_tagger` sont MORTES — les deux flux prennent désormais
+    `Spawn.route_for`/`Opts.tag_err` à la source, l'unidirectionnalité tient sans détour.)
     """
     @enforce_keys [
       :forge,
@@ -77,9 +78,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       :repo,
       :forge_opts,
       :wake_recovery,
-      :opts,
-      :route_reader,
-      :err_tagger
+      :opts
     ]
     defstruct @enforce_keys
 
@@ -106,10 +105,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
             # The raw dispatch `opts` keyword (base of `review_opts`, budgets, incident registry seam).
             opts: keyword(),
             # Capture of `StepDispatcher.route_for/4` (reading the engraved route) — shared with the issue flow.
-            route_reader: (module(), String.t(), integer(), keyword() ->
-                             {:ok, {String.t(), String.t()} | nil} | {:error, term()}),
-            # Capture of `StepDispatcher.tag_err/2` (tagging a resolution error) — shared with the issue flow.
-            err_tagger: (term(), atom() -> term())
           }
   end
 
