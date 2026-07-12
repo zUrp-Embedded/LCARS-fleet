@@ -12,8 +12,11 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   """
   use Mix.Task
 
-  # SOURCE path (compile-time) of `priv/`, robust to the cwd: this file lives under `lib/mix/tasks/`.
-  @priv Path.expand("../../../priv", __DIR__)
+  # SOURCE path (compile-time) of `priv/sp_builder/`, robust to the cwd: this file lives under
+  # `lib/mix/tasks/`. Le segment `/sp_builder` post-collapse (Z3 a namespacé les priv par domaine) :
+  # ce Path.expand RELATIF n'était pas un `:code.priv_dir` → raté par le sweep de migration, corrigé
+  # à l'audit macro (la task crashait sur sp-map.yaml introuvable — SEUL outil de régénération des SP).
+  @priv Path.expand("../../../priv/sp_builder", __DIR__)
 
   @impl Mix.Task
   def run(_argv) do
