@@ -1,6 +1,9 @@
 defmodule Fleet.Observation.Application do
   @moduledoc """
-  Application supervisor `fleet_observation` (Ring 4 — observation deck).
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
+  migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  Domain supervisor `fleet_observation` (Ring 4 — observation deck).
 
   Read / observability frontier of the core. A dedicated
   Cowboy listener on its port (per-human, bin/fleet_v2) serves `Fleet.Observation.Deck` (LCARS HTML +
@@ -33,21 +36,24 @@ defmodule Fleet.Observation.Application do
   read the ReadModel's projection.
   """
 
-  use Application
+  use Supervisor
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     children = readmodel_children() ++ listener_children()
 
     # F4 (E1): 3/60 intensity EXPLICIT (event_router/task_queue doctrine — OTP's 3/5 too tight for a blip; the window is a CHOICE).
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
-      max_seconds: 60,
-      name: Fleet.Observation.Supervisor
+      max_seconds: 60
     ]
 
-    Supervisor.start_link(children, opts)
+    Supervisor.init(children, opts)
   end
 
   # ReadModel = sole bus subscriber. Guarded in `:test`: a global subscriber in test

@@ -1,6 +1,8 @@
 defmodule Fleet.Spawner.Application do
   @moduledoc """
-  Application supervisor for `fleet_spawner` + the permanent Type-1 pod boot
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  Supervisor for `fleet_spawner` + the permanent Type-1 pod boot
   extension.
 
   ## Permanent pod boot: SOLE authority = BootOrchestrator
@@ -22,10 +24,14 @@ defmodule Fleet.Spawner.Application do
   part, never boots a permanent pod (no boot hook here).
   """
 
-  use Application
+  use Supervisor
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     base = [
       {Registry, keys: :unique, name: Fleet.Spawner.Registry},
       Fleet.Spawner.Supervisor
@@ -73,12 +79,11 @@ defmodule Fleet.Spawner.Application do
     # grace (suspects state reset to zero); the pods themselves are not children of this app (their
     # attachment to the Registry is lost — the reap will claim them as REAL orphans, and
     # BootOrchestrator/PermanentWarden will bring them back to life: cattle, coherent).
-    Supervisor.start_link(children,
+    Supervisor.init(children,
       strategy: :rest_for_one,
       # 3/60 explicit (common doctrine).
       max_restarts: 3,
-      max_seconds: 60,
-      name: Fleet.Spawner.RootSupervisor
+      max_seconds: 60
     )
   end
 end

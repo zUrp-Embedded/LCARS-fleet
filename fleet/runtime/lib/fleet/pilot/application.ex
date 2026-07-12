@@ -1,5 +1,7 @@
 defmodule Fleet.Pilot.Application do
   @moduledoc """
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
   Supervisor for the `fleet_pilot` app — **STEP mode only** (the forge IS the state machine).
 
   Starts, if `:step_dispatch?` is configured (`config/runtime.exs` from the env) and the forge
@@ -27,10 +29,14 @@ defmodule Fleet.Pilot.Application do
   The RAM engine (`fleet_workflow`) falls downstream (`start_pipeline` orphaned).
   """
 
-  use Application
+  use Supervisor
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     # The forge pool starts UNCONDITIONALLY, before the step rail: the ForgeClient is also called
     # by `create_issue` (fleet_mcp) outside the Poller/StepRunConsumer rail, so the pool must exist as soon as
     # fleet_pilot boots. Lazy (no connection until a request) → harmless outside prod/tests.
@@ -49,11 +55,10 @@ defmodule Fleet.Pilot.Application do
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
-      max_seconds: 60,
-      name: Fleet.Pilot.Supervisor
+      max_seconds: 60
     ]
 
-    Supervisor.start_link(children, opts)
+    Supervisor.init(children, opts)
   end
 
   # HTTP pool dedicated to the ForgeClient. `conn_max_idle_time: 30_000` closes any connection left idle >30s

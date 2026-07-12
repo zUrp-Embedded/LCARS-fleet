@@ -1,6 +1,9 @@
 defmodule Fleet.API.Application do
   @moduledoc """
-  Application supervisor `fleet_api`.
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
+  migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  Domain supervisor `fleet_api`.
 
   Starts the Cowboy listener (per-human port, bin/fleet_v2) with dispatch:
 
@@ -19,34 +22,42 @@ defmodule Fleet.API.Application do
   Pre-registration of event atoms (created at compile-time, not derived from external input → no atom-exhaustion DoS leak).
   """
 
-  use Application
+  use Supervisor
 
   # NB atom `api` (admin.spawn.request): created at compile-time by its real site
   # (rest.ex) — no need for a dedicated pre-registration attribute in this
   # application (the atom already exists via the `%Fleet.Event{type: :"admin.spawn.request"}`).
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     children = listener_children()
 
     # F4 (E1): 3/60 intensity EXPLICIT (event_router/task_queue doctrine — 3/5 OTP too tight for a blip; the window is a CHOICE).
-    opts = [strategy: :one_for_one, max_restarts: 3, max_seconds: 60, name: Fleet.API.Supervisor]
+    opts = [strategy: :one_for_one, max_restarts: 3, max_seconds: 60]
 
-    case Supervisor.start_link(children, opts) do
-      {:ok, _} = ok ->
-        # A systemd `Type=notify` unit waits for sd_notify(READY=1). Emitted
-        # AFTER Supervisor.start_link OK (Cowboy listener effectively bound
-        # — otherwise `is-active = activating` until TimeoutStartSec=120s).
-        # Inline gen_udp AF_UNIX SOCK_DGRAM (no Hex dep). NOTIFY_SOCKET
-        # guard (no-op in dev/test without systemd). Rescue: never
-        # crash the app on notify failure.
-        notify_systemd_ready()
-        log_build_info()
-        ok
+    Supervisor.init(children, opts)
+  end
 
-      err ->
-        err
-    end
+  @doc """
+  Post-boot side effects — called by `Fleet.Application` AFTER the root
+  `Supervisor.start_link` returned `{:ok, _}` (i.e. the WHOLE fleet is up, this
+  domain's Cowboy listener included).
+
+  Pre-collapse these ran in this module's `Application.start/2` after ITS OWN
+  tree was up; hoisting them to the root END-of-boot preserves the original
+  intent (never signal READY before the listener is bound — a systemd
+  `Type=notify` unit would sit `activating` until TimeoutStartSec otherwise)
+  and strengthens it (READY now means the full fleet, not just the api).
+  Both are total: notify no-ops without $NOTIFY_SOCKET, log never raises.
+  """
+  def post_boot do
+    notify_systemd_ready()
+    log_build_info()
+    :ok
   end
 
   # Boot trace: the version of the served build, readable in the logs of the

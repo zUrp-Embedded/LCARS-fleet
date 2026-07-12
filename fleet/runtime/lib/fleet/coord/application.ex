@@ -1,6 +1,9 @@
 defmodule Fleet.Coord.Application do
   @moduledoc """
-  Application supervisor `fleet_coord`.
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
+  migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  Domain supervisor `fleet_coord`.
 
   At boot:
 
@@ -12,7 +15,7 @@ defmodule Fleet.Coord.Application do
   ## Strategy
 
   `:one_for_one` but with `[]` children (minimal tree). The supervisor
-  exists for umbrella OTP consistency.
+  exists for supervision-tree consistency.
 
   ## No pre-registration of event atoms
 
@@ -26,15 +29,19 @@ defmodule Fleet.Coord.Application do
   `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` with 0 callers.)
   """
 
-  use Application
+  use Supervisor
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     :ok = Fleet.Coord.Policies.init_policies!()
 
     children = []
 
-    opts = [strategy: :one_for_one, name: Fleet.Coord.Supervisor]
-    Supervisor.start_link(children, opts)
+    opts = [strategy: :one_for_one]
+    Supervisor.init(children, opts)
   end
 end

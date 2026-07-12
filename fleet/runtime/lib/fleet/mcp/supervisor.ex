@@ -13,6 +13,12 @@ defmodule Fleet.MCP.Supervisor do
       socket acceptors) — started unconditionally host-side (nothing is created
       as long as no pod is provisioned).
 
+  The drive is PULL-only: the pod calls the MCP tools (`get_work_item`/`submit_result`)
+  and is kicked via send-keys. A PUSH-channel model was tried (Anthropic Channel PoC,
+  4 iterations) and abandoned — do NOT reintroduce push channels. (Scar moved here from
+  the deleted `Fleet.MCP.Application` wrapper at the Z2 collapse, 2026-07-12 — this
+  module is now the mcp DOMAIN supervisor, started directly by `Fleet.Application`.)
+
   Pod-facing transport = one **AF_UNIX socket per pod** (the identity IS the channel,
   cf. `Fleet.MCP.PodSocketAcceptor`). The former shared HTTP loopback transport
   (`PodTools` in `transport: :http`, Plug.Cowboy/Ranch, `:pod_facing_port`) is

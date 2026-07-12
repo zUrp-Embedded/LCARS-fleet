@@ -153,8 +153,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   #     broker) → there really is NO queue to drain → HONEST `0` (not a failure mask).
   #   * app PRESENT but the call raises/exits (broker restarting during the quiesce) → ABNORMAL: we do NOT
   #     mask as `0` (under-counting ⇒ drain would conclude "empty" wrongly) → sentinel "not empty".
-  # In an umbrella all modules are loadable, so "module loaded" does not distinguish absent from
-  # crashed: we decide on the ACTUALLY-started app (`started_applications`), not the code path.
+  # All modules are loadable in the single app, so "module loaded" does not distinguish absent
+  # from crashed: we decide on the ACTUALLY-running broker PROCESS (`Process.whereis`), not the
+  # code path. (Z2 collapse 2026-07-12 : the old check keyed on the `:fleet_task_queue` OTP app
+  # in `started_applications` — that app no longer exists, the check would be `false` FOREVER
+  # → drain short-circuited to 0 with tasks still queued. The live process is the real fact.)
   defp tasks_pending do
     if task_queue_running?() do
       case safe_count_pending() do
@@ -175,7 +178,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   end
 
   defp task_queue_running? do
-    List.keymember?(Application.started_applications(), :fleet_task_queue, 0)
+    is_pid(Process.whereis(Fleet.TaskQueue.Server))
   end
 
   # Module in a VARIABLE for the `apply`: no literal remote call `Fleet.TaskQueue.x()` → no

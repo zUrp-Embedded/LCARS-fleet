@@ -61,10 +61,15 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     enabled? =
       Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
 
+    # Z2 collapse 2026-07-12 : the old filter keyed on "fleet_" OTP apps — post-collapse
+    # there is ONE app (:lcars_fleet), the filter returned [] forever and the
+    # `boot_complete.started_apps` payload silently LIED (empty fleet at every boot).
+    # Filter on "lcars" = the honest single-app equivalent (the field was already
+    # quasi-constant pre-collapse : the 14 apps were all deps of starfleet).
     started_apps =
       Application.started_applications()
       |> Enum.map(fn {a, _, _} -> a end)
-      |> Enum.filter(&String.starts_with?(Atom.to_string(&1), "fleet_"))
+      |> Enum.filter(&String.starts_with?(Atom.to_string(&1), "lcars"))
       |> Enum.sort()
 
     Logger.info("BootOrchestrator: starting post-readiness sequence (boot_permanent=#{enabled?})")

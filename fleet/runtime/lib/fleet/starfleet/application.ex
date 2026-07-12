@@ -1,6 +1,8 @@
 defmodule Fleet.Starfleet.Application do
   @moduledoc """
-  Application supervisor for `fleet_starfleet`.
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  Supervisor for `fleet_starfleet`.
 
   Starts:
 
@@ -34,7 +36,7 @@ defmodule Fleet.Starfleet.Application do
   the widened restart window (vs OTP's 3/5) is a deliberate choice for blips.
   """
 
-  use Application
+  use Supervisor
 
   # The atoms Cat5Escalator ACTUALLY emits are
   # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator) — the old
@@ -53,8 +55,12 @@ defmodule Fleet.Starfleet.Application do
     :"mcp.server_crashed"
   ]
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
     # V2 extensions.
@@ -106,11 +112,10 @@ defmodule Fleet.Starfleet.Application do
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
-      max_seconds: 60,
-      name: Fleet.Starfleet.Supervisor
+      max_seconds: 60
     ]
 
-    Supervisor.start_link(children, opts)
+    Supervisor.init(children, opts)
   end
 
   @doc false

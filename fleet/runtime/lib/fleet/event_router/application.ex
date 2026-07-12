@@ -1,7 +1,11 @@
 defmodule Fleet.EventRouter.Application do
+  # Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
+  # migration 2026-07-12 ; nom conservé pour zéro churn de références).
+  # @moduledoc false RESTAURÉ : module interne délibérément caché (le contrat public
+  # du domaine vit dans la façade Fleet.EventRouter/Bus) — la conversion ne change pas ça.
   @moduledoc false
 
-  use Application
+  use Supervisor
 
   # Gitea actions that `WebhooksGitea` can emit (`gitea.<action>`). SINGLE SOURCE:
   # both the atom pre-registration (preregister_event_atoms) AND the registry-coherence
@@ -15,8 +19,12 @@ defmodule Fleet.EventRouter.Application do
   @spec gitea_event_types() :: [String.t()]
   def gitea_event_types, do: @gitea_event_types
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     preregister_event_atoms()
     # Loads the events.yaml registry → populates `authorized_event_types` (fail-loud broadcast
     # validation, on in prod, off in test). There is no dispatch GenServer: consumption happens
@@ -33,11 +41,10 @@ defmodule Fleet.EventRouter.Application do
     # that won't stay up) → we escalate to the root app supervisor rather than hammering a
     # restart that won't succeed. The OTP default (3/5) is too tight for a transient blip; we
     # widen it to 60s, made explicit so the window is a choice, not an implicit default.
-    Supervisor.start_link(children,
+    Supervisor.init(children,
       strategy: :one_for_one,
       max_restarts: 3,
-      max_seconds: 60,
-      name: Fleet.EventRouter.Supervisor
+      max_seconds: 60
     )
   end
 

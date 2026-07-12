@@ -1,6 +1,8 @@
 defmodule Fleet.Workflow.Application do
   @moduledoc """
-  Application `fleet_workflow` — now a **workflow_map/gate/delivery lib** (near-pure).
+  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+
+  `fleet_workflow` — now a **workflow_map/gate/delivery lib** (near-pure).
 
   There is NO in-memory (RAM) engine (no `Fleet.Workflow.Executor` nor its Registry/PodRegistry/
   ExecutorSupervisor, StageRunner, StageSpawner, Toposort, WorkspaceProvisioner stack): no process is
@@ -16,7 +18,7 @@ defmodule Fleet.Workflow.Application do
   `events.yaml`). (F-C108: was wrongly documented as "no longer emitted".)
   """
 
-  use Application
+  use Supervisor
 
   @workflow_map_event_atoms [
     :"workflow_map.step.completed",
@@ -24,10 +26,14 @@ defmodule Fleet.Workflow.Application do
     :"workflow_map.failed"
   ]
 
-  @impl Application
-  def start(_type, _args) do
+  def start_link(init_arg \\ []) do
+    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl Supervisor
+  def init(_init_arg) do
     # No process to supervise → empty supervisor. Kept transitionally (target: lib-only).
-    Supervisor.start_link([], strategy: :one_for_one, name: Fleet.Workflow.Supervisor)
+    Supervisor.init([], strategy: :one_for_one)
   end
 
   @doc """
