@@ -275,26 +275,18 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   end
 
   # `System.cmd` has NO native timeout: a network-backed NSS (`getent passwd` over LDAP/SSSD) or a
-  # pathological `readlink` could HANG the whole pod spawn indefinitely (SOC-EFF-001). Run it in a bounded
-  # Task: on timeout, brutal-kill the Task → the Port closes → the OS process is SIGKILLed, and return a
-  # non-`{_, 0}` sentinel so the caller's existing fallback fires. `System.cmd` is wrapped in try INSIDE
-  # the Task so a raise (command absent) never crashes the linked caller.
+  # pathological `readlink` could HANG the whole pod spawn indefinitely (SOC-EFF-001). Bounded through
+  # `Fleet.Credentials.Shell.run/3`, the SINGLE bounded-exec primitive of the repo: `setsid` +
+  # `SIGKILL` to the whole process-GROUP at the wall deadline — the command AND its descendants really
+  # die. The Task+`:brutal_kill` pattern this replaced only killed the BEAM side: the Port closes, but a
+  # hung `getent` (LDAP down) SURVIVED as an OS orphan on every spawn (the same trap three scars of this
+  # repo name). The `{output, exit_status}` shape is kept for the two call sites; any failure (timeout,
+  # missing binary) yields a non-zero status so their existing fallback fires.
   @cmd_timeout_ms 5_000
   defp cmd_with_timeout(cmd, args) do
-    task =
-      Task.async(fn ->
-        try do
-          System.cmd(cmd, args, stderr_to_stdout: true)
-        rescue
-          _ -> {"", 124}
-        catch
-          _, _ -> {"", 124}
-        end
-      end)
-
-    case Task.yield(task, @cmd_timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
-      _ -> {"", 124}
+    case Fleet.Credentials.Shell.run(cmd, args, timeout_ms: @cmd_timeout_ms) do
+      {:ok, {out, status}} -> {out, status}
+      {:error, _} -> {"", 124}
     end
   end
 end

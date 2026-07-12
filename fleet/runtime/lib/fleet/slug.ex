@@ -141,7 +141,16 @@ defmodule Fleet.Slug do
   def under_root?(dest, root) when is_binary(dest) and is_binary(root) do
     expanded_root = Path.expand(root)
     expanded_dest = Path.expand(dest)
-    expanded_dest == expanded_root or String.starts_with?(expanded_dest, expanded_root <> "/")
+
+    # The separator is appended ONLY when the root does not already end with one — i.e. only when
+    # the root is not `/` itself. Concatenating unconditionally turned the root `/` into the prefix
+    # `//`, which no expanded path starts with: `under_root?("/x", "/")` came out FALSE and
+    # `confined_join("/", name)` was structurally impossible, though the contract promises "== root
+    # or under root". Fail-CLOSED (a false reject, never an escape) — but a guard that refuses the
+    # legal case is a guard nobody can use. Found by the confinement property.
+    prefix = if String.ends_with?(expanded_root, "/"), do: expanded_root, else: expanded_root <> "/"
+
+    expanded_dest == expanded_root or String.starts_with?(expanded_dest, prefix)
   end
 
   @doc """

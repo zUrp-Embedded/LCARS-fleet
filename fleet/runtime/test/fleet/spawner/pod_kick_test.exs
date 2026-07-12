@@ -40,6 +40,10 @@ defmodule Fleet.Spawner.PodKickTest do
     :ok
   end
 
+  # Les fixtures `data` portent TOUJOURS `issue_id` : c'est la forme réelle (`Pod.@type data`), et
+  # le broadcast `wake.failed` du cap la lit (l'issue_id nourrit le correlation_id → le bloc
+  # « Mandat lié » de l'issue d'escalade). Une fixture amputée passerait là où la donnée réelle
+  # passe et casserait ailleurs — le stub menteur, en plus discret.
   defp fake_pod, do: "no-such-pod-#{System.unique_integer([:positive])}"
 
   test "pas de tmux_session → no-op, aucun re-kick planifié" do
@@ -49,12 +53,12 @@ defmodule Fleet.Spawner.PodKickTest do
                {:timeout, :kick},
                {:attempt, 1},
                @state,
-               %{tmux_session: nil, pod_id: fake_pod()}
+               %{tmux_session: nil, pod_id: fake_pod(), issue_id: "issue-1"}
              )
   end
 
   test "tmux pas encore up (serveur absent) + brief non pull → retente (reschedule n+1)" do
-    data = %{tmux_session: "sess", pod_id: fake_pod()}
+    data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
     # `alive?` faux (pas de vrai serveur) → branche reschedule (action attempt n+1), pas yop perdu.
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
@@ -62,7 +66,7 @@ defmodule Fleet.Spawner.PodKickTest do
   end
 
   test "cap atteint (n >= max) → abandon (cancel), aucun reschedule" do
-    data = %{tmux_session: "sess", pod_id: fake_pod()}
+    data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
     # cap (3) atteint → action d'ANNULATION du generic timeout :kick (:infinity), pas de reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
@@ -80,7 +84,8 @@ defmodule Fleet.Spawner.PodKickTest do
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, %{
                tmux_session: "sess",
-               pod_id: pod
+               pod_id: pod,
+               issue_id: "issue-1"
              })
   end
 
@@ -89,7 +94,7 @@ defmodule Fleet.Spawner.PodKickTest do
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
 
-    data = %{tmux_session: "sess", pod_id: fake_pod()}
+    data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
     # n=2 ≥ cap bootstrap (2) → stop (cancel). Si le cap worker (9) s'appliquait, n=2 < 9 → reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
@@ -106,7 +111,7 @@ defmodule Fleet.Spawner.PodKickTest do
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
-    data = %{tmux_session: "sess", pod_id: pod}
+    data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1"}
     # n=3 > cap bootstrap (2) MAIS < cap worker (9) → reschedule (chemin worker, tmux pas up).
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 4}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)

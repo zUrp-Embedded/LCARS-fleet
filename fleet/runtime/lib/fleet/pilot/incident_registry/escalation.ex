@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   def escalate(kind, subject, reason, sig, opts \\ []) do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
     add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Pilot.ForgeClient.add_label/4)
-    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo, "fleet/lcars")
+    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo) || ops_repo()
 
     label =
       opts[:label] || Application.get_env(:fleet_pilot, :system_issue_label, "error_system")
@@ -91,6 +91,17 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
       end
     end
   end
+
+  @doc """
+  The fleet's OPS repo — SINGLE authority (`:fleet_pilot, :ops_repo`, default `"fleet/lcars"`).
+
+  Two things land there and must never drift apart: the incident REGISTRY file (branch `work/ops`,
+  `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
+  incident — a registry on repo A whose issues open on repo B is an alarm nobody finds. The two
+  specific knobs (`:incident_registry_repo` / `:system_issue_repo`) remain as explicit overrides.
+  """
+  @spec ops_repo() :: String.t()
+  def ops_repo, do: Application.get_env(:fleet_pilot, :ops_repo, "fleet/lcars")
 
   # F-C075 — BOUNDED retry of the DISCOVERY label (`error_system`): a transient forge blip (name→id
   # resolution / org-label auto-create / HTTP 500) self-heals; a persistent failure is SURFACED by

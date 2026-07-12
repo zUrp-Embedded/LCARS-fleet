@@ -25,11 +25,20 @@ defmodule Fleet.GitRef do
   @ref_re ~r/\A[A-Za-z0-9][A-Za-z0-9._\/\-]*\z/
 
   @doc """
-  `true` if `ref` is a well-formed branch/ref name per `git check-ref-format`. Binary, matches
-  `@ref_re` (alphanumeric head + `[A-Za-z0-9._/-]`, which already excludes space/`~^:?*[\\`/`@{`), AND
-  none of the rules a charset regex misses: no `..`; no trailing `.`; and every `/`-separated component
-  is non-empty (→ no `//`, no leading/trailing `/`), does not begin with `.`, and does not end with
+  `true` if `ref` is a well-formed **ref** name (git's ref grammar). Binary, matches `@ref_re`
+  (alphanumeric head + `[A-Za-z0-9._/-]`, which already excludes space/`~^:?*[\\`/`@{`), AND none of
+  the rules a charset regex misses: no `..`; no trailing `.`; and every `/`-separated component is
+  non-empty (→ no `//`, no leading/trailing `/`), does not begin with `.`, and does not end with
   `.lock`. Everything else (non-binary, empty, leading `-`, space) → `false`.
+
+  ## Ref, not branch-name — `"HEAD"` is deliberately VALID
+
+  `git check-ref-format --branch HEAD` fails (you cannot CREATE a branch named `HEAD`), and a
+  differential property against that oracle flags `valid?("HEAD") == true` as a false-accept. It is
+  not one: this module gates the refs the runtime hands to git, and `"HEAD"` is the LOCAL side of
+  every deliverable push (`git push <remote> HEAD:refs/heads/<branch>` — `Deliverable.local_ref/1`
+  defaults to it, `StepRunBuild` sets it). Rejecting it would break the publication rail (proven:
+  12 red tests). The right oracle for this contract is git's ref grammar, not `--branch`.
   """
   @spec valid?(term()) :: boolean()
   def valid?(ref) when is_binary(ref) do

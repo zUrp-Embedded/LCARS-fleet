@@ -738,14 +738,17 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end,
         gate_eval_ttl_ms: 0,
-        gate_eval_sweep_ms: 10
+        # Cadence LONGUE : on ne veut PAS courir après le tick automatique (sous charge il
+        # arriverait quand il veut → test flaky). On PILOTE le sweep en envoyant son message,
+        # puis on synchronise par la barrière FIFO :sys.get_state. Déterministe, zéro sleep.
+        gate_eval_sweep_ms: 60_000
       )
 
     send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
     assert Map.has_key?(:sys.get_state(pid).gate_evals, "corr-1")
 
-    # Le tick de sweep tombe (10 ms) → le contexte, plus vieux que le TTL (0), est libéré.
-    Process.sleep(60)
+    send(pid, :sweep_gate_evals)
+
     assert %{gate_evals: evals} = :sys.get_state(pid)
     refute Map.has_key?(evals, "corr-1")
   end

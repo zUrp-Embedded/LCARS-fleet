@@ -559,8 +559,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 
+  # SINGLE ops-repo authority (`:ops_repo`): the incident REGISTRY (this file, work/ops branch) and
+  # the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces of
+  # one incident. They used to read two separate keys with two inline defaults: one edit away from
+  # a registry on repo A and its issues on repo B, with nothing to catch it. `:incident_registry_repo`
+  # survives as an explicit override for the rare split.
   defp repo(opts),
-    do: opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo, "fleet/lcars")
+    do:
+      opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo) ||
+        Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
   defp branch(opts),
     do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "work/ops")

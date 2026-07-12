@@ -94,7 +94,7 @@ defmodule Fleet.Spawner.PermanentWarden do
       attempts: %{}
     }
 
-    if is_integer(reconcile_ms), do: Process.send_after(self(), :reconcile, reconcile_ms)
+    :ok = schedule_reconcile(reconcile_ms)
 
     {:ok, state}
   end
@@ -174,8 +174,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   # vs live Registry: the missing ones go through the SAME respawn path (counter/backoff shared
   # with the event rail → a reconciliation can never spend more than an event storm would).
   def handle_info(:reconcile, state) do
-    if is_integer(state.reconcile_ms),
-      do: Process.send_after(self(), :reconcile, state.reconcile_ms)
+    :ok = schedule_reconcile(state.reconcile_ms)
 
     if state.reconcile_enabled_fun.() do
       missing = expected_missing(state)
@@ -228,6 +227,16 @@ defmodule Fleet.Spawner.PermanentWarden do
   # Single authority for "who is permanent" — the SAME selection the boot uses (no fork of the
   # `boot_at_start?` rule here).
   defp default_expected_roles, do: Fleet.Spawner.PermanentBoot.expected_permanent_roles()
+
+  # Arme le tick suivant. `nil` = réconciliation désactivée (seam de test). Le timer ref n'est
+  # jamais annulé (le tick se re-programme lui-même) → valeur sans signification, jetée ici plutôt
+  # qu'au site d'appel (dialyzer strict : unmatched_return).
+  defp schedule_reconcile(ms) when is_integer(ms) do
+    _ = Process.send_after(self(), :reconcile, ms)
+    :ok
+  end
+
+  defp schedule_reconcile(_), do: :ok
 
   defp default_live_roles do
     Fleet.Spawner.list_pods()

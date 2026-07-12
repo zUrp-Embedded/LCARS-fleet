@@ -19,8 +19,17 @@ defmodule Fleet.Pilot.IssueId do
   def compose(number), do: @prefix <> to_string(number)
 
   @doc ~S'''
-  Parses a step issue_id `"issue-<n>"` → `{:ok, n}`; otherwise `:error`. STRICT inverse of
-  `compose/1`: the suffix must be a complete integer (`"issue-7x"` / `"issue-"` → `:error`).
+  Parses a step issue_id `"issue-<n>"` → `{:ok, n}`; otherwise `:error`. The suffix must be a
+  COMPLETE integer (`"issue-7x"` / `"issue-"` / `"issue-x"` → `:error`).
+
+  `parse ∘ compose == id` (round-trip guaranteed, negatives included — locked by property).
+  The converse does NOT hold: `Integer.parse/1` accepts leading zeros and an explicit sign, so
+  `"issue-007"` and `"issue-+7"` both parse to `7` while `compose(7)` only ever yields `"issue-7"`.
+  Several DISTINCT issue_ids therefore denote the same issue. Harmless while the issue_id is a
+  correlator that is only ever READ (its writer is `compose/1`, single-source); it would NOT be
+  harmless the day an issue_id coming from OUTSIDE becomes a KEY (dedup, mutex, lookup) — two
+  spellings would then be two different keys for one issue. Stated here rather than silently
+  tightened: the tolerance is the current, tested behaviour.
   '''
   @spec parse(String.t()) :: {:ok, integer()} | :error
   def parse(@prefix <> rest) do

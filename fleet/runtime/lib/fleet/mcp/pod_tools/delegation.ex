@@ -37,7 +37,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
       sequence. CONTRACT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
     * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
       of the pod's role.
-    * `:delegation_org` (default `"fleet"`) — forge org of onboarded projects.
+    * `:delegation_org` — forge org of onboarded projects. OPTIONAL override: by default the org
+      is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
+      onboarding into an org nobody scans is a silently dead rail.
   """
 
   require Logger
@@ -217,7 +219,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args) do
     with {:ok, onboard} <- conforming_onboard() do
-      org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
+      # SAME config key as the poller's discovery org (`:fleet_pilot, :fleet_org`) — a project
+      # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
+      # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
+      # gate to catch it. Reading another domain's config ATOM creates no module edge (the boundary
+      # stays intact; the `:fleet_<dom>` atoms are legacy-valid, D-07) — the config IS the shared
+      # authority here. `:delegation_org` survives as an explicit OVERRIDE for the rare case where
+      # onboarding must target another org than the one being polled.
+      org =
+        Application.get_env(:fleet_mcp, :delegation_org) ||
+          Application.get_env(:fleet_pilot, :fleet_org, "fleet")
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
       opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
