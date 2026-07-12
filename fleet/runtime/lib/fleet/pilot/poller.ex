@@ -34,7 +34,8 @@ defmodule Fleet.Pilot.Poller do
 
   Stay HERE: the loop (org-repo discovery + admission + tally orchestration + state
   backoff), the pulls path (`step_process_pulls`, not guarded by the lease) and the throttled
-  awaits-arch re-kick (coupled to `poll_count`).
+  awaits-arch re-kick (coupled to `poll_count`; fired ONCE per tick by `do_poll` on the
+  cross-repo union — the arch pod is fleet-unique, a per-repo kick multiplied the wake).
 
   ## Init configuration
 
@@ -130,19 +131,10 @@ defmodule Fleet.Pilot.Poller do
     orphan_lock_suspects: MapSet.new()
   ]
 
-  @type t :: %__MODULE__{
-          repo: String.t(),
-          interval_ms: pos_integer(),
-          forge_client_override: module() | nil,
-          forge_opts: keyword(),
-          loader: module() | nil,
-          spawner: module() | nil,
-          poll_count: non_neg_integer(),
-          error_count: non_neg_integer(),
-          err_streak: non_neg_integer(),
-          last_error: term() | nil,
-          last_tally_errors: non_neg_integer()
-        }
+  # No `@type t`: the previous one omitted a third of the real fields and typed `repo` non-nil
+  # (false since multi-project discovery) — a lying type nobody consumed (zero @spec referenced
+  # it). The commented defstruct above IS the state contract; a type list that must be manually
+  # mirrored rusts silently (same reason comment-counters are banned).
 
   # ============================================================
   # Public API
@@ -323,6 +315,10 @@ defmodule Fleet.Pilot.Poller do
   # alone → a live pod #N/repoB NO LONGER masks an orphan #N/repoA, and the 2-tick grace no longer
   # contaminates across repos (no more double-spawn). The key carries the identity.
   defp do_poll(state) do
+    # `started` captured BEFORE the forge call: `list_org_repos` is precisely the SLOW call when
+    # the forge degrades — capturing after it reported duration_ms≈0 on exactly the failure case
+    # an operator watches for (blind metric where it matters most).
+    started = System.monotonic_time()
     forge = step_forge_client(state)
 
     case forge.list_org_repos(state.org, state.forge_opts) do
@@ -334,21 +330,31 @@ defmodule Fleet.Pilot.Poller do
         # No more mutable topic nor server-side seal to verify. Per-human scoping stays
         # `assigned_by` (issue-level, `step_do_poll`): the fleet processes ONLY its issues, even if
         # `list_org_repos` shows it the repos of the OTHER humans of the group (the anti-theft guard holds).
-        {tally, suspects} =
-          Enum.reduce(repos, {Lease.zero_tally(), MapSet.new()}, fn repo,
-                                                                    {acc_tally, acc_suspects} ->
-            {t, st} = step_do_poll(%{base | repo: repo})
-            {Lease.merge_tally(acc_tally, t), MapSet.union(acc_suspects, st.orphan_lock_suspects)}
+        #
+        # The fold accumulates exactly the two cross-repo monoids step_do_poll yields (tally merge,
+        # suspects union) + the awaits-arch union — nothing else survives the per-repo pass.
+        {tally, suspects, awaits} =
+          Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
+                                                                                  {acc_t, acc_s,
+                                                                                   acc_a} ->
+            {t, s, a} = step_do_poll(%{base | repo: repo})
+            {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
           end)
+
+        # G4 re-kick — FLEET-GLOBAL action on the UNIQUE arch pod, decided ONCE per tick on the
+        # cross-repo union. Inside the per-repo loop it fired R times per throttle-tick (poll_count
+        # is loop-invariant): R repos awaits-arch = R wakes of the SAME arch + R log lines each
+        # claiming "throttle" — the trace lied about the throttle and undercounted the backlog.
+        maybe_rekick_arch(awaits, base)
 
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
-        handle_poll_error(state, {:discover_repos, reason}, System.monotonic_time(), nil)
+        handle_poll_error(state, {:discover_repos, reason}, started)
     end
   end
 
-  defp handle_poll_error(state, reason, started, _err) do
+  defp handle_poll_error(state, reason, started) do
     new_streak = state.err_streak + 1
 
     Logger.warning(
@@ -426,12 +432,10 @@ defmodule Fleet.Pilot.Poller do
       # to the pulls via `:awaits_arch_ids` → `dispatch_review` skips the judge of a PR whose parent issue
       # awaits the arch (symmetric to `decide/1` on the issue side). Without this: escalation places `awaits-arch` on
       # the ISSUE but `dispatch_review` reads ONLY the PR's labels → judge re-spawn every tick (churn).
+      # The G4 re-kick itself is NOT fired here: it is fleet-global (unique arch pod) → the set is
+      # returned repo-QUALIFIED (issue numbers collide across repos) and `do_poll` kicks ONCE on the union.
       awaits_arch_ids = awaits_arch_ids(issues)
       pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
-
-      # G4: throttled re-kick of the arch as long as an issue awaits its action (the initial kick at escalation
-      # is one-shot; a lost wake → issue blocked forever otherwise).
-      maybe_rekick_arch(awaits_arch_ids, state)
 
       tally =
         Lease.merge_tally(
@@ -452,31 +456,19 @@ defmodule Fleet.Pilot.Poller do
         Map.merge(tally, %{status: :ok, mode: :step, repo: state.repo})
       )
 
-      # The forge list succeeded, but PER-ITEM `dispatch_*` may have failed
-      # (`tally.errors > 0` — e.g. broker enqueue KO, spawn KO). We compute a per-repo
-      # `err_streak` here, BUT the multi-project `do_poll` currently DISCARDS it (it aggregates
-      # only `orphan_lock_suspects` and forces `err_streak` back to 0 each tick, cf. `do_poll`)
-      # → this partial backoff does NOT take effect; dispatch errors still surface via
-      # `last_tally_errors`/telemetry, never as slowdown.
-      {next_streak, next_last_error} =
-        if tally.errors > 0 do
-          {state.err_streak + 1, {:dispatch_errors, tally.errors}}
-        else
-          {0, nil}
-        end
-
-      {tally,
-       %{
-         state
-         | poll_count: state.poll_count + 1,
-           err_streak: next_streak,
-           last_error: next_last_error,
-           last_tally_errors: tally.errors,
-           orphan_lock_suspects: new_suspects
-       }}
+      # Per-item dispatch errors (broker enqueue KO, spawn KO) surface via `tally.errors` →
+      # telemetry + `last_tally_errors` (aggregated by `do_poll`), NEVER as backoff: the forge is
+      # UP (both lists succeeded), so slowing the whole fleet's poll would punish the wrong layer —
+      # policy locked by test F-037. Only a DISCOVERY failure (do_poll) feeds `err_streak`.
+      {tally, new_suspects, MapSet.new(awaits_arch_ids, &{state.repo, &1})}
     else
-      {:error, reason} = err ->
-        handle_poll_error(state, reason, started, err)
+      {:error, reason} ->
+        # Log + telemetry only: the per-repo error state is NOT threaded up (cross-tick error
+        # counters live on the discovery path, `do_poll`). Suspects: contribute the prior set
+        # unchanged (2-tick grace preserved across a transient list failure); awaits: unknown
+        # for this repo (nothing listed) → empty.
+        {tally, _per_repo_state_discarded} = handle_poll_error(state, reason, started)
+        {tally, state.orphan_lock_suspects, MapSet.new()}
     end
   end
 
@@ -493,6 +485,9 @@ defmodule Fleet.Pilot.Poller do
   # FOREVER, silently (the poller only SKIPS it). So we re-kick periodically —
   # THROTTLED (`@awaits_rekick_every` ticks) because a wake can cost a claude turn (bounded spend,
   # Jupiter). Best-effort (the label stays human-released: we nudge the airlock, we never force the verdict).
+  # Called ONCE per tick by `do_poll` on the CROSS-REPO union — the arch pod is unique (fleet
+  # airlock), so the decision is fleet-level; `awaits_ids` is repo-qualified (`{repo, n}` — bare
+  # issue numbers collide across repos) so the logged count is the honest fleet-wide backlog.
   # Resolves `state.spawner || Fleet.Spawner` at the call site (symmetric to reconciliation_seams /
   # lease_seams) + the authority `Roles.architect_pod_id/0` (SSOT shared with kick_architect). Prod
   # does NOT inject the seam → the REAL `Fleet.Spawner` is used (best-effort: `{:error, :not_found}`
@@ -504,7 +499,7 @@ defmodule Fleet.Pilot.Poller do
       pod_id = Fleet.Pilot.Roles.architect_pod_id()
 
       Logger.info(
-        "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch → re-kick #{pod_id} " <>
+        "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) → re-kick #{pod_id} " <>
           "(throttle #{@awaits_rekick_every} ticks)"
       )
 

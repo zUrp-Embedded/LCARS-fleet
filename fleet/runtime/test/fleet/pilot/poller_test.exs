@@ -89,7 +89,49 @@ defmodule Fleet.Pilot.PollerTest do
 
       # AVANT le fix : nil → clause no-op → aucune ligne re-kick. APRÈS : le vrai
       # Fleet.Spawner.wake_pod(arch) est appelé (retourne {:error,:not_found}, tick non-crashé).
-      assert log =~ "awaits-arch → re-kick"
+      assert log =~ "awaits-arch"
+      assert log =~ "re-kick"
+
+      GenServer.stop(pid)
+    end
+
+    # Régression acte4 A-10 — le re-kick vivait DANS la boucle per-repo avec un poll_count
+    # invariant de boucle : R repos en awaits-arch = R wakes du MÊME arch (pod unique) dans le
+    # même tick-throttle, + R lignes prétendant chacune « throttle ». Le hoist dans do_poll
+    # (union cross-repo, décision UNE fois) rend la trace honnête. Ce cas était NON couvert
+    # (le test câblage n'exerce qu'UN repo → la multiplication était invisible).
+    test "A-10 : 2 repos awaits-arch → EXACTEMENT 1 re-kick par tick-throttle (pas 1 par repo)" do
+      issue = %{
+        "number" => 42,
+        "body" => "x",
+        "labels" => [%{"name" => "lcars-awaits-arch"}],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      # `forge_opts` remplacé en bloc (Keyword.merge) : mêmes issues stub + découverte 2 repos.
+      {name, pid} =
+        start_entry_poller({:ok, [issue]}, %{},
+          spawner: nil,
+          forge_opts: [
+            _test_issues: {:ok, [issue]},
+            _test_routes: %{},
+            _test_repos: ["fleet/repo-a", "fleet/repo-b"]
+          ]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..10, do: Poller.force_poll(name)
+        end)
+
+      rekick_lines =
+        log |> String.split("\n") |> Enum.count(&String.contains?(&1, "re-kick"))
+
+      assert rekick_lines == 1,
+             "attendu EXACTEMENT 1 ligne re-kick (fleet-global), vu #{rekick_lines}:\n#{log}"
+
+      # et le compte loggué est le backlog fleet-wide (2 issues : une par repo)
+      assert log =~ "2 issue(s) awaits-arch (fleet-wide)"
 
       GenServer.stop(pid)
     end
