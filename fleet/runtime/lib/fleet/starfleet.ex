@@ -16,7 +16,9 @@ defmodule Fleet.Starfleet do
       Fleet.Spawner,
       Fleet.TaskQueue,
       Fleet.Coord,
-      Fleet.MCP
+      Fleet.MCP,
+      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      Req
     ],
     exports: :all
   @moduledoc """

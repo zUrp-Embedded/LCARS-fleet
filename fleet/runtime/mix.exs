@@ -19,7 +19,16 @@ defmodule LcarsFleet.MixProject do
       deps: deps(),
       aliases: aliases(),
       releases: releases(),
-      dialyzer: dialyzer()
+      dialyzer: dialyzer(),
+      # Z4b — fencing des libs sensibles : TOUTE boundary qui les référence doit les
+      # déclarer dans ses deps (frontière vendor/wire visible au compilateur). Les libs
+      # de format (jason, yaml_elixir, ex_json_schema, uuid) restent libres : ubiquitaires,
+      # les fencer = du bruit, pas de la sûreté.
+      boundary: [
+        default: [
+          check: [apps: [:ex_mcp, :req, :finch, :plug, :plug_cowboy, :phoenix_pubsub]]
+        ]
+      ]
     ]
   end
 

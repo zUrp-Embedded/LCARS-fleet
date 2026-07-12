@@ -9,7 +9,17 @@ defmodule Fleet.EventRouter do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      Fleet.SchemaCache
+      Fleet.SchemaCache,
+      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      Phoenix.PubSub,
+      Plug,
+      Plug.Builder,
+      Plug.Conn,
+      Plug.Conn.Unfetched,
+      Plug.Conn.WrapperError,
+      Plug.Parsers,
+      Plug.Router,
+      Plug.Router.Utils
     ],
     exports: :all
   @moduledoc """

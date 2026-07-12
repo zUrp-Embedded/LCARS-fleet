@@ -29,7 +29,10 @@ defmodule Fleet.Pilot do
       Fleet.Spawner,
       Fleet.Credentials,
       Fleet.CapProfile,
-      Fleet.TaskQueue
+      Fleet.TaskQueue,
+      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      Req,
+      Req.Response
     ],
     exports: :all
 end

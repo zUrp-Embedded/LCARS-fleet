@@ -25,7 +25,18 @@ defmodule Fleet.MCP do
       Fleet.Credentials,
       Fleet.EventRouter,
       Fleet.TaskQueue,
-      Fleet.Spawner
+      Fleet.Spawner,
+      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      ExMCP.ContentHelpers,
+      ExMCP.DSL.Meta,
+      ExMCP.DSL.Tool,
+      ExMCP.Internal.StdioLoggerConfig,
+      ExMCP.Protocol.RequestProcessor,
+      ExMCP.Protocol.RequestTracker,
+      ExMCP.Protocol.ResponseBuilder,
+      ExMCP.Registry,
+      ExMCP.Server,
+      ExMCP.Server.Transport
     ],
     exports: :all
 end

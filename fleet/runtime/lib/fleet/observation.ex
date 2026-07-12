@@ -20,7 +20,17 @@ defmodule Fleet.Observation do
       Fleet.SchemaCache,
       Fleet.Spawner,
       Fleet.CapProfile,
-      Fleet.EventRouter
+      Fleet.EventRouter,
+      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      Plug,
+      Plug.Builder,
+      Plug.Conn,
+      Plug.Conn.Unfetched,
+      Plug.Conn.WrapperError,
+      Plug.HTML,
+      Plug.Router,
+      Plug.Router.Utils,
+      Plug.Static
     ],
     exports: :all
 end
