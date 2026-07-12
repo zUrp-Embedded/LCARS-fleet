@@ -199,9 +199,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # connection). On close / error / IDLE TIMEOUT, we hand control back to the accept loop.
   #
   # The idle timeout is what makes a MUTE connection reapable. Without it, a `recv` with no
-  # deadline held its Task forever: a pod (adversarial by doctrine everywhere else) opening
-  # `max_children` mute connections on ITS socket exhausted the Task pool SHARED by the whole
-  # fleet → get_work_item/submit_result dead fleet-wide until that pod died. The bridge is
+  # deadline held its Task forever: a pod that OPENS but never speaks on its connections (a
+  # leaking bridge, or a misbehaving/compromised agent) could open `max_children` mute
+  # connections on ITS socket and exhaust the Task pool SHARED by the whole fleet →
+  # get_work_item/submit_result dead fleet-wide until that pod died. The bridge is
   # request/response (a line, then the answer): a connection silent for `@idle_timeout_ms` is
   # abandoned by construction, never a legitimate slow call (the SERVICE of a line has no
   # deadline here — only the wait for the NEXT line does).
