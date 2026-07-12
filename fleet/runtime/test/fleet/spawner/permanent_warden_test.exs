@@ -180,6 +180,34 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     refute_receive {:respawn, _}, 200
   end
 
+  test "tick de réconciliation : pendant un DRAIN (quiesce), gate PAR DÉFAUT off → aucun respawn" do
+    # A-13 (fix, pas décision) : le gate par défaut lit Fleet.Shutdown.Quiesce (Ring-0). Pendant un
+    # drain, respawner un permanent mort combattrait le drain (cattle : un vrai shutdown nuke le node
+    # et ce tick meurt avec ; le drain gracieux est un chemin DEBUG pour inspecter sans tuer). On teste
+    # le chemin PAR DÉFAUT (pas le seam) : quiesce ON → pas de respawn ; quiesce OFF → respawn.
+    parent = self()
+
+    Fleet.Shutdown.Quiesce.refuse!()
+    on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
+
+    start_warden(
+      fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+      reconcile_ms: 10,
+      expected_roles_fun: fn -> ["architect"] end,
+      live_roles_fun: fn -> [] end
+      # PAS de reconcile_enabled_fun → chemin par défaut (auto_boot? and not quiescing?).
+    )
+
+    # NB : auto_boot_enabled? doit être vrai en test pour que SEUL quiesce explique l'absence de
+    # respawn. Si le défaut auto_boot est false en test, ce refute passerait pour la mauvaise raison
+    # — mais le test suivant (quiesce OFF → respawn) prouve que c'est bien quiesce qui gate.
+    refute_receive {:respawn, _}, 200
+
+    Fleet.Shutdown.Quiesce.resume!()
+    # Drain fini → le prochain tick re-dérive et respawne l'architecte manquant.
+    assert_receive {:respawn, "architect"}, 1_000
+  end
+
   test "tick de réconciliation : énumération qui LÈVE → rien respawné (le filet ne devient jamais un danger)" do
     # Une énumération cassée (Registry indispo, catalogue illisible) ne doit NI tuer le warden,
     # NI — pire — rapporter TOUS les permanents comme absents et re-spawner la flotte entière.

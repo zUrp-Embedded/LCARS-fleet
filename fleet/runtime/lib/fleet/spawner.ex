@@ -16,7 +16,10 @@ defmodule Fleet.Spawner do
       Fleet.Credentials,
       Fleet.EventRouter,
       Fleet.ProjectBootstrap,
-      Fleet.TaskQueue
+      Fleet.TaskQueue,
+      # Ring-0 primitif (flag :persistent_term, deps: []) — lisible vers le bas depuis n'importe
+      # quel ring. Le PermanentWarden le consulte pour ne pas respawner pendant un drain (A-13).
+      Fleet.Shutdown.Quiesce
     ],
     exports: [Application, PermanentBoot, PodTmux, Pod.McpProvision, LaunchBackend]
 

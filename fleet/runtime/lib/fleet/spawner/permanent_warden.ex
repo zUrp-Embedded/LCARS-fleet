@@ -248,16 +248,17 @@ defmodule Fleet.Spawner.PermanentWarden do
     end)
   end
 
-  # Gate of the reconciliation tick. `auto_boot_enabled?` ONLY: the maintenance mode
-  # (`LCARS_BOOT_PERMANENT_AT_START=false`) must not be defeated by a warden re-deriving pods
-  # nobody asked for.
-  #
-  # NOT gated on `Shutdown.Quiesce.quiescing?` here, deliberately: `Fleet.Spawner` does not declare
-  # `Fleet.Shutdown` in its boundary, and wiring that edge IS the open arbitration A-13
-  # (quiesce at the mechanical chokepoint — `spawn_pod` — rather than sprinkled per caller).
-  # The day A-13 lands, the chokepoint covers this tick for free. Until then the seam
-  # `:reconcile_enabled_fun` lets a caller compose the check without widening the boundary.
-  defp default_reconcile_enabled?, do: Fleet.Spawner.PermanentBoot.auto_boot_enabled?()
+  # Gate of the reconciliation tick, two conditions:
+  #  - `auto_boot_enabled?` : the maintenance mode (`LCARS_BOOT_PERMANENT_AT_START=false`) must not
+  #    be defeated by a warden re-deriving pods nobody asked for.
+  #  - `not quiescing?` : during a drain the fleet is being torn down — respawning a dead permanent
+  #    would fight the drain (the drain is a DEBUG path to inspect pods without killing them; a
+  #    real shutdown nukes the node and this tick dies with it). `Fleet.Shutdown.Quiesce` is a
+  #    Ring-0 zero-dep primitive (a `:persistent_term` flag), reachable downward from any ring —
+  #    declared in this domain's boundary, no cycle. (A-13 for THIS tick: a fix, not a decision.)
+  defp default_reconcile_enabled? do
+    Fleet.Spawner.PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()
+  end
 
   defp handle_permanent_death(role, state) do
     now = System.monotonic_time(:millisecond)
