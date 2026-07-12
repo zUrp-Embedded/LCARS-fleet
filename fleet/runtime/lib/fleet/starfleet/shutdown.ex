@@ -187,10 +187,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   # what the hack hid. The try/rescue around the call (broker restarting mid-quiesce)
   # keeps its role: never mask as `0`, return :error → sentinel "not empty".
   defp safe_count_pending do
-    case Fleet.TaskQueue.list_pending() do
-      list when is_list(list) -> {:ok, length(list)}
-      _ -> :error
-    end
+    # Le retour nominal EST une liste (spec de list_pending/0 — prouvé dialyzer : la
+    # clause défensive `_ -> :error` était morte-par-spec, retirée au gate final Z7).
+    # La protection réelle « broker down mid-quiesce » = rescue/catch (noproc → :error).
+    {:ok, length(Fleet.TaskQueue.list_pending())}
   rescue
     _ -> :error
   catch

@@ -90,9 +90,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
            Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
       {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}
     else
+      # Les specs de route_for/4 (Z6c : appel direct typé, plus une capture opaque) et
+      # de safe_load couvrent tout — l'ancien fourre-tout `other -> :route_unreadable`
+      # était mort-par-spec (prouvé dialyzer au gate final Z7, retiré).
       {:ok, nil} -> {:error, :routeless}
       {:error, _} = err -> err
-      other -> {:error, {:route_unreadable, other}}
     end
   end
 
