@@ -20,12 +20,14 @@ defmodule Fleet.Pilot.WorktreeSync do
   on disk. This GenServer closes the race by construction: it handles one message at a time → one `git`
   at a time, whatever the number of triggers.
 
-  ## Best-effort and convergent
+  ## Fast-path mirror — the truth lives on the forge
 
   `sync/2` is a **cast**: the merge does not wait for it (hot-path intact) and the deliverable is already on the
-  forge — a failed alignment is only a disk behind, never a loss. The alignment is
-  **convergent and idempotent**: `reset --hard origin/main` brings back the LATEST `main`, no matter how many
-  merges happened between the cast and its handling. We don't try to match a precise merge: we
+  forge — the local clone is a MIRROR; a failed alignment is only a disk behind, never a loss, and is
+  logged warning by `log_result`. The alignment is **convergent and idempotent**: `reset --hard origin/main`
+  re-derives the FULL state (absolute, not incremental) — the next sync (every later merge casts one, or a
+  manual `sync_now/2`) brings back the LATEST `main`, no matter how many merges happened between the cast
+  and its handling, and heals any previously missed alignment. We don't try to match a precise merge: we
   want "clone == latest `main`". The timing with the merges therefore has no functional importance —
   that's what makes the non-coalescence inconsequential (the lease already spaces out the merges of a same repo).
   """
@@ -43,7 +45,11 @@ defmodule Fleet.Pilot.WorktreeSync do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
-  @doc "Requests (best-effort, serialized) the alignment of `repo`'s local clone onto `origin/main`."
+  @doc """
+  Requests (async cast, serialized) the alignment of `repo`'s local clone onto `origin/main`.
+  A failure is logged warning and heals at the next sync (`reset --hard origin/main` re-derives
+  the full state); the truth stays on the forge.
+  """
   @spec sync(GenServer.server(), String.t()) :: :ok
   def sync(server \\ __MODULE__, repo), do: GenServer.cast(server, {:sync, repo})
 

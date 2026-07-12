@@ -358,8 +358,9 @@ defmodule Fleet.Credentials.Shell do
   # is reliable, unlike right after the open where `setsid -w` has not necessarily forked yet. PREFERRED
   # target = the whole process-GROUP: the top-level AND all its descendants (git transport helpers,
   # filters) die together. Fallback if the PGID could not be discovered (process already gone / /proc
-  # unavailable): we kill the `setsid` wrapper (an honest degradation). `kill` is best-effort (the
-  # process may have died in the meantime). Then port close. nil = nothing to kill.
+  # unavailable): we kill the `setsid` wrapper (an honest degradation). `kill`'s result is discarded:
+  # its expected failure is ESRCH — the target died in the meantime — which IS the state we are
+  # driving toward, so the return carries nothing. Then port close. nil = nothing to kill.
   defp terminate(port, os_pid) do
     _ =
       case child_pgid(os_pid) do

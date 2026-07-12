@@ -261,8 +261,10 @@ defmodule Fleet.Pilot.Poller.Lease do
         # workflow_run) — BUT if the absence is DURABLE, the issue holds the lease and the repo is blocked
         # FOREVER silently (Jupiter: nobody will see it). We ESCALATE: IncidentRegistry dedups
         # by signature → 1st occurrence = WAL note, RECURRENCE (map missing at every tick) = sysadmin
-        # issue opened. No spam (the dedup IS the throttle). Best-effort (the escalation must
-        # never break the tick).
+        # issue opened. No spam (the dedup IS the throttle). The escalation must never break the
+        # tick (rescue in escalate_workflow_map_incident, silent at this site); the load failure
+        # recurs at EVERY tick while the map stays broken, so a skipped escalation is re-attempted
+        # one tick later — and the registry itself logs error when its owner is unavailable.
         _ = escalate_workflow_map_incident(workflow_map_name, message, seams)
         nil
     end

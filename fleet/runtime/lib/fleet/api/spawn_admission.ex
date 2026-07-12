@@ -112,9 +112,17 @@ defmodule Fleet.API.SpawnAdmission do
     else
       with {:ok, opts} <- build_admin_opts(raw),
            :ok <- validate_issue_id(raw) do
+        # The broadcast payload carries the PARSED form, not the raw DTO: a blank
+        # `cap_profile_name: ""` admitted here (presence/1 resolved the role instead) must NOT
+        # travel to the Bus — PublishConsumer's `name || role` fallback would short-circuit on
+        # the truthy "" → load("") → drop AFTER the 202 was ACKed (a lying 202, the exact class
+        # this module exists to close). Parse once at this boundary; the Bus receives truth.
         payload =
           raw
           |> Map.take(["cap_profile_name", "role", "issue_id"])
+          |> Map.reject(fn {k, v} ->
+            k in ["cap_profile_name", "role"] and presence(v) == nil
+          end)
           |> maybe_put_opts(opts)
 
         {:ok, payload}
@@ -128,8 +136,9 @@ defmodule Fleet.API.SpawnAdmission do
   # MUST be a binary, mirroring the `pod_id` guard in `build_admin_opts`: a raw JSON number/bool/list would
   # be `to_string`-d downstream (`PublishConsumer`) into the pod's issue correlation + spawn logs (e.g.
   # `to_string([1, 2, 3]) = <<1, 2, 3>>` control bytes) — a no-auth ingress must not admit an untyped
-  # correlation key. Absent → OK (`PublishConsumer` falls back to the Bus envelope's issue_id). NOT
-  # path-bound (the FS path derives from `pod_id`), so `is_binary` suffices — no `valid_pod_id?` needed.
+  # correlation key. Absent → OK (`PublishConsumer` defaults it to `""` — no envelope fallback, the
+  # canonical %Fleet.Event{} carries issue_id in the payload). NOT path-bound (the FS path derives
+  # from `pod_id`), so `is_binary` suffices — no `valid_pod_id?` needed.
   defp validate_issue_id(raw) do
     case Map.fetch(raw, "issue_id") do
       :error -> :ok

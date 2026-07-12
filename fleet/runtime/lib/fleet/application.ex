@@ -68,13 +68,14 @@ defmodule Fleet.Application do
       Fleet.EventRouter.Application,
       # Ring 1 — broker de mandats (dep : Bus).
       Fleet.TaskQueue.Application,
-      # Ring 2 — substrat MCP (sockets per-pod). ⚠ AVANT starfleet (cicatrice F8, cf. moduledoc).
+      # Ring 2 — substrat MCP (sockets per-pod). ⚠ AVANT spawner (cicatrice F8, cf. moduledoc).
       Fleet.MCP.Supervisor,
       # Ring 1 — spawner (pods). Après mcp : son provisionneur de sockets résout vers MCP au runtime.
       Fleet.Spawner.Application,
       # Ring 2 — policy coord (init_policies! fail-fast dans son init/1).
       Fleet.Coord.Application,
-      # Ring 2 — audit + BootOrchestrator (spawn des permanents → exige mcp ET spawner vivants).
+      # Ring 2 — audit + monitors (DriftMonitor/AuditConsumer/Shutdown/MCP*). Le BootOrchestrator
+      # n'y est PLUS : déclenché post-boot par la racine (A-08, cf. bas de start/2).
       Fleet.Starfleet.Application,
       # Ring 3 — driver forge (inerte sans :step_dispatch?).
       Fleet.Pilot.Application,

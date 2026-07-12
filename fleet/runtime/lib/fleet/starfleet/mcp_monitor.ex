@@ -134,7 +134,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
   end
 
   # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # best-effort policy has ONE authority, Ring 0). `:silent`: UnregisteredError = boot-order tolerated
+  # protected-emission policy has ONE authority, Ring 0). `:silent`: UnregisteredError = boot-order tolerated
   # (registry not yet populated), not an alarm. A MALFORMED event (construction bug) is
   # logged ERROR by safe_emit then neutralized — otherwise it would mask the "MCP crashed" alert,
   # and this broadcast runs INSIDE the GenServer itself: letting it crash would restart the

@@ -623,7 +623,7 @@ defmodule Fleet.Spawner.Pod do
           "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalation #5.2"
         )
 
-        Events.best_effort_broadcast("wake.failed", %{
+        Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
           "reason" => {:no_ack, phase},
           "pane" => Fleet.Spawner.PodTmux.capture_pane(data.pod_id)
@@ -723,7 +723,7 @@ defmodule Fleet.Spawner.Pod do
       # Process died WITHOUT a submitted result → orphan active task. Release it.
       clear_pod_task(data.pod_id)
 
-      Events.best_effort_broadcast("pod.failed", %{
+      Events.lossy_broadcast("pod.failed", %{
         "pod_id" => data.pod_id,
         "issue_id" => data.issue_id,
         "reason" => "exited_before_result",
@@ -889,7 +889,9 @@ defmodule Fleet.Spawner.Pod do
 
   # At the death of a PROJECT pod (rc_name present), checkpoints its ACTIVE session JSONl to the
   # seed-store for later recall (`--resume`). Permanents (no rc_name) → no seed-store.
-  # Best-effort (SeedStore never raises here).
+  # Non-fatal by contract: SeedStore.checkpoint never raises (it rescues internally, logs warning,
+  # returns `{:error, _}` — discarded here); a failed checkpoint loses only the session-memory
+  # bonus, the death path proceeds (the work truth lives on the forge).
   defp maybe_checkpoint_seed(data) do
     case LaunchSpec.rc_project(data.opts, data.cap_profile) do
       nil ->
@@ -955,8 +957,9 @@ defmodule Fleet.Spawner.Pod do
     pod_dir = Paths.pod_dir_for(args.pod_id, args.opts)
 
     %{
-      # `phase: :pending` is read only by `Pod.Recovery.first_continue_for/1` in `init/1` (to
-      # choose the start state), then DROPPED from the gen_statem data (the phase IS the state).
+      # `phase: :pending` = the fresh-boot marker; `Pod.Recovery.first_continue_for/1` matches on
+      # `:recovery` ALONE (its fallback clause covers this fresh/no-snapshot shape → :allocate).
+      # The field is then DROPPED from the gen_statem data (the phase IS the state).
       phase: :pending,
       conditions: MapSet.new(),
       pod_id: args.pod_id,
@@ -1019,7 +1022,7 @@ defmodule Fleet.Spawner.Pod do
     data = Map.put(data, :last_error, reason)
     StateFs.write_state_fs(put_phase(data, :failed))
 
-    Events.best_effort_broadcast("pod.failed", %{
+    Events.lossy_broadcast("pod.failed", %{
       "pod_id" => data.pod_id,
       "issue_id" => data.issue_id,
       "reason" => reason
@@ -1039,9 +1042,13 @@ defmodule Fleet.Spawner.Pod do
     Map.update!(data, :conditions, &MapSet.delete(&1, condition))
   end
 
-  # Releases the active task of a pod that dies without completing it. Best-effort (non-fatal): the Pod
-  # is otherwise decoupled from TaskQueue (event-driven completion) — we do not crash a pod's death
-  # if TaskQueue is unavailable (e.g. a test context with no broker).
+  # Releases the active task of a pod that dies without completing it. Non-fatal for the death path:
+  # the Pod is otherwise decoupled from TaskQueue (event-driven completion) — we do not crash a pod's
+  # death if TaskQueue is unavailable (e.g. a test context with no broker). A failed release is logged
+  # warning below; the stale ACTIVE item does not outlive it silently: the broker holds no persisted
+  # state (a down broker restarts EMPTY) and a later enqueue for the same pod supersedes any stale
+  # active item — cf. `Spawner.safe_clear_for_pod` (kill path twin, logged ERROR there because the
+  # staleness feeds the poller-reclaim/re-dispatch loop).
   defp clear_pod_task(pod_id) do
     Fleet.TaskQueue.clear_for_pod(pod_id)
     :ok

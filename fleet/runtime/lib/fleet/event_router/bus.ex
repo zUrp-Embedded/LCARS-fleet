@@ -16,9 +16,10 @@ defmodule Fleet.EventRouter.Bus do
     * `broadcast_main/1` — `broadcast(main_topic(), event)`, the canonical shortcut.
     * `emit/3` — `Fleet.Event.new(source, type, opts) |> broadcast_main()`, the producer
       idiom "construct a canonical event + broadcast to main" in one call.
-    * `safe_emit/3-4` — PROTECTED variant of `emit/3` for best-effort emitters
-      (observability/escalation): UNIFIED error policy (boot-order tolerated,
-      construction bug logged, never a crash of the emitter).
+    * `safe_emit/3-4` — PROTECTED variant of `emit/3` for fire-and-forget emitters
+      (observability/escalation — a lost event costs visibility, never a lifecycle):
+      UNIFIED error policy (boot-order tolerated, construction bug logged, never a
+      crash of the emitter).
     * `subscribe/1` / `unsubscribe/1` — topic subscription management (default `main_topic/0`)
     * `authorized_event_types/0` — MapSet of atoms loaded at boot by `Catalog.load!/0`
     * `set_authorized_event_types/1` — called by `Catalog.load!/0` at boot
@@ -99,7 +100,8 @@ defmodule Fleet.EventRouter.Bus do
   Factors ONLY the construction + broadcast: `emit/3` rescues nothing, classes nothing.
   Two error regimes exist among producers:
 
-    * **best-effort** (observability/escalation, fire-and-forget) — the policy is
+    * **observability/escalation** (fire-and-forget: a lost event costs visibility,
+      never a lifecycle — failures are logged, never propagated) — the policy is
       UNIFIED in `safe_emit/3-4` below. Do NOT re-implement a local rescue around
       `emit/3`: that is exactly the duplication `safe_emit` absorbed.
     * **surface-specific** — the producer keeps ITS policy AROUND `emit/3`: HTTP
@@ -146,7 +148,7 @@ defmodule Fleet.EventRouter.Bus do
       the enum, timestamp not a `%DateTime{}`, non-keyword opts, a type name never
       pre-registered), NOT a runtime hazard: ALWAYS `Logger.error` + `:ok`. Never
       swallowed silently — an escalation/alert that vanishes silently is undiagnosable.
-      Never propagated — the best-effort emitter (monitor GenServer, boot Task, pod
+      Never propagated — the fire-and-forget emitter (monitor GenServer, boot Task, pod
       gen_statem) must NEVER crash over an OBSERVABILITY defect: letting it crash would
       loop its supervisor over a malformed producer.
 

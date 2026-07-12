@@ -261,7 +261,8 @@ defmodule Fleet.SpawnerTest do
         repo_id: @test_repo_id
       )
 
-    # la task active passe à `:cleared` (≠ `:pending`/`:assigned`) — best-effort, async → poll borné
+    # la task active passe à `:cleared` (≠ `:pending`/`:assigned`) — clear ASYNC à la mort du pod
+    # (clear_pod_task ; un clear raté est loggué warning côté Pod) → poll borné
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
            "la task du pod mort devrait être :cleared, statut actuel : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
@@ -400,9 +401,10 @@ defmodule Fleet.SpawnerTest do
     end
 
     @tag :tmp_dir
-    test "TurnFlag.write : dir absent → :ok best-effort (log-loud, pas de crash)", %{
-      tmp_dir: tmp
-    } do
+    test "TurnFlag.write : dir absent → :ok (loggué warning, pas de crash — le wake retombe sur send-keys + result_deadline)",
+         %{
+           tmp_dir: tmp
+         } do
       assert :ok = Fleet.Spawner.Pod.TurnFlag.write(Path.join(tmp, "nope/missing"))
     end
   end

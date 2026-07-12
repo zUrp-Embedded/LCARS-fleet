@@ -25,7 +25,9 @@ defmodule Fleet.Pilot.ForgeStubs do
       :ok
     end
 
-    # WS2 : le sceau pose stage/merged post-merge (best-effort). No-op (le stub prouve l'ordre merge↔comment).
+    # WS2 : le sceau pose stage/merged post-merge — trace système dont l'échec est jeté SANS log par
+    # seal_and_merge (aucun rail ne le re-pose ; cf. gatekeeper_seal.ex). No-op (le stub prouve
+    # l'ordre merge↔comment).
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
     # Close explicite (QoL 2026-07-07) : dernier acte de seal_and_merge. SIGNALE (opts inclus) : un test

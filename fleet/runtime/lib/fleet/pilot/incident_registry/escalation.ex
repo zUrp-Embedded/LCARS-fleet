@@ -13,20 +13,24 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     * Label `error_system` = DURABLE signal (the poller/human finds the issue by it); added with a
       BOUNDED retry. A PERSISTENT label failure (F-C075) → `{:error, {:discovery_label_failed, num, _}}`
       → `record_or_escalate` renders `{:escalation_failed, _}` (never a lying `{:escalated}` for an
-      unfindable incident). Sysadmin assignee best-effort (account absent → retry WITHOUT assignee:
-      escalation takes precedence over naming).
+      unfindable incident). The sysadmin assignee is a SECONDARY discovery path (account absent →
+      retry WITHOUT assignee: escalation takes precedence over naming; the durable path is the
+      label, and a missing assignee is visible on the issue itself).
     * Forge down (create) → `{:error, _}` propagated (`record_or_escalate` renders it as
       `{:escalation_failed, _}`, never a lying `{:escalated}`).
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
-      SP suspect) — the diagnosis guides the sysadmin toward the root-cause.
+      SP suspect / Cat-5 max severity) — the diagnosis guides the sysadmin toward the root-cause.
   """
 
   require Logger
 
   @doc """
-  Opens a system issue (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) for an
-  incident. `kind`: `:recurrence` | `:reroll_failed` | `:pod_failed` | `:sp_suspect`. Label = DURABLE
-  signal (always); assignee best-effort (label-only fallback if the account does not exist).
+  Opens a system issue (default label `error_system` — `opts[:label]` overrides, e.g. `error_cat5`;
+  assignee `starfleet`=sysadmin) for an incident. `kind`: `:recurrence` | `:reroll_failed` |
+  `:pod_failed` | `:sp_suspect` | `:cat5`. The label is a DURABLE discovery signal (always set,
+  bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
+  retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
+  is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body.
   Returns `{:ok, number}` | `{:error, term}`.
   """
   @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
@@ -110,13 +114,14 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   end
 
   # Creates the system issue with the sysadmin assignee; nonexistent assignee (account absent) -> retry WITHOUT
-  # assignee (best-effort: escalation takes precedence over naming). Forge down on both attempts -> {:error, _}
+  # assignee (escalation takes precedence over naming: the issue must land; the durable discovery path is the
+  # label, and the missing assignee is visible on the issue). Forge down on both attempts -> {:error, _}
   # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
   #
   # F-C076 (KEEP, D1): the retry drops the assignee on ANY first error, not only an invalid-assignee 422.
   # Assessed harmless → KEPT: a real forge-down fails BOTH attempts (→ {:error}, no spurious drop); the
   # invalid-assignee case is exactly when dropping is correct; only a transient error resolving BETWEEN the
-  # two attempts drops a valid assignee — a rare race. And the assignee is a BEST-EFFORT discovery path: the
+  # two attempts drops a valid assignee — a rare race. And the assignee is a SECONDARY discovery path: the
   # DURABLE one is the `error_system` label (now retried + fail-loud-surfaced, F-C075), so a dropped assignee
   # loses NO discoverability. A precise "drop only on a 422-assignee error" would couple to the forge HTTP
   # error shape (fragile) for a negligible gain — not worth it.

@@ -159,7 +159,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # (via the linked issue `Closes #N`). The gate is AGENT-AGNOSTIC → we LAY the judges (reviewer_roles, system
   # token via forge_opts); on the next tick `requested` carries them → normal review → merge/rework, EXACTLY
   # like an agent deliverable. An agent PR ALWAYS has its judges via open_deliverable_pr → never reaches
-  # here. Best-effort: a laying failure surfaces (`{:error, {:adopt_failed, _}}`), no crash or silent skip.
+  # here. A laying failure surfaces as `{:error, {:adopt_failed, _}}` — counted in the poller's
+  # `tally.errors` (telemetry + last_tally_errors) and RETRIED next tick (`requested` still empty →
+  # same adoption path re-runs). No crash, no silent skip.
   # Idempotent: re-laying the same reviewers = Gitea no-op (an adopted PR is never re-adopted: requested ≠ []).
   defp adopt_orphan_pr(pr_number, %Ctx{} = ctx) do
     reviewers = Fleet.Pilot.Roles.reviewer_roles(ctx.opts)
@@ -201,8 +203,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              ctx.forge_opts
            ) do
         :ok ->
-          # Die-on-promote (best-effort). The producer is `one-shot`: it is ALREADY dead at the end of
-          # build/rework → this kill is a no-op in the nominal case. We DELIBERATELY keep `for_issue`
+          # Die-on-promote (return discarded — honestly: the producer is `one-shot`, ALREADY dead at
+          # the end of build/rework → this kill is a no-op in the nominal case; a kill failure is
+          # swallowed by `safe_kill`, and a leftover pod ends itself at end-of-run, its orphaned
+          # substrate swept by Spawner's PodWarden). We DELIBERATELY keep `for_issue`
           # (not `for_repo`): for a `slot_scope: project` producer, `for_issue(issue_n, producer)`
           # targets a PHANTOM pod_id (`<repo>-issue-N-engineer` does not exist — the project identity is
           # `<repo>-engineer`) → SAFE no-op. Using `for_repo` here would KILL the eng if it's already coding

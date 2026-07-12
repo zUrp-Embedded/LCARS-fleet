@@ -206,7 +206,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       :ok
     end
 
-    # F181 : compensation — kill best-effort du pod avant retrait du verrou.
+    # F181 : compensation — `safe_kill` du pod avant retrait du verrou. Un kill raté n'est pas
+    # retenté : le verrou retiré → re-dispatch au tick suivant, qui RE-BRIEF le pod encore vivant
+    # (dispatch idempotent) ; le substrat orphelin est balayé par le PodWarden du Spawner.
     def kill_pod(pod_id) do
       send(self(), {:killed, pod_id})
       :ok
@@ -378,7 +380,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # F071 : verrouille le 2ᵉ site `IssueId.compose` (enqueue_brief) — sinon un retour au littéral
       # "issue-#{number}" pour `issue_id` ne serait pas attrapé (le pod_id ≠ issue_id).
       assert attrs.issue_id == "issue-42"
-      # kick best-effort émis
+      # kick émis — un wake raté ne serait pas muet : spawn_step remonte
+      # `{:error, {:wake_unreached, …}}` (compté en errors par le poller, re-wake au tick suivant).
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 

@@ -26,7 +26,8 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   @doc """
   Creates a repo on the forge. `opts[:org]` → `POST /orgs/<org>/repos` (org repo); otherwise
   `POST /user/repos` (the token's account). `auto_init: true` by default (initial commit + README
-  → clonable right away). Best-effort idempotent: repo already present (HTTP 409) → `{:ok, :already_exists}`.
+  → clonable right away). Idempotent: repo already present (HTTP 409) → `{:ok, :already_exists}` —
+  provisioning converges on a re-run instead of erroring; any other failure IS returned as an error.
 
   ## Returns
     * `{:ok, full_name}` — repo created (e.g. `"fleet/poc-helloworld"`)

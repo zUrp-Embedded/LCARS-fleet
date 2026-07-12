@@ -109,7 +109,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   end
 
   # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # best-effort policy has ONE authority, Ring 0). The type name is SYNTHESIZED: we pass the BINARY
+  # protected-emission policy has ONE authority, Ring 0). The type name is SYNTHESIZED: we pass the BINARY
   # `starfleet.audit_cat5_<src>` as-is, safe_emit converts it via `to_existing_atom` (anti
   # atom-leak — the 3 atoms are registered: events.yaml + Starfleet.Application pre-register)
   # UNDER its rescue. An unexpected source (atom never pre-registered) is classed there as a

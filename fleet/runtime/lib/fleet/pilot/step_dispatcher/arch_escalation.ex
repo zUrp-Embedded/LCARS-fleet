@@ -130,20 +130,39 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   # CORE of arch escalation (factored — conflict AND exhausted rework): DEDUPLICATED gatekeeper comment
   # (signed via `as_role`) + `lcars-awaits-arch` lock on the ISSUE → the poller SKIPS it
-  # (out-of-dispatch). Best-effort: we surface to the human channel (the arch), we do not mask. A single
+  # (out-of-dispatch). We surface to the human channel (the arch), we do not mask: the LABEL is the
+  # load-bearing effect (its failure is logged error below), the comment is explanatory only. A single
   # forge write point for all PR arch escalations (no fork of signature/label).
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
-    # Gatekeeper-signed comment (best-effort) via the UNIQUE writer `GatekeeperSeal.as_gatekeeper/1`.
-    # Fail-CLOSED on the token: if the gatekeeper role token is unavailable, SKIP the comment (do not post
-    # it under the system account) but STILL post the load-bearing `lcars-awaits-arch` label (system, the
-    # poller throttle) — the escalation's effect (out-of-dispatch) holds regardless of the comment.
-    _ =
-      with {:ok, gk} <- Fleet.Pilot.GatekeeperSeal.as_gatekeeper(seams.forge_opts) do
+    # Gatekeeper-signed comment (EXPLANATORY, not load-bearing) via the UNIQUE writer
+    # `GatekeeperSeal.as_gatekeeper/1`. Fail-CLOSED on the token: if the gatekeeper role token is
+    # unavailable, SKIP the comment (do not post it under the system account) but STILL post the
+    # load-bearing `lcars-awaits-arch` label (system, the poller throttle) — the escalation's effect
+    # (out-of-dispatch) holds regardless of the comment. A failed/skipped post is LOGGED (never
+    # retried: once the label sticks, `decide/1` skips → no re-post path exists) — the arch would
+    # otherwise see the throttle label with no explanation and no trace of why.
+    case Fleet.Pilot.GatekeeperSeal.as_gatekeeper(seams.forge_opts) do
+      {:ok, gk} ->
         gk_opts =
           gk |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
 
-        seams.forge.post_comment(seams.repo, issue_n, body, gk_opts)
-      end
+        case seams.forge.post_comment(seams.repo, issue_n, body, gk_opts) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "ArchEscalation: issue ##{issue_n} escalation comment NOT posted (#{inspect(reason)}) — " <>
+                "the arch will see the awaits-arch label without its explanation (no re-post rail)"
+            )
+        end
+
+      {:error, reason} ->
+        Logger.warning(
+          "ArchEscalation: issue ##{issue_n} escalation comment SKIPPED (gatekeeper token: " <>
+            "#{inspect(reason)}) — label-only escalation, no explanation on the issue"
+        )
+    end
 
     case seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts) do
       {:error, reason} ->

@@ -162,7 +162,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          log_ctx
        ) do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
-         # Native time-tracking (best-effort, discard): STARTS the stopwatch on the SAME object as the
+         # Native time-tracking (discard: pure Gitea metric, NOT load-bearing for the dispatch — a
+         # failed start is swallowed here, unlogged; the time is simply not tracked for this run and
+         # nothing re-derives it): STARTS the stopwatch on the SAME object as the
          # lock (issue or PR) — global mechanic, role-agnostic (cf. § Time-tracking, ForgeClient).
          # Signed IN THE WORKER'S NAME (`as_role`) — NOT the label (protocol = system): Gitea attributes the
          # tracked time to the AUTHENTICATED user, so a system stopwatch would count all the time
@@ -280,8 +282,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   @doc """
-  Best-effort compensation: kills the pod (if it spawned) before removing the lock.
-  Silent no-op if the spawner does not expose `kill_pod/1` or if the pod does not exist.
+  Compensation kill: kills the pod (if it spawned) before removing the lock.
+  Silent no-op if the spawner does not expose `kill_pod/1` (test stubs) or if the pod does not
+  exist; a raise is swallowed (`:ok`). A kill that genuinely fails is NOT retried here — what
+  catches it: on the compensation path the lock is removed, so the next tick re-dispatches and the
+  still-alive pod is RE-BRIEFED (idempotent dispatch, `pod_alive?` path); on die-on-promote the
+  `one-shot` producer ends itself at end-of-run; orphaned pod substrate (tmux socket without its
+  Pod process) is swept by Spawner's PodWarden.
 
   PUBLIC because shared with the core: `spawn_step/9` (compensation) AND `ReviewLifecycle.promote_pr`
   (die-on-promote of the eng). One copy, no fork.

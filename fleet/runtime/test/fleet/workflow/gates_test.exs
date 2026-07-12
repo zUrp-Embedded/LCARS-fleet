@@ -127,10 +127,12 @@ defmodule Fleet.Workflow.GatesTest do
     test "hard avec rules = LISTE d'items NON-STRING (maps) → {:fail}, pas FunctionClauseError (crash singleton)" do
       # Asymétrie : le hard gate v2.5 (`is_list(rules)`) appelait `Predicate.eval?` sur
       # CHAQUE item SANS filtrer les non-strings (le terminal, lui, filtre via
-      # `Enum.all?(rules, &is_binary/1)`). Une workflow_map v1 — ou un override non schématisé —
-      # portant un hard gate à `rules` = liste de maps levait FunctionClauseError dans
-      # Predicate → ça remontait non-wrappé au StepRunConsumer (singleton) → crash. Le filet
-      # `Predicate.eval?/2` total (item non-string → false) rend la gate fail-closed.
+      # `Enum.all?(rules, &is_binary/1)`). Un override NON SCHÉMATISÉ (workflow_map en mémoire
+      # qui contourne le schéma du loader — il n'existe PAS d'entrée v1 : un YAML v1 échoue le
+      # schéma v2.5 avant normalize) portant un hard gate à `rules` = liste de maps levait
+      # FunctionClauseError dans Predicate → ça remontait non-wrappé au StepRunConsumer
+      # (singleton) → crash. Le filet `Predicate.eval?/2` total (item non-string → false) rend
+      # la gate fail-closed.
       step = %{
         "gate" => %{"type" => "hard", "rules" => [%{"name" => "r1", "match" => %{"a" => 1}}]}
       }

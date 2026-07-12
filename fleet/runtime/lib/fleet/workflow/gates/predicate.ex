@@ -76,8 +76,9 @@ defmodule Fleet.Workflow.Gates.Predicate do
   # TOTAL fail-closed clause. The hard gate v2.5 applies `eval?` to EVERY item of
   # `rules` without guaranteeing it is a string: known asymmetry with the terminal
   # gate, which filters its non-string items upstream (`Enum.all?(rules, &is_binary/1)`).
-  # A non-string `rule` (e.g. a v1 gate rule-map mis-routed to the hard v2.5 path,
-  # or an unschematized override) — or non-map `outputs` — renders `false`:
+  # A non-string `rule` (an UNSCHEMATIZED override — an in-memory workflow_map that bypassed the
+  # loader's schema; there is NO v1 input, a v1 YAML fails the v2.5 schema before normalize)
+  # — or non-map `outputs` — renders `false`:
   # the hard gate FAILS (`Enum.all?` becomes false → `{:fail, …}` in Gates), NEVER a
   # FunctionClauseError that would bubble up and crash the StepRunConsumer (singleton). The eval
   # is made TOTAL, symmetric with the terminal's fail-closed catch-all.

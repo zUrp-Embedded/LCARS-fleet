@@ -108,6 +108,8 @@ defmodule Fleet.CapProfile do
     * `{:error, :not_found}` — no profile carries this name
     * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
       distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
+    * `{:error, :name_collision}` — two catalogue files carry the same `metadata.name`
+      (broken deploy artifact — propagated from `Catalog.read_role/1`, fail-loud)
     * `{:error, :invalid_schema}` — malformed YAML OR schema-nonconformant
     * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
   """
@@ -131,6 +133,8 @@ defmodule Fleet.CapProfile do
     * `{:error, :not_found}` — base role absent
     * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
       distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
+    * `{:error, :name_collision}` — two catalogue files carry the same `metadata.name`
+      (broken deploy artifact — propagated from `Catalog.read_role/1`, fail-loud)
     * `{:error, :modop_not_found}` — at least one named modop is absent
       (the missing modop name is logged via `Logger.warning/1`)
     * `{:error, :invalid_schema}` — base or post-merge result nonconformant

@@ -31,7 +31,7 @@ defmodule Fleet.Credentials.RoleToken do
   @doc """
   Forge token of the `role` account, or `nil` if absent/unreadable/invalid role.
 
-  `nil` is a best-effort REPORTING of absence (logged here), NOT a policy: this module stays policy-NEUTRAL.
+  `nil` REPORTS the absence (every cause is warning-logged here), it is NOT a policy: this module stays policy-NEUTRAL.
   The fail-CLOSED policy is carried by the `Fleet.Credentials.RoleIdentity` smart-constructor, the SINGLE
   source shared by both consumers (pilot `ForgeClient.as_role/2`, mcp `Delegation.create_issue`): a `nil`
   token yields `{:error, :role_token_unavailable}` and NEVER a system-account fallback (which would be a

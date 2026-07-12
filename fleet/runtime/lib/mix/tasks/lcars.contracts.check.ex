@@ -850,9 +850,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # FENÊTRE ASSUMÉE entre Z3 et Z4 : la direction des deps inter-domaines n'est enforcée
   # nulle part. Ce qui RESTE vérifiable ici, et que l'umbrella ne portait pas, c'est
   # l'invariant de BOOT : l'ordre des children de Fleet.Application est le SEUL porteur
-  # de F8 (event_router premier ; mcp avant starfleet ; starfleet après spawner) — le
-  # réordonner casse le boot sans erreur de compile. C'est ce que ce check verrouille,
-  # sous un id honnête (`boot.order_f8`).
+  # de F8 (event_router premier ; mcp avant spawner — les contraintes starfleet sont
+  # tombées avec A-08, cf. le commentaire dans la fonction) — le réordonner casse le boot
+  # sans erreur de compile. C'est ce que ce check verrouille, sous un id honnête
+  # (`boot.order_f8`).
   defp check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 

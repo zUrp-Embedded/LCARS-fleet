@@ -198,7 +198,9 @@ for entry in "${ENTRIES[@]}"; do
   fi
 
   # Écriture atomique (tmp+mv) + droits POSIX : 0640, groupe fleet (le BEAM per-humain lit via
-  # le groupe ; personne d'autre). chgrp best-effort (exige le privilège du dossier).
+  # le groupe ; personne d'autre). chgrp exige le privilège sur le dossier : un refus n'annule PAS
+  # la pose du token mais est signalé WARN sur stderr (« à poser à la main ») — tant que le groupe
+  # n'est pas corrigé, le BEAM ne lit pas le fichier et RoleToken le loggue warning à l'usage.
   install -d -m 0750 "$TOKENS_DIR" 2>/dev/null || true
   tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"

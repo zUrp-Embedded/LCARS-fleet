@@ -115,10 +115,11 @@ if config_env() != :test do
     end
   end
 
-  # SignalsOS (:start_signals) : PAS d'on-switch — F037 : `handle_info({:signal,_})` est MORT
-  # (les signaux OS vont au gen_event `:erl_signal_server`, pas au GenServer ; SIGUSR1 halte même le
-  # VM). Câbler un knob activerait un module cassé ET dangereux. Reste gated-off jusqu'à F037 (vrai
-  # fix = gen_event handler). os.signal.* du registre = dormant en attendant.
+  # SignalsOS (:start_signals) : PAS d'on-switch — le module est un stub NON-IMPLÉMENTÉ dont
+  # `init/1` RAISE avant tout `:os.set_signal` (boot fail-loud : l'activer est une misconfiguration,
+  # jamais une capture silencieuse de SIGTERM/SIGHUP). Le vrai fix, le jour venu = un gen_event
+  # handler sur `:erl_signal_server` (les signaux OS n'atteignent pas un GenServer). Reste gated-off ;
+  # os.signal.* du registre = dormant en attendant.
 
   # ============================================================
   # fleet_spawner (Lot 3) — pods permanents
@@ -162,7 +163,8 @@ if config_env() != :test do
   # TmuxBackend (claude --remote-control HORS bwrap, containment: none, control-path cassé depuis la
   # convergence PodTmux 2026-06-02) a été SUPPRIMÉ (Fable F103). Le bloc d'opt-in quarantaine
   # `LCARS_LAUNCH_BACKEND=tmux` + `LCARS_UNSAFE_ALLOW_HOST_TMUX=1` est retiré avec lui : il n'y a plus
-  # de backend hors-bwrap à activer. La chaîne bwrap est la seule voie (sanctuaire).
+  # de backend hors-bwrap à activer. La chaîne bwrap est la seule voie de lancement sandboxé
+  # (elle projette le sanctuaire du pod — le monde clos fourni À l'agent).
 
   # ============================================================
   # fleet_mcp — base des sockets MCP per-pod (transport AF_UNIX, R9)

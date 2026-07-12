@@ -14,7 +14,7 @@ defmodule Fleet.TaskQueue.Server do
   Broadcasts `%Fleet.Event{source: :task_queue, ...}` on `Phoenix.PubSub`
   topic `fleet.events`, `correlation_id = work_item.id`. Cross-restart recovery via
   `state.json` (fail-loud `:state.corrupt` on schema mismatch at READ, non-blocking
-  fallback). On the WRITE side: `persist/1` is best-effort — a write failure is
+  fallback). On the WRITE side: `persist/1` never blocks a transition — a write failure is
   logged **error** (durability of the recovery point broken), **non-fatal** (we
   don't crash the broker over a disk blip); reconciliation goes through the
   forge-driven rail (re-dispatch from the forge state), not through this local persistence.
@@ -32,11 +32,11 @@ defmodule Fleet.TaskQueue.Server do
   `:bus` (seam, default `Fleet.EventRouter.Bus`; module with `broadcast/2` — injected in test to
   exercise the non-swallowed `work_item.completed` lifecycle path).
 
-  ## Broadcast — load-bearing vs best-effort
+  ## Broadcast — load-bearing vs lossy observability
   `work_item.completed` is LIFECYCLE load-bearing (the StepRunConsumer depends on it to finish the step_run) →
   `required_broadcast`: a failure is NOT swallowed, it propagates `{:error, {:broadcast_failed, _}}` to the caller
   of `submit_result` (no more mute `:ok` that leaves the forge lock for life). The other events
-  (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `best_effort_broadcast` (observability, rescue).
+  (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `lossy_broadcast` (observability, rescue).
 
   ## Split — what was extracted, what stays (and why)
 
@@ -46,7 +46,7 @@ defmodule Fleet.TaskQueue.Server do
       write, fail-loud `:corrupt` decoding). The Server keeps the ORCHESTRATION:
       `persist/1` decides WHETHER to persist (`persist: false` / `state_path: nil`),
       `load_state/2` decides WHETHER to reload — Store only knows how to read/write.
-    * `Fleet.TaskQueue.Broadcast` — load-bearing vs best-effort policy + the
+    * `Fleet.TaskQueue.Broadcast` — load-bearing vs lossy-observability policy + the
       `event/3` envelope. The Server keeps one-line adapters that unpack
       `state.bus`/`state.topic` (the per-instance seams).
 
@@ -165,7 +165,7 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_continue({:corrupt, found}, state) do
     # Non-blocking fallback: empty state + a boot-anomaly event post-init.
-    best_effort_broadcast(
+    lossy_broadcast(
       state,
       Fleet.Event.new(:task_queue, :"state.corrupt", payload: %{expected: 1, found: found})
     )
@@ -207,7 +207,7 @@ defmodule Fleet.TaskQueue.Server do
         # WorkItem has no @derive Jason.Encoder, so a `%{work_item: work_item}` would crash `Jason.encode!`
         # in any JSON-event consumer (Fleet.API.WS on every enqueue). No consumer
         # needs the struct (deck = count, audit = pod_id/correlation_id).
-        best_effort_broadcast(
+        lossy_broadcast(
           new_state,
           event(:"work_item.enqueued", work_item, %{work_item_id: work_item.id})
         )
@@ -230,7 +230,7 @@ defmodule Fleet.TaskQueue.Server do
         assigned = %{work_item | state: :assigned, assigned_at: now()}
         new_state = state |> put_work_item(assigned) |> persist()
 
-        best_effort_broadcast(
+        lossy_broadcast(
           new_state,
           event(:"work_item.assigned", assigned, %{work_item_id: assigned.id})
         )
@@ -333,7 +333,7 @@ defmodule Fleet.TaskQueue.Server do
 
         for t <- cleared,
             do:
-              best_effort_broadcast(
+              lossy_broadcast(
                 new_state,
                 event(:"work_item.cleared", t, %{work_item_id: t.id})
               )
@@ -403,8 +403,10 @@ defmodule Fleet.TaskQueue.Server do
           new_state = state |> put_work_item(failed) |> persist()
 
           # `:"work_item.failed"` (deadline) = watchdog of the IRREDUCIBLE, not a caller-facing
-          # completion: best-effort (a handle_info has no one to propagate to). The guard stays, honest.
-          best_effort_broadcast(
+          # completion: lossy broadcast (a handle_info has no caller to propagate to). The :failed
+          # transition is already recorded + persisted above — a lost broadcast costs observability
+          # only, logged warning by `Broadcast`. The guard stays, honest.
+          lossy_broadcast(
             new_state,
             event(:"work_item.failed", failed, %{
               work_item_id: failed.id,
@@ -553,14 +555,14 @@ defmodule Fleet.TaskQueue.Server do
   #
   # One-line adapters: the GenServer state does NOT traverse the policy module —
   # here we unpack the per-instance seams (`state.bus`, `state.topic`) and pass
-  # explicit arguments. The load-bearing vs best-effort classification (the WHY
+  # explicit arguments. The load-bearing vs lossy-observability classification (the WHY
   # of the two regimes) lives in the moduledoc of `Fleet.TaskQueue.Broadcast`.
 
   defp event(type, %WorkItem{} = work_item, payload),
     do: Broadcast.event(type, work_item, payload)
 
-  defp best_effort_broadcast(state, %Fleet.Event{} = ev),
-    do: Broadcast.best_effort(state.bus, state.topic, ev)
+  defp lossy_broadcast(state, %Fleet.Event{} = ev),
+    do: Broadcast.lossy(state.bus, state.topic, ev)
 
   defp required_broadcast(state, %Fleet.Event{} = ev),
     do: Broadcast.required(state.bus, state.topic, ev)

@@ -113,7 +113,8 @@ events:
 
   # --- post_extract.git (REMOVED) ---
   # `git.published`/`git.publish_failed` REMOVED: 0 producer (the RAM engine `Pipeline.Executor`
-  # was removed; `Pipeline.Git.publish/1` does not broadcast) AND 0 consumer (the
+  # was removed; the system git rail — `Workflow.Git.commit/push composed by Deliverable`,
+  # the successor of the deleted `publish/1` — does not broadcast) AND 0 consumer (the
   # `Starfleet.AuditConsumer` clause was RAZED 2026-07-04, cf. `audit_consumer.ex`). 0 producer +
   # 0 consumer = registry lie (the registry must reflect reality, exactly as pod.allocate/transition
   # above). The prior comment still claimed "consumed by AuditConsumer / consumer wired" — false since

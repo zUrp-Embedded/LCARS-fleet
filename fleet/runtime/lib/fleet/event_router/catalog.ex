@@ -12,7 +12,7 @@ defmodule Fleet.EventRouter.Catalog do
   `authorized_event_types`** (`Bus.set_authorized_event_types/1`) → `Bus.broadcast/2`
   fails loud on any type outside the registry: an emitted, unregistered event crashes
   its emitter. The external dynamic emitters (`webhooks_gitea`/`signals_os`/
-  `policies`/`Pod.best_effort_broadcast`) rescue `UnregisteredError` so as not to die
+  `policies`/`Pod.lossy_broadcast`) rescue `UnregisteredError` so as not to die
   on an unexpected type; the `pod.completed` lifecycle, on the other hand, goes through
   `Pod.required_broadcast` which PROPAGATES the failure instead of swallowing it (a
   load-bearing event swallowed would mask the end of step_run and leave the lock held).

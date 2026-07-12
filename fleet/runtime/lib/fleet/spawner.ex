@@ -263,7 +263,9 @@ defmodule Fleet.Spawner do
             # run its OWN clear_for_pod. Without releasing the mandate here, the work item stays ACTIVE →
             # the poller reclaims it → re-dispatch → a kill/timeout LOOP. So we release it (the
             # load-bearing part; the `:killed` tombstone is secondary and lost with the dead pod).
-            # Best-effort: a TaskQueue that is itself down must never make `kill_pod` crash.
+            # Fail-safe toward the caller only: a TaskQueue that is itself down must never make
+            # `kill_pod` crash — a failed release is logged ERROR by `safe_clear_for_pod` (the
+            # reclaim-loop stake is spelled out there).
             _ = safe_clear_for_pod(pod_id)
             :ok
         end
@@ -273,8 +275,9 @@ defmodule Fleet.Spawner do
     end
   end
 
-  # Release a pod's active mandate, best-effort (used by the brutal `kill_pod` fallback): a TaskQueue
-  # that is itself down/absent must never propagate an exit into `kill_pod`.
+  # Release a pod's active mandate (used by the brutal `kill_pod` fallback): a TaskQueue that is
+  # itself down/absent must never propagate an exit into `kill_pod` — but the failure is NOT silent:
+  # logged ERROR below (the stake: stale active item → poller reclaim → kill/re-dispatch loop).
   defp safe_clear_for_pod(pod_id) do
     Fleet.TaskQueue.clear_for_pod(pod_id)
     :ok

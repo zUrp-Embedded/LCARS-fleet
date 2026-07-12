@@ -28,8 +28,10 @@ Nothing here is restated, only pointed at.
 Universal-substrate primitives co-located here (Ring 0, zero new edge):
 - `Fleet.EventRouter.BindAddress` — single source of the listener bind IP (loopback default, exposure = named opt-in)
 - `Fleet.EventRouter.Listener` — single source of the Cowboy HTTP child-spec (the "spec" counterpart of `BindAddress`)
-- `Fleet.Shutdown.Quiesce` — the shutdown-drain flag (`:persistent_term`, no process)
-- `Fleet.SchemaCache` — the "load an artifact once, cache in `:persistent_term`" authority
+
+(`Fleet.Shutdown.Quiesce` and `Fleet.SchemaCache` are NOT here: each is its own zero-dep
+Ring-0 boundary — `lib/fleet/shutdown/quiesce.ex`, `lib/fleet/schema_cache.ex` — reachable
+downward from any ring precisely because they depend on nothing.)
 
 ## Config & deps
 - Knob `:start_webhooks` — read by `Application`, runtime on-switch `LCARS_FLEET_WEBHOOKS`.

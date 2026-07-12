@@ -103,7 +103,10 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
 
     # project-scoped one-shot + pod VIVANT → busy AVANT le resolver.
     assert {:skipped, :role_busy} =
-             StepDispatcher.dispatch_issue(payload(), opts(ProjectScopedLoader, AliveSpawner, resolver))
+             StepDispatcher.dispatch_issue(
+               payload(),
+               opts(ProjectScopedLoader, AliveSpawner, resolver)
+             )
 
     refute_received :resolver_called
     refute_received {:add_label, _}
@@ -114,7 +117,10 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
 
     # pod mort → la décision passe → le resolver tire → son erreur reste taguée et loggée.
     assert {:error, {:project_resolution, :ls_remote_timeout}} =
-             StepDispatcher.dispatch_issue(payload(), opts(ProjectScopedLoader, DeadSpawner, resolver))
+             StepDispatcher.dispatch_issue(
+               payload(),
+               opts(ProjectScopedLoader, DeadSpawner, resolver)
+             )
 
     # et surtout : AUCUN lock orphelin (l'échec est pré-lock).
     refute_received {:add_label, _}
@@ -129,7 +135,10 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     end
 
     assert {:ok, {:spawned, _pod_id, "engineer"}} =
-             StepDispatcher.dispatch_issue(payload(), opts(InstanceScopedLoader, AliveSpawner, resolver))
+             StepDispatcher.dispatch_issue(
+               payload(),
+               opts(InstanceScopedLoader, AliveSpawner, resolver)
+             )
 
     assert_received :resolver_called
   end

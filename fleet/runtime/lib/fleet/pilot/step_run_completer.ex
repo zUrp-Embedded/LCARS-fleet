@@ -9,7 +9,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   ## Ordered idempotent sequence
 
   Atomicity is impossible (Gitea has no transaction; one step_run = ~5 HTTP
-  writes). We replace it with an ORDER where the poller trigger (PATCH assignee)
+  writes). We replace it with an ORDER where the poller trigger (the ENGRAVED
+  ROUTE of the next step — the poller reads the route, never the assignee)
   is the **second-to-last** and the lock is lifted **last**:
 
     1. **Commit + push deliverable** — delegated to `Deliverable.publish`
@@ -44,8 +45,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     * `Texts` — DEFAULT wording (pr_body/review_body/signed comment), pure generators;
       the caller's overrides take precedence.
-    * `Emissions` — best-effort SIDE emissions of the producer delivery (eng voice,
-      `deliverable.published` slot-freeze); out of sequence by contract.
+    * `Emissions` — SIDE emissions of the producer delivery (eng voice,
+      `deliverable.published` slot-freeze); out of sequence by contract: the
+      completion depends on none of their results (the deliverable truth = the
+      pushed commit + open PR). Failure visibility per emission: `Emissions` doc.
 
   Intent routing (`route/3` ×5) stays HERE: it calls back the public primitives
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
@@ -59,8 +62,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
   alias Fleet.Pilot.Labels
   alias Fleet.Pilot.Roles
 
-  # SIDE emissions of the producer delivery (eng voice + slot-freeze) — best-effort by
-  # contract (a failure never breaks the completion), hence their extraction out of sequence.
+  # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by
+  # contract (the completion depends on none of their results: the deliverable truth is the
+  # pushed commit + open PR), hence their extraction.
   alias Fleet.Pilot.StepRunCompleter.Emissions
 
   # Authority for the default WORDING (pr_body/review_body/signed comment) — pure generators;
@@ -387,8 +391,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp complete_producer(step_run, opts) do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(step_run, opts) do
-      # Best-effort SIDE emissions (eng voice PR+issue, slot-freeze deliverable.published) —
-      # discarded by contract: the sequence depends on no return value (cf. Emissions).
+      # SIDE emissions (eng voice PR+issue, slot-freeze deliverable.published) — discarded by
+      # contract: the sequence depends on no return value; the deliverable truth is the pushed
+      # commit + open PR. Failure visibility per emission: cf. Emissions.
       _ = Emissions.post_eng_summary(step_run, opts)
 
       # Stage transition AFTER the comment (same order + same anti-same-second gap as `complete/2` /
@@ -627,7 +632,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # Assigns the commissioning HUMAN to the PR (like the issue: see WHICH human drove the
   # agents). The human DRIVES, does nothing → signs nothing, but is the assignee everywhere (driver
   # trace). Assignee = routing field (not authorship) → system token OK. Unresolvable human →
-  # best-effort (the code IS delivered): log + we do not fail the step_run.
+  # non-blocking: the code IS delivered (commit pushed, PR open), the missing assignee is visible
+  # on the PR itself and logged warning — we do not fail the step_run over a routing field.
   defp assign_human_step(forge, repo, pr, forge_opts) do
     case Fleet.Credentials.Human.current() do
       {:ok, login} ->
@@ -700,10 +706,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
           {:ok, term()} | {:error, term()}
   def unlock(forge, repo, n, forge_opts, role) do
     # Stopwatch: stopped HERE, symmetric to the start at spawn (`Spawn.spawn_step`) — same object (`n` =
-    # issue or PR depending on the role), same global mechanics, SAME identity (`as_role`). Best-effort
-    # (discard): cosmetic, never blocking for the real unlock (the invariant that matters).
-    # Best-effort + fail-closed on the token: no role token → skip the (cosmetic) stopwatch stop rather
-    # than stamp it under the system account. `_ =` discards; the real unlock (below) is unaffected.
+    # issue or PR depending on the role), same global mechanics, SAME identity (`as_role`). The discarded
+    # value carries no correctness: the load-bearing op is the `remove_label` below (the real unlock).
+    # Fail-closed on the token: no role token → skip the stopwatch stop rather than stamp it under the
+    # system account (RoleToken logs the missing token). A failed stop is otherwise SWALLOWED here (`_ =`,
+    # no log) and nothing re-stops it: the Gitea stopwatch keeps running — a cosmetic time metric, wrong
+    # but visible on the forge object. The real unlock (below) is unaffected either way.
     _ =
       with {:ok, ro} <- ForgeClient.as_role(forge_opts, role),
            do: forge.stop_stopwatch(repo, n, ro)
@@ -718,9 +726,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # `unlock` (the ISSUE lock, for its part, persists until the merge). Without this stop, the eng's stopwatch,
   # hooked to the lock that persists, would engulf the whole review → cycle time disguised as work time
   # (a WEAK visual metric, but a false number lies about who worked). `role` = the producer (same
-  # identity as the start at spawn: Gitea is per-user). Best-effort (discard): never blocking.
+  # identity as the start at spawn: Gitea is per-user). Result discarded: a display metric, never
+  # blocking for the completion.
   defp stop_build_stopwatch(forge, repo, issue_n, forge_opts, role) do
-    # Best-effort + fail-closed on the token (skip rather than stamp under the system account).
+    # Fail-closed on the token (skip rather than stamp under the system account; RoleToken logs the
+    # missing token). A failed stop is otherwise SWALLOWED (`_ =`, no log) and nothing re-stops it —
+    # the stopwatch keeps running (cosmetic time metric, wrong but visible on the forge).
     _ =
       with {:ok, ro} <- ForgeClient.as_role(forge_opts, role),
            do: forge.stop_stopwatch(repo, issue_n, ro)
@@ -775,11 +786,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # ── Step 4: next assignee OR close (1-step terminal) ─────────────────
+  # ── Step 4: route the next step OR close (1-step terminal) ─────────────────
   # (No step 3 "PATCH state:*": the state lives in the route-comment. Step numbers preserved.)
-  # Reassign: engraves the next step's ROUTE BEFORE the PATCH assignee — the poller
-  # must see the new assignee only with its workflow_map position already set (otherwise the next
-  # spawn would not know which step it is). post_route idempotent (marker dedup).
+  # Multi-step: engraves the next step's ROUTE (post_route) — NO assignee PATCH: the assignee
+  # STAYS the human (driver trace), the poller reads the engraved route to spawn the next step.
+  # post_route idempotent (marker dedup).
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
       nil ->

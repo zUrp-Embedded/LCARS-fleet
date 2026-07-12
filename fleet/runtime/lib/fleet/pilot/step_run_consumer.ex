@@ -453,8 +453,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # (DAG, unknown step) does NOT misroute: it bubbles up (the system does not advance blindly).
       case GateEngine.resolve_next(payload, n, gate_seams(state)) do
         {:error, reason} ->
-          # Q2 DRAFT producer (best-effort, before the escalation): a workflow_map LOAD failure lights
-          # the dormant Cat-5 rail (see emit_workflow_map_failed_draft/3).
+          # Q2 DRAFT producer (decoupled signal, before the escalation: a missed emit is logged warning
+          # by emit_workflow_map_failed_draft and never blocks the escalation below — the human wall does
+          # not depend on it): a workflow_map LOAD failure lights the dormant Cat-5 rail
+          # (see emit_workflow_map_failed_draft/3).
           emit_workflow_map_failed_draft(reason, n, role)
 
           # G2 (funnel): a NON-TRANSIENT TERMINAL error must NOT bubble up as a log-only `{:noreply}`
@@ -711,8 +713,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         result
 
       other ->
-        # Q2 DRAFT producer (best-effort, before the escalation): an escalation-worthy judge verdict
-        # (halt/`halt_invalid`/… → freeze-to-arch) lights the dormant audit rail (see emit_audit_verdict_draft/4).
+        # Q2 DRAFT producer (decoupled signal, before the escalation: a missed emit is logged warning by
+        # emit_audit_verdict_draft and never blocks the freeze-to-arch below): an escalation-worthy judge
+        # verdict (halt/`halt_invalid`/… → freeze-to-arch) lights the dormant audit rail
+        # (see emit_audit_verdict_draft/4).
         emit_audit_verdict_draft(other, n, role, trace)
 
         # `comment_body: trace` → the verdict trace (attributed to the judge via its label, halt_invalid
@@ -728,7 +732,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Two dormant Cat-5 rails had a wired consumer (Starfleet.DriftMonitor) but NO producer. These emit a
   # REAL, honest signal from the forge-driven rail so the chain DriftMonitor → Cat5Escalator/CoordBackend →
   # Coord.Policies → Emitter → coord.* fires end-to-end. DRAFT: honest but partial (see per-fun notes);
-  # both are BEST-EFFORT (safe_emit, never crashes the load-bearing rail) and emit source `:workflow` so
+  # both are DECOUPLED from the load-bearing rail (safe_emit: an emit failure is logged warning by each
+  # producer, never crashes nor blocks the escalation that follows) and emit source `:workflow` so
   # they satisfy DriftMonitor's anti-spoof source match.
   # ============================================================
 

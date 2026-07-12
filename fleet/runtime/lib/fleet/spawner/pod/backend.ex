@@ -45,7 +45,10 @@ defmodule Fleet.Spawner.Pod.Backend do
   Reap an orphan (bwrap/tmux/claude surviving a crash of the pod gen_statem process) of the same
   pod_id before a (re)launch. Does NOTHING if no orphan alive (fresh-pod case). The kill
   (tmux kill-server + anchored pkill -f) is centralized in `PodTmux.kill_holder/1` (anti self-kill).
-  Best-effort (rescue → log): a reap that raises does not block the launch.
+  A reap that raises does not block the launch (rescued → logged warning). A still-live orphan is
+  not silently adopted: the relaunch targets the SAME per-pod sock/session name and the launcher's
+  `tmux new-session` fails on the duplicate (the launch error is the visible symptom), and
+  `PodWarden`'s periodic reap remains the terminal rail for any live socket without a matching Pod.
   """
   @spec reap_orphan_pod(String.t()) :: :ok
   def reap_orphan_pod(pod_id) do

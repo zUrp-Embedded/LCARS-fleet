@@ -7,7 +7,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
     1. enqueues an eval brief to the PERMANENT gatekeeper (work-session, addressed by `pod_id` via the
        TaskQueue — the overseer is NOT spawned/owned here);
-    2. kicks the pod (best-effort with wake recovery);
+    2. kicks the pod (wake WITH recovery: respawn on 1st failure, starfleet escalation on 2nd;
+       an unreachable kick is SURFACED — telemetry + warning — never silent, and the enqueued
+       brief survives in the broker until the re-wake);
     3. returns the `correlation_id` (= task.id) for the async resumption
        (`task_queue.work_item.completed` → `resume_gate`).
 
@@ -57,7 +59,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
   @doc """
   Forge-driven summoning of the gatekeeper on gate escalation. Enqueues an eval brief to the
-  PERMANENT gatekeeper (addressed by `pod_id`), kicks (best-effort), and returns the `correlation_id`
+  PERMANENT gatekeeper (addressed by `pod_id`), kicks (WakeRecovery: respawn then starfleet escalation;
+  an unreachable kick is surfaced by telemetry + warning while the enqueued brief survives in the
+  broker), and returns the `correlation_id`
   (= task.id) for the `task_queue.work_item.completed` correlation. No booted gatekeeper /
   failed enqueue → `{:error, _}` (the caller fail-louds; never a silent pass).
 

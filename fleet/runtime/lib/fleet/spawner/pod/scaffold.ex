@@ -35,8 +35,11 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   @doc """
   Removes any residual `<session_id>.jsonl` under the pod_dir (all cwd-slugs, shared glob
   `SessionFiles.jsonl_paths/2`) → frees the UUID for `--session-id` (a stale jsonl would trip
-  "Session ID already in use" on the deterministic re-spawn). Best-effort: a failure does not break
-  the spawn. Called by the `:cleaning` state (skipped on `resume` — `SeedStore.restore` overwrites the jsonl).
+  "Session ID already in use" on the deterministic re-spawn). The `File.rm` return is discarded: a
+  leftover jsonl does not fail here — it resurfaces at the `--session-id` launch itself as the
+  vendor's "Session ID already in use" error (the launch, not this GC, carries the visible failure;
+  the info log below fires whether or not the rm succeeded). Called by the `:cleaning` state
+  (skipped on `resume` — `SeedStore.restore` overwrites the jsonl).
   """
   @spec gc_stale_session_jsonl(map()) :: :ok
   def gc_stale_session_jsonl(state) do

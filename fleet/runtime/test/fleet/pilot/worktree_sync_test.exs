@@ -47,7 +47,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     assert head(proj) == head(seed)
   end
 
-  test "clone local absent → :ok (best-effort, rien à aligner, le livrable reste sur la forge)",
+  test "clone local absent → :ok (rien à aligner : le clone est un MIROIR, la vérité = main mergée sur la forge ; skip loggué debug)",
        %{sync: sync} do
     assert :ok = WorktreeSync.sync_now(sync, "fleet/jamais-clone")
   end

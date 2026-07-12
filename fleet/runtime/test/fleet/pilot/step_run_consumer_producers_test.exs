@@ -6,7 +6,9 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   - `workflow_map.failed` — émis sur un échec de LOAD workflow_map (`:workflow_map_load_failed`).
   - `audit.verdict` — émis sur un verdict de juge escalade-digne (branche `other` de `apply_verdict`).
 
-  Les deux sont émis source `:workflow` (invariant anti-spoof DriftMonitor) et best-effort (safe_emit).
+  Les deux sont émis source `:workflow` (invariant anti-spoof DriftMonitor) via `safe_emit` :
+  un échec d'émission est loggué warning par le producteur et ne bloque jamais l'escalade porteuse
+  (le Bus est le fast-path lossy ; la vérité durable reste le rail forge).
   On subscribe au Bus RÉEL (c'est l'objet du test : prouver l'émission) → `async: false` (état global
   Bus partagé) + noms/issues uniques pour l'hermétisme.
   """

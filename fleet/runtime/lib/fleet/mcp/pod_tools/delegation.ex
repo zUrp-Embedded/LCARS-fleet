@@ -176,8 +176,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # merge") with a NON-delivery closure (onboarding marker `[lcars-onboarded]` / manual close) →
         # false `delivered:true` → the arch chained N+1 on an ABANDONED brick. We now PROVE the merge via
         # the `stage/merged` label (WS1, set by the gatekeeper seal AT MERGE, before the explicit close).
-        # A rare missing label (set_stage is best-effort) → false-NEGATIVE (the arch WAITS) = SAFE, the
-        # opposite of the old false-positive that mis-sequenced.
+        # A missing label is possible: the seal's `set_stage` failure is discarded un-logged and no
+        # rail re-sets it (cf. gatekeeper_seal.ex). Here that reads as a false-NEGATIVE (the arch
+        # WAITS on delivered:false) = SAFE, the opposite of the old false-positive that mis-sequenced.
         "delivered" => issue_state == "closed" and @merged_label in issue_labels,
         "pr" => issue_pr_status(forge, repo, number)
       }
@@ -274,7 +275,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
             # (burning the workflow_map) is NO LONGER here: it is the responsibility of the SYSTEM — the POLLER burns
             # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
             # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
-            # onboarded the same way.) type:feature = a visual LABEL (human), best-effort — NEVER routing.
+            # onboarded the same way.) type:feature = a visual LABEL (human) — NEVER routing: the
+            # result is discarded, nothing mechanical reads this label, and its absence is directly
+            # visible on the issue in the forge UI.
             _ = forge.add_label(repo, number, "type:feature", [])
 
             {:ok,

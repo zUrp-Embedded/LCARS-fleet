@@ -15,14 +15,14 @@ restated, only pointed at.
 
 ## Modules
 - `Fleet.Starfleet` — namespace head moduledoc (no code)
-- `Fleet.Starfleet.Application` — `:one_for_one` supervisor (3/60); boot fail-fast schema load + compile-time event-atom pre-registration + six `:start_*`-gated children
+- `Fleet.Starfleet.Application` — `:one_for_one` supervisor (3/60); boot fail-fast schema load + compile-time event-atom pre-registration + five `:start_*`-gated children (BootOrchestrator is NOT one: triggered post-boot by the root via `Fleet.Starfleet.boot_orchestrate/0`, A-08)
 - `Fleet.Starfleet.Gatekeeper` — pure decision-JSON validation against the frozen `decision-v1.json` schema (boot-loaded into the Ring 0 `Fleet.SchemaCache`)
 - `Fleet.Starfleet.Decision` — the validated `{decision, reason, details, chain}` output struct
 - `Fleet.Starfleet.DriftMonitor` — Bus subscriber routing 4 event types to Cat 5 / coord (`audit.verdict`, `workflow_map.failed`, `pod.drift` have live/draft producers; only `oauth.refresh.failed` is dormant)
 - `Fleet.Starfleet.Cat5Escalator` — pure functions: audit-log write + canonical `starfleet.audit_cat5_<source>` broadcast + coord delegation
 - `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail (lifecycle + security, log-only)
 - `Fleet.Starfleet.AuditLog` — fail-safe NDJSON writer with threshold rotation
-- `Fleet.Starfleet.BootOrchestrator` — post-readiness `:transient` Task: boots permanent pods, emits `fleet.boot_*`, never crashes the daemon
+- `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget Task, triggered by the root AFTER full boot — A-08): boots permanent pods, emits `fleet.boot_*`, never crashes the daemon
 - `Fleet.Starfleet.CoordBackend` (+ `NotWiredYet`) — behaviour seam over `Fleet.Coord`; `resolved/0` = single source of the wired backend
 - `Fleet.Starfleet.Shutdown` (+ `Shutdown.Dispatcher` behaviour, `NoOpDispatcher`, `AggregateDispatcher`) — coordinated grace-drain (invoked by `bin/fleet_v2 stop`); `configured_dispatcher/0` = single source, `AggregateDispatcher` = fail-closed prod in-flight count
 - `Fleet.Starfleet.MCPMonitor` / `MCPWatcher` (+ shared `PeriodicCheck`) — the two periodic GenServers: local MCP-substrate liveness and Hex.pm SDK version drift

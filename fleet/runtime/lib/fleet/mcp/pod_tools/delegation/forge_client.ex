@@ -36,7 +36,11 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
               opts :: keyword()
             ) :: {:ok, issue_number :: integer()} | {:error, term()}
 
-  @doc "Labels an issue (best-effort on the Delegation side: result ignored)."
+  @doc """
+  Labels an issue. Delegation's only call site (`type:feature`) discards the result: the label is
+  human-facing decoration, nothing mechanical reads it, and its absence is directly visible on the
+  issue in the forge UI.
+  """
   @callback add_label(
               repo :: String.t(),
               issue_number :: integer(),

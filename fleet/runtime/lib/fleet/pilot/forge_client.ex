@@ -241,8 +241,10 @@ defmodule Fleet.Pilot.ForgeClient do
   # ============================================================
 
   @doc """
-  Starts the Gitea native stopwatch on `number` (issue or PR). Best-effort — idempotent: 409
+  Starts the Gitea native stopwatch on `number` (issue or PR). Idempotent: 409
   ("already active", a rebrief on a live pod re-sets the same lock) → `:ok`, not an error.
+  Like `stop_stopwatch/3`: the stopwatch is cosmetic time-tracking, never a pipeline-correctness
+  invariant — any other error is returned, and it is the caller's business not to block on it.
   """
   @spec start_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def start_stopwatch(repo, number, opts \\ []) do
@@ -256,7 +258,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Stops the Gitea native stopwatch on `number` (records the elapsed duration). Best-effort — idempotent:
+  Stops the Gitea native stopwatch on `number` (records the elapsed duration). Idempotent:
   409 ("no active stopwatch") → `:ok`, never a blocking error (the stopwatch is cosmetic,
   not a pipeline-correctness invariant).
   """
@@ -875,7 +877,9 @@ defmodule Fleet.Pilot.ForgeClient do
   absent/unreadable/empty (or a non-path-safe role) → `{:error, :role_token_unavailable}`. It NEVER falls
   back to the system token — posting/merging as the most-privileged system account would be a privilege
   ESCALATION + a traceability lie. Load-bearing callers (gatekeeper seal, arch escalation) PROPAGATE the
-  error (the op does not happen); best-effort callers (eng voice, stopwatch) SKIP. The pod never posts:
+  error (the op does not happen); cosmetic callers (eng voice, stopwatch) SKIP their post — losing a
+  trace comment or a time entry, never the deliverable (the commit is already pushed) nor the
+  pipeline. The pod never posts:
   it's the system that posts with the ROLE token, never the pod (forge-blind).
   """
   @spec as_role(keyword(), String.t() | nil) ::

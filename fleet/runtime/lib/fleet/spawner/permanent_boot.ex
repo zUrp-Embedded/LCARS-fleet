@@ -292,8 +292,9 @@ defmodule Fleet.Spawner.PermanentBoot do
   # F-C043 — a corrupt permanent base seed is a CERTAIN config problem (a versioned artifact in `priv` is
   # broken), not a probabilistic strike. We log LOUD and emit `pod.drift` (source `:spawner`) with
   # `drift_count` AT the DriftMonitor threshold → the anomaly rail (DriftMonitor → Cat5Escalator) escalates
-  # it on the FIRST occurrence (an operator repairs the seed). Best-effort (`Bus.safe_emit`): the incident
-  # signal never blocks/crashes the boot — the pod still comes up (degraded).
+  # it on the FIRST occurrence (an operator repairs the seed). The incident signal never blocks/crashes
+  # the boot (`Bus.safe_emit` flattens any emit failure into a logged `:ok`) — the pod still comes up
+  # (degraded); the Logger.error below stays the visibility floor even if the event itself is lost.
   # @drift_escalate_count must be ≥ `Fleet.Starfleet.DriftMonitor`'s threshold (3, a protocol constant;
   # fleet_spawner→fleet_starfleet is not a dependency, so it is asserted by a comment, not referenced).
   @drift_escalate_count 3

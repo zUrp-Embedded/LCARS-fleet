@@ -136,8 +136,9 @@ defmodule Fleet.Spawner.Pod.Assets do
   Provisions the in-pod monitor (`watch.sh`) into the pod_dir (= bwrap HOME). The agent arms it via
   the native `Monitor` tool (cf. the role's SP, `core/runtime-contract` block) → wake-by-flag
   (`turn.flag` touched by the fleet), zero CONTENT send-keys. The asset lives in the bundled
-  `priv/spawner/` (resolved via `app_dir`, like the SP draft). chmod best-effort: the agent runs
-  `bash ~/watch.sh`, the exec bit is not required.
+  `priv/spawner/` (resolved via `app_dir`, like the SP draft). The `File.chmod` return is discarded
+  (`_ =`): the exec bit carries nothing here — the agent runs `bash ~/watch.sh`, never `./watch.sh`;
+  the op whose error matters is the `safe_write`, which does propagate.
   """
   @spec provision_monitor_watch(map()) :: :ok | {:error, term()}
   def provision_monitor_watch(state) do

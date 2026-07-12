@@ -40,7 +40,7 @@ L'ex-umbrella (14 apps) est collapsée en une app unique ; les ex-apps sont des 
 
 **Strates (mémo de lecture, l'enforcement est dans boundary)** : utils Ring-0 (`Fleet.Slug`, `EnvParse`, `GitRef`, `Layout`, `Event`, `SchemaCache`, `Shutdown.Quiesce` — deps: []) ; substrat (`event_router` = Bus PubSub `fleet.events`, `cap_profile`) ; primitives pod (`credentials`, `sp_builder`, `project_bootstrap`, `task_queue` broker de mandats, `spawner` + launchers `bin/`) ; coordination (`mcp`, `workflow`, `coord`, `starfleet`) ; driver forge (`pilot` — client du core, off sans `:step_dispatch?`) ; surfaces (`api` REST/WS no-auth by design, `observation` read-only).
 
-**Seams runtime ASSUMÉS** (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:forge_client`/`:project_onboard` — Pilot ∉ deps de MCP) ; `starfleet→coord` (`:coord_backend`, rail best-effort doctrine D1) ; `:launch_backend` (hermétisme test).
+**Seams runtime ASSUMÉS** (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:forge_client`/`:project_onboard` — Pilot ∉ deps de MCP) ; `starfleet→coord` (`:coord_backend`, relais d'escalade doctrine D1 — la trace durable est l'audit log, écrit AVANT le routage ; un routage raté est loggué warning par Cat5Escalator/DriftMonitor) ; `:launch_backend` (hermétisme test).
 
 ### Frontière vendor (N0 / N1)
 

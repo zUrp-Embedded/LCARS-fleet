@@ -166,7 +166,6 @@ defmodule Fleet.GitTest do
       assert {:error, {:invalid_refspec, "--force"}} =
                Fleet.Workflow.Git.push(ws, "origin", "--force")
     end
-
   end
 
   # ============================================================

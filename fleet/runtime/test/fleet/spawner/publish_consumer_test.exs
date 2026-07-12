@@ -49,6 +49,59 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     refute_received {:spawn_called, _, _}
   end
 
+  # Régression acte4 #32 (2e couche — la frontière Bus no-auth). "" est TRUTHY : sans presence/1,
+  # `cap_profile_name:"" || role` court-circuitait sur "" → load("") → drop APRÈS le 202 (202
+  # menteur). La 1re couche (SpawnAdmission) ne broadcast plus de clés vides, mais le Bus est
+  # no-auth : tout process peut émettre — ce consumer normalise AUSSI.
+  defmodule OkSpawner do
+    def spawn_pod(_cap_profile, _issue_id, _opts), do: {:ok, :stub_pod}
+  end
+
+  test "acte4 #32 : cap_profile_name vide + role valide → le role est résolu (spawn tiré)" do
+    {pid, _} = start_consumer(OkSpawner)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(
+          pid,
+          Fleet.Event.new(:api, :"admin.spawn.request",
+            payload: %{"cap_profile_name" => "", "role" => "engineer", "issue_id" => "issue-9"}
+          )
+        )
+
+        # barrière FIFO : le send est traité avant le retour
+        _ = :sys.get_state(pid)
+      end)
+
+    assert Process.alive?(pid)
+    assert log =~ "spawn dispatched name=engineer issue=issue-9"
+    refute log =~ "invalid — name missing/empty"
+  end
+
+  test "acte4 #32 : name entièrement vide → spawn.failed émis (drop visible, plus un warning muet)" do
+    :ok = Fleet.EventRouter.Bus.subscribe()
+    on_exit(fn -> Fleet.EventRouter.Bus.unsubscribe() end)
+    {pid, _} = start_consumer()
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "", "issue_id" => "issue-10"}
+      )
+    )
+
+    assert Process.alive?(pid)
+
+    assert_receive %Fleet.Event{
+                     source: :spawner,
+                     type: :"spawn.failed",
+                     payload: %{"reason" => :name_missing_or_empty}
+                   },
+                   500
+
+    refute_received {:spawn_called, _, _}
+  end
+
   test "admin.spawn.request avec name ghost → CapProfile.load fail → log warn, alive" do
     {pid, _} = start_consumer()
 

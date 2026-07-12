@@ -14,9 +14,9 @@ defmodule Fleet.Spawner.Pod.EventsTest do
     :ok
   end
 
-  describe "best_effort_broadcast/2 (pod.failed / wake.failed)" do
+  describe "lossy_broadcast/2 (pod.failed / wake.failed)" do
     test "corrèle par issue_id" do
-      Events.best_effort_broadcast("pod.failed", %{
+      Events.lossy_broadcast("pod.failed", %{
         "pod_id" => "pod-x",
         "issue_id" => "fleet/repo#42",
         "reason" => "boom"
@@ -31,7 +31,7 @@ defmodule Fleet.Spawner.Pod.EventsTest do
     end
 
     test "issue_id absent → correlation_id nil (pas de crash, pod hors-projet)" do
-      Events.best_effort_broadcast("pod.failed", %{"pod_id" => "pod-y", "reason" => "boom"})
+      Events.lossy_broadcast("pod.failed", %{"pod_id" => "pod-y", "reason" => "boom"})
 
       assert_receive %Fleet.Event{type: :"pod.failed", correlation_id: nil}
     end

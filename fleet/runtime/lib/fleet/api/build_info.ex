@@ -75,8 +75,9 @@ defmodule Fleet.API.BuildInfo do
   a hand-rolled glob. The runtime will re-read this file via
   `Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")` → `source: :release`.
 
-  Best-effort on the capture: if git fails at build, we write `unknown` facts
-  rather than breaking the release build.
+  If git fails at build, we write `unknown` facts rather than breaking the
+  release build: the degradation is carried IN the artifact itself (the API
+  then serves `sha: "unknown"`), not hidden.
   """
   @spec write_release_file(Mix.Release.t()) :: Mix.Release.t()
   def write_release_file(%Mix.Release{} = release) do

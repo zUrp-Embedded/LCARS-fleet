@@ -62,7 +62,8 @@ defmodule Fleet.CapProfile.Catalog do
       YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
   """
   @spec read_role(String.t()) ::
-          {:ok, map()} | {:error, :not_found | :invalid_schema | :catalogue_missing | :name_collision}
+          {:ok, map()}
+          | {:error, :not_found | :invalid_schema | :catalogue_missing | :name_collision}
   def read_role(role) do
     # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
     # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,

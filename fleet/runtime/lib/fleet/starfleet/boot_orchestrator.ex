@@ -44,7 +44,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
   Returns `:ok` = "the orchestration Task ran to completion" (it NEVER crashes the daemon — a
   crash would reboot the sequence into a permanent-respawn loop), NOT "the boot succeeded". The
-  real outcome lives in the emitted `fleet.boot_*` event (best-effort observability); the durable
+  real outcome lives in the emitted `fleet.boot_*` event (observability only — each outcome is ALSO
+  logged info/warning/error by `emit_*` before broadcasting, so a lost event never hides it); the durable
   fact "which permanent pods run" is re-derivable via the spawner registry + reconciled by
   `PermanentWarden`. A caller must NOT read `:ok` as boot success.
   """
@@ -76,8 +77,10 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
     boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
 
-    # Best-effort emissions (rescued internally) — returns discarded deliberately, boot does not
-    # depend on the broadcast succeeding.
+    # Observability emissions (rescued inside `Bus.safe_emit`, cf. `emit_canon/2`) — returns
+    # discarded deliberately: boot does not depend on the broadcast succeeding. A lost event costs
+    # Bus visibility only — each outcome is logged by `emit_*` before broadcasting, and the durable
+    # fact "which permanent pods run" is re-derived from the spawner registry by `PermanentWarden`.
     _ =
       case boot_result do
         {:ok, pods} ->
@@ -160,7 +163,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   end
 
   # Canonical schema broadcast %Fleet.Event{source: :starfleet}, via the protected core
-  # `Bus.safe_emit/4` (local duplicated rescue removed — the best-effort policy has ONE
+  # `Bus.safe_emit/4` (local duplicated rescue removed — the protected-emission policy has ONE
   # authority, Ring 0). `:silent`: this Task emits DURING boot — an UnregisteredError
   # (registry not yet populated) is the nominal case here, not an alarm. A MALFORMED event
   # (construction bug) is logged ERROR by safe_emit then neutralized — otherwise it would mask a

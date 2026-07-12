@@ -8,9 +8,12 @@ defmodule Fleet.Workflow.PayloadGuard do
   and an adversarial `%{"path" => …, "content" => …}` list.
 
   SINGLE source of payload application: one sole authority for deliverable
-  placement (a divergent placement is made unrepresentable). Best-effort
-  atomicity in 2 passes: (1) validate ALL paths before any write;
-  (2) write — a partially invalid payload writes NOTHING.
+  placement (a divergent placement is made unrepresentable). 2 passes:
+  (1) validate ALL paths before any write — a partially INVALID payload writes
+  NOTHING; (2) write — a `File.write` failure mid-pass stops there and returns
+  the error, files already written REMAIN (no rollback), but the caller
+  (`Deliverable.materialize_content`) short-circuits on the error so nothing
+  partial is ever committed.
 
   ## The 4 closed vectors (fail-closed, first refusal returned)
 
@@ -57,7 +60,8 @@ defmodule Fleet.Workflow.PayloadGuard do
     * `{:error, {:path_traversal | :dotgit_path | :dangerous_gitattributes |
       :symlink_escape, rel_path}}` — vector refused (nothing is written)
     * `{:error, {:file_write_failed, rel_path, reason}}` — write KO in pass 2
-      (files already written remain — best-effort atomicity)
+      (files already written remain — no rollback; the caller stops on the
+      error, so the partial state is never committed)
   """
   @spec apply_files(Path.t(), term()) :: :ok | {:error, term()}
   def apply_files(workspace, files) when is_list(files) and files != [] do

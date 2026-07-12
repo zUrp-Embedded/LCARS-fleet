@@ -3,8 +3,9 @@ defmodule Fleet.Spawner.SeedStore do
   Pod seed-store. When a PROJECT-pod dies, the FIRST ROUND of its ACTIVE session JSONl
   (its memory) is checkpointed to `<seed_root>/<projet>/pods/<role>.jsonl` + a seed map
   `<role>.json` (`{uuid, slug}`) for later recall (`--resume`).
-  **Best-effort**: a checkpoint failure NEVER kills the pod
-  (the seed is a memory bonus, not a lifecycle dependency).
+  A checkpoint failure NEVER kills the pod: every failure lands as a logged warning + `{:error, _}`
+  (which the dying `Pod` discards) and the teardown proceeds. What is lost is only the
+  session-memory bonus — the work's durable truth lives on the forge, not in the seed.
 
   - `seed_root`: `:fleet_spawner, :seed_store_root` (default `/home/projects.work`).
   - The seed map's `uuid` = the DETERMINISTIC BUILDER of the Desktop slot (the `session_id`
@@ -27,7 +28,9 @@ defmodule Fleet.Spawner.SeedStore do
   slot (the `session_id` pre-allocated at spawn): it is the `uuid` stored in the seed map, SINGLE SOURCE
   of the pod's identity — NOT the live jsonl's UUID (which a `/clear` may have rotated). The content
   (first round) and the `slug` come from the ACTIVE jsonl. With no live jsonl → `:none`.
-  Best-effort: name confinement + `{:error, _}` non-fatal.
+  Never raises to the caller: an unconfined name is refused (logged warning + `{:error, _}`), any
+  FS/JSON failure is rescued into a logged warning + `{:error, _}` — the teardown proceeds, only the
+  session-memory bonus is lost (the work truth lives on the forge).
   """
   @spec checkpoint(Path.t(), String.t(), String.t(), String.t()) ::
           :ok | :none | {:error, term()}
@@ -37,7 +40,8 @@ defmodule Fleet.Spawner.SeedStore do
     # They come from `rc_name` (a dispatch/recall input, uncontrolled by construction): a `..`/`/`
     # would traverse outside the store (writing an arbitrary host `.jsonl`). We cast both into a slug and
     # confine the destination directory under the root BEFORE any `mkdir_p!`/`write!` — a malformed name
-    # never reaches the FS (`{:error, _}` best-effort, the checkpoint is a non-fatal memory bonus).
+    # never reaches the FS (refusal = logged warning + `{:error, _}`; the checkpoint is a non-fatal
+    # memory bonus, the dying pod proceeds).
     with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
          {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug) do

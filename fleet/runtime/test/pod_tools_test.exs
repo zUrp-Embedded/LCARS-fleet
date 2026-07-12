@@ -401,7 +401,8 @@ defmodule Fleet.MCP.PodToolsTest do
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
 
-      # type:feature = étiquette de VISU (best-effort), JAMAIS du routing.
+      # type:feature = étiquette de VISU, JAMAIS du routing : rien de mécanique ne la lit, son
+      # résultat est jeté et son absence est directement visible sur l'issue dans l'UI forge.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
       assert {:ok, result} = Jason.decode(txt)

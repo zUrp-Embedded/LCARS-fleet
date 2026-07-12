@@ -275,7 +275,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     )
 
     # Stopwatch: stopped ALSO here (dead pod = never went through `unlock`) — otherwise it would run until
-    # the next real unlock, counting the dead time as work. Best-effort, symmetric to the spawn —
+    # the next real unlock, counting the dead time as work. Result discarded (`_ =`): the stopwatch is
+    # time-tracking, not a pipeline invariant — a failed stop costs attribution minutes, never the reclaim
+    # (the remove_label below carries the real op and logs error on failure). Symmetric to the spawn —
     # BUT signed with RAW forge_opts (system), NOT `as_role`: the dead pod TOOK its role identity with it
     # (no usable trace at this point, orphan = no live pod left to query). Gitea requires
     # the SAME identity to stop as to start (per-user) → THIS stop will NOT match the stopwatch

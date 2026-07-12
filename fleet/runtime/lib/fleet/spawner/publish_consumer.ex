@@ -5,9 +5,11 @@ defmodule Fleet.Spawner.PublishConsumer do
   Subscribes to `Fleet.EventRouter.Bus` topic `fleet.events`, filters
   `:"admin.spawn.request"`, dispatches `Fleet.Spawner.spawn_pod/3`.
 
-  Expected payload (rest.ex broadcasts the conn.body_params):
-    * `"cap_profile_name"` or `"role"` — string, canonical CapProfile name (loaded via `Fleet.CapProfile.load/1`)
-    * `"issue_id"` — string (else the Bus envelope's issue_id)
+  Expected payload (SpawnAdmission broadcasts the PARSED DTO):
+    * `"cap_profile_name"` or `"role"` — non-empty string, canonical CapProfile name
+      (loaded via `Fleet.CapProfile.load/1`)
+    * `"issue_id"` — string (absent → defaults to `""`; no envelope fallback — the canonical
+      `%Fleet.Event{}` carries issue_id in the payload)
     * `"opts"` — keyword map (optional)
 
   Errors (load fail / spawn fail) → log warning, **no crash**
@@ -79,17 +81,25 @@ defmodule Fleet.Spawner.PublishConsumer do
   # (No `envelope` param anymore: it was a vestige of the legacy `{atom, map}` tuple clause the
   # moduledoc declares dead — the fallback read of a root-level issue_id could never fire.)
   defp handle_spawn_request(payload, state) do
-    name = Map.get(payload, "cap_profile_name") || Map.get(payload, "role")
+    # `presence/1` on EACH candidate before the fallback (the Bus is no-auth: SpawnAdmission
+    # broadcasts a parsed DTO, but any process can emit on fleet.events) — a truthy "" in
+    # `cap_profile_name` would short-circuit `||` and mask a valid `role` (the acte4 #32
+    # regression class). This consumer is a REAL boundary, not defensive re-validation.
+    name = presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role"))
 
     issue_id = Map.get(payload, "issue_id") || ""
 
     opts = Map.get(payload, "opts", []) |> to_keyword()
 
-    if not is_binary(name) or name == "" do
+    if is_nil(name) do
       Logger.warning(
         "PublishConsumer: admin.spawn.request invalid — name missing/empty " <>
           "(payload=#{inspect(payload)})"
       )
+
+      # The API may have ACKed 202 before this async drop → same alarm as the other drop paths
+      # (F-C044): the failure must reach the observation read-model, not just the server log.
+      emit_spawn_failed(payload, :name_missing_or_empty)
     else
       case Fleet.CapProfile.load(name) do
         {:ok, cap_profile} ->
@@ -120,11 +130,18 @@ defmodule Fleet.Spawner.PublishConsumer do
     end
   end
 
+  # A usable name is a non-empty string; anything else (nil, "", non-string) counts as ABSENT so
+  # the `||` fallback reaches the next candidate instead of short-circuiting on a truthy "".
+  # Same rule as `SpawnAdmission.presence/1` (the admission twin of this consumer).
+  defp presence(v) when is_binary(v) and v != "", do: v
+  defp presence(_), do: nil
+
   # `spawn.failed` alarm (spawn cycle) — emitted when the dispatch of an `admin.spawn.request` RAISED and
-  # the spawn is therefore dropped. Best-effort toward the PROCESS (a Bus down must not kill the
-  # consumer → rescue), BUT the broadcast failure is NOT swallowed silently: Logger.error, because losing
-  # the alarm would re-silence the drop we just made visible (consistent with `pod.failed` on the Pod side,
-  # best-effort observability too but logged loudly if the broadcast breaks). Strict canonical envelope
+  # the spawn is therefore dropped. The rescue protects the PROCESS only (a Bus down must not kill the
+  # consumer), BUT the broadcast failure is NOT swallowed silently: Logger.error, because losing
+  # the alarm would re-silence the drop we just made visible (consistent with `pod.failed` on the Pod side:
+  # an observability signal whose loss never blocks, but is logged loudly when the broadcast breaks).
+  # Strict canonical envelope
   # built + broadcast via `Bus.emit` (`source: :spawner`, type `:"spawn.failed"`, present in the events.yaml registry).
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
     result =

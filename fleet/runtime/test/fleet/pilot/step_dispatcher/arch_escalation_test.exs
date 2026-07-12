@@ -14,7 +14,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   alias Fleet.Pilot.StepDispatcher.ArchEscalation.Seams
 
   defmodule LabelFailForge do
-    # comment best-effort OK ; add_label ÉCHOUE → le throttle ne prend jamais.
+    # comment EXPLICATIF OK (non porteur — le porteur est le label) ; add_label ÉCHOUE → le
+    # throttle ne prend jamais.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, 1}
     def add_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "label boom"}}
   end

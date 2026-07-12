@@ -93,7 +93,10 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     refute_received {:comment, _, _, _, _}
   end
 
-  test "comment KO APRÈS merge → :ok quand même (sceau best-effort, le merge fait foi)" do
+  # Le merge est l'acte qui fait foi ; le comment est une trace post-merge JETÉE SANS LOG par
+  # seal_and_merge — la trace lisible manque alors sur l'issue et rien ne la re-poste (le dedup ne
+  # garde que contre les replays). Seule la trace humaine est perdue, jamais le merge.
+  test "comment KO APRÈS merge → :ok quand même (le merge fait foi, la trace est perdue en silence)" do
     assert :ok = GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
 
     assert_received :merged

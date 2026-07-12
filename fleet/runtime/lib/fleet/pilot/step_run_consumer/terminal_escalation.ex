@@ -14,7 +14,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
        label `lcars-awaits-arch` + UNLOCK (`lcars-in-flight` removed). The unlock is
        LOAD-BEARING: the poller no longer re-dispatches (the issue carries `lcars-awaits-arch`,
        skipped) → the churn stops, the human decides.
-    2. `kick_architect/1` — active best-effort notification of the arch pod.
+    2. `kick_architect/1` — active notification of the arch pod, a latency accelerator
+       only: the truth (label `lcars-awaits-arch` + arch-addressed comment) is already on
+       the forge; a failed kick is logged warning and the Poller (G4) re-kicks the arch
+       every tick as long as an issue carries the label.
 
   Without this net (G2, the funnel), a terminal error bubbled up as log-only would make
   the rail churn: the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step
@@ -128,7 +131,9 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   @doc """
   THE single freeze-to-arch gesture: `await_arch` (comment + `lcars-awaits-arch` +
-  unlock) via `run_completion`, THEN kick of the arch (best-effort). Returns the completion's
+  unlock) via `run_completion`, THEN kick of the arch (latency only: the durable truth is the
+  forge state — label + comment — and a failed kick, logged warning, is retried by the Poller's
+  G4 awaits-arch re-kick every tick). Returns the completion's
   outcome (the kick never alters the result). Also called by the consumer for
   the fail-closed verdicts (redirect/escalate_user/halt_*) — net parity.
   """
@@ -154,11 +159,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   @doc """
   NOTIFIES the arch (the SOLE airlock to the human) that a verdict (escalate/abandon) or a blockage requires
-  its attention. Best-effort KICK via the UNIVERSAL wake (`wake_pod`: CARRIER/MCP flag → send-keys fallback
-  → log; every pod arms its Monitor at spawn). **NO reboot**: the arch is the human's SESSION, never
-  killed/restarted by the fleet (an unreachable arch = the human restarts ITS session, not us) — hence NO
-  `WakeRecovery.wake` (which carries a respawn). Wake failure → log-loud, non-blocking (the label `lcars-awaits-arch`
-  + the arch-addressed comment stay; the arch queries its inbox on the next round).
+  its attention. The KICK is a latency accelerator via the UNIVERSAL wake (`wake_pod`: CARRIER/MCP flag →
+  send-keys fallback → log; every pod arms its Monitor at spawn). **NO reboot**: the arch is the human's SESSION,
+  never killed/restarted by the fleet (an unreachable arch = the human restarts ITS session, not us) — hence NO
+  `WakeRecovery.wake` (which carries a respawn). Wake failure → log-loud (warning), non-blocking: the truth is the
+  forge state (label `lcars-awaits-arch` + the arch-addressed comment stay), the arch queries its inbox on the
+  next round, and the Poller (G4) re-kicks every tick while the label is present.
   """
   @spec kick_architect(module()) :: :ok
   def kick_architect(spawner) do

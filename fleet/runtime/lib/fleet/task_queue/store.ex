@@ -10,7 +10,7 @@ defmodule Fleet.TaskQueue.Store do
   ## Contract
 
     * `save/2` — ATOMIC write (tmp + rename) of the versioned schema `v: 1`.
-      **Best-effort on the WRITE side**: a write failure is logged at **error**
+      **Non-blocking on the WRITE side**: a write failure is logged at **error**
       (durability of the recovery point is broken) but still returns `:ok` —
       we do not crash the broker over a disk blip; reconciliation goes through
       the forge-driven rail (re-dispatch from the forge state), not through
@@ -54,11 +54,12 @@ defmodule Fleet.TaskQueue.Store do
   Writes the map of work items to `path` — atomic write (tmp + rename),
   schema `%{"v" => 1, "work_items" => %{id => WorkItem.to_map(t)}}`.
 
-  Best-effort: ALWAYS returns `:ok`. A write failure breaks the durability of the
-  cross-restart recovery point — this is a logged ERROR, not a warning: the RAM queue
+  ALWAYS returns `:ok` (a write failure never propagates). A write failure breaks the durability
+  of the cross-restart recovery point — this is a logged ERROR, not a warning: the RAM queue
   moves forward but state.json diverges → a restart would re-read a stale state. We do NOT
   crash the broker (a transient disk blip must not kill the in-flight work items);
-  reconciliation goes through the forge-driven rail. The breach becomes LOUD
+  the truth of the work is the FORGE — on restart the queue re-derives itself from the
+  forge polls (canonical reconciliation rail). The breach becomes LOUD
   (error-level → monitoring), no more silent degradation.
   """
   @spec save(Path.t(), %{optional(String.t()) => WorkItem.t()}) :: :ok

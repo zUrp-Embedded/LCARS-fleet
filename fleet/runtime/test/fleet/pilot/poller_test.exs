@@ -306,8 +306,11 @@ defmodule Fleet.Pilot.PollerTest do
     # orphelin (réclamé après la grace 2-tick). Un stub avec list_pods absent ferait fail-safe (skip).
     def list_pods, do: []
 
-    # G4 : le re-kick awaits-arch appelle wake_pod (best-effort) — stub no-op (le tick ne doit pas crasher
-    # quand une issue awaits-arch est présente). La DÉCISION de re-kicker est testée via awaits_rekick?/2.
+    # G4 : le re-kick awaits-arch appelle wake_pod — stub no-op (le tick ne doit pas crasher quand
+    # une issue awaits-arch est présente). Un wake perdu coûte de la latence, jamais le backlog :
+    # la vérité = le label `lcars-awaits-arch` sur la forge, relu chaque tick, et ce re-kick
+    # périodique (throttle @awaits_rekick_every) EST le rail qui re-dérive le wake. La DÉCISION de
+    # re-kicker est testée via awaits_rekick?/2.
     def wake_pod(_pod_id), do: :ok
   end
 

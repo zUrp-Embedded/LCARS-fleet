@@ -480,30 +480,43 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # G4 — RE-KICK the arch as long as at least one issue awaits its action (`lcars-awaits-arch`). The initial
-  # kick (at escalation, StepRunConsumer.kick_architect) is one-shot best-effort: if the wake was
-  # lost (arch busy, or dead-then-respawned by the PermanentWarden), the issue stays out-of-dispatch
-  # FOREVER, silently (the poller only SKIPS it). So we re-kick periodically —
+  # kick (at escalation, StepRunConsumer.kick_architect) is ONE-SHOT with no delivery guarantee: if the
+  # wake was lost (arch busy, or dead-then-respawned by the PermanentWarden), the issue stays out-of-dispatch
+  # FOREVER, silently (the poller only SKIPS it). The truth is the `lcars-awaits-arch` label on the forge,
+  # re-read at every tick — and THIS re-kick is the rail that re-derives a wake from it, periodically.
   # THROTTLED (`@awaits_rekick_every` ticks) because a wake can cost a claude turn (bounded spend,
-  # Jupiter). Best-effort (the label stays human-released: we nudge the airlock, we never force the verdict).
+  # Jupiter). The re-kick only NUDGES the airlock (a wake, nothing more): the label stays human-released,
+  # we never force the verdict.
   # Called ONCE per tick by `do_poll` on the CROSS-REPO union — the arch pod is unique (fleet
   # airlock), so the decision is fleet-level; `awaits_ids` is repo-qualified (`{repo, n}` — bare
   # issue numbers collide across repos) so the logged count is the honest fleet-wide backlog.
   # Resolves `state.spawner || Fleet.Spawner` at the call site (symmetric to reconciliation_seams /
   # lease_seams) + the authority `Roles.architect_pod_id/0` (SSOT shared with kick_architect). Prod
-  # does NOT inject the seam → the REAL `Fleet.Spawner` is used (best-effort: `{:error, :not_found}`
-  # if the arch pod is dead, discarded by `_ =`). (Was a silent no-op in prod — the seam had no
-  # default and the guard `when not is_nil(spawner)` fell through — the rail this exists for never ran.)
+  # does NOT inject the seam → the REAL `Fleet.Spawner` is used. A failed wake (arch pod dead,
+  # `{:error, :not_found}`) loses latency, never the backlog: the label persists on the forge, this
+  # same re-kick fires again `@awaits_rekick_every` ticks later, and the PermanentWarden respawns the
+  # arch in the interval. The log states the ACTUAL outcome — logging « re-kick » before the wake
+  # made the trace lie whenever it failed. (Was a silent no-op in prod — the seam had no default
+  # and the guard `when not is_nil(spawner)` fell through — the rail this exists for never ran.)
   defp maybe_rekick_arch(awaits_ids, %__MODULE__{} = state) do
     if awaits_rekick?(MapSet.size(awaits_ids), state.poll_count) do
       spawner = state.spawner || Fleet.Spawner
       pod_id = Fleet.Pilot.Roles.architect_pod_id()
 
-      Logger.info(
-        "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) → re-kick #{pod_id} " <>
-          "(throttle #{@awaits_rekick_every} ticks)"
-      )
+      case spawner.wake_pod(pod_id) do
+        :ok ->
+          Logger.info(
+            "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) → re-kick #{pod_id} " <>
+              "(throttle #{@awaits_rekick_every} ticks)"
+          )
 
-      _ = spawner.wake_pod(pod_id)
+        other ->
+          Logger.warning(
+            "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) — re-kick #{pod_id} " <>
+              "UNREACHED (#{inspect(other)}) — label forge intact, retry in #{@awaits_rekick_every} ticks, " <>
+              "PermanentWarden respawns the arch"
+          )
+      end
     end
 
     :ok

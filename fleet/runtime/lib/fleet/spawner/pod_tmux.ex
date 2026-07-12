@@ -141,8 +141,11 @@ defmodule Fleet.Spawner.PodTmux do
   `Pod.Backend.reap_orphan_pod` (reap BEFORE a re-launch) calls `kill_holder` WITHOUT removing the
   sock-dir (the `:projecting` state re-provisions it right after), and the graceful teardown removes the
   sock-dir too when the kill went through the Port's SIGTERM (path without `kill_holder`). The rm is
-  therefore a gesture separate from the kill, not its systematic sequel. Best-effort (`rm_rf` does not
-  raise on the absent), returns `:ok`.
+  therefore a gesture separate from the kill, not its systematic sequel. The `rm_rf` result is
+  discarded and `:ok` is always returned: an absent dir is a no-op (nothing to remove), and a genuine
+  rm failure has no handler here — its symptom is exactly the noise this removal prevents:
+  `PodWarden` re-suspects the lingering sock-dir and logs a false "persistent orphan" (visible there,
+  not here).
   """
   @spec remove_sock_dir(String.t()) :: :ok
   def remove_sock_dir(pod_id) when is_binary(pod_id) do
@@ -194,13 +197,23 @@ defmodule Fleet.Spawner.PodTmux do
   @doc """
   Captures the visible content of the pod's pane (`tmux capture-pane -p`) = the REPL screen. An OFFLOADED
   observation channel, fallback-ACK: when the agent does not ack, we attach the screen to the escalation
-  issue (starfleet sees what the agent was displaying/doing). Returns `""` if the capture fails (best-effort).
+  issue (starfleet sees what the agent was displaying/doing). Returns `""` if the capture fails
+  (tmux error / dead session) — LOGGED: no retry and no rail re-derives the screen, and without the
+  log an empty pane on the escalation issue was indistinguishable from a genuinely blank screen.
   """
   @spec capture_pane(String.t()) :: String.t()
   def capture_pane(pod_id) when is_binary(pod_id) do
     case tmux(pod_id, ["capture-pane", "-p", "-t", session_name(pod_id)]) do
-      {out, 0} -> out
-      _ -> ""
+      {out, 0} ->
+        out
+
+      {err, rc} ->
+        Logger.warning(
+          "pod #{pod_id} capture_pane FAILED (rc=#{rc}: #{String.trim(err)}) — " <>
+            "escalation will carry an EMPTY pane (not a blank screen; no re-capture rail)"
+        )
+
+        ""
     end
   end
 

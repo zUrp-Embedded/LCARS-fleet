@@ -82,8 +82,10 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   @doc """
-  Stops `pod_id`'s acceptor and removes the socket file (and its per-pod dir,
-  best-effort). Idempotent.
+  Stops `pod_id`'s acceptor and removes the socket file, then its per-pod dir. The FS results are
+  discarded: a leftover socket file is visible as "file without acceptor" in
+  `Fleet.MCP.Supervisor.pod_facing_status/0` (degraded) and reaped, warning-logged, by
+  `sweep_stale_sockets/0` at the next boot. Idempotent.
   """
   @spec release_pod_socket(String.t()) :: :ok
   def release_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
@@ -97,7 +99,8 @@ defmodule Fleet.MCP.PodSocketSupervisor do
       path = socket_path(pod_id)
       # Closing the socket frees the FD, NOT the file → we remove it explicitly.
       _ = File.rm(path)
-      # Removes the per-pod dir if empty (best-effort, breaks nothing otherwise).
+      # rmdir only removes an EMPTY dir — the discarded value carries nothing: if the rm above
+      # failed, the dir stays and the next boot's sweep_stale_sockets/0 reaps file + dir.
       _ = File.rmdir(Path.dirname(path))
       :ok
     else

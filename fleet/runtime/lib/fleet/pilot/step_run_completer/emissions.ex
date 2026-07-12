@@ -4,12 +4,16 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   extracted from `Fleet.Pilot.StepRunCompleter`: everything that accompanies the publication
   of a deliverable WITHOUT being part of the completion sequence.
 
-  ## Best-effort by contract
+  ## Out of the completion sequence by contract
 
-  Both emissions are **best-effort**: a failure NEVER breaks the completion
-  (the deliverable = the commit, already pushed; the PR is already open). It is precisely
+  Neither emission can break the completion: when they run, the deliverable truth is
+  already on the forge (the commit is pushed; the PR is already open). It is precisely
   this contract that makes the concern separable: the completer's sequence (order, lock,
   idempotence) depends on NO return value from here — the caller discards (`_ =`).
+  Failure visibility differs per emission: a missed `deliverable.published` is logged
+  warning here and backstopped pod-side (`:publish_deadline` lifts the freeze anyway);
+  a failed eng-voice post is SWALLOWED (discarded, no log) — the ticket simply lacks
+  the note, nothing re-posts it.
 
   Called by `complete_producer` AFTER `open_deliverable_pr` (the push has already READ the
   workspace) and BEFORE `route` (the lock is not yet lifted).
@@ -28,8 +32,10 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   the push. Carries the `pod_id` (the producer pod, from the pod.completed payload). Source `:workflow`
   (the publication is a workflow-engine op; atom aligned on the fleet_pipeline→fleet_workflow rename —
   the bare :pipeline atom had survived the rename sed, sole emitter, zero matcher by source).
-  Best-effort: an emission failure does NOT break the completion (the deliverable is already published) — the
-  pod-side backstop (:publishing deadline) covers a miss. No-op if no pod_id (legacy/test).
+  This event is the fast-path release of the freeze: the truth (the deliverable on the forge) is already
+  durable, and a missed emission is logged warning here and re-derived pod-side by the `:publish_deadline`
+  backstop (the `:publishing` flag lifts anyway at the deadline) — a miss costs slot latency, never the
+  completion nor the deliverable. No-op if no pod_id (legacy/test).
   """
   @spec deliverable_published(map(), integer()) :: :ok | :noop
   def deliverable_published(step_run, pr) do
@@ -72,8 +78,9 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   ENG VOICE on the TICKET (OUTGOING info, descriptive and traceable): posts the
   producer's `summary` (what it did on delivery / its response to the review on rework) as an
   ISSUE comment, IN THE NAME OF THE ENG (`as_role` — honest trace; the pod stays forge-blind, it is
-  the SYSTEM that posts). Best-effort: a post failure does NOT break the completion (the deliverable = the
-  commit, already pushed). Absent/empty → nothing (no empty comment).
+  the SYSTEM that posts). A post failure does NOT break the completion (the deliverable = the
+  commit, already pushed) and is SWALLOWED here (discarded, no log): the only loss is the note's
+  absence on the ticket — nothing re-posts it. Absent/empty → nothing (no empty comment).
 
   DEDUP (footprint): the FULL NOTE goes on the ISSUE (the ticket = canonical record of the work,
   "here is what I did" in response to the brief) — the PR NO LONGER receives a copy nor a separate
@@ -95,17 +102,23 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         role = Map.get(step_run, :role, "engineer")
 
         # FULL NOTE on the ISSUE (canonical record of the work) — the sole post of this function.
-        # Best-effort + fail-closed on the token: no role token → skip (do not post the eng voice under the
-        # system account); the completion is unaffected (the deliverable = the pushed commit).
-        _ =
-          with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role) do
-            forge.post_comment(
-              repo,
-              n,
-              "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
-              role_opts
-            )
-          end
+        # Fail-closed on the token: no role token → skip (do not post the eng voice under the system
+        # account; RoleToken logs the missing token). A failed post is LOGGED: it leaves the ticket
+        # without the note and no rail re-posts it; the completion is unaffected (the deliverable
+        # truth = the pushed commit + open PR), but the loss must be visible.
+        with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
+             {:error, reason} <-
+               forge.post_comment(
+                 repo,
+                 n,
+                 "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
+                 role_opts
+               ) do
+          Logger.warning(
+            "Emissions: #{repo}##{n} eng note NOT posted (#{inspect(reason)}) — " <>
+              "ticket without the #{role} summary, no re-post rail (deliverable truth unaffected)"
+          )
+        end
 
         :ok
 

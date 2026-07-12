@@ -21,16 +21,23 @@ defmodule Fleet.Coord.Emitter do
       mandatory: a bare type would be outside the registry → broadcast
       rejected → silent drop)
 
-  ## Broadcast policy (best-effort, never blocking)
+  ## Broadcast policy (fire-and-forget, never blocking)
 
   Via the protected core `Bus.safe_emit/4` (the Ring 0 authority of this
   policy): `UnregisteredError` (registry not yet populated at boot order)
   tolerated in SILENCE so as not to break the boot — fire-and-forget; a
   MALFORMED event (build bug) is logged ERROR by safe_emit then neutralized —
-  coord must not crash on an observability defect. The `correlation_id`
+  coord must not crash on an observability defect. A `{:error, _}` PubSub
+  return passes THROUGH `safe_emit` (its passthrough contract) and is LOGGED
+  warning here (`safe_canon_broadcast`): nothing re-derives the lost
+  notification — the escalation's durable trace, when there is one, is the
+  upstream starfleet audit log (`Cat5Escalator` writes it BEFORE dispatching
+  here), not this event. The `correlation_id`
   (task.id UUID of the original work item, nil outside a work item) is
   propagated on every broadcast to tie the event back to its work item.
   """
+
+  require Logger
 
   alias Fleet.EventRouter.Bus
 
@@ -42,7 +49,7 @@ defmodule Fleet.Coord.Emitter do
   `pod_id`/`verdict`/`reason` (atom OR string keys); `correlation_id`
   propagated on the broadcast.
 
-  ALWAYS returns `:ok` (best-effort broadcast — cf. moduledoc § Policy): the
+  ALWAYS returns `:ok` (fire-and-forget broadcast — cf. moduledoc § Policy): the
   dispatch's success is the LOOKUP's success (returned by `Policies`), not the
   observability's.
   """
@@ -98,13 +105,27 @@ defmodule Fleet.Coord.Emitter do
     do: :"coord.escalation_triggered"
 
   # Strict canonical broadcast (source :coord) via the protected core `Bus.safe_emit/4` — the
-  # best-effort policy has ONE authority (Ring 0). `:silent`: UnregisteredError tolerated without
+  # protected-emission policy has ONE authority (Ring 0). `:silent`: UnregisteredError tolerated without
   # noise (boot order); malformed event logged ERROR by safe_emit then neutralized (cf. moduledoc).
+  # A PubSub `{:error, _}` passes THROUGH safe_emit unlogged (its passthrough contract) — logged
+  # HERE: a lost coord event (escalation_triggered / notification_routed) has NO re-derive rail;
+  # the only durable trace is the upstream Cat5 audit log, and only on the escalation path.
   defp safe_canon_broadcast(type, opts) do
-    Bus.safe_emit(:coord, type, opts,
-      on_unregistered: :silent,
-      context: "Coord.Emitter: action NOT broadcast"
-    )
+    case Bus.safe_emit(:coord, type, opts,
+           on_unregistered: :silent,
+           context: "Coord.Emitter: action NOT broadcast"
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Emitter: coord event #{inspect(type)} NOT broadcast (#{inspect(reason)}) — " <>
+            "notification lost, no re-derive rail (durable trace = Cat5 audit log, escalation path only)"
+        )
+
+        :ok
+    end
   end
 
   defp extract_pod_id(%{pod_id: pid}) when is_binary(pid), do: pid

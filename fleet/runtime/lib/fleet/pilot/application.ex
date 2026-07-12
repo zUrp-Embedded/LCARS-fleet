@@ -139,8 +139,10 @@ defmodule Fleet.Pilot.Application do
       # thundering herd). Beyond -> {:error, :max_children}, handled fail-loud by offload_async.
       {Task.Supervisor, name: Fleet.Pilot.StepRunConsumer.task_supervisor(), max_children: 16},
       # Persistent memory of system incidents (resilient owner). Consumed by WakeRecovery
-      # (kick_gatekeeper / safe_wake) AND by the IncidentConsumer (`*.failed` events). Best-effort boot
-      # (forge unreachable at boot → local WAL only, no crash).
+      # (kick_gatekeeper / safe_wake) AND by the IncidentConsumer (`*.failed` events). The truth lives
+      # in the local WAL (written first, crash-survivable); the forge is the ASYNC cross-machine
+      # backing-store. Forge unreachable at boot → WAL only, no crash: the sync re-schedules itself
+      # (`:sync_forge` retry, error logged at threshold) and catches up when the forge returns.
       Fleet.Pilot.IncidentRegistry,
       # Bus consumer SEPARATE from the pod FAILURE events (`pod.failed`/`wake.failed`) → IncidentRegistry.
       # Its Task.Supervisor (offload of the registry's forge writes) started BEFORE it (it refers to it). Separate from

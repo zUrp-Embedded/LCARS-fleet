@@ -104,7 +104,8 @@ defmodule Fleet.API.RestTest do
 
     # MA-18 — LE finding : un slug bien formé mais SANS cap-profile (ex. `lcars spawn scout`) ne doit
     # PLUS rendre 202 (qui mentait : le PublishConsumer logguait juste un warning, zéro pod). 422 +
-    # AUCUN broadcast (l'admission est refusée à la frontière, pas avalée en best-effort async).
+    # AUCUN broadcast (l'admission est refusée à la frontière, pas déportée dans le consumer async
+    # où l'échec ne serait qu'un warning sans pod).
     test "MA-18 — cap-profile inexistant → 422, PAS 202, et AUCUN broadcast" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout-inexistant-xyz"}))

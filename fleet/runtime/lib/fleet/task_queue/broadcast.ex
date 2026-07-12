@@ -1,6 +1,6 @@
 defmodule Fleet.TaskQueue.Broadcast do
   @moduledoc """
-  Broker broadcast policy — load-bearing vs best-effort classification,
+  Broker broadcast policy — load-bearing vs lossy-observability classification,
   extracted from `Fleet.TaskQueue.Server` (same move as `Fleet.Spawner.Pod.Events`
   on the spawner side). No GenServer state: `bus`, `topic` and the event arrive as
   explicit arguments.
@@ -12,7 +12,7 @@ defmodule Fleet.TaskQueue.Broadcast do
   a trap: a swallowed `work_item.completed` = submit OK returned to the pod, BUT the step_run
   finish never triggered → forge lock held for life (silent wedge). Hence the SEPARATION:
 
-    * `best_effort/3` — pure OBSERVABILITY (`work_item.enqueued`/`assigned`/`cleared`/
+    * `lossy/3` — pure OBSERVABILITY (`work_item.enqueued`/`assigned`/`cleared`/
       `failed`-deadline, `state.corrupt`). A failure is non-blocking (rescue → log
       warning, always returns `:ok`) — no one FINISHES a step_run on it.
     * `required/3` — load-bearing LIFECYCLE (`work_item.completed`). The failure is NOT
@@ -27,7 +27,7 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   ## Why NOT `Fleet.EventRouter.Bus.safe_emit/4`
 
-  `safe_emit` is the best-effort Ring 0 core — but it emits via `emit/3` →
+  `safe_emit` is the Ring 0 protected-emission core — but it emits via `emit/3` →
   `broadcast_main/1`, i.e. ALWAYS the real Bus on the main topic. The broker
   carries two per-instance knobs (`:bus` seam + `:topic`, options of `Server.start_link/1`)
   that serve test isolation (stub bus that fails/raises on `work_item.completed`, dedicated topic
@@ -58,7 +58,7 @@ defmodule Fleet.TaskQueue.Broadcast do
   end
 
   @doc """
-  OBSERVABILITY broadcast (best-effort): emits `event` on `topic` via `bus.broadcast/2`
+  OBSERVABILITY broadcast (lossy): emits `event` on `topic` via `bus.broadcast/2`
   (registry validation `assert_authorized!` included when `bus` is the real
   `Fleet.EventRouter.Bus`: task events have the same guard as the others).
 
@@ -66,15 +66,13 @@ defmodule Fleet.TaskQueue.Broadcast do
   warning; an `{:error, _}` PubSub passthrough is discarded — no caller FINISHES a
   step_run on these events, a failure is merely an observability loss.
   """
-  @spec best_effort(module(), String.t(), Fleet.Event.t()) :: :ok
-  def best_effort(bus, topic, %Fleet.Event{} = ev) do
+  @spec lossy(module(), String.t(), Fleet.Event.t()) :: :ok
+  def lossy(bus, topic, %Fleet.Event{} = ev) do
     _ = bus.broadcast(topic, ev)
     :ok
   rescue
     e ->
-      Logger.warning(
-        "Broadcast: best_effort_broadcast #{ev.type} failed (pod=#{ev.pod_id}): #{inspect(e)}"
-      )
+      Logger.warning("Broadcast: lossy #{ev.type} failed (pod=#{ev.pod_id}): #{inspect(e)}")
 
       :ok
   end

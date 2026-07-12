@@ -16,8 +16,8 @@ only pointed at.
 ## Modules
 - `Fleet.TaskQueue` — public-API facade (`enqueue`/`get_for_pod`/`submit_result` + queries); every fn has a test-seam variant (explicit `server`)
 - `Fleet.TaskQueue.Server` — the broker GenServer (single writer; per-task deadline watchdog; bounded terminal-task retention; persistence + broadcast orchestration). Watchdog and prune kept in-Server on purpose (extraction refusals argued in its `@moduledoc`)
-- `Fleet.TaskQueue.Store` — `state.json` persistence (atomic write best-effort, fail-loud `:corrupt` read); inert in prod while `persist: false`
-- `Fleet.TaskQueue.Broadcast` — broadcast policy: `best_effort/3` (observability) vs `required/3` (load-bearing `work_item.completed`); deliberately outside `Bus.safe_emit`
+- `Fleet.TaskQueue.Store` — `state.json` persistence (atomic write, write failure logged error and non-fatal — the forge is the truth, re-derived by its polls; fail-loud `:corrupt` read); inert in prod while `persist: false`
+- `Fleet.TaskQueue.Broadcast` — broadcast policy: lossy `lossy/3` (observability) vs `required/3` (load-bearing `work_item.completed`); deliberately outside `Bus.safe_emit`
 - `Fleet.TaskQueue.WorkItem` — the task struct + `to_map/1`/`from_map/1` (state.json serialization); `id` = the canonical `correlation_id`
 - `Fleet.TaskQueue.Application` — supervisor; boots the named `Server` with `persist: false` (the ephemeral prod mode)
 

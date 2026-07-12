@@ -45,7 +45,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   EXPLICITLY — **gatekeeper too** (last act — coherent chronology, no more `Closes #N`/
   Gitea auto-close that closed BEFORE the comment; same identity as the merge+comment, a single
   sealing ceremony, no attribution break). The comment is ONLY posted if the
-  merge succeeded (best-effort, the merge is authoritative). We NEVER claim "merged" before having
+  merge succeeded (the merge is the authoritative act; comment/stage/close are POST-merge trace and
+  can never un-merge anything). We NEVER claim "merged" before having
   verified it. Merge failed → no success comment, the error bubbles up.
 
   `forge_opts` = RAW forge opts (base_url/system token…): the gatekeeper signature is applied
@@ -81,18 +82,44 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # MERGE FIRST, only comment "✅ delivered and merged" IF the merge REALLY succeeded. The reverse
         # order (comment → merge) would post the success BEFORE verifying it → on a conflict, a
         # LYING "merged" comment would stay frozen: silent failure on THE crucial point of the workflow (we
-        # would control the INTENT, not the REALITY of the merge). The seal is therefore best-effort POST-merge — comment,
+        # would control the INTENT, not the REALITY of the merge). The seal is therefore strictly POST-merge — comment,
         # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
         # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
         # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
         case do_merge(forge, repo, pr_number, gk_opts) do
           :ok ->
-            _ = comment(forge, repo, issue_n, body, comment_opts)
+            # POST-merge trace. A failed seal comment does not block the sequence (the merge stays
+            # the authoritative truth) but is LOGGED: nothing re-posts it (the dedup only guards
+            # against replays), so a silent loss left the issue without its human-readable seal.
+            case comment(forge, repo, issue_n, body, comment_opts) do
+              {:ok, _} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning(
+                  "GatekeeperSeal: #{repo}##{issue_n} seal comment NOT posted (#{inspect(reason)}) — " <>
+                    "merge done (authoritative), human-readable trace missing on the issue, nothing re-posts it"
+                )
+            end
 
             # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
-            # signature): the stage/* are managed by lcars-system (WS1). Best-effort (display; the merge
-            # is authoritative).
-            _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
+            # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
+            # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
+            # `{:skip, :merged}` guard (F-C066) when the close below fails. Its failure is ERROR-level:
+            # a load-bearing label NOT engraved (no rail re-sets it — in the close-also-fails case only
+            # the kept `lcars-in-flight` lock still guards against re-dispatch, and Delegation.issue_status
+            # reports delivered=false forever: the arch would wait on a merged brick).
+            case forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts) do
+              {:ok, _} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.error(
+                  "GatekeeperSeal: #{repo}##{issue_n} stage/merged NOT engraved (#{inspect(reason)}) — " <>
+                    "load-bearing label lost (F-C066 durable guard + Delegation delivered-detection); " <>
+                    "no rail re-sets it, only the in-flight lock still guards re-dispatch"
+                )
+            end
 
             # EXPLICIT close, as the LAST visible act on the issue (chronology QoL, 2026-07-07): no more
             # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
@@ -111,7 +138,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # else in the pipeline) — not concerned by this inconsistency.
             close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
 
-            # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
+            # Projects the deliverable onto the local clone `/home/projects/<name>` — a MIRROR: the truth is
+            # the merged `main` on the forge; the sync is convergent (`reset --hard origin/main` — the next
+            # merge's sync catches up any missed one) and a failure is logged warning by WorktreeSync. The SERIALIZATION
             # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
             # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
             # a failed alignment = disk behind, never a loss (the deliverable is on the forge). Independent of the
