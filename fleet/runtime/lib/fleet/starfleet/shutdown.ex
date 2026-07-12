@@ -181,12 +181,13 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     is_pid(Process.whereis(Fleet.TaskQueue.Server))
   end
 
-  # Module in a VARIABLE for the `apply`: no literal remote call `Fleet.TaskQueue.x()` → no
-  # compile-time dependency on fleet_task_queue (the layering forbids the inversion).
+  # DIRECT call — the dep is DECLARED (boundary Fleet.Starfleet → Fleet.TaskQueue,
+  # downward; Z5 migration 2026-07-13). The old module-in-a-variable idiom dodged the
+  # umbrella compile order, which no longer exists — the boundary compiler now carries
+  # what the hack hid. The try/rescue around the call (broker restarting mid-quiesce)
+  # keeps its role: never mask as `0`, return :error → sentinel "not empty".
   defp safe_count_pending do
-    mod = Fleet.TaskQueue
-
-    case apply(mod, :list_pending, []) do
+    case Fleet.TaskQueue.list_pending() do
       list when is_list(list) -> {:ok, length(list)}
       _ -> :error
     end

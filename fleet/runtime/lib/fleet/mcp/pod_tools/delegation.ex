@@ -339,8 +339,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The ROLE (architect / engineer / …) is burned in at SPAWN and read from the Spawner registry
   # (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test seam
   # `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role}}` | `{:error, _}`.
-  # Default = RUNTIME dispatch to `Fleet.Spawner.pod_info/1` (no compile-time dep on
-  # fleet_spawner). Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
+  # Default = DIRECT call to `Fleet.Spawner.pod_info/1` — the dep is DECLARED (boundary
+  # Fleet.MCP → Fleet.Spawner, downward; Z5 migration 2026-07-13). The old `apply` idiom
+  # dodged the umbrella compile order, which no longer exists — the boundary compiler now
+  # carries what the hack hid. Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
   defp resolve_role(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 
@@ -351,7 +353,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp default_pod_resolver(pod_id) when is_binary(pod_id) do
-    apply(Fleet.Spawner, :pod_info, [pod_id])
+    Fleet.Spawner.pod_info(pod_id)
   rescue
     _ -> {:error, :pod_unknown}
   catch

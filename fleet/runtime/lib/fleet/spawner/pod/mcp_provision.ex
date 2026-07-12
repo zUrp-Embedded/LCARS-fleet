@@ -43,7 +43,10 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # (`Fleet.MCP.PodSocketSupervisor` in prod, `Fleet.Spawner.MCPSocketStub` set by config/test.exs).
   defp mcp_socket_provisioner, do: McpSocketProvisioner.resolved()
 
-  # The seam is DUCK-TYPED (fleet_mcp can't adopt the @behaviour — upward compile edge forbidden), so a
+  # The seam is DUCK-TYPED and stays INJECTED post-collapse (Z5, 2026-07-13) : this is THE assumed
+  # upward runtime seam — mcp already declares Fleet.Spawner (boundary dep, Delegation), so
+  # spawner→mcp as a literal call would close a boundary CYCLE (forbidden by the compiler; and
+  # doctrinally the core must not compile-depend on its own substrate consumer). So a
   # misconfigured `:mcp_socket_provisioner` (a module that does not export the callbacks) would make
   # `apply/3` raise `UndefinedFunctionError` deep in `:projecting` → crash the pod gen_statem with an
   # obscure error. Guard with `function_exported?` → a typed `{:error, {:mcp_provisioner_misconfigured,
