@@ -294,6 +294,43 @@ defmodule Fleet.MCP.PodSocketTest do
     assert function_exported?(Fleet.MCP.PodSocketSupervisor, :release_pod_socket, 1)
   end
 
+  test "un pod qui ouvre des connexions MUETTES n'asphyxie PAS la flotte (plafond per-pod + timeout idle)" do
+    # Le pod est adversarial par doctrine partout ailleurs. Le pool de Tasks qui SERT les
+    # connexions est FLEET-WIDE (max_children du Task.Supervisor partagé) : sans plafond
+    # per-pod, un seul pod ouvrant assez de connexions muettes épuisait le pool → les tools
+    # de TOUS les autres pods (get_work_item/submit_result) morts tant que le fautif vivait.
+    # Ici : le pod fautif se heurte à SON plafond ; un autre pod continue d'être servi.
+    noisy = uniq("noisy")
+    victim = uniq("victim")
+
+    {:ok, noisy_path} = PodSocketSupervisor.ensure_pod_socket(noisy)
+    {:ok, victim_path} = PodSocketSupervisor.ensure_pod_socket(victim)
+
+    on_exit(fn ->
+      PodSocketSupervisor.release_pod_socket(noisy)
+      PodSocketSupervisor.release_pod_socket(victim)
+    end)
+
+    # Le fautif ouvre BEAUCOUP plus de connexions que son plafond (8) et n'envoie JAMAIS de
+    # ligne — chacune resterait bloquée en recv sans deadline. Les connexions au-delà du
+    # plafond sont refusées (fermées par l'acceptor) : le pool partagé n'est pas consommé.
+    mutes =
+      for _ <- 1..40 do
+        {:ok, sock} =
+          :gen_tcp.connect({:local, noisy_path}, 0, [:binary, {:packet, :line}, {:active, false}])
+
+        sock
+      end
+
+    on_exit(fn -> Enum.each(mutes, &:gen_tcp.close/1) end)
+
+    # La victime est servie normalement — c'est TOUT l'invariant : la faute d'un pod lui coûte
+    # à LUI, jamais à la flotte.
+    {:ok, _} = TaskQueue.enqueue(victim, %{brief: "still served"})
+    resp = call(victim_path, 1, "get_work_item", %{})
+    assert {:ok, %{"work_item" => %{"brief" => "still served"}}} = content(resp)
+  end
+
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
   # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.

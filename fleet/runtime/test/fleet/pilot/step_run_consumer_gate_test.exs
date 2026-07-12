@@ -681,6 +681,75 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(evals, "corr-1")
   end
 
+  test "GenServer : work_item.cleared correle -> contexte d'eval LIBERE (fin de la fuite RAM du singleton)" do
+    # gate_evals ne rétrécissait QUE sur la complétion corrélée : une éval supersédée (nouvel
+    # enqueue sur le gatekeeper) ou clearée (mort du pod) laissait son contexte — payload +
+    # workflow_map ENTIÈRE — en RAM à vie dans ce singleton (croissance monotone du daemon).
+    # Sans verdict il n'y a RIEN à reprendre ; et un verdict tardif se reconstruirait depuis
+    # les metadata self-describing du broker.
+    {:ok, pid} =
+      StepRunConsumer.start_link(
+        name: :"step_run_gate_#{System.unique_integer([:positive])}",
+        repo: "o/r",
+        remote: "origin",
+        subscribe: false,
+        forge_client: StubForge,
+        loader: WorkflowMap,
+        deliverable: DelivStub,
+        deliverable_mode_fun: dmode(),
+        task_queue: StubTaskQueue,
+        spawner: StubSpawner,
+        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
+        role_emails: fn r -> ["#{r}@lcars.local"] end
+      )
+
+    send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
+    assert Map.has_key?(:sys.get_state(pid).gate_evals, "corr-1")
+
+    send(
+      pid,
+      Fleet.Event.new(:task_queue, :"work_item.cleared",
+        correlation_id: "corr-1",
+        payload: %{work_item_id: "corr-1", reason: :superseded}
+      )
+    )
+
+    assert %{gate_evals: evals} = :sys.get_state(pid)
+    refute Map.has_key?(evals, "corr-1")
+  end
+
+  test "GenServer : sweep TTL -> un contexte d'eval sans verdict expire (backstop du rail lossy)" do
+    # Le rail work_item.cleared est LOSSY (doctrine D1) et un gatekeeper qui meurt en pleine éval
+    # n'émet RIEN : le TTL est la bretelle qui ne dépend d'aucun message. Seams ttl/sweep à ~0 pour
+    # exercer la mécanique sans attendre 2 h (un TTL qu'on ne peut tester qu'en attendant n'est
+    # pas testé).
+    {:ok, pid} =
+      StepRunConsumer.start_link(
+        name: :"step_run_gate_#{System.unique_integer([:positive])}",
+        repo: "o/r",
+        remote: "origin",
+        subscribe: false,
+        forge_client: StubForge,
+        loader: WorkflowMap,
+        deliverable: DelivStub,
+        deliverable_mode_fun: dmode(),
+        task_queue: StubTaskQueue,
+        spawner: StubSpawner,
+        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
+        role_emails: fn r -> ["#{r}@lcars.local"] end,
+        gate_eval_ttl_ms: 0,
+        gate_eval_sweep_ms: 10
+      )
+
+    send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
+    assert Map.has_key?(:sys.get_state(pid).gate_evals, "corr-1")
+
+    # Le tick de sweep tombe (10 ms) → le contexte, plus vieux que le TTL (0), est libéré.
+    Process.sleep(60)
+    assert %{gate_evals: evals} = :sys.get_state(pid)
+    refute Map.has_key?(evals, "corr-1")
+  end
+
   test "GenServer : work_item.completed d'un corr inconnu -> ignore (pas de crash)" do
     {:ok, pid} =
       StepRunConsumer.start_link(

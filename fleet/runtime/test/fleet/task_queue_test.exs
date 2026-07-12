@@ -648,6 +648,27 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.submit_result(q, "pod-Z", %{"work_item_id" => old.id, "verdict" => "stale"})
   end
 
+  test "supersede ÉMET work_item.cleared (la seule transition terminale muette — trace + purge des consumers)",
+       %{q: q, topic: _topic} do
+    # Le supersede était la SEULE transition terminale sans event : l'item passait :cleared
+    # derrière un Logger.debug → (a) la trace d'audit mentait par omission sur le sort d'un
+    # mandat, (b) tout consumer portant du contexte per-mandat (StepRunConsumer.gate_evals :
+    # payload + workflow_map ENTIÈRE) le gardait à vie. L'event le libère.
+    {:ok, old} = TaskQueue.enqueue(q, "pod-S", %{brief: "ancien"})
+    assert_receive %Fleet.Event{type: :"work_item.enqueued"}
+
+    {:ok, _fresh} = TaskQueue.enqueue(q, "pod-S", %{brief: "frais"})
+
+    old_id = old.id
+
+    assert_receive %Fleet.Event{
+      source: :task_queue,
+      type: :"work_item.cleared",
+      correlation_id: ^old_id,
+      payload: %{work_item_id: ^old_id, reason: :superseded}
+    }
+  end
+
   # MA-27 — `clear_for_pod` purge TOUTES les actives du pod (pas seulement la + récente via `find_active`).
   # Avec l'invariant tenu à l'enqueue il n'y en a normalement qu'une ; le test pose volontairement DEUX
   # actives (en court-circuitant l'unicité via la map d'état directe) pour prouver que clear est TOTAL.

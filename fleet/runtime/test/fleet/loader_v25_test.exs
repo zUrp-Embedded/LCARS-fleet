@@ -101,6 +101,37 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
+  test "V2.5 needs avec DOUBLON → rejet SCHEMA (plus de diagnostic :fan_out menteur)", %{
+    tmp_dir: dir
+  } do
+    # `needs: [a, a]` (copier-coller) passait le schema, l'arête était posée DEUX fois, et le
+    # GraphValidator rejetait en :fan_out avec un diagnostic FAUX (« 2 successeurs [b, b] » sur
+    # une chaîne linéaire) : fail-closed mais trace menteuse — l'auteur du map cherchait un
+    # fan-out inexistant. Le rejet vit désormais en AMONT (uniqueItems), avec le vrai motif.
+    yaml = """
+    kind: WorkflowMap
+    metadata:
+      name: dup-needs
+    spec:
+      max_rework_rounds: 1
+      steps:
+        a:
+          role: engineer
+          profile: engineer
+        b:
+          role: engineer
+          profile: engineer
+          needs: ["a", "a"]
+    """
+
+    File.write!(Path.join(dir, "dup-needs.yaml"), yaml)
+
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+      Loader.load!("dup-needs", workflow_maps_root: dir)
+    end
+  end
+
+  @tag :tmp_dir
   test "V2.5 structurellement invalide → raise schema workflow-map-v2.5", %{tmp_dir: dir} do
     bad = """
     kind: WorkflowMap

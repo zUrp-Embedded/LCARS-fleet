@@ -82,21 +82,30 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     case seams.gatekeeper_pod_id_fun.() do
       pod_id when is_binary(pod_id) ->
         gate = get_in(workflow_map, ["steps", step, "gate"])
-        workflow_map_name = Map.get(workflow_map, "name")
+
+        # TWO names exist for a map and they are NOT the same authority: `map["name"]` is the
+        # DECLARED name (`metadata.name` of the YAML), while the reload path takes the LOADING
+        # name (the file/route name, `payload["workflow_map"]` → `Loader.load!/1`). Nothing forces
+        # them equal (no schema rule, no contracts check). We engrave the LOADING name — the one
+        # the reconstruction will feed back to the Loader — so a crash-recovery cannot fail to
+        # reload the map on precisely the rare path this mechanism exists to cover. The declared
+        # name stays the HUMAN label of the brief.
+        load_name = Map.get(payload, "workflow_map") || Map.get(workflow_map, "name")
+        declared_name = Map.get(workflow_map, "name")
 
         brief =
           Fleet.Workflow.GateBrief.build(%{
             step: step,
-            workflow_map_id: workflow_map_name,
+            workflow_map_id: declared_name,
             gate: gate,
             outputs: outputs
           })
 
         # SELF-DESCRIBING VERDICT: the eval task's metadata carries the RESUMPTION context
-        # (`payload`/`n`/`role` on top of the step/workflow_map_name already present). This task survives in the broker
+        # (`payload`/`n`/`role` on top of the step/loading-name already present). This task survives in the broker
         # (TaskQueue = another process) a crash of the StepRunConsumer alone → the verdict (`work_item.completed`) brings
         # this metadata back → the restarted StepRunConsumer (emptied gate_evals RAM) rebuilds the eval_ctx
-        # (`workflow_map = Loader.load!(workflow_map_name)`) instead of a silent `{:noreply}` (issue wedged forever). No
+        # (`workflow_map = Loader.load!(meta["workflow_map"])`) instead of a silent `{:noreply}` (issue wedged forever). No
         # NEW source: `payload` already carries `workspace`/`base_sha`/`gate_base_sha` — we embed it as-is.
         attrs = %{
           # Escalation target = the gatekeeper (STRUCTURAL exception judge, GATE-D1) — via the
@@ -107,7 +116,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
           metadata: %{
             "gate_eval" => true,
             "step" => step,
-            "workflow_map" => workflow_map_name,
+            # The LOADING name (see above): this key is read back by `reconstruct_eval_ctx/2` and
+            # handed to the Loader — it must be what the Loader accepts, not the declared label.
+            "workflow_map" => load_name,
             "gate" => gate,
             "outputs" => outputs,
             "resume_payload" => payload,

@@ -197,13 +197,21 @@ defmodule Fleet.TaskQueue.Server do
         # `find_active`/`max_by` becomes moot (at most 1 active/pod by construction).
         {state, superseded} = supersede_active(state, pod_id)
 
-        if superseded > 0,
-          do:
-            Logger.debug(
-              "Server: enqueue pod=#{pod_id} supersedes #{superseded} stale active item(s)"
-            )
-
         new_state = state |> put_work_item(work_item) |> persist()
+
+        # Supersede was the ONLY terminal transition with no event: the mandates it closes went
+        # `:cleared` behind a debug log, so the audit trail lied by omission about their fate and
+        # any consumer holding per-mandate context (StepRunConsumer's `gate_evals`) kept it
+        # forever. One `work_item.cleared` per superseded item, SAME shape as the clear_for_pod
+        # rail (payload `work_item_id` + `reason` — the reason distinguishes the two paths).
+        for t <- superseded do
+          Logger.debug("Server: enqueue pod=#{pod_id} supersedes stale active item #{t.id}")
+
+          lossy_broadcast(
+            new_state,
+            event(:"work_item.cleared", t, %{work_item_id: t.id, reason: :superseded})
+          )
+        end
 
         # payload = `%{work_item_id}` (consistent with every other work_item.* event), NOT the raw `%WorkItem{}` —
         # WorkItem has no @derive Jason.Encoder, so a `%{work_item: work_item}` would crash `Jason.encode!`
@@ -459,21 +467,18 @@ defmodule Fleet.TaskQueue.Server do
   # The pod abandons the old one: `submit_result` of the old work item will hit `find_active`
   # = nil → `:no_active_work_item`/`:double_submit_ignored`, never a mutation of the new one. Keeps all the rest
   # (other pods, the pod's terminal items). Bounds the queue to 1 active/pod AT WRITE. Returns
-  # `{state, n_superseded}`.
+  # `{state, superseded_items}` — the ITEMS, not a count: the caller broadcasts one
+  # `work_item.cleared` per item (a terminal transition with no event is a hole in the audit
+  # trail, and it strands the per-mandate context consumers hold — cf. StepRunConsumer gate_evals).
   defp supersede_active(state, pod_id) do
-    work_items =
-      Map.new(state.work_items, fn {id, t} ->
-        if t.pod_id == pod_id and t.state in @active_states do
-          {id, %{t | state: :cleared}}
-        else
-          {id, t}
-        end
-      end)
-
     superseded =
-      Enum.count(state.work_items, fn {_id, t} ->
-        t.pod_id == pod_id and t.state in @active_states
-      end)
+      state.work_items
+      |> Map.values()
+      |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
+      |> Enum.map(&%{&1 | state: :cleared})
+
+    work_items =
+      Enum.reduce(superseded, state.work_items, fn t, acc -> Map.put(acc, t.id, t) end)
 
     {%{state | work_items: work_items}, superseded}
   end

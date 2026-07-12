@@ -56,9 +56,21 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     {:buffer, 1_048_576}
   ]
 
+  # Idle deadline on the wait for the NEXT line of an accepted connection (cf. `serve/3`).
+  # 5 min ≫ any legitimate inter-line pause of the bridge (request → response, then it either
+  # chains or closes), yet finite: a mute connection frees its Task instead of pinning one of
+  # the pool's `max_children` slots for the lifetime of the pod. Overridable (`:fleet_mcp,
+  # :socket_idle_timeout_ms`) — the atom `:fleet_mcp` is legacy-valid (D-07).
+  @idle_timeout_ms Application.compile_env(:fleet_mcp, :socket_idle_timeout_ms, 300_000)
+
   # Task.Supervisor (tree `Fleet.MCP.Supervisor`) where each accepted connection is served in its
   # own Task. Separates the SERVICE of a connection (potentially slow) from the accept LOOP.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
+
+  # PER-POD ceiling on concurrently served connections (cf. handle_continue/2). The bridge is
+  # request/response over one connection at a time; 8 leaves ample room for a chained burst
+  # while keeping the FLEET-WIDE `max_children` pool out of any single pod's reach.
+  @max_conns_per_pod Application.compile_env(:fleet_mcp, :max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -79,7 +91,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     with :ok <- ensure_parent_dir(path),
          :ok <- rm_stale(path),
          {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]) do
-      {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools},
+      # `conns` = the connection Tasks of THIS pod currently being served (monitored: a Task that
+      # ends — close, error, idle timeout — frees its slot via the :DOWN below). It is the state
+      # backing the per-pod ceiling; without it the acceptor could only see the FLEET-WIDE pool.
+      {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools, conns: %{}},
        {:continue, :accept}}
     else
       {:error, reason} -> {:stop, {:socket_init_failed, reason}}
@@ -90,36 +105,35 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   @impl GenServer
   def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
 
+  # A served connection ended (peer closed, error, or idle timeout) → its slot is freed. Any
+  # exit reason frees it: the ceiling counts LIVE connections, it is not a spend budget.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    {:noreply, %{state | conns: Map.delete(state.conns, ref)}}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
   @impl GenServer
-  def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id, tools: tools} = state) do
+  def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
-        # CONCURRENT: each connection is served in its OWN Task, never inline here. Serving
-        # inline (the old `serve(sock, pod_id)`) blocked the accept loop while ONE handler was pending
-        # (e.g. a slow ~30 s forge call): we never came back to `accept`, so every following connection
-        # from the pod stayed in the kernel backlog unserved → `readline` timeout on the bridge side
-        # (the whole pod froze). One Task per connection → we re-`accept` right away; a slow handler
-        # affects only its connection. `controlling_process` gives the socket to the worker (the acceptor can
-        # re-accept / die without killing the in-flight connections); transfer failed (worker already dead) →
-        # we close the socket rather than leak it.
-        case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id, tools) end) do
-          {:ok, pid} ->
-            case :gen_tcp.controlling_process(sock, pid) do
-              :ok -> :ok
-              {:error, _} -> :gen_tcp.close(sock)
-            end
+        # PER-POD CEILING, checked BEFORE reaching for the shared pool: the Task.Supervisor's
+        # `max_children` is FLEET-WIDE — one pod opening enough connections would starve every
+        # OTHER pod's tools (get_work_item/submit_result dead fleet-wide). A pod's misbehaviour
+        # must cost that pod alone, never the fleet: we cap the connections served for THIS
+        # socket and refuse the excess here, so the shared pool keeps slots for the others.
+        if live_conns(state) >= @max_conns_per_pod do
+          Logger.warning(
+            "PodSocketAcceptor: pod=#{pod_id} connection REFUSED — #{@max_conns_per_pod} " <>
+              "concurrent connections already served for this pod (leaking bridge?); the " <>
+              "fleet-wide Task pool is NOT consumed by this pod's excess"
+          )
 
-          {:error, reason} ->
-            # Notably :max_children (connection-pool saturation = a leaking bridge) —
-            # VISIBLE: otherwise the pod just sees an inexplicable readline timeout.
-            Logger.warning(
-              "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — leaking bridge?"
-            )
-
-            :gen_tcp.close(sock)
+          :gen_tcp.close(sock)
+          {:noreply, state, {:continue, :accept}}
+        else
+          {:noreply, spawn_conn(sock, state), {:continue, :accept}}
         end
-
-        {:noreply, state, {:continue, :accept}}
 
       # Listen socket closed = we were stopped (release) → clean stop, not an error.
       {:error, :closed} ->
@@ -143,11 +157,56 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
+  defp live_conns(%{conns: conns}), do: map_size(conns)
+
+  # CONCURRENT: each connection is served in its OWN Task, never inline in the accept loop.
+  # Serving inline blocked the loop while ONE handler was pending (e.g. a slow ~30 s forge call):
+  # we never came back to `accept`, so every following connection from the pod stayed in the
+  # kernel backlog unserved → `readline` timeout on the bridge side (the whole pod froze). One
+  # Task per connection → we re-`accept` right away; a slow handler affects only its connection.
+  # `controlling_process` gives the socket to the worker (the acceptor can re-accept / die
+  # without killing the in-flight connections); transfer failed (worker already dead) → we close
+  # the socket rather than leak it. The Task is MONITORED: its end frees the pod's slot.
+  defp spawn_conn(sock, %{pod_id: pod_id, tools: tools} = state) do
+    case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id, tools) end) do
+      {:ok, pid} ->
+        case :gen_tcp.controlling_process(sock, pid) do
+          :ok ->
+            ref = Process.monitor(pid)
+            %{state | conns: Map.put(state.conns, ref, pid)}
+
+          {:error, _} ->
+            :gen_tcp.close(sock)
+            state
+        end
+
+      {:error, reason} ->
+        # Notably :max_children — the FLEET-WIDE pool is saturated (by the other pods: this pod's
+        # own excess is refused upstream by the per-pod ceiling). VISIBLE: otherwise the pod just
+        # sees an inexplicable readline timeout.
+        Logger.warning(
+          "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — " <>
+            "fleet-wide connection pool saturated"
+        )
+
+        :gen_tcp.close(sock)
+        state
+    end
+  end
+
   # Serves a connection line by line until the peer closes (the bridge does one
   # call = one line, then reads the response; it may chain several over the same
-  # connection). On close / error, we hand control back to the accept loop.
+  # connection). On close / error / IDLE TIMEOUT, we hand control back to the accept loop.
+  #
+  # The idle timeout is what makes a MUTE connection reapable. Without it, a `recv` with no
+  # deadline held its Task forever: a pod (adversarial by doctrine everywhere else) opening
+  # `max_children` mute connections on ITS socket exhausted the Task pool SHARED by the whole
+  # fleet → get_work_item/submit_result dead fleet-wide until that pod died. The bridge is
+  # request/response (a line, then the answer): a connection silent for `@idle_timeout_ms` is
+  # abandoned by construction, never a legitimate slow call (the SERVICE of a line has no
+  # deadline here — only the wait for the NEXT line does).
   defp serve(sock, pod_id, tools) do
-    case :gen_tcp.recv(sock, 0) do
+    case :gen_tcp.recv(sock, 0, @idle_timeout_ms) do
       {:ok, line} ->
         _ =
           case handle_line(line, pod_id, tools) do
@@ -156,6 +215,14 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           end
 
         serve(sock, pod_id, tools)
+
+      {:error, :timeout} ->
+        Logger.warning(
+          "PodSocketAcceptor: pod=#{pod_id} connection idle > #{div(@idle_timeout_ms, 1000)}s " <>
+            "— closed (mute connections must not hold the fleet-wide Task pool)"
+        )
+
+        :gen_tcp.close(sock)
 
       {:error, _reason} ->
         :gen_tcp.close(sock)

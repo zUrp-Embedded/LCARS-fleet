@@ -61,7 +61,12 @@
                   "enum": ["reversible", "fire_once"],
                   "description": "réservé : idempotence/fire-once, pas encore consommé par aucune logique"
                 },
-                "needs": {"type": "array", "items": {"type": "string"}},
+                "needs": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "uniqueItems": true,
+                  "description": "prédécesseurs (noms de steps), SANS doublon : un `needs` répété (copier-coller) posait deux fois la même arête → le graphe partait en rejet :fan_out avec un diagnostic MENTEUR (« 2 successeurs [b, b] » sur une chaîne linéaire). Le rejet vit ICI, en amont, avec le vrai motif."
+                },
                 "condition": {"type": "string"},
                 "inputs": {"type": "array", "items": {"type": "string"}},
                 "outputs": {"type": "array", "items": {"type": "string"}},

@@ -152,9 +152,18 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # LOAD-BEARING return of the kick (`{:error,{:escalated,_}}`) is SURFACED (telemetry/warning), not swallowed.
     :wake_recovery,
     # Pending escalations, keyed by correlation_id (= task.id of the eval brief). Value =
-    # resume context `%{n, role, payload, workflow_map, step}`. fast-path OPTIMIZATION only
-    # (the verdict is self-descriptive via the task metadata → reconstructible at restart).
+    # resume context `%{n, role, payload, workflow_map, step, stored_at}`. fast-path OPTIMIZATION
+    # only (the verdict is self-descriptive via the task metadata → reconstructible at restart).
+    # BOUNDED, two independent rails: the `work_item.cleared` of a superseded/cleared eval frees
+    # its entry (event, lossy), and a periodic sweep drops whatever outlived `@gate_eval_ttl_ms`
+    # (backstop that needs no message to arrive). Without them, only a CORRELATED completion ever
+    # removed an entry → every other terminal fate stranded a payload + a full workflow_map in
+    # this singleton's RAM, forever.
     gate_evals: %{},
+    # TTL/cadence of the eval-context sweep (seams — a TTL only exercisable by waiting 2 h is a
+    # TTL nobody tests). Defaults resolved in `init/1` from the module attributes.
+    gate_eval_ttl_ms: nil,
+    gate_eval_sweep_ms: nil,
     # Completion offload seam. Default nil → `run_completion` falls back to SYNC (the outcome
     # bubbles up, `maybe_complete`/`resume_gate` seams + all tests unchanged). Prod = async Task.Supervisor.
     step_run_runner: nil
@@ -170,6 +179,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Task supervisor for the completion offload (prod). Name shared between
   # `application.ex step_children` (which starts it BEFORE the StepRunConsumer) and `offload_async/1`.
   @step_run_task_supervisor Fleet.Pilot.StepRunTaskSupervisor
+
+  # TTL of a RAM eval context + cadence of the sweep that enforces it (cf. `:sweep_gate_evals`).
+  # 2 h ≫ any real gatekeeper eval (a claude turn — minutes); past that, the mandate can no longer
+  # yield a verdict this fast-path would honour. Dropping the context loses NOTHING: a late verdict
+  # still resumes through the broker's self-describing metadata (`reconstruct_eval_ctx/2`).
+  # Both are test seams (`:gate_eval_ttl_ms` / `:gate_eval_sweep_ms`) — a TTL that can only be
+  # exercised by waiting 2 h is a TTL nobody tests.
+  @gate_eval_ttl_ms 7_200_000
+  @gate_eval_sweep_ms 600_000
 
   @doc false
   def task_supervisor, do: @step_run_task_supervisor
@@ -224,6 +242,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # Wake recovery seam (default = the real fn).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{},
+      gate_eval_ttl_ms: Keyword.get(opts, :gate_eval_ttl_ms, @gate_eval_ttl_ms),
+      gate_eval_sweep_ms: Keyword.get(opts, :gate_eval_sweep_ms, @gate_eval_sweep_ms),
       # Prod (step_children) injects `&offload_async/1` here; without this
       # read, `run_completion` would fall back to sync → the git push would block the singleton (dead offload).
       step_run_runner: Keyword.get(opts, :step_run_runner)
@@ -233,6 +253,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
       "StepRunConsumer: start (MULTI-PROJECT F-037 : repo/remote per-step-run) " <>
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
+
+    # Backstop sweep of the RAM eval contexts (TTL): armed unconditionally — the leak it bounds
+    # does not depend on the Bus being subscribed, and the tick is a no-op on an empty map.
+    Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
 
     # In step-mode, the StepRunConsumer IS the active path → it ensures the permanent
     # gatekeeper (handle_continue: boot outside init, OTP). Idempotent + autoboot-guarded (no-op
@@ -273,6 +297,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         Logger.info(
           "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
         )
+
+        # `stored_at` (monotonic) = the TTL clock of the sweep backstop. Stamped HERE, at the
+        # single insertion point, so no context can enter the map without a deadline.
+        eval_ctx = Map.put(eval_ctx, :stored_at, System.monotonic_time(:millisecond))
 
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
 
@@ -327,11 +355,65 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
+  # An eval mandate that ends WITHOUT a verdict (superseded by a fresh enqueue on the gatekeeper,
+  # or cleared with its pod) frees its RAM context: `gate_evals` only ever shrank on the CORRELATED
+  # completion, so every non-completed terminal transition stranded an entry (payload + the whole
+  # workflow_map) in this singleton — monotone growth on a long-lived daemon. Nothing is lost by
+  # dropping it: without a verdict there is nothing to resume, and the durable truth (the eval task
+  # + its self-describing metadata) lives in the broker, which is what `reconstruct_eval_ctx/2`
+  # reads if a late verdict ever arrives.
+  def handle_info(
+        %Fleet.Event{source: :task_queue, type: :"work_item.cleared", correlation_id: corr},
+        state
+      )
+      when is_binary(corr) do
+    case Map.pop(state.gate_evals, corr) do
+      {nil, _} ->
+        {:noreply, state}
+
+      {_eval_ctx, gate_evals} ->
+        Logger.info(
+          "StepRunConsumer: eval mandate #{corr} cleared without a verdict — resume context released"
+        )
+
+        {:noreply, %{state | gate_evals: gate_evals}}
+    end
+  end
+
+  # Periodic backstop of the same leak: the `work_item.cleared` rail above is LOSSY (Bus doctrine
+  # D1), and a gatekeeper that dies mid-eval emits nothing at all. Any context older than the
+  # eval's useful life is dead by construction (its mandate can no longer produce a verdict this
+  # consumer would honour) → swept. Belt (event) AND braces (TTL): a singleton's RAM must be
+  # bounded by a mechanism that does not depend on a message arriving.
+  def handle_info(:sweep_gate_evals, state) do
+    Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
+
+    now = System.monotonic_time(:millisecond)
+    ttl = state.gate_eval_ttl_ms
+
+    {kept, expired} =
+      Enum.split_with(state.gate_evals, fn {_corr, ctx} -> fresh?(ctx, now, ttl) end)
+
+    for {corr, _ctx} <- expired do
+      Logger.warning(
+        "StepRunConsumer: eval context #{corr} expired (no verdict within the eval TTL) — " <>
+          "released; a late verdict would still resume via the broker metadata"
+      )
+    end
+
+    {:noreply, %{state | gate_evals: Map.new(kept)}}
+  end
+
   # Pod FAILURE events (`pod.failed`/`wake.failed`) are routed by `Fleet.Pilot.IncidentConsumer`
   # (SEPARATE consumer → incident registry). Here they fall into the catch-all (no-op): this singleton
   # carries ONLY step-run completion, not the incident policy (distinct concern, isolated blast-radius).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
+
+  # A context with no `stored_at` predates the stamping (or came from a test fixture): treated as
+  # fresh — the sweep never drops what it cannot date (it bounds growth, it does not police).
+  defp fresh?(%{stored_at: at}, now, ttl) when is_integer(at), do: now - at < ttl
+  defp fresh?(_ctx, _now, _ttl), do: true
 
   # Executes the resume (common fast-path / reconstruction). The resume pushes/writes onto the
   # repo of the escalated STEP_RUN (carried by the original `pod.completed`, kept in `eval_ctx.payload`), not onto
