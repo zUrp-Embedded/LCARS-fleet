@@ -276,6 +276,14 @@ if config_env() != :test do
   config :fleet_api, http_port: http_port
   config :fleet_api, start_listener: true
 
+  # AF_UNIX control socket pour la porte d'écriture (POST /api/admin/spawn, ControlRouter) —
+  # hors du réseau que le pod partage (A-21). Défaut : ~/.lcars/run/api.sock (per-humain, home
+  # réel jamais bindé dans le pod → inatteignable). Override LCARS_API_SOCK (posé par bin/fleet_v2).
+  config :fleet_api,
+    control_socket:
+      System.get_env("LCARS_API_SOCK") ||
+        Path.join([System.fetch_env!("HOME"), ".lcars", "run", "api.sock"])
+
   # ============================================================
   # fleet_observation — observation deck read-only, port per-humain (BL-026)
   # ============================================================

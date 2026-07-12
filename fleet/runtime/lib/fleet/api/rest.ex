@@ -10,28 +10,31 @@ defmodule Fleet.API.Rest do
       `Fleet.API.Readiness.deep/0` — anti-hollow-green
     * `GET /api/workflow_runs` / `issues` / `pods` — **501 not_implemented** (F-C118 : ex-empty-200
       menteurs ; l'observabilité réelle est servie par fleet_observation, deck :8091)
-    * `POST /api/admin/spawn` — filters the payload by DTO allowlist (422 if an internal spawner
-      field / an unknown key is present), validates the cap-profile (400 if absent, 422 if
-      unknown / host-native), requires a `brief` for a one-shot cap-profile (422 otherwise — mirror
-      of R18, avoids the lying 202) THEN broadcasts the `admin.spawn.request` event + 202. All the
-      admission policy lives in `Fleet.API.SpawnAdmission`; this router maps the verdicts
-      to HTTP statuses
 
-  ## Auth — no-auth reads, guarded writes (not blanket no-auth)
+  `POST /api/admin/spawn` is served ELSEWHERE — `Fleet.API.ControlRouter`, on the local AF_UNIX
+  control socket, not on this TCP surface (see § Auth). This router is READ-only.
 
-  No application auth *for reads*. The `X-Auth-Token` HMAC (static bearer on the
-  constant `"fleet-api-v1"` — not a request signature) was REMOVED: unexposed
-  intra-container = zero surface, and a hand-rolled auth gives a false sense of security (worse
-  than nothing). **The boundary is network isolation**: do NOT publish the API port outside the
-  container (loopback bind / `docker exec`); tunnel (WireGuard/Tailscale) for remote
-  access. Assumed threat-model = LAN / trusted humans.
+  ## Auth — READ-only TCP surface; the write moved off the network
 
-  Reads (dashboard GET, observation) stay no-auth — legitimate, unchanged. **Config writing
-  was removed**: there is no longer a generic write door onto the config repo.
-  An active directive (cap-profiles, coord-policies, workflow_maps) is only modified via git/forge
-  (the traced source of truth), never via a no-auth POST. The ONLY remaining write is
-  `POST /api/admin/spawn`, which is NOT covered by a blanket no-auth: it keeps its own
-  guards (DTO allowlist + host-native refused at admission).
+  This TCP listener now serves READS only (health / version / readiness + the 501 trio). No
+  application auth on reads: they are low-risk, and a bwrap pod reading them is at worst
+  information disclosure. The reads bind loopback by default (`BindAddress`); remote access =
+  tunnel / named opt-in (`LCARS_BIND_HOST`).
+
+  The one WRITE — `POST /api/admin/spawn` — is NO LONGER on this TCP surface. It moved onto the
+  local AF_UNIX control socket (`Fleet.API.ControlRouter`, `~/.lcars/run/api.sock`), served
+  host-side to `bin/lcars`. RATIONALE (A-21): a pod runs under bwrap with `--share-net`, so it
+  SHARES the host netns — its `127.0.0.1` is the host's, and it could reach a no-auth TCP admin
+  endpoint and re-obtain the spawner capability the MCP tool-gating denies it (confused deputy).
+  A UNIX socket closes that BY CONSTRUCTION (the socket file is outside the pod's mount namespace
+  — `--tmpfs /home` masks `~/.lcars`), the SAME move the repo already made for the pod-facing MCP
+  transport (HTTP-loopback → AF_UNIX, "the identity IS the channel"). No auth token to manage.
+  (The historical `X-Auth-Token` static bearer was rightly removed as false security — but the
+  premise that removed it, "unexposed intra-container = zero surface", was itself false for a pod
+  on the shared netns; the fix is to take the door off the network, not to bolt auth onto it.)
+
+  **Config writing was removed**: an active directive (cap-profiles, coord-policies,
+  workflow_maps) is only modified via git/forge (the traced source of truth), never via a POST.
   """
 
   use Plug.Router
@@ -79,114 +82,10 @@ defmodule Fleet.API.Rest do
     send_json(conn, Fleet.API.BuildInfo.current())
   end
 
-  post "/api/admin/spawn" do
-    # "New operator pod" chokepoint: refused during a shutdown drain
-    # (Fleet.Shutdown.Quiesce). 503 = temporarily unavailable.
-    # REST is the ONLY producer of the `admin.spawn.request` event (verified) —
-    # gating here therefore fully covers top-level pod admission.
-    if Fleet.Shutdown.Quiesce.quiescing?() do
-      send_resp(conn, 503, ~s|{"error":"quiescing — shutdown drain in progress"}|)
-    else
-      do_admin_spawn(conn)
-    end
-  end
-
-  # ADMISSION VERDICT → HTTP mapping. All the POLICY (DTO allowlist, path-safe pod_id,
-  # loadable cap-profile, host-native refused, one-shot brief R18) lives in
-  # `Fleet.API.SpawnAdmission.admit/1` (extracted C4 2026-07-05, the WHY of each guard
-  # is documented there); here we only translate each refusal into a status + JSON body.
-  # A refusal = NOTHING was broadcast (admission precedes emission by construction).
-  defp do_admin_spawn(conn) do
-    raw = conn.body_params || %{}
-
-    case Fleet.API.SpawnAdmission.admit(raw) do
-      {:ok, payload} ->
-        do_broadcast_spawn(conn, payload)
-
-      {:error, {:forbidden_fields, fields}} ->
-        # 422 Unprocessable — the request carries non-public fields (internal spawner opts /
-        # seams / disk roots). Refused at the boundary, the consumer never interprets them.
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "unauthorized fields on /api/admin/spawn",
-            forbidden: Enum.sort(fields)
-          })
-        )
-
-      {:error, {:invalid_pod_id, value}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "invalid pod_id (expected [A-Za-z0-9._-], no '..')",
-            value: inspect(value)
-          })
-        )
-
-      {:error, {:invalid_issue_id, value}} ->
-        # 422 — `issue_id` (optional forge/event correlation) was present but not a string. A raw
-        # number/bool/list would be `to_string`-d downstream into the pod's correlation + logs.
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "invalid issue_id (expected a string)",
-            value: inspect(value)
-          })
-        )
-
-      {:error, :brief_required} ->
-        # 422 — one-shot cap-profile without `brief`: the spawner would refuse (R18), the 202 would lie.
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "brief required (one-shot cap-profile)",
-            reason:
-              "one-shot lifetime_scope without `brief`: the pod would leave with no work (R18). Provide `brief`."
-          })
-        )
-
-      {:error, :missing_cap_profile} ->
-        # 400 Bad Request — the required field is missing (incomplete request, not invalid content).
-        send_resp(
-          conn,
-          400,
-          ~s|{"error":"cap_profile_name (or role) required"}|
-        )
-
-      {:error, {:cap_profile, name, reason}} ->
-        # 422 — well-formed but the named cap-profile is not loadable → NO pod can
-        # be born. No more lying 202.
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{error: "unknown cap_profile: #{name}", reason: inspect(reason)})
-        )
-
-      {:error, {:host_native_forbidden, name}} ->
-        # 422 — HOST-NATIVE cap-profile (`containment: none`): never reachable via this generic
-        # no-auth spawn door (dedicated out-of-band path). Fail-closed by construction.
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "host-native cap_profile forbidden via /api/admin/spawn: #{name}",
-            reason:
-              "containment != bwrap — host-native goes through its dedicated path, not the spawn API"
-          })
-        )
-    end
-  end
-
-  defp do_broadcast_spawn(conn, payload) do
-    case Fleet.API.SpawnAdmission.broadcast(payload) do
-      :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
-      {:error, reason} -> send_json(conn, 400, %{error: inspect(reason)})
-    end
-  end
+  # `POST /api/admin/spawn` is NO LONGER served here: the one WRITE door moved OFF TCP onto the
+  # local AF_UNIX control socket (`Fleet.API.ControlRouter`), so a pod on the shared host netns
+  # cannot reach it (A-21). This TCP surface is now READ-ONLY. A stray POST here falls through to
+  # the 404 below — honest, not a silent accept.
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)

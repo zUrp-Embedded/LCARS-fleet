@@ -100,21 +100,30 @@ defmodule Fleet.API.Application do
          ]}
       ]
 
-      # Child-spec via the single source Fleet.EventRouter.Listener: loopback bind by default
-      # applied BY CONSTRUCTION (boundary = network isolation, cf. Rest § Auth: the only
-      # remaining write, /api/admin/spawn, is no-auth but guarded — NEVER expose it on
-      # 0.0.0.0 by default). The WS surface (:<port>/ws) and the observation deck (:8091) stay
-      # local-only: remote access goes through a tunnel/reverse-proxy. Public exposure =
-      # named opt-in (LCARS_BIND_HOST, via BindAddress).
-      [
+      # TCP listener = READ surface + WS (loopback by default via BindAddress; public exposure =
+      # named opt-in LCARS_BIND_HOST). The WRITE (/api/admin/spawn) is NOT here — it moved onto
+      # the AF_UNIX control socket below, off the network the pod shares (A-21, cf. Rest § Auth).
+      tcp =
         Fleet.EventRouter.Listener.cowboy_child(
           plug: Fleet.API.Rest,
           port: port,
           dispatch: dispatch
         )
-      ]
+
+      [tcp | control_socket_child()]
     else
       []
+    end
+  end
+
+  # AF_UNIX control socket serving `Fleet.API.ControlRouter` (`POST /api/admin/spawn`). Started
+  # alongside the TCP listener when `:control_socket` is configured (per-human, runtime.exs). `[]`
+  # when unset (e.g. a deploy that keeps the write on TCP, or a test) → the write door is then
+  # simply absent rather than silently TCP-exposed.
+  defp control_socket_child do
+    case Application.get_env(:fleet_api, :control_socket) do
+      sock when is_binary(sock) and sock != "" -> [Fleet.API.ControlRouter.child_spec(sock)]
+      _ -> []
     end
   end
 end

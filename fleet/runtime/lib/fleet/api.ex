@@ -27,7 +27,10 @@ defmodule Fleet.API do
       Plug.Parsers,
       Plug.Router,
       Plug.Router.Utils,
-      Plug.Static
+      Plug.Static,
+      # api binds its OWN AF_UNIX control socket (ControlRouter → Plug.Cowboy.http, off the
+      # network the pod shares — A-21) ; jusqu'ici le TCP passait par EventRouter.Listener.
+      Plug.Cowboy
     ],
     exports: [Application]
 

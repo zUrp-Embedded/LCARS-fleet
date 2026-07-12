@@ -149,8 +149,14 @@ setup_env() {
   # dans le sandbox : UNE seule source pour les deux côtés.
   export LCARS_FLEET_MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-$HOME/.lcars/run/mcp}"
 
-  # CLI `lcars` → API per-humain.
+  # CLI `lcars` → API per-humain. Les LECTURES passent par le port TCP loopback ; l'ÉCRITURE
+  # (spawn) passe par une socket AF_UNIX per-humaine (ControlRouter) — hors du réseau que le pod
+  # partage (A-21). Le fichier vit sous ~/.lcars/run/ (home réel jamais bindé dans le pod).
   export LCARS_API_URL="${LCARS_API_URL:-http://localhost:$API_PORT}"
+  export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
+  # Nettoie une socket résiduelle d'une instance précédente (AF_UNIX n'est pas auto-supprimé à la
+  # fermeture ; le daemon la rebinde au boot). Le rebind runtime sur crash est géré côté BEAM.
+  rm -f "$LCARS_API_SOCK"
 
   # On-switches : l'arch boote (permanent), la machine step-mode tourne (forge-driven).
   export LCARS_BOOT_PERMANENT_AT_START=true
@@ -168,6 +174,7 @@ setup_env() {
   cat > "$HOME/.lcars/run/fleet_v2.runtime.env" <<RT
 # Genere par fleet_v2 start — \`source\` pour utiliser lcars (spawn/list/attach) hors de cette session.
 export LCARS_API_URL="$LCARS_API_URL"
+export LCARS_API_SOCK="$LCARS_API_SOCK"
 export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
 RT
 }

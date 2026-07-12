@@ -39,6 +39,9 @@ else
   exit 1
 fi
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
+# `spawn` (écriture) passe par la socket AF_UNIX per-humaine (ControlRouter), hors du réseau que
+# le pod partage (A-21). Les lectures restent sur $API_URL (TCP loopback).
+API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
 PROG="$(basename "$0")"
@@ -67,7 +70,8 @@ USAGE
       Cette aide.
 
 ENV
-  LCARS_API_URL=$API_URL
+  LCARS_API_URL=$API_URL       (lectures REST, TCP loopback)
+  LCARS_API_SOCK=$API_SOCK     (écriture spawn, socket AF_UNIX host-only — A-21)
   LCARS_TMUX_SOCK_BASE=$SOCK_BASE
 EOF
 }
@@ -105,14 +109,16 @@ cmd_spawn() {
   # NB contrat : `/api/admin/spawn` n'accepte qu'un DTO PLAT allowlisté (`cap_profile_name` + `issue_id`
   # + `brief`) — PAS d'`opts` brut : toute clé hors allowlist (y compris un `opts` fourni par le client)
   # fait échouer le spawn en 422. L'API reconstruit elle-même l'`opts` interne du spawner à partir de
-  # `brief` (cf. rest.ex `parse_admin_spawn_dto` / `build_admin_opts`).
+  # `brief` (cf. SpawnAdmission).
   local body http
-  # curl SANS -f : un 4xx/5xx ne fait pas échouer curl (on lit le code via -w) ; seul un échec réseau
-  # (exit ≠ 0) déclenche le `|| die`. stderr → /dev/null (on donne notre propre message), stdout = corps + code.
-  body="$(curl -sS -m 10 -X POST "$API_URL/api/admin/spawn" \
+  # `--unix-socket` : la porte d'écriture vit sur la socket AF_UNIX per-humaine (ControlRouter),
+  # PAS sur le TCP loopback — le pod (netns hôte partagé) ne peut pas l'atteindre (A-21). Le host
+  # dans l'URL est ignoré avec --unix-socket ; on garde un host bidon. curl SANS -f : un 4xx/5xx
+  # ne fait pas échouer curl (on lit le code via -w) ; seul un échec transport (exit ≠ 0) → `|| die`.
+  body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \
-    || die "daemon injoignable sur $API_URL (fleet_v2 démarrée pour cet utilisateur ? LCARS_API_URL/port correct ?)"
+    || die "control socket injoignable ($API_SOCK) — fleet_v2 démarrée pour cet utilisateur ?"
 
   http="${body##*$'\n'}"; body="${body%$'\n'*}"
   case "$http" in
