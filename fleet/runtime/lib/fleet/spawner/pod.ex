@@ -127,6 +127,8 @@ defmodule Fleet.Spawner.Pod do
           port: port() | nil,
           # Result received via the Bus event task_queue.work_item.completed (%Fleet.Event{}, completion).
           submitted_result: map() | nil,
+          # Bounded retry counter for the pod.completed re-fire (acte3 vague C).
+          extract_retries: non_neg_integer(),
           last_result: map() | nil,
           # Name of the pod's tmux session (`lcars-pod-<id>` on the PER-POD sock, set by
           # LauncherPortBackend). Used for kick/wake (PodTmux) and sock-aware teardown.
@@ -377,22 +379,45 @@ defmodule Fleet.Spawner.Pod do
   # via CompletedPayload — le pod est le SEUL à les connaître). Unifier les deux exigerait
   # soit que le pod consomme son propre event, soit de ré-introduire du state partagé :
   # les deux bonds sont irréductibles. (Cf. chantier migration, arbitrage A-02.)
+  # Bounded re-fire of pod.completed after a failed broadcast (acte3 vague C). The 1000ms delay is NOT
+  # cosmetic: it keeps the pod ALIVE in :monitoring between retries (invariant MA-04: never release/kill
+  # on an orphan completion) and spaces them; @extract_retry_max caps them before transition_failed.
+  @extract_retry_max 5
+  @extract_retry_delay_ms 1_000
+
   # `pod.completed` is load-bearing LIFECYCLE (the StepRunConsumer depends on it to finish the step_run).
   # Broadcast via `required_broadcast`: its failure is NOT swallowed. If it fails, we do NOT progress
   # to release/kill (one-shot) nor to the re-monitoring that DROPS `submitted_result`
-  # (long-lived): the pod STAYS in :monitoring with its result RETAINED + deadline re-armed (by
-  # the :monitoring enter) → a re-wake re-fires the extract instead of an ORPHAN completion.
+  # (long-lived): the pod STAYS in :monitoring with its result RETAINED → a bounded `:extract_retry`
+  # timer re-fires the extract (capped at @extract_retry_max, then transition_failed) instead of an
+  # ORPHAN completion — never a silent wedge.
   def handle_event(:internal, :proceed, :extracting, data) do
     result = data.submitted_result || %{}
 
     case Events.required_broadcast("pod.completed", CompletedPayload.build(data, result)) do
       :ok ->
-        do_extract_proceed(data, result)
+        # Reset the retry counter on every SUCCESSFUL broadcast: a long-lived pod's cycle N must not
+        # inherit cycle N-1's retries.
+        do_extract_proceed(%{data | extract_retries: 0}, result)
 
       {:error, _reason} ->
-        # Fail-loud (already logged ERROR by required_broadcast). Back to :monitoring: its enter
-        # re-arms the deadline. submitted_result RETAINED (no drop) → the re-wake re-triggers.
-        {:next_state, :monitoring, data}
+        # Fail-loud (already logged ERROR by required_broadcast). submitted_result RETAINED (no drop).
+        n = data.extract_retries
+
+        if n >= @extract_retry_max do
+          Logger.error(
+            "pod #{data.pod_id} pod.completed UNDELIVERABLE après #{n} retries — résultat NON livré " <>
+              "au step_run → transition_failed (pas de wedge silencieux)"
+          )
+
+          transition_failed(data, {:pod_completed_undeliverable, n})
+        else
+          # BOUNDED retry rail: back to :monitoring + a dedicated :extract_retry timer re-fires the
+          # extract (the ONLY re-fire path — the broker emits work_item.completed just once, so a
+          # missed broadcast would otherwise wedge the pod FOREVER with its result in hand).
+          {:next_state, :monitoring, %{data | extract_retries: n + 1},
+           [schedule_extract_retry_action()]}
+        end
     end
   end
 
@@ -618,6 +643,15 @@ defmodule Fleet.Spawner.Pod do
   # No tmux_session (StubBackend, or vanished session/kill race) → no kick.
   def handle_event({:timeout, :kick}, {:attempt, _n}, _state, _data), do: :keep_state_and_data
 
+  # BOUNDED extract-retry timer (acte3 vague C) — the ONLY re-fire of pod.completed after a failed
+  # broadcast. Guarded on :monitoring + a non-nil submitted_result: a no-op if a long-lived cycle has
+  # meanwhile reset the result (the extract already succeeded or the pod moved on).
+  def handle_event({:timeout, :extract_retry}, :fire, :monitoring, %{submitted_result: r} = data)
+      when not is_nil(r),
+      do: {:next_state, :extracting, data, [{:next_event, :internal, :proceed}]}
+
+  def handle_event({:timeout, :extract_retry}, :fire, _state, _data), do: :keep_state_and_data
+
   # ============================================================
   # Port / Bus events (event type :info) + catch-all
   # ============================================================
@@ -697,6 +731,14 @@ defmodule Fleet.Spawner.Pod do
       })
 
       Logger.warning("pod #{data.pod_id} exited before submitting result (exit=#{exit_code})")
+
+      # TOMBSTONE (acte3 vague C) : graver state.json phase=:failed AVANT le stop. Sans ça le
+      # state.json restait à :monitoring (posé au launch) → ni clear_terminal_snapshot ni le
+      # PodWarden (qui ne GC que les @terminal_phases) ne réclament jamais le pod_dir (clone git
+      # complet) = fuite monotone, exactement ce que le warden existe pour tuer. Parité avec
+      # transition_failed (le twin), payload pod.failed INCHANGÉ (exit_code conservé).
+      data = Map.put(data, :last_error, {:exited_before_result, exit_code})
+      StateFs.write_state_fs(put_phase(data, :failed))
       {:stop, {:shutdown, {:exited_before_result, exit_code}}, data}
     end
   end
@@ -938,6 +980,7 @@ defmodule Fleet.Spawner.Pod do
       opts: args.opts,
       port: nil,
       submitted_result: nil,
+      extract_retries: 0,
       last_result: nil,
       tmux_session: nil,
       liveness_sample: nil
@@ -1059,6 +1102,9 @@ defmodule Fleet.Spawner.Pod do
   # timer (a wake_pod during bootstrap does not create a 2nd loop). The bounds/cadences + the
   # decision/I-O live in `Pod.Kick`; here we only build the timer ACTION.
   defp schedule_kick_action(n, delay), do: {{:timeout, :kick}, delay, {:attempt, n}}
+
+  defp schedule_extract_retry_action,
+    do: {{:timeout, :extract_retry}, @extract_retry_delay_ms, :fire}
 
   # Cancel = set the :kick generic timeout to :infinity (= no timer).
   defp cancel_kick_action, do: {{:timeout, :kick}, :infinity, {:attempt, 0}}

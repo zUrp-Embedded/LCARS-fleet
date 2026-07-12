@@ -1,8 +1,8 @@
 defmodule Fleet.Pilot.IncidentConsumer do
   @moduledoc """
-  Bus consumer of **pod FAILURE** events (`pod.failed` / `wake.failed`, source `:spawner`) →
-  `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). Subscribes `Fleet.EventRouter.Bus`
-  (topic `fleet.events`).
+  Bus consumer of **pod FAILURE** events (`pod.failed` / `wake.failed` / `spawn.failed`, source
+  `:spawner`) → `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). Subscribes
+  `Fleet.EventRouter.Bus` (topic `fleet.events`).
 
   ## Why a consumer SEPARATE from the StepRunConsumer
 
@@ -21,9 +21,9 @@ defmodule Fleet.Pilot.IncidentConsumer do
     * `wake.failed` — the ack-driven loop exhausted the cap (the agent NEVER acked: neither flag, nor
       send-keys). Recurrence = **SP suspect** (inference targets the SP, not the agent: 1×=random, recurrent
       = bad/drifted SP) → `escalate_kind: :sp_suspect` (+ `pane` for the diag).
-
-  The atom literals `:"pod.failed"` / `:"wake.failed"` are written HERE: they also create the atom
-  that `best_effort_broadcast` (on the `Fleet.Spawner.Pod` side) needs to publish these events.
+    * `spawn.failed` — the `admin.spawn.request` dispatch DROPPED the spawn AFTER the API answered 202
+      (no pod created → no pod_id). Subject = `cap_profile_name` (the role: recurrence = "this role keeps
+      failing to spawn"; issue_id is per-request → never recurs). op="spawn", default recurrence escalation.
 
   ## Offload (`:runner`)
 
@@ -105,6 +105,23 @@ defmodule Fleet.Pilot.IncidentConsumer do
       when is_binary(pod_id) do
     # wake recurrence = SP suspect (see moduledoc) → typed escalation + `pane` for the diag.
     record(state, "wake", pod_id, p["reason"], escalate_kind: :sp_suspect, pane: p["pane"])
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{
+          source: :spawner,
+          type: :"spawn.failed",
+          payload: %{"cap_profile_name" => name} = p
+        },
+        state
+      )
+      when is_binary(name) do
+    # spawn.failed (twin of pod.failed): admin.spawn.request dispatch DROPPED the spawn AFTER the API
+    # already answered 202 (no pod was ever created — hence no pod_id). Subject = cap_profile_name (the
+    # role): recurrence = "this role keeps failing to spawn" (issue_id is per-request → never recurs).
+    # op="spawn", default :recurrence escalation. Was ORPHANED: produced, never consumed → the 202 lied silently.
+    record(state, "spawn", name, p["reason"], [])
     {:noreply, state}
   end
 

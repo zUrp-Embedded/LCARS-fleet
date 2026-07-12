@@ -33,16 +33,17 @@ defmodule Fleet.API.ReadinessTest do
   defp sub(result, id), do: Enum.find(result.subsystems, &(&1.id == id))
 
   describe "deep/0 — forme" do
-    test "verdict global + liste dégradés + 6 sous-systèmes + ts" do
+    test "verdict global + liste dégradés + 7 sous-systèmes + ts" do
       assert %{status: status, degraded: degraded, subsystems: subsystems, ts: ts} =
                Readiness.deep()
 
       assert status in ["operational", "degraded"]
       assert is_list(degraded)
 
-      # 6 sous-systèmes : event.registry, coord.backend, shutdown.dispatcher, launch.backend,
-      # mcp.pod_facing, + pilot.step (F-010 : liveness du rail forge-state-machine, ex-vert-creux).
-      assert length(subsystems) == 6
+      # 7 sous-systèmes : event.registry, coord.backend, shutdown.dispatcher, launch.backend,
+      # mcp.pod_facing, pilot.step (rail forge-state-machine), + spawn.dispatch (acte3 vague C :
+      # PublishConsumer = unique abonné de admin.spawn.request, ex-vert-creux du 202).
+      assert length(subsystems) == 7
       assert is_binary(ts)
 
       # chaque sous-système : id/state/detail, state dans le vocab
@@ -203,6 +204,30 @@ defmodule Fleet.API.ReadinessTest do
       assert %{status: "degraded", degraded: ["boom"]} = result
       assert %{state: :degraded, detail: %{error: msg}} = sub(result, "boom")
       assert msg =~ "kaboom"
+    end
+  end
+
+  describe "spawn.dispatch (sonde le PROCESS — l'unique abonné de admin.spawn.request)" do
+    # Acte3 vague C : le 202 de POST /api/admin/spawn mentait quand PublishConsumer était off
+    # (Bus lossy → broadcast perdu → 0 pod) alors que /readiness/deep disait operational.
+    test "degraded quand PublishConsumer absent (start_publish_consumer off — ambient test)" do
+      # config/test.exs pose start_publish_consumer=false → le consumer n'est jamais démarré.
+      refute is_pid(Process.whereis(Fleet.Spawner.PublishConsumer))
+      assert %{state: :degraded, detail: %{consumer: false}} = sub(Readiness.deep(), "spawn.dispatch")
+    end
+
+    test "operational quand PublishConsumer vivant ET abonné" do
+      start_supervised!({Fleet.Spawner.PublishConsumer, [subscribe: true]})
+
+      assert %{state: :operational, detail: %{consumer: true, subscribed: true}} =
+               sub(Readiness.deep(), "spawn.dispatch")
+    end
+
+    test "degraded quand PublishConsumer vivant mais NON abonné (seam subscribe:false)" do
+      start_supervised!({Fleet.Spawner.PublishConsumer, [subscribe: false]})
+
+      assert %{state: :degraded, detail: %{consumer: true, subscribed: false}} =
+               sub(Readiness.deep(), "spawn.dispatch")
     end
   end
 end

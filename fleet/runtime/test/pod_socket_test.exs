@@ -336,4 +336,25 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
+
+  describe "sweep_stale_sockets/0 (cold-boot — résidu kill -9)" do
+    test "efface le résidu d'un pod one-shot → plus de faux deaf-pod degraded", %{base: base} do
+      # Résidu d'une instance antérieure tuée par kill -9 (terminate/3 sauté) : le fichier socket
+      # survit sur le tmpfs, aucun acceptor derrière lui.
+      leaked = Path.join([base, "pod-oneshot-#{System.unique_integer([:positive])}", "sock"])
+      File.mkdir_p!(Path.dirname(leaked))
+      File.write!(leaked, "")
+
+      # AVANT le sweep : le résidu se lit deaf-pod degraded (le faux-vert INVERSÉ — degraded à vie).
+      assert {:degraded, %{note: note}} = Fleet.MCP.Supervisor.pod_facing_status()
+      assert note =~ "deaf"
+
+      assert :ok = PodSocketSupervisor.sweep_stale_sockets()
+
+      # APRÈS : fichier + dir per-pod effacés, statut opérationnel.
+      refute File.exists?(leaked)
+      refute File.dir?(Path.dirname(leaked))
+      assert {:operational, %{sockets: 0}} = Fleet.MCP.Supervisor.pod_facing_status()
+    end
+  end
 end

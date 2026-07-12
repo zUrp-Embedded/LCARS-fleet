@@ -67,7 +67,8 @@ defmodule Fleet.API.Readiness do
       {"shutdown.dispatcher", &shutdown_dispatcher/0},
       {"launch.backend", &launch_backend/0},
       {"mcp.pod_facing", &mcp_pod_facing/0},
-      {"pilot.step", &pilot_step/0}
+      {"pilot.step", &pilot_step/0},
+      {"spawn.dispatch", &spawn_dispatch/0}
     ]
   end
 
@@ -100,6 +101,16 @@ defmodule Fleet.API.Readiness do
   defp pilot_step do
     {state, detail} = Fleet.Pilot.Application.step_status()
     probe("pilot.step", state, detail)
+  end
+
+  # The admin.spawn.request WRITE rail: `Fleet.Spawner.PublishConsumer` is its UNIQUE subscriber; if it
+  # is off/dead/not-subscribed, `POST /api/admin/spawn` still answers 202 while the broadcast is lost
+  # (Bus lossy) — the 202 lies. Delegated to the write-path owner
+  # `Fleet.Spawner.Application.spawn_dispatch_status/0` (no Ring 1 process name here). `:degraded` flips
+  # the global verdict — the exact hollow-green this module exists to kill.
+  defp spawn_dispatch do
+    {state, detail} = Fleet.Spawner.Application.spawn_dispatch_status()
+    probe("spawn.dispatch", state, detail)
   end
 
   # Coord Cat 5 escalation backend: `NotWiredYet` (or absent) ⇒ silent

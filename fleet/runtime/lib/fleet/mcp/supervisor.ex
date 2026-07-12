@@ -48,6 +48,12 @@ defmodule Fleet.MCP.Supervisor do
 
   @impl Supervisor
   def init(opts) do
+    # COLD-BOOT socket sweep BEFORE the acceptor DynamicSupervisor starts (below): any residual
+    # `<base>/<pod_id>/sock` is provably from an earlier instance (kill -9 skipped terminate/3), so it
+    # would read as a permanent false "deaf pod" in readiness. init/1 runs EXACTLY once per boot (this
+    # sup's death = node death, parent max_restarts:0) → no re-sweep, no in-flight cascade risk.
+    Fleet.MCP.PodSocketSupervisor.sweep_stale_sockets()
+
     children = [
       {Fleet.MCP.Server, opts},
       # Resolution Registry `pod_id → acceptor` (`:via` names), started BEFORE the

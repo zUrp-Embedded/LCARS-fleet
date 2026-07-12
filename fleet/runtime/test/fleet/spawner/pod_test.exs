@@ -26,6 +26,15 @@ defmodule Fleet.Spawner.PodTest do
       do: raise(Fleet.Event.UnregisteredError, "forced pod.completed fail")
   end
 
+  # Échoue le PREMIER broadcast puis délègue au vrai Bus (état partagé via Agent en app-env).
+  defmodule FlakyBus do
+    def broadcast(topic, ev) do
+      agent = Application.fetch_env!(:fleet_spawner, :flaky_agent)
+      n = Agent.get_and_update(agent, fn n -> {n, n + 1} end)
+      if n == 0, do: {:error, :transient}, else: Fleet.EventRouter.Bus.broadcast(topic, ev)
+    end
+  end
+
   setup %{tmp_dir: tmp_dir} do
     Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
@@ -288,11 +297,42 @@ defmodule Fleet.Spawner.PodTest do
       # LE finding : PAS d'EXIT :normal (le one-shot ne release PAS sur une complétion non diffusée).
       refute_receive {:EXIT, ^pid, :normal}, 800
 
-      # Le pod RESTE vivant en :monitoring (fail-loud : le re-wake re-fire l'extract).
+      # Le pod RESTE vivant en :monitoring (fail-loud : le timer :extract_retry re-fire l'extract).
       assert Process.alive?(pid)
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
       GenServer.stop(pid)
+    end
+
+    test "MA-04b : pod.completed échoue au 1er tir puis RÉUSSIT au retry borné → pod.completed enfin émis" do
+      Process.flag(:trap_exit, true)
+      Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+      Application.put_env(:fleet_spawner, :flaky_agent, agent)
+      Application.put_env(:fleet_spawner, :event_bus, FlakyBus)
+
+      on_exit(fn ->
+        Application.delete_env(:fleet_spawner, :event_bus)
+        Application.delete_env(:fleet_spawner, :flaky_agent)
+      end)
+
+      StubBackend.set_reply(interactive_reply(session_id: "s-ma04b"))
+      pod_id = "pod-ma04b-#{System.unique_integer([:positive])}"
+
+      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
+      assert_receive {:launch_called, _, _}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      # Le work_item.completed entrant passe par Phoenix.PubSub direct (pas event_bus) → FlakyBus
+      # n'intercepte QUE pod.completed. 1er pod.completed échoue (:transient) → pod reste :monitoring ;
+      # le timer :extract_retry (1s) re-entre :extracting et RE-ÉMET → 2e tir réussit.
+      submit_result_event(pod_id, %{"answer" => "OK"})
+
+      # Le retry RE-ÉMET pod.completed avec succès → le one-shot poursuit sa complétion normale
+      # (release → stop :normal). Preuve du rail débloqué : l'event ré-émis PUIS l'arrêt propre
+      # (avant le fix, le pod restait wedgé en :monitoring pour toujours, aucun EXIT :normal).
+      assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 5_000
+      assert_receive {:EXIT, ^pid, :normal}, 2_000
     end
 
     test "SLOT-FREEZE : le pod ADOPTE le issue_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
@@ -1023,6 +1063,25 @@ defmodule Fleet.Spawner.PodTest do
       send(pid, {fake_port, {:exit_status, 137}})
 
       assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
+    end
+
+    test "exit_status sans résultat GRAVE le tombstone state.json phase=failed (GC-able PodWarden)" do
+      Process.flag(:trap_exit, true)
+      fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
+      StubBackend.set_reply(interactive_reply(port: fake_port))
+
+      pod_id = "pod-exit-tomb-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-exit"))
+      assert_receive {:launch_called, _, _}, 2_000
+      send(pid, {fake_port, {:exit_status, 137}})
+      assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
+
+      # Le write est SYNCHRONE avant le stop → l'assertion disque post-EXIT est déterministe.
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+
+      assert content["phase"] == "failed",
+             "exit-avant-résultat doit graver le tombstone :failed — sinon state.json reste " <>
+               ":monitoring → pod_dir (clone git) invisible au GC PodWarden (fuite monotone)"
     end
   end
 

@@ -41,8 +41,8 @@ events:
   # `admin.spawn.request` RAISES (CapProfile/spawn_pod fails unexpectedly) → the spawn is dropped.
   # The REST API has already replied HTTP 202 "queued" to the client BEFORE this async dispatch → without
   # this event the drop is SILENT (the admin thinks the pod is queued; zero pod, zero alarm). Twin of
-  # `pod.failed`, same cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Real producer; consumer
-  # (dashboard/operator) to come — legitimate key (without it the broadcast would UnregisteredError → re-drop silently).
+  # `pod.failed`, same cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Consumed by
+  # `Fleet.Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
   spawn.failed: []
 
   # --- Credentials ---

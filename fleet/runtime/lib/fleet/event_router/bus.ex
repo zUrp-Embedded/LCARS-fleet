@@ -290,4 +290,15 @@ defmodule Fleet.EventRouter.Bus do
   def unsubscribe(topic \\ @main_topic) when is_binary(topic) do
     Phoenix.PubSub.unsubscribe(@pubsub_name, topic)
   end
+
+  @doc """
+  Is `pid` currently subscribed to `topic` (default the main topic)? Phoenix.PubSub 2.x keeps local
+  subscriptions in a Registry NAMED like the pubsub (`subscribe/2` = `Registry.register(name, topic, _)`),
+  so a pid is subscribed iff it appears among the topic's Registry entries. Owned HERE (Ring 0, the PubSub
+  authority) so consumers can probe liveness WITHOUT leaking the Registry detail — cf. readiness anti-hollow-green.
+  """
+  @spec subscribed?(pid(), String.t()) :: boolean()
+  def subscribed?(pid, topic \\ @main_topic) when is_pid(pid) and is_binary(topic) do
+    @pubsub_name |> Registry.lookup(topic) |> Enum.any?(fn {sub_pid, _} -> sub_pid == pid end)
+  end
 end

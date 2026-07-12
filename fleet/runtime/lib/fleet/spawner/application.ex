@@ -86,4 +86,41 @@ defmodule Fleet.Spawner.Application do
       max_seconds: 60
     )
   end
+
+  @doc """
+  LIVE state of the admin-spawn dispatch rail, for readiness (anti-hollow-green). fleet_spawner
+  owns the write-path topology → it knows whether the UNIQUE subscriber of `admin.spawn.request`
+  (`Fleet.Spawner.PublishConsumer`) is alive AND subscribed. fleet_api only asks (no Ring 1
+  process name leaks into Ring 4).
+
+    * `{:operational, _}` — PublishConsumer alive AND subscribed to `fleet.events` → the
+      broadcast→consume→spawn_pod chain is wired.
+    * `{:degraded, _}`    — `start_publish_consumer` off, OR the process is dead, OR alive but NOT
+      subscribed → `POST /api/admin/spawn` still answers 202 into the void (Bus lossy) = 202 lies, 0 pod.
+  """
+  @spec spawn_dispatch_status() :: {:operational | :degraded, map()}
+  def spawn_dispatch_status do
+    pid = Process.whereis(Fleet.Spawner.PublishConsumer)
+
+    cond do
+      not is_pid(pid) ->
+        {:degraded,
+         %{
+           consumer: false,
+           note:
+             "PublishConsumer not alive (start_publish_consumer off/crashed) — POST /api/admin/spawn answers 202 into the void (0 pod)"
+         }}
+
+      not Fleet.EventRouter.Bus.subscribed?(pid) ->
+        {:degraded,
+         %{
+           consumer: true,
+           subscribed: false,
+           note: "PublishConsumer alive but NOT subscribed to fleet.events — 202 into the void (0 pod)"
+         }}
+
+      true ->
+        {:operational, %{consumer: true, subscribed: true}}
+    end
+  end
 end

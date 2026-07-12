@@ -493,11 +493,14 @@ defmodule Fleet.Pilot.Poller do
   # FOREVER, silently (the poller only SKIPS it). So we re-kick periodically —
   # THROTTLED (`@awaits_rekick_every` ticks) because a wake can cost a claude turn (bounded spend,
   # Jupiter). Best-effort (the label stays human-released: we nudge the airlock, we never force the verdict).
-  # Uses the `spawner` seam DIRECTLY (no default here — nil ⇒ no-op via the guard; prod does not inject it, cf. `Application.step_children!`) + the authority `Roles.architect_pod_id/0` (SSOT
-  # shared with kick_architect). nil spawner (test/config) → no-op.
-  defp maybe_rekick_arch(awaits_ids, %__MODULE__{spawner: spawner} = state)
-       when not is_nil(spawner) do
+  # Resolves `state.spawner || Fleet.Spawner` at the call site (symmetric to reconciliation_seams /
+  # lease_seams) + the authority `Roles.architect_pod_id/0` (SSOT shared with kick_architect). Prod
+  # does NOT inject the seam → the REAL `Fleet.Spawner` is used (best-effort: `{:error, :not_found}`
+  # if the arch pod is dead, discarded by `_ =`). (Was a silent no-op in prod — the seam had no
+  # default and the guard `when not is_nil(spawner)` fell through — the rail this exists for never ran.)
+  defp maybe_rekick_arch(awaits_ids, %__MODULE__{} = state) do
     if awaits_rekick?(MapSet.size(awaits_ids), state.poll_count) do
+      spawner = state.spawner || Fleet.Spawner
       pod_id = Fleet.Pilot.Roles.architect_pod_id()
 
       Logger.info(
@@ -510,8 +513,6 @@ defmodule Fleet.Pilot.Poller do
 
     :ok
   end
-
-  defp maybe_rekick_arch(_awaits_ids, _state), do: :ok
 
   @doc false
   # PURE re-kick decision: at least ONE issue awaits the arch AND we are on a tick multiple of the

@@ -65,6 +65,34 @@ defmodule Fleet.Pilot.PollerTest do
       refute Poller.awaits_rekick?(2, 9)
       refute Poller.awaits_rekick?(1, 15)
     end
+
+    test "CÂBLAGE PROD (spawner nil) : le re-kick s'exécute avec le VRAI Fleet.Spawner par défaut" do
+      # Régression du faux-vert : en prod le seam :spawner n'est PAS injecté (nil), et l'ancienne
+      # garde `when not is_nil(spawner)` faisait tomber maybe_rekick_arch dans un no-op MUET → le
+      # rail anti-« issue awaits-arch bloquée à jamais » ne tournait JAMAIS. Ce test exerce le chemin
+      # nil (= prod) que les autres setups (spawner: StepStubSpawner) ne couvrent pas.
+      issue = %{
+        "number" => 42,
+        "body" => "x",
+        "labels" => [%{"name" => "lcars-awaits-arch"}],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil)
+
+      # Le re-kick n'arme qu'au tick multiple de @awaits_rekick_every (10) ; do_poll incrémente
+      # poll_count de 1/tick (list_org_repos rend 1 repo). 10 polls → le 10e arme.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..10, do: Poller.force_poll(name)
+        end)
+
+      # AVANT le fix : nil → clause no-op → aucune ligne re-kick. APRÈS : le vrai
+      # Fleet.Spawner.wake_pod(arch) est appelé (retourne {:error,:not_found}, tick non-crashé).
+      assert log =~ "awaits-arch → re-kick"
+
+      GenServer.stop(pid)
+    end
   end
 
   describe "GenServer init / lifecycle" do

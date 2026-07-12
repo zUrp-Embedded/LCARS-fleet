@@ -45,7 +45,7 @@ defmodule Fleet.Spawner.Pod.Events do
   #     records them best-effort, nobody FINISHES a step_run on them.
   #   - `required_broadcast/2`: load-bearing LIFECYCLE (`pod.completed`). The failure is NOT swallowed: it
   #     bubbles up `{:error, {:broadcast_failed, _}}` → the `:extracting` state does NOT release/kill the pod on an
-  #     orphaned completion; it stays alive (re-wake re-fires the extract), fail-loud. Both go
+  #     orphaned completion; it stays alive (a bounded :extract_retry timer re-fires the extract), fail-loud. Both go
   #     through the strict canonical envelope `%Fleet.Event{source: :spawner}`.
 
   @doc """

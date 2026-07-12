@@ -11,6 +11,10 @@ config :fleet_api, http_port: 0
 # (refuse par omission) ; en test la BEAM tourne HOST-side (le superviseur MCP doit démarrer) → on déclare
 # `:host` POSITIVEMENT, comme runtime.exs le fait sur le daemon.
 config :fleet_mcp, boot_environment: :host
+# Hermétisme (acte3 vague C) : le cold-boot sweep de MCP.Supervisor.init/1 rm les sockets
+# résiduels sous :sock_base. Sans cet override il taperait `/run/lcars/mcp` réel (fleet vivante
+# même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
+config :fleet_mcp, sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test")
 
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot du daemon, même invariant hermétique que fleet_api).

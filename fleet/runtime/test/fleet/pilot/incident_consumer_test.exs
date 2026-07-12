@@ -67,4 +67,32 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
     refute_receive :rec, 100
   end
+
+  test "spawn.failed → record_or_escalate(\"spawn\", cap_profile_name, reason, [])" do
+    # Le rail était ORPHELIN (produit par PublishConsumer, jamais consommé) : le 202 de
+    # POST /api/admin/spawn mentait en silence quand le dispatch droppait le spawn. Sujet =
+    # cap_profile_name (le rôle) : la récurrence groupe « ce rôle échoue à spawner » (issue_id
+    # est per-requête → ne récurrerait jamais).
+    pid = start(echo_fun())
+
+    send(
+      pid,
+      failed_event(:"spawn.failed", %{
+        "cap_profile_name" => "reviewer",
+        "issue_id" => "issue_42",
+        "reason" => "boom"
+      })
+    )
+
+    assert_receive {:rec, "spawn", "reviewer", "boom", []}
+  end
+
+  test "spawn.failed sans cap_profile_name → ignoré (garde)" do
+    me = self()
+    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    send(pid, failed_event(:"spawn.failed", %{"reason" => "boom"}))
+
+    refute_receive :rec, 100
+  end
 end

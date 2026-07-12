@@ -125,6 +125,39 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   @spec base_dir() :: Path.t()
   def base_dir, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
 
+  @doc """
+  COLD-BOOT sweep of residual per-pod socket files. A `kill -9` of the BEAM skips every `terminate/3`
+  → the socket files survive on the tmpfs; a one-shot pod (non-deterministic id) never re-spawns, so
+  `rm_stale` never fires on them → they linger and read as "deaf pods" (`pod_facing_status` counts a
+  socket FILE without an acceptor = degraded, a false-positive FOREVER). Called ONCE per boot from
+  `Fleet.MCP.Supervisor.init/1`, BEFORE this DynamicSupervisor starts → 0 live acceptor → every
+  `<base>/<pod_id>/sock` is provably a residual of an earlier instance. Non-blocking (rescue → :ok).
+  """
+  @spec sweep_stale_sockets() :: :ok
+  def sweep_stale_sockets do
+    base_dir()
+    |> Path.join("*/sock")
+    |> Path.wildcard()
+    |> Enum.each(fn path ->
+      Logger.warning(
+        "PodSocketSupervisor: cold-boot sweep du socket résiduel #{path} " <>
+          "(résidu d'instance antérieure — kill -9 ?)"
+      )
+
+      _ = File.rm(path)
+      _ = File.rmdir(Path.dirname(path))
+    end)
+
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "PodSocketSupervisor: cold-boot socket sweep échoué (non-bloquant): #{inspect(e)}"
+      )
+
+      :ok
+  end
+
   # Boundary guard: mcp owns its FS safety (a DIFFERENT concern from the pod_id GRAMMAR, whose authority
   # is `Fleet.Spawner.valid_pod_id?` — no cross-app dep here; mcp defends its OWN effect boundary, since
   # ensure/release do `File.rm` on `<base>/<pod_id>/…` and a `/` or `..` would escape it). The pod_id must
