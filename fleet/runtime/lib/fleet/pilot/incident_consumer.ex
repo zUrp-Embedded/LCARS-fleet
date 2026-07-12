@@ -108,7 +108,9 @@ defmodule Fleet.Pilot.IncidentConsumer do
         state
       )
       when is_binary(pod_id) do
-    record(state, "pod", pod_id, p["reason"], [])
+    # `reason` = stable category (producer-normalized, keys the dedup signature) ;
+    # `reason_detail` rides as an opt → engraved in the issue body by Escalation (human diag).
+    record(state, "pod", pod_id, p["reason"], reason_detail: p["reason_detail"])
     {:noreply, state}
   end
 
@@ -118,7 +120,12 @@ defmodule Fleet.Pilot.IncidentConsumer do
       )
       when is_binary(pod_id) do
     # wake recurrence = SP suspect (see moduledoc) → typed escalation + `pane` for the diag.
-    record(state, "wake", pod_id, p["reason"], escalate_kind: :sp_suspect, pane: p["pane"])
+    record(state, "wake", pod_id, p["reason"],
+      escalate_kind: :sp_suspect,
+      pane: p["pane"],
+      reason_detail: p["reason_detail"]
+    )
+
     {:noreply, state}
   end
 
@@ -135,7 +142,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
     # already answered 202 (no pod was ever created — hence no pod_id). Subject = cap_profile_name (the
     # role): recurrence = "this role keeps failing to spawn" (issue_id is per-request → never recurs).
     # op="spawn", default :recurrence escalation. Was ORPHANED: produced, never consumed → the 202 lied silently.
-    record(state, "spawn", name, p["reason"], [])
+    record(state, "spawn", name, p["reason"], reason_detail: p["reason_detail"])
     {:noreply, state}
   end
 

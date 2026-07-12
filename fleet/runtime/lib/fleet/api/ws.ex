@@ -2,13 +2,14 @@ defmodule Fleet.API.WS do
   @moduledoc """
   Cowboy WebSocket handler `:<port>/ws` (per-human port, bin/fleet_v2) subscribes `Fleet.EventRouter.Bus`
   topic `fleet.events` + per-client topic filter + 30s ping/pong
-  heartbeat.
+  heartbeat (WebSocket CONTROL frames — the client pongs automatically, which feeds Cowboy's
+  `idle_timeout`: a purely passive subscriber stays connected without sending data itself).
 
   ## JSON protocol
 
   ### Client → Server
 
-      {"action": "subscribe", "topics": ["workflow_map.*", "audit.cat5.*"]}
+      {"action": "subscribe", "topics": ["workflow_map.*", "starfleet.*"]}
 
   Empty topics list = subscribe all (default at connect).
 
@@ -16,9 +17,11 @@ defmodule Fleet.API.WS do
 
       {"type": "connected"}                   ← initial handshake
       {"type": "subscribed", "topics": [...]} ← subscribe ack
-      {"type": "ping"}                        ← 30s heartbeat
       {"type": "event", "event_type": "workflow_map.failed", "payload": {...}}
       {"type": "error", "reason": "..."}
+
+  (The 30s heartbeat is a WebSocket control `ping` frame, invisible to JS clients — no
+  `{"type": "ping"}` text frame on the wire.)
 
   ## Topic filter
 
@@ -82,25 +85,39 @@ defmodule Fleet.API.WS do
     event_type = Atom.to_string(type)
 
     if topic_matches?(event_type, state.topics) do
-      frame =
-        Jason.encode!(%{
-          type: "event",
-          event_type: event_type,
-          payload: payload
-        })
-
-      {[{:text, frame}], state}
+      {[{:text, encode_event(event_type, payload)}], state}
     else
       {[], state}
     end
   end
 
+  # Heartbeat = a real WebSocket CONTROL ping (not a `{"type":"ping"}` text frame): the peer's
+  # mandatory auto-pong (RFC 6455) counts as received data and feeds `idle_timeout` (60s) — a
+  # passive subscriber (dashboard) would otherwise be disconnected every 60s since a text ping
+  # that clients never answer feeds nothing.
   def websocket_info(:heartbeat, state) do
     Process.send_after(self(), :heartbeat, @heartbeat_ms)
-    {[{:text, ~s|{"type":"ping"}|}], state}
+    {[{:ping, <<>>}], state}
   end
 
   def websocket_info(_msg, state), do: {[], state}
+
+  # The bus payload is a map but its VALUES may carry non-JSON terms (failure events normalize
+  # `reason` producer-side, but the bus is no-auth and any future producer can slip a tuple):
+  # `Jason.encode!` raises `Protocol.UndefinedError` on those — and the non-bang `Jason.encode/1`
+  # raises on them TOO (same trap documented in `AuditLog.encode_line`), so a rescue is the only
+  # net. An incident event must never kill the operator's observation stream: degrade to a
+  # truthful `_raw` frame instead of crashing the Cowboy connection process.
+  defp encode_event(event_type, payload) do
+    Jason.encode!(%{type: "event", event_type: event_type, payload: payload})
+  rescue
+    _e ->
+      Jason.encode!(%{
+        type: "event",
+        event_type: event_type,
+        payload: %{"_raw" => inspect(payload)}
+      })
+  end
 
   @doc """
   Checks whether `event_type` (string) matches at least one pattern in

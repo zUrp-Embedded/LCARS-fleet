@@ -218,10 +218,12 @@ defmodule Fleet.TaskQueueTest do
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qc)
 
+    # `found` est stringifié au producteur (inspect/1) : le payload reste JSON-safe de bout
+    # en bout (le bord WS l'encode brut).
     assert_receive %Fleet.Event{
       source: :task_queue,
       type: :"state.corrupt",
-      payload: %{expected: 1, found: 99}
+      payload: %{expected: 1, found: "99"}
     }
 
     # fallback non-bloquant : la queue tourne, state vide
@@ -274,11 +276,16 @@ defmodule Fleet.TaskQueueTest do
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qbs)
 
+    # La variante {:work_item, id, reason} était le SEUL `found` non-JSON-encodable : le
+    # producteur la stringifie (inspect/1) pour que l'event traverse le bord WS sans crash.
     assert_receive %Fleet.Event{
       source: :task_queue,
       type: :"state.corrupt",
-      payload: %{found: {:work_item, "t1", :invalid}}
+      payload: %{found: found}
     }
+
+    assert found == inspect({:work_item, "t1", :invalid})
+    assert {:ok, _} = Jason.encode(%{found: found})
 
     assert [] = TaskQueue.list_pending(q)
   end

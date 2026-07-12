@@ -92,12 +92,20 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     assert Process.alive?(pid)
 
+    # Le sujet retombe en sentinelle "unknown" (presence/1 sur les deux candidats, classe #32) :
+    # l'alarme atteint TOUJOURS le rail incident avec un sujet binaire (garde is_binary de
+    # IncidentConsumer) — un nom "" ne la fait plus disparaître en silence. `reason` est la
+    # catégorie string (payload JSON-safe de bout en bout).
     assert_receive %Fleet.Event{
                      source: :spawner,
                      type: :"spawn.failed",
-                     payload: %{"reason" => :name_missing_or_empty}
+                     payload:
+                       %{"reason" => "name_missing_or_empty", "cap_profile_name" => "unknown"} =
+                         payload
                    },
                    500
+
+    assert {:ok, _} = Jason.encode(payload)
 
     refute_received {:spawn_called, _, _}
   end

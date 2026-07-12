@@ -37,14 +37,18 @@ defmodule Fleet.EventRouter.Application do
         signals_children()
 
     # EXPLICIT restart bounds (aligned with the other app supervisors, e.g. TaskQueue 3/60):
-    # past 3 crashes in 60s the child is in a crash loop (Bus / webhook listener / SignalsOS
-    # that won't stay up) → we escalate to the root app supervisor rather than hammering a
-    # restart that won't succeed. The OTP default (3/5) is too tight for a transient blip; we
-    # widen it to 60s, made explicit so the window is a choice, not an implicit default.
+    # past 3 crashes in 60s the child is in a crash loop (webhook listener / SignalsOS that
+    # won't stay up) → we escalate to the root app supervisor rather than hammering a restart
+    # that won't succeed. The OTP default (3/5) is too tight for a transient blip; we widen it
+    # to 60s, made explicit so the window is a choice, not an implicit default.
+    # `auto_shutdown: :any_significant`: the Bus escalation (see base_children/0) must reach
+    # the NODE mechanically — the significant child's death shuts THIS supervisor down instead
+    # of being resurrected into a deaf PubSub.
     Supervisor.init(children,
       strategy: :one_for_one,
       max_restarts: 3,
-      max_seconds: 60
+      max_seconds: 60,
+      auto_shutdown: :any_significant
     )
   end
 
@@ -58,7 +62,6 @@ defmodule Fleet.EventRouter.Application do
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
-    fallback_events = ~w(unknown_event)
 
     # The gitea webhook broadcasts a dynamic `gitea.<action>` (action from the body or the
     # X-Gitea-Event header). We pre-register the types seen in practice so the canonical
@@ -66,24 +69,34 @@ defmodule Fleet.EventRouter.Application do
     # These types MUST also be events.yaml keys, otherwise `Bus.broadcast` fails loud with
     # `UnregisteredError` → a silent drop of the webhook. Guard: test
     # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
+    # (No `unknown_event` fallback atom: zero producer, zero consumer, zero events.yaml key —
+    # the list stays aligned on the registry + the two dynamic families above.)
     Enum.each(
-      yaml_events ++ signal_events ++ fallback_events ++ gitea_event_types(),
+      yaml_events ++ signal_events ++ gitea_event_types(),
       fn event_type ->
         _ = String.to_atom(event_type)
       end
     )
   end
 
-  defp base_children do
+  # Public for the escalation-contract test (like webhook_children/0 for the bind test):
+  # the child spec IS the invariant — restart/significant are what make the node-escalation real.
+  @doc false
+  def base_children do
     # The PubSub sits under a DEDICATED supervisor with `max_restarts: 0`. A LOCAL restart of
     # Phoenix.PubSub would lose ALL of the node's subscriptions: consumers alive but DEAF for
     # life (they only subscribe in init/1), and undetectable (probes test whereis, not the
-    # subscription). A PubSub crash → deliberate escalation all the way to the node (assumed
-    # posture: everything is :permanent, a container restart is the only honest resubscription).
+    # subscription). A PubSub crash → escalation all the way to the node, MECHANICALLY:
+    # `restart: :temporary` (a resurrected PubSub with an empty subscription registry would be
+    # a success-shaped lie) + `significant: true` + parent `auto_shutdown: :any_significant`
+    # → this child's death shuts the domain down → root supervisor `max_restarts: 0` → node.
+    # (Assumed posture: a container restart is the only honest resubscription.)
     [
       %{
         id: Fleet.EventRouter.Bus.EscalatingSupervisor,
         type: :supervisor,
+        restart: :temporary,
+        significant: true,
         start:
           {Supervisor, :start_link,
            [

@@ -260,7 +260,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:ok, content} ->
         case Jason.decode(content) do
           {:ok, reg} when is_map(reg) ->
-            reg
+            drop_non_map_entries(reg, "WAL #{path}")
 
           other ->
             Logger.error(
@@ -307,9 +307,28 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp decode(content) do
     case Jason.decode(content) do
-      {:ok, reg} when is_map(reg) -> reg
+      {:ok, reg} when is_map(reg) -> drop_non_map_entries(reg, "forge file")
       _ -> %{}
     end
+  end
+
+  # The registry file lives on the SHARED forge (work/ops) and the WAL on local disk — both
+  # hand-editable. A non-map VALUE under a signature ({"sig": "garbage"}) would enter RAM,
+  # contaminate the WAL, then raise in merge_entry during handle_continue(:load) → boot-loop
+  # REPRODUCIBLE at every reboot until the file is repaired by hand. Same doctrine as the
+  # unparseable WAL above: visible memory loss (LOUD drop), never a boot crash.
+  defp drop_non_map_entries(reg, origin) do
+    {maps, bad} = Map.split_with(reg, fn {_sig, v} -> is_map(v) end)
+
+    if map_size(bad) > 0 do
+      Logger.error(
+        "IncidentRegistry: #{map_size(bad)} non-map entrie(s) dropped from #{origin} " <>
+          "(sigs: #{inspect(Map.keys(bad))}) — repair the file; the incident memory of these " <>
+          "signatures is lost (their recurrences will look like first occurrences)."
+      )
+    end
+
+    maps
   end
 
   # Encode the registry with ONE incident per line, sorted keys. The git diff of the file (committed on
@@ -330,6 +349,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp merge(a, b), do: Map.merge(a, b, fn _sig, ea, eb -> merge_entry(ea, eb) end)
 
   defp merge_entry(a, b) do
+    # Defensive net BEHIND drop_non_map_entries (decode/read_wal filter at both load points):
+    # a non-map can only reach here through a NEW load path — coerce, never raise at boot.
+    a = if is_map(a), do: a, else: %{}
+    b = if is_map(b), do: b, else: %{}
+
     %{
       "count" => max(a["count"] || 0, b["count"] || 0),
       "first_seen" => min_iso(a["first_seen"], b["first_seen"]),

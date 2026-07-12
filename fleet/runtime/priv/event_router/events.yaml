@@ -33,7 +33,8 @@ events:
   # per-key comments). STILL DORMANT: `oauth.refresh.failed` (never implemented on the launcher/credentials side) — no
   # honest signal to emit yet. (`pod.drift` is now LIVE via Fleet.Spawner.PermanentBoot, F-C043.) Keys kept: consumers wired + tested, ready.
   # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
-  # attempts (agent never acked) — payload `pod_id`/`reason`/`pane`. Consumed by
+  # attempts (agent never acked) — payload `pod_id`/`reason` (stable category string, JSON-safe;
+  # keys the IncidentRegistry dedup signature)/`reason_detail`/`pane`. Consumed by
   # `Fleet.Pilot.IncidentConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
   # Real producer AND consumer → legitimate key (was absent = consumed-outside-registry, contracts-check red).
   wake.failed: []
@@ -41,7 +42,9 @@ events:
   # `admin.spawn.request` RAISES (CapProfile/spawn_pod fails unexpectedly) → the spawn is dropped.
   # The REST API has already replied HTTP 202 "queued" to the client BEFORE this async dispatch → without
   # this event the drop is SILENT (the admin thinks the pod is queued; zero pod, zero alarm). Twin of
-  # `pod.failed`, same cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Consumed by
+  # `pod.failed`, same cycle. Payload `cap_profile_name` (sentinel "unknown" when both name and
+  # role are absent/empty — the alarm always reaches the rail)/`issue_id`/`reason` (stable
+  # category string)/`reason_detail`. Consumed by
   # `Fleet.Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
   spawn.failed: []
 

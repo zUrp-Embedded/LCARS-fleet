@@ -164,10 +164,12 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_continue({:corrupt, found}, state) do
-    # Non-blocking fallback: empty state + a boot-anomaly event post-init.
+    # Non-blocking fallback: empty state + a boot-anomaly event post-init. `found` may carry
+    # the non-JSON-encodable {:work_item, id, reason} variant (Store decode) → stringify at
+    # the producer so the payload stays JSON-safe end-to-end (WS edge encodes it raw).
     lossy_broadcast(
       state,
-      Fleet.Event.new(:task_queue, :"state.corrupt", payload: %{expected: 1, found: found})
+      Fleet.Event.new(:task_queue, :"state.corrupt", payload: %{expected: 1, found: inspect(found)})
     )
 
     {:noreply, state}

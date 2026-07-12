@@ -133,6 +133,45 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       refute Reg.seen_before?("wake:whatever:x", server: name)
     end
 
+    test "boot : entrée NON-MAP dans le WAL/forge (fichier édité à la main) → drop LOUD, JAMAIS un boot-loop",
+         %{tmp_dir: tmp} do
+      # Le fichier forge (work/ops) et le WAL sont éditables à la main : une VALEUR non-map sous
+      # une signature entrait en RAM puis faisait lever merge_entry en handle_continue(:load) →
+      # boot-loop reproductible à chaque reboot tant que le fichier n'était pas réparé. Doctrine
+      # du WAL illisible : perte de mémoire VISIBLE (drop loggué error), jamais un crash de boot.
+      File.write!(
+        Path.join(tmp, "incidents.json"),
+        Jason.encode!(%{"wake:p:bad" => "garbage-string", "wake:p:ok" => %{"count" => 1}})
+      )
+
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!(
+            {Reg,
+             [
+               name: name,
+               wal_path: Path.join(tmp, "incidents.json"),
+               sync_debounce_ms: 5,
+               retry_ms: 50,
+               # La forge porte AUSSI une entrée non-map pour la même signature : le merge
+               # WAL ∪ forge du boot ne doit lever sur aucun des deux côtés.
+               get_file_fun: fn _r, _p, _o ->
+                 {:ok, %{content: Jason.encode!(%{"wake:p:bad" => 42}), sha: "s"}}
+               end
+             ]}
+          )
+
+          _ = :sys.get_state(name)
+        end)
+
+      assert log =~ "non-map"
+      # L'entrée saine survit, l'entrée véreuse est droppée (récurrence = première occurrence).
+      assert Reg.seen_before?("wake:p:ok", server: name)
+      refute Reg.seen_before?("wake:p:bad", server: name)
+    end
+
     test "forge down : note reste :ok + WAL tient (fail-loud, AUCUNE perte)", %{tmp_dir: tmp} do
       name =
         start_reg(tmp,

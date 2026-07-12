@@ -138,6 +138,33 @@ defmodule Fleet.Event do
           "Fleet.Event.new/3: payload #{inspect(v)} is not a map — an event payload is always a map"
   end
 
+  @doc """
+  Splits a failure `reason` term into JSON-safe payload fields `{category, detail}`.
+
+  `category` is the STABLE recurrence bucket the incident rail keys its dedup signature on
+  (`IncidentRegistry` buckets tuples by `elem(0)` and passes strings through): a tuple
+  `{:no_ack, :wake}` and its normalized `"no_ack"` yield the SAME signature. `detail` keeps
+  the full term (`inspect/1`) for the human diagnosis. Producers of failure events put BOTH
+  on the bus (`"reason"` / `"reason_detail"`) so every JSON edge (`Fleet.API.WS`) can encode
+  the payload without crashing — a non-encodable term in a broadcast payload raises
+  `Protocol.UndefinedError` in `Jason.encode!` at the edge (the trap `AuditLog.encode_line`
+  rescues consumer-side). A blind `inspect(reason)` at the producer would NOT do: the variable
+  parts (pod ids, error details) would leak into the dedup signature and recurrence would
+  never be detected again.
+  """
+  @spec reason_fields(term()) :: {String.t(), String.t()}
+  def reason_fields(reason) when is_binary(reason), do: {reason, reason}
+
+  def reason_fields(reason) when is_atom(reason),
+    do: {Atom.to_string(reason), Atom.to_string(reason)}
+
+  def reason_fields(reason) when is_tuple(reason) and tuple_size(reason) > 0 do
+    {category, _} = reason_fields(elem(reason, 0))
+    {category, inspect(reason)}
+  end
+
+  def reason_fields(reason), do: {inspect(reason), inspect(reason)}
+
   defmodule UnregisteredError do
     @moduledoc "Event published outside the `events.yaml` registry (strict fail-loud)."
     defexception [:message]

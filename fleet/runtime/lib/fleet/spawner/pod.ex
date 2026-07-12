@@ -623,9 +623,15 @@ defmodule Fleet.Spawner.Pod do
           "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalation #5.2"
         )
 
+        # JSON-safe payload (the WS edge encodes it raw) WITHOUT losing the dedup bucket:
+        # "reason" = stable category ("no_ack" — same IncidentRegistry signature as the raw
+        # tuple), "reason_detail" = full term for the human diag.
+        {reason, reason_detail} = Fleet.Event.reason_fields({:no_ack, phase})
+
         Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
-          "reason" => {:no_ack, phase},
+          "reason" => reason,
+          "reason_detail" => reason_detail,
           "pane" => Fleet.Spawner.PodTmux.capture_pane(data.pod_id)
         })
 
@@ -1022,10 +1028,16 @@ defmodule Fleet.Spawner.Pod do
     data = Map.put(data, :last_error, reason)
     StateFs.write_state_fs(put_phase(data, :failed))
 
+    # All callers pass tuple reasons ({:allocate_failed,_}, {:launch_failed,_}, …) — non-JSON
+    # terms crash the WS edge. Normalize to the stable category (same IncidentRegistry dedup
+    # signature as the tuple: both bucket to elem(0)) + full detail aside.
+    {category, reason_detail} = Fleet.Event.reason_fields(reason)
+
     Events.lossy_broadcast("pod.failed", %{
       "pod_id" => data.pod_id,
       "issue_id" => data.issue_id,
-      "reason" => reason
+      "reason" => category,
+      "reason_detail" => reason_detail
     })
 
     {:stop, {:shutdown, reason}, data}

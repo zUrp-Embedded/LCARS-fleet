@@ -117,14 +117,32 @@ defmodule Fleet.API.WSTest do
       assert frame =~ "anything"
     end
 
-    test "heartbeat → ping frame + reschedule" do
-      assert {[{:text, ~s|{"type":"ping"}|}], state} =
-               WS.websocket_info(:heartbeat, %{topics: []})
+    test "heartbeat → frame de CONTRÔLE ping + reschedule" do
+      # Un vrai ping RFC 6455 (pas un frame texte) : le pong automatique du client nourrit
+      # idle_timeout — un abonné passif (dashboard) n'est plus déconnecté toutes les 60s.
+      assert {[{:ping, <<>>}], state} = WS.websocket_info(:heartbeat, %{topics: []})
 
       assert state == %{topics: []}
 
       # Reschedule fait via Process.send_after — pas attendu (test sync, 30s
       # trop long). On vérifie juste que le frame est correct + state préservé.
+    end
+
+    test "payload non-JSON-encodable (tuple) → frame dégradé _raw, jamais un crash du process" do
+      # Le bord WS est le SEUL consommateur JSON du bus sans filet : un reason tuple d'un
+      # producteur (futur, ou event forgé sur le bus no-auth) crashait chaque connexion Cowboy
+      # précisément sur les events d'incident. Le rescue dégrade en vérité inspectée.
+      event =
+        Fleet.Event.new(:spawner, :"pod.failed",
+          payload: %{"pod_id" => "p1", "reason" => {:no_ack, :wake}}
+        )
+
+      assert {[{:text, frame}], _state} = WS.websocket_info(event, %{topics: []})
+
+      assert {:ok, %{"type" => "event", "event_type" => "pod.failed", "payload" => payload}} =
+               Jason.decode(frame)
+
+      assert payload["_raw"] =~ "no_ack"
     end
 
     test "message inconnu → no frame" do

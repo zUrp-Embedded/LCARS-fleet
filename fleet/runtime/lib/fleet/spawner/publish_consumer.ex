@@ -144,12 +144,23 @@ defmodule Fleet.Spawner.PublishConsumer do
   # Strict canonical envelope
   # built + broadcast via `Bus.emit` (`source: :spawner`, type `:"spawn.failed"`, present in the events.yaml registry).
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
+    # JSON-safe + rail-reaching: "reason" = stable category (tuple reasons {:spawn_pod,_}/
+    # {:cap_profile_load,_} would crash the WS edge AND leak variable detail into the
+    # IncidentRegistry dedup signature if blindly inspected), detail aside. The subject falls
+    # through presence/1 (a truthy "" would mask `role` — the #32 class this file already
+    # neutralizes in handle_spawn_request) down to "unknown": the alarm must ALWAYS reach the
+    # incident rail with a binary subject (IncidentConsumer guards is_binary(name)).
+    {reason_cat, reason_detail} = Fleet.Event.reason_fields(reason)
+
     result =
       Bus.emit(:spawner, :"spawn.failed",
         payload: %{
-          "cap_profile_name" => Map.get(payload, "cap_profile_name") || Map.get(payload, "role"),
+          "cap_profile_name" =>
+            presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role")) ||
+              "unknown",
           "issue_id" => Map.get(payload, "issue_id"),
-          "reason" => reason
+          "reason" => reason_cat,
+          "reason_detail" => reason_detail
         }
       )
 

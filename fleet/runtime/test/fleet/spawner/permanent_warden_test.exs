@@ -7,9 +7,10 @@ defmodule Fleet.Spawner.PermanentWardenTest do
 
   alias Fleet.Spawner.PermanentWarden
 
-  defp start_warden(respawn_fun) do
+  defp start_warden(respawn_fun, opts \\ []) do
     start_supervised!(
-      {PermanentWarden, name: nil, subscribe: false, respawn_fun: respawn_fun, backoff_base_ms: 1}
+      {PermanentWarden,
+       [name: nil, subscribe: false, respawn_fun: respawn_fun, backoff_base_ms: 1] ++ opts}
     )
   end
 
@@ -22,7 +23,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     }
   end
 
-  test "pod.failed d'un permanent → respawn (via backoff) ; compteur remis à zéro sur succès" do
+  test "pod.failed d'un permanent → respawn (via backoff) ; mort SOUS min-uptime → le compteur CONTINUE" do
     parent = self()
 
     warden =
@@ -35,9 +36,57 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     # backoff_base 1ms → le respawn planifié arrive vite.
     assert_receive {:respawn, "architect"}, 1_000
 
-    # Mort ULTÉRIEURE (après succès) → le compteur est reparti de zéro → re-respawn direct.
+    # Mort quasi-immédiate (sous min_uptime défaut 60s) : PAS de reset au {:ok, pid} du
+    # start_child (la chaîne launch est async — boote-puis-meurt bouclait à l'infini sur un
+    # reset-at-start). Le cycle continue, borné : le respawn arrive encore (attempt 2/5).
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn, "architect"}, 1_000
+  end
+
+  test "survie OBSERVÉE (min_uptime_ms: 0) → compteur remis à zéro : jamais de HALT sur des morts espacées" do
+    parent = self()
+
+    warden =
+      start_warden(
+        fn role ->
+          send(parent, {:respawn, role})
+          {:ok, "permanent-#{role}"}
+        end,
+        min_uptime_ms: 0
+      )
+
+    # 7 cycles mort→respawn (> @max_attempts=5) : avec min_uptime 0, chaque uptime compte
+    # comme une survie → reset à chaque mort → la borne n'est jamais atteinte (sémantique
+    # « une mort ULTÉRIEURE repart d'un backoff court » préservée pour les pods sains).
+    for _ <- 1..7 do
+      send(warden, pod_failed("permanent-architect"))
+      assert_receive {:respawn, "architect"}, 1_000
+    end
+  end
+
+  test "boote-puis-meurt en boucle (launch OK, mort sous min-uptime) → HALT DURABLE, dépense bornée" do
+    parent = self()
+
+    warden =
+      start_warden(fn role ->
+        send(parent, {:respawn, role})
+        {:ok, "permanent-#{role}"}
+      end)
+
+    # Chaque respawn RÉUSSIT (start_child {:ok}) mais le pod meurt sous min_uptime (60s défaut,
+    # le test tourne en ms) : le compteur doit CONTINUER malgré les {:ok} → borne à 5 respawns.
+    for _ <- 1..5 do
+      send(warden, pod_failed("permanent-architect"))
+      assert_receive {:respawn, "architect"}, 1_000
+    end
+
+    # 6e mort sous min-uptime avec la borne épuisée → HALT RÉEL : plus aucun respawn,
+    # même sur les morts suivantes (le HALT est durable tant qu'aucune survie n'est observée).
+    send(warden, pod_failed("permanent-architect"))
+    refute_receive {:respawn, _}, 300
+
+    send(warden, pod_failed("permanent-architect"))
+    refute_receive {:respawn, _}, 300
   end
 
   test "pod.failed d'un pod NON-permanent (issue-*) → no-op (la relance = job du rail forge)" do

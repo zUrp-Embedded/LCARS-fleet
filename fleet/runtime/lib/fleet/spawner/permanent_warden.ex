@@ -18,18 +18,25 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   Each successful respawn boots a claude session: an unbounded crash-loop would burn LLM in a loop.
   So the retry is BOUNDED: `@max_attempts` consecutive attempts per role (exponential backoff
-  `base * 2^attempt` capped at 10 min — default base 5s, i.e. 5s → 10s → 20s → 40s → 80s),
-  counter reset on a SUCCESSFUL respawn. Exhausted → retry HALT + `Logger.error`
-  (the role stays dead until intervention). This halt is NOT silent: the human escalation has
-  ALREADY gone through the incident rail (`IncidentConsumer` records every `pod.failed`; the RECURRENCE
-  of the same signature opens an `error_system` sysadmin issue on the forge — a repaired rail) — so the
-  warden carries NO escalation wiring of its own (composition, not an authority fork).
+  `base * 2^attempt` capped at 10 min — default base 5s, i.e. 5s → 10s → 20s → 40s → 80s).
+  The counter resets ONLY on OBSERVED survival: the pod must live past `:min_uptime_ms` after
+  a warden respawn. A `start_child` `{:ok, pid}` proves NOTHING (the allocate→launch chain is
+  async) — resetting there let a boot-then-die pod loop forever at ~5s with the HALT unreachable
+  and the spend unbounded, the exact failure mode this bound exists for. Exhausted → retry HALT
+  + `Logger.error` (the role stays dead until intervention). This halt is NOT silent: the human
+  escalation has ALREADY gone through the incident rail (`IncidentConsumer` records every
+  `pod.failed`; the RECURRENCE of the same signature opens an `error_system` sysadmin issue on
+  the forge — a repaired rail) — so the warden carries NO escalation wiring of its own
+  (composition, not an authority fork). A death with a STALE respawn stamp (or none) means an
+  external actor resurrected the role since — that IS the external repair signal: new cycle,
+  the spend was borne by the actor (cattle, E2).
 
   ## Seams (tests)
 
     * `:subscribe` (default true) — real Bus subscription.
     * `:respawn_fun` (default `&Fleet.Spawner.PermanentBoot.respawn/1`) — `(role) -> {:ok, pod_id} | {:error, _}`.
     * `:backoff_base_ms` (default 5_000) — backoff base (reduced in test).
+    * `:min_uptime_ms` (default 60_000) — survival threshold that resets the attempt counter.
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
   """
 
@@ -53,7 +60,11 @@ defmodule Fleet.Spawner.PermanentWarden do
     if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     respawn_fun = Keyword.get(opts, :respawn_fun, &Fleet.Spawner.PermanentBoot.respawn/1)
     base = Keyword.get(opts, :backoff_base_ms, 5_000)
-    {:ok, %{respawn_fun: respawn_fun, base: base, attempts: %{}}}
+    min_uptime = Keyword.get(opts, :min_uptime_ms, 60_000)
+    # attempts: role => {count, last_respawn_mono_ms | nil} — count = consecutive attempts,
+    # stamp = last WARDEN respawn ({:ok, _} from respawn_fun; nil when the last attempt failed
+    # or none happened). Monotonic clock: wall-clock jumps must not fake a survival.
+    {:ok, %{respawn_fun: respawn_fun, base: base, min_uptime: min_uptime, attempts: %{}}}
   end
 
   @impl true
@@ -88,13 +99,22 @@ defmodule Fleet.Spawner.PermanentWarden do
     case result do
       {:ok, pod_id} ->
         Logger.info("PermanentWarden: permanent #{role} respawned (#{pod_id})")
-        # Respawn SUCCESSFUL → counter reset (a LATER death restarts from a short backoff).
-        {:noreply, %{state | attempts: Map.delete(state.attempts, role)}}
+
+        # NO counter reset here: `{:ok, pid}` = start_child accepted — the async allocate→launch
+        # chain has not run yet (a boot-then-die pod would loop forever on a reset-at-start).
+        # We STAMP the respawn instant; the reset happens at the NEXT death IF the pod lived
+        # past `min_uptime` (observed survival), lazily in `handle_permanent_death/2`.
+        now = System.monotonic_time(:millisecond)
+
+        attempts =
+          Map.update(state.attempts, role, {0, now}, fn {count, _} -> {count, now} end)
+
+        {:noreply, %{state | attempts: attempts}}
 
       {:error, reason} ->
         # Failure of the spawn ITSELF (not a pod death): no pod.failed emitted to re-arm the cycle →
         # we re-schedule HERE, same counter/backoff as via the event (a single mechanism).
-        attempt = Map.get(state.attempts, role, 1)
+        {attempt, _stamp} = Map.get(state.attempts, role, {1, nil})
 
         if attempt < @max_attempts do
           delay = backoff_delay(attempt, state.base)
@@ -105,7 +125,7 @@ defmodule Fleet.Spawner.PermanentWarden do
           )
 
           Process.send_after(self(), {:respawn, role}, delay)
-          {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
+          {:noreply, %{state | attempts: Map.put(state.attempts, role, {attempt + 1, nil})}}
         else
           Logger.error(
             "PermanentWarden: respawn #{role} — #{@max_attempts} consecutive failures, HALT " <>
@@ -121,34 +141,54 @@ defmodule Fleet.Spawner.PermanentWarden do
   def handle_info(_other, state), do: {:noreply, state}
 
   defp handle_permanent_death(role, state) do
-    attempt = Map.get(state.attempts, role, 0)
+    now = System.monotonic_time(:millisecond)
+    {raw_count, last_respawn} = Map.get(state.attempts, role, {0, nil})
 
-    if attempt < @max_attempts do
-      delay = backoff_delay(attempt, state.base)
+    # Survival OBSERVED = the pod lived past min-uptime since the last WARDEN respawn — or no
+    # warden respawn stamp at all (nil / stale = an EXTERNAL actor booted the pod that just
+    # died: it had to live to die, and the warden wasn't the one paying). Only that resets the
+    # cycle; a death under min-uptime CONTINUES the counter (boot-then-die is one crash-loop,
+    # not five fresh incidents).
+    count = if survived?(last_respawn, now, state.min_uptime), do: 0, else: raw_count
+
+    if count < @max_attempts do
+      if raw_count >= @max_attempts do
+        # Post-HALT death with survival observed = external/manual repair (the warden no longer
+        # respawns after HALT). Cattle: new cycle — the resurrection spend was borne by the actor.
+        Logger.warning(
+          "PermanentWarden: permanent #{role} died AFTER HALT (external repair detected) → " <>
+            "new respawn cycle"
+        )
+      end
+
+      delay = backoff_delay(count, state.base)
 
       Logger.warning(
         "PermanentWarden: permanent #{role} dead → respawn in #{div(delay, 1000)}s " <>
-          "(attempt #{attempt + 1}/#{@max_attempts})"
+          "(attempt #{count + 1}/#{@max_attempts})"
       )
 
       Process.send_after(self(), {:respawn, role}, delay)
-      {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
+      {:noreply, %{state | attempts: Map.put(state.attempts, role, {count + 1, nil})}}
     else
-      # Bound reached BUT a POST-HALT pod.failed proves a pod of this role HAS LIVED AGAIN since
-      # (it had to live to die: the warden no longer respawns after HALT → this is an
-      # external/manual repair). Cattle: this new failure deserves a NEW cycle of retries —
-      # without a reset, the warden stayed dead for this role until the BEAM restart. No loop:
-      # each post-HALT cycle requires an external resurrection (the spend is borne by the actor).
-      Logger.warning(
-        "PermanentWarden: permanent #{role} died AFTER HALT (external repair detected) → " <>
-          "new respawn cycle (counter reset to zero)"
+      # Crash-loop CONFIRMED: died under min-uptime with the bound exhausted → REAL, durable
+      # HALT (no re-arm; the spend stops HERE). The stamp stays: a much later death (external
+      # resurrection that lived past min-uptime) passes `survived?/3` above → fresh cycle.
+      Logger.error(
+        "PermanentWarden: permanent #{role} boots then dies under #{div(state.min_uptime, 1000)}s " <>
+          "with #{@max_attempts} attempts exhausted — HALT (sysadmin issue already opened by " <>
+          "the incident rail; intervention required)"
       )
 
-      delay = backoff_delay(0, state.base)
-      Process.send_after(self(), {:respawn, role}, delay)
-      {:noreply, %{state | attempts: Map.put(state.attempts, role, 1)}}
+      {:noreply, state}
     end
   end
+
+  # nil stamp = the last warden attempt failed before launching anything (or never happened):
+  # the pod that just died was necessarily booted OUTSIDE the warden → counts as survival
+  # (external repair), never as a warden crash-loop iteration.
+  defp survived?(nil, _now, _min_uptime), do: true
+  defp survived?(last_ms, now, min_uptime), do: now - last_ms >= min_uptime
 
   @doc "Capped exponential backoff: base * 2^attempt, cap #{@max_delay_ms} ms. Pure (testable)."
   @spec backoff_delay(non_neg_integer(), pos_integer()) :: pos_integer()

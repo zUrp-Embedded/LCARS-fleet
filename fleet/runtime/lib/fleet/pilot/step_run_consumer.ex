@@ -277,7 +277,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
 
       {:skip, reason} ->
-        Logger.debug("StepRunConsumer skip #{p["issue_id"]} (#{reason})")
+        # `reason` can be a tuple ({:bad_issue_id, id}) — bare interpolation would crash the
+        # singleton the moment the operator flips to :debug to diagnose (twin of :285 below).
+        Logger.debug("StepRunConsumer skip #{p["issue_id"]} (#{inspect(reason)})")
         {:noreply, state}
 
       {:error, reason} ->

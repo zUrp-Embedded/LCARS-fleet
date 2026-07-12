@@ -173,7 +173,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     Logger.info(
       "AUDIT pod.completed pod=#{Map.get(payload, "pod_id", "?")} " <>
         "issue=#{Map.get(payload, "issue_id", "?")} " <>
-        "duration_ms=#{get_in(payload, ["result", "duration_ms"]) || "?"}"
+        "duration_ms=#{inspect(get_in(payload, ["result", "duration_ms"]) || "?")}"
     )
   end
 

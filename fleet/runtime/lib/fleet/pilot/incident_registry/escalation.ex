@@ -30,7 +30,9 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   `:pod_failed` | `:sp_suspect` | `:cat5`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
-  is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body.
+  is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
+  `opts[:reason_detail]` engraves the full failure term (producers put the stable dedup CATEGORY in
+  `reason` and the variable detail aside — see `Fleet.Event.reason_fields/1`).
   Returns `{:ok, number}` | `{:error, term}`.
   """
   @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
@@ -57,7 +59,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
     Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
     (Issue auto — durcissement #5.2.)
-    #{correlation_block(opts[:correlation_id])}#{pane_block(opts[:pane])}
+    #{detail_block(opts[:reason_detail])}#{correlation_block(opts[:correlation_id])}#{pane_block(opts[:pane])}
     """
 
     # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
@@ -131,6 +133,15 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
       {:error, _} -> create_fun.(repo, title, body, [])
     end
   end
+
+  # Full failure detail (producer-side `inspect/1` of the original reason term) — « Raison »
+  # above carries the STABLE dedup category only; this block restores the variable part for
+  # the human diagnosis. Empty when the producer had nothing beyond the category.
+  defp detail_block(detail) when is_binary(detail) and detail != "" do
+    "Détail : `#{detail}`.\n"
+  end
+
+  defp detail_block(_), do: ""
 
   # « Captured screen » block (offloaded fallback-ACK) attached to the issue — empty if no pane.
   defp pane_block(pane) when is_binary(pane) and pane != "" do

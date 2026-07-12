@@ -22,15 +22,22 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   defp failed_event(type, payload),
     do: Fleet.Event.new(:spawner, type, payload: payload)
 
-  test "pod.failed → record_or_escalate(\"pod\", pod_id, reason, [])" do
+  test "pod.failed → record_or_escalate(\"pod\", pod_id, reason, reason_detail threadé)" do
     pid = start(echo_fun())
 
     send(
       pid,
-      failed_event(:"pod.failed", %{"pod_id" => "pod_1", "reason" => "result_timeout"})
+      failed_event(:"pod.failed", %{
+        "pod_id" => "pod_1",
+        "reason" => "result_timeout",
+        "reason_detail" => "{:result_timeout, \"pod_1\"}"
+      })
     )
 
-    assert_receive {:rec, "pod", "pod_1", "result_timeout", []}
+    # `reason` = catégorie stable (clé de la signature de dedup) ; le détail complet voyage en
+    # opt jusqu'au corps d'issue (Escalation.detail_block) sans polluer la signature.
+    assert_receive {:rec, "pod", "pod_1", "result_timeout", opts}
+    assert Keyword.get(opts, :reason_detail) == "{:result_timeout, \"pod_1\"}"
   end
 
   test "wake.failed → record_or_escalate(\"wake\", …, escalate_kind: :sp_suspect, pane:)" do
@@ -48,6 +55,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert_receive {:rec, "wake", "pod_2", "no_ack", opts}
     assert Keyword.get(opts, :escalate_kind) == :sp_suspect
     assert Keyword.get(opts, :pane) == "sess:1.2"
+    # Payload sans reason_detail (producteur pré-normalisation ou event forgé) → nil, jamais un crash.
+    assert Keyword.get(opts, :reason_detail) == nil
   end
 
   test "event d'échec sans pod_id → ignoré (pas de record)" do
@@ -68,7 +77,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     refute_receive :rec, 100
   end
 
-  test "spawn.failed → record_or_escalate(\"spawn\", cap_profile_name, reason, [])" do
+  test "spawn.failed → record_or_escalate(\"spawn\", cap_profile_name, reason, opts)" do
     # Le rail était ORPHELIN (produit par PublishConsumer, jamais consommé) : le 202 de
     # POST /api/admin/spawn mentait en silence quand le dispatch droppait le spawn. Sujet =
     # cap_profile_name (le rôle) : la récurrence groupe « ce rôle échoue à spawner » (issue_id
@@ -84,7 +93,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       })
     )
 
-    assert_receive {:rec, "spawn", "reviewer", "boom", []}
+    assert_receive {:rec, "spawn", "reviewer", "boom", opts}
+    assert Keyword.get(opts, :reason_detail) == nil
   end
 
   test "spawn.failed sans cap_profile_name → ignoré (garde)" do
