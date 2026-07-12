@@ -103,10 +103,7 @@ events:
   # `:workflow_map_load_failed` (the WorkflowMapNav single authority). The old RAM-engine producer
   # (`Pipeline.Executor`) was removed; this is the "forge-driven rail publishes a workflow_map failure
   # signal" anticipated here. DRAFT: covers the main dispatch load-failure, not yet every rail path.
-  # `workflow_map.completed` — matched by `API.WS` (`workflow_map.*`), still 0 producer (kept, ready).
   workflow_map.failed: []
-  workflow_map.completed: []
-  workflow_map.step.completed: []
   # deliverable.published (slot-freeze): emitted by Pilot.StepRunCompleter (source :workflow — the
   # publication IS a workflow op via Deliverable.publish) AFTER push + PR confirmed, carries `pod_id` (the
   # producer pod, from the pod.completed payload). Consumed by Spawner.Pod: a resident pod (pipe) goes

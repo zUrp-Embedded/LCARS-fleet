@@ -130,7 +130,7 @@ defmodule Fleet.API.Application do
       # Child-spec via the single source Fleet.EventRouter.Listener: loopback bind by default
       # applied BY CONSTRUCTION (boundary = network isolation, cf. Rest § Auth: the only
       # remaining write, /api/admin/spawn, is no-auth but guarded — NEVER expose it on
-      # 0.0.0.0 by default). The browser dashboard (:<port>/dashboard + /ws) becomes
+      # 0.0.0.0 by default). The WS surface (:<port>/ws) and the observation deck (:8091) stay
       # local-only: remote access goes through a tunnel/reverse-proxy. Public exposure =
       # named opt-in (LCARS_BIND_HOST, via BindAddress).
       [

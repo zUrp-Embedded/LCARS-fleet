@@ -38,13 +38,13 @@ defmodule Fleet.Pilot.Poller do
 
   ## Init configuration
 
-    * `:repo` — `"owner/name"`, OPTIONAL (test/legacy seam): no longer the source of repos —
-      org-repo discovery overwrites it at each iteration of `do_poll`.
+    * (Plus d'opt `:repo` à l'init : le champ struct `repo` reste comme porteur d'itération —
+      posé par `do_poll` à chaque repo découvert — mais n'est plus un seam d'entrée. La découverte
+      par org-membership est la seule source de repos.)
     * `:human` — test seam; default `Fleet.Credentials.Human.current!()` (fail-loud), the
       REAL required source of multi-user scoping.
     * `:interval_ms` — default `30_000` (30s).
     * `:forge_opts` — ForgeClient keyword (base_url, token, req_options).
-    * `:step_dispatch?` — historically the mode switch; now vestigial (default `false`, no longer read in the poll path).
     * test seams: `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injected if non-nil).
     * `:start_tick?` — default `true`; `false` = no auto first tick (tests drive via `force_poll/1`).
 
@@ -99,7 +99,6 @@ defmodule Fleet.Pilot.Poller do
     # create_project (`:fleet_mcp, :delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
     :org,
     :forge_client_override,
-    step_dispatch?: false,
     forge_opts: [],
     loader: nil,
     workflow_map_loader: nil,
@@ -135,7 +134,6 @@ defmodule Fleet.Pilot.Poller do
           repo: String.t(),
           interval_ms: pos_integer(),
           forge_client_override: module() | nil,
-          step_dispatch?: boolean(),
           forge_opts: keyword(),
           loader: module() | nil,
           spawner: module() | nil,
@@ -181,12 +179,10 @@ defmodule Fleet.Pilot.Poller do
     # required source of SCOPING (`Human.current!()` fail-loud — a poller that does not know WHO it is cannot
     # scope its issues via `assigned_by`).
     state = %__MODULE__{
-      repo: Keyword.get(opts, :repo),
       my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
       org: Keyword.get(opts, :org) || Application.get_env(:fleet_pilot, :fleet_org, "fleet"),
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       forge_client_override: Keyword.get(opts, :forge_client),
-      step_dispatch?: Keyword.get(opts, :step_dispatch?, false),
       forge_opts: Keyword.get(opts, :forge_opts, []),
       loader: Keyword.get(opts, :loader),
       workflow_map_loader: Keyword.get(opts, :workflow_map_loader),

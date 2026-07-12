@@ -205,10 +205,11 @@ defmodule Fleet.Starfleet.Shutdown do
   `bin/fleet_v2` cmd_stop RPCs `Fleet.Starfleet.Shutdown.begin(grace_ms: …)` then
   `:init.stop()`. The GenServer serves that RPC; the drain is LIVE.
 
-  Three phases:
-  1. `begin/1` — refuse new jobs (dispatcher gate), drain queue
-  2. `drain_in_flight/1` — wait for in-progress workflows, max grace_ms
-  3. final (`fleet_umbrella stop`) — stop the OTP umbrella
+  `begin/1` is the SOLE prod entry (`bin/fleet_v2 stop` RPCs it): it refuses new jobs (dispatcher
+  gate) THEN drains in ONE loop — `wait_drain` polls `in_flight_count` (live non-permanent pods +
+  pending queue items) until 0 or `grace_ms`. `bin/fleet_v2` then calls `:init.stop()` (ordered OTP
+  stop). `drain_in_flight/1` re-enters that same drain WITHOUT the refuse step — a TEST-ONLY seam to
+  exercise `wait_drain` in isolation (convergence/timeout); no prod caller.
 
   ## Dispatcher backend (seam `:shutdown_dispatcher`)
 
@@ -224,9 +225,9 @@ defmodule Fleet.Starfleet.Shutdown do
 
   `begin/1`/`drain_in_flight/1` block inside the `handle_call` until the drain
   ends: this is the required semantics. The caller (the shutdown trigger →
-  `Fleet.Starfleet.Shutdown.begin` then `fleet_umbrella stop`) MUST know the
+  `Fleet.Starfleet.Shutdown.begin` then `:init.stop()`) MUST know the
   drain is finished before stopping the umbrella. An async reply
-  (`handle_continue`/`Task`) would stop the umbrella DURING the drain → guarantee
+  (`handle_continue`/`Task`) would stop the node DURING the drain → guarantee
   broken. During a shutdown there is no legitimate concurrent call to this
   GenServer; the block is bounded by `grace_ms` (+ a final SIGKILL as last
   resort, formerly systemd `TimeoutStopSec` — also gone with systemd).
@@ -261,13 +262,13 @@ defmodule Fleet.Starfleet.Shutdown do
     Application.get_env(:fleet_starfleet, :shutdown_dispatcher, @default_dispatcher)
   end
 
-  @doc "Phase 1: refuse new jobs + drain (max grace_ms)."
+  @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."
   def begin(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, @default_grace_ms)
     GenServer.call(server(opts), {:begin, grace_ms}, grace_ms + 5_000)
   end
 
-  @doc "Phase 2: wait in-flight → 0 or grace_ms."
+  @doc "TEST-ONLY seam: same drain as `begin/1` WITHOUT the refuse step (exercise wait_drain in isolation). No prod caller."
   def drain_in_flight(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, @default_grace_ms)
     GenServer.call(server(opts), {:drain, grace_ms}, grace_ms + 5_000)

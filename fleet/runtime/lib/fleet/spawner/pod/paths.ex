@@ -132,7 +132,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   of the runtime (Port/tmux), INHERITS that UID → runs in the human's home, binds their creds. If
   someone else installs LCARS tomorrow, it is THEIR user that launches, THEIR home — nothing to
   hardcode. Fail-loud if HOME/user is unresolvable (`System.user_home!()` raises — impossible in
-  practice, but never silently caught). Also called by `Pod.LaunchEnv.claude_dir/0`.
+  practice, but never silently caught).
   """
   @spec runtime_home() :: String.t()
   def runtime_home, do: System.user_home!()

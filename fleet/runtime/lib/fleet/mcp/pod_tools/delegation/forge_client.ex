@@ -13,8 +13,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a compile dep
   `fleet_mcp → fleet_pilot` would be UPWARD, forbidden (the boundary compiler would reject it). The module is resolved at
   RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
-  dep, no cycle). Seam declared in
-  `priv/event_router/allowed_graph.yaml` (`seams` section, direction `up`).
+  dep, no cycle). Assumed UPWARD runtime seam (mcp → pilot).
 
   ## Implementations
 

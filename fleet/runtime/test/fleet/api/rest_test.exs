@@ -376,45 +376,4 @@ defmodule Fleet.API.RestTest do
       assert conn.status == 404
     end
   end
-
-  # ============================================================
-  # #594 D2 — dashboard V2 Elixir natif (Fleet.API.Dashboard mount)
-  # ============================================================
-  describe "GET /dashboard" do
-    test "render HTML 200" do
-      conn = conn(:get, "/dashboard") |> Rest.call(@opts)
-
-      assert conn.status == 200
-      body = conn.resp_body
-
-      assert body =~ "<title>LCARS // V2 MAINFRAME</title>"
-      assert body =~ ~s|<link rel="stylesheet" href="/dashboard/static/lcars-tva.css">|
-      assert body =~ ~s|<header class="lcars-header">|
-      assert body =~ ~s|<aside class="lcars-rail">|
-      assert body =~ ~s|<main class="lcars-main">|
-
-      assert body =~ ~s|id="panel-memory-query"|
-      assert body =~ ~s|id="panel-build"|
-      assert body =~ ~s|id="panel-coord"|
-      assert body =~ ~s|id="panel-oauth"|
-      assert body =~ ~s|id="panel-workers"|
-      assert body =~ ~s|id="panel-health"|
-    end
-
-    test "Content-Type text/html UTF-8" do
-      conn = conn(:get, "/dashboard") |> Rest.call(@opts)
-      ct = get_resp_header(conn, "content-type") |> List.first()
-      assert ct =~ "text/html"
-      assert ct =~ "utf-8"
-    end
-
-    test "GET /dashboard/static/lcars-tva.css sert le CSS" do
-      conn = conn(:get, "/dashboard/static/lcars-tva.css") |> Rest.call(@opts)
-
-      assert conn.status == 200
-      assert conn.resp_body =~ "LCARS"
-      assert conn.resp_body =~ "starfleet#1"
-      assert conn.resp_body =~ "clean-room"
-    end
-  end
 end

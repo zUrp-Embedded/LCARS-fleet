@@ -23,18 +23,15 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     `{:error, reason}` ALREADY tagged `:launch_env_unresolved` (raise from human/passwd/vendor-bin resolution),
     `:credentials_invalid` (scope/plan gate) or `:auth_token_required` (auth/git identity). Order
     auth → git → gate preserved. The `:launching` state wires it onto `do_launch_backend` / `transition_failed`.
-  - `claude_dir/0` — claudeDir of the runtime human (config override `:claude_dir` else
-    `~/.claude`); **public** because also called by the `:injecting` state (`Pod`) for `CLAUDE_DIR` at injection.
 
-  Depends on `Pod.LaunchSpec` (env builders), `Pod.McpProvision` (`mcp_channel_env`), `Pod.Paths`
-  (`runtime_home`), `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, full qualif) and
+  Depends on `Pod.LaunchSpec` (env builders), `Pod.McpProvision` (`mcp_channel_env`),
+  `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, full qualif) and
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
   alias Fleet.Spawner.Pod.McpProvision
-  alias Fleet.Spawner.Pod.Paths
 
   @doc """
   Builds the COMPLETE pod launch env + resolves/validates the credentials.
@@ -175,17 +172,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   #   - an apiKeyHelper / an API key = METERED billing = leaving the subscription (forbidden).
   # So: per-human YES, shared-writable YES, broker NO. DO NOT "improve" this.
   # ════════════════════════════════════════════════════════════════════════════════════════
-  @doc """
-  claudeDir of the runtime human: config override `:fleet_spawner, :claude_dir` else `~/.claude`
-  (derived from `Paths.runtime_home/0`). Public because also called by the `:injecting` state (`Pod`)
-  to set `CLAUDE_DIR` at injection. The arbitrary per-human variant (`claude_dir_for/1`,
-  passwd-resolved) stays private to the `build/4` pipeline — cf. the sanctuary block above.
-  """
-  @spec claude_dir() :: String.t()
-  def claude_dir do
-    Application.get_env(:fleet_spawner, :claude_dir) || Path.join(Paths.runtime_home(), ".claude")
-  end
-
   # Pod creds = the HUMAN's `~/.claude` (= the runtime user). Config override `:claude_dir` honored
   # (tests / non-standard deployment); else derived from their passwd home. Per-human by construction
   # (cf. the big block above) — NEVER a claudeDir shared across humans.

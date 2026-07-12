@@ -1,8 +1,9 @@
 defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
-  Authority over the FORMAT of briefs: worker / judge / brief-review / rework / conflict, plus the
+  Authority over the FORMAT of briefs: worker / judge / brief-review / rework, plus the
   eng voice instructions. `StepDispatcher` CALLS (it chooses WHICH brief based on the forge state),
-  it no longer FORMS the brief itself.
+  it no longer FORMS the brief itself. (No conflict-resolution brief — merge conflicts are
+  ESCALATED to the architect since 2026-07-07, the forge-blind pod cannot rebase.)
 
   Judge-ness (and a judge's target) is a SECURITY property: it is NEVER inferred by
   omission of a clause. `build_brief/9` is a TOTAL sum and fail-loud on out-of-vocab `brief_kind`/`judge_target`
@@ -32,28 +33,6 @@ defmodule Fleet.Pilot.BriefBuilder do
       "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
         "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` clôt la tâche : le " <>
         "LIVRABLE = ton COMMIT (ne RE-mets PAS les fichiers dans le payload). Le payload porte ta voix ↓.",
-      eng_voice_instruction(:rework),
-      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
-    ]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join("\n\n")
-  end
-
-  # CONFLICT RESOLUTION brief: the PR is APPROVED but `main` has advanced (another
-  # parallel issue merged) → conflict. The PRODUCER (git_native, it wrote the content) RECONCILES:
-  # rebase onto `main` + resolution keeping EVERYTHING (its own + main). Not a re-code. The system pushes;
-  # the rebased push invalidates the old reviews (head_sha) → the judges re-validate the merged result, gatekeeper seals.
-  def resolve_conflict_brief(role, _forge, _repo, pr, _forge_opts, _route) do
-    [
-      "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre issue " <>
-        "parallèle a été fusionné) et ta branche **conflicte** avec `main`. On ne te demande PAS de re-coder : " <>
-        "juste de RÉCONCILIER les deux versions.",
-      "**Procédure (git-native)** : dans ton workspace, `git fetch origin` puis `git rebase origin/main`. Pour " <>
-        "CHAQUE fichier en conflit, résous en **gardant TOUT le contenu utile** — le tien ET celui arrivé sur " <>
-        "`main` (ex. un README partagé : garde les DEUX sections, ne supprime rien). `git add` les fichiers " <>
-        "résolus puis `git rebase --continue` (et `git commit` si besoin). Le SYSTÈME pousse (forge-aveugle, tu " <>
-        "ne push pas). `submit_result` clôt : le LIVRABLE = tes COMMIT(s) rebasés (ne RE-mets PAS les fichiers " <>
-        "dans le payload). Le payload porte ta voix ↓.",
       eng_voice_instruction(:rework),
       Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     ]

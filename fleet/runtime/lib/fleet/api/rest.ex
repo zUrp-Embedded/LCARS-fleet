@@ -16,7 +16,6 @@ defmodule Fleet.API.Rest do
       of R18, avoids the lying 202) THEN broadcasts the `admin.spawn.request` event + 202. All the
       admission policy lives in `Fleet.API.SpawnAdmission`; this router maps the verdicts
       to HTTP statuses
-    * `/dashboard` — forwarded to `Fleet.API.Dashboard` (the external web dashboard's entry)
 
   ## Auth — no-auth reads, guarded writes (not blanket no-auth)
 
@@ -189,9 +188,6 @@ defmodule Fleet.API.Rest do
     end
   end
 
-  # Native Elixir V2 dashboard. Mounts Fleet.API.Dashboard under
-  # /dashboard (GET-only UI). No auth — like the whole API (cf. moduledoc § Auth).
-  forward("/dashboard", to: Fleet.API.Dashboard)
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)

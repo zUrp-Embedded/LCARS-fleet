@@ -19,7 +19,6 @@ Trois dashboards préexistent et **restent en vie** (on coupe rien maintenant, m
 | Port | Quoi | Statut |
 |---|---|---|
 | `:8090` | dashboard Python v1.5 | DÉCOMMISSIONNÉ (cf. Fleet.API.Dashboard) |
-| `:8080/dashboard` | `Fleet.API.Dashboard` (Plug, #594-D2) | squelette monté sur l'API de commande |
 | `:8089` | `fleet_dashboard` (branche sœur `dashboard/observability-8089`) | squelette observation deck |
 | **`:8091`** | **`fleet_observation` (CE design)** | **nouveau — la prise propre BL-026** |
 

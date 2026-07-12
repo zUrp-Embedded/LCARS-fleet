@@ -133,10 +133,11 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   def server_spec_present?, do: not is_nil(mcp_server_spec())
 
   @doc """
-  MCP env vars to propagate to the pod. `LCARS_POD_ID` is set into the pod process env, but the
-  bridge (`fleet_mcp_bridge.py`) no longer reads it and injects NO identity into tool-call args:
-  the central derives the pod_id from the per-pod AF_UNIX socket on which it receives (identity =
-  the channel, cf. `Fleet.MCP.PodSocketAcceptor`), and `TaskQueue.get_for_pod/2` filters on that.
+  MCP env vars to propagate to the pod. `LCARS_POD_ID` is set into the POD PROCESS env for the
+  agent's own introspection (cognitive only, symmetric to `LCARS_ROLE`) — it is NOT a channel: the
+  bridge (`fleet_mcp_bridge.py`) does not read it and injects NO identity into tool-call args, the
+  central derives the pod_id from the per-pod AF_UNIX socket on which it receives (identity = the
+  channel, cf. `Fleet.MCP.PodSocketAcceptor`), and `TaskQueue.get_for_pod/2` filters on that.
   A forged `_lcars_pod_id` in the args is IGNORED.
 
   `LCARS_ROLE` (= the cap-profile's `metadata.name` = business role): set HERE in the pod process's
@@ -224,17 +225,18 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # pod would have no `mcp__fleet__*` tool (the bridge would never start) — hence no way to
   # pull its brief nor to submit its result.
   #
-  # Injects `LCARS_POD_ID` AND `LCARS_FLEET_MCP_SOCKET` into the server's env (the bridge reads
-  # `LCARS_FLEET_MCP_SOCKET` to know ON WHICH socket to talk to the central; the central correlates
-  # `get_work_item` to the pod FROM that per-pod socket, NOT from `LCARS_POD_ID`, which the bridge no
-  # longer reads; do not depend on claude→bridge env inheritance) and forces `alwaysLoad:true` (otherwise
-  # the MCP tools are deferred behind ToolSearch, absent from the turn-1 prompt).
+  # Injects `LCARS_FLEET_MCP_SOCKET` into the MCP server's env (the bridge reads it to know ON WHICH
+  # socket to talk to the central; the central correlates `get_work_item` to the pod FROM that per-pod
+  # socket — identity IS the channel, cf. `Fleet.MCP.PodSocketAcceptor`) and forces `alwaysLoad:true`
+  # (otherwise the MCP tools are deferred behind ToolSearch, absent from the turn-1 prompt). NB: no
+  # `LCARS_POD_ID` here — the bridge does not read it, and the pod's identity is never presented on
+  # the wire (a forged one would be ignored; the socket is the sole authority).
   #
   # ⚠ Host vs namespace for the SOCKET: unlike the bridge (host_bridge for the copy, ns_bridge for
   # the argv), the `socket_path` is set AS-IS. The bwrap bind will mount the socket at the SAME absolute path
   # (`--bind X X`) → host == namespace → NO remap. (Host pods, containment none: no namespace at
   # all, the host path IS the path seen by the bridge.) Hence: no `sandbox_home` in the socket path.
-  defp build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, socket_path) do
+  defp build_fleet_mcp_entry(spec, pod_dir, sandbox_home, _pod_id, socket_path) do
     # HOST: where the spawner actually WRITES the bridge (the real pod_dir on disk).
     host_bridge = Path.join([pod_dir, ".lcars", "fleet_mcp_bridge.py"])
 
@@ -252,7 +254,6 @@ defmodule Fleet.Spawner.Pod.McpProvision do
         end)
 
       pod_env = %{
-        "LCARS_POD_ID" => pod_id,
         # Host path of the per-pod socket, set as-is (host == namespace, cf. the note above).
         "LCARS_FLEET_MCP_SOCKET" => socket_path
       }

@@ -11,8 +11,7 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   FORBIDDEN by the layering. The module is therefore resolved at RUNTIME (`resolved/0`:
   app-env + default as a literal atom → NO compile-time dep, hence no cycle).
   `Fleet.Application` starts the whole domain → the real impl is live when a pod
-  runs. Seam declared in `priv/event_router/allowed_graph.yaml`
-  (`seams` section, `up` direction) — the contract lives HERE, at the CONSUMER.
+  runs. Assumed UPWARD runtime seam (spawner → mcp) — the contract lives HERE, at the CONSUMER.
 
   ## Implementations
 

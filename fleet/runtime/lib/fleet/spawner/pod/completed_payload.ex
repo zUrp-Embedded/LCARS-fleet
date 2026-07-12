@@ -38,9 +38,9 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   Builds the `pod.completed` payload map from the gen_statem `data` (READ, never mutated) +
   the received `result`. Project pod (`repo_path` present) → embeds `workspace`/`base_sha`/
   `gate_base_sha`/`role` (+ `repository`/`remote` if `repo`); pod without project → bare payload
-  (base). The workflow_map context (`workflow_map_id`+`step`) is carried ONLY IF the pod is
-  spawned with these keys — no caller sets them today anymore, so in practice the payload is
-  bare (a consumer that receives a bare payload ignores the workflow_map context, no-op).
+  (base). The workflow_map context (`workflow_map`+`step`) is carried ONLY IF the pod is spawned
+  with those keys (`StepDispatcher` via `:workflow_map`/`:step`), else the payload is bare and the
+  consumer no-ops the workflow_map navigation.
   """
   @spec build(map(), map()) :: map()
   def build(data, result) do
@@ -52,33 +52,27 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
 
     opts = data.opts || []
 
-    case {Keyword.get(opts, :workflow_map_id), Keyword.get(opts, :step)} do
-      {nil, _} ->
-        # Step-dispatch pod (assignee-driven) outside a workflow_map. If it carries a PROJECT (cloned repo),
-        # the payload embeds the end-of-step-run context: the StepRunConsumer consumer is stateless (the event
-        # carries the state). Pod without project (memory-X, architect) → bare payload (base), filtered downstream.
-        case LaunchSpec.effective_project(data.opts, data.cap_profile) do
-          %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
-            base
-            |> Map.merge(%{
-              # Single authority over the workspace subfolder (Pod.Paths), not a copied-around literal.
-              "workspace" => Paths.pod_workspace_path(data.pod_dir),
-              "base_sha" => proj["base_sha"],
-              # Base of the delivery GATE, DECONFLICTED from the clone-base (`base_sha`). For a
-              # rebase-based resolution, the deliverable must DESCEND from `main` (the rebase target). The
-              # resolver equals it to `base_sha` for the forward path (build/rework). Fallback `base_sha`.
-              "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
-              "role" => Fleet.CapProfile.name(data.cap_profile)
-            })
-            |> maybe_put_repo(proj)
-            |> maybe_put_workflow_map_ctx(opts)
+    # Step-dispatch pod (assignee-driven). If it carries a PROJECT (cloned repo), the payload embeds the
+    # end-of-step-run context: the StepRunConsumer consumer is stateless (the event carries the state).
+    # Pod without project (memory-X, architect) → bare payload (base), filtered downstream.
+    case LaunchSpec.effective_project(data.opts, data.cap_profile) do
+      %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
+        base
+        |> Map.merge(%{
+          # Single authority over the workspace subfolder (Pod.Paths), not a copied-around literal.
+          "workspace" => Paths.pod_workspace_path(data.pod_dir),
+          "base_sha" => proj["base_sha"],
+          # Base of the delivery GATE, DECONFLICTED from the clone-base (`base_sha`) — a direct caller
+          # can pin it (`gate_base_branch` → resolver → `gate_base_sha`); the forward path (build/rework)
+          # equals it to `base_sha`. Fallback `base_sha`.
+          "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
+          "role" => Fleet.CapProfile.name(data.cap_profile)
+        })
+        |> maybe_put_repo(proj)
+        |> maybe_put_workflow_map_ctx(opts)
 
-          _ ->
-            base
-        end
-
-      {workflow_map_id, step} ->
-        Map.merge(base, %{"workflow_map_id" => workflow_map_id, "step" => step})
+      _ ->
+        base
     end
   end
 

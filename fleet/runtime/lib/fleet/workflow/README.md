@@ -1,7 +1,7 @@
 # fleet_workflow
 
 **Date** : 2026-07-11
-**Dernière révision** : 2026-07-11
+**Dernière révision** : 2026-07-12
 **Statut** : actif — carte du module (les contrats vivent dans les `@moduledoc`)
 **Référencé par** : —
 
@@ -14,7 +14,6 @@ YAML, evaluate gates, publish deliverables. No RAM engine — the supervisor is 
 is restated, only pointed at.
 
 ## Modules
-- `Fleet.Workflow.Application` — empty supervisor (kept transitionally); pre-registers the `workflow_map.*` event atoms, exposed via `workflow_map_event_atoms/0`
 - `Fleet.Workflow.Loader` — `load!/2`: parse the workflow-map YAML, schema-validate (v2.5 envelope), normalize, then graph-validate — fail-loud
 - `Fleet.Workflow.GraphValidator` — `validate/1`: pure graph linter for the inter-step invariants the JSON schema cannot express
 - `Fleet.Workflow.Gate` — the `evaluate/3` gate-evaluation behaviour (vendor-extensible)

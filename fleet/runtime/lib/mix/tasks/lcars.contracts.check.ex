@@ -844,18 +844,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp project_root, do: File.cwd!()
 
   # ── Topology lock ──────────────────────────────────────────────
-  # MIGRATION Z3 : check OBSOLÈTE post-collapse — fail explicite, à retransposer.
-  # Pré-collapse, ce rail figeait le graphe de deps compile RÉEL de l'umbrella :
-  # `apps/fleet_event_router/priv/allowed_graph.yaml` (rings + edges + seams) diffé
-  # BIDIRECTIONNELLEMENT contre les edges `{:fleet_x, in_umbrella: true}` des `apps/*/mix.exs`,
-  # + monotonicité de ring (dep compile montante non-seam = fail), + seams vivants (marker greppé
-  # dans le code de l'app `from`). Post-collapse (app unique), la matière première du check
-  # n'existe plus : plus de mix.exs par domaine, plus de deps in_umbrella — grepper les
-  # `apps/*/mix.exs` LEFTOVER mesurerait un graphe qui ne gouverne plus le build (faux-vert),
-  # et l'équivalent single-app (xref inter-domaines `lib/fleet/<x>/` projeté sur les rings du
-  # yaml, désormais `priv/event_router/allowed_graph.yaml`) est un REDESIGN, pas une
-  # transposition évidente. Fail-closed en attendant : le verrou release reste rouge tant que
-  # la propriété « topologie déclarée = topologie réelle » n'a pas retrouvé une mesure vraie.
   # MIGRATION Z3 (D-19) — l'ancien `layering.dependency_graph` est RETIRÉ avec sa matière
   # première : il lisait les edges `in_umbrella:` des apps/*/mix.exs, qui n'existent plus.
   # Son successeur MÉCANIQUE est boundary (Z4) : chaque domaine déclarera ses deps dans

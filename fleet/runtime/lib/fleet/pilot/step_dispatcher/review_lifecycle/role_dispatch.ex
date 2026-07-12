@@ -1,8 +1,7 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   @moduledoc """
   EXECUTION leaf of the review flow, extracted from `ReviewLifecycle`: prepares and spawns
-  ONE role on a PR — judge (`:judge`), producer in rework (`:rework`), producer in
-  conflict resolution (`:resolve_conflict`).
+  ONE role on a PR — judge (`:judge`) or producer in rework (`:rework`).
 
   ## Why this cut (and not one per declared cluster)
 
@@ -15,16 +14,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   ## Invariants carried here
 
-    * **clone-base vs gate-base**: the review/rework pod clones the FEATURE-BRANCH
-      (`base_branch: head` — the judge must see the DIFF, the rework resumes ITS work);
-      a RESOLUTION (rebase) keeps the feature as clone-base but pins the ancestor
-      gate to `main` (`gate_base_branch` — the feature tip is rewritten by the
-      rebase, it would no longer be an ancestor).
+    * **clone-base = the FEATURE-BRANCH**: the review/rework pod clones `base_branch: head`
+      (the judge must see the DIFF, the rework resumes ITS work) — never `main`.
     * **resolutions BEFORE any forge write** (project + route read-only): a failure
       never leaves an orphan lock.
-    * **pod identity by scope**: rework/conflict = the PRODUCER (`slot_scope` project
-      → `for_repo`, SAME identity as the issue flow; instance → `for_issue`); the JUDGE
-      keys on the PR (`for_pr`, fan-out by review).
+    * **pod identity by scope**: rework = the PRODUCER (`slot_scope` project → `for_repo`,
+      SAME identity as the issue flow; instance → `for_issue`); the JUDGE keys on the PR
+      (`for_pr`, fan-out by review).
     * **serialization gate**: a busy project-scoped producer → `{:skipped,
       :role_busy}` (retry on the next tick), never re-brief-while-busy.
 
@@ -50,8 +46,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
-  @typedoc "Nature of the PR dispatch: judge, producer rework, or conflict resolution (rebase)."
-  @type kind :: :judge | :rework | :resolve_conflict
+  @typedoc "Nature of the PR dispatch: judge or producer rework."
+  @type kind :: :judge | :rework
 
   @doc """
   Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
@@ -105,19 +101,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     # The review pod (judge) OR rework pod (producer) clones the FEATURE-BRANCH (`head.ref`), NOT
     # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
     # the rework resumes ITS own work. Read-only on the code via the workspace provisioned by the
-    # system (the pod has no forge token). `base_branch: head` → the pod CLONES and
-    # starts from the feature-branch tip.
-    #
-    # The RESOLUTION (rebase) ALSO starts from the feature (its work to rebase),
-    # but its deliverable must DESCEND from `main` (the rebase target), not from the old feature tip
-    # (rewritten by the rebase → the gate would reject it: `base_not_ancestor`). We
-    # DECONFLATE the two roles otherwise carried by `base_sha`: `base_branch` = clone-base (feature, the pod
-    # starts from there, UNCHANGED); `gate_base_branch` = "main" → the resolver pins the GATE base to `main`.
-    # judge/rework (forward, no rewrite): no `gate_base_branch` → gate = clone-base, unchanged.
-    review_opts =
-      opts
-      |> Keyword.put(:base_branch, head)
-      |> maybe_gate_base_main(kind)
+    # system (the pod has no forge token). `base_branch: head` → the pod CLONES and starts from the
+    # feature-branch tip. (No rebase-resolution role anymore — merge conflicts are ESCALATED to the
+    # architect since 2026-07-07, the pod is forge-blind and cannot rebase; cf. `ArchEscalation`.)
+    review_opts = Keyword.put(opts, :base_branch, head)
 
     # PROJECT + ROUTE resolved BEFORE any forge write (read-only): a failure leaves no
     # orphan lock. The route (workflow_map_name, step) is read on the ISSUE (the pipeline-state stays there).
@@ -131,7 +118,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       # changing the pod identity loses no context.
       pod_id =
         case kind do
-          k when k in [:rework, :resolve_conflict] ->
+          :rework ->
             Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
           _ ->
@@ -222,15 +209,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # DECONFLATION clone-base / gate-base. A RESOLUTION (rebase) starts from the
-  # feature (clone-base, its work) but its deliverable must DESCEND from `main` (rebase target) → the
-  # gate bases on `main`, not on the old feature tip (rewritten by the rebase, hence not an
-  # ancestor). judge/rework (forward, no rewrite): no divergence → gate = clone-base.
-  defp maybe_gate_base_main(opts, :resolve_conflict),
-    do: Keyword.put(opts, :gate_base_branch, "main")
-
-  defp maybe_gate_base_main(opts, _kind), do: opts
-
   # Brief of a PR dispatch: :judge -> GateBrief defused (via build_brief, the pod
   # judges the issue); :rework -> rework brief to the PRODUCER (fixes per the review, re-pushes).
   # PR-judge path — no workflow_map step here (PR-driven judges) → `step_spec = %{}`:
@@ -238,7 +216,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
   # `{:ok, brief} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
   # deliverable-judge path (F-C083: a forge read-error on the criterion DEFERS, never a criterion-less
-  # judge). rework/resolve build unconditionally (feedback in hand / no criterion) → always `{:ok, _}`.
+  # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _}`.
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
       BriefBuilder.build_brief(
@@ -255,17 +233,4 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
     do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route)}
-
-  defp review_brief(
-         :resolve_conflict,
-         _profile,
-         role,
-         forge,
-         repo,
-         _issue_n,
-         forge_opts,
-         route,
-         pr
-       ),
-       do: {:ok, BriefBuilder.resolve_conflict_brief(role, forge, repo, pr, forge_opts, route)}
 end

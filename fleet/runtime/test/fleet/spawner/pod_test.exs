@@ -1464,12 +1464,13 @@ defmodule Fleet.Spawner.PodTest do
       # JAMAIS le pod_dir hôte (invisible in-sandbox → c'était LE bug).
       refute cmd =~ pod_dir
 
-      # R9 — l'env du serveur MCP porte la socket per-pod (chemin host rendu par le provisionneur stub,
-      # contient le pod_id) en `LCARS_FLEET_MCP_SOCKET` + `LCARS_POD_ID` ; plus de `LCARS_POD_CAPABILITY`
-      # (identité = le canal/la socket, pas un secret sur le fil) ni de `LCARS_FLEET_MCP_URL` (HTTP retiré).
+      # R9 — l'env du serveur MCP porte SEULEMENT la socket per-pod (chemin host rendu par le
+      # provisionneur stub, contient le pod_id) en `LCARS_FLEET_MCP_SOCKET` : identité = le canal/la
+      # socket, pas un secret sur le fil → plus de `LCARS_POD_ID` (retiré vague B, le pont ne le lit
+      # pas), plus de `LCARS_POD_CAPABILITY`, plus de `LCARS_FLEET_MCP_URL` (HTTP retiré).
       env = get_in(config, ["mcpServers", "fleet", "env"])
       assert env["LCARS_FLEET_MCP_SOCKET"] =~ pod_id
-      assert env["LCARS_POD_ID"] == pod_id
+      refute Map.has_key?(env, "LCARS_POD_ID")
       refute Map.has_key?(env, "LCARS_POD_CAPABILITY")
       refute Map.has_key?(env, "LCARS_FLEET_MCP_URL")
     end

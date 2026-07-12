@@ -16,7 +16,6 @@ Nothing here is restated, only pointed at.
 ## Modules
 - `Fleet.ProjectBootstrap.Phase` — bootstrap namespace; carries the only WIRED phase, `Clone`
 - `Fleet.ProjectBootstrap.Phase.Clone` — pure clone/reset primitives called directly by `Fleet.Spawner.Pod` (`clone_or_skip/3`, `clone_work_doc/2`, `reset_in_place/3`)
-- `Fleet.ProjectBootstrap.Application` — `[]`-children supervisor (supervision-tree consistency with sibling domain supervisors, no process started; `Fleet.Coord.Application` pattern)
 
 ## Config & deps
 - No app-env knob. The only calibration is the `:git_timeout_ms` opt of `clone_or_skip/3` (default = the `Fleet.Credentials.Shell.git/2` wrapper's 30s).

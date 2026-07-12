@@ -7,10 +7,8 @@ defmodule Fleet.Application do
     deps: [
       Fleet.EventRouter,
       Fleet.TaskQueue,
-      Fleet.ProjectBootstrap,
       Fleet.MCP,
       Fleet.Spawner,
-      Fleet.Workflow,
       Fleet.Coord,
       Fleet.Starfleet,
       Fleet.Pilot,
@@ -23,8 +21,11 @@ defmodule Fleet.Application do
   depuis le collapse de l'umbrella (migration Z2, 2026-07-12).
 
   Démarre les superviseurs de domaine (les ex-apps umbrella) dans l'ordre topologique de
-  l'ancien graphe de deps compile. Trois ex-apps sont des bibliothèques pures sans arbre
-  de supervision (cap_profile, credentials, sp_builder) — rien à démarrer pour elles.
+  l'ancien graphe de deps compile. Cinq ex-apps sont des bibliothèques PURES sans arbre de
+  supervision (cap_profile, credentials, sp_builder, workflow, project_bootstrap) — rien à
+  démarrer pour elles (elles n'ont AUCUN processus ; leurs modules sont chargés dans l'app,
+  les fonctions pures marchent sans superviseur). Ne restent dans les children que les
+  9 domaines qui démarrent réellement quelque chose.
 
   ## L'ordre des children EST l'invariant de boot (cicatrice F8)
 
@@ -63,14 +64,10 @@ defmodule Fleet.Application do
       Fleet.EventRouter.Application,
       # Ring 1 — broker de mandats (dep : Bus).
       Fleet.TaskQueue.Application,
-      # Ring 1 — bootstrap projet (children vides, garde de cohérence d'arbre).
-      Fleet.ProjectBootstrap.Application,
       # Ring 2 — substrat MCP (sockets per-pod). ⚠ AVANT starfleet (cicatrice F8, cf. moduledoc).
       Fleet.MCP.Supervisor,
       # Ring 1 — spawner (pods). Après mcp : son provisionneur de sockets résout vers MCP au runtime.
       Fleet.Spawner.Application,
-      # Ring 2 — moteur workflow-maps.
-      Fleet.Workflow.Application,
       # Ring 2 — policy coord (init_policies! fail-fast dans son init/1).
       Fleet.Coord.Application,
       # Ring 2 — audit + BootOrchestrator (spawn des permanents → exige mcp ET spawner vivants).

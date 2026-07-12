@@ -5,7 +5,7 @@ defmodule Fleet.Spawner.Pod do
 
   ## States (= the former `phase`s)
 
-      :allocating → :cleaning → :projecting → :injecting → :launching →
+      :allocating → :cleaning → :projecting → :launching →
       :monitoring  ⇄  :extracting → :releasing  ──▶ (stop :normal, phase :succeeded)
                                                 ↑
             (a long-lived pod returns to :monitoring from :extracting)
@@ -34,7 +34,7 @@ defmodule Fleet.Spawner.Pod do
   ## Conditions
 
   `data.conditions` (MapSet) accumulates the observable events crossed:
-  `:home_projected`, `:context_injected`, `:process_launched`, `:stream_alive`,
+  `:home_projected`, `:process_launched`, `:stream_alive`,
   `:output_extracted`, `:home_released`, plus the `:publishing` FLAG (a git_native pipe
   between its submit and the forge confirmation `deliverable.published`). `:publishing` stays
   a flag, NOT a state: a publishing pod is functionally in `:monitoring` (it can
@@ -94,7 +94,6 @@ defmodule Fleet.Spawner.Pod do
           :allocating
           | :cleaning
           | :projecting
-          | :injecting
           | :launching
           | :monitoring
           | :extracting
@@ -102,7 +101,6 @@ defmodule Fleet.Spawner.Pod do
 
   @type condition ::
           :home_projected
-          | :context_injected
           | :process_launched
           | :stream_alive
           | :output_extracted
@@ -326,23 +324,10 @@ defmodule Fleet.Spawner.Pod do
       # SP no longer stored in data (no longer in argv): the SOURCE = .lcars/system-prompt.md (written above),
       # read by claude_launch via --system-prompt-file.
       data = add_condition(data, :home_projected)
-      {:next_state, :injecting, data, [{:next_event, :internal, :proceed}]}
+      {:next_state, :launching, data, [{:next_event, :internal, :proceed}]}
     else
       {:error, reason} -> transition_failed(data, {:project_failed, reason})
     end
-  end
-
-  def handle_event(:internal, :proceed, :injecting, data) do
-    # No more resolve_env OAuth (vault/RT-env deprecated). The pod authenticates via the human's
-    # claudeDir, bound RW by bwrap_launch.sh (env CLAUDE_DIR → ~/.claude, native Anthropic refresh).
-    env_vars = %{"CLAUDE_DIR" => LaunchEnv.claude_dir()}
-
-    data =
-      data
-      |> Map.put(:env_vars, env_vars)
-      |> add_condition(:context_injected)
-
-    {:next_state, :launching, data, [{:next_event, :internal, :proceed}]}
   end
 
   def handle_event(:internal, :proceed, :launching, data) do

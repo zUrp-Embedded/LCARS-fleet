@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.Application do
       # Neither `:repo` to the Poller (discovery by topic), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
       # The routing lives in the route-comment (engraved by create_issue); the Poller reads it (state-machine).
       # subscribe_gitea (Z6e/D-13) : le webhook accélère le tick (hint, poll = la vérité).
-      {Fleet.Pilot.Poller, interval_ms: interval, step_dispatch?: true, subscribe_gitea: true},
+      {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
       {Fleet.Pilot.StepRunConsumer,
        forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/1}
     ]

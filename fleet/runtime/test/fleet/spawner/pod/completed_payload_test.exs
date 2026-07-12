@@ -120,25 +120,6 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
     end
   end
 
-  describe "build/2 — branche workflow_map_id (spawn workflow_map explicite)" do
-    test "workflow_map_id + step dans opts → payload workflow_map (court-circuite le lookup projet)" do
-      # Cette branche N'appelle PAS effective_project : le contexte workflow_map est direct.
-      payload =
-        CompletedPayload.build(
-          data(workflow_map_id: "wm-77", step: "review", project: %{"repo_path" => "ignored"}),
-          %{"r" => 1}
-        )
-
-      assert payload == %{
-               "pod_id" => "pod-abc",
-               "issue_id" => "issue-42",
-               "result" => %{"r" => 1},
-               "workflow_map_id" => "wm-77",
-               "step" => "review"
-             }
-    end
-  end
-
   describe "build/2 — pureté (ne mute pas le data)" do
     test "le data passé n'est pas modifié" do
       d = data(project: %{"repo_path" => "r", "base_sha" => "b", "repo" => "o/n"})
