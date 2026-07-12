@@ -14,7 +14,8 @@ defmodule Fleet.Pilot.Poller.Lease do
     * The lease reads on the ROUTE (append-only, robust), NEVER on the success of the
       workflow_map load: a TRANSIENTLY unreadable workflow_map cannot
       exclude an advanced workflow_run → **fail-closed** (classified ENGAGED, lease HELD).
-      DURABLE absence → G6 escalation (IncidentRegistry, dedup = throttle) — never a
+      DURABLE absence → G6 escalation (IncidentRegistry: 1st = note, recurrence = ONE issue
+      then cooldown — the registry's escalation memory IS the throttle) — never a
       silently blocked repo.
 
   ## Lease vs tally — two concerns that the dispatch return mixes
@@ -259,9 +260,11 @@ defmodule Fleet.Pilot.Poller.Lease do
         # G6: the workflow_map does NOT load (removed/renamed from the catalog, or broken schema). The lease
         # stays fail-closed (cf. classify_issue: we do not release the lease of a maybe-advanced
         # workflow_run) — BUT if the absence is DURABLE, the issue holds the lease and the repo is blocked
-        # FOREVER silently (Jupiter: nobody will see it). We ESCALATE: IncidentRegistry dedups
-        # by signature → 1st occurrence = WAL note, RECURRENCE (map missing at every tick) = sysadmin
-        # issue opened. No spam (the dedup IS the throttle). The escalation must never break the
+        # FOREVER silently (Jupiter: nobody will see it). We ESCALATE: IncidentRegistry keyed
+        # by signature → 1st occurrence = WAL note, RECURRENCE (map missing at every tick) = ONE
+        # sysadmin issue, then the registry's escalation COOLDOWN suppresses the per-tick repeats
+        # (the dedup alone was NOT a throttle: it escalated on EVERY recurrence — one issue per
+        # tick on a durable failure, ~2 880/day). The escalation must never break the
         # tick (rescue in escalate_workflow_map_incident, silent at this site); the load failure
         # recurs at EVERY tick while the map stays broken, so a skipped escalation is re-attempted
         # one tick later — and the registry itself logs error when its owner is unavailable.

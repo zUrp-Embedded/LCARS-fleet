@@ -269,6 +269,135 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:label, "fleet/lcars", 1, "error_system"}
     end
 
+    test "récurrence SOUS cooldown → {:escalation_suppressed, N}, AUCUNE nouvelle issue (mémoire d'escalade)",
+         %{tmp_dir: tmp} do
+      # AVANT : record_or_escalate escaladait à CHAQUE récurrence — une workflow_map durablement
+      # illisible sur une issue routée = 1 issue forge PAR TICK (~2 880/jour), auto-amplifiée par
+      # le webhook-kick (« the dedup IS the throttle » était faux : le dedup ne throttlait rien).
+      # APRÈS : l'escalade grave last_escalated_at/escalated_issue dans l'entrée ; une récurrence
+      # sous le cooldown est NOTÉE (count/last_seen — la timeline reste vraie) mais supprimée.
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 41} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      # 1re occurrence = note ; 2e = escalade (issue #41) ; 3e/4e = SUPPRIMÉES (cooldown 1h défaut).
+      assert :recorded = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert {:escalated, 41} = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert_received :issue_created
+
+      assert {:escalation_suppressed, 41} =
+               Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+
+      assert {:escalation_suppressed, 41} =
+               Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+
+      refute_received :issue_created
+    end
+
+    test "récurrence APRÈS le cooldown → re-escalade (le cooldown borne, il n'éteint pas l'alarme)",
+         %{tmp_dir: tmp} do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      # cooldown 0 ms (seam) : chaque récurrence re-escalade — l'alarme re-tire dès l'expiration.
+      opts = [
+        server: name,
+        escalation_cooldown_ms: 0,
+        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 42} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      assert :recorded = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert {:escalated, 42} = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert {:escalated, 42} = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert_received :issue_created
+      assert_received :issue_created
+    end
+
+    test "le sync forge PRÉSERVE la mémoire d'escalade (merge_entry porte last_escalated_at/escalated_issue)",
+         %{tmp_dir: tmp} do
+      # Le point BLOQUANT du verify : merge_entry reconstruisait l'entrée avec 4 clés codées en
+      # dur → le stamp d'escalade aurait été silencieusement perdu à chaque sync forge (debounce
+      # 2s) et la tempête reprenait. Ici la forge rend l'entrée SANS stamp (autre machine,
+      # pré-cooldown) : après le merge, la récurrence doit TOUJOURS être supprimée.
+      pid = self()
+      sig = Reg.signature("pod", "issue-9-eng", :launch_failed)
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 3}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 43} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      # Entrée déjà connue (forge, count 3) → récurrence directe → escalade + stamp.
+      assert {:escalated, 43} = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+      assert_received :issue_created
+
+      # Le sync (débounce 5ms) merge WAL ∪ forge-sans-stamp et RÉÉCRIT la mémoire : le stamp
+      # doit survivre au merge (pair last_escalated_at/escalated_issue portée par merge_entry).
+      assert_receive {:put, content}, 1_000
+      assert content =~ "last_escalated_at"
+      assert content =~ "escalated_issue"
+
+      assert {:escalation_suppressed, 43} =
+               Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
+
+      refute_received :issue_created
+    end
+
+    test "escalate_gated (Cat-5) : 1re occurrence IMMÉDIATE, répétition sous cooldown supprimée",
+         %{tmp_dir: tmp} do
+      # Doctrine A-06 préservée : la sévérité max ouvre l'issue dès la PREMIÈRE occurrence
+      # (aucun gate de récurrence) — seules les répétitions intra-cooldown de la même signature
+      # sont supprimées (un drift permanent ne re-crée plus une issue par event).
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 77} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      sig = "cat5:pod_drift:permanent-architect"
+
+      assert {:ok, 77} = Reg.escalate_gated(:cat5, "permanent-architect", "drift", sig, opts)
+      assert_received :issue_created
+
+      assert {:suppressed, 77} =
+               Reg.escalate_gated(:cat5, "permanent-architect", "drift", sig, opts)
+
+      refute_received :issue_created
+    end
+
     test "F-C075 : add_label ÉCHOUE (persistant) → {:escalation_failed, {:discovery_label_failed,_}}, JAMAIS un {:escalated} menteur",
          %{tmp_dir: tmp} do
       # `error_system` = LE signal de découverte durable (le poller/l'humain trouve l'issue PAR ce label).

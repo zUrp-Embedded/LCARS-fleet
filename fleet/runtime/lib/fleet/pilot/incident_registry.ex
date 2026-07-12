@@ -65,43 +65,131 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @doc """
   Records a failure, OR escalates it if recurrent (already seen). For the paths WITHOUT re-roll (e.g.
   `pod.failed` / `result_timeout`): 1st = `note` (tolerated, possibly random); recurrence = escalation
-  (pattern → root-cause).
+  (pattern → root-cause). EVERY occurrence updates the memory (count/last_seen — the timeline stays
+  true even under cooldown).
+
+  The registry HAS the escalation memory it is named for: an escalation stamps
+  `last_escalated_at`/`escalated_issue` in the signature entry, and a recurrence under
+  `:incident_escalation_cooldown_ms` (config `:fleet_pilot`, default 1 h) is SUPPRESSED instead of
+  opening a new forge issue. Without this, a durable failure (workflow_map unreadable on a routed
+  issue) opened ONE ISSUE PER TICK — ~2 880/day, self-amplified by the webhook kick.
 
   HONEST return — it carries what ACTUALLY happened, never an optimistic success:
 
     - `:recorded` — first time, incident recorded in memory + local WAL.
     - `{:escalated, issue_number}` — recurrence, sysadmin issue ACTUALLY opened (the number PROVES it).
+    - `{:escalation_suppressed, issue_number | nil}` — recurrence NOTED (count/last_seen updated) but
+      under cooldown of the previous escalation: NO new issue (the existing one carries the alarm).
     - `{:escalation_failed, reason}` — recurrence detected but opening the issue failed (forge down?):
-      NO issue exists. The incident stays in memory/local WAL (recorded on the 1st pass), but the sysadmin
+      NO issue exists. The incident stays in memory/local WAL, but the sysadmin
       alarm did NOT go out → the caller must SHOUT it, not reassure.
-    - `{:record_failed, reason}` — first time but the owner (GenServer) is unavailable: the incident was NOT
+    - `{:record_failed, reason}` — the owner (GenServer) is unavailable: the incident was NOT
       recorded at all (neither memory nor WAL) → a recurrence cannot be detected.
   """
   @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
           :recorded
           | {:escalated, integer()}
+          | {:escalation_suppressed, integer() | nil}
           | {:escalation_failed, term()}
           | {:record_failed, term()}
   def record_or_escalate(op, subject, reason, opts \\ [])
       when is_binary(op) and is_binary(subject) do
     sig = signature(op, subject, reason)
 
-    if seen_before?(sig, opts) do
-      # `escalate_kind` (default `:recurrence`): the wake passes `:sp_suspect` (recurrence = SP, not the agent).
-      # We PROPAGATE the escalation result: `{:escalated, num}` comes out ONLY if the issue was really
-      # opened (the number proves it). Forge down → `{:escalation_failed, _}`; the incident stays in the local
-      # WAL (recorded on the 1st pass, which made `seen_before?` true), only the ISSUE is missing.
-      case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
-        {:ok, num} -> {:escalated, num}
-        {:error, e} -> {:escalation_failed, e}
+    case observe(sig, reason, opts) do
+      :recorded_first ->
+        :recorded
+
+      {:suppressed, issue} ->
+        {:escalation_suppressed, issue}
+
+      :should_escalate ->
+        # `escalate_kind` (default `:recurrence`): the wake passes `:sp_suspect` (recurrence = SP, not the agent).
+        # We PROPAGATE the escalation result: `{:escalated, num}` comes out ONLY if the issue was really
+        # opened (the number proves it). Forge down → `{:escalation_failed, _}`; the incident stays in the
+        # local WAL (observed above), only the ISSUE is missing — and NO cooldown stamp is written, so the
+        # next recurrence retries the escalation.
+        case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
+          {:ok, num} ->
+            _ = mark_escalated(sig, num, opts)
+            {:escalated, num}
+
+          {:error, e} ->
+            {:escalation_failed, e}
+        end
+
+      {:error, e} ->
+        {:record_failed, e}
+    end
+  end
+
+  # Single memory transaction at the OWNER (upsert count/last_seen + WAL + sync schedule) that
+  # ALSO decides the escalation gate — the cooldown check and the note must not race across
+  # two calls, and the recurrence must be engraved even when suppressed.
+  defp observe(sig, reason, opts) do
+    # Le cooldown est résolu CÔTÉ APPELANT (opts > config > défaut) et voyage dans le message :
+    # le handler ne relit pas state.opts — le seam de test et un override par-appel marchent.
+    GenServer.call(server(opts), {:observe, sig, reason, now(opts), cooldown_ms(opts)})
+  catch
+    :exit, why ->
+      Logger.error("IncidentRegistry: unavailable (observe #{sig}): #{inspect(why)} — fail-loud")
+      {:error, :registry_unavailable}
+  end
+
+  # Stamps `last_escalated_at`/`escalated_issue` at the owner (WAL + forge sync — merge_entry
+  # carries the fields cross-machine). Failure = log only: the issue EXISTS (the escalation
+  # succeeded), losing the stamp costs at worst one redundant issue at the next recurrence.
+  defp mark_escalated(sig, issue_number, opts) do
+    GenServer.call(server(opts), {:mark_escalated, sig, issue_number, now(opts)})
+  catch
+    :exit, why ->
+      Logger.error(
+        "IncidentRegistry: unavailable (mark_escalated #{sig} ##{issue_number}): #{inspect(why)} " <>
+          "— cooldown NOT engraved (next recurrence may open a redundant issue)"
+      )
+
+      {:error, :registry_unavailable}
+  end
+
+  @doc """
+  Cat-5 façade: escalates through the registry's cooldown gate while PRESERVING
+  « issue on the FIRST occurrence » (no recurrence gate — max severity, doctrine A-06): only the
+  REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
+  suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays
+  stateless; the memory lives here. If the registry owner is down, we FAIL-OPEN to the
+  escalation: the max-severity alarm must not be lost because its throttle is.
+
+  Returns `{:ok, number}` | `{:suppressed, number | nil}` | `{:error, term}`.
+  """
+  @spec escalate_gated(atom(), String.t(), term(), String.t(), keyword()) ::
+          {:ok, integer()} | {:suppressed, integer() | nil} | {:error, term()}
+  def escalate_gated(kind, subject, reason, sig, opts \\ []) do
+    gate =
+      try do
+        GenServer.call(server(opts), {:observe, sig, reason, now(opts), cooldown_ms(opts)})
+      catch
+        :exit, why ->
+          Logger.error(
+            "IncidentRegistry: unavailable (escalate_gated #{sig}): #{inspect(why)} — " <>
+              "FAIL-OPEN, escalating without cooldown gate"
+          )
+
+          :should_escalate
       end
-    else
-      # `note` records in memory + local WAL. `{:error, _}` = owner unavailable → NOTHING is recorded: we
-      # signal it (`{:record_failed, _}`), we don't lie a `:recorded`.
-      case note(sig, reason, opts) do
-        :ok -> :recorded
-        {:error, e} -> {:record_failed, e}
-      end
+
+    case gate do
+      {:suppressed, issue} ->
+        {:suppressed, issue}
+
+      _first_or_should_escalate ->
+        case escalate(kind, subject, reason, sig, opts) do
+          {:ok, num} ->
+            _ = mark_escalated(sig, num, opts)
+            {:ok, num}
+
+          {:error, e} ->
+            {:error, e}
+        end
     end
   end
 
@@ -147,6 +235,53 @@ defmodule Fleet.Pilot.IncidentRegistry do
     registry = upsert(state.registry, sig, reason, now)
 
     # Local crash-survivable WAL BEFORE the forge; the forge is async (never on the dispatcher's path).
+    _ = write_wal(state.wal_path, registry)
+    {:reply, :ok, schedule_sync(%{state | registry: registry})}
+  end
+
+  # Memory transaction of `record_or_escalate`/`escalate_gated`: notes the occurrence (count/
+  # last_seen — the timeline stays true even under cooldown) AND decides the escalation gate
+  # in ONE serialized call (no race between the check and the note).
+  def handle_call({:observe, sig, reason, now, cooldown_ms}, _from, state) do
+    known? = Map.has_key?(state.registry, sig)
+    cooldown = under_cooldown(state.registry[sig], now, cooldown_ms)
+
+    registry = upsert(state.registry, sig, reason, now)
+    _ = write_wal(state.wal_path, registry)
+    state = schedule_sync(%{state | registry: registry})
+
+    reply =
+      cond do
+        not known? -> :recorded_first
+        match?({:suppressed, _}, cooldown) -> cooldown
+        true -> :should_escalate
+      end
+
+    {:reply, reply, state}
+  end
+
+  # Engraves the escalation memory (recurrence cooldown): WAL + forge sync — `merge_entry`
+  # carries the two fields cross-machine, otherwise every sync would erase the cooldown ~2s
+  # after each note and the issue storm would resume.
+  def handle_call({:mark_escalated, sig, issue_number, now}, _from, state) do
+    registry =
+      Map.update(
+        state.registry,
+        sig,
+        %{
+          "count" => 1,
+          "first_seen" => now,
+          "last_seen" => now,
+          "last_escalated_at" => now,
+          "escalated_issue" => issue_number
+        },
+        fn entry ->
+          entry
+          |> Map.put("last_escalated_at", now)
+          |> Map.put("escalated_issue", issue_number)
+        end
+      )
+
     _ = write_wal(state.wal_path, registry)
     {:reply, :ok, schedule_sync(%{state | registry: registry})}
   end
@@ -354,12 +489,28 @@ defmodule Fleet.Pilot.IncidentRegistry do
     a = if is_map(a), do: a, else: %{}
     b = if is_map(b), do: b, else: %{}
 
-    %{
+    # Escalation memory: the LATEST escalation wins as a PAIR (stamp + its issue — a max on
+    # each field separately could marry the new stamp with the old issue number). Old entries
+    # (pre-cooldown WAL/forge) have neither field → nils, dropped below (back-compat).
+    {esc_at, esc_issue} =
+      if (a["last_escalated_at"] || "") >= (b["last_escalated_at"] || "") do
+        {a["last_escalated_at"], a["escalated_issue"]}
+      else
+        {b["last_escalated_at"], b["escalated_issue"]}
+      end
+
+    base = %{
       "count" => max(a["count"] || 0, b["count"] || 0),
       "first_seen" => min_iso(a["first_seen"], b["first_seen"]),
       "last_seen" => max_iso(a["last_seen"], b["last_seen"]),
       "last_reason" => later_reason(a, b)
     }
+
+    if is_nil(esc_at) do
+      base
+    else
+      Map.merge(base, %{"last_escalated_at" => esc_at, "escalated_issue" => esc_issue})
+    end
   end
 
   defp min_iso(nil, b), do: b
@@ -380,6 +531,31 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # --- config (opts > app env > default) ---
   defp server(opts), do: Keyword.get(opts, :server, __MODULE__)
   defp now(opts), do: opts[:now] || DateTime.to_iso8601(DateTime.utc_now())
+
+  # Recurrence cooldown of the sysadmin escalation: default 1 h (a durable failure keeps ONE
+  # open issue as its alarm instead of one per tick — the storm was ~2 880 issues/day,
+  # self-amplified by the webhook kick). Seam `:escalation_cooldown_ms` (tests) overrides the
+  # config knob. Entries without a stamp (pre-cooldown WAL/forge, or escalation never done)
+  # → nil → the gate lets the escalation through (back-compat = old behavior).
+  @escalation_cooldown_ms 3_600_000
+
+  defp under_cooldown(nil, _now_iso, _cooldown_ms), do: nil
+
+  defp under_cooldown(entry, now_iso, cooldown_ms) do
+    with last when is_binary(last) <- entry["last_escalated_at"],
+         {:ok, last_dt, _} <- DateTime.from_iso8601(last),
+         {:ok, now_dt, _} <- DateTime.from_iso8601(now_iso),
+         true <- DateTime.diff(now_dt, last_dt, :millisecond) < cooldown_ms do
+      {:suppressed, entry["escalated_issue"]}
+    else
+      _ -> nil
+    end
+  end
+
+  defp cooldown_ms(opts) do
+    opts[:escalation_cooldown_ms] ||
+      Application.get_env(:fleet_pilot, :incident_escalation_cooldown_ms, @escalation_cooldown_ms)
+  end
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 

@@ -630,6 +630,10 @@ defmodule Fleet.Spawner.Pod do
 
         Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
+          # issue_id nourrit correlation_id (Events.lossy_broadcast le dérive du payload) : sans
+          # lui, chaque wake.failed partait correlation_id=nil et l'issue d'escalade :sp_suspect
+          # sortait sans bloc « Mandat lié » (vague E cassée sur ce producteur).
+          "issue_id" => data.issue_id,
           "reason" => reason,
           "reason_detail" => reason_detail,
           "pane" => Fleet.Spawner.PodTmux.capture_pane(data.pod_id)
