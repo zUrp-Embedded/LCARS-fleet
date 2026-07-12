@@ -62,6 +62,13 @@ defmodule Fleet.Event do
   @spec valid_source?(atom()) :: boolean()
   def valid_source?(source), do: source in @canonical_sources
 
+  # Test-facing accessor: the guard test proves `@type source` (docs) and `@canonical_sources`
+  # (enforcement) name the SAME set — two free copies of a closed enum drift silently otherwise
+  # (a source added to one list only either rejects a legitimate producer or documents a ghost).
+  @doc false
+  @spec canonical_sources() :: [atom()]
+  def canonical_sources, do: @canonical_sources
+
   @doc """
   Canonical constructor of a `%Fleet.Event{}` — "parse, don't validate": it makes the invalid
   non-representable and is the SOLE construction point for producers.

@@ -140,7 +140,10 @@ defmodule Fleet.Starfleet.AuditConsumer do
          correlation_id: tid,
          payload: p
        }) do
-    reason = Map.get(p, :reason) || Map.get(p, "reason") || "?"
+    # Clé ATOME seule : l'unique producteur (task_queue/server) émet %{reason: …} et le Bus est
+    # in-process (Phoenix.PubSub, aucun round-trip JSON qui stringifierait) — un fallback
+    # string-key serait de la re-validation d'une forme que la frontière garantit déjà.
+    reason = Map.get(p, :reason, "?")
 
     Logger.warning(
       "AUDIT task_queue.work_item.failed pod=#{pid} work_item=#{tid} reason=#{inspect(reason)}"

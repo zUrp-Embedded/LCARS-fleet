@@ -248,8 +248,10 @@ defmodule Fleet.CapProfile do
   mode, never the host — a config gap must NEVER open the host by default.
   """
   @spec containment(t()) :: String.t()
+  # String key ONLY: `to_struct/1` deep-stringifies metadata, so an atom `:containment` key is
+  # structurally impossible here — an atom fallback would re-validate what the boundary guarantees.
   def containment(%__MODULE__{metadata: meta}) when is_map(meta),
-    do: Map.get(meta, "containment") || Map.get(meta, :containment) || @default_containment
+    do: Map.get(meta, "containment") || @default_containment
 
   def containment(%__MODULE__{}), do: @default_containment
 

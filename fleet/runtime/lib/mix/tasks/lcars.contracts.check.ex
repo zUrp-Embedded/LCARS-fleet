@@ -995,8 +995,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     body =
       Enum.map_join(checks, "\n", fn c ->
+        # Accès par CHAMP (c.evidence/c.note comme c.id/c.status) : chaque producteur pose les
+        # 5 clés — un Map.get à défaut masquerait une forme garantie (et son défaut mort).
         ev =
-          case Map.get(c, :evidence, []) do
+          case c.evidence do
             [] -> ""
             list -> "\n    evidence:\n" <> Enum.map_join(list, "\n", &"      - #{&1}")
           end
@@ -1004,7 +1006,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "  - id: #{c.id}\n" <>
           "    remediation: #{c.remediation}\n" <>
           "    status: #{c.status}\n" <>
-          "    note: #{Map.get(c, :note, "")}" <> ev
+          "    note: #{c.note}" <> ev
       end)
 
     header <> "\n" <> body

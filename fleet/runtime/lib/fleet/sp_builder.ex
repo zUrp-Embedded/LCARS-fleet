@@ -366,20 +366,19 @@ defmodule Fleet.SPBuilder do
          spec: %{"invocation" => %{"subagent_template" => name}}
        })
        when is_binary(name) and name != "" do
-    # `confined_join` VALIDATES `name` as a safe slug (kebab, no `.`/`..`/`/`) confined under the root —
-    # same guard as the modops. The flat template file is then `subagent-<name>.md` (a filename carries a
-    # `.` so it can't be the slug leaf itself); we build it under the same root once `name` is proven safe.
-    case Fleet.Slug.confined_join(subagent_template_root(), name) do
-      {:ok, _confined} ->
-        path = Path.join(subagent_template_root(), "subagent-#{name}.md")
+    # `Slug.valid?` guards `name` as a safe slug (kebab, no `.`/`..`/`/`) — the question here is
+    # ONLY "is the name safe as a path fragment?" (the real leaf is `subagent-<name>.md`, built
+    # below). The old `confined_join` computed a joined path just to DISCARD it — an indirection
+    # the reader had to decode; `valid?` states the intent directly (same gesture as filter_skills).
+    if Fleet.Slug.valid?(name) do
+      path = Path.join(subagent_template_root(), "subagent-#{name}.md")
 
-        case File.read(path) do
-          {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
-          {:error, _} -> {:error, {:subagent_template_missing, name}}
-        end
-
-      {:error, reason} ->
-        {:error, {:subagent_template_unsafe, {name, reason}}}
+      case File.read(path) do
+        {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
+        {:error, _} -> {:error, {:subagent_template_missing, name}}
+      end
+    else
+      {:error, {:subagent_template_unsafe, name}}
     end
   end
 

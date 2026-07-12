@@ -61,8 +61,8 @@ defmodule Fleet.SPBuilder.Monk do
 
       path = Path.join(root, registry_rel)
 
-      with {:ok, reg} <- read_registry(path),
-           {:ok, monk} <- find_monk(reg, instance) do
+      with {:ok, monks} <- read_registry(path),
+           {:ok, monk} <- find_monk(monks, instance) do
         {:ok,
          %{
            persona_hint: Map.get(monk, "persona_hint", ""),
@@ -100,10 +100,12 @@ defmodule Fleet.SPBuilder.Monk do
   defp read_registry(path) do
     # No `kind` attribute (a single kind per `monks/*.yaml` folder, the path
     # declares the role). Validation = presence of `spec.monks` in the expected
-    # shape (list), not a `kind` embedded in the YAML.
+    # shape (list), not a `kind` embedded in the YAML. Returns the VALIDATED list
+    # directly (parse-once-trust-inside): downstream must not re-derive `spec.monks`
+    # with a defensive default from a shape this boundary just guaranteed.
     case YamlElixir.read_from_file(path) do
-      {:ok, %{"spec" => %{"monks" => monks}} = reg} when is_list(monks) ->
-        {:ok, reg}
+      {:ok, %{"spec" => %{"monks" => monks}}} when is_list(monks) ->
+        {:ok, monks}
 
       {:ok, _} ->
         {:error, {:not_a_memory_registry, path}}
@@ -113,9 +115,7 @@ defmodule Fleet.SPBuilder.Monk do
     end
   end
 
-  defp find_monk(reg, instance) do
-    monks = get_in(reg, ["spec", "monks"]) || []
-
+  defp find_monk(monks, instance) when is_list(monks) do
     case Enum.find(monks, &(Map.get(&1, "name") == instance)) do
       nil -> {:error, {:monk_instance_not_found, instance}}
       monk -> {:ok, monk}

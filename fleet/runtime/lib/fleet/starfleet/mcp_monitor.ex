@@ -96,7 +96,9 @@ defmodule Fleet.Starfleet.MCPMonitor do
         {:crashed, :ok} ->
           Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")
 
-        {previous, ^new_status} when previous == new_status ->
+        # `{same, same}` : la répétition d'une variable dans un pattern impose déjà l'égalité —
+        # l'ancienne épingle `^new_status` + guard redondant obscurcissait l'intention (« statut inchangé »).
+        {same, same} ->
           :ok
 
         {previous, current} ->

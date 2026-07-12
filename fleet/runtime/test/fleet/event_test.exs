@@ -23,7 +23,33 @@ defmodule Fleet.EventTest do
     test "source non-atom → ArgumentError" do
       assert_raise ArgumentError, fn -> Event.new("spawner", :x) end
     end
+
+    # Régression acte4 #40 — DEUX copies libres du set fermé des sources coexistent :
+    # `@type source` (la doc machine-visible) et `@canonical_sources` (l'enforcement de new/3).
+    # Sans ce garde, ajouter une source dans UNE seule liste passe en silence : manquante dans
+    # l'enforcement → producteur légitime rejeté ; manquante dans le type → doc fantôme.
+    test "garde anti-dérive : @type source ≡ @canonical_sources (mêmes atomes)" do
+      {:ok, types} = Code.Typespec.fetch_types(Fleet.Event)
+
+      {:type, {:source, union_ast, []}} =
+        Enum.find(types, fn
+          {:type, {:source, _, _}} -> true
+          _ -> false
+        end)
+
+      type_atoms = union_atoms(union_ast) |> MapSet.new()
+      enforced = MapSet.new(Event.canonical_sources())
+
+      assert type_atoms == enforced,
+             "dérive @type source vs @canonical_sources — " <>
+               "type-seulement: #{inspect(MapSet.difference(type_atoms, enforced) |> MapSet.to_list())}, " <>
+               "enforcement-seulement: #{inspect(MapSet.difference(enforced, type_atoms) |> MapSet.to_list())}"
+    end
   end
+
+  # Extraction des atomes d'un union-type AST (forme Code.Typespec).
+  defp union_atoms({:type, _, :union, items}), do: Enum.flat_map(items, &union_atoms/1)
+  defp union_atoms({:atom, _, a}), do: [a]
 
   describe "new/3 — timestamp toujours DateTime" do
     test "sans override → DateTime.utc_now injecté" do
