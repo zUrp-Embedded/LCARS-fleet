@@ -444,8 +444,9 @@ defmodule Fleet.Pilot.StepDispatcher do
          {:ok, profile} <- load_role.(role) do
       # We surface the whole STEP_SPEC (extensible) rather than an isolated field. build_brief
       # reads `brief_kind` there (per-step override: consultant worker → judge without a duplicate profile) AND
-      # `judge_target` (judges the BRIEF vs a deliverable). route=nil (initial producer) → empty step_spec.
-      step_spec = get_in(workflow_map, ["steps", step]) || %{}
+      # `judge_target` (judges the BRIEF vs a deliverable). No nil case: `workflow_map_step_role`
+      # above already proved the step EXISTS in the map (unknown step → error before this line).
+      step_spec = get_in(workflow_map, ["steps", step])
       {:ok, {role, profile, step_spec}}
     end
   end

@@ -19,9 +19,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
        *(No step 3 "PATCH `state:*`": the state lives in the route-comment,
        not in a `state:*` label. The following step numbers keep their mapping.)*
     4. **Routing to the next step**:
-         * `next_assignee` present (multi-step) → `set_assignee(next)`; the
-           poller sees the next one only once 1-3 are OK. **(computing
-           `next_assignee` from the workflow_map is upstream, not here.)**
+         * `next_assignee` present (multi-step) → engraves the NEXT step's ROUTE
+           (`post_route`); the assignee STAYS the human — the poller reads the
+           engraved route (never the assignee) to spawn the next step, and only
+           once 1-3 are OK. **(computing `next_assignee` from the workflow_map
+           is upstream, not here.)**
          * `next_assignee == nil` (1-step / terminal) → `close_issue`.
     5. **Removes `lcars-in-flight`** — LAST: the poller re-spawns the next one
        only once EVERYTHING is done.

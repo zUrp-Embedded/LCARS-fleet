@@ -24,9 +24,10 @@ defmodule Fleet.API.Application do
 
   use Supervisor
 
-  # NB atom `api` (admin.spawn.request): created at compile-time by its real site
-  # (rest.ex) — no need for a dedicated pre-registration attribute in this
-  # application (the atom already exists via the `%Fleet.Event{type: :"admin.spawn.request"}`).
+  # NB atom `admin.spawn.request`: created at compile-time by its real emission site —
+  # `SpawnAdmission` (`Bus.emit(:api, :"admin.spawn.request", …)`, the literal atom as 2nd arg;
+  # moved there from rest.ex at the C4 split) — no need for a dedicated pre-registration
+  # attribute in this application.
 
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)

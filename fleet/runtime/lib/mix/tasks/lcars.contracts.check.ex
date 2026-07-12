@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_verdict_envelope_unwrapped(root),
         check_no_root_runtime_guard(root),
         # ── Topology lock ──
-        check_layering_dependency_graph(root),
+        check_boot_order_f8(root),
         # ── Authority locks (Z7 migration — un fait = une source, cross-langage) ──
         check_roles_provisioning_in_catalogue(root),
         check_mcp_wire_inputschema(root)
@@ -701,10 +701,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # ── Combinators (3 families of data-driven checks) ───────────────────
-  # 8 of the 18 checks are pure instantiations of 3 families; each migrated
-  # check is now just a call carrying its DATA (id, files, patterns,
-  # messages). The evidence messages are passed as-is to the combinator:
-  # no loss of precision vs the unrolled versions they replace.
+  # A good share of the checks are pure instantiations of these 3 families (no COUNT here:
+  # comment-counters rust — the list in `run_checks` is the truth); each migrated check is
+  # just a call carrying its DATA (id, files, patterns, messages). The evidence messages are
+  # passed as-is to the combinator: no loss of precision vs the unrolled versions they replace.
 
   # Does a CODE line of `rel` match `pattern`? Raw grep, then
   # confirmation on the line stripped of its comment (a comment
@@ -853,7 +853,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # de F8 (event_router premier ; mcp avant starfleet ; starfleet après spawner) — le
   # réordonner casse le boot sans erreur de compile. C'est ce que ce check verrouille,
   # sous un id honnête (`boot.order_f8`).
-  defp check_layering_dependency_graph(root) do
+  defp check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
     with [block] <- Regex.run(~r/children = \[(.*?)\n    \]/s, app_src, capture: :all_but_first),

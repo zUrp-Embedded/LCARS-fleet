@@ -22,14 +22,14 @@ defmodule Fleet.Shutdown.Quiesce do
   enqueuing a brief) does NOT consult this flag — otherwise the in-flight work
   could no longer finish, the opposite of the drain's purpose.
 
-  ## Why here (fleet_event_router) and not in fleet_starfleet
+  ## Why a standalone Ring-0 boundary (and not inside starfleet)
 
-  A reader in a core app (Ring 2) cannot take `fleet_starfleet` (Ring 2) as a
-  dependency without coupling siblings; and `fleet_event_router` is the
-  universal substrate that everyone already depends on (like `Fleet.Event`), so
-  the flag is reachable downward from any ring. The **primitive** (the flag)
-  therefore lives here; the **policy** (when to quiesce, the in-flight
-  aggregator) stays in `fleet_starfleet`. Iron Law: no process, just
+  `Fleet.Shutdown.Quiesce` is its OWN zero-dep boundary (`use Boundary, deps: []` above —
+  post-collapse it does NOT live in event_router). A reader in a Ring-2 domain cannot take
+  `Fleet.Starfleet` (Ring 2) as a dependency without coupling siblings; a `deps: []` Ring-0
+  primitive is reachable DOWNWARD from any ring precisely because it depends on nothing.
+  The **primitive** (the flag) therefore lives here; the **policy** (when to quiesce, the
+  in-flight aggregator) stays in `Fleet.Starfleet`. Iron Law: no process, just
   `:persistent_term`.
   """
 

@@ -21,12 +21,16 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   on `Fleet.Spawner.Pod` (no cycle). These probes do not log (no `Logger`): they decide,
   the `Pod` core traces.
 
-  ## Contract (called by `Pod`)
+  ## Contract (called by `Pod` / `Pod.Brief`)
 
   - `polled?/1` — bootstrap-stop of the kick (handler `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
-  - `pod_has_active_task?/1` — `pod_info` (`has_active_task`) + `:result_deadline` fire.
+  - `pod_has_active_task?/1` — the `pod_info` reporting boolean ONLY (its own docstring explains
+    why the boolean is the WRONG shape at deadline-fire time, F-C037).
+  - `active_task_state/1` — the `:result_deadline` fire decision (3-state: `:active|:idle|:unknown`,
+    fail-closed on `:unknown`).
   - `brief_pulled?/1` — reduced to the boolean passed to `Kick.acked?/3` by the handler.
-  - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief`.
+  - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief` (`Pod.Brief`).
+  - `brief_slot/1` — enqueue-by-slot decision (`Pod.Brief`, 3-state `:free|:occupied|:unknown`).
   """
 
   @doc """

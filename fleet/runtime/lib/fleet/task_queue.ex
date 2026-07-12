@@ -116,7 +116,12 @@ defmodule Fleet.TaskQueue do
   def clear_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:clear_for_pod, pod_id})
 
-  @doc "Status of the pod's active work item (`{:ok, state | nil}`). Query Port."
+  @doc """
+  Status of the pod's LATEST work item (`{:ok, state | nil}`) — may be TERMINAL
+  (`:completed`/`:failed`/`:cleared`), not only active. `{:ok, nil}` means the pod NEVER had a
+  task, NOT "no active task" (same `latest_for_pod` read as `pod_active_issue_id/1` — callers
+  that need "active only" filter on the state). Query Port.
+  """
   @spec pod_status(String.t()) :: {:ok, atom() | nil}
   def pod_status(pod_id), do: pod_status(@server, pod_id)
 

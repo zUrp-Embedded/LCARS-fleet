@@ -22,7 +22,7 @@ restated, only pointed at.
 - `Fleet.MCP.PodSocketAcceptor` — one AF_UNIX socket acceptor per pod (identity IS the channel; each connection served in its own Task)
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor of the acceptors + the spawner-facing seam API (`ensure_pod_socket` / `release_pod_socket`, paths)
 - `Fleet.MCP.Server` — boot guard: refuses `start_link` on the pod side (`:forbidden_in_pod`)
-- `Fleet.MCP.Supervisor` / `Fleet.MCP.Application` — app supervision (`:one_for_one`); also starts the inline `PodSocketRegistry` (Registry) + `ConnectionTaskSupervisor` (Task.Supervisor); `pod_facing_status/0` = LIVE readiness probe consumed by `Fleet.API.Readiness`
+- `Fleet.MCP.Supervisor` — domain supervision (`:one_for_one`; the `Fleet.MCP.Application` wrapper was deleted at the Z2 collapse — its scar lives in the Supervisor's moduledoc); also starts the inline `PodSocketRegistry` (Registry) + `ConnectionTaskSupervisor` (Task.Supervisor); `pod_facing_status/0` = LIVE readiness probe consumed by `Fleet.API.Readiness`
 
 ## Config & deps
 - Knob `:fleet_mcp, :sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.

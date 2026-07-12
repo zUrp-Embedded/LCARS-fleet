@@ -36,6 +36,6 @@ Universal-substrate primitives co-located here (Ring 0, zero new edge):
 - Knob `:load_event_registry` — read by `Catalog` (default `true`; `false` in `:test`).
 - Knob `:permit_when_registry_empty` — read by `Bus` (regime when the registry is empty).
 - Knob `:start_signals` — read by `Application` (gated off, no on-switch).
-- Knobs `:webhook_port`, `:webhook_secret_path`, `:events_yaml_path`, `:captured_signals` — read by `WebhooksGitea` / `Catalog` / `SignalsOS`, set by `runtime.exs`.
+- Knobs `:webhook_port`, `:webhook_secret_path`, `:events_yaml_path` — read by `WebhooksGitea` / `Catalog`, set by `runtime.exs`.
 - Env `LCARS_BIND_HOST` / `LCARS_WEBHOOK_BIND_HOST` — read by `BindAddress`.
 - Deps: see `mix.exs`.

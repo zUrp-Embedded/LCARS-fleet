@@ -10,8 +10,7 @@ defmodule Fleet.Observation.Application do
   JSON read endpoints). Coexists with the other surfaces — **we cut off
   nothing** (cleanup at the end):
 
-    * `fleet_api` (the API port (per-human), no-auth by design) — **command** surface;
-    * SUPPRIMER (retirer le bullet sur le dashboard Python v1.5 — il n'existe plus)
+    * `fleet_api` (the API port (per-human), no-auth by design) — **command** surface.
 
   ## Cardinal principle
 
