@@ -48,6 +48,8 @@ spec:
       - mcp__fleet__import_project   # jumeau de create_project : ADOPTE un repo existant (F-C142/F-C138)
       - mcp__fleet__create_issue
       - mcp__fleet__get_issue_status
+      - mcp__fleet__list_escalations  # canal retour : lit les escalades awaits-arch (verdict worker)
+      - mcp__fleet__comment_issue     # canal retour : répond sur un ticket en vol (au nom du rôle)
     disallowedTools:
       # snake_case : server tools API Anthropic bypassant can_use_tool — F-CONT-RISK gate
       - web_search

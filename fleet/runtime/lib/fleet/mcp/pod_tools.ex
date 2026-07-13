@@ -187,6 +187,46 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "list_escalations" do
+    meta do
+      name("List Escalations")
+
+      description(
+        "List the fleet escalations awaiting YOUR arbitration (issues labelled `lcars-awaits-arch`): " <>
+          "a worker (consultant/engineer/gatekeeper) hit `escalate_user` and handed the decision back to you. " <>
+          "The wake (\"ton tour\") only signals THAT there is work; THIS reads WHAT. Returns each awaiting issue " <>
+          "with `repo`, `number`, `title` and `verdict` (the worker's escalation comment — the reasoning). " <>
+          "Then act: fix + re-`create_issue`, `comment_issue` your decision, or bring it to your human. " <>
+          "No arguments — it is your inbox across all the fleet's projects."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
+  end
+
+  deftool "comment_issue" do
+    meta do
+      name("Comment Issue")
+
+      description(
+        "Post a comment on a forge issue IN YOUR OWN NAME (the architect role account) — your reply on a " <>
+          "ticket in flight, typically to answer an escalation surfaced by `list_escalations`. " <>
+          "`project` = the issue's `owner/name` repo, **REQUIRED** (no default routing). `number` = the issue " <>
+          "number. `body` = your comment (markdown). Returns {\"status\":\"commented\",\"repo\":...,\"number\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "project" => %{"type" => "string"},
+        "number" => %{"type" => "integer"},
+        "body" => %{"type" => "string"}
+      },
+      "required" => ["project", "number", "body"]
+    })
+  end
+
   # ============================================================
   # Dispatch — work-item drive (Fleet.MCP.PodTools.WorkItems)
   # ============================================================
@@ -329,6 +369,45 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("get_issue_status", _bad, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
+  def handle_tool_call("list_escalations", _arguments, state) do
+    case Delegation.list_escalations(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call(
+        "comment_issue",
+        %{"project" => repo, "number" => number, "body" => body},
+        state
+      )
+      when is_binary(repo) and repo != "" and is_integer(number) and is_binary(body) and body != "" do
+    if valid_repo_ref?(repo) do
+      case Delegation.comment_issue(repo, number, body, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
+       state}
+    end
+  end
+
+  # comment_issue WITHOUT a valid project → STRUCTURAL REFUSAL (mirror of create_issue/get_issue_status).
+  def handle_tool_call("comment_issue", %{"number" => number, "body" => body}, state)
+      when is_integer(number) and is_binary(body) do
+    {:error,
+     {:project_required,
+      "comment_issue REFUSED — `project` is REQUIRED (the issue's `owner/name` repo). No default routing."},
+     state}
+  end
+
+  def handle_tool_call("comment_issue", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

@@ -655,4 +655,107 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
   end
+
+  # Forge stub RICHE pour le canal retour : 2 repos, un awaits-arch (#4 + commentaire verdict) + une
+  # issue normale (#5, à ignorer). Ops HORS behaviour du seam (validées par `function_exported?` dans
+  # `conforming_escalation_forge`), donc PAS de `@behaviour` ici — de simples defs.
+  defmodule EscalationForge do
+    def list_org_repos(_org, _opts), do: {:ok, ["fleet/alpha", "fleet/beta"]}
+
+    def list_open_issues("fleet/alpha", _opts) do
+      {:ok,
+       [
+         %{"number" => 4, "title" => "sonde retour", "labels" => [%{"name" => "lcars-awaits-arch"}]},
+         %{"number" => 5, "title" => "vraie feature", "labels" => [%{"name" => "type:feature"}]}
+       ]}
+    end
+
+    def list_open_issues("fleet/beta", _opts),
+      do: {:ok, [%{"number" => 9, "title" => "rien", "labels" => []}]}
+
+    def list_comments("fleet/alpha", 4, _opts) do
+      {:ok,
+       [
+         %{"body" => "commentaire de route (plus ancien)"},
+         %{"body" => "décision escalate_user — PING-RETOUR-OK [step_run:consultant:await:escalate_user]"}
+       ]}
+    end
+
+    def list_comments(_repo, _n, _opts), do: {:ok, []}
+
+    def post_comment(repo, n, body, opts) do
+      send(self(), {:post_comment, repo, n, body, opts})
+      {:ok, :posted}
+    end
+  end
+
+  describe "canal retour arch (list_escalations lit / comment_issue répond)" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: tmp} do
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, EscalationForge)
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+      :ok
+    end
+
+    test "list_escalations : énumère les awaits-arch (verdict = dernier commentaire), ignore le reste" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["count"] == 1
+
+      assert [%{"repo" => "fleet/alpha", "number" => 4, "title" => "sonde retour", "verdict" => v}] =
+               result["escalations"]
+
+      assert v =~ "PING-RETOUR-OK"
+    end
+
+    test "list_escalations : gate architecte (rôle non-architecte → refusé, aucune lecture)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :forbidden_not_architect, _} =
+               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-eng")))
+    end
+
+    test "comment_issue : poste sur le project passé, AU NOM du rôle architecte (token de rôle)" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"project" => "fleet/alpha", "number" => 4, "body" => "vu, je re-cadre le brief"},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:post_comment, "fleet/alpha", 4, "vu, je re-cadre le brief", opts}
+      assert opts[:token] =~ "ARCH_TOKEN"
+      assert {:ok, %{"status" => "commented", "repo" => "fleet/alpha", "number" => 4}} = Jason.decode(txt)
+    end
+
+    test "comment_issue : gate architecte (rôle non-architecte → refusé, rien posté)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
+
+      assert {:error, :forbidden_not_architect, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"project" => "fleet/alpha", "number" => 4, "body" => "x"},
+                 pod_state(uniq("pod-rev"))
+               )
+
+      refute_received {:post_comment, _, _, _, _}
+    end
+
+    test "comment_issue : REFUSE sans project (miroir create_issue, pas de routage par défaut)" do
+      assert {:error, {:project_required, msg}, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"number" => 4, "body" => "x"},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert msg =~ "project"
+      refute_received {:post_comment, _, _, _, _}
+    end
+  end
 end

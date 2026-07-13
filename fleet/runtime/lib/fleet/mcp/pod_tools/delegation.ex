@@ -189,6 +189,60 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  @doc """
+  Lists the escalations awaiting the architect's arbitration: the issues carrying `lcars-awaits-arch`
+  (a worker hit `escalate_user` and handed the decision back). For each: `repo`, `number`, `title`,
+  and `verdict` (the escalation comment — the WHY). Read-only, architect gate. The wake ("ton tour")
+  only signals THAT there is work; THIS reads WHAT. Scans the delegation org, scoped to the fleet's
+  human; a single unreadable repo is logged LOUD and SKIPPED (partial inbox), never blinding the list.
+  """
+  @spec list_escalations(map()) :: {:ok, map()} | {:error, term()}
+  def list_escalations(state) do
+    with {:ok, _role} <- require_architect(state),
+         {:ok, forge} <- conforming_escalation_forge() do
+      case forge.list_org_repos(escalation_org(), []) do
+        {:ok, repos} ->
+          escalations = Enum.flat_map(repos, &collect_awaits_arch(forge, &1, escalation_human()))
+          {:ok, %{"count" => length(escalations), "escalations" => escalations}}
+
+        {:error, reason} ->
+          {:error, {:forge, reason}}
+      end
+    end
+  end
+
+  @doc """
+  Posts a comment on issue `number` of `repo` IN THE ARCHITECT'S OWN NAME (the role account's token,
+  like `create_issue`) — the arch's reply on a ticket in flight (typically an escalation). Architect
+  gate; `:role_token_unavailable` REFUSES rather than posting under the system account (traceability +
+  least-privilege, same policy as `create_issue`).
+  """
+  @spec comment_issue(String.t(), integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def comment_issue(repo, number, body, state)
+      when is_binary(repo) and is_integer(number) and is_binary(body) do
+    # Gate (identity) FIRST, before validating the seam or touching the forge — an unauthorized caller
+    # must be refused on identity, not leak a seam/mechanics error (and the gate test relies on this order).
+    with {:ok, role} <- require_architect(state),
+         {:ok, forge} <- conforming_escalation_forge(),
+         {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
+      case forge.post_comment(repo, number, body, token: identity.token) do
+        {:ok, _} -> {:ok, %{"status" => "commented", "repo" => repo, "number" => number}}
+        {:error, reason} -> {:error, {:comment_failed, reason}}
+      end
+    else
+      {:error, :role_token_unavailable} = err ->
+        Logger.warning(
+          "Delegation: comment_issue REFUSED: role token not found (incomplete provisioning) — " <>
+            "no system-account fallback"
+        )
+
+        err
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # The forge/onboard seams are DUCK-TYPED: fleet_mcp cannot adopt the `@behaviour` (an
   # fleet_mcp→fleet_pilot compile edge would be UPWARD-forbidden), so the compiler cannot check that the
   # resolved module conforms. A misconfigured seam (a module missing a callback) would `apply/3`-crash
@@ -208,6 +262,90 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
   end
+
+  # Escalation-inbox seam: the arch's read/reply path needs 4 forge ops NOT in the delegation
+  # ForgeClient behaviour (create_issue/…). Adding them to that behaviour would cascade onto EVERY
+  # stub the `conforming_forge` guard checks (StubForge/RecordingForge in pod_tools_test → their
+  # existing create_issue tests would break). So we keep the seam untouched and validate THIS subset
+  # EXPLICITLY against the SAME resolved module (same R2-05 fail-clear shape).
+  defp conforming_escalation_forge do
+    impl = ForgeClient.resolved()
+    _ = Code.ensure_loaded(impl)
+
+    ops = [{:list_org_repos, 2}, {:list_open_issues, 2}, {:list_comments, 3}, {:post_comment, 4}]
+    missing = for {fun, arity} <- ops, not function_exported?(impl, fun, arity), do: {fun, arity}
+
+    if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
+  end
+
+  # Literal, not a ref to `Fleet.Pilot.Labels.awaits_arch/0` (fleet_mcp→fleet_pilot = forbidden compile
+  # edge, cf. § Seams). SSOT = `Fleet.Pilot.Labels` ("lcars-awaits-arch") ; this literal must track it.
+  @awaits_arch_label "lcars-awaits-arch"
+
+  # All the awaits-arch issues of ONE repo (scoped to the human), mapped to escalation entries. A repo
+  # read failing is LOUD + SKIPPED (partial inbox) — never a silent [] hiding an escalation, never a
+  # fail-closed blinding the whole list because one repo hiccuped.
+  defp collect_awaits_arch(forge, repo, human) do
+    case forge.list_open_issues(repo, assigned_by: human) do
+      {:ok, issues} when is_list(issues) ->
+        issues
+        |> Enum.filter(&has_awaits_arch_label?/1)
+        |> Enum.map(&escalation_entry(forge, repo, &1))
+
+      other ->
+        Logger.warning(
+          "Delegation: list_escalations — repo #{repo} unreadable (#{inspect(other)}) — skipped (partial inbox)"
+        )
+
+        []
+    end
+  end
+
+  defp has_awaits_arch_label?(issue) do
+    (Map.get(issue, "labels") || [])
+    |> Enum.any?(&(is_map(&1) and &1["name"] == @awaits_arch_label))
+  end
+
+  defp escalation_entry(forge, repo, issue) do
+    number = Map.get(issue, "number")
+
+    %{
+      "repo" => repo,
+      "number" => number,
+      "title" => Map.get(issue, "title"),
+      "verdict" => latest_verdict(forge, repo, number)
+    }
+  end
+
+  # The escalation VERDICT = the most recent comment (the worker's escalate_user body, posted LAST by
+  # StepRunCompleter). Return its body; nil if unreadable (LOUD) — the arch still sees the ticket + ID.
+  defp latest_verdict(_forge, _repo, number) when not is_integer(number), do: nil
+
+  defp latest_verdict(forge, repo, number) do
+    case forge.list_comments(repo, number, []) do
+      {:ok, comments} when is_list(comments) ->
+        comments
+        |> Enum.reverse()
+        |> Enum.find_value(fn c -> is_map(c) and is_binary(c["body"]) and c["body"] end)
+
+      other ->
+        Logger.warning(
+          "Delegation: list_escalations — comments of #{repo}##{number} unreadable (#{inspect(other)})"
+        )
+
+        nil
+    end
+  end
+
+  # SAME org authority as `do_create_project` / the poller's discovery (`:fleet_pilot, :fleet_org`) —
+  # an inbox scanning an org the fleet never onboards into would be a dead read. `:delegation_org` is
+  # the explicit override, both default `fleet`.
+  defp escalation_org do
+    Application.get_env(:fleet_mcp, :delegation_org) ||
+      Application.get_env(:fleet_pilot, :fleet_org) || "fleet"
+  end
+
+  defp escalation_human, do: Fleet.Credentials.Human.current!()
 
   # ============================================================
   # Forge mechanics (run ONLY after the gate)
