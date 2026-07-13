@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     test "un mount avec newline (injection) est DROPPÉ + loggé, pas sérialisé" do
       cap = cap_with_mounts([%{"mode" => "ro", "path" => "/legit\nrw:/etc/shadow"}])
 
-      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh") end)
+      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
 
       refute env =~ "/etc/shadow",
              "le mount injecté via newline ne doit PAS apparaître dans LCARS_POD_MOUNTS"
@@ -27,13 +27,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
     test "un `\\r` (CR) dans un mount est aussi traité comme injection" do
       cap = cap_with_mounts([%{"mode" => "rw\rro", "path" => "/x"}])
-      {env, _log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh") end)
+      {env, _log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
       refute env =~ "/x"
     end
 
     test "un mount NORMAL est sérialisé (mode:path)" do
       cap = cap_with_mounts([%{"mode" => "rw", "path" => "/home/project"}])
-      env = LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh")
+      env = LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
       assert env =~ "rw:/home/project"
     end
 
@@ -44,10 +44,32 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       # pour un struct schéma-bypassé) → mode inconnu = `ro` (côté RESTRICTIF), jamais brut. Jumeau de
       # `permission_mode`.
       cap = cap_with_mounts([%{"mode" => "RW", "path" => "/x"}])
-      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh") end)
+      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
       assert env =~ "ro:/x"
       refute env =~ "RW:/x"
       assert log =~ "unknown mount mode"
+    end
+  end
+
+  describe "project_ops_path/3 — le monde de SON projet (RO, scopé), ni rien ni tout" do
+    # Le sanctuaire projette le work/ops de SON projet (context/doctrine) pour que le worker SACHE au lieu de
+    # deviner les à-côtés — pas `/home/projects.work` entier (le monde des autres = bruit + sur-exposition),
+    # pas rien (famine → il devine = le poison). `work_root` seam = testable (le vrai est hardcodé).
+    test "pas de projet (rc_name absent) → nil : rien à projeter" do
+      assert LaunchSpec.project_ops_path([], cap_with_mounts([]), "/tmp") == nil
+    end
+
+    test "projet mais work/ops ABSENT → nil (le launcher ro-bind STRICT crasherait sur un source manquant)" do
+      assert LaunchSpec.project_ops_path([rc_name: "ghost_test"], cap_with_mounts([]), "/tmp/nexiste-pas-42") ==
+               nil
+    end
+
+    @tag :tmp_dir
+    test "projet + work/ops présent → le chemin scopé <work_root>/<projet> (SON monde)", %{tmp_dir: tmp} do
+      File.mkdir_p!(Path.join(tmp, "myproj"))
+
+      assert LaunchSpec.project_ops_path([rc_name: "myproj_test"], cap_with_mounts([]), tmp) ==
+               Path.join(tmp, "myproj")
     end
   end
 

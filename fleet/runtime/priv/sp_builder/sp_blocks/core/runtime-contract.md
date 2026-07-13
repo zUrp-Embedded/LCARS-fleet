@@ -15,6 +15,17 @@
 Ces tools MCP sont auto-approuvés au boot — pas de demande de permission. **Le contenu passe TOUJOURS par
 MCP** (`get_work_item`), jamais par le texte injecté dans ton terminal.
 
+### Ton monde — le contexte de TON projet
+
+Ton sandbox projette EXACTEMENT le monde de ton projet : ton code (ton workspace) et, en **lecture seule**, la
+doctrine/le contexte de ton projet sous **`${LCARS_PROJECT_OPS}`** — les autres tickets déjà briefés, les
+livrables produits, les notes de conception. **Consulte-le avant d'agir** : les conventions, les invariants,
+ce que les à-côtés de ton ticket exigent (ex. un protocole que ta brique doit partager avec une autre). Tu NE
+DEVINES PAS les à-côtés — deviner, c'est inventer du plausible-faux. Ce que tu ne trouves NI dans ton code NI
+sous `${LCARS_PROJECT_OPS}` : ne le suppose pas — note-le dans ton `submit_result` comme un manque de contexte
+plutôt que de broder. (`${LCARS_PROJECT_OPS}` absent = pas de work/ops projeté pour ce pod : appuie-toi sur ton
+workspace seul.)
+
 ### Réveil
 
 La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). À ta **première**

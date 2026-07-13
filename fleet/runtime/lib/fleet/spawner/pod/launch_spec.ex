@@ -236,9 +236,45 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   mount (launchers dir) ++ the cap-profile's CATALOGUE mounts (`metadata.mounts`).
   `claude_launch_path` is resolved on the Pod side (install config) and passed here.
   """
-  @spec pod_mounts_env(Fleet.CapProfile.t(), String.t()) :: String.t()
-  def pod_mounts_env(cap_profile, claude_launch_path) do
-    mounts_env(system_mounts(claude_launch_path) ++ cap_profile_mounts(cap_profile))
+  @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t()) :: String.t()
+  def pod_mounts_env(cap_profile, opts, claude_launch_path) do
+    mounts_env(
+      system_mounts(claude_launch_path) ++
+        cap_profile_mounts(cap_profile) ++ project_ops_mount(opts, cap_profile)
+    )
+  end
+
+  # The pod's PROJECT work/ops (`/home/projects.work/<project>`) RO — the worker's PROJECT CONTEXT: the other
+  # tickets' briefs, the delivered livrables (provenance), the project doctrine. A context-long/unique worker
+  # (engineer) EXISTS to hold this context across tickets ; a judge needs it to weigh completeness. Projecting
+  # ONLY ITS OWN project (never `/home/projects.work` entire — that is the arch's RW mount, the whole fleet) is
+  # the sanctuary rule: give the agent ITS world so it KNOWS, not the neighbours' (noise + over-exposure), and
+  # not nothing (famine → it GUESSES the à-côtés = the poison). RO — it reads its doctrine, never corrupts it.
+  # Absent for a pod with no project (rc_project nil) or before onboarding (dir missing) → no mount.
+  defp project_ops_mount(opts, cap_profile) do
+    case project_ops_path(opts, cap_profile) do
+      nil -> []
+      path -> [%{"mode" => "ro", "path" => path}]
+    end
+  end
+
+  @doc """
+  The pod's PROJECT work/ops path (`<work_root>/<project>`) when it EXISTS, else `nil`. Public: SHARED by the
+  mount (`pod_mounts_env`) and the launch env (`LCARS_PROJECT_OPS`, the var the SP reads) so the projected
+  world and the pointer the agent is told to read NEVER drift. The dir check is load-bearing: the launcher
+  `--ro-bind`s STRICTLY (a missing source crashes the spawn) → an un-onboarded/project-less pod gets no mount.
+  `work_root` is a seam (default `Fleet.Layout.work_root()`, a hardcoded global) so the resolution is testable.
+  """
+  @spec project_ops_path(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t() | nil
+  def project_ops_path(opts, cap_profile, work_root \\ Fleet.Layout.work_root()) do
+    case rc_project(opts, cap_profile) do
+      nil ->
+        nil
+
+      project ->
+        path = Path.join(work_root, project)
+        if File.dir?(path), do: path, else: nil
+    end
   end
 
   # CATALOGUE mounts (cap-profile-driven): the world projected into the bwrap sandbox is
@@ -290,7 +326,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end)
   end
 
-  defp mounts_env(_), do: ""
+  # (Plus de clause `mounts_env(_)` fallback : depuis l'ajout du mount projet-ops, `pod_mounts_env` compose
+  # TOUJOURS trois listes via `++` → l'entrée est prouvée-liste, le fallback non-liste était mort — dialyzer
+  # `pattern_match_cov`. Une non-liste crasherait de toute façon AU `++`, jamais ici.)
 
   defp mount_has_newline?(m) do
     has_newline?(Map.get(m, "mode") || Map.get(m, :mode)) or
