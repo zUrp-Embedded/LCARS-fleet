@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
   defp judge_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      metadata: %{"name" => "reviewer", "slot_scope" => "instance"},
+      metadata: %{"name" => "reviewer"},
       spec: %{"brief_kind" => "judge"}
     }
   end

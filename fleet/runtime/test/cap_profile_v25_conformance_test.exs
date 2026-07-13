@@ -208,9 +208,10 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     assert schema_ls == Fleet.CapProfile.Invariants.lifetime_scope_enum(),
            "drift lifetime_scope : schéma #{inspect(schema_ls)} ≠ code #{inspect(Fleet.CapProfile.Invariants.lifetime_scope_enum())}"
 
-    # slot_scope : dupliqué schéma ↔ le littéral de l'accessor `slot_scope/1`.
-    schema_ss = get_in(raw, ["properties", "metadata", "properties", "slot_scope", "enum"])
-    assert schema_ss == ["project", "instance"]
+    # slot_scope N'EST PLUS un enum de schéma (collapse 2026-07-13) : il DÉRIVE de lifetime_scope
+    # (`CapProfile.slot_scope/1`, one-shot→instance / else→project) → plus de copie à verrouiller ici.
+    refute get_in(raw, ["properties", "metadata", "properties", "slot_scope"]),
+           "slot_scope ne doit plus être déclaré dans le schéma (dérivé de lifetime_scope)"
   end
 
   test "F-C138/F-C142 : architect expose import_project via mcp_fleet_tools (canon → surface MCP, single source)" do

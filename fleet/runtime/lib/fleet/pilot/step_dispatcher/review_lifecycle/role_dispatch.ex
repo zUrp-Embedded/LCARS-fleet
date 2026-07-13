@@ -132,7 +132,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # poller (which handles `{:skipped, _}` → retry on the next tick).
          decision =
            Spawn.project_scope_decision(
-             Fleet.CapProfile.slot_scope(profile),
              Fleet.CapProfile.lifetime_scope(profile),
              ctx.spawner,
              pod_id

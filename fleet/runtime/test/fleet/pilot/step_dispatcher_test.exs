@@ -156,8 +156,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "project"},
-           spec: %{"brief_kind" => "worker"}
+           metadata: %{},
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     # F077 : un rôle juge déclare `brief_kind: judge` dans son cap-profile (pas un nom magique).
@@ -166,8 +166,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "gatekeeper", "slot_scope" => "project"},
-           spec: %{"brief_kind" => "judge"}
+           metadata: %{"name" => "gatekeeper"},
+           spec: %{"brief_kind" => "judge", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     # Corr.3 : un juge de PR (qualifier/reviewer) declare aussi brief_kind: judge.
@@ -176,7 +176,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => role, "slot_scope" => "instance"},
+           metadata: %{"name" => role},
            spec: %{"brief_kind" => "judge"}
          }}
 
@@ -186,7 +186,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "consultant", "slot_scope" => "instance"},
+           metadata: %{"name" => "consultant"},
            spec: %{"brief_kind" => "judge"}
          }}
 
@@ -252,7 +252,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "project"},
+           metadata: %{},
            spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
@@ -304,8 +304,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       {:ok,
        %Fleet.CapProfile{
          kind: "CapabilityProfile",
-         metadata: %{"slot_scope" => "project"},
-         spec: %{"brief_kind" => "worker"}
+         metadata: %{},
+         spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
        }}
     end
   end

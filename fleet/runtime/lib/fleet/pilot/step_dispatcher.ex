@@ -168,16 +168,16 @@ defmodule Fleet.Pilot.StepDispatcher do
                  ),
                  :role_resolution
                ),
-             # Pod identity + serialization READ from the catalogue (`slot_scope`), never guessed:
-             # `pod_id_for_scope/4` (instance → for_issue, fan-out per issue | project → for_repo, ONE
-             # identity per project). The scope DECISION (local liveness/slot reads, no project) gates
-             # BEFORE the resolver; its reprovision ACTION (needs project["base_sha"]) runs after.
+             # Pod identity + serialization READ from the catalogue, never guessed. `pod_id_for_scope/4`
+             # takes the slot granularity (`slot_scope`, itself DERIVED from `lifetime_scope`: instance →
+             # for_issue fan-out | project → for_repo, ONE identity/project). The scope DECISION keys on the
+             # ROOT axis `lifetime_scope` DIRECTLY (collapse 2026-07-13 — no longer via the derived slot); it
+             # gates BEFORE the resolver, its reprovision ACTION (needs project["base_sha"]) runs after.
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
              slug = Spawn.feature_slug(issue),
              decision =
                Spawn.project_scope_decision(
-                 scope,
                  Fleet.CapProfile.lifetime_scope(profile),
                  spawner,
                  pod_id

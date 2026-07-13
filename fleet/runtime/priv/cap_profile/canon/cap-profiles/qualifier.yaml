@@ -12,7 +12,6 @@ metadata:
   role_index: 4
   protected: false
   fleet_level: false
-  slot_scope: instance  # fan-out par PR (juge ephemere, invisible Desktop)
 spec:
   # ②.1d — juge de PR (DN §1.4 : « les tests sont honnêtes », une REVIEW). Reçoit un GateBrief
   # DÉSAMORCÉ (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — I-CBC) au lieu

@@ -273,8 +273,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "engineer", "slot_scope" => "project"},
-           spec: %{"brief_kind" => "worker"}
+           metadata: %{"name" => "engineer"},
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     def load(role) when role in ["reviewer", "qualifier", "gatekeeper", "architect"],
@@ -282,12 +282,14 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{
-             "name" => role,
-             "slot_scope" =>
-               if(role in ["gatekeeper", "architect"], do: "project", else: "instance")
-           },
-           spec: %{"brief_kind" => "judge"}
+           metadata: %{"name" => role},
+           # slot DÉRIVE de lifetime (collapse) : gk/arch = context-long → project ; autres juges = one-shot → instance.
+           spec: %{
+             "brief_kind" => "judge",
+             "invocation" => %{
+               "lifetime_scope" => if(role in ["gatekeeper", "architect"], do: "pipe", else: "one-shot")
+             }
+           }
          }}
 
     def load(_), do: {:error, :not_found}

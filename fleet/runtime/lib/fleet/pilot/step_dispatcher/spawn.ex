@@ -373,33 +373,31 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   `git ls-remote` (~15-30s) just to throw the result away, and under a slow forge that stalled
   the whole sequential poll tick).
 
-  ONE identity (repo, role) alive at a time (1 Desktop slot), modulated by the lifetime:
-    instance         -> `:proceed` (never gated: distinct ids per issue, fan-out assumed).
-    project one-shot -> alive = occupied by another issue -> `:role_busy`; it dies at the end of
-                        the task + fresh spawn at the next issue (baseline behavior, UNCHANGED).
-    project pipe     -> RESIDENT process, per its state (pipe_rebrief_state):
-                          dead  -> `:proceed` (fresh spawn, 1st issue);
-                          busy  -> `:role_busy` (still working a task OR publishing its last
-                                   deliverable: resetting its workspace now would corrupt it /
-                                   race the push);
-                          ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
-                                   needs the resolved `project["base_sha"]`) runs AFTER the
-                                   resolver via `maybe_reprovision/5`, on the passing path only.
+  ONE identity (repo, role) alive at a time (1 Desktop slot), keyed on the SINGLE worker axis
+  `lifetime_scope` (collapse 2026-07-13 — `slot_scope` was its redundant re-encoding; `role_busy` now
+  derives from the ROOT axis « context-long vs one-shot », not a mimicking second property):
+    one-shot (fan-out)    -> `:proceed` (never gated: distinct ids per issue, cold + independent).
+    context-long (pipe/…) -> RESIDENT (repo,role) process, per its state (pipe_rebrief_state):
+                               dead  -> `:proceed` (fresh spawn, 1st issue);
+                               busy  -> `:role_busy` (still working a task OR publishing its last
+                                        deliverable: resetting its workspace now would corrupt it /
+                                        race the push);
+                               ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
+                                        needs the resolved `project["base_sha"]`) runs AFTER the
+                                        resolver via `maybe_reprovision/5`, on the passing path only.
+  The former `project one-shot` branch is GONE: a cold pod serialized per project is a contradiction
+  (one-shot ⟹ instance ⟹ fan-out) — no role ever matched it (dead branch, cf. `CapProfile.slot_scope/1`).
 
   Requires NO project (pure liveness/slot reads) — that is the point of the split. The decision→
   action gap now spans the resolver call (~15s worst case); the single sequential dispatcher per
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
   """
-  @spec project_scope_decision(String.t(), String.t(), module(), String.t()) ::
+  @spec project_scope_decision(String.t(), module(), String.t()) ::
           :proceed | :role_busy | :ready_needs_reprovision
-  def project_scope_decision("instance", _lifetime, _spawner, _pod_id), do: :proceed
+  def project_scope_decision("one-shot", _spawner, _pod_id), do: :proceed
 
-  def project_scope_decision("project", "one-shot", spawner, pod_id) do
-    if pod_alive?(spawner, pod_id), do: :role_busy, else: :proceed
-  end
-
-  def project_scope_decision("project", _pipe, spawner, pod_id) do
+  def project_scope_decision(_context_long, spawner, pod_id) do
     case pipe_rebrief_state(spawner, pod_id) do
       :dead -> :proceed
       :busy -> :role_busy
