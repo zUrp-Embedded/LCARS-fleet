@@ -14,6 +14,11 @@ defmodule Fleet.TaskQueue.WorkItem do
           issue_id: String.t() | nil,
           role: String.t() | nil,
           brief: String.t() | nil,
+          # Brief PHYSIQUE (chantier brief-physique) : le brief committé content-addressé dans work/ops.
+          # `brief_ref` = chemin relatif work/ops (`briefs/<sha>.md`) ; `brief_sha` = son SHA (vérif pod).
+          # Migration : `brief` (string) COHABITE tant que le pod ne lit pas encore le fichier ; puis nil.
+          brief_ref: String.t() | nil,
+          brief_sha: String.t() | nil,
           deadline: DateTime.t() | nil,
           enqueued_at: DateTime.t(),
           assigned_at: DateTime.t() | nil,
@@ -30,6 +35,8 @@ defmodule Fleet.TaskQueue.WorkItem do
     :issue_id,
     :role,
     :brief,
+    :brief_ref,
+    :brief_sha,
     :deadline,
     :enqueued_at,
     :assigned_at,
@@ -70,6 +77,8 @@ defmodule Fleet.TaskQueue.WorkItem do
       "issue_id" => t.issue_id,
       "role" => t.role,
       "brief" => t.brief,
+      "brief_ref" => t.brief_ref,
+      "brief_sha" => t.brief_sha,
       "deadline" => iso(t.deadline),
       "enqueued_at" => iso(t.enqueued_at),
       "assigned_at" => iso(t.assigned_at),
@@ -105,7 +114,9 @@ defmodule Fleet.TaskQueue.WorkItem do
          {:ok, metadata} <- cast_map(fetch(attrs, :metadata) || %{}, :metadata),
          {:ok, issue_id} <- cast_str_nil(fetch(attrs, :issue_id), :issue_id),
          {:ok, role} <- cast_str_nil(fetch(attrs, :role), :role),
-         {:ok, brief} <- cast_str_nil(fetch(attrs, :brief), :brief) do
+         {:ok, brief} <- cast_str_nil(fetch(attrs, :brief), :brief),
+         {:ok, brief_ref} <- cast_str_nil(fetch(attrs, :brief_ref), :brief_ref),
+         {:ok, brief_sha} <- cast_str_nil(fetch(attrs, :brief_sha), :brief_sha) do
       {:ok,
        %__MODULE__{
          id: UUID.uuid4(),
@@ -113,6 +124,8 @@ defmodule Fleet.TaskQueue.WorkItem do
          issue_id: issue_id,
          role: role,
          brief: brief,
+         brief_ref: brief_ref,
+         brief_sha: brief_sha,
          deadline: deadline,
          enqueued_at: DateTime.utc_now(),
          state: :pending,
@@ -140,6 +153,8 @@ defmodule Fleet.TaskQueue.WorkItem do
          {:ok, issue_id} <- cast_str_nil(m["issue_id"], :issue_id),
          {:ok, role} <- cast_str_nil(m["role"], :role),
          {:ok, brief} <- cast_str_nil(m["brief"], :brief),
+         {:ok, brief_ref} <- cast_str_nil(m["brief_ref"], :brief_ref),
+         {:ok, brief_sha} <- cast_str_nil(m["brief_sha"], :brief_sha),
          {:ok, result} <- cast_result(m["result"], :result),
          {:ok, metadata} <- cast_map(m["metadata"] || %{}, :metadata) do
       {:ok,
@@ -149,6 +164,8 @@ defmodule Fleet.TaskQueue.WorkItem do
          issue_id: issue_id,
          role: role,
          brief: brief,
+         brief_ref: brief_ref,
+         brief_sha: brief_sha,
          # deadline/assigned/completed stay TOLERANT (parse → nil on a bad ISO): an optional timestamp
          # that no longer parses just becomes nil on recovery (no re-arm), not a corrupt-the-whole-state.
          deadline: parse(m["deadline"]),

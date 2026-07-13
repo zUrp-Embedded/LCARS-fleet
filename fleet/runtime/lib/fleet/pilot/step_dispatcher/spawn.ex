@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
              do: forge.start_stopwatch(repo, lock_target, ro)
            ),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
+         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, repo) do
       # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`
       # (pod unreachable, escalated to starfleet) or `{:error, _}` (re-wake failed) means the pod is
       # NOT woken. Discarding this return (`_ = wake(...)`) would always make `spawn_step` return
@@ -254,13 +254,18 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # The `brief` = the role-aware BRIEF already built (build_brief): disarmed GateBrief for the
   # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
-  defp enqueue_brief(task_queue, pod_id, role, number, brief) do
-    attrs = %{
-      issue_id: Fleet.Pilot.IssueId.compose(number),
-      role: role,
-      brief: brief,
-      metadata: %{"issue" => number}
-    }
+  defp enqueue_brief(task_queue, pod_id, role, number, brief, repo) do
+    # Le brief devient un OBJET physique content-addressé dans work/ops (`brief_sha` du triplet SLSA) ;
+    # le work_item porte le pointeur EN PLUS de la string (migration : la string cohabite tant que le pod
+    # ne lit pas encore l'objet). `physicalize_attrs` DÉGRADE (string seule) si pas de work/ops — jamais fatal.
+    attrs =
+      %{
+        issue_id: Fleet.Pilot.IssueId.compose(number),
+        role: role,
+        brief: brief,
+        metadata: %{"issue" => number}
+      }
+      |> Fleet.Workflow.BriefArtifact.physicalize_attrs(repo)
 
     case task_queue.enqueue(pod_id, attrs) do
       {:ok, _task} -> :ok
