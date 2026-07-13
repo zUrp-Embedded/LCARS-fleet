@@ -578,25 +578,80 @@ defmodule Fleet.Pilot.Poller do
   defp maybe_rekick_arch(awaits_ids, %__MODULE__{} = state) do
     if awaits_rekick?(MapSet.size(awaits_ids), state.poll_count) do
       spawner = state.spawner || Fleet.Spawner
+      task_queue = state.task_queue || Fleet.TaskQueue
       pod_id = Fleet.Pilot.Roles.architect_pod_id()
 
-      case spawner.wake_pod(pod_id) do
-        :ok ->
-          Logger.info(
-            "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) → re-kick #{pod_id} " <>
-              "(throttle #{@awaits_rekick_every} ticks)"
-          )
-
-        other ->
-          Logger.warning(
-            "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch (fleet-wide) — re-kick #{pod_id} " <>
-              "UNREACHED (#{inspect(other)}) — label forge intact, retry in #{@awaits_rekick_every} ticks, " <>
-              "PermanentWarden respawns the arch"
-          )
+      # The arch is a context-long/UNIQUE worker (project/forever, cf. collapse 2026-07-13) — the FORGE is
+      # its queue (the awaits-arch labels), it works ONE escalation at a time, SAME serialize-via-forge as
+      # the engineer. If it is FREE (no active work-item), OFFER it the next one as a real work-item so
+      # `get_work_item` RETURNS the ticket (cures the {done:true} blindness — sonde #4). Busy → we only wake
+      # (the backlog stays on the forge; this re-offers next tick, once the arch submits + the label drains,
+      # ArchInboxConsumer). Enqueue is safe on replay: a fresh one supersedes, and once enqueued the arch is
+      # busy → not re-offered until it drains.
+      unless arch_busy?(task_queue, pod_id) do
+        offer_arch_mandate(task_queue, pod_id, awaits_ids)
       end
+
+      rekick_wake(spawner, pod_id, MapSet.size(awaits_ids))
     end
 
     :ok
+  end
+
+  # "Busy" for the arch — a `forever` pod, ALWAYS alive → busy ≠ "the process runs" (it always does). Busy =
+  # it holds an ACTIVE work-item. Same probe as the reconciliation (`pod_status` + `WorkItem.active?`): a PURE
+  # Query Port, no side-effect — unlike `get_for_pod`, which would assign the pending + broadcast `assigned`.
+  defp arch_busy?(task_queue, pod_id) do
+    case task_queue.pod_status(pod_id) do
+      {:ok, wi_state} -> Fleet.TaskQueue.WorkItem.active?(wi_state)
+      _ -> false
+    end
+  end
+
+  # Enqueue ONE escalation as an arbitration mandate. Stable pick = the smallest `{repo, n}` (deterministic
+  # across ticks; not time-ordered, but the arch drains them one-by-one WITH the human — order is not
+  # load-bearing). The mandate POINTS to the issue (the arch reads it via its forge tools); the `WorkItem`
+  # has no `repo` field → repo+number travel in `metadata` (the ArchInboxConsumer correlates on it to drain
+  # the label at `submit_result`). A failed enqueue loses only latency (the label persists → re-offered).
+  defp offer_arch_mandate(task_queue, pod_id, awaits_ids) do
+    {repo, n} = Enum.min(awaits_ids)
+
+    attrs = %{
+      issue_id: "issue-#{n}",
+      role: "architect",
+      brief:
+        "Arbitrage requis : escalade sur l'issue `#{repo}##{n}`. Lis-la (`list_escalations` / " <>
+          "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou corrige+re-délègue. " <>
+          "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente.",
+      metadata: %{"awaits_arch" => true, "repo" => repo, "number" => n}
+    }
+
+    case task_queue.enqueue(pod_id, attrs) do
+      {:ok, _} ->
+        Logger.info("Poller: arch mandate enqueued #{repo}##{n} (arch was free) → get_work_item will serve it")
+
+      {:error, reason} ->
+        Logger.warning(
+          "Poller: arch mandate enqueue KO (#{repo}##{n}) : #{inspect(reason)} — label intact, retry next tick"
+        )
+    end
+  end
+
+  defp rekick_wake(spawner, pod_id, count) do
+    case spawner.wake_pod(pod_id) do
+      :ok ->
+        Logger.info(
+          "Poller: #{count} issue(s) awaits-arch (fleet-wide) → re-kick #{pod_id} " <>
+            "(throttle #{@awaits_rekick_every} ticks)"
+        )
+
+      other ->
+        Logger.warning(
+          "Poller: #{count} issue(s) awaits-arch (fleet-wide) — re-kick #{pod_id} " <>
+            "UNREACHED (#{inspect(other)}) — label forge intact, retry in #{@awaits_rekick_every} ticks, " <>
+            "PermanentWarden respawns the arch"
+        )
+    end
   end
 
   @doc false
