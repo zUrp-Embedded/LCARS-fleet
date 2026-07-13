@@ -95,7 +95,12 @@ defmodule Fleet.Workflow.Git do
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
 
   defp ensure_git_workspace(ws) do
-    case {File.dir?(ws), File.dir?(Path.join(ws, ".git"))} do
+    # `.git` = un RÉPERTOIRE dans un clone normal, mais un FICHIER (`gitdir: …`) dans un git WORKTREE
+    # (`git worktree add`). Le work/ops du projet EST un worktree orphelin (cf. ProjectOnboard) → un
+    # `File.dir?(".git")` le rejetait à tort (`:not_a_git_workspace`, brief/provenance non committés,
+    # attrapé en preuve LIVE : les tests utilisaient `git init` = dir, jamais le cas worktree réel).
+    # `File.exists?` accepte les deux ; un dossier non-git (ni fichier ni dir `.git`) reste refusé.
+    case {File.dir?(ws), File.exists?(Path.join(ws, ".git"))} do
       {false, _} -> {:error, :workspace_missing}
       {true, false} -> {:error, :not_a_git_workspace}
       {true, true} -> :ok

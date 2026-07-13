@@ -85,4 +85,30 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert BriefArtifact.physicalize_attrs(%{brief: "y"}, nil) == %{brief: "y"}
     assert BriefArtifact.physicalize_attrs(%{brief: ""}, "fleet/demo") == %{brief: ""}
   end
+
+  test "commit dans un git WORKTREE orphelin (le work/ops RÉEL : `.git` est un FICHIER, pas un dir)",
+       %{tmp_dir: tmp} do
+    # Régression LIVE 2026-07-13 : `git init` (`.git` = dir) passait, mais le work/ops est un git
+    # WORKTREE orphelin (ProjectOnboard `git worktree add --orphan`) dont le `.git` est un FICHIER →
+    # `ensure_git_workspace` le rejetait (`:not_a_git_workspace`) → brief non committé. Ce test walk
+    # sur le cas RÉEL, pas le plausible.
+    main = Path.join(tmp, "main")
+    File.mkdir_p!(main)
+    g = fn args -> System.cmd("git", ["-c", "user.name=t", "-c", "user.email=t@t" | args], cd: main) end
+    {_, 0} = g.(["init", "-q"])
+    File.write!(Path.join(main, "README"), "x")
+    {_, 0} = g.(["add", "."])
+    {_, 0} = g.(["commit", "-qm", "init"])
+
+    wt = Path.join(tmp, "workops")
+    {_, 0} = g.(["worktree", "add", "--orphan", "-b", "work/ops", wt])
+    # LE point : dans un worktree, `.git` est un FICHIER (`gitdir: …`), pas un répertoire.
+    assert File.regular?(Path.join(wt, ".git"))
+
+    assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(wt, "brief in a worktree\n")
+    assert File.read!(Path.join(wt, ref)) == "brief in a worktree\n"
+    # committé POUR DE VRAI dans le worktree (le bug rendait `{nil, nil}` sans commit).
+    {log, 0} = System.cmd("git", ["log", "--oneline"], cd: wt)
+    assert log =~ "brief: briefs/#{sha}.md"
+  end
 end
