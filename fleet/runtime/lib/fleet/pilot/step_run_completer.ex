@@ -117,10 +117,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.fetch!(step_run, :role)
 
     with {:ok, sha} <- step1_publish(step_run, deliverable),
-         # Triplet SLSA (chantier brief-physique) : (brief_sha, base_sha, livrable_sha=sha) → provenance
-         # in-toto committée sous work/ops `livrables/`. BEST-EFFORT (dégrade, LOUD) — la provenance n'est
-         # PAS load-bearing pour la complétion : jamais un blocage de merge pour un fichier de trace.
-         _ = maybe_emit_provenance(step_run, sha),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, step_run, forge_opts),
          # Gap BEFORE the route: the verdict comment takes a `created_at` strictly earlier than
          # the route (otherwise same second → arbitrary dashboard order, "logically before, displayed after").
@@ -134,13 +130,20 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # Triplet SLSA à l'EXTRACT (chantier brief-physique) : `(brief_sha, base_sha=input_sha, livrable_sha)`.
-  # `brief_sha`/`base_sha` ont voyagé via pod.completed → step_run ; `livrable_sha` = le commit publié.
-  # N'émet QUE pour un vrai livrable git (`:deliverable_opts` présent = producteur) avec un work/ops.
-  # brief_sha absent (dégradé) → provenance 2/3 (input→output), jamais un digest inventé (cf. Provenance).
-  defp maybe_emit_provenance(step_run, livrable_sha) do
+  # Appelé depuis `open_deliverable_pr` — le point de publication du livrable producteur (chemin PR-native),
+  # PAS `complete/2` (qui ne porte que des verdicts sans livrable). `brief_sha`/`base_sha` ont voyagé via
+  # pod.completed → step_run ; `livrable_sha` = le commit publié. N'émet QUE pour un vrai livrable git
+  # (`:deliverable_opts` présent = producteur) avec un work/ops. brief_sha absent (dégradé) → provenance
+  # 2/3 (input→output), jamais un digest inventé (cf. Provenance).
+  # `:work_root` (opt, défaut `Fleet.Layout.work_root()`) = SEAM du root work/ops — hermétisme test
+  # (le vrai root est un chemin global hardcodé ; l'injecter rend le wiring producteur→provenance
+  # exerçable, sans quoi le vert ne walk jamais le chemin réel — cf. BL-6-01).
+  defp maybe_emit_provenance(step_run, livrable_sha, opts) do
+    work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
+
     with %{} = dopts <- Map.get(step_run, :deliverable_opts),
          repo when is_binary(repo) <- Map.get(step_run, :repo),
-         work_dir = Path.join(Fleet.Layout.work_root(), project_name(repo)),
+         work_dir = Path.join(work_root, project_name(repo)),
          true <- File.dir?(work_dir) do
       emit_provenance(work_dir, step_run, dopts, livrable_sha)
     else
@@ -279,6 +282,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # :role_token_unavailable}` (fail-closed: no PR opened under the system account). It is the SYSTEM
     # that posts with the role token, never the pod (forge-blind).
     with {:ok, sha} <- step1_publish(step_run, deliverable),
+         # Triplet SLSA (chantier brief-physique) : (brief_sha, base_sha=input_sha, livrable_sha=sha) →
+         # provenance in-toto committée sous work/ops `livrables/`. ICI = le SEUL point où un vrai livrable
+         # git producteur est publié (chemin PR-native) ; `complete/2` ne porte QUE des verdicts sans
+         # deliverable_opts (abandon/brief), jamais un livrable. BEST-EFFORT (dégrade LOUD) — PAS load-bearing :
+         # jamais un blocage de PR pour un fichier de trace.
+         _ = maybe_emit_provenance(step_run, sha, opts),
          {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
          {:ok, pr} <-
            open_pr_step(
