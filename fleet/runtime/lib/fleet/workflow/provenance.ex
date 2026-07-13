@@ -9,8 +9,13 @@ defmodule Fleet.Workflow.Provenance do
   tooling externe** (pas de cosign, pas de SLSA CLI).
 
   - `livrable_sha` = subject digest + nom de fichier (l'autorité : la provenance d'UN livrable donné).
+    Le livrable est un **commit git** (ce qui a été poussé) → son digest est étiqueté `gitCommit`
+    (algo in-toto honnête), PAS `sha256` : c'est un SHA-1 de commit, pas un sha256 de contenu — mentir
+    l'algorithme ferait échouer un vérifieur in-toto (le triplet doit être falsifiable, donc exact).
   - `brief_sha`/`brief_ref` = `invocation.configSource` (ce qui a été demandé — l'objet brief committé).
-  - `input_sha` = `buildConfig.input_sha` (le `base_sha` pinné — l'état de départ).
+    Le brief EST content-addressé `sha256(contenu)` (cf. `BriefArtifact`) → digest `sha256`, lui vrai.
+  - `input_sha` = `buildConfig.input_sha` (le `base_sha` pinné — l'état de départ ; champ nu, sans
+    prétention d'algorithme).
 
   **Tolérant au dégradé** : si `brief_sha` manque (brief non matérialisé, cf. `BriefArtifact`), le Statement
   omet le digest du configSource mais grave quand même input→output (2/3 vaut mieux que 0). Idempotent par
@@ -69,7 +74,9 @@ defmodule Fleet.Workflow.Provenance do
     %{
       "_type" => "https://in-toto.io/Statement/v0.1",
       "subject" => [
-        %{"name" => Map.get(a, :subject_name, "deliverable"), "digest" => %{"sha256" => livrable_sha}}
+        # `gitCommit` (pas `sha256`) : le livrable est le commit git publié (SHA-1), pas un sha256 de
+        # contenu — étiquette honnête, sans quoi un vérifieur in-toto échouerait sur l'algorithme.
+        %{"name" => Map.get(a, :subject_name, "deliverable"), "digest" => %{"gitCommit" => livrable_sha}}
       ],
       "predicateType" => "https://slsa.dev/provenance/v1.0",
       "predicate" => %{

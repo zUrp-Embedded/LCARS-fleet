@@ -339,7 +339,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert File.exists?(prov)
       json = prov |> File.read!() |> Jason.decode!()
       # (livrable, brief, input) = les 3 sommets du triplet, chacun à sa place in-toto.
-      assert get_in(json, ["subject", Access.at(0), "digest", "sha256"]) == "deadbeef"
+      assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
       assert get_in(json, ["predicate", "invocation", "configSource", "digest", "sha256"]) == brief_sha
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
       # committé, pas juste écrit sur disque.

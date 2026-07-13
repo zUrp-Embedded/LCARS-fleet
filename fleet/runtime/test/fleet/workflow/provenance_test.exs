@@ -27,7 +27,8 @@ defmodule Fleet.Workflow.ProvenanceTest do
         issue: 4
       })
 
-    assert [%{"digest" => %{"sha256" => "LSHA"}}] = s["subject"]
+    # livrable = commit git → digest `gitCommit` (honnête) ; brief = content-addressé → `sha256`.
+    assert [%{"digest" => %{"gitCommit" => "LSHA"}}] = s["subject"]
     assert get_in(s, ["predicate", "invocation", "configSource", "digest", "sha256"]) == "BSHA"
     assert get_in(s, ["predicate", "invocation", "configSource", "uri"]) == "briefs/BSHA.md"
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
@@ -55,7 +56,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
 
     decoded = path |> File.read!() |> Jason.decode!()
     assert decoded["_type"] == "https://in-toto.io/Statement/v0.1"
-    assert [%{"name" => "rapport-engineer.md", "digest" => %{"sha256" => "abc123"}}] = decoded["subject"]
+    assert [%{"name" => "rapport-engineer.md", "digest" => %{"gitCommit" => "abc123"}}] = decoded["subject"]
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
 
     {n1, 0} = System.cmd("git", ["rev-list", "--count", "HEAD"], cd: tmp)
