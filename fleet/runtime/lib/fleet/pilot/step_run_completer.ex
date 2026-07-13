@@ -117,6 +117,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.fetch!(step_run, :role)
 
     with {:ok, sha} <- step1_publish(step_run, deliverable),
+         # Triplet SLSA (chantier brief-physique) : (brief_sha, base_sha, livrable_sha=sha) → provenance
+         # in-toto committée sous work/ops `livrables/`. BEST-EFFORT (dégrade, LOUD) — la provenance n'est
+         # PAS load-bearing pour la complétion : jamais un blocage de merge pour un fichier de trace.
+         _ = maybe_emit_provenance(step_run, sha),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, step_run, forge_opts),
          # Gap BEFORE the route: the verdict comment takes a `created_at` strictly earlier than
          # the route (otherwise same second → arbitrary dashboard order, "logically before, displayed after").
@@ -128,6 +132,48 @@ defmodule Fleet.Pilot.StepRunCompleter do
       {:ok, routed}
     end
   end
+
+  # Triplet SLSA à l'EXTRACT (chantier brief-physique) : `(brief_sha, base_sha=input_sha, livrable_sha)`.
+  # `brief_sha`/`base_sha` ont voyagé via pod.completed → step_run ; `livrable_sha` = le commit publié.
+  # N'émet QUE pour un vrai livrable git (`:deliverable_opts` présent = producteur) avec un work/ops.
+  # brief_sha absent (dégradé) → provenance 2/3 (input→output), jamais un digest inventé (cf. Provenance).
+  defp maybe_emit_provenance(step_run, livrable_sha) do
+    with %{} = dopts <- Map.get(step_run, :deliverable_opts),
+         repo when is_binary(repo) <- Map.get(step_run, :repo),
+         work_dir = Path.join(Fleet.Layout.work_root(), project_name(repo)),
+         true <- File.dir?(work_dir) do
+      emit_provenance(work_dir, step_run, dopts, livrable_sha)
+    else
+      _ -> :ok
+    end
+  end
+
+  defp emit_provenance(work_dir, step_run, dopts, livrable_sha) do
+    attrs = %{
+      livrable_sha: livrable_sha,
+      brief_sha: Map.get(step_run, :brief_sha),
+      brief_ref: Map.get(step_run, :brief_ref),
+      input_sha: Map.get(dopts, :base_sha) || Map.get(dopts, "base_sha"),
+      pod_id: Map.get(step_run, :pod_id),
+      role: Map.get(step_run, :role),
+      issue: Map.get(step_run, :issue_number)
+    }
+
+    case Fleet.Workflow.Provenance.emit(work_dir, attrs) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "StepRunCompleter: provenance NON gravée (#{Map.get(step_run, :repo)}) : " <>
+            "#{inspect(reason)} — dégradé (complétion préservée)"
+        )
+
+        :ok
+    end
+  end
+
+  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   @awaits_arch_label Labels.awaits_arch()
 

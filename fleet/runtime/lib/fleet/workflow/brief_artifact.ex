@@ -69,14 +69,34 @@ defmodule Fleet.Workflow.BriefArtifact do
   @spec physicalize_attrs(map(), String.t() | nil, keyword()) :: map()
   def physicalize_attrs(attrs, repo, opts \\ [])
 
-  def physicalize_attrs(%{brief: brief} = attrs, repo, opts)
+  def physicalize_attrs(%{brief: brief} = attrs, repo, opts) do
+    case physicalize(brief, repo, opts) do
+      {ref, sha} when is_binary(sha) -> Map.merge(attrs, %{brief_ref: ref, brief_sha: sha})
+      _ -> attrs
+    end
+  end
+
+  def physicalize_attrs(attrs, _repo, _opts), do: attrs
+
+  @doc """
+  Cœur de la matérialisation, forme TUPLE : `{brief_ref, brief_sha}` (ou `{nil, nil}` en dégradé). Le
+  leaf de dispatch l'appelle UNE FOIS (avant le spawn) et pose le pointeur à la fois dans les spawn_opts
+  (→ pod.completed → triplet) ET dans l'enqueue (→ le pod). `physicalize_attrs/3` en dérive. DÉGRADE
+  (LOUD + `{nil, nil}`) si pas de brief / repo / work_dir / échec git — le dispatch n'est JAMAIS cassé.
+  `opts[:work_root]` injectable (test).
+  """
+  @spec physicalize(String.t() | nil, String.t() | nil, keyword()) ::
+          {String.t() | nil, String.t() | nil}
+  def physicalize(brief, repo, opts \\ [])
+
+  def physicalize(brief, repo, opts)
       when is_binary(brief) and brief != "" and is_binary(repo) and repo != "" do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
     work_dir = Path.join(work_root, project_name(repo))
 
     case commit(work_dir, brief) do
       {:ok, %{ref: ref, sha: sha}} ->
-        Map.merge(attrs, %{brief_ref: ref, brief_sha: sha})
+        {ref, sha}
 
       {:error, reason} ->
         Logger.warning(
@@ -84,11 +104,11 @@ defmodule Fleet.Workflow.BriefArtifact do
             "string seule (dégradé, dispatch préservé)"
         )
 
-        attrs
+        {nil, nil}
     end
   end
 
-  def physicalize_attrs(attrs, _repo, _opts), do: attrs
+  def physicalize(_brief, _repo, _opts), do: {nil, nil}
 
   # `owner/name` → `name` (le work/ops est à `<work_root>/<name>`, cf. ProjectOnboard).
   defp project_name(repo), do: repo |> String.split("/") |> List.last()
