@@ -2,6 +2,7 @@ defmodule Fleet.Coord.PoliciesTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Coord.Policies
+  alias Fleet.Decision
   alias Fleet.EventRouter.Bus
 
   setup do
@@ -11,7 +12,7 @@ defmodule Fleet.Coord.PoliciesTest do
 
   describe "handle_decision/2" do
     test "halt + gatekeeper.refuse → notify_dashboard canon broadcast" do
-      decision = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
+      decision = %Decision{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
       assert :ok = Policies.handle_decision(decision, nil)
 
@@ -30,7 +31,7 @@ defmodule Fleet.Coord.PoliciesTest do
     end
 
     test "decision sans match dans table → {:error, {:no_policy_match, {decision, reason}}}" do
-      decision = %{decision: "allow", reason: "unknown", details: %{}, chain: []}
+      decision = %Decision{decision: "allow", reason: "unknown", details: %{}, chain: []}
 
       # Tuple STRUCTURÉ (D1) : le consommateur peut pattern-matcher le miss ET récupérer la
       # clé de lookup fautive — l'ancienne string "no policy match for …" ne le permettait pas.
@@ -38,11 +39,19 @@ defmodule Fleet.Coord.PoliciesTest do
                Policies.handle_decision(decision, nil)
     end
 
+    test "map brute (pas un %Decision{}) → {:error, {:invalid_decision, _}} (frontière refuse le non-validé)" do
+      # BND-002 : la frontière n'accepte QUE le verdict validé `%Fleet.Decision{}`. Une map à 2 clés
+      # (schema Starfleet court-circuité) est REFUSÉE, typée — jamais routée comme un verdict.
+      raw = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
+
+      assert {:error, {:invalid_decision, ^raw}} = Policies.handle_decision(raw, nil)
+    end
+
     test "escalate + audit_verdict → notify_dashboard (dernier maillon du producteur draft Q2 audit.verdict)" do
       # Le producteur draft `StepRunConsumer.emit_audit_verdict_draft` émet EXACTEMENT ce decision_json
       # (decision "escalate", reason "audit_verdict") ; DriftMonitor le route vers handle_decision → clé
       # "escalate.audit_verdict" (coord-policies.yaml). Ce test verrouille que la chaîne blink jusqu'à coord.
-      decision = %{
+      decision = %Decision{
         decision: "escalate",
         reason: "audit_verdict",
         details: %{"verdict" => "halt_wait_input", "issue" => 42},

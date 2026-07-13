@@ -4,6 +4,24 @@ defmodule Fleet.TaskQueue.WorkItem do
 
   `id` = the work item's UUID v4 (= the canonical `correlation_id`, propagated end-to-end).
   Distinct from `pod_id` (the target pod's session UUID).
+
+  ## Frontière de construction (BND-005)
+
+  DEUX seuls chemins de construction VALIDÉS, et le `Fleet.TaskQueue.Server` ne route ses transitions que
+  sur des items qui en sortent :
+
+    * `new/2` — item FRAIS (enqueue) : cast strict des attrs (atom|string keys), rejette un
+      `deadline`/`metadata`/`role`/`brief`… malformé en `{:error, {:bad_attr, _}}`, pose `id`/`enqueued_at`/
+      `state: :pending` lui-même ;
+    * `from_map/1` — recovery depuis `state.json` : `state` par LISTE FERMÉE (pas `to_existing_atom`),
+      champ requis absent ou corruption → `{:error, :invalid}` (→ le `state.corrupt` du Server).
+
+  Forger un `%WorkItem{}` à la main court-circuite ces casts (`state` hors vocabulaire, `metadata` non-map) :
+  toléré UNIQUEMENT dans les tests de corruption/ghost-state explicitement nommés (injection
+  `:sys.replace_state` pour prouver que le cleanup est TOTAL). L'opacité pleine du struct + des variantes
+  `metadata` construites (ordinary-brief vs gate-eval-resume) restent différées comme disproportionnées —
+  même arbitrage que `Fleet.CapProfile` : valeur-donnée partagée en lecture par tout le domaine
+  pilot/taskqueue, une opacité `@opaque` japperait sur chaque lecteur légitime.
   """
 
   @type state :: :pending | :assigned | :in_progress | :completed | :failed | :cleared

@@ -20,10 +20,16 @@ defmodule Fleet.CapProfile do
   Pure data transformer: YAML on disk → composed `%Fleet.CapProfile{}`
   struct. No process, no state.
 
+  **Frontière de construction** : la struct ne se fabrique QUE via `to_struct/1` (privé), atteint
+  uniquement après validation schema — trois chemins d'entrée : `load/1` (catalogue disque par nom),
+  `compose/2` (base + modops), `from_map/1` (map en mémoire, même validation). Fabriquer un
+  `%CapProfile{spec: …}` à la main court-circuite le schema (l'état invalide redevient représentable,
+  BND-001) : le code de prod passe par ces trois-là, et les fixtures par `from_map!/1` (builder de test).
+
   Two roles in one module:
 
     * the `Fleet.CapProfile.Loader` behaviour (`load/1`, `compose/2`,
-      `validate/1`); and
+      `validate/1`) plus the in-memory validated constructor `from_map/1`; and
     * the single-authority accessor surface for a composed profile's
       properties (`name/1`, `role_index/1`, `containment/1`, `slot_scope/1`,
       `lifetime_scope/2`, `deliverable_mode/2`, `brief_kind/2`, …) — each the
@@ -191,6 +197,47 @@ defmodule Fleet.CapProfile do
     case Fleet.CapProfile.Invariants.violations(profile) do
       [] -> :ok
       violations -> {:error, violations}
+    end
+  end
+
+  @doc """
+  Construit un `%Fleet.CapProfile{}` depuis une map EN MÉMOIRE (≠ `load/1`, qui résout un profil du
+  catalogue disque par `metadata.name`), en franchissant la **MÊME** validation schema que `load`/`compose`.
+
+  **Seul chemin d'entrée validé** pour fabriquer un profil hors catalogue : sans lui, du code (fixtures,
+  composition ad-hoc) forge `%CapProfile{spec: %{}}` à la main → le schema est court-circuité et l'état
+  invalide redevient représentable (la faiblesse BND-001). Un profil sorti d'ICI EST schema-conforme
+  (kind/metadata/spec + champs requis) ; `to_struct/1` (privé) reste l'unique FABRICANT de la struct, et
+  n'est jamais atteint sans validation préalable (load / compose / ici).
+
+    * `{:ok, %Fleet.CapProfile{}}` — map schema-conforme
+    * `{:error, :invalid_schema}` — non-conforme (MÊME verdict que `load`)
+    * `{:error, :schema_unavailable}` — le schema priv est absent/corrompu
+  """
+  @spec from_map(map()) :: {:ok, t()} | {:error, atom() | String.t()}
+  def from_map(raw) when is_map(raw) do
+    with :ok <- Schema.validate(raw, :cap_profile) do
+      {:ok, to_struct(raw)}
+    end
+  end
+
+  @doc """
+  Variante bang de `from_map/1` : rend la struct, ou **raise** si la map n'est pas schema-conforme.
+  Destinée aux FIXTURES nominales (le builder de support `Fleet.Support.CapProfileFixture` s'appuie
+  dessus) — une fixture nominale franchit alors la MÊME frontière que la prod au lieu de forger un
+  `%CapProfile{}` partiel. (Un profil DÉLIBÉRÉMENT schema-bypassé, pour tester le fail-loud d'un
+  accesseur, reste hand-built dans un test explicitement nommé « schema bypass ».)
+  """
+  @spec from_map!(map()) :: t()
+  def from_map!(raw) do
+    case from_map(raw) do
+      {:ok, profile} ->
+        profile
+
+      {:error, reason} ->
+        raise ArgumentError,
+              "CapProfile.from_map!/1 : map non schema-conforme (#{inspect(reason)}) — " <>
+                "une fixture nominale doit être un profil complet (cf. Fleet.Support.CapProfileFixture)"
     end
   end
 

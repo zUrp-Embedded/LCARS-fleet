@@ -10,6 +10,9 @@ defmodule Fleet.Coord do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
+      # Verdict validé Ring-0 (BND-002) : `Policies.handle_decision/2` l'EXIGE (map brute refusée). Ce
+      # type ne pouvait vivre dans Starfleet (Starfleet dépend de Coord → cycle) — d'où sa descente Ring-0.
+      Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.EventRouter
     ],

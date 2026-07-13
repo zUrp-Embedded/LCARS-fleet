@@ -56,6 +56,48 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
+    # WAL sous un parent qui est un FICHIER → File.write du .tmp échoue :enotdir. Le WAL est la SEULE
+    # durabilité d'une 1re occurrence (pas d'escalade) → l'échec est SURFACÉ, jamais avalé (BND-055).
+    defp start_reg_wal_broken(tmp) do
+      blocker = Path.join(tmp, "blocker")
+      File.write!(blocker, "i am a file, not a dir")
+      wal = Path.join([blocker, "nested", "incidents.json"])
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: wal,
+           sync_debounce_ms: 5,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+         ]}
+      )
+
+      name
+    end
+
+    test "note : write WAL ÉCHOUE → {:error, {:wal_write_failed, _}} (BND-055, jamais un :ok menteur)",
+         %{tmp_dir: tmp} do
+      name = start_reg_wal_broken(tmp)
+
+      assert {:error, {:wal_write_failed, _}} =
+               Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
+
+      # mémoire quand même à jour (volatile) — la récurrence reste détectée EN MÉMOIRE cette session.
+      assert Reg.seen_before?("wake:p:dead", server: name)
+    end
+
+    test "record_or_escalate : 1re occurrence + write WAL ÉCHOUE → {:recorded_volatile, _} (pas :recorded)",
+         %{tmp_dir: tmp} do
+      name = start_reg_wal_broken(tmp)
+
+      assert {:recorded_volatile, _} =
+               Reg.record_or_escalate("pod", "p1", :dead, server: name, now: "2026-06-20T10:00:00Z")
+    end
+
     test "WAL multi-ligne : un incident par ligne (diff git lisible), reste JSON valide",
          %{tmp_dir: tmp} do
       name =

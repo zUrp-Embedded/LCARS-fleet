@@ -10,6 +10,8 @@ defmodule Fleet.Starfleet do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
+      # Verdict validé Ring-0 (descendu ici depuis Starfleet, BND-002) : Gatekeeper le CONSTRUIT.
+      Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.Shutdown.Quiesce,
       Fleet.EventRouter,
@@ -34,7 +36,7 @@ defmodule Fleet.Starfleet do
 
     * `Fleet.Starfleet.Application` — the app's supervisor (consumers gated
       by config: test hermeticity)
-    * `Fleet.Starfleet.Decision` — validated-output struct
+    * `Fleet.Decision` — validated-output struct (Ring-0, descendu ici pour BND-002)
     * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
       validation (frozen `{decision, reason, details, chain}` schema)
     * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,

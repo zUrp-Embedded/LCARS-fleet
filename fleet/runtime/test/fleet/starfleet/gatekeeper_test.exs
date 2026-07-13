@@ -2,7 +2,8 @@ defmodule Fleet.Starfleet.GatekeeperTest do
   use ExUnit.Case, async: true
   doctest Fleet.Starfleet.Gatekeeper
 
-  alias Fleet.Starfleet.{Decision, Gatekeeper}
+  alias Fleet.Decision
+  alias Fleet.Starfleet.Gatekeeper
 
   describe "validate/1" do
     test "JSON valide minimal → {:ok, %Decision{}}" do

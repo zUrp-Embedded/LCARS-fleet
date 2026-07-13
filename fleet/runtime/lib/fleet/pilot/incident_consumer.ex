@@ -216,6 +216,13 @@ defmodule Fleet.Pilot.IncidentConsumer do
               "issue created (forge down ?) : #{inspect(e)}"
           )
 
+        {:recorded_volatile, e} ->
+          Logger.error(
+            "IncidentConsumer: #{op}.failed #{pod_id} : incident en MÉMOIRE seule — write WAL ÉCHOUÉ " <>
+              "(#{inspect(e)}) : PAS durable cross-session tant que la sync forge async n'a pas absorbé " <>
+              "(BND-055 : un crash avant la sync perdrait la récurrence)"
+          )
+
         {:record_failed, e} ->
           Logger.error(
             "IncidentConsumer: #{op}.failed #{pod_id} : incident NOT recorded (registry unavailable) : #{inspect(e)}"

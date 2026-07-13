@@ -32,6 +32,7 @@ defmodule Fleet.Coord.Policies do
   """
 
   alias Fleet.Coord.Emitter
+  alias Fleet.Decision
 
   @policies_key {__MODULE__, :policies}
 
@@ -121,12 +122,15 @@ defmodule Fleet.Coord.Policies do
       STRUCTURED tuple (pattern-matchable by consumers — the old string
       `"no policy match for …"` was not); the human message lives in the
       consumers' logs (`DriftMonitor`), not in the tuple.
+    * `{:error, {:invalid_decision, term}}` — the input is NOT a validated
+      `%Fleet.Decision{}` (raw map refused at the boundary, BND-002).
   """
   @spec handle_decision(
-          Fleet.Starfleet.Decision.t() | map(),
+          Fleet.Decision.t(),
           correlation_id :: String.t() | nil
-        ) :: :ok | {:error, {:no_policy_match, {term(), term()}}}
-  def handle_decision(%{decision: decision, reason: reason} = dec, correlation_id) do
+        ) ::
+          :ok | {:error, {:no_policy_match, {term(), term()}} | {:invalid_decision, term()}}
+  def handle_decision(%Decision{decision: decision, reason: reason} = dec, correlation_id) do
     case lookup({decision, reason}) do
       {:ok, %{"action" => action, "escalation_path" => path}} ->
         Emitter.dispatch_action(action, path, dec, correlation_id)
@@ -135,6 +139,15 @@ defmodule Fleet.Coord.Policies do
         {:error, {:no_policy_match, {decision, reason}}}
     end
   end
+
+  # La frontière n'accepte QUE le verdict VALIDÉ `%Fleet.Decision{}` (sortie de
+  # `Fleet.Starfleet.Gatekeeper.validate/1`, seule construction). Une map brute `%{decision, reason}`
+  # passait ici (le contrat annonçait « décision validée » mais acceptait « map à 2 clés ») → un
+  # appelant pouvait court-circuiter le schema Starfleet et router un verdict non validé. On REFUSE,
+  # typé (l'appelant `DriftMonitor` loggue le `{:error, _}`) — l'état invalide n'est plus représentable
+  # à la frontière, jamais normalisé en aval. (Le type ne pouvait être exigé tant qu'il vivait dans
+  # Starfleet : Coord ne peut nommer un type de Starfleet — d'où la descente Ring-0 de `Fleet.Decision`.)
+  def handle_decision(other, _correlation_id), do: {:error, {:invalid_decision, other}}
 
   @doc """
   Dispatch of a Cat 5 escalation.

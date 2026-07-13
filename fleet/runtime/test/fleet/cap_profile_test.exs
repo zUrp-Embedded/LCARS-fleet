@@ -556,6 +556,37 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
+  describe "from_map/1 (constructeur validé en mémoire — BND-001)" do
+    test "map schema-conforme → {:ok, %CapProfile{}} (même validation que load)" do
+      # Une fixture nominale (builder) EST schema-conforme ; on la re-passe en map et from_map la reconstruit.
+      p = Fleet.Support.CapProfileFixture.build()
+      map = %{"kind" => p.kind, "metadata" => p.metadata, "spec" => p.spec}
+
+      assert {:ok, %Fleet.CapProfile{}} = Fleet.CapProfile.from_map(map)
+    end
+
+    test "map NON conforme (spec vide) → {:error, :invalid_schema} — jamais un profil forgé silencieusement" do
+      # C'EST le trou BND-001 : sans from_map, ce shape se fabriquait en `%CapProfile{spec: %{}}` hand-built,
+      # schema court-circuité. Le constructeur le REFUSE (même verdict que load), il ne le normalise pas.
+      raw = %{"kind" => "CapabilityProfile", "metadata" => %{"name" => "x", "containment" => "bwrap"}, "spec" => %{}}
+
+      assert {:error, :invalid_schema} = Fleet.CapProfile.from_map(raw)
+    end
+
+    test "from_map!/1 raise sur map non conforme (fixture fausse = raise, pas un profil partiel)" do
+      assert_raise ArgumentError, ~r/non schema-conforme/, fn ->
+        Fleet.CapProfile.from_map!(%{"kind" => "x", "metadata" => %{}, "spec" => %{}})
+      end
+    end
+
+    test "builder de support : profil canon + override → schema-conforme, override appliqué" do
+      profile = Fleet.Support.CapProfileFixture.build(%{"metadata" => %{"name" => "engineer-test"}})
+
+      assert Fleet.CapProfile.name(profile) == "engineer-test"
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+  end
+
   # ============================================================
   # git_ops_denied_patterns/1 + with_resolved_disallowed_tools/1
   # Mécanisme catalogue→claude CLI (face 1 décision archi git, 2026-05-24)

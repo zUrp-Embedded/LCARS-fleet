@@ -44,7 +44,7 @@ defmodule Fleet.Coord.Emitter do
   @doc """
   Emits the canonical event corresponding to `action` (cf. moduledoc
   § Actions). `path` = the policy's `escalation_path` (relayed as-is into the
-  payload); `payload` = the decision (`%Fleet.Starfleet.Decision{}`/map) or the
+  payload); `payload` = the decision (`%Fleet.Decision{}`/map) or the
   original escalation payload — normalized into a map, from which we extract
   `pod_id`/`verdict`/`reason` (atom OR string keys); `correlation_id`
   propagated on the broadcast.

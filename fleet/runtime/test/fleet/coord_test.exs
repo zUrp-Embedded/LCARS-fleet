@@ -2,6 +2,7 @@ defmodule Fleet.CoordTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Coord
+  alias Fleet.Decision
   alias Fleet.EventRouter.Bus
 
   setup do
@@ -11,7 +12,7 @@ defmodule Fleet.CoordTest do
 
   describe "delegator API" do
     test "handle_decision/2 délégué à Policies" do
-      decision = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
+      decision = %Decision{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
       assert :ok = Coord.handle_decision(decision, nil)
 

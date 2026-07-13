@@ -18,13 +18,13 @@ defmodule Fleet.Starfleet.Gatekeeper do
 
   ## Public API
 
-      iex> {:ok, %Fleet.Starfleet.Decision{decision: "halt"}} =
+      iex> {:ok, %Fleet.Decision{decision: "halt"}} =
       ...>   Fleet.Starfleet.Gatekeeper.validate(
       ...>     ~s|{"decision":"halt","reason":"poc","details":{},"chain":["test"]}|
       ...>   )
   """
 
-  alias Fleet.Starfleet.Decision
+  alias Fleet.Decision
 
   @schema_key {__MODULE__, :decision_schema}
 

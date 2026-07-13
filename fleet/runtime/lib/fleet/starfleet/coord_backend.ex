@@ -19,7 +19,7 @@ defmodule Fleet.Starfleet.CoordBackend do
   """
 
   @callback handle_decision(
-              decision :: Fleet.Starfleet.Decision.t(),
+              decision :: Fleet.Decision.t(),
               correlation_id :: String.t() | nil
             ) :: :ok | {:error, term()}
 

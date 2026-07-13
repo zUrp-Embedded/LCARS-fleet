@@ -9,7 +9,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
     - **recurrence check** (`seen_before?`) = MEMORY lookup → 0 I/O per fail → withstands a **burst** (N pods
       falling together = the very signature of an error-handler's job);
     - **write** (`note`) = serialized upsert + **local WAL** (JSON, atomic write tmp+rename →
-      crash-survivable) THEN triggers an **ASYNC forge sync** → the dispatcher NEVER blocks on the forge;
+      crash-survivable) THEN triggers an **ASYNC forge sync** → the dispatcher NEVER blocks on the forge.
+      Un WAL en échec de WRITE est SURFACÉ, jamais avalé (BND-055) : le WAL est la seule durabilité d'une
+      1ʳᵉ occurrence (pas d'escalade), donc `note/3` rend `{:error, {:wal_write_failed,_}}` et
+      `record_or_escalate/4` rend `{:recorded_volatile,_}` — jamais un `:ok`/`:recorded` menteur ;
     - **forge = durable cross-machine backing-store** (branch `work/ops`), debounced + retried async sync,
       **bidirectional merge** (incidents from other machines absorbed); forge unreachable = **fail-LOUD** log,
       never a loss (the WAL holds, re-sync on return) nor a silent re-roll.
@@ -77,6 +80,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
   HONEST return — it carries what ACTUALLY happened, never an optimistic success:
 
     - `:recorded` — first time, incident recorded in memory + local WAL.
+    - `{:recorded_volatile, reason}` — first time, incident en MÉMOIRE mais le write WAL a ÉCHOUÉ
+      (BND-055) : PAS durable cross-session tant que la sync forge async ne l'a pas absorbé. Le caller
+      doit le DISTINGUER d'un `:recorded` (log/telemetry LOUD), jamais rassurer sur une durabilité absente.
     - `{:escalated, issue_number}` — recurrence, sysadmin issue ACTUALLY opened (the number PROVES it).
     - `{:escalation_suppressed, issue_number | nil}` — recurrence NOTED (count/last_seen updated) but
       under cooldown of the previous escalation: NO new issue (the existing one carries the alarm).
@@ -88,6 +94,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   """
   @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
           :recorded
+          | {:recorded_volatile, term()}
           | {:escalated, integer()}
           | {:escalation_suppressed, integer() | nil}
           | {:escalation_failed, term()}
@@ -99,6 +106,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
     case observe(sig, reason, opts) do
       :recorded_first ->
         :recorded
+
+      {:recorded_first_volatile, wal_reason} ->
+        # BND-055 : mémoire OK, WAL KO → durabilité non prouvée (le caller LOUD, ne rassure pas).
+        {:recorded_volatile, wal_reason}
 
       {:suppressed, issue} ->
         {:escalation_suppressed, issue}
@@ -235,8 +246,17 @@ defmodule Fleet.Pilot.IncidentRegistry do
     registry = upsert(state.registry, sig, reason, now)
 
     # Local crash-survivable WAL BEFORE the forge; the forge is async (never on the dispatcher's path).
-    _ = write_wal(state.wal_path, registry)
-    {:reply, :ok, schedule_sync(%{state | registry: registry})}
+    # Le WAL est la SEULE durabilité de `note/3` (pas d'escalade = pas d'issue forge) : un échec de write
+    # NE PEUT PAS être avalé en `:ok` (BND-055). Sans ça, mémoire mise à jour + WAL échoué + crash avant
+    # la sync forge async = incident jamais durable, alors que le retour disait « enregistré ». On propage
+    # l'échec typé ; `WakeRecovery` le voit déjà (`note OK → recorded` sinon LOUD « anchor NOT recorded »).
+    reply =
+      case write_wal(state.wal_path, registry) do
+        :ok -> :ok
+        {:error, e} -> {:error, {:wal_write_failed, e}}
+      end
+
+    {:reply, reply, schedule_sync(%{state | registry: registry})}
   end
 
   # Memory transaction of `record_or_escalate`/`escalate_gated`: notes the occurrence (count/
@@ -247,11 +267,17 @@ defmodule Fleet.Pilot.IncidentRegistry do
     cooldown = under_cooldown(state.registry[sig], now, cooldown_ms)
 
     registry = upsert(state.registry, sig, reason, now)
-    _ = write_wal(state.wal_path, registry)
+    wal = write_wal(state.wal_path, registry)
     state = schedule_sync(%{state | registry: registry})
 
+    # BND-055 : sur une PREMIÈRE occurrence (`:recorded_first` → `:recorded`, PAS d'escalade), le WAL est
+    # la seule durabilité — un échec de write ne doit pas ressortir `:recorded`. On distingue
+    # `{:recorded_first_volatile, _}` (mémoire OK, WAL KO → durabilité suspendue à la sync forge async).
+    # Sur une RÉCURRENCE (`:should_escalate`/`:suppressed`), la durabilité = l'ISSUE forge ouverte par
+    # l'escalade (write WAL déjà loggué LOUD à l'intérieur) → on n'altère pas le gate d'escalade.
     reply =
       cond do
+        not known? and match?({:error, _}, wal) -> {:recorded_first_volatile, elem(wal, 1)}
         not known? -> :recorded_first
         match?({:suppressed, _}, cooldown) -> cooldown
         true -> :should_escalate
