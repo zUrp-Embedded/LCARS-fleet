@@ -117,6 +117,15 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
+        # La boucle {:continue, :accept} + accept BLOQUANT ne rend JAMAIS la main à la mailbox
+        # (un {:continue} repasse avant les messages) → handle_info({:DOWN}), qui libère le slot
+        # d'une connexion finie, ne tourne jamais tant que des connexions arrivent → le compte ne
+        # fait que MONTER → après @max_conns_per_pod connexions CUMULÉES sur la vie du pod, le
+        # permanent est refusé À VIE (constaté : 0 connexion réelle, 8 comptées, arch verrouillé).
+        # On draine donc les {:DOWN} en attente ICI, juste avant le plafond : on compte les
+        # connexions VIVANTES et on vide la mailbox (sinon les {:DOWN} fuient en mémoire).
+        state = reap_down(state)
+
         # PER-POD CEILING, checked BEFORE reaching for the shared pool: the Task.Supervisor's
         # `max_children` is FLEET-WIDE — one pod opening enough connections would starve every
         # OTHER pod's tools (get_work_item/submit_result dead fleet-wide). A pod's misbehaviour
@@ -158,6 +167,20 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   defp live_conns(%{conns: conns}), do: map_size(conns)
+
+  # Draine (non-bloquant, `after 0`) les {:DOWN} des Tasks de connexion terminées et applique les
+  # libérations de slot MAINTENANT — cf. le commentaire dans handle_continue(:accept) : la boucle
+  # d'accept affame la mailbox, donc on ne peut pas compter sur handle_info({:DOWN}) pour
+  # décrémenter le plafond en temps voulu. Ne pêche QUE les {:DOWN} (le seul monitor de l'acceptor
+  # = les Tasks de connexion, cf. spawn_conn) ; le reste de la mailbox est laissé intact.
+  defp reap_down(state) do
+    receive do
+      {:DOWN, ref, :process, _pid, _reason} ->
+        reap_down(%{state | conns: Map.delete(state.conns, ref)})
+    after
+      0 -> state
+    end
+  end
 
   # CONCURRENT: each connection is served in its OWN Task, never inline in the accept loop.
   # Serving inline blocked the loop while ONE handler was pending (e.g. a slow ~30 s forge call):

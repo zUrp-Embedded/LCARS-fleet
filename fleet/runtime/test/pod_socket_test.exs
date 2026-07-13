@@ -331,6 +331,25 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:ok, %{"work_item" => %{"brief" => "still served"}}} = content(resp)
   end
 
+  test "SOC-LEAK-001 : ouvrir/FERMER en série AU-DELÀ du plafond ne verrouille pas le pod (slot libéré)" do
+    # Chaque `call` = une connexion SERVIE PUIS FERMÉE. Le slot per-pod DOIT se libérer à la
+    # fermeture, sinon un pod à LONGUE VIE (permanent-architect) atteint le plafond (8) sur des
+    # connexions déjà MORTES et se fait refuser À VIE (constaté e2e 2026-07-13 : 0 connexion
+    # réelle, 8 comptées, arch verrouillé). Cause : la boucle {:continue,:accept} affamait
+    # handle_info({:DOWN}) → le compteur ne décroissait jamais. Ici on enchaîne 3× le plafond ;
+    # sans la libération (reap_down), les connexions ≥ 9 se font refuser et `call` casse.
+    pod = uniq("longlived")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    for i <- 1..24 do
+      resp = call(path, i, "get_work_item", %{})
+
+      assert {:ok, _} = content(resp),
+             "connexion ##{i} : slot non libéré (le plafond compte des connexions mortes)"
+    end
+  end
+
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
   # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.
