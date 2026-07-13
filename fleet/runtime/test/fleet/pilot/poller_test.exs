@@ -48,6 +48,24 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
+  # Stubs task_queue pour les tests d'offre-arch (chantier brief-physique) : implémentent les 4 lectures que
+  # le tick de poll fait (réconciliation `list_active`/`pod_active_issue_id`/`pod_status` + mon offer-arch
+  # `pod_status`/`enqueue`) → évitent de toucher le VRAI broker en test. `pod_status` de l'arch = le levier
+  # « libre vs occupé ».
+  defmodule ArchFreeTQ do
+    def list_active, do: []
+    def pod_active_issue_id(_pod_id), do: {:ok, nil}
+    def pod_status(_pod_id), do: {:ok, nil}
+    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+  end
+
+  defmodule ArchBusyTQ do
+    def list_active, do: []
+    def pod_active_issue_id(_pod_id), do: {:ok, nil}
+    def pod_status(_pod_id), do: {:ok, :in_progress}
+    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+  end
+
   describe "G4 — awaits_rekick?/2 (throttle du re-kick arch)" do
     test "au moins 1 issue attend ET tick multiple du throttle → re-kick" do
       assert Poller.awaits_rekick?(1, 0)
@@ -78,7 +96,7 @@ defmodule Fleet.Pilot.PollerTest do
         "assignees" => [%{"login" => "lordzurp"}]
       }
 
-      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil)
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil, task_queue: ArchBusyTQ)
 
       # Le re-kick n'arme qu'au tick multiple de @awaits_rekick_every (10) ; do_poll incrémente
       # poll_count de 1/tick (list_org_repos rend 1 repo). 10 polls → le 10e arme.
@@ -112,6 +130,7 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid} =
         start_entry_poller({:ok, [issue]}, %{},
           spawner: nil,
+          task_queue: ArchBusyTQ,
           forge_opts: [
             _test_issues: {:ok, [issue]},
             _test_routes: %{},
@@ -132,6 +151,53 @@ defmodule Fleet.Pilot.PollerTest do
 
       # et le compte loggué est le backlog fleet-wide (2 issues : une par repo)
       assert log =~ "2 issue(s) awaits-arch (fleet-wide)"
+
+      GenServer.stop(pid)
+    end
+
+    # Chantier brief-physique / serialize-via-forge : l'arch est un worker context-long/unique (comme l'eng)
+    # → la forge est sa file. Si l'arch est LIBRE, le poller lui ENFILE le mandat d'arbitrage (get_work_item
+    # cesse de rendre {done:true} — sonde #4).
+    test "arch LIBRE + issue awaits-arch → le poller ENFILE un mandat d'arbitrage à l'arch" do
+      issue = %{
+        "number" => 42,
+        "body" => "x",
+        "labels" => [%{"name" => "lcars-awaits-arch"}],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchFreeTQ)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..10, do: Poller.force_poll(name)
+        end)
+
+      assert log =~ "arch mandate enqueued lordzurp/lcars-test#42"
+
+      GenServer.stop(pid)
+    end
+
+    # Symétrique : l'arch OCCUPÉ (un work-item actif) sérialise via la forge — PAS de nouvel enqueue (le
+    # backlog reste sur la forge, ré-offert au prochain tick une fois l'arch libre + le label drainé). Le
+    # wake fire quand même (nudge). C'est le role_busy de l'eng transposé au forever (busy = a un work-item).
+    test "arch OCCUPÉ (work-item actif) → PAS d'enqueue (sérialise via la forge), wake seul" do
+      issue = %{
+        "number" => 42,
+        "body" => "x",
+        "labels" => [%{"name" => "lcars-awaits-arch"}],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchBusyTQ)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..10, do: Poller.force_poll(name)
+        end)
+
+      refute log =~ "arch mandate enqueued"
+      assert log =~ "re-kick"
 
       GenServer.stop(pid)
     end
@@ -260,8 +326,8 @@ defmodule Fleet.Pilot.PollerTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "project"},
-           spec: %{"brief_kind" => "worker"}
+           metadata: %{},
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     # Corr.3 : juge de PR (qualifier/reviewer) -> brief_kind: judge (brief GateBrief desamorce).
@@ -270,7 +336,7 @@ defmodule Fleet.Pilot.PollerTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => role, "slot_scope" => "instance"},
+           metadata: %{"name" => role},
            spec: %{"brief_kind" => "judge"}
          }}
 

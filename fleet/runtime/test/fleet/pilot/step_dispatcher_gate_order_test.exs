@@ -33,8 +33,8 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "project"},
-           spec: %{"brief_kind" => "worker"}
+           metadata: %{},
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
   end
 
@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "instance"},
+           metadata: %{},
            spec: %{"brief_kind" => "worker"}
          }}
   end
@@ -159,7 +159,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
 
     # 1. la DÉCISION ne demande aucun project (elle est prise avant le resolver)
     assert :ready_needs_reprovision =
-             Spawn.project_scope_decision("project", "pipe", ReadyPipeSpawner, "pod-pipe")
+             Spawn.project_scope_decision("pipe", ReadyPipeSpawner, "pod-pipe")
 
     # 2. l'ACTION consomme le project résolu (base_sha) — post-resolver
     assert :ok =
@@ -184,7 +184,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert :role_busy =
-                 Spawn.project_scope_decision("project", "pipe", RaisingSpawnerA09, "pod-x")
+                 Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x")
       end)
 
     # fail-closed VISIBLE (le warning de safe_pod_info), jamais :proceed (reset destructif).

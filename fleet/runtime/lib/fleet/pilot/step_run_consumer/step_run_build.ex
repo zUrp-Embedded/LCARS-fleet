@@ -111,6 +111,11 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     # judge_target (brief|nil) → complete_judge decides PR-review trace vs issue-comment;
     # absent (normal/gatekeeper path) → default PR behavior (fail-loud if no PR).
     |> put_unless_nil(:judge_target, Map.get(route, :judge_target))
+    # Provenance du brief (chantier brief-physique) : le pointeur content-addressé voyagé via pod.completed
+    # → le StepRunCompleter assemble le triplet SLSA `(brief_sha, base_sha, livrable_sha)` après publish.
+    # Absent (brief non matérialisé / judge sans brief) → non posé.
+    |> put_unless_nil(:brief_sha, payload["brief_sha"])
+    |> put_unless_nil(:brief_ref, payload["brief_ref"])
     |> maybe_put_deliverable(pr_role, role, payload, n, seams)
     |> maybe_put_review_event(pr_role, route.intent, payload)
     |> maybe_put_eng_summary(pr_role, payload)

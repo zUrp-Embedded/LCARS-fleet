@@ -314,6 +314,38 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:error, {:open_pr, {:http, 422, _}}} =
                StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
     end
+
+    # Régression 2026-07-13 : la provenance était accrochée à `complete/2` (verdicts SANS livrable) →
+    # jamais émise sur le VRAI chemin producteur (`open_deliverable_pr` est le seul point de publication
+    # d'un livrable git). Ce test walk ce chemin et exige le triplet complet — il rougirait sur le mauvais
+    # wiring d'origine. (Le `:work_root` seam remplace le `Fleet.Layout.work_root()` global non testable.)
+    @tag :tmp_dir
+    test "émet la provenance triplet (brief_sha, input_sha, livrable_sha) sous work/ops `livrables/`",
+         %{tmp_dir: tmp} do
+      # work/ops du projet : project_name("lordzurp/lcars-test") = "lcars-test", un vrai repo git.
+      work_dir = Path.join(tmp, "lcars-test")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      brief_sha = String.duplicate("b", 64)
+      step_run = pr_step_run(%{brief_sha: brief_sha, brief_ref: "briefs/#{brief_sha}.md"})
+      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+
+      assert {:ok, %{commit_sha: "deadbeef"}} =
+               StepRunCompleter.open_deliverable_pr(step_run, opts)
+
+      # La provenance apparaît, content-addressée sur le livrable_sha, committée, triplet COMPLET.
+      prov = Path.join(work_dir, "livrables/deadbeef-provenance.json")
+      assert File.exists?(prov)
+      json = prov |> File.read!() |> Jason.decode!()
+      # (livrable, brief, input) = les 3 sommets du triplet, chacun à sa place in-toto.
+      assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
+      assert get_in(json, ["predicate", "invocation", "configSource", "digest", "sha256"]) == brief_sha
+      assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
+      # committé, pas juste écrit sur disque.
+      {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
+      assert log =~ "provenance: livrables/deadbeef-provenance.json"
+    end
   end
 
   describe "record_review/2 + promote/2 (Corr.3 PR-natif)" do

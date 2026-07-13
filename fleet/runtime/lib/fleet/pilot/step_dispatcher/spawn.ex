@@ -161,6 +161,17 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          alive_before?,
          log_ctx
        ) do
+    # Brief PHYSIQUE : matérialisé UNE fois (content-addressé work/ops → {ref, sha}) AVANT le spawn,
+    # obligatoirement — le pointeur va à la FOIS dans les spawn_opts (→ data du pod → pod.completed →
+    # triplet SLSA assemblé au completer, à côté de base_sha) ET dans l'enqueue (→ le pod). `physicalize`
+    # dégrade en {nil, nil} (LOUD) sans jamais casser le dispatch.
+    {brief_ref, brief_sha} = Fleet.Workflow.BriefArtifact.physicalize(brief, repo)
+
+    spawn_opts =
+      if is_binary(brief_sha),
+        do: Keyword.merge(spawn_opts, brief_sha: brief_sha, brief_ref: brief_ref),
+        else: spawn_opts
+
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          # Native time-tracking (discard: pure Gitea metric, NOT load-bearing for the dispatch — a
          # failed start is swallowed here, unlogged; the time is simply not tracked for this run and
@@ -177,7 +188,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
              do: forge.start_stopwatch(repo, lock_target, ro)
            ),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
+         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, brief_ref, brief_sha) do
       # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`
       # (pod unreachable, escalated to starfleet) or `{:error, _}` (re-wake failed) means the pod is
       # NOT woken. Discarding this return (`_ = wake(...)`) would always make `spawn_step` return
@@ -254,11 +265,16 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # The `brief` = the role-aware BRIEF already built (build_brief): disarmed GateBrief for the
   # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
-  defp enqueue_brief(task_queue, pod_id, role, number, brief) do
+  defp enqueue_brief(task_queue, pod_id, role, number, brief, brief_ref, brief_sha) do
+    # Le brief est déjà matérialisé UNE fois au leaf → `{brief_ref, brief_sha}` (`{nil, nil}` en dégradé).
+    # Le work_item porte le POINTEUR content-addressé EN PLUS de la string (migration : la string cohabite
+    # tant que le pod ne lit pas encore l'objet). Même `brief_sha` que celui posé dans les spawn_opts.
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
       brief: brief,
+      brief_ref: brief_ref,
+      brief_sha: brief_sha,
       metadata: %{"issue" => number}
     }
 
@@ -357,33 +373,31 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   `git ls-remote` (~15-30s) just to throw the result away, and under a slow forge that stalled
   the whole sequential poll tick).
 
-  ONE identity (repo, role) alive at a time (1 Desktop slot), modulated by the lifetime:
-    instance         -> `:proceed` (never gated: distinct ids per issue, fan-out assumed).
-    project one-shot -> alive = occupied by another issue -> `:role_busy`; it dies at the end of
-                        the task + fresh spawn at the next issue (baseline behavior, UNCHANGED).
-    project pipe     -> RESIDENT process, per its state (pipe_rebrief_state):
-                          dead  -> `:proceed` (fresh spawn, 1st issue);
-                          busy  -> `:role_busy` (still working a task OR publishing its last
-                                   deliverable: resetting its workspace now would corrupt it /
-                                   race the push);
-                          ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
-                                   needs the resolved `project["base_sha"]`) runs AFTER the
-                                   resolver via `maybe_reprovision/5`, on the passing path only.
+  ONE identity (repo, role) alive at a time (1 Desktop slot), keyed on the SINGLE worker axis
+  `lifetime_scope` (collapse 2026-07-13 — `slot_scope` was its redundant re-encoding; `role_busy` now
+  derives from the ROOT axis « context-long vs one-shot », not a mimicking second property):
+    one-shot (fan-out)    -> `:proceed` (never gated: distinct ids per issue, cold + independent).
+    context-long (pipe/…) -> RESIDENT (repo,role) process, per its state (pipe_rebrief_state):
+                               dead  -> `:proceed` (fresh spawn, 1st issue);
+                               busy  -> `:role_busy` (still working a task OR publishing its last
+                                        deliverable: resetting its workspace now would corrupt it /
+                                        race the push);
+                               ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
+                                        needs the resolved `project["base_sha"]`) runs AFTER the
+                                        resolver via `maybe_reprovision/5`, on the passing path only.
+  The former `project one-shot` branch is GONE: a cold pod serialized per project is a contradiction
+  (one-shot ⟹ instance ⟹ fan-out) — no role ever matched it (dead branch, cf. `CapProfile.slot_scope/1`).
 
   Requires NO project (pure liveness/slot reads) — that is the point of the split. The decision→
   action gap now spans the resolver call (~15s worst case); the single sequential dispatcher per
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
   """
-  @spec project_scope_decision(String.t(), String.t(), module(), String.t()) ::
+  @spec project_scope_decision(String.t(), module(), String.t()) ::
           :proceed | :role_busy | :ready_needs_reprovision
-  def project_scope_decision("instance", _lifetime, _spawner, _pod_id), do: :proceed
+  def project_scope_decision("one-shot", _spawner, _pod_id), do: :proceed
 
-  def project_scope_decision("project", "one-shot", spawner, pod_id) do
-    if pod_alive?(spawner, pod_id), do: :role_busy, else: :proceed
-  end
-
-  def project_scope_decision("project", _pipe, spawner, pod_id) do
+  def project_scope_decision(_context_long, spawner, pod_id) do
     case pipe_rebrief_state(spawner, pod_id) do
       :dead -> :proceed
       :busy -> :role_busy

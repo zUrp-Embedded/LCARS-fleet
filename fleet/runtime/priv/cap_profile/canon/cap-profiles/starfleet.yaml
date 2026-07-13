@@ -20,7 +20,6 @@ metadata:
   # fleet_level true : le sysadmin-runtime ne touche pas aux projets -> fleet-level (repo 0000).
   # Inerte tant que starfleet ne spawne pas de pod.
   fleet_level: true
-  slot_scope: project   # singleton fleet-level (repo 0000) ; reserve le slot R=0, inerte (pas de pod)
 spec:
   # Rôle système host-native : brief = instruction exécutable, jamais un juge. REQUIS (schéma) — jamais inféré.
   brief_kind: worker

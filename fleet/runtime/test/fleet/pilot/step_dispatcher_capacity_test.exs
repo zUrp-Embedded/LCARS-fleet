@@ -35,8 +35,8 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"slot_scope" => "project"},
-           spec: %{"brief_kind" => "worker"}
+           metadata: %{},
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
   end
 

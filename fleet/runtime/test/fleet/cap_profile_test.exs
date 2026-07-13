@@ -31,7 +31,6 @@ defmodule Fleet.CapProfileTest do
     metadata:
       name: test-role
       containment: bwrap
-      slot_scope: instance
     spec:
       brief_kind: worker
       scope:
@@ -790,19 +789,25 @@ defmodule Fleet.CapProfileTest do
       refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 16}))
     end
 
-    test "slot_scope/1 lit metadata.slot_scope ∈ {project, instance}, raise si absent ou invalide" do
-      assert Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "project"})) == "project"
-      assert Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "instance"})) == "instance"
-
-      # Sans défaut fabriqué (comme role_index/1) : absent → raise.
-      assert_raise ArgumentError, fn ->
-        Fleet.CapProfile.slot_scope(role_struct(%{"name" => "ad-hoc"}))
+    test "slot_scope/1 DÉRIVE de lifetime_scope (collapse 2026-07-13) : one-shot→instance, context-long→project" do
+      life = fn lt ->
+        %Fleet.CapProfile{
+          kind: "CapabilityProfile",
+          metadata: %{"name" => "x"},
+          spec: %{"invocation" => %{"lifetime_scope" => lt}}
+        }
       end
 
-      # Valeur hors enum → raise (le code ne devine jamais une politique de slot).
-      assert_raise ArgumentError, fn ->
-        Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "global"}))
-      end
+      # one-shot = froid, indépendant → fan-out → instance
+      assert Fleet.CapProfile.slot_scope(life.("one-shot")) == "instance"
+      # context-long (pipe/run/forever) = une instance qui garde le contexte → unique/sérialisé → project
+      assert Fleet.CapProfile.slot_scope(life.("pipe")) == "project"
+      assert Fleet.CapProfile.slot_scope(life.("run")) == "project"
+      assert Fleet.CapProfile.slot_scope(life.("forever")) == "project"
+
+      # lifetime absent (spec vide) → défaut one-shot → instance : le fail SÛR (éphémère/fan-out,
+      # jamais un slot Desktop partagé revendiqué par erreur).
+      assert Fleet.CapProfile.slot_scope(role_struct(%{"name" => "ad-hoc"})) == "instance"
     end
   end
 
@@ -941,7 +946,7 @@ defmodule Fleet.CapProfileTest do
     defp cp_scope(tools) do
       %Fleet.CapProfile{
         kind: "CapabilityProfile",
-        metadata: %{"name" => "r", "containment" => "bwrap", "slot_scope" => "instance"},
+        metadata: %{"name" => "r", "containment" => "bwrap"},
         spec: %{"brief_kind" => "worker", "scope" => %{"allowedTools" => tools}}
       }
     end

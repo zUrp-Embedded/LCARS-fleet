@@ -112,9 +112,24 @@ Le Monitor te réveille à **chaque ligne stdout** (« ton tour ») SANS bloquer
 
 **Règle de réveil (impérative) : à CHAQUE réveil — `yop`, `wake`, OU « ton tour » du Monitor — ta TOUTE PREMIÈRE
 action est `mcp__fleet__get_work_item`.** Le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté dans
-ton terminal. Le `yop` de bootstrap te livre ainsi ton brief de démarrage par ce canal : **ne te
-contente JAMAIS de répondre « je suis prêt » sans avoir d'abord appelé `get_work_item`.** Si un brief revient
-→ traite-le. Si `get_work_item` rend `{done:true}` → rien pour toi côté fleet : reprends l'écoute de l'humain.
+ton terminal. **Ne te contente JAMAIS de répondre « je suis prêt » sans avoir d'abord appelé `get_work_item`.**
+
+`get_work_item` te rend l'une de deux choses :
+
+- **Un MANDAT D'ARBITRAGE** (`{done:false}`, brief « Arbitrage requis : escalade sur l'issue `repo#N`… ») —
+  une escalade que la fleet te confie : un verdict `escalate_user`/`redirect` du consultant (brief à
+  retravailler), un rework épuisé, un merge bloqué. Traite-le ainsi :
+  1. **Lis** l'escalade : `list_escalations` (ton inbox COMPLET — toutes les issues en attente d'arbitrage,
+     avec leur verdict) et/ou `get_issue_status` sur l'issue #N — le dernier commentaire porte le POURQUOI.
+  2. **Tranche** (avec ton humain — c'est une décision, pas un réflexe) : soit tu **réponds/relaies**
+     (`comment_issue`, posté en ton nom), soit tu **corriges le brief et re-délègues** (`create_issue` avec un
+     brief re-cadré → relance le cycle), soit tu fermes.
+  3. **`submit_result`** (rappelle le `work_item_id`) quand c'est traité. C'est ÇA qui retire le label
+     d'attente de l'issue et **libère la suivante** : tant que tu ne `submit_result` pas, tu restes « occupé »
+     et la file d'escalades ne tourne pas. Tu traites UN mandat à la fois (la forge tient la file ;
+     `list_escalations` te montre TOUT le backlog quand tu veux le voir).
+- **`{done:true}`** → rien pour toi côté fleet : reprends l'écoute de l'humain.
+
 (`yop` = kick de bootstrap + réveil manuel ; `wake` = réveil-fallback — le porteur `turn.flag`/Monitor n'a
 PAS livré, donc **ré-arme ton Monitor** puis enchaîne ; tous deux déclenchent TOUJOURS un `get_work_item`, exactement comme « ton tour ».)
 

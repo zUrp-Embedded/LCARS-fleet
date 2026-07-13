@@ -337,27 +337,32 @@ defmodule Fleet.CapProfile do
   def fleet_level?(%__MODULE__{}), do: false
 
   @doc """
-  The role's identity/slot granularity (`metadata.slot_scope`) — an axis ORTHOGONAL to `lifetime_scope`.
-  `"project"`: pod_id per (repo, role) → ONE identity per project → ONE stable Desktop slot (cwd +
-  session-id pinned), dispatch serialized per (repo, role) (engineer, fleet-level singletons). `"instance"`:
-  pod_id per (repo, number, role) → fan-out per issue/PR (ephemeral judges). **SINGLE SOURCE** of this
-  read: `Fleet.Pilot.StepDispatcher` chooses `PodId.for_repo` vs `for_issue`/`for_pr` off it.
+  The role's identity/slot granularity — **DERIVED from `lifetime_scope`** (collapse 2026-07-13). It is NO
+  LONGER a declared property: `slot_scope` and `lifetime_scope` were labelled two "orthogonal" axes, but the
+  catalogue proves them PERFECTLY correlated — `one-shot ⟺ instance` (cold, fan-out), context-long
+  (`pipe`/`run`/`forever`) `⟺ project` (a single accumulating instance, serialized), zero counter-example
+  over the 7 roles. « unique vs multi » is not data to declare: it is a CONSEQUENCE of « context-long vs
+  one-shot » (context-long ⟹ one instance that keeps context ⟹ serialize ; one-shot ⟹ cold, independent ⟹
+  fan-out). A "project one-shot" is a contradiction (why serialize a cold pod that shares nothing?), which
+  is why `project_scope_decision` had a dead branch for it. SINGLE SOURCE now = `lifetime_scope`.
 
-  **No fabricated default** (like `role_index/1` / `name/1`): the slot policy is a routing property
-  declared explicitly by EACH role — a profile without `slot_scope ∈ {project, instance}` is a
-  catalogue gap → we **raise** (fail-loud), never a silent inference in code.
+    * `"instance"` (one-shot): pod_id per (repo, number, role) → fan-out per issue/PR (ephemeral judges).
+    * `"project"` (context-long): pod_id per (repo, role) → ONE identity per project → ONE stable Desktop
+      slot (cwd + session-id pinned), dispatch serialized per (repo, role) (engineer, arch, fleet-level
+      singletons).
+
+  **SINGLE SOURCE** of the routing: `Fleet.Pilot.StepDispatcher` chooses `PodId.for_repo` vs
+  `for_issue`/`for_pr` off this. `lifetime_scope` is schema-REQUIRED (`invocation.required`) + enum-gated
+  (`g24_4`) → always present+valid for a loaded profile; the `"one-shot"` default is the safe fail (a role
+  without a lifetime = ephemeral = fans out, never a shared serialized slot claimed by mistake).
   """
   @spec slot_scope(t()) :: String.t()
-  def slot_scope(%__MODULE__{metadata: %{"slot_scope" => s}}) when s in ["project", "instance"],
-    do: s
-
-  def slot_scope(%__MODULE__{}),
-    do:
-      raise(
-        ArgumentError,
-        "CapProfile without metadata.slot_scope ∈ {project, instance} — slot policy not declared " <>
-          "(catalogue-only, no default: declare the scope in the role's cap-profile)"
-      )
+  def slot_scope(%__MODULE__{} = profile) do
+    case lifetime_scope(profile) do
+      "one-shot" -> "instance"
+      _context_long -> "project"
+    end
+  end
 
   @doc """
   Is the cap-profile a CATALOGUED role (carries an integer `role_index`)? A predicate WITHOUT a raise —

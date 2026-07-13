@@ -504,6 +504,50 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       GenServer.stop(pid)
     end
+
+    test "work_item.completed d'une escalade arch (metadata awaits_arch) → DRAIN lcars-awaits-arch" do
+      # Serialize-via-forge (chantier brief-physique) : l'arch a résolu son mandat (submit_result) → le système
+      # retire le label d'attente pour que le poller serve la SUIVANTE. Le repo+numéro voyagent dans la metadata
+      # du work-item (le WorkItem n'a pas de champ repo). `forge_opts[:test_pid]` porte le pid pour l'assertion
+      # cross-process (le stub tourne DANS le GenServer).
+      defmodule DrainForge do
+        def remove_label(repo, number, label, opts) do
+          send(opts[:test_pid], {:remove_label, repo, number, label})
+          {:ok, :removed}
+        end
+      end
+
+      name = :"HC_drain_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        StepRunConsumer.start_link(
+          name: name,
+          forge_client: DrainForge,
+          forge_opts: [test_pid: self()],
+          subscribe: false
+        )
+
+      arch_done =
+        Fleet.Event.new(:task_queue, :"work_item.completed",
+          correlation_id: "wi-arch-1",
+          payload: %{metadata: %{"awaits_arch" => true, "repo" => "fleet/proj", "number" => 7}}
+        )
+
+      send(pid, arch_done)
+      assert_receive {:remove_label, "fleet/proj", 7, "lcars-awaits-arch"}, 1_000
+
+      # une complétion NON-arch (pas de `awaits_arch`) ne draine RIEN (chemin nominal préservé).
+      other_done =
+        Fleet.Event.new(:task_queue, :"work_item.completed",
+          correlation_id: "wi-other",
+          payload: %{metadata: %{"gate_eval" => false}}
+        )
+
+      send(pid, other_done)
+      refute_receive {:remove_label, _, _, _}, 200
+
+      GenServer.stop(pid)
+    end
   end
 
   describe "default_deliverable_mode/1 (F-C053 — rôle non-chargeable ≠ absent)" do

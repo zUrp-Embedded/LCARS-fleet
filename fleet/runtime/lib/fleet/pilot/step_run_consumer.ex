@@ -328,30 +328,17 @@ defmodule Fleet.Pilot.StepRunConsumer do
         state
       )
       when is_binary(corr) do
-    case Map.pop(state.gate_evals, corr) do
-      # FAST-PATH absent: the context is not in RAM. TWO EXCLUSIVE cases:
-      #  (a) the verdict metadata carries `gate_eval` (gatekeeper escalation) → we RECONSTRUCT the eval_ctx from
-      #      the metadata (self-descriptive verdict) → resume. This is the closed wedge: crash of the StepRunConsumer alone
-      #      (broker alive → the task + its metadata survive) → the verdict arrives at the restarted StepRunConsumer
-      #      (empty gate_evals) → reconstruction instead of a silent `{:noreply}` (issue locked forever).
-      #  (b) otherwise → `{:noreply}` (NORMAL case: every step-dispatch pod emits a `work_item.completed` without
-      #      `gate_eval` → it is not a gatekeeper escalation → we ignore it).
-      {nil, _} ->
-        case reconstruct_eval_ctx(ev.payload, state) do
-          {:ok, eval_ctx} ->
-            do_resume_gate(eval_ctx, ev, corr, state)
-            {:noreply, state}
-
-          :not_gate_eval ->
-            {:noreply, state}
-        end
-
-      # FAST-PATH: the context is in RAM (nominal path, no crash) → direct resume. EXCLUSIVE of the
-      # reconstruction case (corr present here ⊻ absent there) → never a double-resume.
-      {eval_ctx, gate_evals} ->
-        state = %{state | gate_evals: gate_evals}
-        do_resume_gate(eval_ctx, ev, corr, state)
-        {:noreply, state}
+    # ARCH INBOX DRAIN (serialize-via-forge, chantier brief-physique) : the arch RESOLVED an escalation
+    # (its `submit_result`) → remove the `lcars-awaits-arch` label so the poller stops re-offering THIS one
+    # and serves the NEXT awaits-arch issue (the forge is the arch's queue, one at a time). Correlated by the
+    # work-item `metadata.awaits_arch` (+ repo/number), posted by `Poller.offer_arch_mandate`. Checked FIRST:
+    # an arch mandate carries NO `gate_eval` → without this it would fall into the eval reconstruction below
+    # (and the label would NEVER drain → infinite re-offer of a resolved escalation).
+    if arch_escalation_resolved?(ev) do
+      _ = drain_awaits_arch(ev, state)
+      {:noreply, state}
+    else
+      resume_or_reconstruct(ev, corr, state)
     end
   end
 
@@ -430,6 +417,80 @@ defmodule Fleet.Pilot.StepRunConsumer do
           "StepRunConsumer: gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}"
         )
     end
+  end
+
+  # The NOMINAL work_item.completed path (not an arch escalation): gatekeeper-eval resume (RAM fast-path or
+  # metadata reconstruction), or `{:noreply}` for every other pod's completion. Extracted so the handler
+  # stays a clean two-way branch (arch drain vs the rest); the eval logic is unchanged.
+  defp resume_or_reconstruct(ev, corr, state) do
+    case Map.pop(state.gate_evals, corr) do
+      # FAST-PATH absent: the context is not in RAM. TWO EXCLUSIVE cases:
+      #  (a) the verdict metadata carries `gate_eval` (gatekeeper escalation) → we RECONSTRUCT the eval_ctx from
+      #      the metadata (self-descriptive verdict) → resume. This is the closed wedge: crash of the StepRunConsumer alone
+      #      (broker alive → the task + its metadata survive) → the verdict arrives at the restarted StepRunConsumer
+      #      (empty gate_evals) → reconstruction instead of a silent `{:noreply}` (issue locked forever).
+      #  (b) otherwise → `{:noreply}` (NORMAL case: every step-dispatch pod emits a `work_item.completed` without
+      #      `gate_eval` → it is not a gatekeeper escalation → we ignore it).
+      {nil, _} ->
+        case reconstruct_eval_ctx(ev.payload, state) do
+          {:ok, eval_ctx} ->
+            do_resume_gate(eval_ctx, ev, corr, state)
+            {:noreply, state}
+
+          :not_gate_eval ->
+            {:noreply, state}
+        end
+
+      # FAST-PATH: the context is in RAM (nominal path, no crash) → direct resume. EXCLUSIVE of the
+      # reconstruction case (corr present here ⊻ absent there) → never a double-resume.
+      {eval_ctx, gate_evals} ->
+        state = %{state | gate_evals: gate_evals}
+        do_resume_gate(eval_ctx, ev, corr, state)
+        {:noreply, state}
+    end
+  end
+
+  # The completed work-item is an ARCH escalation mandate (`Poller.offer_arch_mandate`): its metadata carries
+  # `awaits_arch: true` (+ repo/number). Same key convention as `reconstruct_eval_ctx` (`:metadata` atom,
+  # string fallback). Distinguishes it from every other `work_item.completed` (which drains nothing).
+  defp arch_escalation_resolved?(%Fleet.Event{payload: payload}) when is_map(payload) do
+    meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
+    is_map(meta) and Map.get(meta, "awaits_arch") == true
+  end
+
+  defp arch_escalation_resolved?(_), do: false
+
+  # Drains `lcars-awaits-arch` on the resolved issue → the poller serves the NEXT one (the forge is the arch's
+  # queue). `remove_label` is idempotent (`:already_absent` no-op). repo+number travel in the work-item
+  # metadata (a `WorkItem` has no repo field). BEST-EFFORT: a failed remove leaves the label → the poller
+  # re-offers (a re-arbitration, never a loss) — logged so it stays visible, never a silent stuck label.
+  defp drain_awaits_arch(%Fleet.Event{payload: payload}, state) do
+    meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
+    repo = Map.get(meta, "repo")
+    number = Map.get(meta, "number")
+    forge = state.forge_client || Fleet.Pilot.ForgeClient
+
+    if is_binary(repo) and is_integer(number) do
+      case forge.remove_label(repo, number, Fleet.Pilot.Labels.awaits_arch(), state.forge_opts) do
+        {:ok, _} ->
+          Logger.info(
+            "StepRunConsumer: awaits-arch drained on #{repo}##{number} (arch resolved) → poller serves the next"
+          )
+
+        {:error, reason} ->
+          Logger.warning(
+            "StepRunConsumer: awaits-arch NOT drained on #{repo}##{number} (#{inspect(reason)}) — " <>
+              "poller may re-offer (no loss)"
+          )
+      end
+    else
+      Logger.warning(
+        "StepRunConsumer: arch escalation resolved but metadata lacks repo/number " <>
+          "(#{inspect(meta)}) — label not drained"
+      )
+    end
+
+    :ok
   end
 
   # RECONSTRUCTS the eval_ctx from the verdict metadata (self-descriptive verdict), when the
