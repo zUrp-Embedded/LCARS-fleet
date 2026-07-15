@@ -74,7 +74,7 @@ spec:
     gitconfig: false
     forge_signing_allowed: false
   modop_set:
-    default: [fire-mode, archive-mode]
+    default: [fire-mode]
     optional: [rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null

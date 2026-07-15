@@ -1,8 +1,8 @@
 # Modop — archive-mode (broadcast events, persistent monks)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-12
-**Statut** : actif — modop bundle SP positif
+**Dernière révision** : 2026-07-15
+**Statut** : DORMANT — pattern Memory-X (monks/archivist/broker) ; aucun rôle actif ne le compose (retiré des defaults consultant/starfleet, DR-006). Conservé pour une réactivation Memory-X (cf. beyond_#2 doctrine).
 **Dérivé de** : LCARS-v1.5 pattern archive-mode (monks Memory Alpha) + doctrine memory-alpha primitive cognitive (beyond_#2/doctrines/001)
 
 ---
@@ -71,13 +71,12 @@ Payload structuré :
 | Cap-profile | engineer/qualifier/reviewer/consultant | monks/archivist/broker |
 | Boot | on-demand dispatch | boot_at_start: true |
 
-## V1.5 Memory-X V0 → V1
+## Statut de réactivation (dormant)
 
-- SUPPRIMER (la sous-section « V1.5 Memory-X V0 → V1 » décrit un `apps/fleet_memory`/broker :8092 razé au collapse umbrella et un channel MCP `fleet-control` inexistant ; aucune implémentation Memory-X courante).
-- **V1 cible** : monks archive-mode via cap-profile + channel MCP custom `fleet-control` (push events)
-  - Pas de module Elixir dédié — la diff est config métier
-  - Cap-profile `monk-doctrine.yaml`, `monk-architecture.yaml`, etc.
-  - Channel `fleet-control` route les queries depuis architect → monks → archivist → response
+Pattern DORMANT : aucune implémentation Memory-X courante — l'`apps/fleet_memory`/broker et le canal MCP
+`fleet-control` d'origine ont été razés au collapse umbrella. Réactivation = un chantier Memory-X dédié
+(cap-profiles `monk-*.yaml` + un canal de routing des queries architect → monks → archivist → response),
+config métier, pas un module Elixir.
 
 ## Anti-pattern
 
