@@ -34,6 +34,30 @@ defmodule Fleet.Spawner.SessionId do
   """
   import Bitwise
 
+  # RFC4122 version-4 UUID shape (lowercase). Matches BOTH what `encode/4` produces (the hexspeak ids
+  # are built as legal v4 UUIDs) AND a real vendor session UUID (`--session-id`/`--resume` accept only
+  # this shape). Single source of the "is this a legal session id string" predicate.
+  @uuid_v4_re ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
+
+  @doc """
+  Validates an EXPLICIT session id (recall seed / permanent boot-from-base / admin override) as a legal
+  RFC4122 v4 UUID — the shape `encode/4` produces and the shape the vendor's `--session-id`/`--resume`
+  accept. `{:ok, uuid}` | `{:error, :not_uuid_shaped}`.
+
+  BND-024: an explicit session id is an identity that gets exported to the launcher (`LCARS_POD_SESSION_ID`)
+  and persisted for recovery/recall. Accepting ANY binary would make `opts[:session_id]` / a seed JSON an
+  ALTERNATE authority for the deterministic-identity property (a non-reconstructible id passed to the
+  vendor). The spawn path CASTS the seed through here — a present-but-non-UUID value is a caller/seed
+  corruption, refused rather than posed as an identity. The deterministic ids remain a STRONGER subtype
+  (this gates the SHAPE only, not the hexspeak `<T>badcafe…` semantics).
+  """
+  @spec cast(term()) :: {:ok, String.t()} | {:error, :not_uuid_shaped}
+  def cast(sid) when is_binary(sid) do
+    if Regex.match?(@uuid_v4_re, sid), do: {:ok, sid}, else: {:error, :not_uuid_shaped}
+  end
+
+  def cast(_), do: {:error, :not_uuid_shaped}
+
   @doc """
   Encodes the triplet `(role_index, protected, repo[, pool])` into a deterministic hexspeak UUID.
 

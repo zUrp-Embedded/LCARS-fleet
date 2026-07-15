@@ -980,10 +980,9 @@ defmodule Fleet.Spawner.Pod do
       issue_id: args.issue_id,
       # Session UUID PRE-ALLOCATED at spawn: `--session-id <uuid>` on the 1st creation. Recovery
       # from state.json does NOT reuse this sid (recreate = fresh session). The explicit seed
-      # (`opts[:session_id]`, e.g. arch recall) TAKES PRECEDENCE over the mint (`Pod.SessionMint`).
-      session_id:
-        Keyword.get(args.opts, :session_id) ||
-          SessionMint.mint(args.cap_profile, args.opts),
+      # (`opts[:session_id]`, e.g. arch recall / permanent boot-from-base) TAKES PRECEDENCE over the
+      # mint (`Pod.SessionMint`) — but is CAST as a valid UUID first (BND-024).
+      session_id: resolve_session_id(args),
       # ISO8601 timestamp frozen at creation, persisted as-is in state.json.
       started_at: DateTime.utc_now(),
       # default false; ONLY a deliberate recall (`opts[:resume]`) sets it to true → claude
@@ -1002,6 +1001,31 @@ defmodule Fleet.Spawner.Pod do
       tmux_session: nil,
       liveness_sample: nil
     }
+  end
+
+  # BND-024: the explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
+  # recall / permanent boot-from-base resume a real vendor session, and the value is exported to the
+  # launcher + persisted for recovery. A present-but-non-UUID seed is a caller/seed corruption: we REFUSE
+  # it loud (raise → `init/1` rescue → `{:error, _}` at start_link, no launch), never accept an arbitrary
+  # binary as identity nor silently fall back to the mint (that would MASK the corrupt seed with a mint id
+  # under a wrong recall/resume intent). Absent seed → the mint (a valid UUID by construction).
+  defp resolve_session_id(args) do
+    case Keyword.get(args.opts, :session_id) do
+      nil ->
+        SessionMint.mint(args.cap_profile, args.opts)
+
+      seed ->
+        case Fleet.Spawner.SessionId.cast(seed) do
+          {:ok, uuid} ->
+            uuid
+
+          {:error, :not_uuid_shaped} ->
+            raise ArgumentError,
+                  "Pod: explicit session_id #{inspect(seed)} is not a valid UUID (BND-024) — a recall/" <>
+                    "boot seed must resume a real vendor session; refusing rather than posing a " <>
+                    "non-reconstructible identity."
+        end
+    end
   end
 
   # SINGLE accessor of the role (= metadata.name) for ALL pod sites. Delegates to the SINGLE

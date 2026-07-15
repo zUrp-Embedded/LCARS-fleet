@@ -56,6 +56,38 @@ defmodule Fleet.Spawner.SessionIdTest do
     end
   end
 
+  describe "cast/1 — validation d'un session_id explicite (BND-024)" do
+    test "UUID v4 valide (dont un id hexspeak déterministe) → {:ok, uuid}" do
+      # un vrai UUID vendor v4
+      assert {:ok, "abcdef01-2345-4678-9abc-def012345678"} =
+               SessionId.cast("abcdef01-2345-4678-9abc-def012345678")
+
+      # un id déterministe produit par encode/4 EST un UUID v4 légal → cast l'accepte
+      det = SessionId.encode(3, false, 161)
+      assert {:ok, ^det} = SessionId.cast(det)
+    end
+
+    test "non-UUID / mauvaise version / mauvais variant / non-binaire → {:error, :not_uuid_shaped}" do
+      for bad <- [
+            "sess-xyz",
+            "builder-det",
+            "u9",
+            # version nibble = 3 (pas 4)
+            "abcdef01-2345-3678-9abc-def012345678",
+            # variant nibble = 7 (hors [89ab])
+            "abcdef01-2345-4678-7abc-def012345678",
+            # majuscules (le vendor rend du lowercase)
+            "ABCDEF01-2345-4678-9ABC-DEF012345678",
+            "",
+            nil,
+            42
+          ] do
+        assert {:error, :not_uuid_shaped} = SessionId.cast(bad),
+               "#{inspect(bad)} devrait être refusé"
+      end
+    end
+  end
+
   describe "verrou anti-drift seed↔encodeur" do
     test "le base seed arch porte EXACTEMENT le session_id encodé (= ce que permanent_boot extrait)" do
       seed = Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "architect.jsonl"])

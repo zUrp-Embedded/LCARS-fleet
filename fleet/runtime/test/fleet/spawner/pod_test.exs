@@ -555,11 +555,13 @@ defmodule Fleet.Spawner.PodTest do
 
     test "state.json écrit après launch (point de recovery, session_id PRÉ-ALLOUÉ)" do
       # session_id pré-alloué au spawn (DN §A) : passé via opts (le caller l'alloue, comme pod_id).
-      # Le backend ne le capture PLUS (modèle -p mort) — l'état fait foi, persisté tel quel.
+      # Le backend ne le capture PLUS (modèle -p mort) — l'état fait foi, persisté tel quel. BND-024 :
+      # un seed explicite DOIT être un UUID valide (recall/boot reprennent une vraie session vendor).
       StubBackend.set_reply(interactive_reply())
 
+      seed = "abcdef01-2345-4678-9abc-def012345678"
       pod_id = "pod-state-#{System.unique_integer([:positive])}"
-      args = build_args(pod_id, "issue-1") |> Map.put(:opts, session_id: "sess-xyz")
+      args = build_args(pod_id, "issue-1") |> Map.put(:opts, session_id: seed)
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       # Barrière de sync : :launch_called est émis PENDANT launch_backend.launch, avant que
@@ -573,13 +575,33 @@ defmodule Fleet.Spawner.PodTest do
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["v"] == 1
       assert content["issue_id"] == "issue-1"
-      assert content["session_id"] == "sess-xyz"
+      assert content["session_id"] == seed
       assert is_binary(content["cap_profile_name"])
       assert is_binary(content["started_at"])
       assert is_list(content["conditions"])
       assert content["phase"] in ["launching", "monitoring"]
 
       Process.exit(pid, :kill)
+    end
+
+    test "BND-024 : opts[:session_id] non-UUID → spawn REFUSÉ (jamais une identité arbitraire)" do
+      # Un seed explicite est exporté au launcher (LCARS_POD_SESSION_ID) + persisté pour la recovery/recall.
+      # N'importe quel binaire deviendrait une autorité-identité alternative, non reconstructible. Un seed
+      # présent-mais-non-UUID = corruption caller/seed → refus LOUD (pas d'accept arbitraire, pas de
+      # fallback silencieux au mint qui masquerait le seed corrompu sous une intention recall erronée).
+      Process.flag(:trap_exit, true)
+      pod_id = "pod-badseed-#{System.unique_integer([:positive])}"
+
+      assert {:error, {%ArgumentError{message: msg}, _stack}} =
+               spawn_via_supervisor(%{
+                 cap_profile: valid_profile(),
+                 issue_id: "issue-1",
+                 pod_id: pod_id,
+                 opts: [session_id: "sess-xyz", repo_id: @test_repo_id]
+               })
+
+      assert msg =~ "not a valid UUID"
+      refute_received {:launch_called, _args, _env}
     end
   end
 
