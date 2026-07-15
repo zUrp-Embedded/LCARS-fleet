@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r4-mcp-boot.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional (réécrit archi per-pod ADR-G — Fable F175)
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (réécrit F175 puis retiré, cf. « GATE RETIRÉ » plus bas).
 # gate-r4-mcp-boot.sh — R-CORE.comm Ring 4 (fleet_mcp central bootable). exit 0 ssi le superviseur
 # fleet_mcp, démarré avec `:pod_facing_port` configuré (host-side), boote le serveur MCP pod-facing
 # CENTRAL (PodTools :http) sur ce port, et qu'un client MCP round-trip get_task/submit_result contre

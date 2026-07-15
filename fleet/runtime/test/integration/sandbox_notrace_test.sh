@@ -3,7 +3,7 @@
 # SOURCE: test/integration/sandbox_notrace_test.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-14
-# STATUS: PROTO-V2 — test intégration F094 : invariant no-trace de la sandbox bwrap_launch.sh
+# STATUS: SONDE MANUELLE d'intégration (DR-032) — standalone, hors mix gate (exige bwrap+userns+tmux). F094 no-trace, ré-aligné : auth `bind` courant (token_arg RETIRÉ) ; `/etc/fleet` masqué par construction (binds /etc sélectifs). À exécuter à la main pour valider.
 #
 # F094 (invariant CARDINAL, non-testable en hermétique) : « l'agent ne voit AUCUNE trace LCARS ». Dépend
 # de la VUE sandbox bwrap → seul un bwrap RÉEL peut le prouver. Ce test lance `bin/bwrap_launch.sh` (le
@@ -14,7 +14,7 @@
 #   - le code runtime LCARS host (`/home/projects/LCARS`, `/etc/fleet`) est INVISIBLE ;
 #   - `/home` est un tmpfs (pas le /home host avec ses humains/pods) ;
 #   - HOME = POD_DIR (monde clos) ;
-#   - le token OAuth injecté est présent (auth), MAIS l'env ambiant host ne fuit pas (--clearenv).
+#   - l'auth :bind est réalisée (`.credentials.json` bindé sous `$HOME/.claude/`), MAIS l'env ambiant host ne fuit pas (--clearenv).
 #
 # Standalone (nécessite bwrap + userns + tmux) — hors `mix test`. bwrap NON édité ICI (on prouve le launcher RÉEL) : lu/exécuté.
 
@@ -69,6 +69,9 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$POD_DIR" "$SOCK_BASE" "$CLAUDE_DIR" "$GIT_MIRROR" "$VENDOR_SHARE"
+# Auth :bind (ADR-F, seul mode courant depuis le retrait de token_arg) : le launcher bind CE fichier
+# → doit exister host-side sinon fail au boundary. Fixture vide (on ne prouve que la vue sandbox).
+: > "$CLAUDE_DIR/.credentials.json"
 printf '#!/bin/sh\necho fake-vendor\n' > "$VENDOR_BIN"; chmod +x "$VENDOR_BIN"
 
 # COMMAND factice (à la place de claude_launch.sh). Vit SOUS POD_DIR (bind RW → visible dans le sandbox au
@@ -85,7 +88,9 @@ mkdir -p "$out"
   echo "etc_fleet=$([ -e /etc/fleet ] && echo VISIBLE || echo absent)"
   echo "home_env=$HOME"
   echo "cwd=$(pwd)"
-  echo "oauth_token=$([ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && echo set || echo unset)"
+  # Auth :bind (ADR-F) : le launcher bind `.credentials.json` sous `$HOME/.claude/` (token_arg RETIRÉ →
+  # plus de CLAUDE_CODE_OAUTH_TOKEN en env, qui fuyait dans l'argv). On prouve la présence du fichier bindé.
+  echo "creds_bound=$([ -f "$HOME/.claude/.credentials.json" ] && echo set || echo unset)"
   echo "DONE"
 } > "$out/notrace.txt" 2>&1
 exec sleep 30
@@ -104,8 +109,6 @@ LCARS_GIT_MIRROR="$GIT_MIRROR" \
 LCARS_VENDOR_NAME="claude" \
 LCARS_VENDOR_BIN="$VENDOR_BIN" \
 LCARS_VENDOR_SHARE="$VENDOR_SHARE" \
-LCARS_AUTH_MODE="token_arg" \
-LCARS_ANTHROPIC_AUTH_TOKEN="dummy-token-for-test" \
 LCARS_POD_SESSION_ID="sess-$$" \
 LCARS_POD_SESSION_NAME_PREFIX="tester_role" \
 GIT_AUTHOR_NAME="t" GIT_AUTHOR_EMAIL="t@t" GIT_COMMITTER_NAME="t" GIT_COMMITTER_EMAIL="t@t" \
@@ -133,19 +136,14 @@ if [ -f "$OUT" ]; then
   grep -qxF "host_projects=absent"   "$OUT" && ok "/home/projects host invisible"                            || ko "FUITE : /home/projects visible"
   grep -qxF "home_entries=[]"        "$OUT" && ok "/home = tmpfs vide (pas le /home host)"                   || ko "/home non-vide : $(grep home_entries= "$OUT")"
   grep -qxF "home_env=$POD_DIR"      "$OUT" && ok "HOME = POD_DIR (monde clos)"                               || ko "HOME inattendu : $(grep home_env= "$OUT")"
-  grep -qxF "oauth_token=set"        "$OUT" && ok "token OAuth injecté présent (auth)"                        || ko "token OAuth absent (auth cassée)"
+  grep -qxF "creds_bound=set"        "$OUT" && ok ".credentials.json bindé sous \$HOME/.claude (auth :bind, ADR-F)" || ko "creds absentes dans le pod (auth :bind cassée)"
 
-  # FINDING (PAS un FAIL — fix = éditer bwrap_launch.sh : ro-bind /etc sélectif ; décision user) : bwrap_launch `--ro-bind
-  # /etc /etc` expose TOUT /etc, dont `/etc/fleet` (lcars-fleet.env = FORGE_TOKEN/RELEASE_COOKIE,
-  # api-secret, webhook-secret). Un agent qui DÉRIVE (le seul thread intra reconnu, ADR-C « contenir le
-  # pod ») peut les lire → le sandbox ne contient PAS les secrets fleet. Remontée user, pas un fix de nuit.
-  if grep -qxF "etc_fleet=VISIBLE" "$OUT"; then
-    echo "  ⚠ FINDING (no-trace partiel) : /etc/fleet VISIBLE dans le pod (bwrap --ro-bind /etc) →" >&2
-    echo "    secrets fleet (lcars-fleet.env, *-secret) lisibles par un agent dérivant. Fix = masquer" >&2
-    echo "    /etc/fleet (--tmpfs) ou ro-bind /etc sélectif dans bwrap_launch.sh (décision user)." >&2
-  else
-    ok "/etc/fleet invisible (pas de fuite secrets fleet)"
-  fi
+  # DR-032 : le FINDING historique « /etc/fleet VISIBLE » est RÉSOLU PAR CONSTRUCTION — bwrap_launch ne fait
+  # plus `--ro-bind /etc /etc` mais des binds /etc SÉLECTIFS (resolv.conf/ssl/ca-certificates/passwd/group/…),
+  # `/etc/fleet` (secrets FORGE_TOKEN/*-secret) n'y est PAS → invisible. Assertion DURE désormais (plus un finding).
+  grep -qxF "etc_fleet=absent" "$OUT" &&
+    ok "/etc/fleet invisible (binds /etc sélectifs — pas de fuite secrets fleet)" ||
+    ko "FUITE : /etc/fleet visible — bwrap ne doit plus binder /etc en bloc (régression des binds sélectifs)"
 else
   ko "COMMAND jamais exécuté dans le sandbox (constats absents)"
 fi

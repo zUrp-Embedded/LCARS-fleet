@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r-core-comm-inc3c2.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
 # gate-r-core-comm-inc3c2.sh — R-CORE.comm inc3c.2 (e2e : pod claude → pont stdio → fleet_mcp central).
 # exit 0 ssi un VRAI pod claude (bwrap --share-net) spawne le pont stdio `fleet_mcp_stdio_bridge.py`
 # (connexion SYNCHRONE → tools inline turn-1, le seul transport viable one-shot), PULL sa tâche via

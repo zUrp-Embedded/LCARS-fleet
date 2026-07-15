@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r-core-comm-inc3b3.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
 # ⛔ APPROCHE ABANDONNÉE — CONSERVÉ COMME PREUVE REPRODUCTIBLE D'UN DEAD-END.
 # CONCLUSION EMPIRIQUE (2026-05-24, runtime claude 2.1.150) : un pod one-shot ne peut PAS utiliser un
 # serveur fleet_mcp HTTP. Testé 4×, dont avec `alwaysLoad:true` (le cran 2.1.150 censé dé-déférer +

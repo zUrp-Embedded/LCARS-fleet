@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r-core-comm-inc3b1.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: SONDE MANUELLE v2 (DR-032) — standalone, hors mix gate (non-CI ; mix gate = ExUnit + shell_gate[python+bats] + contracts.check + dialyzer).
 # gate-r-core-comm-inc3b1.sh — R-CORE.comm inc3b.1 (couche tool MCP, pur Elixir). exit 0 ssi
 # Fleet.MCP.PodTools (use ExMCP.Server + deftool get_task/submit_result) round-trip avec la file
 # in-memory Fleet.MCP.TaskQueue : get_task POP une tâche nonce (canal IN), submit_result la STORE

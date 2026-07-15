@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r-core-comm-inc3b2.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
 # gate-r-core-comm-inc3b2.sh — R-CORE.comm inc3b.2 (transport HTTP-SSE réel). exit 0 ssi
 # Fleet.MCP.PodTools démarré en transport :sse (Cowboy, port OS-assigné) + un client MCP
 # (ExMCP.Client) round-trip get_task (IN) / submit_result (OUT) sur le VRAI fil HTTP : SSE établi,

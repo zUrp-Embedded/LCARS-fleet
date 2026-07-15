@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r-core-comm-inc4.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
 # gate-r-core-comm-inc4.sh — R-CORE.comm increment 4 (canal IN). exit 0 ssi un pod PULL sa tâche
 # auprès du fleet via le tool MCP `get_task` (canal IN), l'exécute, et soumet via `submit_result` (OUT)
 # — comm fleet↔pod 100% MCP, zéro scraping/injection. PREUVE forte : la tâche (et son nonce) n'existe

@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r0.6-tooling.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: SONDE MANUELLE v2 (DR-032) — standalone, hors mix gate (non-CI ; mix gate = ExUnit + shell_gate[python+bats] + contracts.check + dialyzer).
 # gate-r0.6-tooling.sh — R0.6. exit 0 ssi l'outillage statique (Credo/Sobelow/Dialyzer) est
 # configuré + RUNNABLE depuis la racine du runtime (app unique). Les FINDINGS sont une baseline (PAS gated à
 # zéro — cleanup séparé, par ring). Sert aussi de vérif indépendante des rapports d'audit

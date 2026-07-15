@@ -2,7 +2,7 @@
 # SOURCE: test/gate-r0.8-canon.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: salvage v2-functional
+# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
 # gate-r0.8-canon.sh — R0.8. exit 0 ssi les apps réabsorbées ne réfèrent plus `05_data-canon`
 # (chemin doctrine hors-repo) dans leurs tests ET passent 0 fail. Réabsorption incrémentale :
 # chaque sub-brick (mcp, coord, pipeline, spawner, spbuilder) ajoute son bloc ici quand done.
