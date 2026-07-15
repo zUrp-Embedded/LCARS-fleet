@@ -219,10 +219,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # arbitrage A-04 du chantier migration si l'user la veut un jour).
   # États : absent PROUVÉ (404) → gestes admin ; forge en PANNE → :forge_preflight_failed
   # SANS instructions (ne jamais envoyer l'opérateur créer un compte sur une panne réseau) ;
-  # NON-VÉRIFIABLE (403 sur la lecture team, token non org-admin) → dégrade + procède (cf.
-  # clause 403 plus bas — bricole vécue e2e migration 2026-07-12 : le garde bloquait un
-  # humain PROVISIONNÉ faute de droit de lecture). Seam `:forge_users` (défaut
-  # ForgeClient.Repo) : stub en test, pas de flip de config.
+  # NON-VÉRIFIABLE (403 sur la lecture team, token non org-admin) → DR-018 : REFUS par défaut
+  # (`:human_team_unverifiable` + gestes exacts) — une admission load-bearing non-prouvable ≠ « vérifiée » ;
+  # le dégradé reste possible mais comme MODE EXPLICITE (`allow_unverifiable_human_team?: true`), plus un
+  # succès muet. Seam `:forge_users` (défaut ForgeClient.Repo) : stub en test, pas de flip de config.
   defp ensure_human_provisioned(org, opts) do
     users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
     human = Keyword.get(opts, :human) || Fleet.Credentials.Human.current!()
@@ -243,23 +243,28 @@ defmodule Fleet.Pilot.ProjectOnboard do
           {:ok, false} ->
             {:error, {:human_not_provisioned, human, provisioning_gestures(:team, human, org)}}
 
-          # QUATRIÈME état (≠ le tri-état ci-dessus) : 403 = le token runtime n'a pas le
-          # DROIT de LIRE l'appartenance team. Le compte de service est un simple membre
-          # d'org (ni owner, ni membre de `humans`) → Gitea refuse GET /teams/<id>/members/<u>.
-          # « Ne PEUT PAS vérifier » ≠ « humain ABSENT » (404) : fail-closer ici briquerait
-          # TOUT onboarding sur une forge où le token n'est pas org-admin — alors que
-          # create_repo/issue/PR, eux, marchent avec ce même token. On DÉGRADE (warning +
-          # on procède) : le garde F2 protège là où il PEUT lire ; là où il ne peut pas,
-          # create_issue en aval reste le filet (le 422 forge explicite d'avant F2). NE PAS
-          # convertir en :ok muet — le warning est load-bearing (dit POURQUOI le garde saute).
+          # QUATRIÈME état (≠ le tri-état ci-dessus) : 403 = le token runtime n'a pas le DROIT de LIRE
+          # l'appartenance team (compte de service = simple membre d'org, ni owner ni membre de `humans`
+          # → Gitea refuse GET /teams/<id>/members/<u>). « Ne PEUT PAS vérifier » ≠ « humain ABSENT » (404).
+          # DR-018 : cet état N'EST PLUS mappé à un `:ok` muet indistinguable d'une admission PROUVÉE. Une
+          # propriété d'admission LOAD-BEARING non-prouvable n'équivaut pas à « vérifiée ». Par DÉFAUT on
+          # REFUSE, avec les gestes admin EXACTS dans l'erreur (donner au token le droit de lecture team, ou
+          # ajouter l'humain à `humans`, ou opter pour le mode dégradé explicite). Le dégradé reste possible
+          # mais comme MODE CONSCIENT (`allow_unverifiable_human_team?: true`), pas comme succès silencieux —
+          # là create_issue en aval reste le filet, mais l'opérateur l'a CHOISI et la trace est LOUD.
           {:error, {:http, 403, _}} ->
-            Logger.warning(
-              "ProjectOnboard: preflight team-check `humans` NON VÉRIFIABLE pour #{human} " <>
-                "(403 — le token runtime ne peut pas lire l'appartenance team) → on procède " <>
-                "sans le garde team (create_issue en aval reste le filet)."
-            )
+            if Keyword.get(opts, :allow_unverifiable_human_team?, false) do
+              Logger.warning(
+                "ProjectOnboard: preflight team-check `humans` NON VÉRIFIABLE pour #{human} (403 — le " <>
+                  "token runtime ne peut pas lire l'appartenance team) → onboarding en MODE DÉGRADÉ " <>
+                  "EXPLICITE (allow_unverifiable_human_team?: true). L'admission humaine n'est PAS prouvée ; " <>
+                  "create_issue en aval reste le filet."
+              )
 
-            :ok
+              :ok
+            else
+              {:error, {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
+            end
 
           {:error, reason} ->
             {:error, {:forge_preflight_failed, reason}}
@@ -281,6 +286,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
     "le compte '#{human}' existe mais n'est PAS membre de la team 'humans' de l'org '#{org}' — " <>
       "geste admin : GET /api/v1/orgs/#{org}/teams → id de 'humans', puis " <>
       "PUT /api/v1/teams/<id>/members/#{human}. Puis relancer l'onboarding."
+  end
+
+  # DR-018 — 403 sur la lecture team : l'admission humaine ne PEUT PAS être prouvée (token runtime non
+  # org-admin). Trois issues, toutes explicites (pas de dégradé silencieux) : réparer le droit, prouver
+  # l'appartenance, ou assumer le dégradé comme mode conscient.
+  defp provisioning_gestures(:team_read, human, org) do
+    "l'appartenance de '#{human}' à la team 'humans' de l'org '#{org}' est NON VÉRIFIABLE " <>
+      "(403 — le token runtime n'a pas le droit de lire GET /api/v1/teams/<id>/members/<u>). " <>
+      "Options : 1) donner au token runtime le droit de lecture team (owner d'org, ou membre de 'humans') ; " <>
+      "2) prouver l'appartenance en ajoutant '#{human}' à 'humans' (cf. geste :team) ; " <>
+      "3) onboarder en MODE DÉGRADÉ EXPLICITE avec `allow_unverifiable_human_team?: true` (l'admission " <>
+      "humaine ne sera PAS prouvée — create_issue en aval reste le filet)."
   end
 
   # ── slug / preconditions ─────────────────────────────────────────────────

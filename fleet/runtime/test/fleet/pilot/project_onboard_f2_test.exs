@@ -92,22 +92,36 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
   end
 
   @tag :tmp_dir
-  test "team NON VÉRIFIABLE (403, token non org-admin) → preflight dégrade + procède (warning LOUD), jamais un blocage",
+  test "DR-018 : team NON VÉRIFIABLE (403) → REFUS par défaut (:human_team_unverifiable + gestes), rien créé",
        %{tmp_dir: tmp} do
-    o = opts(tmp, ForbiddenTeamUsers)
+    # DR-018 : le 4ᵉ état (non-vérifiable) n'est PLUS un :ok muet. Une admission load-bearing non-prouvable
+    # ≠ « vérifiée » → refus par défaut, avec les gestes admin exacts (droit de lecture / prouver / dégradé).
+    assert {:error, {:human_team_unverifiable, "ghost-human", gestures}} =
+             ProjectOnboard.onboard("poc-f2", opts(tmp, ForbiddenTeamUsers))
+
+    assert gestures =~ "NON VÉRIFIABLE"
+    assert gestures =~ "allow_unverifiable_human_team?"
+    # une admission non-prouvable ne crée RIEN (le garde court AVANT tout mkdir/clone)
+    refute File.exists?(Path.join([tmp, "projects", "poc-f2"]))
+  end
+
+  @tag :tmp_dir
+  test "DR-018 : team 403 + allow_unverifiable_human_team?: true → MODE DÉGRADÉ EXPLICITE (procède, warning LOUD)",
+       %{tmp_dir: tmp} do
+    # Le dégradé RESTE possible (forge où le token n'est pas org-admin) mais comme MODE CONSCIENT opt-in,
+    # pas comme succès indistinguable : l'opérateur le pose, la trace est LOUD, create_issue reste le filet.
+    o = Keyword.put(opts(tmp, ForbiddenTeamUsers), :allow_unverifiable_human_team?, true)
     proj = Path.join([tmp, "projects", "poc-f2"])
     File.mkdir_p!(proj)
 
     log =
       capture_log(fn ->
-        # Le preflight PASSE malgré le 403 (sinon human_not_provisioned / forge_preflight_failed) :
-        # la séquence continue et attrape le dossier pré-existant → preuve de passage. Régression
-        # e2e migration 2026-07-12 : le garde bloquait un humain PROVISIONNÉ faute de droit de lecture.
+        # dégradé EXPLICITE : le preflight procède malgré le 403 → la séquence continue et attrape le
+        # dossier pré-existant (preuve de passage), au lieu de bloquer un humain PROVISIONNÉ sans droit de lecture.
         assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
       end)
 
-    # La dégradation est LOUD (dit POURQUOI le garde saute) — jamais un :ok muet.
-    assert log =~ "NON VÉRIFIABLE"
+    assert log =~ "MODE DÉGRADÉ EXPLICITE"
     assert log =~ "403"
   end
 

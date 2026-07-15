@@ -369,7 +369,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
           Application.get_env(:fleet_pilot, :fleet_org, "fleet")
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-      opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
+      # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
+      # membership (403 on the team read) — a load-bearing admission unproven ≠ verified. A deployment whose
+      # service token is deliberately a plain org member (not org-admin) opts into the degraded mode as an
+      # EXPLICIT, deployment-visible config property (`:fleet_pilot, :allow_unverifiable_human_team?`),
+      # never a silent per-call default. Same `:fleet_<dom>` config-atom read as `:fleet_org` above (D-07).
+      opts = [
+        org: org,
+        description: Map.get(args, "description", pitch),
+        pitch: pitch,
+        allow_unverifiable_human_team?:
+          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+      ]
 
       case onboard.onboard(name, opts) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
@@ -391,7 +402,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
     with {:ok, onboard} <- conforming_onboard() do
-      case onboard.import(full_name, []) do
+      # DR-018: same admission contract as onboard — refuse an unprovable `humans` membership by default,
+      # degrade only under the explicit deployment-visible config knob.
+      opts = [
+        allow_unverifiable_human_team?:
+          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+      ]
+
+      case onboard.import(full_name, opts) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
           {:ok,
            %{
