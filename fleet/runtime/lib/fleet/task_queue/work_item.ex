@@ -33,8 +33,10 @@ defmodule Fleet.TaskQueue.WorkItem do
           role: String.t() | nil,
           brief: String.t() | nil,
           # Brief PHYSIQUE (chantier brief-physique) : le brief committé content-addressé dans work/ops.
-          # `brief_ref` = chemin relatif work/ops (`briefs/<sha>.md`) ; `brief_sha` = son SHA (vérif pod).
-          # Migration : `brief` (string) COHABITE tant que le pod ne lit pas encore le fichier ; puis nil.
+          # `brief_ref` = chemin relatif work/ops (`briefs/<sha>.md`) ; `brief_sha` = son SHA256 (vérif pod).
+          # DR-010 : provenance BEST-EFFORT. `brief` (string) COHABITE comme FALLBACK dégradé assumé — il ne
+          # devient PAS nil (un projet non-onboardé / sans work/ops dispatche sur la string seule, cf.
+          # `BriefArtifact`). `brief_sha` présent = provenance vérifiable ; absent = mode dégradé VISIBLE.
           brief_ref: String.t() | nil,
           brief_sha: String.t() | nil,
           deadline: DateTime.t() | nil,
@@ -133,8 +135,8 @@ defmodule Fleet.TaskQueue.WorkItem do
          {:ok, issue_id} <- cast_str_nil(fetch(attrs, :issue_id), :issue_id),
          {:ok, role} <- cast_str_nil(fetch(attrs, :role), :role),
          {:ok, brief} <- cast_str_nil(fetch(attrs, :brief), :brief),
-         {:ok, brief_ref} <- cast_str_nil(fetch(attrs, :brief_ref), :brief_ref),
-         {:ok, brief_sha} <- cast_str_nil(fetch(attrs, :brief_sha), :brief_sha) do
+         {:ok, brief_ref} <- cast_brief_ref(fetch(attrs, :brief_ref), :brief_ref),
+         {:ok, brief_sha} <- cast_brief_sha(fetch(attrs, :brief_sha), :brief_sha) do
       {:ok,
        %__MODULE__{
          id: UUID.uuid4(),
@@ -171,8 +173,8 @@ defmodule Fleet.TaskQueue.WorkItem do
          {:ok, issue_id} <- cast_str_nil(m["issue_id"], :issue_id),
          {:ok, role} <- cast_str_nil(m["role"], :role),
          {:ok, brief} <- cast_str_nil(m["brief"], :brief),
-         {:ok, brief_ref} <- cast_str_nil(m["brief_ref"], :brief_ref),
-         {:ok, brief_sha} <- cast_str_nil(m["brief_sha"], :brief_sha),
+         {:ok, brief_ref} <- cast_brief_ref(m["brief_ref"], :brief_ref),
+         {:ok, brief_sha} <- cast_brief_sha(m["brief_sha"], :brief_sha),
          {:ok, result} <- cast_result(m["result"], :result),
          {:ok, metadata} <- cast_map(m["metadata"] || %{}, :metadata) do
       {:ok,
@@ -241,6 +243,32 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_str_nil(nil, _field), do: {:ok, nil}
   defp cast_str_nil(s, _field) when is_binary(s), do: {:ok, s}
   defp cast_str_nil(v, field), do: {:error, {:bad_attr, {field, v}}}
+
+  # BND-123: `brief_sha`/`brief_ref` are the CONTENT-ADDRESS of the physical brief, not free text. An
+  # arbitrary string would masquerade as verifiable provenance in the MCP envelope (the pod would then
+  # fail its sha-check, but the WorkItem would already CLAIM a physical brief). Validate the SHAPE at
+  # construction: `brief_sha` = sha256 hex (64 lowercase), `brief_ref` = `briefs/<sha>.md`. nil stays nil
+  # (the legit degraded/best-effort state, DR-010). SSoT for BOTH `new/2` (→ {:bad_attr}) and
+  # `rich_from_map` (→ :invalid via its `else`).
+  defp cast_brief_sha(nil, _field), do: {:ok, nil}
+
+  defp cast_brief_sha(s, field) when is_binary(s) do
+    if Regex.match?(~r/\A[0-9a-f]{64}\z/, s),
+      do: {:ok, s},
+      else: {:error, {:bad_attr, {field, s}}}
+  end
+
+  defp cast_brief_sha(v, field), do: {:error, {:bad_attr, {field, v}}}
+
+  defp cast_brief_ref(nil, _field), do: {:ok, nil}
+
+  defp cast_brief_ref(s, field) when is_binary(s) do
+    if Regex.match?(~r/\Abriefs\/[0-9a-f]{64}\.md\z/, s),
+      do: {:ok, s},
+      else: {:error, {:bad_attr, {field, s}}}
+  end
+
+  defp cast_brief_ref(v, field), do: {:error, {:bad_attr, {field, v}}}
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

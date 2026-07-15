@@ -57,6 +57,13 @@ defmodule Fleet.Workflow.Provenance do
     abs = Path.join(work_dir, ref)
 
     cond do
+      not safe_path_segment?(livrable_sha) ->
+        # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH
+        # (`livrables/<sha>-provenance.json`). A separator/traversal (`/`, `\`, `..`) would escape the
+        # work/ops dir. It IS a git commit digest (hex) in production — a value carrying a path separator
+        # is refused, never trusted as a path segment.
+        {:error, {:invalid_livrable_sha, livrable_sha}}
+
       not File.dir?(work_dir) ->
         {:error, {:work_dir_missing, work_dir}}
 
@@ -67,6 +74,9 @@ defmodule Fleet.Workflow.Provenance do
         write_and_commit(work_dir, abs, ref, statement(attrs), opts)
     end
   end
+
+  # Path-SAFE segment for the provenance filename (BND-120): no separator, no traversal.
+  defp safe_path_segment?(s), do: not String.contains?(s, ["/", "\\", ".."])
 
   @doc "Le Statement in-toto (map JSON-able) — pur, sans I/O (testable + réutilisable)."
   @spec statement(attrs()) :: map()

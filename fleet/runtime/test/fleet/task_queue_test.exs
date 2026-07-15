@@ -332,6 +332,23 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:bad_attr, {:metadata, _}}} = WorkItem.new("p1", %{metadata: "nope"})
     assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
     assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
+
+    # BND-123 : brief_sha/brief_ref sont le CONTENT-ADDRESS du brief physique, pas du texte libre. Un sha
+    # bidon se ferait passer pour une provenance vérifiable dans l'enveloppe MCP → shape validée au cast.
+    valid_sha = String.duplicate("a", 64)
+    assert {:ok, %WorkItem{brief_sha: ^valid_sha}} = WorkItem.new("p1", %{brief_sha: valid_sha})
+
+    assert {:ok, %WorkItem{brief_ref: "briefs/" <> _}} =
+             WorkItem.new("p1", %{brief_ref: "briefs/#{valid_sha}.md"})
+
+    # nil reste nil (état dégradé/best-effort légitime, DR-010)
+    assert {:ok, %WorkItem{brief_sha: nil, brief_ref: nil}} = WorkItem.new("p1", %{})
+    # sha hors-forme (trop court, majuscules, non-hex) → refus
+    assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: "def"})
+    assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
+    # ref hors-forme (pas briefs/<sha>.md) → refus
+    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/inconnu.md"})
+    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "../escape.md"})
   end
 
   test "6g. enqueue propage l'erreur du smart-constructor + caste le deadline ISO", %{

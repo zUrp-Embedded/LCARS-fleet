@@ -5,13 +5,22 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   Matérialise le contenu d'un brief en artefact **content-addressé** committé dans le worktree
   work/ops du système (`<work_dir>/briefs/<sha256>.md`) et rend `{ref, sha}` — le `brief_sha` du
-  triplet SLSA `(brief_sha, input_sha, livrable_sha)`. Le work_item ne porte plus la string du brief
-  mais ce pointeur ; le pod lit l'objet et **vérifie le sha** avant d'agir (le pointeur peut mentir,
-  l'objet non).
+  triplet SLSA `(brief_sha, input_sha, livrable_sha)`.
 
-  **Idempotence par content-address** : même contenu ⇒ même chemin ⇒ no-op (`File.exists?`). Un
-  re-brief identique (retry, reroll) ne recrée rien et ne conflit jamais ; seul un contenu DIFFÉRENT
-  produit un nouvel objet, à un chemin différent → jamais de conflit de contenu sur la branche work/ops.
+  **Provenance BEST-EFFORT, PAS load-bearing pour la livraison** (DR-010) — cf. `physicalize/3` : DÉGRADE,
+  ne casse JAMAIS le dispatch. Le work_item porte le pointeur `{ref, sha}` QUAND la matérialisation réussit ;
+  SINON (pas de work/ops, projet non-onboardé, échec git → `{nil, nil}`) il porte la **string du brief**
+  comme fallback dégradé, et le dispatch continue. Le pod vérifie `sha256(objet) == brief_sha` **quand le
+  sha est présent** (le pointeur peut mentir, l'objet non ; cf. `runtime-contract.md` + l'enveloppe MCP) ;
+  `brief_sha` absent = provenance NON PROUVÉE, jamais un blocage. L'absence de `brief_sha` est donc une
+  PROPRIÉTÉ VISIBLE du mode dégradé — pas une garantie silencieusement contournée, ni « le work_item ne
+  porte plus la string » (il la porte, comme fallback assumé).
+
+  **Idempotence par content-address (LOCALE)** : même contenu ⇒ même chemin ⇒ no-op (`File.exists?` sur
+  l'objet déjà matérialisé). Un re-brief identique (retry, reroll) ne recrée rien et ne conflit jamais ;
+  seul un contenu DIFFÉRENT produit un nouvel objet, à un chemin différent → jamais de conflit de contenu
+  sur la branche work/ops. L'idempotence porte sur l'OBJET LOCAL committé, PAS sur sa publication forge
+  (la durabilité/push est une décision séparée de l'appelant, cf. `:push`) — local ≠ publié (BND-121).
 
   `sha` = **sha256(contenu)** (pas le blob-sha git : le triplet in-toto est en sha256, et le pod le
   recalcule sur les bytes lus pour vérifier). Le commit git DURABILISE l'objet ; `sha` reste l'autorité.
