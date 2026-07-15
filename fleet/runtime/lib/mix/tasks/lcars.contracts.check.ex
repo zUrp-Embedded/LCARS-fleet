@@ -1027,16 +1027,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # le CONTRAT au gate : la projection existe dans le code ET le test anti-régression existe
   # (si quelqu'un supprime le test, le gate le voit — ceinture du filet ExUnit).
   defp check_mcp_wire_inputschema(root) do
-    acceptor = Path.join(root, "lib/fleet/mcp/pod_socket_acceptor.ex")
-    test = Path.join(root, "test/pod_socket_test.exs")
+    acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
+    test = "test/pod_socket_test.exs"
 
-    projection? =
-      acceptor
-      |> grep_lines(~r/"inputSchema"/)
-      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/"inputSchema"/, strip_comment(line)) end)
+    # Projection code-side: the camelCase wire key on an EXECUTABLE line (`code_match?` excludes
+    # @doc/@moduledoc heredocs + `#` comments — BND-111: a prose mention of "inputSchema" is not a proof).
+    projection? = code_match?(root, acceptor, ~r/"inputSchema"/)
 
-    test_src = if File.exists?(test), do: File.read!(test), else: ""
-    asserts? = test_src =~ ~s("inputSchema") and test_src =~ ~s("input_schema")
+    # Test-side proof: the EXECUTABLE assert/refute PAIR, NOT a bare full-file string presence (BND-111:
+    # the test's own COMMENT names BOTH tokens → a raw `=~` would stay green even if the asserts were
+    # deleted). We require `assert Map.has_key?(… "inputSchema")` AND `refute Map.has_key?(… "input_schema")`
+    # each on its own code line (absent test file → code_match? false → fail, hollow-green guard).
+    asserts? =
+      code_match?(root, test, ~r/"inputSchema"/, [~r/assert\s+Map\.has_key\?/, ~r/"inputSchema"/]) and
+        code_match?(root, test, ~r/"input_schema"/, [~r/refute\s+Map\.has_key\?/, ~r/"input_schema"/])
 
     %{
       id: "mcp.wire_inputschema",
@@ -1051,7 +1055,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             ["#{acceptor}: projection \"inputSchema\" absente du code (F1 rouvert)"]
 
           not asserts? ->
-            ["#{test}: paire assert inputSchema / refute input_schema absente"]
+            [
+              "#{test}: paire EXÉCUTABLE assert Map.has_key?(inputSchema) / refute Map.has_key?(input_schema) absente (BND-111 : un commentaire ne suffit plus)"
+            ]
 
           true ->
             []
