@@ -1,9 +1,9 @@
 # fleet_event_router
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
 **Statut** : actif — bus d'événements PubSub `fleet.events` + registry events.yaml (Ring 0)
-**Référencé par** : `04_design-notes/fleet_event_router.md`
+**Référencé par** : —
 
 Event bus (Phoenix.PubSub topic `fleet.events`) + the `events.yaml` registry
 (Ring 0 — substrate: 0 dependencies, ~12 domains depend on it). Consumption =

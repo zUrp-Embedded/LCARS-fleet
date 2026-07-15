@@ -1,9 +1,9 @@
 # fleet_starfleet
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-13 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
 **Statut** : actif — audit/validation system-side, N0 (Ring 2)
-**Référencé par** : `04_design-notes/fleet_starfleet.md`
+**Référencé par** : —
 
 System-side audit/validation module (Ring 2), N0 — consumes the outputs of the
 arbitration pods (gatekeeper + other decision roles) on the LCARS core side.

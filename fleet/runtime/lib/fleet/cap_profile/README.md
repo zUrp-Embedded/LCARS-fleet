@@ -1,9 +1,9 @@
 # fleet_cap_profile
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
 **Statut** : actif — composeur/loader/validateur de cap-profiles (Ring 0 substrat, schéma v2.5)
-**Référencé par** : `04_design-notes/fleet_cap_profile.md`
+**Référencé par** : —
 
 Capability Profile composer/loader/validator (Ring 0 substrat, LCARS schema v2.5):
 a pure data transformer, YAML on disk → composed `%Fleet.CapProfile{}` struct, no

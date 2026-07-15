@@ -1,9 +1,9 @@
 # fleet_api
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-12 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
+**Dernière révision** : 2026-07-15 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
 **Statut** : actif — API publique REST + WS (Ring 4)
-**Référencé par** : `04_design-notes/fleet_api.md`
+**Référencé par** : —
 
 LCARS public API (Ring 4 — external surface): REST + WS on a per-human port. Client-agnostic
 (consumers: `bin/lcars`, health/readiness probes). **No-auth by design** — the security contract

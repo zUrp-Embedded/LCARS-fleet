@@ -1,9 +1,9 @@
 # fleet_sp_builder
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
 **Statut** : actif — composeur de System Prompts depuis blocs (Ring 1)
-**Référencé par** : `04_design-notes/fleet_sp_builder.md`
+**Référencé par** : —
 
 System Prompt builder/composer (Ring 1): a pure data-transformer turning a
 `%Fleet.CapProfile{}` + modop bundles + pod identifiers into a `system-prompt.md`,

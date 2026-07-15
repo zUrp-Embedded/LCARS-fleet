@@ -1,9 +1,9 @@
 # fleet_coord
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-12 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
 **Statut** : actif — coordination déclarative verdict→action (Ring 2)
-**Référencé par** : `04_design-notes/fleet_coord.md`
+**Référencé par** : —
 
 Declarative coordination (Ring 2): a `{verdict, reason} → {action, escalation_path}`
 routing table, no LLM reasoning.

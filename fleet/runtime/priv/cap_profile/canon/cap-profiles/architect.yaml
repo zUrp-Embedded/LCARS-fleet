@@ -1,7 +1,7 @@
 # Cap-profile : architect
 # Date : 2026-05-18
-# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L108)
-# Schema : ../../07_code/runtime-v2/apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
+# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
+# Schema : ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: architect

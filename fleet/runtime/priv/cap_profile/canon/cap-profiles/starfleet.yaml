@@ -1,7 +1,8 @@
 # Cap-profile : starfleet
 # Date : 2026-05-18
-# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L114), 01_architecture/derogations.md D-01
-# Schema : ../../07_code/runtime-v2/apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
+# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante). Dérogation
+# host-natif D-01 = le `lifetime_scope: forever` + `containment` documentés inline plus bas.
+# Schema : ../../schema/cap-profile-v2.5.json
 #
 # D-01 : starfleet hors-bwrap (host-natif sysadmin avec sudo).
 # Justification : starfleet doit gérer infrastructure host (systemd, ACL, bwrap config, provisioning).

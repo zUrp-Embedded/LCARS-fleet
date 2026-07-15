@@ -11,11 +11,14 @@
 > `cap-profiles/monks/` (absent = monks gelés) → chemin **dormant par design** jusqu'à un dégel explicite.
 
 **Date** : 2026-05-22 (bascule run #4)
+**Dernière révision** : 2026-07-15
+**Statut** : LEGACY GELÉ — non chargé par le code (cf. bannière ci-dessus)
+**Référencé par** : —
 
 ## Contenu
 
 - `cap-profiles/` — capability profiles (archivist, monk, à compléter : architect, engineer, consultant, qualifier, reviewer, gatekeeper, starfleet)
-- `fleets/` — configurations d'instances de fleet (memory-alpha, memory-beta, à compléter selon DN ring1/fleet-as-instance.md)
+- `fleets/` — configurations d'instances de fleet (memory-alpha, memory-beta) — gelées (dir legacy)
 - `sp/` — system prompts cap-profile (archivist, monk)
 
 ## Source
@@ -24,7 +27,7 @@ Ces fichiers sont issus de :
 - Branche `feature/core-pod-runtime` (cap-profiles archivist/monk + configs memory alpha/beta)
 - `/local/LCARS-v1.5/sp/` (copies SP archivist/monk)
 
-Référencé par : DN `04_design-notes/ring1/fleet-as-instance.md` (DRAFT), DN `04_design-notes/ring2/cap-profiles.md`, DN `04_design-notes/ring2/fleet_memory.md`.
+Historique : issu de design-notes des runs #3/#4 (fleet-as-instance, cap-profiles, fleet_memory), aujourd'hui archivées hors runtime dans `work/beyond_#N/`. Aucune autorité courante — dir gelé.
 
 ## Discovery
 

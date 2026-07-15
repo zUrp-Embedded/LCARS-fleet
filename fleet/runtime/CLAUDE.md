@@ -9,7 +9,7 @@ Ce fichier oriente un agent (Claude Code) dans ce dépôt : où vivent les chose
 
 ## Project
 
-LCARS Fleet runtime — **app Elixir/OTP unique `:lcars_fleet`** (monolithe modulaire, frontières compilées par [boundary](https://hexdocs.pm/boundary)), couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Les design-notes qui pilotent chaque domaine vivent dans `04_design-notes/`. Le contrat de chaque module vit dans son `@moduledoc` (SSoT, machine-visible via `h`/ExDoc) ; le `README.md` d'un domaine (`lib/fleet/<dom>/README.md`) est une **carte** (index + pointeurs), PAS une copie du contrat. Pour comprendre un domaine : le `@moduledoc` de sa façade `Fleet.<Dom>` (ex. `h Fleet.Coord`) + la carte. **Pour comprendre le workflow entier : le récit des 5 phases dans `Fleet.Pilot` (@moduledoc) + son spécimen exécutable `test/fleet/pilot/chain_integration_test.exs` — LE point d'entrée de lecture transverse.**
+LCARS Fleet runtime — **app Elixir/OTP unique `:lcars_fleet`** (monolithe modulaire, frontières compilées par [boundary](https://hexdocs.pm/boundary)), couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Le contrat de chaque module vit dans son `@moduledoc` (SSoT, machine-visible via `h`/ExDoc) ; le `README.md` d'un domaine (`lib/fleet/<dom>/README.md`) est une **carte** (index + pointeurs), PAS une copie du contrat. Pour comprendre un domaine : le `@moduledoc` de sa façade `Fleet.<Dom>` (ex. `h Fleet.Coord`) + la carte. **Pour comprendre le workflow entier : le récit des 5 phases dans `Fleet.Pilot` (@moduledoc) + son spécimen exécutable `test/fleet/pilot/chain_integration_test.exs` — LE point d'entrée de lecture transverse.**
 
 ## Build / test / release
 

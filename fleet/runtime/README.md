@@ -1,9 +1,9 @@
 # LCARS Fleet Runtime
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-12
+**Dernière révision** : 2026-07-15
 **Statut** : runtime v2 — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
-**Référencé par** : 04_design-notes/
+**Référencé par** : —
 
 Plan de contrôle OTP pour une flotte d'agents LLM faillibles. Le runtime *spawn*, surveille et
 récolte des pods éphémères (un agent par rôle, sandboxé), et fait avancer le travail sur une forge
@@ -12,8 +12,9 @@ qui meurt, un run raté, un crash du nœud ne perdent rien de porteur — la for
 tâche non signée re-dispatche. Le Bus (`Phoenix.PubSub`) est un fast-path *lossy* assumé, jamais une
 source de vérité.
 
-Implémentation Elixir/OTP des 16 design-notes promues du run #3.1. ~200 modules, 21 frontières
-`boundary`, `mix gate` vert (compile strict + suite ExUnit + contrats inter-modules + Dialyzer).
+Implémentation Elixir/OTP. Les frontières inter-domaines sont **compilées** par `boundary` (le graphe
+de dépendances est vérifié à la compilation, pas tenu par discipline) ; `mix gate` vert = compile strict
++ suite ExUnit + contrats inter-modules + Dialyzer.
 
 ## Architecture — un graphe de dépendances vérifié à la compilation
 
@@ -74,7 +75,7 @@ graphe boundary le prouve — `Fleet.Spawner` n'a aucune arête vers `Fleet.MCP`
 vers `Fleet.Pilot`. Le compilateur refuserait l'alias compile-time ; le seam reste explicite et
 testable.
 
-Le graphe complet des 21 frontières est régénérable :
+Le graphe complet des frontières est régénérable :
 
 ```bash
 mix boundary.visualize   # → boundary/app.dot (graphviz)
@@ -122,7 +123,6 @@ dans `etc/README.md` + `etc/fleet_v2.env.template`.
 ## Où lire la suite
 
 - **`CLAUDE.md`** — guide de navigation du dépôt : rings détaillés, invariants, conventions.
-- **`04_design-notes/`** — une design-note par chantier ; ce qui pilote chaque domaine.
 - **Contrat d'un domaine** — le `@moduledoc` de sa façade `Fleet.<Domaine>` (SSoT machine-visible :
   `h Fleet.Coord`). Les `README.md` des domaines sont des **cartes** (index de modules + pointeurs),
   jamais une copie du contrat.
