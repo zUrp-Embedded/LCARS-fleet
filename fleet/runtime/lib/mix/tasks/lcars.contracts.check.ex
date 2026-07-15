@@ -365,23 +365,43 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     )
   end
 
-  # `Fleet.Spawner.spawn_pod/3` must refuse a `one-shot` pod without a brief (otherwise
-  # the pod starts with no work → timeout). Marker of the guard: the error
-  # `:brief_required`. Red if absent (regression to the mute generic brief).
+  # `Fleet.Spawner.spawn_pod/3` must enforce R18's REAL invariant, not merely NAME it (DR-030): the
+  # earlier marker-only `:brief_required` presence passed on the @doc prose alone. We now assert the
+  # EXECUTABLE clauses (doc blocks excluded by `code_match?`, BND-111):
+  #   1. one-shot without brief → refused: the executable tuple `{:error, :brief_required}` on its line.
+  #   2. a cap-profile WITHOUT `lifetime_scope` is not a spawnable state (DR-019): spawn_pod gates on
+  #      `CapProfile.fetch_lifetime_scope/1` and refuses `{:error, :cap_profile_no_lifetime_scope}` — so
+  #      "absent lifetime_scope" is not silently exempted from the brief rule (the hole DR-019/BND-099 closed).
+  # Unwiring any clause turns this RED, whatever the docs say.
   defp check_spawn_has_brief(root) do
-    presence_check(root, %{
-      id: "spawn.has_brief",
-      remediation: "R18",
-      file: "lib/fleet/spawner.ex",
-      pattern: ~r/:brief_required/,
-      missing: "no :brief_required guard at the spawn_pod boundary",
-      note: "spawn_pod must refuse a one-shot pod without a brief (except allow_no_brief)"
-    })
+    spawner = "lib/fleet/spawner.ex"
+
+    evidence_check(
+      %{
+        id: "spawn.has_brief",
+        remediation: "R18",
+        note:
+          "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}) AND refuses a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) — the real R18 invariant, not a marker"
+      },
+      [
+        {code_match?(root, spawner, ~r/:brief_required/, [
+           ~r/:brief_required/,
+           ~r/^\s*\{:error, :brief_required\}/
+         ]), "#{spawner}: no executable {:error, :brief_required} guard at the spawn_pod boundary"},
+        {code_match?(root, spawner, ~r/fetch_lifetime_scope/),
+         "#{spawner}: spawn_pod does not gate on CapProfile.fetch_lifetime_scope (DR-019 source-fix unwired)"},
+        {code_match?(root, spawner, ~r/:cap_profile_no_lifetime_scope/, [
+           ~r/:cap_profile_no_lifetime_scope/,
+           ~r/^\s*\{:error, :cap_profile_no_lifetime_scope\}/
+         ]), "#{spawner}: no executable refusal of a cap-profile without lifetime_scope (DR-019)"}
+      ]
+    )
   end
 
-  # `Fleet.SPBuilder.filter_skills/2` must fail (fail-loud) if a whitelisted PLAIN
-  # skill is absent from disk — otherwise a silent filtering would let a pod
-  # claim a nonexistent skill. Marker: `:skills_missing`.
+  # `Fleet.SPBuilder.filter_skills/2` must fail (fail-loud) if a whitelisted PLAIN skill is absent from
+  # disk — otherwise a silent filtering would let a pod claim a nonexistent skill. BND-111: confirm the
+  # EXECUTABLE tuple `{:error, {:skills_missing, ...}}` on its line (the @doc/@comment name the same tuple
+  # in prose; `code_match?` excludes doc blocks, and the tuple-shape confirm excludes an inline mention).
   # Red if absent.
   defp check_skills_declared_present(root) do
     presence_check(root, %{
@@ -389,8 +409,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       remediation: "R11",
       file: "lib/fleet/sp_builder.ex",
       pattern: ~r/:skills_missing/,
-      missing: "filter_skills silently filters out missing skills",
-      note: "filter_skills must fail-loud {:skills_missing} on a missing plain skill"
+      confirm: [~r/:skills_missing/, ~r/\{:error, \{:skills_missing,/],
+      missing: "filter_skills silently filters out missing skills (no executable {:error, {:skills_missing,} fail-loud)",
+      note: "filter_skills must fail-loud {:error, {:skills_missing, _}} on a missing plain skill"
     })
   end
 
@@ -712,15 +733,56 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `confirm`: regex OR list of regexes that must ALL match the
   # stripped line, when the confirmation differs from the grep (e.g. require the token
   # to live on the line of the `{:error, …}` tuple); default = `pattern` itself.
-  defp code_match?(root, rel, pattern, confirm \\ nil) do
+  # Public (`@doc false`) so the anti-hollow-green property (a marker in prose does NOT count, BND-111)
+  # is unit-testable against a crafted fixture file, not only via the whole-repo smoke test.
+  @doc false
+  def code_match?(root, rel, pattern, confirm \\ nil) do
     confirms = if confirm, do: List.wrap(confirm), else: [pattern]
+    path = Path.join(root, rel)
+    doc_lines = doc_block_lines(path)
 
-    Path.join(root, rel)
+    path
     |> grep_lines(pattern)
+    # BND-111: a marker in RETURN-VALUE docs or module prose (`@doc/@moduledoc` heredocs) is NOT
+    # executable code. This checker IS the anti-hollow-green mechanism — it must not accept its own
+    # markers' documentation as proof (e.g. `{:error, :brief_required}` is BOTH in `spawner.ex`'s @doc
+    # AND at the guard; only the guard proves the invariant). Doc-block lines are dropped before matching.
+    |> Enum.reject(fn {ln, _line} -> MapSet.member?(doc_lines, ln) end)
     |> Enum.any?(fn {_ln, line} ->
       stripped = strip_comment(line)
       Enum.all?(confirms, &Regex.match?(&1, stripped))
     end)
+  end
+
+  # Line numbers inside `@moduledoc`/`@doc`/`@typedoc`/`@shortdoc` HEREDOC blocks (delimiters included).
+  # Line-based scan: enter on `@…doc [~sS]?"""`, exit on a lone `"""`. A heredoc cannot contain an
+  # unescaped `"""` (Elixir), so the first lone `"""` closes it. Single-line `@doc "..."` is not a
+  # heredoc — left to `strip_comment/1`'s inline-string tracking. Used by `code_match?/4` (BND-111).
+  defp doc_block_lines(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.reduce({MapSet.new(), false}, fn {line, ln}, {acc, in_doc?} ->
+          cond do
+            in_doc? ->
+              if Regex.match?(~r/^\s*"""\s*$/, line),
+                do: {MapSet.put(acc, ln), false},
+                else: {MapSet.put(acc, ln), true}
+
+            Regex.match?(~r/^\s*@(module|type|short)?doc\s+(~[sS])?"""/, line) ->
+              {MapSet.put(acc, ln), true}
+
+            true ->
+              {acc, in_doc?}
+          end
+        end)
+        |> elem(0)
+
+      _ ->
+        MapSet.new()
+    end
   end
 
   # Family A — marker-presence: `file` must carry `pattern` in code
