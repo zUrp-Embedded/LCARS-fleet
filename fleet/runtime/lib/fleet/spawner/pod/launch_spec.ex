@@ -315,10 +315,14 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     # launchable one; refusing fails it loud. The raise is caught by `LaunchEnv.build/4`'s try/rescue →
     # `{:error, {:launch_env_unresolved, _}}` → clean pod-projection failure, no launch (the R1-21 concern
     # "a raise crashes the gen_statem" is moot: every call to this sits inside that try/rescue).
-    for m <- Enum.filter(mounts, &mount_has_newline?/1) do
-      raise ArgumentError,
-            "LaunchSpec: SECURITY REFUSAL — newline in a mount field (LCARS_POD_MOUNTS injection): " <>
-              "#{inspect(m)}. Pod projection refused — an injecting mount is NOT dropped-and-launched."
+    case Enum.find(mounts, &mount_has_newline?/1) do
+      nil ->
+        :ok
+
+      injecting ->
+        raise ArgumentError,
+              "LaunchSpec: SECURITY REFUSAL — newline in a mount field (LCARS_POD_MOUNTS injection): " <>
+                "#{inspect(injecting)}. Pod projection refused — an injecting mount is NOT dropped-and-launched."
     end
 
     Enum.map_join(mounts, "\n", fn m ->
