@@ -137,6 +137,16 @@ defmodule Fleet.Spawner.PodTest do
     }
   end
 
+  # Minimal profile carrying ONLY a lifetime_scope — for the FS-bucket mapping (scope_for via
+  # state_fs_path_for/3). Not spawned; exercises the path resolution alone.
+  defp profile_with_scope(scope) do
+    %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      metadata: %{"name" => "x", "containment" => "bwrap"},
+      spec: %{"invocation" => %{"lifetime_scope" => scope}}
+    }
+  end
+
   defp spawn_via_supervisor(args) do
     StubBackend.set_parent(self())
     Fleet.Spawner.Pod.start_link(args)
@@ -1803,6 +1813,51 @@ defmodule Fleet.Spawner.PodTest do
 
       assert {:error, {:recall_seed_missing, ^missing}} =
                Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
+    end
+  end
+
+  describe "state_fs_path_for/3 — mapping scope → bucket FS (BND-106)" do
+    test "scopes ENUM → bucket attendu, aucun warning d'anomalie" do
+      root = "/tmp/lcars-scope-test"
+
+      for {scope, bucket} <- [
+            {"one-shot", "pods"},
+            {"forever", "pods"},
+            {"pipe", "pipes"},
+            {"run", "runs"}
+          ] do
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            path =
+              Fleet.Spawner.Pod.Paths.state_fs_path_for(
+                "pod-1",
+                profile_with_scope(scope),
+                state_fs_root: root
+              )
+
+            assert path == Path.join([root, bucket, "pod-1", "state.json"])
+          end)
+
+        refute log =~ "non-enum", "un scope enum (#{scope}) ne doit PAS logguer une anomalie"
+      end
+    end
+
+    test "BND-106 : scope HORS-enum → bucket pods/ MAIS warning LOUD (jamais un default silencieux)" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          path =
+            Fleet.Spawner.Pod.Paths.state_fs_path_for(
+              "pod-2",
+              profile_with_scope("banana"),
+              state_fs_root: "/tmp/lcars-scope-test"
+            )
+
+          # Toujours bucketé pods/ (safe), mais rendu VISIBLE : un state.json mal-bucketé est un
+          # footgun recovery/GC que le warden re-scannerait de travers.
+          assert path == Path.join(["/tmp/lcars-scope-test", "pods", "pod-2", "state.json"])
+        end)
+
+      assert log =~ "non-enum lifetime_scope"
     end
   end
 

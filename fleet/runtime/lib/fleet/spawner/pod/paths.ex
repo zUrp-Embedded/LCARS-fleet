@@ -26,6 +26,8 @@ defmodule Fleet.Spawner.Pod.Paths do
     public because they are crossed from those modules.
   """
 
+  require Logger
+
   # A pod's deliverable workspace = `<pod_dir>/workspace` (under `$POD_DIR`, bwrap-bound RW).
   # Subdir centralized HERE — single authority for the placement convention (the
   # `Fleet.Spawner.pod_workspace_path/1` facade delegates; the `Pod.*` islands call it directly).
@@ -120,10 +122,24 @@ defmodule Fleet.Spawner.Pod.Paths do
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
-  # `forever` shares the FS scope `pods/` with `one_shot` (both = pods with
-  # their own lifetime).
+  # `one-shot` and `forever` share the FS scope `pods/` (both = pods with their own lifetime).
+  # Enum values enumerated EXPLICITLY (schema v2.5 enum = one-shot|pipe|run|forever) so the
+  # common `one-shot` never falls into the anomaly branch below.
+  defp scope_for("one-shot"), do: "pods"
   defp scope_for("forever"), do: "pods"
-  defp scope_for(_), do: "pods"
+
+  # BND-106: a value outside the enum. DR-019 refuses an ABSENT lifetime_scope at spawn; a
+  # present-but-non-enum value is the residual (a struct that bypassed the schema). We still bucket
+  # to `pods/` (safe default), but LOUD — never a silent "looks-correct" default around a malformed
+  # profile (a mis-bucketed state.json is a recovery/GC footgun the warden would then mis-scan).
+  defp scope_for(other) do
+    Logger.warning(
+      "Pod.Paths: non-enum lifetime_scope #{inspect(other)} → pods/ bucket " <>
+        "(profile bypassed the schema enum)."
+    )
+
+    "pods"
+  end
 
   @doc """
   Runtime human's HOME. The human running the fleet = the user of the runtime process itself:
