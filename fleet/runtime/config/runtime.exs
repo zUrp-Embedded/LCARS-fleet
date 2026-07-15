@@ -380,8 +380,8 @@ if config_env() != :test do
     config :fleet_pilot, step_dispatch?: true
   end
 
-  # #8 cohérence : plus de routing par label (`LCARS_PILOT_STEP_ROUTING` retiré). Le routing vit dans la
-  # route-comment, gravée par `create_issue` (workflow_map de délégation, défaut brief-gate). type:* = visu.
+  # #8 coherence: no more label-routing knob (`LCARS_PILOT_STEP_ROUTING` removed). Routing lives in the
+  # scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`; delegation workflow_map, default brief-gate). type:* = display.
 
   # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
   # il est PER-STEP-RUN, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.

@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.Application do
       # alignments (one `git` at a time per worktree, against index corruption).
       Fleet.Pilot.WorktreeSync,
       # Neither `:repo` to the Poller (discovery by topic), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
-      # The routing lives in the route-comment (engraved by create_issue); the Poller reads it (state-machine).
+      # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
       # subscribe_gitea (Z6e/D-13) : le webhook accélère le tick (hint, poll = la vérité).
       {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
       {Fleet.Pilot.StepRunConsumer,

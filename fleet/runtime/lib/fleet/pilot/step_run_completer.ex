@@ -17,8 +17,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
        (workspace coherence gate + bounded push). Inseparable: the local commit
        alone is not seen by the forge. Returns the `commit_sha` that signs the step_run.
     2. **Signed comment** `[step_run:<role>:<sha>]` — dedup by signature (replay-safe).
-       *(No step 3 "PATCH `state:*`": the state lives in the route-comment,
-       not in a `state:*` label. The following step numbers keep their mapping.)*
+       *(No step 3 "PATCH `state:*`": the position lives in the scoped labels `wfmap/*`+`stage/*`
+       (post_route), not in a `state:*` label. The following step numbers keep their mapping.)*
     4. **Routing to the next step**:
          * `next_assignee` present (multi-step) → engraves the NEXT step's ROUTE
            (`post_route`); the assignee STAYS the human — the poller reads the
@@ -715,7 +715,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp lock_number(%{pr_role: :judge}, pr) when is_integer(pr), do: pr
   defp lock_number(%{issue_number: n}, _pr), do: n
 
-  # Engraves the workflow_map POSITION [lcars-route:p:s] on the issue (read by StepDispatcher/dispatch_review
+  # Engraves the workflow_map POSITION (scoped labels `wfmap/*`+`stage/*` via post_route) on the issue (read by StepDispatcher/dispatch_review
   # to identify the judge's step: the assignee/reviewer alone does not identify it, a role can
   # be on N steps). It stays (navigation authority); only the TRIGGER (set_assignee) is replaced
   # by the review-request. Engraves if workflow_map+next_step present (otherwise 1-step/terminal, no route).
@@ -842,7 +842,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # ── Step 4: route the next step OR close (1-step terminal) ─────────────────
-  # (No step 3 "PATCH state:*": the state lives in the route-comment. Step numbers preserved.)
+  # (No step 3 "PATCH state:*": the position lives in the scoped labels `wfmap/*`+`stage/*` (post_route). Step numbers preserved.)
   # Multi-step: engraves the next step's ROUTE (post_route) — NO assignee PATCH: the assignee
   # STAYS the human (driver trace), the poller reads the engraved route to spawn the next step.
   # post_route idempotent (marker dedup).

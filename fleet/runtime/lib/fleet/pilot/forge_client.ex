@@ -353,8 +353,8 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Opens a pull request `head` → `base` on `repo` (Gitea `POST /repos/{repo}/pulls`).
   IDEMPOTENT: if an open PR already exists for this `head`, returns its number (the
-  Gitea 409 is not an error). `opts[:body]` = body — put `Closes #N` in it for
-  the issue auto-close at merge (the forge maintains the issue↔PR link).
+  Gitea 409 is not an error). `opts[:body]` = body. (No `Closes #N` auto-close: it was removed
+  2026-07-07 — the issue is closed EXPLICITLY by `GatekeeperSeal.seal_and_merge` after the seal.)
 
   ## Returns
     * `{:ok, number}` — PR opened (or already existing)

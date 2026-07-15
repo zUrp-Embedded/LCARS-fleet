@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   a workflow_map can have the same role on several steps (e.g. `standard-qa`:
   `architect` is on `brainstorm` AND `plan`). The assignee (= role) alone
   **does not identify** the step. The canonical position is therefore the **step name**, which
-  the runtime engraves on the forge (enriched lock comment `[lock:role:step:ts]`) and
+  the runtime engraves on the forge (scoped label `stage/*` via `ForgeClient.post_route`) and
   re-reads to navigate. `WorkflowMapNav` is keyed by step name; where
   the name comes from (forge) is the caller's concern.
 
