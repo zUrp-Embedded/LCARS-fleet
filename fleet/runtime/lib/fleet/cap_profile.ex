@@ -489,6 +489,27 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
+  Load-bearing accessor for `lifetime_scope` — NO default (DR-019/R18). `{:ok, scope}` iff the
+  schema-REQUIRED field is present as a non-empty string, `{:error, :no_lifetime_scope}` otherwise.
+
+  `lifetime_scope` decides at least four things (brief-required, slot scope, state-fs scope, release).
+  A `%CapProfile{}` without it is an INVALID state that the STRUCT type still allows (a schema-loaded
+  profile always has it; a hand-forged/unvalidated struct may not). The SPAWN path (`Fleet.Spawner.
+  spawn_pod`, the choke point of every spawn) gates on THIS: an absent lifetime_scope is REFUSED, never
+  spawned — otherwise the same profile receives DIVERGENT downstream reads (brief-exempt at the guard,
+  yet `"one-shot"` at extraction via the lenient `lifetime_scope/2` default → releases). The lenient
+  `lifetime_scope/2` stays for the derivations that run AFTER the gate (`slot_scope`, `Pod.Paths`),
+  where the scope is guaranteed present.
+  """
+  @spec fetch_lifetime_scope(t()) :: {:ok, String.t()} | {:error, :no_lifetime_scope}
+  def fetch_lifetime_scope(%__MODULE__{spec: spec}) do
+    case get_in(spec, ["invocation", "lifetime_scope"]) do
+      s when is_binary(s) and s != "" -> {:ok, s}
+      _ -> {:error, :no_lifetime_scope}
+    end
+  end
+
+  @doc """
   Canonical accessor for `deliverable_mode` (`spec.deliverable_mode`, schema v2.5). **Single source**:
   the publication-mode selection (`Fleet.Workflow.Deliverable.publish/1`) is read HERE, not
   re-implemented at the readers. `default` `"payload"` (the canon default, back-compat: a profile

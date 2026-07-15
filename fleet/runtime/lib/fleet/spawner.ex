@@ -97,8 +97,10 @@ defmodule Fleet.Spawner do
 
   @doc """
   Rule R18: a one-shot cap-profile requires a brief. Shared authority (brief_guard +
-  the boundaries that validate at admission, e.g. the API). nil/absent → false (exempted),
-  like brief_guard.
+  the boundaries that validate at admission, e.g. the API). Reads only the EXPLICIT
+  `"one-shot"`; a missing lifetime_scope → false, but that is now a dead-safe default —
+  the spawn choke point (`spawn_pod`) refuses a no-scope profile via `fetch_lifetime_scope/1`
+  BEFORE this predicate is consulted (DR-019), and admission only ever schema-loads.
   """
   @spec brief_required?(Fleet.CapProfile.t()) :: boolean()
   def brief_required?(%Fleet.CapProfile{spec: spec}) do
@@ -125,43 +127,59 @@ defmodule Fleet.Spawner do
           {:ok, pid()} | {:error, term()}
   def spawn_pod(%Fleet.CapProfile{} = cap_profile, issue_id, opts \\ [])
       when is_binary(issue_id) and is_list(opts) do
-    case brief_guard(cap_profile, opts) do
-      :ok ->
-        pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
+    # DR-019 (R18 structural): `lifetime_scope` is schema-REQUIRED — it decides brief-required, slot
+    # scope, state-fs scope AND release. A %CapProfile{} without it is an INVALID state the struct type
+    # still allows (an unvalidated/hand-forged struct); letting it spawn gave it DIVERGENT downstream
+    # reads (brief-exempt at the guard, yet "one-shot" at extraction → releases). We refuse it at THE
+    # choke point (every spawn — publish_consumer, step_dispatcher, recall — funnels here), so no
+    # unvalidated profile ever reaches the divergent readers.
+    with {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
+         :ok <- brief_guard(cap_profile, opts) do
+      pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
-        # pod_id threads into FS paths (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
-        # by interpolation. The UUID default = safe, but the `:pod_id` override (step `issue-N-role-ts`, role
-        # resolved forge-side; permanent `permanent-<name>-ts`; admin) is NOT necessarily controlled → a `/` or `..`
-        # would traverse out of `~/pods`. Path-safe charset guard + `..` rejection → a CLEAR refusal, never a
-        # traversed path (all legitimate pod_ids — UUID / catalogue / step — pass).
-        if valid_pod_id?(pod_id) do
-          # DETERMINISTIC pod id (stable, no timestamp suffix): a re-dispatch falls back on the same
-          # `pod_id`. If a terminal TOMBSTONE (`state.json` :succeeded/:released/:killed) from a previous
-          # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
-          # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
-          # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
-          _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
+      # pod_id threads into FS paths (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
+      # by interpolation. The UUID default = safe, but the `:pod_id` override (step `issue-N-role-ts`, role
+      # resolved forge-side; permanent `permanent-<name>-ts`; admin) is NOT necessarily controlled → a `/` or `..`
+      # would traverse out of `~/pods`. Path-safe charset guard + `..` rejection → a CLEAR refusal, never a
+      # traversed path (all legitimate pod_ids — UUID / catalogue / step — pass).
+      if valid_pod_id?(pod_id) do
+        # DETERMINISTIC pod id (stable, no timestamp suffix): a re-dispatch falls back on the same
+        # `pod_id`. If a terminal TOMBSTONE (`state.json` :succeeded/:released/:killed) from a previous
+        # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
+        # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
+        # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
+        _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
-          args = %{
-            cap_profile: cap_profile,
-            issue_id: issue_id,
-            pod_id: pod_id,
-            opts: opts
-          }
+        args = %{
+          cap_profile: cap_profile,
+          issue_id: issue_id,
+          pod_id: pod_id,
+          opts: opts
+        }
 
-          spec = pod_child_spec(args)
+        spec = pod_child_spec(args)
 
-          # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
-          # (never produced by our gen_statem, but callers should not have to carry that contract).
-          case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-            {:ok, pid} -> {:ok, pid}
-            {:ok, pid, _info} -> {:ok, pid}
-            :ignore -> {:error, :pod_init_ignored}
-            {:error, _} = err -> err
-          end
-        else
-          {:error, :invalid_pod_id}
+        # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
+        # (never produced by our gen_statem, but callers should not have to carry that contract).
+        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+          {:ok, pid} -> {:ok, pid}
+          {:ok, pid, _info} -> {:ok, pid}
+          :ignore -> {:error, :pod_init_ignored}
+          {:error, _} = err -> err
         end
+      else
+        {:error, :invalid_pod_id}
+      end
+    else
+      {:error, :no_lifetime_scope} ->
+        # Invalid state refused at the boundary (DR-019), not silently defaulted: the profile never
+        # came from the schema → do not spawn it. LOUD (error): a caller forged/mutated a struct.
+        Logger.error(
+          "Spawner: spawn_pod refused — cap-profile has no lifetime_scope (schema-required; " <>
+            "an unvalidated/hand-forged struct is not a spawnable state)."
+        )
+
+        {:error, :cap_profile_no_lifetime_scope}
 
       {:error, _} = err ->
         err
@@ -202,12 +220,14 @@ defmodule Fleet.Spawner do
   # claude waits → timeout). Long-lived pods (`forever`/`run`/`pipe`) pull their
   # tasks via MCP (`yop` → get_work_item) → exempted (spares the permanent/gatekeeper pods).
   # Explicit admin/diagnostic escape hatch: `opts[:allow_no_brief]`.
-  defp brief_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
+  # PRECONDITION: `cap_profile` already passed `fetch_lifetime_scope/1` in `spawn_pod` (a no-scope
+  # profile never reaches here — it is refused upstream, DR-019). So scope is guaranteed present:
+  # the guard only decides one-shot→brief, no nil-scope exemption to make.
+  defp brief_guard(%Fleet.CapProfile{} = cap_profile, opts) do
     brief = Keyword.get(opts, :brief)
     # `nil` AND `""` (empty brief — e.g. a `build_brief` over an empty/malformed
     # step context) both count as "no brief".
     has_brief? = is_binary(brief) and brief != ""
-    scope = get_in(spec, ["invocation", "lifetime_scope"])
 
     cond do
       has_brief? ->
@@ -228,16 +248,7 @@ defmodule Fleet.Spawner do
 
         {:error, :brief_required}
 
-      is_nil(scope) ->
-        # Profile with no declared lifetime_scope (unvalidated?): exemption by default
-        # (we only refuse the EXPLICIT one-shot), but we make the gap visible.
-        Logger.warning(
-          "Spawner: spawn_pod (R18): lifetime_scope missing from cap-profile — " <>
-            "spawn allowed without brief (default exemption, profile to verify)."
-        )
-
-        :ok
-
+      # Long-lived (forever/run/pipe): pulls its work via MCP → exempted.
       true ->
         :ok
     end

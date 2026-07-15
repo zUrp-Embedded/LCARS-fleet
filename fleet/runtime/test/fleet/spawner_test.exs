@@ -165,9 +165,25 @@ defmodule Fleet.SpawnerTest do
                "scope #{scope} ne devrait PAS exiger de brief"
       end
 
-      # lifetime_scope absent (profil non validé ?) : nil-aware → false (exempté), comme brief_guard.
+      # lifetime_scope absent : brief_required? lit le "one-shot" EXPLICITE → false. C'est désormais un
+      # défaut mort-sûr : spawn_pod REFUSE un profil sans scope en amont (DR-019, test dédié ci-dessous),
+      # ce prédicat n'est jamais consulté sur un no-scope réel dans le chemin de spawn.
       no_scope = put_in(valid_profile().spec["invocation"], %{})
       refute Fleet.Spawner.brief_required?(no_scope)
+    end
+
+    test "DR-019 : cap-profile SANS lifetime_scope → spawn REFUSÉ (état invalide, jamais spawné)" do
+      # `lifetime_scope` est schema-REQUIRED : un %CapProfile{} sans lui n'a jamais été validé par le
+      # schéma. Le laisser spawner lui donnait des lectures aval DIVERGENTES (brief-exempté au guard, mais
+      # "one-shot" à l'extraction → release). Le choke point spawn_pod le refuse fail-loud — même avec un
+      # brief, même avec allow_no_brief (l'invalidité du profil précède la question du brief).
+      no_scope = put_in(valid_profile().spec["invocation"], %{})
+
+      assert {:error, :cap_profile_no_lifetime_scope} =
+               Fleet.Spawner.spawn_pod(no_scope, "issue-no-scope", brief: "do x")
+
+      assert {:error, :cap_profile_no_lifetime_scope} =
+               Fleet.Spawner.spawn_pod(no_scope, "issue-no-scope", allow_no_brief: true)
     end
 
     test "one-shot + pas de brief → {:error, :brief_required}" do
