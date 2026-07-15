@@ -118,8 +118,9 @@ defmodule Fleet.API.Application do
 
   # AF_UNIX control socket serving `Fleet.API.ControlRouter` (`POST /api/admin/spawn`). Started
   # alongside the TCP listener when `:control_socket` is configured (per-human, runtime.exs). `[]`
-  # when unset (e.g. a deploy that keeps the write on TCP, or a test) → the write door is then
-  # simply absent rather than silently TCP-exposed.
+  # when unset (e.g. a test, or a deploy with no write door) → the write door is simply ABSENT
+  # (POST /api/admin/spawn 404s on the TCP listener; the control socket is the ONLY write door —
+  # there is no "keep the write on TCP" mode).
   defp control_socket_child do
     case Application.get_env(:fleet_api, :control_socket) do
       sock when is_binary(sock) and sock != "" -> [Fleet.API.ControlRouter.child_spec(sock)]

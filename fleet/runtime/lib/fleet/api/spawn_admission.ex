@@ -2,8 +2,8 @@ defmodule Fleet.API.SpawnAdmission do
   @moduledoc """
   ADMISSION pipeline for `POST /api/admin/spawn` — the POLICY of the API's
   only write, separated from the HTTP routing (C4 2026-07-05 split):
-  `Fleet.API.Rest` maps each verdict returned here onto its HTTP status, this
-  module decides WHO passes. Pure functions + catalog reads (no process).
+  `Fleet.API.ControlRouter` (the write door) maps each verdict returned here onto its HTTP
+  status, this module decides WHO passes. Pure functions + catalog reads (no process).
 
   ## Why a strict admission on a no-auth surface
 
@@ -40,14 +40,14 @@ defmodule Fleet.API.SpawnAdmission do
 
   `broadcast/1` (the post-admission step) emits the canonical schema
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
-  `{:error, _}` (HTTP 400 surface on the Rest side), never a handler crash.
+  `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
   """
 
   alias Fleet.EventRouter.Bus
 
   @typedoc """
   Admission-refusal verdicts — each mapped onto ONE HTTP status by
-  `Fleet.API.Rest` (400 for `:missing_cap_profile`, 422 for the rest).
+  `Fleet.API.ControlRouter` (400 for `:missing_cap_profile`, 422 for the rest).
   """
   @type refusal ::
           {:forbidden_fields, [String.t()]}
@@ -70,7 +70,7 @@ defmodule Fleet.API.SpawnAdmission do
   Full admission of a `POST /api/admin/spawn` body (the 5 steps of the
   moduledoc, fixed order, first refusal returned). `{:ok, payload}` = the
   CANONICAL payload ready to broadcast (the only thing that will reach the consumer/spawner);
-  `{:error, refusal}` = nothing leaves, `Fleet.API.Rest` translates to HTTP.
+  `{:error, refusal}` = nothing leaves, `Fleet.API.ControlRouter` translates to HTTP.
 
   A non-map body (JSON parser returning something else) is treated as an empty
   DTO → `{:error, :missing_cap_profile}` (the required field is missing).
@@ -91,7 +91,7 @@ defmodule Fleet.API.SpawnAdmission do
   rescue: the API's POLICY is to surface as HTTP — an out-of-registry event
   (`UnregisteredError`) or a malformed one (`ArgumentError`/
   `FunctionClauseError` from the constructor) becomes `{:error, _}` (→ 400 on the
-  Rest side), never a handler crash.
+  ControlRouter side), never a handler crash.
   """
   @spec broadcast(map()) :: :ok | {:error, term()}
   def broadcast(payload) do

@@ -14,7 +14,7 @@ arbitration pods (gatekeeper + other decision roles) on the LCARS core side.
 restated, only pointed at.
 
 ## Modules
-- `Fleet.Starfleet` — namespace head moduledoc (no code)
+- `Fleet.Starfleet` — domain façade + `use Boundary` declaration; carries `boot_orchestrate/0` (triggered post-boot by the root, A-08). NOT a pure/empty namespace.
 - `Fleet.Starfleet.Application` — `:one_for_one` supervisor (3/60); boot fail-fast schema load + compile-time event-atom pre-registration + five `:start_*`-gated children (BootOrchestrator is NOT one: triggered post-boot by the root via `Fleet.Starfleet.boot_orchestrate/0`, A-08)
 - `Fleet.Starfleet.Gatekeeper` — pure decision-JSON validation against the frozen `decision-v1.json` schema (boot-loaded into the Ring 0 `Fleet.SchemaCache`)
 - `Fleet.Decision` — the validated `{decision, reason, details, chain}` output struct (Ring-0 : descendu hors Starfleet pour BND-002, Coord ne pouvant nommer un type de Starfleet sans cycle)
@@ -31,4 +31,4 @@ restated, only pointed at.
 - Child gating (`:fleet_starfleet`) read by `Application` — `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`, `:start_boot_orchestrator`, `:start_mcp_monitor` (default `true`), `:start_mcp_watcher` (default `false`, outbound HTTP); all forced `false` in `test.exs`.
 - Backend seams — `:coord_backend` (read via `CoordBackend.resolved/0`), `:shutdown_dispatcher` (read via `Shutdown.configured_dispatcher/0`), `:spawner_mod` (test-only stub); prod values set by `runtime.exs`.
 - Params, each read by its owning module (defaults in the `@moduledoc`) — `:decision_schema_path`, `:audit_log_path` / `:audit_log_max_bytes`, `:mcp_monitor_check_interval_ms` / `:mcp_monitor_target`, `:mcp_watcher_check_interval_ms` / `:mcp_watcher_package` / `:mcp_watcher_upstream_fetcher`.
-- Deps: see `mix.exs`. Runtime-wired, NOT compile deps: `fleet_coord` (via `:coord_backend`), `fleet_task_queue` (via `apply`).
+- Deps: declared in `Fleet.Starfleet`'s `use Boundary` (compile-enforced) — incl. `Fleet.Coord` and `Fleet.TaskQueue`, which ARE compile deps (`AggregateDispatcher` calls `Fleet.TaskQueue.list_pending/0` directly; the old module-in-variable/`apply` is gone). The ONLY true runtime seams are the injected backends above (`:coord_backend`, `:shutdown_dispatcher`, `:spawner_mod` test-only) — not Coord/TaskQueue.

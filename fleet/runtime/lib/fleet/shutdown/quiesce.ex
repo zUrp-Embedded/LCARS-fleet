@@ -13,7 +13,7 @@ defmodule Fleet.Shutdown.Quiesce do
   flips to `true`; the **entry points for new top-level work** consult it and
   refuse to admit new work.
 
-  Current reader: REST `POST /api/admin/spawn` (`Fleet.API.Rest`) — a new
+  Current reader: `Fleet.API.ControlRouter` (the `POST /api/admin/spawn` write door) — a new
   operator pod is refused while draining. (A workflow-activation reader once
   lived here too, but that entry point was removed; re-wiring it is part of the graceful-shutdown; its trigger `Fleet.Starfleet.Shutdown.begin/1` is
   invoked by the graceful-stop path (`bin/fleet_v2` stop). See that module.)
