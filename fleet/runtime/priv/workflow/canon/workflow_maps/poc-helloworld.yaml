@@ -5,8 +5,9 @@
 # rend son livrable via submit_result. PAS de gate human-approval (caillou C1) ;
 # 1 seul step pour isoler la mécanique avant d'enrichir (qualifier/reviewer/gate).
 #
-# Statut : draft défrichage — sera enrichi (gates qualité, clone forge, finish) une
-# fois la mécanique de base prouvée. Ne pas considérer comme canon.
+# Statut : DÉMO — pipeline volontairement minimal (1 step, sans gate) pour prouver/démontrer la
+# chaîne de délégation de bout en bout. Canon en tant que démo, pas un pipeline de production
+# (les pipelines de prod ajoutent qualifier/reviewer/gatekeeper — cf. standard-qa).
 
 kind: WorkflowMap
 metadata:
