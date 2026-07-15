@@ -46,12 +46,22 @@ defmodule Fleet.Spawner.Pod.SessionMint do
           0x0000
         )
 
-      is_integer(repo) ->
+      is_integer(repo) and repo in 0..9999 ->
         Fleet.Spawner.SessionId.encode(
           Fleet.CapProfile.role_index(cap_profile),
           Fleet.CapProfile.protected?(cap_profile),
           repo
         )
+
+      is_integer(repo) ->
+        # DR-020: repo id beyond the `<REPO4>` bound (0..9999). REFUSED loud, NOT folded by modulo —
+        # a silent `rem` would collide this repo with `rem(repo, 10_000)` and hand two projects the SAME
+        # deterministic identity (JSONL recall / Desktop slot / reconstructible id all confused). The
+        # 10000th project-bound repo is an explicit stop until the SessionId `<REPO4>` format is widened.
+        raise ArgumentError,
+              "SessionMint.mint: forge repo_id #{repo} exceeds the <REPO4> deterministic-id bound " <>
+                "(0..9999) for role #{Fleet.CapProfile.name(cap_profile)} — refused (no silent modulo " <>
+                "collision). Onboarding a repo id > 9999 requires widening the SessionId format."
 
       true ->
         raise ArgumentError,

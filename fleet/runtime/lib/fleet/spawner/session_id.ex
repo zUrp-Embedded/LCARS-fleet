@@ -16,9 +16,11 @@ defmodule Fleet.Spawner.SessionId do
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
-                      `0-9` ⊂ hex → the UUID stays legal. **ASSUMED DEBT**: cap 9999 ; the caller passes a
-                      repo in `0..9999` (repo 10000 would collide with repo 0, etc. — accepted: we will not
-                      reopen an old project at the moment of creating a 10000th).
+                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999** (F-C064): `encode/4` REFUSES a
+                      repo outside it (function-clause), and the caller-side mint (`Pod.SessionMint`) refuses
+                      it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
+                      stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
+                      hand two projects one deterministic identity). Widening `<REPO4>` = a format redesign.
     - `dec0de`        filler.
     - `<P><R>`        pool (high nibble, `0` = sequential) + role index (low nibble) — **HEX** (R=0-F).
                       `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a

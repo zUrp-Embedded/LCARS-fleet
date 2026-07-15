@@ -555,22 +555,24 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     do: spawn_opts |> Keyword.put(:workflow_map, workflow_map_name) |> Keyword.put(:step, step)
 
   @doc """
-  Resolves the forge `repo_id` (bounded to `<REPO4>` = `rem(id, 10000)`) — the project's forge id makes the
-  deterministic session_id of project-bound roles (eng, judges) via `Fleet.Spawner.SessionId`
-  (DECIMAL `<REPO4>` segment). Forge without `repo_id/2` (stub) / forge down / absent id → `nil`
-  (no `:repo_id` put — `Opts.maybe_put` swallows the nil at the call site). A project-bound role
-  spawned WITHOUT a repo is then an ANOMALY: the mint (`Fleet.Spawner.Pod.SessionMint`) FAILS-LOUD (raises)
-  — we NEVER fabricate a random UUID to mask an unresolved forge (forge = organ of
-  LCARS, forge down = stop). `rem(id, 10000)`: `<REPO4>` = 4 decimal digits → assumed DEBT (F-C064, KEEP),
-  repo 10000 collides with repo 0. Collision threshold = 10 000 repos in the org (far); a fix would widen
-  the fixed `<REPO4>` segment = a SessionId FORMAT redesign — disproportionate vs the documented debt.
-  (We will not reopen the old one; cf. SessionId moduledoc.)
+  Resolves the forge `repo_id` (the RAW forge id) — the project's forge id makes the deterministic
+  session_id of project-bound roles (eng, judges) via `Fleet.Spawner.SessionId` (DECIMAL `<REPO4>`
+  segment). Forge without `repo_id/2` (stub) / forge down / absent id → `nil` (no `:repo_id` put —
+  `Opts.maybe_put` swallows the nil at the call site). A project-bound role spawned WITHOUT a repo is
+  then an ANOMALY: the mint (`Fleet.Spawner.Pod.SessionMint`) FAILS-LOUD (raises) — we NEVER fabricate a
+  random UUID to mask an unresolved forge (forge = organ of LCARS, forge down = stop).
+
+  DR-020 (F-C064 anchor): the `<REPO4>` bound (0..9999) is enforced at the MINT, LOUD — a forge id > 9999
+  is REFUSED, NEVER folded by `rem(id, 10_000)`. The old silent modulo was a HIDDEN collision: repo 10000
+  and repo 0 would encode the SAME deterministic identity, handing two projects one JSONL-recall / Desktop
+  slot / reconstructible id. We pass the raw id through and let the mint refuse an out-of-format id
+  explicitly (widening `<REPO4>` = a SessionId FORMAT redesign, deferred) rather than corrupt identity.
   """
   @spec resolve_repo_id(module(), String.t(), keyword()) :: non_neg_integer() | nil
   def resolve_repo_id(forge, repo, forge_opts) do
     if function_exported?(forge, :repo_id, 2) do
       case forge.repo_id(repo, forge_opts) do
-        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 10_000)
+        {:ok, id} when is_integer(id) and id >= 0 -> id
         _ -> nil
       end
     else

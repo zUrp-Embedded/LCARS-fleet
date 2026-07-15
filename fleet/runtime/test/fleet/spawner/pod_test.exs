@@ -654,6 +654,26 @@ defmodule Fleet.Spawner.PodTest do
       refute_received {:launch_called, _args, _env}
     end
 
+    test "DR-020 : repo_id > 9999 (hors <REPO4>) → spawn REFUSÉ loud, PAS de troncature modulo silencieuse" do
+      # Avant : resolve_repo_id foldait `rem(id, 10_000)` → repo 10000 encodait la MÊME identité que
+      # repo 0 (deux projets, un seul session_id déterministe → JSONL/slot/GC confondus). Désormais le
+      # mint REFUSE fort un id hors format plutôt que corrompre l'identité par un modulo caché.
+      Process.flag(:trap_exit, true)
+      pod_id = "pod-eng-bigrepo-#{System.unique_integer([:positive])}"
+
+      assert {:error, {%ArgumentError{message: msg}, _stack}} =
+               spawn_via_supervisor(%{
+                 cap_profile: valid_profile(),
+                 issue_id: "issue-1",
+                 pod_id: pod_id,
+                 opts: [repo_id: 10_000]
+               })
+
+      assert msg =~ "<REPO4>"
+      assert msg =~ "no silent modulo"
+      refute_received {:launch_called, _args, _env}
+    end
+
     test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo DÉCIMAL encodé)" do
       pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
       args = build_args(pod_id, "issue-1") |> Map.put(:opts, repo_id: 161)
