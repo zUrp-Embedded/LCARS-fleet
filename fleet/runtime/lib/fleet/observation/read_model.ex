@@ -100,15 +100,27 @@ defmodule Fleet.Observation.ReadModel do
   end
 
   @doc """
-  Health of the read-model behind `projection/0` (F-C124): `:live` if the ETS table exists, `:unavailable`
-  if it is DOWN (table gone → `projection/0` reads `empty()`, INDISTINGUISHABLE from a quiet-healthy fleet
-  without this signal). Surfaced in `/api/projection` (`_status` field) so a client sees a DEAD read-model
-  instead of a false "quiet fleet". (A `:live` table can still be transiently stale on a fresh boot — that
-  window is brief and silent by design; only the DOWN blind-spot is load-bearing to surface.)
+  Health of the read-model behind `projection/0` (F-C124, DR-027):
+    * `:unavailable` — the ETS table is DOWN (table gone → `projection/0` reads `empty()`);
+    * `:deaf` — the process is ALIVE but its Bus subscribe FAILED → no event can arrive (a deaf
+      read-model is INDISTINGUISHABLE from a quiet-healthy fleet without this signal);
+    * `:live` — table present AND subscribed (or deliberate static no-subscribe mode).
+  Surfaced in `/api/projection` (`_status`) so a client sees a DEAD/DEAF read-model instead of a false
+  "quiet fleet". (A `:live` table can still be transiently stale on a fresh boot — brief, silent by design.)
   """
-  @spec projection_status() :: :live | :unavailable
+  @spec projection_status() :: :live | :deaf | :unavailable
   def projection_status do
-    if :ets.whereis(@table) == :undefined, do: :unavailable, else: :live
+    cond do
+      :ets.whereis(@table) == :undefined -> :unavailable
+      subscribed?() -> :live
+      true -> :deaf
+    end
+  end
+
+  defp subscribed? do
+    :ets.lookup_element(@table, :subscribed, 2)
+  rescue
+    ArgumentError -> false
   end
 
   # ── Server ──────────────────────────────────────────────────────────────────
@@ -119,26 +131,44 @@ defmodule Fleet.Observation.ReadModel do
     # writes via the GenServer. Auto-deleted on process death.
     _ = :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
     :ets.insert(@table, {:projection, empty()})
+    subscribe? = Keyword.get(opts, :subscribe, true)
+    # DR-027: `:subscribed` gates the :live status. A REAL subscribe (subscribe? true) starts PESSIMISTIC
+    # (false) and flips true only once the Bus subscribe SUCCEEDS (handle_continue) — an alive-but-deaf
+    # read-model then reads :deaf, never a lying :live. The deliberate no-subscribe mode (subscribe? false,
+    # test/static) is live from init (no subscribe attempt = not a failure; also avoids a boot race).
+    :ets.insert(@table, {:subscribed, not subscribe?})
 
-    {:ok, %{proj: empty(), subscribe?: Keyword.get(opts, :subscribe, true)},
-     {:continue, :subscribe}}
+    {:ok,
+     %{
+       proj: empty(),
+       subscribe?: subscribe?,
+       # Seam: the subscribe fn (default `Bus.subscribe/1`) — injectable to exercise the DEAF path in test.
+       subscribe_fun: Keyword.get(opts, :subscribe_fun, &Bus.subscribe/1)
+     }, {:continue, :subscribe}}
   end
 
   @impl GenServer
-  def handle_continue(:subscribe, %{subscribe?: true} = state) do
+  def handle_continue(:subscribe, %{subscribe?: true, subscribe_fun: subscribe_fun} = state) do
     topic = Bus.main_topic()
 
-    case Bus.subscribe(topic) do
+    case subscribe_fun.(topic) do
       :ok ->
-        :ok
+        :ets.insert(@table, {:subscribed, true})
 
       other ->
-        Logger.warning("ReadModel: subscribe #{topic} → #{inspect(other)}")
+        # DR-027 hollow-green: a failed subscribe leaves the read-model ALIVE but DEAF — no event will
+        # ever arrive, yet `projection_status/0` used to say :live (a deaf process INDISTINGUISHABLE from
+        # a quiet-healthy fleet). We leave `:subscribed` FALSE → status reports :deaf, and we LOG LOUD.
+        Logger.error(
+          "ReadModel: subscribe #{topic} FAILED (#{inspect(other)}) — read-model is DEAF: no event " <>
+            "will arrive, /api/projection reports :deaf (a deaf process is NOT a quiet-healthy fleet)"
+        )
     end
 
     {:noreply, state}
   end
 
+  # Deliberate no-subscribe mode (test/static config): already :live from init (no subscribe attempt).
   def handle_continue(:subscribe, state), do: {:noreply, state}
 
   @impl GenServer

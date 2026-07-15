@@ -94,7 +94,7 @@ defmodule Fleet.Observation.Deck do
   # STREAM/COORDINATION/DIAGNOSTICS/BRIDGE. Direct ETS read (bypass GenServer).
   get "/api/projection" do
     # F-C124 — include the read-model HEALTH so a DOWN read-model (whose projection reads empty) is not
-    # indistinguishable from a quiet-healthy fleet. `_status` = :live | :unavailable (additive field).
+    # indistinguishable from a quiet-healthy fleet. `_status` = :live | :deaf | :unavailable (additive field).
     proj = Fleet.Observation.ReadModel.projection()
     body = Jason.encode!(Map.put(proj, :_status, Fleet.Observation.ReadModel.projection_status()))
 
