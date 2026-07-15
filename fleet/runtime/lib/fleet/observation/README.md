@@ -1,9 +1,9 @@
 # fleet_observation
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-08 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
+**Dernière révision** : 2026-07-15 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
 **Statut** : actif — observation deck read-only (Ring 4)
-**Référencé par** : `DESIGN-observabilite.md`
+**Référencé par** : —
 
 Read / observability frontier (Ring 4): serves an LCARS observation deck on a per-human
 port. Read-only, no-auth, intra-release — it observes the fleet, mutates nothing (it depends
@@ -26,4 +26,4 @@ restated, only pointed at.
 - Knobs `:start_listener` / `:start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, like `fleet_api`).
 - Deps: `fleet_spawner` (Ring 1, `list_pods/0`), `fleet_cap_profile` (Ring 0, role catalogue), `fleet_event_router` (Ring 0, Bus + listener), + `plug`/`plug_cowboy`/`jason`. See `mix.exs`.
-- Design: `DESIGN-observabilite.md` (the observable catalogue + the 7 decks).
+- `DESIGN-observabilite.md` — note de design **HISTORIQUE**/exploratoire, PAS l'autorité courante (décrit des mécaniques abandonnées : ports `:8089`/`:8090`, snapshot readiness dans le ReadModel). L'autorité observabilité = les `@moduledoc` (`Deck`, `ReadModel`) + le code.

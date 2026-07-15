@@ -1,12 +1,22 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-12
-**Statut** : design note exploratoire (incrément A — la base de travail). Mode exploration : pas de mauvaise réponse, on teste.
+**Dernière révision** : 2026-07-15
+**Statut** : ⚠ HISTORIQUE / exploratoire — PAS l'autorité courante (cf. bannière ci-dessous).
 **Référencé par** : `lib/fleet/observation/README.md`
 **Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
 
 ---
+
+> ⚠️ **DOCUMENT HISTORIQUE — PAS l'autorité courante.** Cette note de design (exploratoire, incrément A)
+> mélange une cible initiale, des incréments passés et des **mécaniques ABANDONNÉES** : cohabitation
+> `fleet_dashboard :8089`, port `:8090` décommissionné, snapshot boot (`Spawner.list_pods/0` +
+> `Readiness.deep/0`) DANS le ReadModel. Le code courant ne fait RIEN de tout ça : `/api/pods` lit les
+> pods live via le `Deck`, `/api/projection` lit UNIQUEMENT la projection event-stream (aucun snapshot
+> readiness), et le `ReadModel` consomme TOUT le Bus (il route aussi des diagnostics `fleet.boot*` /
+> `mcp.server_crashed` / `sdk.upstream_alert`, y compris d'origine starfleet). **L'autorité observabilité
+> courante = les `@moduledoc` de `Fleet.Observation.Deck` et `Fleet.Observation.ReadModel` + le code.**
+> Ne PAS se servir de ce doc comme référence du runtime courant.
 
 ## 0. Mission
 
