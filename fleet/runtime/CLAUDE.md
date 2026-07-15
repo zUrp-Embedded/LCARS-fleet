@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-12 (migration single-app + boundary — l'umbrella n'existe plus ; guide réaligné, fonction primaire inchangée = navigation)
+**Dernière révision** : 2026-07-15 (règle GRAVÉE : langue du code = anglais, sans exception — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -85,6 +85,7 @@ Quand un test a besoin du vrai backend, il l'instancie directement (`start_super
 
 ## Code conventions
 
+- **Langue du code = ANGLAIS, sans exception** (pré-requis, PAS une préférence). Toute prose qui VIT dans un fichier source — commentaire inline, `@moduledoc`, `@doc`, docstring, nom de variable/fonction, message de log/rail opérateur — est en **anglais**. Le français est STRICTEMENT réservé au contenu rendu pour l'**œil de l'humain final** : corps des commentaires/issues/PR postés sur la forge, texte du dashboard, message user-facing affiché à l'opérateur. Un log interne reste EN (debug/rail, pas l'interface). RAISON, non négociable : LCARS est la **vitrine de sa propre thèse — « du code propre, 100% généré par des agents »** — donc un commentaire français dans `lib/`/`test/`/`bin/` n'est pas un détail de style, c'est un **contre-exemple signé de la main de l'auteur** qui falsifie la thèse. Corollaire : un agent qui édite le runtime N'INTRODUIT JAMAIS de français dans le code, et traduit vers l'EN tout FR qu'il touche au passage (jamais une retraduction partielle en vrac — reliquat = chantier dédié). L'i18n du user-facing est un chantier SÉPARÉ et ULTÉRIEUR (d'abord un projet qui tourne). Un gate `shell_gate` rejettera mécaniquement le FR-dans-le-code — **mur, pas consigne** (la doctrine LCARS appliquée à LCARS).
 - **Logger levels — doctrine** : `error` = perte réelle ou condition terminale (donnée NON gravée, event load-bearing NON émis, HALT, corruption) ; `warning` = dégradé/retry/anomalie non-fatale ; `info` = jalon de lifecycle ; les ticks nominaux sont SILENCIEUX.
 - **Préfixe des messages de log** : le préfixe est le **rail opérateur** — le nom que l'opérateur greppe pour suivre un flux. Un module autonome loggue sous son dernier segment (`Poller:`, `ReadModel:`) ; un sous-module EXTRAIT d'une façade loggue sous la FAÇADE de son rail (`Emissions`/`Spawn`/`GateEngine` → `StepRunCompleter:`/`StepDispatcher:`/`StepRunConsumer:`) — extraire un cluster ne fragmente jamais la trace, et un même module n'utilise qu'UN préfixe (le nom de fonction, s'il porte du signal, descend dans le corps du message). Exceptions nommées : `AUDIT <event.type>` et `pod <id> …` (rails délibérés), `MCP.Supervisor:` (dernier segment trop générique seul), `LCARS config:` (message operator-facing du parsing env).
 - Le contrat de chaque module = son `@moduledoc` (SSoT). Le `README.md` d'un domaine est une **carte qui POINTE, jamais une copie**. Nouveau module → une ligne dans la carte ; le contrat reste dans son `@moduledoc`.
