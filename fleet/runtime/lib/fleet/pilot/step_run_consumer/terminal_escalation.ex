@@ -100,6 +100,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def terminal_escalate?({:rework_exhausted, _}), do: true
   def terminal_escalate?({:rework_budget_unreadable, _}), do: true
   def terminal_escalate?({:human_approval_required, _}), do: true
+  # DR-013: an unloadable cap-profile at completion is a TERMINAL config anomaly (the producer/judge
+  # property is unknown). ESCALATE, never bubble: bubbling would let the reaper re-dispatch a persistently
+  # broken profile forever (G2 churn) without notifying a human.
+  def terminal_escalate?(:cap_profile_unloadable), do: true
   def terminal_escalate?(_), do: false
 
   @doc """
@@ -205,6 +209,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   defp terminal_error_message({:rework_budget_unreadable, reason}, _role) do
     "🛑 **Budget de rework illisible** (`#{inspect(reason)}`) — on ne rebondit pas à l'aveugle (risque de " <>
       "boucle). Vérifie l'état forge de l'issue (comments `[step_run:…]`) puis relance ou abandonne."
+  end
+
+  defp terminal_error_message(:cap_profile_unloadable, role) do
+    "🛑 **Cap-profile illisible** (rôle `#{role}`) — le profil a disparu/corrompu depuis le spawn : impossible " <>
+      "de savoir si ce rôle PRODUIT du code ou juge. On ne devine PAS (un vrai producteur traité en juge " <>
+      "perdrait son livrable). Répare le cap-profile canon du rôle puis relance."
   end
 
   defp terminal_error_message({:human_approval_required, _reason}, role) do

@@ -51,8 +51,8 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
   defp dmode,
     do: fn
-      "engineer" -> "git_native"
-      _ -> "payload"
+      "engineer" -> {:ok, "git_native"}
+      _ -> {:ok, "payload"}
     end
 
   defp state do
@@ -141,6 +141,32 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
       # Rail ciblé : un verdict n'est pas un échec de load → pas de workflow_map.failed.
       refute_received %Fleet.Event{type: :"workflow_map.failed"}
+    end
+  end
+
+  describe "DR-013 — cap-profile illisible au completion → escalation, jamais un juge silencieux" do
+    test "deliverable_mode_fun {:error, :cap_profile_unloadable} → freeze arch (await_arch), PAS de complétion silencieuse" do
+      # Un rôle dont le cap-profile a disparu/corrompu depuis le spawn : le mode producteur/juge est
+      # INCONNU. Avant DR-013 : fallback "payload" → producer? false → reclassé SILENCIEUSEMENT en juge
+      # (un vrai producteur, son code jamais poussé). Désormais : {:error} → fail-loud + escalade à l'arch
+      # (freeze_to_arch : jamais bubble → le reaper re-dispatcherait un profil cassé à l'infini, G2 churn).
+      st = %{state() | deliverable_mode_fun: fn _role -> {:error, :cap_profile_unloadable} end}
+
+      payload = %{
+        "issue_id" => "issue-77",
+        "workspace" => "/ws",
+        "base_sha" => "cafe",
+        "role" => "engineer",
+        "workflow_map" => "judgemap-q2",
+        "step" => "gate",
+        "result" => %{}
+      }
+
+      StepRunConsumer.maybe_complete(payload, st)
+
+      # Escalade humaine (freeze_to_arch → await_arch), JAMAIS une complétion silencieuse en juge.
+      assert_receive {:await_arch, _step_run, _opts}, 500
+      refute_received {:step_run, _, _}
     end
   end
 end

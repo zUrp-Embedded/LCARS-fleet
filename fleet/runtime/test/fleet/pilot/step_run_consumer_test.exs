@@ -54,8 +54,8 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   # Seam deliverable_mode : engineer = git_native (producteur), tout le reste = payload (juge).
   defp dmode,
     do: fn
-      "engineer" -> "git_native"
-      _ -> "payload"
+      "engineer" -> {:ok, "git_native"}
+      _ -> {:ok, "payload"}
     end
 
   defp state(extra \\ %{}) do
@@ -550,15 +550,20 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
   end
 
-  describe "default_deliverable_mode/1 (F-C053 — rôle non-chargeable ≠ absent)" do
-    test "rôle NON-CHARGEABLE (profil manquant/corrompu) → \"payload\" (fail-safe) MAIS log LOUD (plus de classification silencieuse)" do
-      # Le cœur du finding : un profil non-chargeable est un PROBLÈME de config, pas un deliverable_mode
-      # absent (F-C143). On garde le défaut fail-SAFE `payload` (non-producteur → pas de push non-vérifié)
-      # mais on LOG LOUD : classer en silence masquerait la mis-config (un vrai producteur traité en juge,
-      # son code jamais poussé). D1 — observable > silencieux.
+  describe "default_deliverable_mode/1 (DR-013 — rôle non-chargeable ≠ absent)" do
+    test "rôle CHARGEABLE → {:ok, mode} (deliverable_mode du cap-profile)" do
+      # engineer est un rôle canon → chargeable → producteur (git_native).
+      assert {:ok, "git_native"} = StepRunConsumer.default_deliverable_mode("engineer")
+    end
+
+    test "DR-013 : rôle NON-CHARGEABLE (profil manquant/corrompu) → {:error, :cap_profile_unloadable} + log LOUD" do
+      # Le cœur du finding : un profil non-chargeable est un PROBLÈME de config. AVANT : fallback muet
+      # "payload" → `producer?` le lisait non-producteur → reclassé SILENCIEUSEMENT en juge (un vrai
+      # producteur, son code jamais poussé). Désormais : RÉSULTAT FERMÉ `{:error, :cap_profile_unloadable}`
+      # → la classification producteur/juge fail-loud (jamais consommé comme "juge" par défaut).
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert "payload" =
+          assert {:error, :cap_profile_unloadable} =
                    StepRunConsumer.default_deliverable_mode(
                      "role-inexistant-#{System.unique_integer([:positive])}"
                    )

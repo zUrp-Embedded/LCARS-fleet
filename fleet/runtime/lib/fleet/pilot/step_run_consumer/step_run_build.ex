@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
             repo: String.t() | nil,
             remote: String.t() | nil,
             role_emails: (String.t() -> [String.t()]),
-            deliverable_mode_fun: (String.t() -> String.t()),
+            deliverable_mode_fun: (String.t() -> {:ok, String.t()} | {:error, term()}),
             forge_client: module() | nil,
             forge_opts: keyword()
           }
@@ -86,10 +86,23 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   yet materialized on the PR — transitional gap noted (the trace lives in the gatekeeper's
   task result; PR-trace = later increment).
   """
-  @spec build(map(), pos_integer(), String.t(), route(), Seams.t()) :: map()
+  @spec build(map(), pos_integer(), String.t(), route(), Seams.t()) :: map() | {:error, term()}
   def build(payload, n, role, route, %Seams{} = seams) do
-    {pr_role, producer_branch} = classify_pr_role(payload, n, role, seams)
+    # DR-013: an unloadable cap-profile makes the producer/judge property UNKNOWN → the classification
+    # returns `{:error, _}` and the whole build bails out (the caller fails-loud, no step_run completed
+    # under an unknown property). Ordered case: `{:error, _}` FIRST (a 2-tuple that would otherwise bind
+    # `{pr_role, producer_branch}` and silently corrupt the classification), then the real `{:producer |
+    # :judge, branch}`.
+    case classify_pr_role(payload, n, role, seams) do
+      {:error, _} = err ->
+        err
 
+      {pr_role, producer_branch} ->
+        build_step_run(payload, n, role, route, seams, pr_role, producer_branch)
+    end
+  end
+
+  defp build_step_run(payload, n, role, route, seams, pr_role, producer_branch) do
     %{
       repo: seams.repo,
       # pod_id of the PRODUCER (from the pod.completed payload): carries through to the emission of
@@ -127,13 +140,20 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   # without workflow_map via `parse_feature_branch`). A judge without a resolvable producer → `producer_branch`
   # nil → `complete_pr` fail-loud `:no_producer_branch` (never a bad merge). The design steps
   # UPSTREAM of the producer (architect) are out-of-scope (engineer-first decision, PR mapping).
+  # DR-013: closed classification — `{:producer,_}` | `{:judge,_}` | `{:error, reason}` (the cap-profile
+  # was unloadable → the producer/judge property is UNKNOWN, never a silent judge).
   defp classify_pr_role(payload, n, role, seams) do
-    if GateEngine.producer?(role, seams.deliverable_mode_fun) do
-      # feature-branch format = single source `Fleet.Pilot.ForgeProtocol.feature_branch/2` (glued to its
-      # parser `parse_feature_branch/1`) — no hardcoded `lcars/issue-...` construction here.
-      {:producer, Fleet.Pilot.ForgeProtocol.feature_branch(n, role)}
-    else
-      {:judge, judge_producer_branch(payload, n, seams)}
+    case GateEngine.producer?(role, seams.deliverable_mode_fun) do
+      {:ok, true} ->
+        # feature-branch format = single source `Fleet.Pilot.ForgeProtocol.feature_branch/2` (glued to its
+        # parser `parse_feature_branch/1`) — no hardcoded `lcars/issue-...` construction here.
+        {:producer, Fleet.Pilot.ForgeProtocol.feature_branch(n, role)}
+
+      {:ok, false} ->
+        {:judge, judge_producer_branch(payload, n, seams)}
+
+      {:error, _} = err ->
+        err
     end
   end
 

@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
     @type t :: %__MODULE__{
             loader: module() | (String.t() -> map()),
-            deliverable_mode_fun: (String.t() -> String.t()),
+            deliverable_mode_fun: (String.t() -> {:ok, String.t()} | {:error, term()}),
             repo: String.t() | nil,
             forge_opts: keyword(),
             forge_client: module() | nil,
@@ -144,13 +144,22 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @doc """
   Is the finishing role a PRODUCER (deliverable_mode `"git_native"`)?
   Producer = pushes code, opens the PR. Judge (`"payload"`) = review, doesn't push.
-  Non-binary role → `false` (fail-safe: never treated as a producer by accident).
-  """
-  @spec producer?(term(), (String.t() -> String.t())) :: boolean()
-  def producer?(role, deliverable_mode_fun) when is_binary(role),
-    do: deliverable_mode_fun.(role) == "git_native"
 
-  def producer?(_role, _deliverable_mode_fun), do: false
+  Returns a CLOSED result (DR-013): `{:ok, true|false}` when the mode RESOLVES, `{:error, reason}` when the
+  cap-profile is unloadable (the `deliverable_mode_fun` seam surfaces it) — the classification never
+  consumes an unloadable profile as a silent judge. Non-binary role → `{:ok, false}` (fail-safe: never a
+  producer by accident; a distinct anomaly from an unloadable profile).
+  """
+  @spec producer?(term(), (String.t() -> {:ok, String.t()} | {:error, term()})) ::
+          {:ok, boolean()} | {:error, term()}
+  def producer?(role, deliverable_mode_fun) when is_binary(role) do
+    case deliverable_mode_fun.(role) do
+      {:ok, mode} -> {:ok, mode == "git_native"}
+      {:error, _} = err -> err
+    end
+  end
+
+  def producer?(_role, _deliverable_mode_fun), do: {:ok, false}
 
   @doc """
   Advances in the workflow_map + tags the terminal intent according to the ROLE that finishes.
@@ -196,10 +205,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   #   judge (payload) → `:reviewed`: `complete_pr` posts the native review (verdict read from the gate-decision,
   #     carried further via `:review_event`) + unlocks the PR. The merge/rework = poller (dispatch_review).
   defp no_workflow_map_resolve(payload, seams) do
-    if producer?(payload["role"], seams.deliverable_mode_fun) do
-      {:ok, :review, {nil, nil}}
-    else
-      {:ok, :reviewed, {nil, nil}}
+    case producer?(payload["role"], seams.deliverable_mode_fun) do
+      {:ok, true} -> {:ok, :review, {nil, nil}}
+      {:ok, false} -> {:ok, :reviewed, {nil, nil}}
+      {:error, _} = err -> err
     end
   end
 
@@ -250,12 +259,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     else
       case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
         :pass ->
-          # The terminal intent depends on the ROLE that finishes (cf. advance_intent/3).
-          advance_intent(
-            workflow_map,
-            step,
-            producer?(payload["role"], seams.deliverable_mode_fun)
-          )
+          # The terminal intent depends on the ROLE that finishes (cf. advance_intent/3). DR-013:
+          # an unloadable cap-profile → fail-loud, never a blind advance under an unknown producer property.
+          case producer?(payload["role"], seams.deliverable_mode_fun) do
+            {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
+            {:error, _} = err -> err
+          end
 
         {:fail, reason} ->
           Logger.info(

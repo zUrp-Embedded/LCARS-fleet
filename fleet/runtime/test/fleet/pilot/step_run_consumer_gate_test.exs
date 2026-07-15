@@ -153,8 +153,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   defp dmode,
     do: fn
-      "engineer" -> "git_native"
-      _ -> "payload"
+      "engineer" -> {:ok, "git_native"}
+      _ -> {:ok, "payload"}
     end
 
   defp hc(opts \\ []) do

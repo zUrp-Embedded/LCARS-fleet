@@ -581,12 +581,27 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_step_run(payload, n, state) do
     role = payload["role"]
 
-    # A PRODUCER that cannot deliver (missing dependency/info) marks
-    # `blocked: true` in its result → human ESCALATION via `await_arch` (posted reason = its
-    # `summary` voice + `lcars-awaits-arch` + unlock → poller SKIPS, the human decides via the arch). OTHERWISE the
-    # publish without a commit fail-loud `:no_deliverable_commit` = silent WEDGE (an honest eng refuses
-    # to guess → un-escalated blockage). Reuses the whole await_arch safety net.
-    if producer?(role, state) and
+    # DR-013: the producer/judge property is resolved via the cap-profile. An UNLOADABLE profile (corrupt/
+    # deleted since spawn) makes it UNKNOWN → we NEVER classify silently as judge. Checked HERE (before
+    # resolve_next, which also reads producer? on the SAME role → it then only ever sees a loadable
+    # profile) and ESCALATED to the arch (freeze + await_arch): bubbling would let the reaper re-dispatch a
+    # persistently broken profile forever (G2 churn) without notifying a human.
+    case producer?(role, state) do
+      {:error, reason} ->
+        TerminalEscalation.escalate_terminal_error(reason, n, role, terminal_seams(state))
+
+      {:ok, is_producer?} ->
+        run_step_run_classified(payload, n, role, is_producer?, state)
+    end
+  end
+
+  # A PRODUCER that cannot deliver (missing dependency/info) marks
+  # `blocked: true` in its result → human ESCALATION via `await_arch` (posted reason = its
+  # `summary` voice + `lcars-awaits-arch` + unlock → poller SKIPS, the human decides via the arch). OTHERWISE the
+  # publish without a commit fail-loud `:no_deliverable_commit` = silent WEDGE (an honest eng refuses
+  # to guess → un-escalated blockage). Reuses the whole await_arch safety net.
+  defp run_step_run_classified(payload, n, role, is_producer?, state) do
+    if is_producer? and
          TerminalEscalation.blocked_flag?(
            Verdict.unwrap_worker_envelope(payload["result"] || %{})
          ) do
@@ -719,10 +734,18 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # timeout 10s) lives INSIDE the offloaded closure — a degraded forge + a burst of pod.completed no longer
     # blocks the singleton's mailbox (handle_info becomes O(1) again in prod, the offload carries the I/O).
     run_completion(state, "##{n}", fn ->
-      step_run = StepRunBuild.build(payload, n, role, route, build_seams(state))
-      hc_opts = completer_opts(state) |> Opts.maybe_put(:deliverable, state.deliverable)
+      # DR-013: `build/5` returns `{:error, _}` if the producer/judge classification is UNKNOWN
+      # (cap-profile unloadable) → we do NOT complete under an unknown property; `run_completion` logs
+      # the FAIL. (In practice the upstream `producer?` guard in `run_step_run` already escalated this
+      # role; this is the belt-and-suspenders on the build path.)
+      case StepRunBuild.build(payload, n, role, route, build_seams(state)) do
+        {:error, _} = err ->
+          err
 
-      state.step_run_completer.complete_pr(step_run, hc_opts)
+        step_run when is_map(step_run) ->
+          hc_opts = completer_opts(state) |> Opts.maybe_put(:deliverable, state.deliverable)
+          state.step_run_completer.complete_pr(step_run, hc_opts)
+      end
     end)
   end
 
@@ -746,26 +769,29 @@ defmodule Fleet.Pilot.StepRunConsumer do
   @doc false
   # Seam default: resolves the role's deliverable_mode via the cap-profile catalogue (single source).
   #
-  # F-C053 — an UNLOADABLE cap-profile is a config PROBLEM (missing/corrupt profile), NOT the valid
-  # absent-`deliverable_mode` of F-C143. It is only reachable as a TRANSIENT load failure (a role whose
-  # profile can't load could never be SPAWNED, so it could never reach completion — the profile was there
-  # at spawn, unreadable now). We keep the fail-SAFE default `"payload"` (a non-loadable role is NOT treated
-  # as a producer → its output is never pushed as unverified code), but we LOG LOUD instead of classifying
-  # SILENTLY: silently defaulting would MASK the misconfiguration (a real producer mishandled as a judge,
-  # its code never pushed). D1 — observable > silent; the safe default avoids wedging on a transient blip.
+  # DR-013 — an UNLOADABLE cap-profile at completion is a config PROBLEM (missing/corrupt profile). It used
+  # to fall back to `"payload"` (LOUD log), but that fallback is NOT cosmetic: `producer?/2` then reads it
+  # as non-producer → the role is silently reclassified `:judge` (a real producer's deliverable never
+  # pushed, or a search for a nonexistent producer PR). A config anomaly must NOT become a DIFFERENT business
+  # behavior. We return an EXPLICIT `{:error, :cap_profile_unloadable}` — the producer/judge classification
+  # consumes a CLOSED result and FAILS LOUD (the step_run is not completed under an unknown property; the
+  # issue stays locked, an operator sees the FAIL). The valid absent-`deliverable_mode` (F-C143) is `{:ok,
+  # "payload"}` (a loadable profile that simply does not declare `git_native`) — DISTINCT from unloadable.
+  @spec default_deliverable_mode(String.t()) ::
+          {:ok, String.t()} | {:error, :cap_profile_unloadable}
   def default_deliverable_mode(role) do
     case Fleet.CapProfile.load(role) do
       {:ok, cap} ->
-        Fleet.CapProfile.deliverable_mode(cap)
+        {:ok, Fleet.CapProfile.deliverable_mode(cap)}
 
       other ->
         Logger.error(
           "StepRunConsumer: cap-profile for role #{inspect(role)} UNLOADABLE (#{inspect(other)}) — " <>
-            "deliverable_mode defaults to \"payload\" (fail-safe: NOT a producer, no unverified push). " <>
-            "FIX the role's cap-profile; a real producer would be mishandled as a judge."
+            "deliverable_mode UNRESOLVABLE → producer/judge classification FAILS LOUD (no silent judge " <>
+            "reclassification, no unverified push). FIX the role's cap-profile."
         )
 
-        "payload"
+        {:error, :cap_profile_unloadable}
     end
   end
 
@@ -828,22 +854,22 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # producer → `:review` (opens the PR + requests the judges, NEVER an auto-merge of a deliverable); a terminal
         # judge (brief-review consultant) → `:promote` (it validated the last gate of its workflow_map);
         # a next step → `:advance`. A single source of truth for the terminal intent.
-        case GateEngine.advance_intent(workflow_map, step, producer?(role, state)) do
-          {:ok, intent, {next_assignee, next_step}} ->
-            complete_business_step_run(
-              payload,
-              n,
-              role,
-              intent,
-              next_assignee,
-              next_step,
-              state,
-              trace,
-              Map.get(ctx, :judge_target)
-            )
-
-          {:error, reason} ->
-            {:error, reason}
+        # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
+        # cap-profile fails-loud, never a blind terminal intent under an unknown property.
+        with {:ok, is_producer?} <- producer?(role, state),
+             {:ok, intent, {next_assignee, next_step}} <-
+               GateEngine.advance_intent(workflow_map, step, is_producer?) do
+          complete_business_step_run(
+            payload,
+            n,
+            role,
+            intent,
+            next_assignee,
+            next_step,
+            state,
+            trace,
+            Map.get(ctx, :judge_target)
+          )
         end
 
       "abandon" ->
