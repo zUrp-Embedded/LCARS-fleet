@@ -1,4 +1,4 @@
-# Modop noop — overlay vide (identité). compose(role, ["noop"]) = cap-profile du rôle inchangé.
-# (gap-fill C7 : le root <cap-profiles>/modop/ doit porter noop ; le canon/modop/noop sibling
-#  n'est pas résolu par root_dir. Référencé par gk-smoke steps sans overlay.)
+# noop modop — empty identity overlay: `compose(role, ["noop"])` leaves the role's cap-profile
+# unchanged. Must live under the root `<cap-profiles>/modop/` (root_dir does not resolve the
+# `canon/modop/noop` sibling); referenced by gk-smoke steps that carry no overlay.
 {}

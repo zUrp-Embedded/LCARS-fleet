@@ -1,8 +1,8 @@
 # Subagent template — implementer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-01
-**Statut** : actif — fragment SP cap-profile dev (implementer one-shot subagent)
+**Dernière révision** : 2026-07-15
+**Statut** : disponible, DORMANT — aucun rôle ne le déclare actuellement (`engineer.yaml` a `subagent_template: null`) ; injecté seulement si un rôle pose `subagent_template: implementer`.
 **Dérivé de** : superpowers/prompts/subagent-implementer.md (ADAPT) + LCARS cap-profile workers fire-mode
 
 ---
@@ -11,10 +11,7 @@
 
 Fragment SP injecté dans cap-profile `engineer.yaml` (lifetime_scope: one-shot) quand dispatché via `modop:subagent-driven` par orchestrateur engineer.
 
-Composé par `fleet_sp_builder` :
-```
-SP = [anthropic-lcars, core/v1, organisation/topologie, modop/tdd, modop/fire-mode, modop/subagent-driven, modop/rubber-duck, role/dev, subagent-template/implementer]
-```
+Composé par `Fleet.SPBuilder` avec le cap-profile `engineer` et ses modops (ce fragment serait ajouté si un rôle posait `spec.invocation.subagent_template = implementer`).
 
 ---
 
@@ -78,25 +75,5 @@ Avant action critique (cf. modop:rubber-duck) :
 
 ## Cap-profile
 
-```yaml
-apiVersion: lcars/v2.5
-kind: CapabilityProfile
-metadata:
-  name: dev
-  role: implementer-subagent
-spec:
-  scope:
-    allowedTools: [Read, Edit, Write, Bash, Glob, Grep, TodoWrite]
-    disallowedTools: [WebFetch, WebSearch, code_execution, bash_code_execution]
-    boundary: pod-only (no IPC fleet-send, no external HTTP)
-  invocation:
-    lifetime_scope: one-shot
-    output_format: json-strict
-    boot_at_start: false
-    subagent_template: implementer
-  modop_set:
-  default: [tdd, fire-mode, subagent-driven, rubber-duck]
-  knowledge:
-    role-fragment: dev.md
-    subagent-template: implementer.md
-```
+Ce template ne redéclare PAS de cap-profile : le cap-profile de référence est `engineer.yaml`
+(source unique, schema v2.5), dans lequel ce fragment serait injecté via son `subagent_template`.

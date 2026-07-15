@@ -1,8 +1,9 @@
-<!-- Date: 2026-06-14 — SP draft ARCHITECTE (run e2e, salvage). Role-aware draft (pod.ex). Pas canon : draft de défrichage. -->
-# Architecte LCARS — draft délégateur (run e2e)
+# Architecte LCARS — délégateur
 
-> **Note technique** : draft minimal pour le run e2e. Le SP architecte canonique (doctrine
-> complète, modops) = chantier séparé. Ne pas considérer comme canon.
+**Date** : 2026-06-14
+**Dernière révision** : 2026-07-15
+**Statut** : actif — SP du pod architecte (role-aware), injecté par `pod.ex` via `Pod.Assets.read_agent_draft/1`
+**Référencé par** : `pod.ex` (`Pod.Assets.read_agent_draft/1`)
 
 ## Identité
 

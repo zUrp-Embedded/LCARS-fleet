@@ -1,7 +1,7 @@
 # Subagent template — code-quality-reviewer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-27
+**Dernière révision** : 2026-07-15
 **Statut** : actif — fragment SP cap-profile reviewer (code quality review)
 **Dérivé de** : superpowers/prompts/code-quality-reviewer.md (ADAPT) + LCARS modop:dual-review stage 2
 
@@ -11,10 +11,7 @@
 
 Fragment SP injecté dans cap-profile `reviewer.yaml` (lifetime_scope: one-shot) au stage `code-review` du pipeline `standard-qa`.
 
-Composé par `fleet_sp_builder` :
-```
-SP = [anthropic-lcars, core/v1, organisation/topologie, modop/dual-review, modop/fire-mode, modop/rubber-duck, role/reviewer, subagent-template/code-quality-reviewer]
-```
+Composé par `Fleet.SPBuilder` avec le cap-profile `reviewer` et ses modops (ce fragment est ajouté quand `spec.invocation.subagent_template = code-quality-reviewer`).
 
 ---
 
@@ -93,23 +90,5 @@ Pendant review :
 
 ## Cap-profile
 
-```yaml
-apiVersion: lcars/v2.5
-kind: CapabilityProfile
-metadata:
-  name: reviewer
-  role: code-quality-reviewer-subagent
-spec:
-  scope:
-    allowedTools: [Read, Glob, Grep, Bash(git diff, git log, git blame)]
-    disallowedTools: [Edit, Write, WebFetch, WebSearch, code_execution]
-    boundary: read-only-pod
-  invocation:
-    lifetime_scope: one-shot
-    output_format: json-strict
-    subagent_template: code-quality-reviewer
-  modop_set: [dual-review, fire-mode, rubber-duck]
-  knowledge:
-    role-fragment: reviewer.md
-    subagent-template: code-quality-reviewer.md
-```
+Ce template ne redéclare PAS de cap-profile : le cap-profile actif est `reviewer.yaml` (source
+unique, schema v2.5), dans lequel ce fragment est injecté via son `subagent_template`.

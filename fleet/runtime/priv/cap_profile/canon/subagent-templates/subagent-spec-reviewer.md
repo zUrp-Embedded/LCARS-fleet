@@ -1,7 +1,7 @@
 # Subagent template — spec-reviewer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-27
+**Dernière révision** : 2026-07-15
 **Statut** : actif — fragment SP cap-profile qualifier (spec compliance review)
 **Dérivé de** : superpowers/prompts/spec-reviewer.md (ADAPT) + LCARS modop:dual-review stage 1
 
@@ -11,10 +11,7 @@
 
 Fragment SP injecté dans cap-profile `qualifier.yaml` (lifetime_scope: one-shot) au stage `spec-review` du pipeline `standard-qa`.
 
-Composé par `fleet_sp_builder` :
-```
-SP = [anthropic-lcars, core/v1, organisation/topologie, modop/dual-review, modop/fire-mode, modop/rubber-duck, role/qualifier, subagent-template/spec-reviewer]
-```
+Composé par `Fleet.SPBuilder` avec le cap-profile `qualifier` et ses modops (ce fragment est ajouté quand `spec.invocation.subagent_template = spec-reviewer`).
 
 ---
 
@@ -89,23 +86,5 @@ Pendant review :
 
 ## Cap-profile
 
-```yaml
-apiVersion: lcars/v2.5
-kind: CapabilityProfile
-metadata:
-  name: qualifier
-  role: spec-reviewer-subagent
-spec:
-  scope:
-    allowedTools: [Read, Glob, Grep, Bash(git diff, git log)]
-    disallowedTools: [Edit, Write, WebFetch, WebSearch, code_execution]
-    boundary: read-only-pod
-  invocation:
-    lifetime_scope: one-shot
-    output_format: json-strict
-    subagent_template: spec-reviewer
-  modop_set: [dual-review, fire-mode, rubber-duck]
-  knowledge:
-    role-fragment: qualifier.md
-    subagent-template: spec-reviewer.md
-```
+Ce template ne redéclare PAS de cap-profile : le cap-profile actif est `qualifier.yaml` (source
+unique, schema v2.5), dans lequel ce fragment est injecté via son `subagent_template`.

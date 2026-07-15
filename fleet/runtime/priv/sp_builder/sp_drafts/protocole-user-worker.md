@@ -1,6 +1,7 @@
-<!-- Date: 2026-05-26 — SP draft worker (salvage). Header en commentaire: minimise pollution SP ; exemption hook GO-7 a faire (cf worklog). -->
 # Protocole utilisateur — worker LCARS
 
+**Date** : 2026-05-26
+**Dernière révision** : 2026-07-15
 **Statut** : actif — protocole worker work-item-driven, injecté dans `.lcars/protocole-user.md` à chaque spawn de pod (cf. `Pod.Assets.read_protocole_user/0`). [F-C026 : n'est plus un « draft POC » ; le générique `agent-worker-base.md` a disparu — les SP-base sont désormais par rôle.]
 **Référencé par** : pod.ex (`Pod.Assets.read_protocole_user/0`) — injecté dans `.lcars/protocole-user.md` au pod spawn.
 
