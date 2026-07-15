@@ -103,7 +103,17 @@ teardown() { rm -rf "$TMP_BASE"; }
   export CLAUDE_DIR="/nonexistent/claudedir"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"claudeDir"* ]]
 }
-@test "setup: exit 1 quand git mirror missing" {
+@test "DR-023: git mirror DORMANT (LCARS_GIT_MIRROR non posé) → INERTE : pas d'exit 1, aucun bind mirror" {
+  # DR-023/BND-025 : une feature désactivée n'est plus une précondition (fini le fossile
+  # /var/lib/lcars/git-mirror en défaut qui tuait un 1er spawn sur un install home vierge).
+  unset LCARS_GIT_MIRROR
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]                    # dormant ≠ fatal
+  [[ "$output" == *"BWRAP_ARGS:"* ]]       # le launch atteint l'exec bwrap
+  [[ "$output" != *"ERR: git mirror"* ]]   # aucune erreur mirror
+  [[ "$output" != *"git-mirror"* ]]        # AUCUN bind mirror projeté dans le sandbox
+}
+@test "DR-023: git mirror POSÉ mais absent (LCARS_GIT_MIRROR=<dir inexistant>) → fatal (demande explicite introuvable)" {
   export LCARS_GIT_MIRROR="/nonexistent/mirror"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"git mirror"* ]]
 }
