@@ -17,7 +17,8 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     only: [
       resolve_config: 1,
       http_get: 2,
-      http_post: 3
+      http_post: 3,
+      paginate: 3
     ]
 
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
@@ -61,25 +62,22 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`. **THE poller's discovery (WS3)**: org
-  membership IS the admission (the org = the trust group, managed UPSTREAM by the human admin) — no more mutable
-  topic nor server-side seal. The per-human scoping stays `assigned_by` (issue-level, anti-theft guard:
-  the fleet processes ONLY its issues, even if it sees the group's other repos). Returns the
-  `full_name`s (`"owner/name"`). (limit=50: a small-team org has < 50 active repos; pagination = backlog.)
+  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`, **PAGINATED** (DR-016/BND-057). **THE poller's
+  discovery (WS3)**: org membership IS the admission (the org = the trust group, managed UPSTREAM by the
+  human admin) — no more mutable topic nor server-side seal. The per-human scoping stays `assigned_by`
+  (issue-level, anti-theft guard: the fleet processes ONLY its issues, even if it sees the group's other
+  repos). Returns the `full_name`s (`"owner/name"`).
   """
   @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []) when is_binary(org) do
-    # `when is_list(body)` — fail-loud on an unexpected 2xx shape (error envelope, proxy HTML page),
-    # NOT `List.wrap` which coerced it into a silent `{:ok, []}` = the poller believes "no repos"
-    # with zero trace. THE load-bearing collection reader of discovery (WS3): same doctrine as
-    # `paginate` (:unexpected_page_shape) and `team_member?` below — this was the odd-one-out.
+    # PAGINATED (DR-016/BND-057): THE poller's discovery is a source-of-truth collection consumed as "every
+    # repo of the fleet org". A single `?limit=50` page silently HID repos 51+ (beyond 50 repos = invisible
+    # projects: no dispatch, no reconciliation, no re-kick, no event nor error — the forge+poll backstop
+    # broken in a zone the poll never re-reads). We loop like every other SSOT read (`paginate/3`: fail-loud
+    # on an unexpected page shape via `:unexpected_page_shape`). The "small-team org < 50" assumption is GONE.
     with {:ok, config} <- resolve_config(opts),
-         {:ok, body} when is_list(body) <-
-           http_get(config, "/orgs/#{encode_seg(org)}/repos?limit=50") do
+         {:ok, body} <- paginate(config, "/orgs/#{encode_seg(org)}/repos", "") do
       {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
-    else
-      {:ok, other} -> {:error, {:unexpected_repos_shape, other}}
-      {:error, _} = err -> err
     end
   end
 

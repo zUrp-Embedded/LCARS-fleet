@@ -244,15 +244,16 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
     # Régression acte4 #9 — LE reader de collection de la discovery coerçait un 2xx non-liste via
     # `List.wrap` → `{:ok, []}` silencieux = le poller croit « aucun repo » sans trace, pile le
-    # faux-vert que MA-20 a chassé sur paginate. Même doctrine : forme 2xx inattendue → fail-loud.
-    test "acte4 #9 : 2xx non-liste → {:error, :unexpected_repos_shape}, PAS {:ok, []}" do
+    # faux-vert que MA-20 a chassé sur paginate. Depuis DR-016, la discovery PAGINE via `paginate/3` :
+    # la garde fail-loud est désormais celle du primitif (`:unexpected_page_shape`), même doctrine.
+    test "acte4 #9 : 2xx non-liste → {:error, :unexpected_page_shape}, PAS {:ok, []}" do
       handlers = %{
         {"GET", "/api/v1/orgs/fleet/repos"} => {200, %{"message" => "this is not a list"}}
       }
 
       result = ForgeClient.list_org_repos("fleet", opts(handlers))
 
-      assert {:error, {:unexpected_repos_shape, %{"message" => _}}} = result
+      assert {:error, {:unexpected_page_shape, _path, _page, %{"message" => _}}} = result
       # Garde anti-régression : surtout PAS un succès vide menteur.
       refute match?({:ok, []}, result)
     end
@@ -1098,6 +1099,23 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       # le 51ᵉ (présent UNIQUEMENT en page 2) prouve que la 2ᵉ page a été lue et accumulée.
       assert Enum.any?(issues, &(&1["number"] == 51))
+    end
+
+    # DR-016/BND-057 — LA discovery du poller (org-membership = admission). Avant : `?limit=50` SEUL →
+    # au-delà de 50 repos, les projets 51+ étaient INVISIBLES (pas de dispatch, pas de réconciliation,
+    # aucun event ni erreur — le backstop forge+poll rompu dans une zone jamais re-lue). Paginé → vus.
+    test "list_org_repos : 50 repos page 1 + 1 repo page 2 → les 51 full_names (repo 51 vu)" do
+      page1 = for n <- 1..50, do: %{"full_name" => "fleet/repo-#{n}"}
+      page2 = [%{"full_name" => "fleet/repo-51"}]
+
+      handlers = %{
+        {"GET", "/api/v1/orgs/fleet/repos"} => paged_handler([page1, page2])
+      }
+
+      assert {:ok, names} = ForgeClient.list_org_repos("fleet", opts(handlers))
+      assert length(names) == 51
+      # le 51ᵉ n'existe QU'en page 2 : sa présence prouve que le repo 51 n'est plus invisible.
+      assert "fleet/repo-51" in names
     end
 
     # #5.2 D1 — pagination de list_open_pulls : la LISTE pagine via /issues (`list_scoped_issues`, MÊME code
