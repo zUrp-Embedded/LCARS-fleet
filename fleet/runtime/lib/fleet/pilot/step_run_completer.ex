@@ -267,10 +267,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     repo = Map.fetch!(step_run, :repo)
     n = Map.fetch!(step_run, :issue_number)
-    role = Map.get(step_run, :role, "engineer")
+    role = Map.fetch!(step_run, :role)
     base = Map.get(step_run, :base_branch, "main")
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
-    title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
+    title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role}")
 
     # The pointer to the note (if the producer has one) is FOLDED into this opening body — not a
     # 2nd separate comment posted right after by Emissions.post_eng_summary (QoL: a single PR post, not two).
@@ -393,15 +393,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # Producer extracted from the `producer_branch` (`lcars/issue-N-<producer>`) for the seal comment.
   # The feature-branch format has a SOLE AUTHORITY: `ForgeProtocol.parse_feature_branch/1` (glued to
   # its builder `feature_branch/2`). We delegate the parse instead of a local regex → no drift possible.
-  # Fallback `engineer` if the branch is not a fleet feature-branch (head unrecognized / absent).
+  # Honest fallback `inconnu` if the branch is not a fleet feature-branch (head unrecognized / absent):
+  # a seal comment must NOT claim `engineer` for an unattributable merge (DR-017).
   defp producer_of(branch) when is_binary(branch) do
     case ForgeProtocol.parse_feature_branch(branch) do
       {:ok, {_n, producer}} -> producer
-      :error -> "engineer"
+      :error -> "inconnu"
     end
   end
 
-  defp producer_of(_), do: "engineer"
+  defp producer_of(_), do: "inconnu"
 
   @doc """
   **PR-native — step-run-completion orchestrator.** Composes the PR primitives

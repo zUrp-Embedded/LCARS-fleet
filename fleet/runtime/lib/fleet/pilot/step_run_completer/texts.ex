@@ -25,9 +25,9 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
   @spec pr_body(integer(), String.t(), boolean()) :: String.t()
   def pr_body(n, role, has_note? \\ false) do
     base =
-      "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
-        "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
-        "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation."
+      "Livrable de la brique ##{n}, produit par **#{role}**. Le système a poussé le commit " <>
+        "(le producteur code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
+        "token forge). Reviews demandées aux juges ; merge à l'approbation."
 
     if has_note?,
       do: base <> "\n\n🔧 Note de l'#{role} (livrable) → détail sur le ticket ##{n}.",
@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
 
       :request_changes ->
         "Verdict du juge **#{role}** : **CHANGEMENTS DEMANDÉS** — la brique ne satisfait pas " <>
-          "son critère ; le producteur (engineer) doit corriger et re-pousser sur la même PR."
+          "son critère ; le producteur doit corriger et re-pousser sur la même PR."
 
       _ ->
         "Commentaire du juge **#{role}** : verdict non concluant (en attente)."
