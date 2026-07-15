@@ -171,8 +171,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   Pod permission mode: the cap-profile's `spec.invocation.permission_mode`, default `"default"`
   (→ `--permission-mode default`, allow/deny lists ENFORCED). Non-empty → claude_launch passes
   `--permission-mode <mode>`; to re-open the bypass, a cap-profile sets `"bypassPermissions"`.
-  Set as `LCARS_PERMISSION_MODE` by `LaunchEnv.build/4`. Bounded to the closed CLI enum — an unknown mode
-  falls back to the SAFE `"default"` (never an arbitrary string on the launcher's argv).
+  Set as `LCARS_PERMISSION_MODE` by `LaunchEnv.build/4`.
+
+  ABSENT → `"default"` (the schema default: unspecified = enforced). A PRESENT-but-out-of-enum value is a
+  SECURITY setting that bypassed the schema (config typo / forged profile) — DR-021: it is REFUSED, not
+  normalized. Normalizing a typoed `"bypassPermissions"` to `"default"` (or vice-versa) would silently
+  CHANGE the security meaning of an invalid profile; instead we RAISE, and `LaunchEnv.build/4`'s try/rescue
+  folds it onto a clean `{:error, {:launch_env_unresolved, _}}` → the pod projection FAILS, no launch.
   """
   @spec permission_mode(Fleet.CapProfile.t() | term()) :: String.t()
   def permission_mode(%Fleet.CapProfile{spec: spec}),
@@ -183,27 +188,29 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   defp bound_permission_mode(mode) when mode in @permission_modes, do: mode
 
   defp bound_permission_mode(other) do
-    Logger.warning(
-      "LaunchSpec: unknown permission_mode #{inspect(other)} — falling back to \"default\" (safe)"
-    )
-
-    "default"
+    # DR-021: a present-but-invalid SECURITY setting → REFUSE the projection (raise, caught by
+    # LaunchEnv.build/4), never a downstream repair to "default" that changes an invalid profile's meaning.
+    raise ArgumentError,
+          "LaunchSpec: SECURITY REFUSAL — permission_mode #{inspect(other)} is out of the closed CLI " <>
+            "enum #{inspect(@permission_modes)} (schema-bypassed profile). Pod projection refused — " <>
+            "an invalid security setting is NOT normalized to a safe default."
   end
 
-  # Closed bwrap mount-mode enum. An out-of-enum mount `mode` (config typo, nil) falls back to the
-  # RESTRICTIVE `"ro"` — never a raw/unknown token that bwrap_launch could read as RW (a write OUT of the
-  # sandbox). Twin of `bound_permission_mode`; the cap-profile schema bounds `mode` at LOAD, this is the
-  # eval-boundary net for a schema-bypassed mount.
+  # Closed bwrap mount-mode enum. `mode` is a SECURITY property (RO vs RW = write out of the sandbox).
+  # The cap-profile schema bounds `mode ∈ {ro,rw}` at LOAD; this is the eval-boundary check for a
+  # schema-bypassed mount.
   @mount_modes ~w(ro rw)
 
   defp bound_mount_mode(mode) when mode in @mount_modes, do: mode
 
   defp bound_mount_mode(other) do
-    Logger.warning(
-      "LaunchSpec: unknown mount mode #{inspect(other)} — falling back to \"ro\" (safe)"
-    )
-
-    "ro"
+    # DR-021: an out-of-enum mount mode (typo `"RW"`, nil) → REFUSE (raise, caught by LaunchEnv.build/4),
+    # never a repair to "ro". Normalizing a typoed RW to RO silently changes the security meaning of an
+    # invalid profile; refusing fails the projection loud. Twin of `bound_permission_mode`.
+    raise ArgumentError,
+          "LaunchSpec: SECURITY REFUSAL — mount mode #{inspect(other)} is out of the closed enum " <>
+            "#{inspect(@mount_modes)} (schema-bypassed mount). Pod projection refused — an invalid " <>
+            "mount mode is NOT normalized to ro."
   end
 
   @doc """
@@ -303,23 +310,24 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   defp mounts_env(mounts) when is_list(mounts) do
     # `LCARS_POD_MOUNTS` is NEWLINE-DELIMITED (bwrap_launch reads one `mode:path` per line). A `\n`/`\r`
     # in a mount field would INJECT an extra mount line → an unintended (possibly RW) bind into the
-    # sandbox = an escape. A newline in a mount field is NEVER legitimate → DROP the mount + LOUD (the
-    # injection is neutralized, the sandbox is built without it, and the anomaly is visible; we do NOT
-    # raise here — a raise in the launch path would crash the pod gen_statem, cf. R1-21).
-    {injecting, clean} = Enum.split_with(mounts, &mount_has_newline?/1)
-
-    for m <- injecting do
-      Logger.error(
-        "LaunchSpec: mount DROPPED — newline in a mount field (LCARS_POD_MOUNTS injection): #{inspect(m)}"
-      )
+    # sandbox = an escape. A newline in a mount field is NEVER legitimate → DR-021: REFUSE the projection
+    # (raise), do NOT drop-and-continue. Dropping repaired an invalid (attack-shaped) profile into a
+    # launchable one; refusing fails it loud. The raise is caught by `LaunchEnv.build/4`'s try/rescue →
+    # `{:error, {:launch_env_unresolved, _}}` → clean pod-projection failure, no launch (the R1-21 concern
+    # "a raise crashes the gen_statem" is moot: every call to this sits inside that try/rescue).
+    for m <- Enum.filter(mounts, &mount_has_newline?/1) do
+      raise ArgumentError,
+            "LaunchSpec: SECURITY REFUSAL — newline in a mount field (LCARS_POD_MOUNTS injection): " <>
+              "#{inspect(m)}. Pod projection refused — an injecting mount is NOT dropped-and-launched."
     end
 
-    Enum.map_join(clean, "\n", fn m ->
+    Enum.map_join(mounts, "\n", fn m ->
       # `mode` is bound to the closed enum `{ro, rw}` — an out-of-enum value (config typo `"RW"`, nil) is
       # NOT serialized raw into `LCARS_POD_MOUNTS` (which would delegate RW/RO semantics to bwrap_launch's
-      # parse — a permissive read of an unknown mode = a write OUT of the sandbox). Unknown → the RESTRICTIVE
-      # `ro`. The cap-profile schema already bounds `mode` at LOAD (`enum: [ro, rw]`); this is defense-in-depth
-      # for a schema-bypassed (in-memory) mount, twin of `permission_mode`.
+      # parse — a permissive read of an unknown mode = a write OUT of the sandbox). DR-021: an out-of-enum
+      # mode REFUSES the projection (`bound_mount_mode` raises), it is not repaired to `ro`. The cap-profile
+      # schema already bounds `mode` at LOAD (`enum: [ro, rw]`); this is the eval-boundary check for a
+      # schema-bypassed (in-memory) mount, twin of `permission_mode`.
       mode = bound_mount_mode(Map.get(m, "mode") || Map.get(m, :mode))
       path = Map.get(m, "path") || Map.get(m, :path)
       "#{mode}:#{path}"

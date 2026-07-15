@@ -1,8 +1,6 @@
 defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
-
   alias Fleet.Spawner.Pod.LaunchSpec
 
   defp cap_with_mounts(mounts) do
@@ -13,22 +11,24 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     }
   end
 
-  describe "pod_mounts_env/2 — anti-injection LCARS_POD_MOUNTS (R1-27)" do
-    test "un mount avec newline (injection) est DROPPÉ + loggé, pas sérialisé" do
+  describe "pod_mounts_env/2 — anti-injection LCARS_POD_MOUNTS (R1-27 / DR-021)" do
+    test "un mount avec newline (injection) → REFUS (raise), pas de drop-and-launch" do
+      # DR-021 : un mount injectant est un état INVALIDE (attaque-shaped). Avant : droppé + launch continue
+      # (réparation aval d'un profil invalide). Désormais : refus LOUD → la projection échoue (le raise est
+      # capté par LaunchEnv.build/4 → {:error, {:launch_env_unresolved, _}}, aucun launch).
       cap = cap_with_mounts([%{"mode" => "ro", "path" => "/legit\nrw:/etc/shadow"}])
 
-      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
-
-      refute env =~ "/etc/shadow",
-             "le mount injecté via newline ne doit PAS apparaître dans LCARS_POD_MOUNTS"
-
-      assert log =~ "DROPPED"
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL.*injection/s, fn ->
+        LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
+      end
     end
 
-    test "un `\\r` (CR) dans un mount est aussi traité comme injection" do
+    test "un `\\r` (CR) dans un mount → REFUS aussi (même injection)" do
       cap = cap_with_mounts([%{"mode" => "rw\rro", "path" => "/x"}])
-      {env, _log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
-      refute env =~ "/x"
+
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL/, fn ->
+        LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
+      end
     end
 
     test "un mount NORMAL est sérialisé (mode:path)" do
@@ -37,17 +37,16 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert env =~ "rw:/home/project"
     end
 
-    test "un mount avec mode HORS-ENUM (typo) est borné à `ro` (safe), pas sérialisé brut" do
-      # Repli mou #5 : `mode` sérialisé BRUT dans LCARS_POD_MOUNTS. Un mode nil/typo (`"RW"`) déléguait la
-      # sémantique RW/RO au parse de bwrap_launch.sh (RW hors-sandbox s'il le traite permissif). Le schéma
-      # borne déjà `mode ∈ {ro,rw}` au LOAD (upstream) ; ici on borne AUSSI au eval (défense-en-profondeur
-      # pour un struct schéma-bypassé) → mode inconnu = `ro` (côté RESTRICTIF), jamais brut. Jumeau de
-      # `permission_mode`.
+    test "un mount avec mode HORS-ENUM (typo) → REFUS (raise), pas de repli mou vers `ro`" do
+      # DR-021 : `mode` est une propriété de SÉCURITÉ (RO vs RW = écriture hors-sandbox). Un mode nil/typo
+      # (`"RW"`) présent-mais-invalide = profil schéma-bypassé → refus, jamais normalisé à `ro` (normaliser
+      # un RW typoé en RO change silencieusement le sens d'un profil invalide). Le schéma borne déjà
+      # `mode ∈ {ro,rw}` au LOAD ; ce check est la frontière eval. Jumeau de `permission_mode`.
       cap = cap_with_mounts([%{"mode" => "RW", "path" => "/x"}])
-      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh") end)
-      assert env =~ "ro:/x"
-      refute env =~ "RW:/x"
-      assert log =~ "unknown mount mode"
+
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL.*mount mode/s, fn ->
+        LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
+      end
     end
   end
 
@@ -88,17 +87,16 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       end
     end
 
-    test "un mode INCONNU (setting sécurité forgé) → fallback \"default\" (safe) + warning" do
-      {mode, log} =
-        with_log(fn ->
-          LaunchSpec.permission_mode(cap_with_permission_mode("yolo-bypass-everything"))
-        end)
-
-      assert mode == "default"
-      assert log =~ "unknown permission_mode"
+    test "un mode INCONNU (setting sécurité forgé) → REFUS (raise), pas de fallback \"default\"" do
+      # DR-021 : normaliser un permission_mode invalide en "default" change silencieusement le sens d'un
+      # profil de sécurité forgé (un "bypassPermissions" typoé deviendrait enforced, ou l'inverse). Présent-
+      # mais-hors-enum → refus LOUD ; la projection échoue (raise capté par LaunchEnv.build/4).
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL.*permission_mode/s, fn ->
+        LaunchSpec.permission_mode(cap_with_permission_mode("yolo-bypass-everything"))
+      end
     end
 
-    test "absent → default" do
+    test "absent → default (défaut schéma légitime : non-spécifié = enforced, PAS une valeur invalide)" do
       cap = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}
       assert LaunchSpec.permission_mode(cap) == "default"
     end

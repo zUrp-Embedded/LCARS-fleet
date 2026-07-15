@@ -1035,6 +1035,29 @@ defmodule Fleet.Spawner.PodTest do
       # Le refus est au boundary ALLOCATE → le pod n'est JAMAIS lancé (gate effective).
       refute_received {:launch_called, _, _}
     end
+
+    test "DR-021 : mount injectant (newline) → pod échoue PROPREMENT (raise capté), JAMAIS lancé" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      # Un mount avec newline = injection LCARS_POD_MOUNTS. LaunchSpec REFUSE (raise) au lieu de dropper-
+      # et-lancer ; le raise est capté par LaunchEnv.build/4 → {:error, {:launch_env_unresolved,_}} →
+      # transition_failed. PREUVE que le reversal R1-21 (refus au lieu de drop) échoue le pod proprement,
+      # SANS crasher le gen_statem (le { :EXIT, :shutdown, _ } propre, pas un {:EXIT, _, {%ArgumentError{}}}).
+      profile = put_in(valid_profile().metadata["mounts"], [%{"mode" => "ro", "path" => "/x\nrw:/etc"}])
+      pod_id = "pod-mount-inject-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{
+          cap_profile: profile,
+          issue_id: "t1",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
+
+      assert_receive {:EXIT, ^pid, {:shutdown, {:launch_env_unresolved, _msg}}}, 2_000
+      refute_received {:launch_called, _, _}
+    end
   end
 
   describe "Z2 — porte credentials au spawn (CRED-D1 : scope + plan)" do

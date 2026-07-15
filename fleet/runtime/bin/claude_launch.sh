@@ -197,6 +197,10 @@ dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
 
 # Mode permission (#kill-yolo) : override env (host) sinon `cap-profile.spec.invocation.permission_mode`,
 # défaut "default" (→ `--permission-mode default`, listes ENFORCED ; fini --dangerously-skip qui bypassait).
+# N0 (LaunchSpec.permission_mode) BORNE déjà le mode à l'enum CLI et REFUSE une valeur présente-mais-hors-
+# enum AVANT tout launch (DR-021) → cette lecture porte une valeur déjà validée. Le `// "default"` ne
+# replie donc que l'ABSENCE (non-spécifié = enforced, légitime) ; un présent-invalide est impossible ici
+# (N0 a refusé le pod) et, en dernier ressort, l'enum de `claude` le rejetterait. Pas de normalisation muette.
 PERM_MODE="${PERM_ENV_OVERRIDE:-$("$JQ_BIN" -r '.spec.invocation.permission_mode // "default"' "$CAP_PROFILE_JSON" 2>/dev/null)}"
 [[ -z "$PERM_MODE" ]] && PERM_MODE="default"
 PERM_FLAGS=(--permission-mode "$PERM_MODE")
