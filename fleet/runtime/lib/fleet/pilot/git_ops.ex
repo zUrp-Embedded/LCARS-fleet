@@ -27,24 +27,29 @@ defmodule Fleet.Pilot.GitOps do
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
   def run(args, opts \\ []) do
-    env =
-      if(Keyword.get(opts, :auth, false), do: ForgeAuth.git_env(), else: []) ++
-        identity_env(Keyword.get(opts, :author))
+    with {:ok, forge_env} <- forge_env(Keyword.get(opts, :auth, false)) do
+      env = forge_env ++ identity_env(Keyword.get(opts, :author))
 
-    case Fleet.Credentials.Shell.git(args, env: env) do
-      {:ok, {_out, 0}} ->
-        :ok
+      case Fleet.Credentials.Shell.git(args, env: env) do
+        {:ok, {_out, 0}} ->
+          :ok
 
-      {:ok, {out, code}} ->
-        {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
+        {:ok, {out, code}} ->
+          {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
 
-      {:error, {:timeout, ms}} ->
-        {:error, {:git_timeout, Enum.take(args, 3), ms}}
+        {:error, {:timeout, ms}} ->
+          {:error, {:git_timeout, Enum.take(args, 3), ms}}
 
-      {:error, {:exit, reason}} ->
-        {:error, {:git_exit, Enum.take(args, 3), reason}}
+        {:error, {:exit, reason}} ->
+          {:error, {:git_exit, Enum.take(args, 3), reason}}
+      end
     end
   end
+
+  # `auth: true` → forge auth REQUIRED → fail-loud on a present-but-malformed credential (DR-024), never
+  # run unauthenticated. `auth: false` → local op (reset/commit/worktree), no forge auth → empty env.
+  defp forge_env(true), do: ForgeAuth.git_env_result()
+  defp forge_env(false), do: {:ok, []}
 
   # Commit (author set): `GIT_AUTHOR` = what the caller declares; `GIT_COMMITTER` = the human,
   # resolved ROBUSTLY via `ForgeIdentity.human_identity` (git config → GECOS → login) — so it does NOT depend

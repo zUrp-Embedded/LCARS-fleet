@@ -241,8 +241,11 @@ defmodule Fleet.Workflow.Git do
   @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) do
     with :ok <- validate_cli_arg(remote, :invalid_remote),
-         :ok <- validate_cli_arg(refspec, :invalid_refspec) do
-      do_push(workspace, remote, refspec)
+         :ok <- validate_cli_arg(refspec, :invalid_refspec),
+         # DR-024: push REQUIRES forge auth → fail-loud on a present-but-malformed credential (never run
+         # unauthenticated, which masks the config error as a later 403 or silently succeeds on a public remote).
+         {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
+      do_push(workspace, remote, refspec, auth_env)
     end
   end
 
@@ -256,8 +259,8 @@ defmodule Fleet.Workflow.Git do
 
   defp validate_cli_arg(_arg, err), do: {:error, err}
 
-  defp do_push(workspace, remote, refspec) do
-    case run_push(workspace, remote, refspec, []) do
+  defp do_push(workspace, remote, refspec, auth_env) do
+    case run_push(workspace, remote, refspec, [], auth_env) do
       {:ok, {_out, 0}} ->
         {:ok, true}
 
@@ -267,7 +270,7 @@ defmodule Fleet.Workflow.Git do
         # is forge-blind, no concurrent pusher) → a `--force` retry is safe: the system overwrites
         # ITS OWN branch with the rebase. Without it, the resolution rebase NEVER lands.
         if non_fast_forward?(out),
-          do: force_push(workspace, remote, refspec),
+          do: force_push(workspace, remote, refspec, auth_env),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
 
       {:error, {:timeout, _ms}} ->
@@ -278,8 +281,8 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  defp force_push(workspace, remote, refspec) do
-    case run_push(workspace, remote, refspec, ["--force"]) do
+  defp force_push(workspace, remote, refspec, auth_env) do
+    case run_push(workspace, remote, refspec, ["--force"], auth_env) do
       {:ok, {_out, 0}} -> {:ok, true}
       {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
       {:error, {:timeout, _ms}} -> {:error, {:git_push_timeout, push_timeout_ms()}}
@@ -293,13 +296,13 @@ defmodule Fleet.Workflow.Git do
   # whole GROUP (the push AND its transport helpers) + closes the port. Replaces the `Task.async` +
   # `shutdown(:brutal_kill)` pattern which killed only the BEAM Task while letting the git process (carrier of
   # the forge token in its environ) leak. `core.hooksPath=/dev/null` kept (hook hardening unchanged).
-  defp run_push(workspace, remote, refspec, extra) do
-    # Forge token via env (out of argv/cmdline) — single source Fleet.Credentials.ForgeAuth, injected
-    # explicitly (Shell.git/2 would inject it by default, but we are explicit at the sensitive site).
+  defp run_push(workspace, remote, refspec, extra, auth_env) do
+    # Forge token via env (out of argv/cmdline) — resolved ONCE at `push/3` via `ForgeAuth.git_env_result/0`
+    # (fail-loud on a malformed credential, DR-024) and threaded here explicitly.
     Fleet.Credentials.Shell.git(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
       cd: workspace,
       timeout_ms: push_timeout_ms(),
-      env: Fleet.Credentials.ForgeAuth.git_env()
+      env: auth_env
     )
   end
 

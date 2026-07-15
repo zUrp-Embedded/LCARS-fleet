@@ -76,6 +76,41 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
   end
 
+  describe "git_env_result/0 (auth-required paths, fail-loud on malformed — DR-024)" do
+    test "absent (nil) → {:ok, anti-prompt only} (the legit no-auth state)" do
+      Application.delete_env(:fleet_credentials, :forge_auth)
+      assert {:ok, [{"GIT_TERMINAL_PROMPT", "0"}]} = ForgeAuth.git_env_result()
+    end
+
+    test "PRESENT but malformed (empty token) → {:error, :forge_auth_malformed} (never a silent no-auth env)" do
+      capture_log(fn ->
+        Application.put_env(:fleet_credentials, :forge_auth, %{url_prefix: "https://f/", token: ""})
+        assert {:error, :forge_auth_malformed} = ForgeAuth.git_env_result()
+      end)
+    end
+
+    test "url_prefix with a control char → {:error, :forge_auth_malformed}" do
+      capture_log(fn ->
+        Application.put_env(:fleet_credentials, :forge_auth, %{
+          url_prefix: "https://f/\ninject",
+          token: "t"
+        })
+
+        assert {:error, :forge_auth_malformed} = ForgeAuth.git_env_result()
+      end)
+    end
+
+    test "valid → {:ok, [anti-prompt + auth extraheader]}" do
+      Application.put_env(:fleet_credentials, :forge_auth, %{
+        url_prefix: "https://forge.example/",
+        token: "SECRET123"
+      })
+
+      assert {:ok, [{"GIT_TERMINAL_PROMPT", "0"}, {"GIT_CONFIG_COUNT", "1"} | _]} =
+               ForgeAuth.git_env_result()
+    end
+  end
+
   describe "preuve locale : git honore git_env (mécanisme F087, sans forge)" do
     test "git config --get lit l'extraheader depuis l'env, pas l'argv" do
       Application.put_env(:fleet_credentials, :forge_auth, %{

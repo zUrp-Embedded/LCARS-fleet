@@ -39,49 +39,70 @@ defmodule Fleet.Credentials.ForgeAuth do
   @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
 
   @doc """
-  Environment variables for the system-side git auth — `[{name, value}]` to pass as-is to
-  `System.cmd(env:)`. **ALWAYS carries `GIT_TERMINAL_PROMPT=0`** (anti-hang bound);
-  adds the forge auth extraheader IF `:fleet_credentials, :forge_auth` is present and complete.
-  Never `[]` (the anti-prompt invariant is unconditional).
+  The system-side git auth env WITH an explicit result for auth-REQUIRED ops (push, private
+  `ls-remote`, `GitOps.run(auth: true)`): `{:ok, env} | {:error, :forge_auth_malformed}` (DR-024/BND-117).
+
+    * `{:ok, [@git_no_prompt | …auth…]}` — `:forge_auth` valid → auth extraheader added.
+    * `{:ok, [@git_no_prompt]}` — `:forge_auth` ABSENT (nil): the LEGITIMATE "no auth configured" state
+      (tests, local `file://`). The CALLER decides whether an unauthenticated op is acceptable.
+    * `{:error, :forge_auth_malformed}` — `:forge_auth` PRESENT but broken (empty/missing field, or a
+      control char in `url_prefix`). An auth-required op MUST fail-loud HERE, never run UNAUTHENTICATED:
+      a present-but-broken credential must not be masked as a later 401/403 (or silently succeed on a
+      public remote). This is the DR-024 fix: present-invalid ≠ absent-legit.
   """
-  @spec git_env() :: [{String.t(), String.t()}]
-  def git_env do
+  @spec git_env_result() :: {:ok, [{String.t(), String.t()}]} | {:error, :forge_auth_malformed}
+  def git_env_result do
     case Application.get_env(:fleet_credentials, :forge_auth) do
       nil ->
-        # ABSENT = a fleet with no forge configured (tests, local-only `file://`) → anti-prompt only, no
-        # noise. This is the legitimate "no auth" state (distinct from a present-but-broken config below).
-        [@git_no_prompt]
+        {:ok, [@git_no_prompt]}
 
       %{url_prefix: prefix, token: token}
       when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
         if safe_prefix?(prefix) do
-          [
-            @git_no_prompt,
-            {"GIT_CONFIG_COUNT", "1"},
-            {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
-            {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
-          ]
+          {:ok,
+           [
+             @git_no_prompt,
+             {"GIT_CONFIG_COUNT", "1"},
+             {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
+             {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
+           ]}
         else
           # R1-15: a newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
-          # the header (never `inspect` the value — it sits next to the token). LOUD, not silent.
+          # (never `inspect` the value — it sits next to the token). LOUD, and typed as malformed.
           Logger.error(
-            "ForgeAuth: :forge_auth url_prefix carries a newline/control char — auth header SKIPPED " <>
-              "(git ops UNAUTHENTICATED). Fix the forge config."
+            "ForgeAuth: :forge_auth url_prefix carries a newline/control char — REFUSED " <>
+              "(auth-required git ops fail-loud, DR-024). Fix the forge config."
           )
 
-          [@git_no_prompt]
+          {:error, :forge_auth_malformed}
         end
 
       _other ->
-        # PRESENT but malformed (empty/missing url_prefix or token, wrong shape): do NOT swallow silently
-        # (MINE-CRED-01). Otherwise git runs UNAUTHENTICATED and only fails later at the remote (403/404),
-        # masking the real cause = the broken credential config. LOUD (no `inspect` — a token may be inside).
+        # PRESENT but malformed (empty/missing url_prefix or token, wrong shape): typed error, not a silent
+        # UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01 / DR-024).
         Logger.error(
-          "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or token) — auth " <>
-            "header SKIPPED (git ops UNAUTHENTICATED). Fix the forge config."
+          "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or token) — REFUSED " <>
+            "(auth-required git ops fail-loud, DR-024). Fix the forge config."
         )
 
-        [@git_no_prompt]
+        {:error, :forge_auth_malformed}
+    end
+  end
+
+  @doc """
+  Environment variables for the system-side git auth — `[{name, value}]` to pass as-is to
+  `System.cmd(env:)`. **ALWAYS carries `GIT_TERMINAL_PROMPT=0`** (anti-hang bound); adds the forge auth
+  extraheader IF `:forge_auth` is present and complete. Never `[]` (the anti-prompt invariant is unconditional).
+
+  For OPTIONAL-auth / local git ONLY. On a present-but-MALFORMED config it degrades to `[@git_no_prompt]`
+  (the error is logged LOUD by `git_env_result/0`). **Auth-REQUIRED paths MUST use `git_env_result/0`**
+  to fail-loud on a broken credential instead of running unauthenticated (DR-024).
+  """
+  @spec git_env() :: [{String.t(), String.t()}]
+  def git_env do
+    case git_env_result() do
+      {:ok, env} -> env
+      {:error, :forge_auth_malformed} -> [@git_no_prompt]
     end
   end
 

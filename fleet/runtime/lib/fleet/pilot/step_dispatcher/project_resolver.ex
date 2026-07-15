@@ -77,25 +77,28 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   # whereas the `Task.async` + `shutdown(:brutal_kill)` pattern only killed the BEAM Task while letting the
   # git process leak.
   defp ls_remote_sha(repo_url, branch) do
-    # Forge token via env (out of argv/cmdline) — single source Fleet.Credentials.ForgeAuth.
-    case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
-           timeout_ms: 15_000,
-           env: Fleet.Credentials.ForgeAuth.git_env()
-         ) do
-      {:ok, {out, 0}} ->
-        case out |> String.split("\n", trim: true) |> List.first() do
-          nil -> {:error, :no_ref}
-          line -> {:ok, line |> String.split() |> List.first()}
-        end
+    # Forge token via env (out of argv/cmdline). DR-024: a private ls-remote REQUIRES auth → fail-loud on a
+    # present-but-malformed credential (git_env_result) instead of running unauthenticated (a 403/404 masks it).
+    with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
+      case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
+             timeout_ms: 15_000,
+             env: auth_env
+           ) do
+        {:ok, {out, 0}} ->
+          case out |> String.split("\n", trim: true) |> List.first() do
+            nil -> {:error, :no_ref}
+            line -> {:ok, line |> String.split() |> List.first()}
+          end
 
-      {:ok, {out, rc}} ->
-        {:error, {rc, String.trim(out)}}
+        {:ok, {out, rc}} ->
+          {:error, {rc, String.trim(out)}}
 
-      {:error, {:timeout, _ms}} ->
-        {:error, :timeout}
+        {:error, {:timeout, _ms}} ->
+          {:error, :timeout}
 
-      {:error, {:exit, reason}} ->
-        {:error, {:exit, reason}}
+        {:error, {:exit, reason}} ->
+          {:error, {:exit, reason}}
+      end
     end
   end
 end
