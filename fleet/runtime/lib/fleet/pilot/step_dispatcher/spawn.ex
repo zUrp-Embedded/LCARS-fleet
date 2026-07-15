@@ -38,10 +38,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   require Logger
 
-  # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constant, as in
+  # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
   # StepDispatcher which keeps ITS @in_flight_label for `decide/1`/`dispatch_review` — same source,
   # not a fork).
-  @in_flight_label Fleet.Pilot.Labels.in_flight()
+  @in_flight_label Fleet.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """

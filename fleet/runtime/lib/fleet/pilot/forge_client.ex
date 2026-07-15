@@ -641,10 +641,10 @@ defmodule Fleet.Pilot.ForgeClient do
   # legitimate place, the onboard of a routeless issue (`StepDispatcher.ensure_workflow_map_or_onboard`).
   # ============================================================
 
-  # Scoped prefixes read from the SINGLE SOURCE of the vocab (`Fleet.Pilot.Labels`) — no re-declaration
+  # Scoped prefixes read from the SINGLE SOURCE of the vocab (`Fleet.Labels`) — no re-declaration
   # of the literal (a rename there propagates here at compile time).
-  @stage_prefix Fleet.Pilot.Labels.stage_prefix()
-  @wfmap_prefix Fleet.Pilot.Labels.wfmap_prefix()
+  @stage_prefix Fleet.Labels.stage_prefix()
+  @wfmap_prefix Fleet.Labels.wfmap_prefix()
 
   @doc """
   Sets the position = `wfmap/<pipeline>` (which map, idempotent) + `stage/<step>` (via `set_stage`, mutex).

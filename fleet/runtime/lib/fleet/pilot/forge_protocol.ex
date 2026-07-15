@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   feature-branches. No I/O — only build + parse of strings (the HTTP ops that
   *post*/*read* them live in `Fleet.Pilot.ForgeClient`).
 
-  Counterpart of `Fleet.Pilot.Labels` (both carry the wire-protocol): `Labels` = the
+  Counterpart of `Fleet.Labels` (both carry the wire-protocol): `Labels` = the
   **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches,
   route/step_run/onboard markers, result blocks** and the **trust primitive** `system_authored?/2`.
 

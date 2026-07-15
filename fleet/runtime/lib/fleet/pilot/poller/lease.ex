@@ -40,9 +40,9 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   alias Fleet.Pilot.StepDispatcher
 
-  # workflow_run lock (single source `Fleet.Pilot.Labels`) — fast-path `classify_issue`
+  # workflow_run lock (single source `Fleet.Labels`) — fast-path `classify_issue`
   # (in-flight → ENGAGED without a route read).
-  @in_flight Fleet.Pilot.Labels.in_flight()
+  @in_flight Fleet.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """

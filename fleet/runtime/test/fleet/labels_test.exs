@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.LabelsTest do
+defmodule Fleet.LabelsTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.Labels
+  alias Fleet.Labels
 
   # Ces valeurs SONT le wire-protocol forge-state-machine (DN §5). Un renommage doit être un acte
   # DÉLIBÉRÉ et visible (ce test rouge le force) — poller/dispatcher/completer/consumer s'accordent

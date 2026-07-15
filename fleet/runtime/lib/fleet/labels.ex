@@ -1,18 +1,24 @@
-defmodule Fleet.Pilot.Labels do
+defmodule Fleet.Labels do
+  use Boundary, deps: [], exports: []
+
   @moduledoc """
   Label vocabulary of the forge-state-machine **wire-protocol**: the forge IS the state machine,
   these labels are its thread. SINGLE SOURCE.
 
-  These constants ARE NOT config: they ARE the protocol. The poller, the dispatcher,
-  the completer and the consumer must agree byte-for-byte — an `lcars-in-flight` lock set
-  by one is only lifted by another if they name the SAME label. Re-declaring them as `@attr` per
-  module = silent drift on a rename. Centralized here, consumed everywhere.
+  RING-0 (DR-011): the vocabulary is a shared SUBSTRATE concern — the forge protocol that BOTH `Fleet.Pilot`
+  (poller/dispatcher/completer/consumer) AND `Fleet.MCP` (the arch's delegation reads `stage/merged` /
+  `lcars-awaits-arch`) must name byte-for-byte. It lived under `Fleet.Pilot` and MCP could not depend upward
+  on Pilot (forbidden compile edge) → MCP re-declared the literals, a silent-drift risk on a rename. Now at
+  Ring-0 (`deps: []`), a single authority both domains DEPEND ON — the literals are gone from MCP.
+
+  These constants ARE NOT config: they ARE the protocol. Re-declaring them as `@attr` per module = silent
+  drift on a rename. Centralized here, consumed everywhere.
 
   Compile-time usage (preserves the constant semantics, usable in `cond`/pattern):
 
-      @in_flight_label Fleet.Pilot.Labels.in_flight()
+      @in_flight_label Fleet.Labels.in_flight()
 
-  or runtime direct (`Fleet.Pilot.Labels.awaits_arch()`).
+  or runtime direct (`Fleet.Labels.awaits_arch()`).
 
   Two families: the FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` (concurrency / escalation,
   unscoped), and the workflow_map POSITION as SCOPED labels `wfmap/<map>` + `stage/<step>` (WS2: the state

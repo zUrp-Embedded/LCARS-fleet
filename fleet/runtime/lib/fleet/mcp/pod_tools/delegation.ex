@@ -30,9 +30,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   ## Seams (app-env `:fleet_mcp`)
 
     * `:forge_client` (default `Fleet.Pilot.ForgeClient`) — forge client, runtime
-      dispatch (no compile-time dep on fleet_pilot). CONTRACT = behaviour
-      `Fleet.MCP.PodTools.Delegation.ForgeClient` (typed callbacks + resolver
-      `resolved/0`, single source of the default).
+      dispatch (no compile-time dep on fleet_pilot). TWO declared behaviours over the SAME seam module
+      (DR-012): `Delegation.ForgeClient` (DELEGATION/TRACKING surface: create_issue/add_label/get_issue/…)
+      and `Delegation.EscalationForge` (ESCALATION surface: list_org_repos/list_open_issues/list_comments/
+      post_comment) — each an inspectable contract with its own `resolved/0`, no hidden ad-hoc op list.
     * `:project_onboard` (default `Fleet.Pilot.ProjectOnboard`) — onboarding
       sequence. CONTRACT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
     * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
@@ -47,7 +48,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Pilot.ForgeClient`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
-  alias Fleet.MCP.PodTools.Delegation.{ForgeClient, ProjectOnboard}
+  alias Fleet.MCP.PodTools.Delegation.{EscalationForge, ForgeClient, ProjectOnboard}
 
   @doc """
   Places a forge issue ready for the poller — architect gate included.
@@ -129,11 +130,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). LITERAL, not a ref to
-  # `Fleet.Pilot.Labels`: fleet_mcp→fleet_pilot is an UPWARD-forbidden compile edge (cf. § Seams — the
-  # forge seam is runtime-dispatched precisely to avoid it). SSOT = `Fleet.Pilot.Labels`
-  # (`stage_prefix() <> stage_merged()` = "stage/merged"); this literal must track it (stable protocol constant).
-  @merged_label "stage/merged"
+  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). DR-011: the forge-protocol
+  # vocabulary moved to Ring-0 `Fleet.Labels` (deps: []), so MCP now DEPENDS ON the SSOT directly — no more
+  # drifting literal ("stage/merged" = `stage_prefix() <> stage_merged()`).
+  @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
   @doc """
   Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
@@ -263,24 +263,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
     if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
   end
 
-  # Escalation-inbox seam: the arch's read/reply path needs 4 forge ops NOT in the delegation
-  # ForgeClient behaviour (create_issue/…). Adding them to that behaviour would cascade onto EVERY
-  # stub the `conforming_forge` guard checks (StubForge/RecordingForge in pod_tools_test → their
-  # existing create_issue tests would break). So we keep the seam untouched and validate THIS subset
-  # EXPLICITLY against the SAME resolved module (same R2-05 fail-clear shape).
-  defp conforming_escalation_forge do
-    impl = ForgeClient.resolved()
-    _ = Code.ensure_loaded(impl)
+  # Escalation-inbox seam (arch's read/reply path): its 4 forge ops are NOT in the delegation ForgeClient
+  # behaviour, and adding them there would cascade onto every DELEGATION stub (StubForge/RecordingForge)
+  # → their create_issue-only tests would break. DR-012: rather than a hidden ad-hoc `function_exported?`
+  # list (a SECOND contract next to the official behaviour), the escalation contract is now a DECLARED
+  # behaviour `EscalationForge` — checked by the SAME `conforming/2` guard (single inspectable surface).
+  defp conforming_escalation_forge,
+    do: conforming(EscalationForge, EscalationForge.resolved())
 
-    ops = [{:list_org_repos, 2}, {:list_open_issues, 2}, {:list_comments, 3}, {:post_comment, 4}]
-    missing = for {fun, arity} <- ops, not function_exported?(impl, fun, arity), do: {fun, arity}
-
-    if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
-  end
-
-  # Literal, not a ref to `Fleet.Pilot.Labels.awaits_arch/0` (fleet_mcp→fleet_pilot = forbidden compile
-  # edge, cf. § Seams). SSOT = `Fleet.Pilot.Labels` ("lcars-awaits-arch") ; this literal must track it.
-  @awaits_arch_label "lcars-awaits-arch"
+  # DR-011: SSOT `Fleet.Labels.awaits_arch/0` (Ring-0, both domains depend on it) — no drifting literal.
+  @awaits_arch_label Fleet.Labels.awaits_arch()
 
   # All the awaits-arch issues of ONE repo (scoped to the human), mapped to escalation entries. A repo
   # read failing is LOUD + SKIPPED (partial inbox) — never a silent [] hiding an escalation, never a

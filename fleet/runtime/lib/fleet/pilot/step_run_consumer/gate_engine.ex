@@ -180,13 +180,13 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # A PR LIFECYCLE stage (review/merged, cf. `Fleet.Pilot.Labels`) is set POST-MAP (complete_producer →
+  # A PR LIFECYCLE stage (review/merged, cf. `Fleet.Labels`) is set POST-MAP (complete_producer →
   # review, gatekeeper_seal → merged). DISTINCTION from the homonymous map step (a workflow_map CAN have a
   # step named `review`, cf. poc-cycle/reviewer): it's a lifecycle stage ONLY if it does NOT exist as a
   # step in THIS map. Otherwise (real step) → `inherited_route?`/`gate_decide` decide as before. Without this
   # "not-in-the-map" guard, a real `review` step would be wrongly diverted (loss of the terminal `:promote`).
   defp lifecycle_stage?(workflow_map, step) do
-    step in [Fleet.Pilot.Labels.stage_review(), Fleet.Pilot.Labels.stage_merged()] and
+    step in [Fleet.Labels.stage_review(), Fleet.Labels.stage_merged()] and
       not match?({:ok, _}, Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step))
   end
 

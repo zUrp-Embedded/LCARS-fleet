@@ -53,6 +53,7 @@ defmodule Fleet.Pilot do
       Fleet.Slug,
       Fleet.EnvParse,
       Fleet.GitRef,
+      Fleet.Labels,
       Fleet.Layout,
       Fleet.Event,
       Fleet.SchemaCache,

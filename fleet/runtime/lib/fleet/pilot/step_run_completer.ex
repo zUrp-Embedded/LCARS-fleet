@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.ForgeProtocol
-  alias Fleet.Pilot.Labels
+  alias Fleet.Labels
   alias Fleet.Pilot.Roles
 
   # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # the caller's overrides (`:pr_body`/`:review_body`/`:comment_body`) always take precedence.
   alias Fleet.Pilot.StepRunCompleter.Texts
 
-  # Protocol vocabulary = single source Fleet.Pilot.Labels.
+  # Protocol vocabulary = single source Fleet.Labels.
   @in_flight_label Labels.in_flight()
 
   @typedoc """
@@ -459,7 +459,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       forge_opts = Keyword.get(opts, :forge_opts, [])
       repo = Map.fetch!(step_run, :repo)
       n = Map.fetch!(step_run, :issue_number)
-      _ = forge.set_stage(repo, n, Fleet.Pilot.Labels.stage_review(), forge_opts)
+      _ = forge.set_stage(repo, n, Fleet.Labels.stage_review(), forge_opts)
       _ = Emissions.deliverable_published(step_run, pr)
       route(step_run, pr, opts)
     end
@@ -557,7 +557,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     # Gap BEFORE unlock: `promote` merges + posts the seal + sets `stage/merged` + closes the issue
     # (GatekeeperSeal.seal_and_merge); without it, `unlock` (removal of `lcars-in-flight`, an
-    # INDEPENDENT write, distinct label families cf. `Fleet.Pilot.Labels`) risks the same `created_at`
+    # INDEPENDENT write, distinct label families cf. `Fleet.Labels`) risks the same `created_at`
     # → arbitrary dashboard order (same bug as the producer comment/stage, cf. `complete/2`).
     #
     # Unlock of BOTH numbers (idempotent: remove_label no-op if absent): the ISSUE lock — never lifted

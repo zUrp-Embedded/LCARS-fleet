@@ -109,7 +109,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # a load-bearing label NOT engraved (no rail re-sets it — in the close-also-fails case only
             # the kept `lcars-in-flight` lock still guards against re-dispatch, and Delegation.issue_status
             # reports delivered=false forever: the arch would wait on a merged brick).
-            case forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts) do
+            case forge.set_stage(repo, issue_n, Fleet.Labels.stage_merged(), forge_opts) do
               {:ok, _} ->
                 :ok
 

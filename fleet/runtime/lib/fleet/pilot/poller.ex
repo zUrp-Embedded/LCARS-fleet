@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.Poller do
   # HUMAN lock placed on the ISSUE at escalation (gatekeeper verdict escalate/halt/redirect, or unresolved
   # conflict). The poller computes the SET of issues carrying it (already listed at the tick → zero I/O) and threads
   # it to the pulls → `dispatch_review` skips the judge of a PR whose parent issue awaits the arch.
-  @awaits_arch Fleet.Pilot.Labels.awaits_arch()
+  @awaits_arch Fleet.Labels.awaits_arch()
 
   @default_interval_ms 30_000
 

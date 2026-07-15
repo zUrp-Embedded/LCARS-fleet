@@ -657,11 +657,15 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # Forge stub RICHE pour le canal retour : 2 repos, un awaits-arch (#4 + commentaire verdict) + une
-  # issue normale (#5, à ignorer). Ops HORS behaviour du seam (validées par `function_exported?` dans
-  # `conforming_escalation_forge`), donc PAS de `@behaviour` ici — de simples defs.
+  # issue normale (#5, à ignorer). DR-012 : le contrat escalation est désormais un behaviour DÉCLARÉ
+  # (`Delegation.EscalationForge`) → le stub l'ADOPTE (checké au compile, anti lying-stub, comme StubForge).
   defmodule EscalationForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
+
+    @impl true
     def list_org_repos(_org, _opts), do: {:ok, ["fleet/alpha", "fleet/beta"]}
 
+    @impl true
     def list_open_issues("fleet/alpha", _opts) do
       {:ok,
        [
@@ -673,6 +677,7 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_open_issues("fleet/beta", _opts),
       do: {:ok, [%{"number" => 9, "title" => "rien", "labels" => []}]}
 
+    @impl true
     def list_comments("fleet/alpha", 4, _opts) do
       {:ok,
        [
@@ -683,6 +688,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     def list_comments(_repo, _n, _opts), do: {:ok, []}
 
+    @impl true
     def post_comment(repo, n, body, opts) do
       send(self(), {:post_comment, repo, n, body, opts})
       {:ok, :posted}

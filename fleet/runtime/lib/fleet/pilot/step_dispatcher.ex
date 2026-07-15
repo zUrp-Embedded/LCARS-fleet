@@ -52,12 +52,12 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Spawn opts builders / naming (rc_name / feature_slug / maybe_put_route / resolve_repo_id) —
   # shared with the review flow (RoleDispatch), one copy.
 
-  # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constants).
-  @in_flight_label Fleet.Pilot.Labels.in_flight()
-  @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
+  # Protocol vocabulary = single source Fleet.Labels (compile-time constants).
+  @in_flight_label Fleet.Labels.in_flight()
+  @awaits_arch_label Fleet.Labels.awaits_arch()
   # F-C066 — scoped label `stage/merged` (posé par GatekeeperSeal AVANT le close). Composé des DEUX
   # autorités Labels (prefix + valeur), pas un littéral forké.
-  @merged_label Fleet.Pilot.Labels.stage_prefix() <> Fleet.Pilot.Labels.stage_merged()
+  @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
   @type decision :: :engage | {:skip, atom()}
 

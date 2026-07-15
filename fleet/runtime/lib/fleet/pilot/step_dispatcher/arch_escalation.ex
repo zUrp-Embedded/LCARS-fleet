@@ -32,11 +32,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   describes the escalation).
   """
 
-  # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constant, as in
+  # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
   # StepDispatcher which keeps ITS @awaits_arch_label for `decide/1` — same source, not a fork).
   require Logger
 
-  @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
+  @awaits_arch_label Fleet.Labels.awaits_arch()
 
   defmodule Seams do
     @moduledoc """

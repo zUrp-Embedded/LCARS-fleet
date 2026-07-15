@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-08 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
+**Dernière révision** : 2026-07-15 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
 **Statut** : actif — driver forge (Ring 3, client du core)
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -29,7 +29,7 @@ restated, only pointed at.
 
 **Forge client (domain layer)**
 - `Fleet.Pilot.ForgeClient` — Gitea client, injected via the `:forge_client` seam. Sub-modules `{Transport, UrlSafe, Jury, Repo, Files}`.
-- `Fleet.Pilot.ForgeProtocol` / `Fleet.Pilot.Labels` — pure wire-protocol vocabulary (branch/route/step_run formats + lock-labels).
+- `Fleet.Pilot.ForgeProtocol` / `Fleet.Labels` — pure wire-protocol vocabulary (branch/route/step_run formats + lock-labels).
 - `Fleet.Pilot.MergeOutcome` — pure structural classification of a merge failure.
 
 **Incidents & onboarding**

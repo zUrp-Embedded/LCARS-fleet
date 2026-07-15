@@ -46,17 +46,17 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   (`state.spawner || Fleet.Spawner`, `state.task_queue || Fleet.TaskQueue`) at ITS site: the cluster
   receives already-resolved modules.
 
-  Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Pilot.Labels` (single source of the
+  Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Labels` (single source of the
   lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id) + the
   injected seams (spawner/task_queue/forge).
   """
 
   require Logger
 
-  # workflow_run lock: single source `Fleet.Pilot.Labels` (compile-time constant). SAME source as
+  # workflow_run lock: single source `Fleet.Labels` (compile-time constant). SAME source as
   # the `@in_flight` of the core `Poller` (which keeps its own for the fast-path `classify_issue`) — not a
   # fork of a literal, the authority stays `Labels.in_flight/0`.
-  @in_flight Fleet.Pilot.Labels.in_flight()
+  @in_flight Fleet.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """

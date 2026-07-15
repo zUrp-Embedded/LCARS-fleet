@@ -471,7 +471,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     forge = state.forge_client || Fleet.Pilot.ForgeClient
 
     if is_binary(repo) and is_integer(number) do
-      case forge.remove_label(repo, number, Fleet.Pilot.Labels.awaits_arch(), state.forge_opts) do
+      case forge.remove_label(repo, number, Fleet.Labels.awaits_arch(), state.forge_opts) do
         {:ok, _} ->
           Logger.info(
             "StepRunConsumer: awaits-arch drained on #{repo}##{number} (arch resolved) → poller serves the next"

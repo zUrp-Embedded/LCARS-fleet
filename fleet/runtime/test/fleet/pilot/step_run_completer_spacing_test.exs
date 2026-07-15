@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
   # F-QoL (2026-07-07) — flux PROMOTE (merge, déclenché par le DERNIER juge) : le sceau (merge + comment
   # + `stage/merged`) doit être VISIBLEMENT antérieur à l'unlock (`lcars-in-flight` retiré, sur la PR —
   # verrou juge) — même risque de tie même-seconde que ci-dessus, cette fois entre deux écritures de
-  # LABEL de familles distinctes (cf. `Fleet.Pilot.Labels`).
+  # LABEL de familles distinctes (cf. `Fleet.Labels`).
   defmodule PromoteSeqForge do
     def get_pr_for_branch(_repo, _head, _base, _opts),
       do:
