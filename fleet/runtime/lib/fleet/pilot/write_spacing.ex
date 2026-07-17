@@ -10,11 +10,11 @@ defmodule Fleet.Pilot.WriteSpacing do
   `ProjectOnboard` (create_repo → push main → push work/ops) and `ForgeClient.merge_pr`
   (merge → head-branch delete). Same config, same test seam.
 
-  The gap only orders writes BETWEEN two distinct forge calls. Two events born from ONE call
-  (a single `git push` of a new ref → "branch created" + "pushed" the same second) cannot be
-  spaced — make the birth a SINGLE forge action instead (API branch create, cf.
-  `ForgeClient.create_branch/4`), or accept the tie when the call is unsplittable (orphan
-  `work/ops` push, cf. `ProjectOnboard`).
+  The gap only orders writes BETWEEN two distinct forge calls. Two actions born from ONE call
+  cannot be spaced — and a branch BIRTH always is one (twin "created"+"snapshot" pair, measured
+  on both the push and the API channel): the twin tie is accepted everywhere (both lines tell
+  the same fact), while the CONTENT push is kept OUT of it via API pre-birth + gap (cf.
+  `ForgeClient.create_branch/4`). Same acceptance for the merge transaction's own pair.
   """
 
   @doc """

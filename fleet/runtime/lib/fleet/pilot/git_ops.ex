@@ -46,21 +46,6 @@ defmodule Fleet.Pilot.GitOps do
     end
   end
 
-  @doc """
-  Reads the workspace's HEAD sha (bounded `git rev-parse HEAD`). Local read, no auth.
-  """
-  @spec head_sha(Path.t()) :: {:ok, String.t()} | {:error, term()}
-  def head_sha(dir) do
-    args = ["-C", dir, "rev-parse", "HEAD"]
-
-    case Fleet.Credentials.Shell.git(args) do
-      {:ok, {out, 0}} -> {:ok, String.trim(out)}
-      {:ok, {out, code}} -> {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
-      {:error, {:timeout, ms}} -> {:error, {:git_timeout, Enum.take(args, 3), ms}}
-      {:error, {:exit, reason}} -> {:error, {:git_exit, Enum.take(args, 3), reason}}
-    end
-  end
-
   # `auth: true` → forge auth REQUIRED → fail-loud on a present-but-malformed credential (DR-024), never
   # run unauthenticated. `auth: false` → local op (reset/commit/worktree), no forge auth → empty env.
   defp forge_env(true), do: ForgeAuth.git_env_result()

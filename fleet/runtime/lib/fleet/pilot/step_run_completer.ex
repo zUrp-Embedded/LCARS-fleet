@@ -282,10 +282,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # :role_token_unavailable}` (fail-closed: no PR opened under the system account). It is the SYSTEM
     # that posts with the role token, never the pod (forge-blind).
     # Feed chronology (the activity feed IS the human interface — every forge write of this
-    # sequence must land in its OWN Gitea second, or the feed renders the tie inverted): birth
-    # the target branch as ONE action (API create at base_sha — a git push of a new ref births
-    # TWO tied actions), gap, content push, gap, PR. Warning-only: a pre-create failure degrades
-    # to the previous behaviour (branch born by the push, cosmetic tie), never blocks the publish.
+    # sequence must land in its OWN Gitea second, or the feed renders the tie inverted): API-birth
+    # the target branch at base_sha, gap, content push, gap, PR. The birth itself is a twin
+    # same-second pair on ANY channel (structural to Gitea, accepted — both lines tell the same
+    # fact); the point is keeping the CONTENT action out of that tie. Warning-only: a pre-create
+    # failure degrades to the single-push behaviour, never blocks the publish.
     ensure_branch_born_visible(
       forge,
       repo,
@@ -816,8 +817,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # ── Step 1: commit + push deliverable (or step_run_sha supplied if no git) ──────
-  # Births the deliverable target branch as ONE feed action (ForgeClient.create_branch at
-  # base_sha) BEFORE the content push — see the feed-chronology block in `open_deliverable_pr`.
+  # API-births the deliverable target branch (ForgeClient.create_branch at base_sha) BEFORE the
+  # content push — see the feed-chronology block in `open_deliverable_pr` for what this buys.
   # OPTIONAL by contract: `:branch_exists` (rework replay) is the idempotent no-op, any other
   # failure (API error, seam stub without create_branch/4) logs a warning and falls back to the
   # single-push behaviour. Only a SUCCESSFUL birth inserts the gap (no pointless 2s otherwise).

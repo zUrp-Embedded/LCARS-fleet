@@ -50,8 +50,6 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # H1/H3: derived from the single authority of the container layout (Fleet.Layout, R0).
   @projects_root Fleet.Layout.projects_root()
   @work_root Fleet.Layout.work_root()
-  # Staging ref for the feed-silent work/ops birth (outside refs/heads → no feed action).
-  @silent_ref "refs/lcars/onboard-work-ops"
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
   # (wrote nothing). committer = the human (git config) traces who initiated (2026-06-14).
   # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
@@ -83,8 +81,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # SAME Gitea second and the activity feed displays them in an ARBITRARY order (observed live:
     # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
     # push) and one after push main (main IS pushed before work/ops) orders the writes BETWEEN calls.
-    # The work/ops birth itself is made a SINGLE feed action by `publish_work_ops` (silent-ref +
-    # API branch create — a direct push of a new ref would birth two tied same-second actions).
+    # The work/ops birth itself is a twin same-second pair — structural to Gitea, both channels
+    # measured (cf. `publish_work_ops`). Accepted: the twins tell the same fact.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
@@ -368,44 +366,13 @@ defmodule Fleet.Pilot.ProjectOnboard do
     GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
   end
 
-  # Births `work/ops` on the forge as ONE feed action. An orphan ref cannot be API-created
-  # directly (no base the server knows) — so: (1) push the orphan commit onto a ref OUTSIDE
-  # refs/heads (`refs/lcars/*` is feed-silent — probed live on Gitea 2026-07-17), (2) API-create
-  # the branch from that now-known SHA (a single `create_branch` action; a direct `git push -u`
-  # births TWO tied same-second actions the feed renders in arbitrary order), (3) re-run the
-  # normal `push -u` (zero objects to send → feed-silent, sets the local upstream), (4) clean the
-  # silent ref (best-effort — a leftover hidden ref is cosmetic). Any failure of the silent path
-  # falls back to the plain `push -u` (branch born by the push, tied actions — warning, never a
-  # failed onboard).
-  defp publish_work_ops(full_name, work_dir, opts) do
-    with {:ok, sha} <- GitOps.head_sha(work_dir),
-         :ok <- push_refspec(work_dir, "HEAD:#{@silent_ref}"),
-         :ok <- create_work_ops_branch(full_name, sha, opts) do
-      result = push(work_dir, "work/ops", true)
-      _ = push_refspec(work_dir, ":#{@silent_ref}")
-      result
-    else
-      {:error, reason} ->
-        Logger.warning(
-          "ProjectOnboard: feed-silent work/ops birth failed (#{inspect(reason)}) — " <>
-            "plain push fallback (feed tie possible)"
-        )
-
-        push(work_dir, "work/ops", true)
-    end
-  end
-
-  defp create_work_ops_branch(full_name, sha, opts) do
-    case ForgeClient.create_branch(full_name, "work/ops", sha, fc_opts(opts)) do
-      :ok -> :ok
-      # Replay (re-run after a partial onboard): the branch is already born — idempotent no-op.
-      {:error, :branch_exists} -> :ok
-      {:error, _} = err -> err
-    end
-  end
-
-  defp push_refspec(dir, refspec) do
-    GitOps.run(["-C", dir, "push", "origin", refspec], auth: true)
+  # Publishes `work/ops`. Its BIRTH is two same-second feed actions ("branch created" + the
+  # birth snapshot) — STRUCTURAL to Gitea, measured on BOTH channels (direct `push -u` round 3,
+  # API create-from-staged-sha round 5, 2026-07-17/18): every branch birth emits the twin pair,
+  # so the API detour bought nothing here and was removed. The twins tell the same fact ("work/ops
+  # is born"); only Gitea's feed sort (insertion order within a tied second) can invert them.
+  defp publish_work_ops(_full_name, work_dir, _opts) do
+    push(work_dir, "work/ops", true)
   end
 
   defp add_work_ops(proj_dir, work_dir) do

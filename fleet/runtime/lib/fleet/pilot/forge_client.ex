@@ -378,10 +378,11 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Creates the branch `branch` on `repo` from `old_ref` (branch/tag/COMMIT the server already
-  knows) via the Gitea API — ONE feed action (`create_branch`), unlike a `git push` of a new ref
-  which births TWO same-second actions ("branch created" + "pushed") that the activity feed
-  renders in arbitrary order. This is the feed-honest way to BIRTH a branch; the content push
-  then lands as its own action (caller inserts the `WriteSpacing.gap` between the two).
+  knows) via the Gitea API. NB (measured live 2026-07-18): EVERY branch birth — API or push —
+  emits a twin same-second action pair ("branch created" + birth snapshot); the pair is
+  structural to Gitea and unsplittable client-side. What API-birthing + a `WriteSpacing.gap`
+  before the content push buys is that the CONTENT action (the commits humans read) lands in
+  its OWN second, outside the twin tie — cf. `StepRunCompleter.ensure_branch_born_visible`.
 
   ## Returns
     * `:ok` — branch created
