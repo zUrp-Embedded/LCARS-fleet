@@ -1000,18 +1000,33 @@ defmodule Fleet.Pilot.ForgeClientTest do
     # délai 0 dans les tests → pas de Process.sleep réel.
     defp merge_opts(handlers), do: [{:merge_retry_delay_ms, 0} | opts(handlers)]
 
+    # Post-merge handlers (GET head.ref → DELETE branch): every merge-OK path runs the spaced
+    # branch-delete tail — stubbing it keeps these tests warning-free (its failure path has its
+    # own dedicated test below).
+    defp post_merge_handlers do
+      %{
+        {"GET", "/api/v1/repos/fleet/proj/pulls/9"} =>
+          {200, %{"head" => %{"ref" => "lcars/issue-9-eng"}}},
+        {"DELETE", "/api/v1/repos/fleet/proj/branches/lcars%2Fissue-9-eng"} => {204, %{}}
+      }
+    end
+
     test "rebase réussit du premier coup → :ok" do
-      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
+      handlers =
+        Map.merge(post_merge_handlers(), %{
+          {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}
+        })
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
     test "transitoire « try again later » (405) PUIS 200 → retry → :ok (mergeabilité en cours, live morse)" do
       # 1er POST → 405 checking ; 2e POST (retry) → 200 (la mergeabilité s'est stabilisée).
-      handlers = %{
-        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
-          seq_handler([{405, %{"message" => "Please try again later"}}, {200, %{}}])
-      }
+      handlers =
+        Map.merge(post_merge_handlers(), %{
+          {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+            seq_handler([{405, %{"message" => "Please try again later"}}, {200, %{}}])
+        })
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
@@ -1052,7 +1067,10 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
 
     test "opts[:method] force le style (ex. fast-forward-only)" do
-      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
+      handlers =
+        Map.merge(post_merge_handlers(), %{
+          {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}
+        })
 
       assert :ok =
                ForgeClient.merge_pr(
@@ -1060,6 +1078,37 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  9,
                  [{:method, "fast-forward-only"} | merge_opts(handlers)]
                )
+    end
+
+    test "merge OK → head branch deleted as a SEPARATE spaced call (feed-ordered), slash encoded" do
+      # Proves the two-call shape (GET head.ref then DELETE) replacing `delete_branch_after_merge`:
+      # a DELETE handler keyed on the %2F-encoded branch answers 204 — reaching it IS the assertion
+      # (FakeForge 500s any unhandled route, which delete_head_branch_spaced only warns about;
+      # the probe Agent below turns "the DELETE actually happened" into an explicit assert).
+      {:ok, probe} = Agent.start_link(fn -> false end)
+
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}},
+        {"GET", "/api/v1/repos/fleet/proj/pulls/9"} =>
+          {200, %{"head" => %{"ref" => "lcars/issue-9-eng"}}},
+        {"DELETE", "/api/v1/repos/fleet/proj/branches/lcars%2Fissue-9-eng"} =>
+          fn ->
+            Agent.update(probe, fn _ -> true end)
+            {204, %{}}
+          end
+      }
+
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+      assert Agent.get(probe, & &1), "DELETE /branches/<head.ref> was never called"
+    end
+
+    @tag capture_log: true
+    test "delete failure is warning-only: merge stays :ok (the merge is the authority)" do
+      # No GET/DELETE handlers → FakeForge 500s the post-merge lookup; the merge result must
+      # still be :ok (a surviving dead branch is cosmetic, never a merge error).
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
+
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
   end
 

@@ -31,7 +31,7 @@ defmodule Fleet.Workflow.Deliverable do
 
   require Logger
 
-  alias Fleet.Workflow.{DeliverableGate, Git, PayloadGuard}
+  alias Fleet.Workflow.{DeliverableGate, Git, PayloadGuard, WriteSpacing}
 
   @type mode :: :payload | :git_native
 
@@ -211,10 +211,35 @@ defmodule Fleet.Workflow.Deliverable do
 
   defp push_deliverable(opts) do
     if push?(opts) do
+      ensure_target_branch_visible(opts)
       refspec = "#{local_ref(opts)}:#{opts.target_branch}"
       Git.push(opts.workspace, opts.remote, refspec)
     else
       {:ok, false}
+    end
+  end
+
+  # Split "branch created" from "pushed on branch" for the Gitea activity feed: a single push of a
+  # NEW ref births both events in the same second and the feed renders the tie in an arbitrary
+  # order (displayed wrong = wrong, even when the underlying writes are ordered). Pre-create the
+  # ref at `base_sha` (already known server-side, zero transfer), then gap, then content push.
+  # NEVER blocks the publish: on `:exists` (rework on a live branch) or pre-create failure the
+  # push proceeds exactly as before — the fallback only costs the cosmetic tie.
+  defp ensure_target_branch_visible(opts) do
+    case Git.ensure_remote_branch(opts.workspace, opts.remote, opts.target_branch, opts.base_sha) do
+      :created ->
+        WriteSpacing.gap()
+
+      :exists ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Deliverable: pre-create of #{opts.target_branch} failed (#{inspect(reason)}) — " <>
+            "single-push fallback (feed tie possible)"
+        )
+
+        :ok
     end
   end
 

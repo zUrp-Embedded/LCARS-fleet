@@ -708,8 +708,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # "created_at" anti-tie (Gitea) between two forge writes — authority SHARED with `ProjectOnboard`
-  # (same bug, same fix, same config): `Fleet.Pilot.WriteSpacing`, see its doc for the full WHY.
-  defp space_writes(opts), do: Fleet.Pilot.WriteSpacing.gap(opts)
+  # (same bug, same fix, same config): `Fleet.Workflow.WriteSpacing`, see its doc for the full WHY.
+  defp space_writes(opts), do: Fleet.Workflow.WriteSpacing.gap(opts)
 
   # Lock to lift: producer -> the issue (lock set by dispatch_issue); judge -> the PR (lock
   # set by dispatch_review). A producer rework (pr nil) falls on the issue.

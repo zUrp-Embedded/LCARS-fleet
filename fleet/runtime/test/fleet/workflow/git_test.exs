@@ -195,6 +195,71 @@ defmodule Fleet.GitTest do
     end
   end
 
+  describe "ensure_remote_branch/4 — pre-created target branch (feed anti-tie)" do
+    # Shared fixture: bare knows main (= base_sha), workspace holds one extra local commit
+    # (the deliverable) NOT pushed yet — the exact publish-time shape.
+    defp remote_branch_fixture(tmp) do
+      bare = init_bare_repo(Path.join(tmp, "bare.git"))
+      ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
+      commit_initial(ws)
+      {_, 0} = System.cmd("git", ["push", "origin", "main"], cd: ws)
+      {base_sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
+      File.write!(Path.join(ws, "feature.md"), "deliverable\n")
+      {:ok, _sha} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      {bare, ws, String.trim(base_sha)}
+    end
+
+    test "absent branch → :created, ref born at base_sha on the remote", %{tmp_dir: tmp} do
+      {bare, ws, base_sha} = remote_branch_fixture(tmp)
+
+      assert :created =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "lcars/issue-9-eng", base_sha)
+
+      {ref_sha, 0} = System.cmd("git", ["rev-parse", "lcars/issue-9-eng"], cd: bare)
+      assert String.trim(ref_sha) == base_sha
+    end
+
+    test "branch already at the same sha → :exists (idempotent re-run)", %{tmp_dir: tmp} do
+      {_bare, ws, base_sha} = remote_branch_fixture(tmp)
+
+      assert :created =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "lcars/issue-9-eng", base_sha)
+
+      assert :exists =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "lcars/issue-9-eng", base_sha)
+    end
+
+    test "diverged branch (rework already pushed) → :exists, ref NOT rewound (no force)", %{
+      tmp_dir: tmp
+    } do
+      {bare, ws, base_sha} = remote_branch_fixture(tmp)
+      # The live branch is AHEAD (the deliverable is already on it — rework shape).
+      {_, 0} = System.cmd("git", ["push", "origin", "HEAD:refs/heads/lcars/issue-9-eng"], cd: ws)
+      {ahead_sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
+
+      assert :exists =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "lcars/issue-9-eng", base_sha)
+
+      # base_sha is an ANCESTOR of the live tip: a forced pre-create would silently rewind the
+      # branch (and empty its open PR). The ref must still point at the ahead sha.
+      {ref_sha, 0} = System.cmd("git", ["rev-parse", "lcars/issue-9-eng"], cd: bare)
+      assert String.trim(ref_sha) == String.trim(ahead_sha)
+    end
+
+    test "injection: leading-`-` branch/base_sha/remote rejected fail-closed", %{tmp_dir: tmp} do
+      {_bare, ws, base_sha} = remote_branch_fixture(tmp)
+
+      assert {:error, {:invalid_refspec, _}} =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "--exec=evil", base_sha)
+
+      assert {:error, {:invalid_base_sha, _}} =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "origin", "b", "--force")
+
+      assert {:error, {:invalid_remote, _}} =
+               Fleet.Workflow.Git.ensure_remote_branch(ws, "-c=x", "b", base_sha)
+    end
+  end
+
   describe "push/3 — F-PARALLEL-PR-CONFLICT (force sur historique réécrit)" do
     test "push normal rejeté (non-fast-forward) → retry --force land la branche rebasée", %{
       tmp_dir: tmp

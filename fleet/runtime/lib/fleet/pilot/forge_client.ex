@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.ForgeClient do
     ]
 
   # Safe encoding of URL segments (path-traversal guard) — UrlSafe is the single authority.
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   # ONLY re-export of the vocab: `parse_feature_branch/1`. `fleet_mcp` (pod_tools) calls it via the
   # `:forge_client` seam (runtime-resolved, defaulting to this module) so as NOT to create a compile-time dep on
@@ -490,14 +490,11 @@ defmodule Fleet.Pilot.ForgeClient do
   # ONE `Do: method` call; bounded retry ONLY on the "try again later" transient (mergeability
   # being computed on the Gitea side). Any other error = definitive → propagates (fail-loud).
   defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # `delete_branch_after_merge` → Gitea deletes the feature-branch
-    # `lcars/issue-N-role` after merge (hygiene: no pile-up of dead branches). No-op if the
-    # branch is protected/absent; the merge stays the authority (the deletion is a side effect).
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
-           "Do" => method,
-           "delete_branch_after_merge" => true
+           "Do" => method
          }) do
       {:ok, _} ->
+        delete_head_branch_spaced(config, repo, index)
         :ok
 
       {:error, {:http, 405, body}} = err ->
@@ -524,6 +521,35 @@ defmodule Fleet.Pilot.ForgeClient do
     do: body |> Map.get("message", "") |> String.downcase() |> String.contains?("try again later")
 
   defp merge_checking?(_), do: false
+
+  # Deletes the merged feature-branch `lcars/issue-N-role` (hygiene: no pile-up of dead branches)
+  # as a SEPARATE call AFTER a `WriteSpacing.gap` — `delete_branch_after_merge` bundled both into one
+  # Gitea transaction, whose two feed events ("pushed on main" + "branch deleted") tied in the same
+  # second and displayed in an arbitrary order. The merge stays the authority: any failure here is a
+  # WARNING (a surviving dead branch is cosmetic), never a merge error.
+  defp delete_head_branch_spaced(config, repo, index) do
+    with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
+         head_ref when is_binary(head_ref) and head_ref != "" <- get_in(pr, ["head", "ref"]) do
+      Fleet.Workflow.WriteSpacing.gap()
+
+      case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(head_ref)}") do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "ForgeClient: post-merge delete of #{head_ref} failed (#{inspect(reason)}) — dead branch survives"
+          )
+      end
+    else
+      other ->
+        Logger.warning(
+          "ForgeClient: post-merge head.ref unreadable for #{repo}##{index} (#{inspect(other)}) — branch not deleted"
+        )
+    end
+
+    :ok
+  end
 
   @doc """
   Lists the OPEN PRs of `repo` ASSIGNED TO ME (forge-side multi-user scoping), FULL PR

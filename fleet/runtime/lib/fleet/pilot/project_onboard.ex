@@ -76,22 +76,25 @@ defmodule Fleet.Pilot.ProjectOnboard do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
-    # Anti-tie gaps (Fleet.Pilot.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
+    # Anti-tie gaps (Fleet.Workflow.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
     # LOCALLY (git), near-instantaneous — without a gap, create_repo/push main/push work/ops fall in the
     # SAME Gitea second and the activity feed displays them in an ARBITRARY order (observed live:
     # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
-    # push) and one after push main (main IS pushed before work/ops) suffice for the 3 visible events.
+    # push) and one after push main (main IS pushed before work/ops) orders the writes BETWEEN calls.
+    # Known residual tie: the work/ops push itself births "branch created" + "pushed" in one second —
+    # unsplittable for an ORPHAN ref (it must be born with its first commit; no base the server knows,
+    # unlike the deliverable branches pre-created at base_sha, cf. Git.ensure_remote_branch). Accepted.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
          {:ok, full_name} <- create_repo(name, org, opts),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Workflow.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- Scaffold.main(proj_dir, name, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Workflow.WriteSpacing.gap(opts),
          :ok <- add_work_ops(proj_dir, work_dir),
          :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
