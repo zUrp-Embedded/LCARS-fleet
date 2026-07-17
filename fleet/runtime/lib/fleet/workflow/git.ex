@@ -249,48 +249,6 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  @doc """
-  Pre-creates the remote branch `branch` at `base_sha` when it does not exist yet — so that the
-  Gitea "branch created" event lands in its OWN second, BEFORE the content push (a single `git push`
-  of a new ref births "branch created" + "pushed" in the same second, and the activity feed renders
-  that tie in an arbitrary order — `WriteSpacing` cannot split two events born from ONE call).
-  `base_sha` is a commit the server already knows (pinned at clone) → zero objects transferred.
-
-  Returns `:created` (ref pushed — the caller inserts the `WriteSpacing.gap` before the content
-  push), `:exists` (branch already on the remote: up-to-date at the same sha, or diverged →
-  non-fast-forward refusal, e.g. a rework push on a live branch — NEVER forced here, unlike
-  `push/3` whose auto-force is reserved for the system's own content refspec), or `{:error, term()}`
-  (network/auth — the caller degrades to the single-push behaviour, never blocks the publish).
-  """
-  @spec ensure_remote_branch(Path.t(), String.t(), String.t(), String.t()) ::
-          :created | :exists | {:error, term()}
-  def ensure_remote_branch(workspace, remote, branch, base_sha) do
-    with :ok <- validate_cli_arg(remote, :invalid_remote),
-         :ok <- validate_cli_arg(branch, :invalid_refspec),
-         :ok <- validate_cli_arg(base_sha, :invalid_base_sha),
-         {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
-      case run_push(workspace, remote, "#{base_sha}:refs/heads/#{branch}", [], auth_env) do
-        {:ok, {out, 0}} ->
-          # Idempotent re-run: the ref already points at base_sha → git reports
-          # "Everything up-to-date" ("up to date" on some versions) and pushes nothing.
-          if out |> String.downcase() |> String.replace("-", " ") |> String.contains?("up to date"),
-            do: :exists,
-            else: :created
-
-        {:ok, {out, rc}} ->
-          if non_fast_forward?(out),
-            do: :exists,
-            else: {:error, {:git_push_failed, rc, String.trim(out)}}
-
-        {:error, {:timeout, _ms}} ->
-          {:error, {:git_push_timeout, push_timeout_ms()}}
-
-        {:error, {:exit, reason}} ->
-          {:error, {:git_push_exit, reason}}
-      end
-    end
-  end
-
   # `remote`/`refspec` must NOT start with `-`. Otherwise `git push` reads them as
   # OPTIONS (`--receive-pack=<cmd>` → execution on the remote side, `-c <config>`, `--exec=`) → option
   # injection via an untrusted input. `System.cmd` does not use a shell, but git parses its options:

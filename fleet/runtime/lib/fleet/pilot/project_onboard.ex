@@ -50,6 +50,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # H1/H3: derived from the single authority of the container layout (Fleet.Layout, R0).
   @projects_root Fleet.Layout.projects_root()
   @work_root Fleet.Layout.work_root()
+  # Staging ref for the feed-silent work/ops birth (outside refs/heads → no feed action).
+  @silent_ref "refs/lcars/onboard-work-ops"
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
   # (wrote nothing). committer = the human (git config) traces who initiated (2026-06-14).
   # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
@@ -76,29 +78,28 @@ defmodule Fleet.Pilot.ProjectOnboard do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
-    # Anti-tie gaps (Fleet.Workflow.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
+    # Anti-tie gaps (Fleet.Pilot.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
     # LOCALLY (git), near-instantaneous — without a gap, create_repo/push main/push work/ops fall in the
     # SAME Gitea second and the activity feed displays them in an ARBITRARY order (observed live:
     # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
     # push) and one after push main (main IS pushed before work/ops) orders the writes BETWEEN calls.
-    # Known residual tie: the work/ops push itself births "branch created" + "pushed" in one second —
-    # unsplittable for an ORPHAN ref (it must be born with its first commit; no base the server knows,
-    # unlike the deliverable branches pre-created at base_sha, cf. Git.ensure_remote_branch). Accepted.
+    # The work/ops birth itself is made a SINGLE feed action by `publish_work_ops` (silent-ref +
+    # API branch create — a direct push of a new ref would birth two tied same-second actions).
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
          {:ok, full_name} <- create_repo(name, org, opts),
-         :ok <- Fleet.Workflow.WriteSpacing.gap(opts),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- Scaffold.main(proj_dir, name, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
-         :ok <- Fleet.Workflow.WriteSpacing.gap(opts),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          :ok <- add_work_ops(proj_dir, work_dir),
          :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
-         :ok <- push(work_dir, "work/ops", true),
+         :ok <- publish_work_ops(full_name, work_dir, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} ready — main=#{proj_dir}, work/ops=#{work_dir}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
@@ -175,7 +176,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       with :ok <- add_work_ops(proj_dir, work_dir),
            :ok <- Scaffold.work(work_dir, name, opts),
            :ok <- commit(work_dir, "chore(import): init work/ops") do
-        push(work_dir, "work/ops", true)
+        publish_work_ops(full_name, work_dir, opts)
       end
     end
   end
@@ -365,6 +366,46 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp clone_main(url, proj_dir) do
     File.mkdir_p!(Path.dirname(proj_dir))
     GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
+  end
+
+  # Births `work/ops` on the forge as ONE feed action. An orphan ref cannot be API-created
+  # directly (no base the server knows) — so: (1) push the orphan commit onto a ref OUTSIDE
+  # refs/heads (`refs/lcars/*` is feed-silent — probed live on Gitea 2026-07-17), (2) API-create
+  # the branch from that now-known SHA (a single `create_branch` action; a direct `git push -u`
+  # births TWO tied same-second actions the feed renders in arbitrary order), (3) re-run the
+  # normal `push -u` (zero objects to send → feed-silent, sets the local upstream), (4) clean the
+  # silent ref (best-effort — a leftover hidden ref is cosmetic). Any failure of the silent path
+  # falls back to the plain `push -u` (branch born by the push, tied actions — warning, never a
+  # failed onboard).
+  defp publish_work_ops(full_name, work_dir, opts) do
+    with {:ok, sha} <- GitOps.head_sha(work_dir),
+         :ok <- push_refspec(work_dir, "HEAD:#{@silent_ref}"),
+         :ok <- create_work_ops_branch(full_name, sha, opts) do
+      result = push(work_dir, "work/ops", true)
+      _ = push_refspec(work_dir, ":#{@silent_ref}")
+      result
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "ProjectOnboard: feed-silent work/ops birth failed (#{inspect(reason)}) — " <>
+            "plain push fallback (feed tie possible)"
+        )
+
+        push(work_dir, "work/ops", true)
+    end
+  end
+
+  defp create_work_ops_branch(full_name, sha, opts) do
+    case ForgeClient.create_branch(full_name, "work/ops", sha, fc_opts(opts)) do
+      :ok -> :ok
+      # Replay (re-run after a partial onboard): the branch is already born — idempotent no-op.
+      {:error, :branch_exists} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  defp push_refspec(dir, refspec) do
+    GitOps.run(["-C", dir, "push", "origin", refspec], auth: true)
   end
 
   defp add_work_ops(proj_dir, work_dir) do

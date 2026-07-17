@@ -181,9 +181,81 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
                sleeper: sleeper
              )
 
-    # ordre : le comment (note eng, POINTEUR déjà plié dans open_pr) AVANT le gap AVANT la transition de
-    # stage — plus de tie même-seconde (le stage n'apparaît plus AVANT le comment sur le dashboard).
-    assert [:open_pr, :comment, {:slept, 2000}, :stage | _] = drain()
+    # Every forge write of the producer sequence lands in its OWN second (2026-07-17: push/PR/
+    # comment observed tied and inverted in the activity feed): gap after the publish push, gap
+    # before the eng-note comment, gap before the stage transition. The stub forge does NOT
+    # export create_branch/4 → the API branch pre-create is skipped silently (fallback contract).
+    assert [
+             {:slept, 2000},
+             :open_pr,
+             {:slept, 2000},
+             :comment,
+             {:slept, 2000},
+             :stage | _
+           ] = drain()
+  end
+
+  defmodule BirthSeqForge do
+    # Same shape as ProducerSeqForge PLUS create_branch/4 — proves the completer births the
+    # target branch via the API (ONE feed action) and gaps it before the content push.
+    def create_branch(_repo, _branch, _base, _opts),
+      do:
+        (
+          send(self(), {:call, :create_branch})
+          :ok
+        )
+
+    defdelegate open_pr(repo, head, base, title, opts), to: ProducerSeqForge
+    defdelegate post_comment(repo, n, body, opts), to: ProducerSeqForge
+    defdelegate set_stage(repo, n, stage, opts), to: ProducerSeqForge
+    defdelegate request_review(repo, pr, reviewers, opts), to: ProducerSeqForge
+    defdelegate post_route(repo, n, p, s, opts), to: ProducerSeqForge
+    defdelegate remove_label(repo, n, label, opts), to: ProducerSeqForge
+    defdelegate stop_stopwatch(repo, n, opts), to: ProducerSeqForge
+  end
+
+  test "complete_pr producteur — la branche cible naît par l'API (une action feed) puis gap avant le push" do
+    set_spacing(2000)
+
+    step_run = %{
+      repo: "fleet/proj",
+      issue_number: 42,
+      role: "engineer",
+      pr_role: :producer,
+      intent: :advance,
+      next_assignee: "qualifier",
+      producer_branch: "lcars/issue-42-engineer",
+      eng_summary: "décodeur implémenté",
+      deliverable_opts: %{
+        mode: :git_native,
+        workspace: "/tmp/ws",
+        base_sha: "cafe",
+        target_branch: "lcars/issue-42-engineer"
+      }
+    }
+
+    sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
+
+    assert {:ok, :review_requested} =
+             StepRunCompleter.complete_pr(step_run,
+               deliverable: StubDeliverable,
+               forge_client: BirthSeqForge,
+               forge_opts: [],
+               sleeper: sleeper
+             )
+
+    # Branch birth (API, one action) → gap → publish (stub, no trace) → gap → PR → gap →
+    # comment → gap → stage. The birth is FIRST and spaced from the content push.
+    assert [
+             :create_branch,
+             {:slept, 2000},
+             {:slept, 2000},
+             :open_pr,
+             {:slept, 2000},
+             :comment,
+             {:slept, 2000},
+             :stage | _
+           ] = drain()
   end
 
   # F-QoL (2026-07-07) — flux PROMOTE (merge, déclenché par le DERNIER juge) : le sceau (merge + comment

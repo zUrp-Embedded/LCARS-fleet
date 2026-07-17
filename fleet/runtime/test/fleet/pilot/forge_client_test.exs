@@ -984,6 +984,31 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "create_branch/4 (feed-honest branch birth — one action)" do
+    test "201 → :ok" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/branches"} => {201, %{"name" => "b"}}}
+
+      assert :ok = ForgeClient.create_branch("fleet/proj", "lcars/issue-9-eng", "cafe", opts(handlers))
+    end
+
+    test "409 (already born — replay) → {:error, :branch_exists}, typed for the idempotent skip" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branches"} =>
+          {409, %{"message" => "branch already exists"}}
+      }
+
+      assert {:error, :branch_exists} =
+               ForgeClient.create_branch("fleet/proj", "b", "cafe", opts(handlers))
+    end
+
+    test "other HTTP error propagates as-is (caller decides the fallback)" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/branches"} => {404, %{"message" => "no ref"}}}
+
+      assert {:error, {:http, 404, _}} =
+               ForgeClient.create_branch("fleet/proj", "b", "dead", opts(handlers))
+    end
+  end
+
   describe "merge_pr/3 (PROMOTE — rebase single-call + retry transient)" do
     # Réponses ORDONNÉES sur le chemin merge (rappelé en cas de retry) via Agent compteur.
     defp seq_handler(responses) do

@@ -377,6 +377,33 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  Creates the branch `branch` on `repo` from `old_ref` (branch/tag/COMMIT the server already
+  knows) via the Gitea API — ONE feed action (`create_branch`), unlike a `git push` of a new ref
+  which births TWO same-second actions ("branch created" + "pushed") that the activity feed
+  renders in arbitrary order. This is the feed-honest way to BIRTH a branch; the content push
+  then lands as its own action (caller inserts the `WriteSpacing.gap` between the two).
+
+  ## Returns
+    * `:ok` — branch created
+    * `{:error, :branch_exists}` — already there (Gitea 409; idempotent no-op for the caller)
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec create_branch(String.t(), String.t(), String.t(), Keyword.t()) :: :ok | {:error, term()}
+  def create_branch(repo, branch, old_ref, opts \\ [])
+      when is_binary(repo) and is_binary(branch) and is_binary(old_ref) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/branches", %{
+             "new_branch_name" => branch,
+             "old_ref_name" => old_ref
+           }) do
+        {:ok, _} -> :ok
+        {:error, {:http, 409, _}} -> {:error, :branch_exists}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Finds the OPEN PR `head` → `base` on `repo` (Gitea `GET /repos/{repo}/pulls`, filtered
   client-side by `head.ref`/`base.ref`). Idempotence building block of `open_pr/5`.
 
@@ -530,7 +557,7 @@ defmodule Fleet.Pilot.ForgeClient do
   defp delete_head_branch_spaced(config, repo, index) do
     with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
          head_ref when is_binary(head_ref) and head_ref != "" <- get_in(pr, ["head", "ref"]) do
-      Fleet.Workflow.WriteSpacing.gap()
+      Fleet.Pilot.WriteSpacing.gap()
 
       case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(head_ref)}") do
         {:ok, _} ->

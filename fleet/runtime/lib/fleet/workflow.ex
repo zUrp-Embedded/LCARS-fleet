@@ -27,5 +27,5 @@ defmodule Fleet.Workflow do
       Fleet.EventRouter,
       Fleet.TaskQueue
     ],
-    exports: [Gatekeeper, GateBrief, Loader, Gates, GateDecision, BriefArtifact, Provenance, WriteSpacing]
+    exports: [Gatekeeper, GateBrief, Loader, Gates, GateDecision, BriefArtifact, Provenance]
 end

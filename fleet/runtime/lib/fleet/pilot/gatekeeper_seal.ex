@@ -7,11 +7,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   - `Fleet.Pilot.StepDispatcher.promote_pr` (judges APPROVED directly);
   - `Fleet.Pilot.StepRunCompleter.promote` (terminal `:promote`, e.g. after gatekeeper escalation).
 
-  Both call `seal_and_merge/6` → same gatekeeper signature, same trace, everywhere (without this
+  Both call `seal_and_merge/7` → same gatekeeper signature, same trace, everywhere (without this
   single point, a merge would go through with a raw system token, without a comment, attributed to `lcars-system`).
 
   The gatekeeper signature (`as_gatekeeper/1` = `Fleet.Pilot.ForgeClient.as_role(forge_opts,
-  gatekeeper_role())`) is built HERE, internally: `seal_and_merge/6` receives the RAW `forge_opts`
+  gatekeeper_role())`) is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`
   and signs itself — there is only ONE writer of the `as_role(_, gatekeeper_role())` idiom
   in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
   `as_gatekeeper/1`). A caller can no longer forget the signature nor fork it. `as_role` remains
@@ -29,10 +29,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   @doc """
   UNIQUE gatekeeper signature: injects the `gatekeeper` account's token into `forge_opts`
   (`Fleet.Pilot.ForgeClient.as_role/2`). ONLY point in the runtime that writes the
-  `as_role(_, gatekeeper_role())` idiom — used internally by `seal_and_merge/6` (merge + seal
+  `as_role(_, gatekeeper_role())` idiom — used internally by `seal_and_merge/7` (merge + seal
   comment) and by `ArchEscalation` (gatekeeper-signed escalation comment). Role token
   absent/unreadable → `{:error, :role_token_unavailable}` (fail-CLOSED via
-  `Fleet.Credentials.RoleIdentity`): NEVER a system-token fallback — `seal_and_merge/6`
+  `Fleet.Credentials.RoleIdentity`): NEVER a system-token fallback — `seal_and_merge/7`
   refuses the merge/close rather than act under the most-privileged system account.
   """
   @spec as_gatekeeper(keyword()) :: {:ok, keyword()} | {:error, :role_token_unavailable}
@@ -57,10 +57,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   FAILED after retries — NOT a lying `:ok`. The merged brick stays open but the caller skips the unlock
   (issue keeps `lcars-in-flight`) and `decide/1` skips `stage/merged` → never re-dispatched (no double-delivery).
   """
-  @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
+  @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword(), keyword()) ::
           :ok
           | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
-  def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts) do
+  def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts, opts \\ []) do
     case as_gatekeeper(forge_opts) do
       {:error, :role_token_unavailable} = err ->
         # Fail-CLOSED: no gatekeeper role token → we do NOT merge/close under the SYSTEM account (privilege
@@ -88,6 +88,13 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
         case do_merge(forge, repo, pr_number, gk_opts) do
           :ok ->
+            # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
+            # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
+            # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
+            # seal comment lands strictly AFTER the delete's second, and again before the close —
+            # read bottom-up the feed then tells: merged, branch deleted, sealed, closed.
+            Fleet.Pilot.WriteSpacing.gap(opts)
+
             # POST-merge trace. A failed seal comment does not block the sequence (the merge stays
             # the authoritative truth) but is LOGGED: nothing re-posts it (the dedup only guards
             # against replays), so a silent loss left the issue without its human-readable seal.
@@ -136,6 +143,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
             # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
             # else in the pipeline) — not concerned by this inconsistency.
+            # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
+            # the close action (observed tied and inverted — feed ids 4780/4792, 2026-07-17).
+            Fleet.Pilot.WriteSpacing.gap(opts)
+
             close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
 
             # Projects the deliverable onto the local clone `/home/projects/<name>` — a MIRROR: the truth is

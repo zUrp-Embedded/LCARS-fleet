@@ -281,7 +281,23 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # the PR author on the forge = Engineer (the eng did the work). Token absent → `{:error,
     # :role_token_unavailable}` (fail-closed: no PR opened under the system account). It is the SYSTEM
     # that posts with the role token, never the pod (forge-blind).
+    # Feed chronology (the activity feed IS the human interface — every forge write of this
+    # sequence must land in its OWN Gitea second, or the feed renders the tie inverted): birth
+    # the target branch as ONE action (API create at base_sha — a git push of a new ref births
+    # TWO tied actions), gap, content push, gap, PR. Warning-only: a pre-create failure degrades
+    # to the previous behaviour (branch born by the push, cosmetic tie), never blocks the publish.
+    ensure_branch_born_visible(
+      forge,
+      repo,
+      Map.fetch!(step_run, :deliverable_opts),
+      forge_opts,
+      opts
+    )
+
     with {:ok, sha} <- step1_publish(step_run, deliverable),
+         # Gap BEFORE the PR: the content push takes a `created_at` strictly earlier than the
+         # PR-opened action (observed tied and inverted, feed ids 4696/4720, 2026-07-17).
+         :ok <- space_writes(opts),
          # Triplet SLSA (chantier brief-physique) : (brief_sha, base_sha=input_sha, livrable_sha=sha) →
          # provenance in-toto committée sous work/ops `livrables/`. ICI = le SEUL point où un vrai livrable
          # git producteur est publié (chemin PR-native) ; `complete/2` ne porte QUE des verdicts sans
@@ -378,7 +394,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # `StepDispatcher.promote_pr`. The gatekeeper signature is set INTERNALLY by `seal_and_merge`
     # (sole writer `GatekeeperSeal.as_gatekeeper/1`): this `:promote` terminal (e.g. after escalation)
     # cannot merge on a raw system token without a comment (merge attributed to `lcars-system`).
-    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts) do
+    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts, opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
       # F-C066 — merge OK mais close échoué : NON-`:ok` propagé → le `with` de `route/3` court-circuite
@@ -447,6 +463,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp complete_producer(step_run, opts) do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(step_run, opts) do
+      # Gap BEFORE the eng note: the PR-opened action takes a `created_at` strictly earlier
+      # than the note comment (observed tied and inverted, feed ids 4696/4708, 2026-07-17).
+      :ok = space_writes(opts)
+
       # SIDE emissions (eng voice PR+issue, slot-freeze deliverable.published) — discarded by
       # contract: the sequence depends on no return value; the deliverable truth is the pushed
       # commit + open PR. Failure visibility per emission: cf. Emissions.
@@ -708,8 +728,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # "created_at" anti-tie (Gitea) between two forge writes — authority SHARED with `ProjectOnboard`
-  # (same bug, same fix, same config): `Fleet.Workflow.WriteSpacing`, see its doc for the full WHY.
-  defp space_writes(opts), do: Fleet.Workflow.WriteSpacing.gap(opts)
+  # (same bug, same fix, same config): `Fleet.Pilot.WriteSpacing`, see its doc for the full WHY.
+  defp space_writes(opts), do: Fleet.Pilot.WriteSpacing.gap(opts)
 
   # Lock to lift: producer -> the issue (lock set by dispatch_issue); judge -> the PR (lock
   # set by dispatch_review). A producer rework (pr nil) falls on the issue.
@@ -796,6 +816,36 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # ── Step 1: commit + push deliverable (or step_run_sha supplied if no git) ──────
+  # Births the deliverable target branch as ONE feed action (ForgeClient.create_branch at
+  # base_sha) BEFORE the content push — see the feed-chronology block in `open_deliverable_pr`.
+  # OPTIONAL by contract: `:branch_exists` (rework replay) is the idempotent no-op, any other
+  # failure (API error, seam stub without create_branch/4) logs a warning and falls back to the
+  # single-push behaviour. Only a SUCCESSFUL birth inserts the gap (no pointless 2s otherwise).
+  defp ensure_branch_born_visible(forge, repo, d_opts, forge_opts, opts) do
+    with true <- Map.get(d_opts, :push?, true),
+         branch when is_binary(branch) <- Map.get(d_opts, :target_branch),
+         base when is_binary(base) <- Map.get(d_opts, :base_sha),
+         true <- Code.ensure_loaded?(forge) and function_exported?(forge, :create_branch, 4) do
+      case forge.create_branch(repo, branch, base, forge_opts) do
+        :ok ->
+          space_writes(opts)
+
+        {:error, :branch_exists} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "StepRunCompleter: pre-create of #{branch} failed (#{inspect(reason)}) — " <>
+              "single-push fallback (feed tie possible)"
+          )
+      end
+    else
+      _ -> :ok
+    end
+
+    :ok
+  end
+
   defp step1_publish(step_run, deliverable) do
     case Map.get(step_run, :deliverable_opts) do
       nil ->
