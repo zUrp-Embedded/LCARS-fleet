@@ -118,10 +118,9 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
-  # NO `monks/` scan: the monks are FROZEN under `priv/cap_profile/canon/_frozen-monks/`
-  # (deliberately out of the boot loop, F-C153) and a `monks/` dir does not exist — a wildcard
-  # on it was speculative scaffolding (YAGNI); the re-home that thaws them adds their scan
-  # (and their slot_scope) THEN. The `modop/` dir stays excluded: overlays have no role
+  # No `monks/` scan: the monks are FROZEN under `priv/cap_profile/canon/_frozen-monks/`,
+  # deliberately out of the boot loop (cf. `Fleet.SPBuilder.Monk`); the thaw that re-homes
+  # them adds their scan then. The `modop/` dir stays excluded: overlays have no role
   # identity. A fragment without `metadata.name` → ignored (baseline/overlay).
   # Collision `name` → fail-loud (`:name_collision`).
   #
@@ -259,8 +258,7 @@ defmodule Fleet.CapProfile.Catalog do
     # A `:root_dir` explicitly set to nil (e.g. a cross-test env leak) must NEVER
     # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
     # Default = the BUNDLED priv (`:code.priv_dir`) → resolves in a RELEASE (lib/lcars_fleet-vsn/priv/…)
-    # as in dev (_build/…/priv) WITHOUT any env. The old default `"cap-profiles"` (relative to the CWD) was
-    # never correct without an explicit `LCARS_CAPPROFILES_ROOT` → `:enoent` in a release (hermeticity).
+    # as in dev (_build/…/priv) WITHOUT any env — a CWD-relative default would :enoent in a release.
     Application.get_env(:fleet_cap_profile, :root_dir) ||
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/canon/cap-profiles")
   end
