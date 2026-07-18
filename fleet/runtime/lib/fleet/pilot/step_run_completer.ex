@@ -640,10 +640,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   # Producer WITHOUT workflow_map (single-brick): the PR is open (`complete_producer`) → we put
-  # the JUDGES (`:reviewer_roles`, default qualifier+reviewer) into `requested_reviewers` (the poller
-  # `dispatch_review` spawns them one by one), we ASSIGN the HUMAN to the PR (see which human drove). NO
-  # merge here: the merge is driven by the PR-state (dispatch_review, when all judges have approved).
-  # Branch-protection OFF in dev → LCARS aggregates, interim.
+  # the CARD's jury (`Roles.project_jury` — the project's declared card) into `requested_reviewers`
+  # (the poller `dispatch_review` spawns them one by one), we ASSIGN the HUMAN to the PR (see which
+  # human drove). NO merge here: the merge is driven by the PR-state (dispatch_review, when all
+  # judges have approved — or immediately on a zero-judge card). Branch-protection OFF in dev →
+  # LCARS aggregates, interim.
   defp route(%{intent: :review} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -653,7 +654,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # case: the lock was on the PR (set by `dispatch_review` :rework, held by the re-dispatched
     # producer). The ISSUE lock, though, is NOT lifted here (doctrine above, cf. `:advance`): the
     # brick stays in-flight until the final `:promote`, first delivery or not.
-    with :ok <- request_reviews_step(forge, repo, pr, Roles.jury(nil, opts), forge_opts),
+    with :ok <- request_reviews_step(forge, repo, pr, Roles.project_jury(repo, opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
          # Producer → judges hand-off: closes ITS build stopwatch (on the ISSUE), decoupled from the lock (the
          # ISSUE lock persists until the merge; the PR unlock below covers only the rework re-delivery
@@ -700,10 +701,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
     :ok
   end
 
-  # Requests the review of ALL judges at once (qualifier+reviewer into requested_reviewers).
-  # Empty list = config hole (never merge without a judge in interim) → fail-loud.
-  defp request_reviews_step(_forge, _repo, _pr, [], _forge_opts),
-    do: {:error, {:request_review, :no_reviewers}}
+  # Requests the review of ALL the card's judges at once (into requested_reviewers).
+  # Empty jury = a DELIBERATE zero-judge card (schema doctrine — the jury source is the
+  # schema-required card, no config hole exists anymore): nothing to request, the poller
+  # seals directly (`dispatch_by_verdicts` zero-judge path; the provenance wall still runs
+  # inside `seal_and_merge` — the mechanical floor is never the card's to waive).
+  defp request_reviews_step(_forge, _repo, _pr, [], _forge_opts), do: :ok
 
   defp request_reviews_step(forge, repo, pr, reviewers, forge_opts) do
     # Exhaustive over the REAL @spec of request_review (`:ok | {:error, term()}`) — an `{:ok, _}`

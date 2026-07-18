@@ -1,0 +1,35 @@
+# Carte type — l0-poc (2026-07-18)
+#
+# Date: 2026-07-18
+# Statut: actif — carte de production L0 (PoC jetable), la plus légère du catalogue.
+# Dérivé de: programme carte-driven 2026-07-18 (la mécanique de criticité EST le choix de la carte).
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Pilot.Roles.project_jury.
+#
+# ZÉRO JUGE, délibéré : l'engineer livre, la PR est scellée directement par le système.
+# Le plancher mécanique tient SEUL et n'est pas négociable par la carte : identité,
+# provenance (mur au sceau — le triplet SHA est vérifié à CHAQUE merge, carte ou pas),
+# pas de push direct sur main. La carte gouverne le JUGEMENT (ici : aucun), jamais le plancher.
+
+kind: WorkflowMap
+metadata:
+  name: l0-poc
+  description: "PoC L0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
+  applicable_intensity: [L0]
+  applicable_regime: [R1, R2]
+
+spec:
+  # Jury VIDE délibéré (doctrine schéma : « an empty array is a deliberate zero-judge card »).
+  # required_approvals = 0 à l'onboard ; requested == [] est le chemin NOMINAL du poller → merge scellé.
+  jury: []
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step unique : implémentation (engineer, fire-mode) ---
+    build:
+      role: engineer
+      profile: fire-mode   # MODOP overlay (authoring C8-correct) ; le cap-profile est chargé par `role`.
+      needs: []            # racine DAG
+      inputs:
+        - ticket.body
+      timeout_sec: 1800

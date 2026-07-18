@@ -206,9 +206,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp protect_main(repo, opts) do
     rule = %{
       rule_name: "main",
-      # Sized by the project's CARD jury (default delegation card until per-project card
-      # selection, F-29) — repo-level protection follows the card, never an engine config.
-      required_approvals: length(Roles.jury(nil, opts)),
+      # Sized by the project's CARD jury: the declaration was written (or imported) into
+      # `<proj_dir>/intensity.json` BEFORE this lock → `project_jury` reads THAT card.
+      # A zero-judge card (l0-poc) sizes the rule to 0 — the forge gate then only enforces
+      # no-direct-push; the judgment layer IS the card's choice.
+      required_approvals: length(Roles.project_jury(repo, opts)),
       dismiss_stale_approvals: true,
       block_on_rejected_reviews: true,
       enable_push: false

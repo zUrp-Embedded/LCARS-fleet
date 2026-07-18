@@ -318,6 +318,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         loader: StubLoader,
         spawner: StubSpawner,
         task_queue: StubTaskQueue,
+        # Hermetic root for `Roles.project_jury` (never created): no intensity.json →
+        # the delegation default card, regardless of the REAL filesystem's state.
+        projects_root: Path.join(System.tmp_dir!(), "lcars-void-projects"),
         # default stub resolver: no project (ordering tests clone nothing).
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
         # #5.2 D2 — default route (step build=engineer): since the decoupling, a ROUTELESS issue is
@@ -905,6 +908,20 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert reviewers != []
       assert_received {:requested_review, _index, ^reviewers}
+      refute_received {:spawned, _, _}
+    end
+
+    test "ZERO-JUDGE card (jury []) + no requested judge → NOMINAL sealed merge, NOT adoption" do
+      # The card arbitrates the no-judge case: an empty jury makes `requested == []` the
+      # nominal path → straight to the sealed merge (provenance wall inside seal_and_merge);
+      # no judge laid, no judge spawned. `reviewer_roles: []` = the card's jury via the seam.
+      pr = pr(%{"requested_reviewers" => [], "number" => 6})
+
+      assert {:ok, {:merged, 6}} =
+               StepDispatcher.dispatch_review(pr, dispatch_opts(reviewer_roles: []))
+
+      assert_received {:merged, 6}
+      refute_received {:requested_review, _, _}
       refute_received {:spawned, _, _}
     end
 

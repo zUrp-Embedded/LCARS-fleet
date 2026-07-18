@@ -11,6 +11,8 @@ defmodule Fleet.Pilot.Roles do
   **Last revised**: 2026-07-18
   """
 
+  require Logger
+
   @default_producer_role "engineer"
   @default_gatekeeper_role "gatekeeper"
   @default_architect_pod_id "permanent-architect"
@@ -47,6 +49,43 @@ defmodule Fleet.Pilot.Roles do
 
   defp jury_of(%{"jury" => jury}, _opts) when is_list(jury), do: jury
   defp jury_of(nil, opts), do: Fleet.Workflow.Loader.load!(delegation_workflow_map(opts))["jury"]
+
+  @doc """
+  Jury of the PROJECT's declared card — the per-issue jury source at every PR call-site
+  (review laying, verdict classification, orphan adoption, branch-protection sizing).
+  Resolution: `Fleet.Pilot.ProjectIntensity.pipeline_default/2` (the committed declaration;
+  absent → delegation default) → loaded card → `spec.jury`. An empty jury is a DELIBERATE
+  zero-judge card (schema doctrine) — the caller decides what that means (no review round,
+  straight to the sealed merge; the mechanical floor holds regardless).
+
+  The `:reviewer_roles` opt is the injection seam (tests), checked FIRST — no disk read
+  under the seam. A declared card that no longer loads falls back LOUD to the delegation
+  default (same repair doctrine as the burn: re-declare to fix, never a stalled rail).
+  """
+  @spec project_jury(String.t(), keyword()) :: [String.t()]
+  def project_jury(repo, opts \\ []) when is_binary(repo) do
+    case Keyword.fetch(opts, :reviewer_roles) do
+      {:ok, jury} when is_list(jury) -> jury
+      :error -> jury_of(load_project_card(repo, opts), opts)
+    end
+  end
+
+  defp load_project_card(repo, opts) do
+    name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo, opts)
+    loader_opts = Keyword.take(opts, [:workflow_maps_root])
+
+    try do
+      Fleet.Workflow.Loader.load!(name, loader_opts)
+    rescue
+      e ->
+        Logger.warning(
+          "Roles: project card #{inspect(name)} for #{repo} does not load " <>
+            "(#{Exception.message(e)}) — falling back to the delegation default card"
+        )
+
+        Fleet.Workflow.Loader.load!(delegation_workflow_map(opts), loader_opts)
+    end
+  end
 
   @doc """
   Name of the delegation DEFAULT workflow map (burned on any routeless issue and used as

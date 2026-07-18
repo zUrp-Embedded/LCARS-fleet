@@ -46,6 +46,24 @@ defmodule Fleet.Workflow.LoaderV25Test do
     refute Map.has_key?(pipe, "spec")
   end
 
+  # The two production TYPE cards of the criticality catalogue: the card IS the judgment-layer
+  # choice — the engine reads `jury` as data (`Roles.project_jury`), never hardcodes a panel.
+  test "canon l0-poc.yaml (V2.5) normalized → single build step + DELIBERATE zero-judge jury" do
+    pipe = Loader.load!("l0-poc", workflow_maps_root: @canon_pipelines)
+    assert pipe["name"] == "l0-poc"
+    assert pipe["jury"] == []
+    assert Map.keys(pipe["steps"]) == ["build"]
+    assert pipe["steps"]["build"]["role"] == "engineer"
+  end
+
+  test "canon l1-light.yaml (V2.5) normalized → single build step + qualifier-only jury" do
+    pipe = Loader.load!("l1-light", workflow_maps_root: @canon_pipelines)
+    assert pipe["name"] == "l1-light"
+    assert pipe["jury"] == ["qualifier"]
+    assert Map.keys(pipe["steps"]) == ["build"]
+    assert pipe["steps"]["build"]["role"] == "engineer"
+  end
+
   @tag :tmp_dir
   test "V2.5 step with post_extract.git passes schema (face 2 of the git architecture decision)",
        %{tmp_dir: dir} do

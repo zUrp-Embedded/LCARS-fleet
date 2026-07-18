@@ -117,8 +117,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
        the re-spawn loop.
     2. all requested have a verdict + at least one `:changes_requested` → producer rework.
     3. all requested have APPROVED → MERGE (gatekeeper-sealed).
-    4. no requested judge → ADOPTION: PR discovered without setup (typ. HUMAN/fork) → we LAY the judges
-       (reviewer_roles) → normal review on the next tick. Agent-agnostic gate: origin doesn't matter.
+    4. no requested judge → the CARD decides: a zero-judge card (`project_jury` == []) makes this
+       the NOMINAL path → straight to the sealed merge (the provenance wall inside `seal_and_merge`
+       stays the floor); a judged card makes it an ORPHAN (typ. HUMAN/fork PR discovered without
+       setup) → ADOPTION: we LAY the card's jury → normal review on the next tick. Agent-agnostic
+       gate: origin doesn't matter.
 
   Entry point of the review flow: `StepDispatcher.dispatch_review/2` delegates here after the PR gate + the
   read of `pr_review_state`. `requested` = union(volatile requested_reviewers, stable jury);
@@ -134,38 +137,48 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         RoleDispatch.dispatch(:judge, pr_number, head, hd(pending), ctx)
 
       requested == [] ->
-        adopt_orphan_pr(pr_number, ctx)
+        # The CARD arbitrates (doc point 4): zero-judge card → this IS the nominal path, seal
+        # directly; judged card → orphan PR, lay the card's jury (adoption).
+        case Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts) do
+          [] -> promote_or_route(pr_number, head, ctx)
+          card_jury -> adopt_orphan_pr(pr_number, card_jury, ctx)
+        end
 
       Enum.any?(Map.values(Map.take(verdicts, requested)), &(&1 == :changes_requested)) ->
         Remediation.dispatch_rework(pr_number, head, ctx)
 
       true ->
-        # All approved → MERGE. A merge failure is NOT necessarily a conflict: we re-read the PR object
-        # and route on the REAL cause (`route_merge_failure`: already-merged / cancelled / draft / policy
-        # re-request / real conflict / unknown) — never a catch-all "conflict", never a seal
-        # claimed before the merge holds.
-        case promote_pr(pr_number, head, ctx) do
-          {:error, {:merge, reason}} ->
-            Remediation.route_merge_failure(pr_number, head, reason, ctx)
-
-          other ->
-            other
-        end
+        # All approved → MERGE (sealed, honest failure routing — `promote_or_route`).
+        promote_or_route(pr_number, head, ctx)
     end
   end
 
-  # ADOPTION — a PR with NO judge at all (neither volatile requested_reviewers nor stable jury) was not set
-  # up by the pipeline: typically a HUMAN PR (fork + cross-repo) that the poller discovered + scoped
-  # (via the linked issue `Closes #N`). The gate is AGENT-AGNOSTIC → we LAY the judges (reviewer_roles, system
-  # token via forge_opts); on the next tick `requested` carries them → normal review → merge/rework, EXACTLY
-  # like an agent deliverable. An agent PR ALWAYS has its judges via open_deliverable_pr → never reaches
-  # here. A laying failure surfaces as `{:error, {:adopt_failed, _}}` — counted in the poller's
-  # `tally.errors` (telemetry + last_tally_errors) and RETRIED next tick (`requested` still empty →
-  # same adoption path re-runs). No crash, no silent skip.
-  # Idempotent: re-laying the same reviewers = Gitea no-op (an adopted PR is never re-adopted: requested ≠ []).
-  defp adopt_orphan_pr(pr_number, %Ctx{} = ctx) do
-    reviewers = Fleet.Pilot.Roles.jury(nil, ctx.opts)
+  # PROMOTE + honest failure routing: a merge failure is NOT necessarily a conflict — we re-read
+  # the PR object and route on the REAL cause (`route_merge_failure`: already-merged / cancelled /
+  # draft / policy re-request / real conflict / unknown) — never a catch-all "conflict", never a
+  # seal claimed before the merge holds. SHARED by the all-approved path and the zero-judge card
+  # path: same seal, same routing, no fork.
+  defp promote_or_route(pr_number, head, %Ctx{} = ctx) do
+    case promote_pr(pr_number, head, ctx) do
+      {:error, {:merge, reason}} ->
+        Remediation.route_merge_failure(pr_number, head, reason, ctx)
 
+      other ->
+        other
+    end
+  end
+
+  # ADOPTION — a PR with NO judge at all (neither volatile requested_reviewers nor stable jury) on a
+  # JUDGED card was not set up by the pipeline: typically a HUMAN PR (fork + cross-repo) that the poller
+  # discovered + scoped (via the linked issue `Closes #N`). The gate is AGENT-AGNOSTIC → we LAY the
+  # CARD's jury (`reviewers`, resolved by the caller; system token via forge_opts); on the next tick
+  # `requested` carries them → normal review → merge/rework, EXACTLY like an agent deliverable. An agent
+  # PR ALWAYS has its judges via open_deliverable_pr → never reaches here. A laying failure surfaces as
+  # `{:error, {:adopt_failed, _}}` — counted in the poller's `tally.errors` (telemetry +
+  # last_tally_errors) and RETRIED next tick (`requested` still empty → same adoption path re-runs).
+  # No crash, no silent skip.
+  # Idempotent: re-laying the same reviewers = Gitea no-op (an adopted PR is never re-adopted: requested ≠ []).
+  defp adopt_orphan_pr(pr_number, reviewers, %Ctx{} = ctx) do
     case ctx.forge.request_review(ctx.repo, pr_number, reviewers, ctx.forge_opts) do
       :ok -> {:ok, {:adopted, pr_number, reviewers}}
       {:error, reason} -> {:error, {:adopt_failed, reason}}

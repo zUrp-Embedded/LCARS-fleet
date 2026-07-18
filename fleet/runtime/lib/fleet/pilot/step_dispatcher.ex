@@ -381,9 +381,9 @@ defmodule Fleet.Pilot.StepDispatcher do
             # that also tags the gatekeeper (a verdict-reader/sealer, not a jury member) — the jury axis is
             # `reviewer_roles`. A foreign reviewer is surfaced LOUD (not swallowed), never a crash (a benign
             # human review must not DoS the pipe).
-            # Jury source = THE CARD (default delegation card here — the per-issue map threading
-            # arrives with the intensity chain, F-29); `:reviewer_roles` opt = test seam.
-            jury_roles = MapSet.new(Fleet.Pilot.Roles.jury(nil, opts), &String.downcase/1)
+            # Jury source = THE CARD (the project's declared card, `Roles.project_jury`);
+            # `:reviewer_roles` opt = test seam.
+            jury_roles = MapSet.new(Fleet.Pilot.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
 
             {requested, foreign} =
               Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))

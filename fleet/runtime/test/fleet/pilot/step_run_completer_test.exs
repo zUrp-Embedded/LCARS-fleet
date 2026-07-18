@@ -622,6 +622,24 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
+    test "producer :review on a ZERO-JUDGE card (jury []) → opens PR, NO request_review, NO error" do
+      # An empty jury is a DELIBERATE card choice (schema doctrine), not a config hole:
+      # nothing to request here — the poller seals directly on its next tick
+      # (`dispatch_by_verdicts` zero-judge path). The rest of the hand-off is unchanged
+      # (human assigned, PR lock lifted, no merge on this side).
+      assert {:ok, :review_requested} =
+               StepRunCompleter.complete_pr(
+                 producer_step_run(:review),
+                 orch_opts(reviewer_roles: [])
+               )
+
+      assert_received {:open_pr, "lcars/issue-42-engineer", "main", _}
+      refute_received {:request_review, _, _}
+      assert_received {:assignee, 7, _human}
+      assert_received {:unlock, 7, "lcars-in-flight"}
+      refute_received {:merge, _}
+    end
+
     test "②.1d judge :reviewed (no-workflow_map) → native review (explicit :approve event), unlocks the PR, NO merge nor request_review" do
       step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :approve})
 
