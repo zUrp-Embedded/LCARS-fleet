@@ -1,7 +1,7 @@
 defmodule Fleet.API.SpawnAdmission do
   @moduledoc """
   ADMISSION pipeline for `POST /api/admin/spawn` — the POLICY of the API's
-  only write, separated from the HTTP routing (C4 2026-07-05 split):
+  only write, separated from the HTTP routing:
   `Fleet.API.ControlRouter` (the write door) maps each verdict returned here onto its HTTP
   status, this module decides WHO passes. Pure functions + catalog reads (no process).
 
