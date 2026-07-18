@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.LaunchBackend do
   @moduledoc """
-  Behaviour to execute `bin/bwrap_launch.sh` (worksite 4) → `bin/claude_launch.sh`
-  (worksite 5) with resolved OAuth ENV vars.
+  Behaviour to execute `bin/bwrap_launch.sh` → `bin/claude_launch.sh`
+  with resolved OAuth ENV vars.
 
   The default `Fleet.Spawner.LaunchBackend.LauncherPortBackend` uses
   `Port.open/2` (`:spawn_executable`) and returns immediately (interactive
@@ -83,9 +83,9 @@ defmodule Fleet.Spawner.LaunchBackend do
     # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
     _ = Code.ensure_loaded(mod)
 
-    # Pas de `is_atom(mod)` : `resolved/0` étant typé `module()`, Dialyzer prouve `is_atom`
-    # toujours vrai → branche `false` morte → gate ROUGE. `function_exported?` seul couvre
-    # typo/absent/nil (tous atomes) — miroir EXACT de `Pod.McpProvision.conforming_provisioner`.
+    # No `is_atom(mod)` guard: `resolved/0` is typed `module()`, so Dialyzer proves `is_atom`
+    # always true → dead `false` branch → RED gate. `function_exported?` alone covers
+    # typo/absent/nil (all atoms) — EXACT mirror of `Pod.McpProvision.conforming_provisioner`.
     if function_exported?(mod, :launch, 2) do
       {:ok, mod}
     else
