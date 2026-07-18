@@ -1,18 +1,18 @@
 defmodule LcarsFleet.MixProject do
   use Mix.Project
 
-  # App UNIQUE :lcars_fleet — collapse de l'umbrella (migration Z3, 2026-07-12).
-  # Les 14 ex-apps sont des domaines sous lib/fleet/, supervisés par Fleet.Application
-  # (l'ordre de boot vit LÀ-BAS, cicatrice F8 inline — plus dans une liste release).
-  # Les atoms de config legacy (`config :fleet_spawner, …`) restent valides : la config
-  # ETS est keyed par atom indépendamment de l'existence d'une app OTP (décision D-07).
+  # SINGLE app :lcars_fleet. The ex-umbrella apps are domains under lib/fleet/,
+  # supervised by Fleet.Application (the boot order lives THERE, F8 scar inline —
+  # never in a release list).
+  # The legacy config atoms (`config :fleet_spawner, …`) stay valid: the ETS config
+  # is keyed by atom regardless of any OTP app existing (decision D-07).
   def project do
     [
       app: :lcars_fleet,
       version: "0.1.0",
       elixir: "~> 1.18",
-      # Z4 migration — boundary = gardien compilé de l'architecture (deps inter-domaines
-      # + exports de façades). Successeur mécanique du verrou topologie umbrella (D-19).
+      # boundary = the compiled guardian of the architecture (inter-domain deps
+      # + façade exports).
       compilers: [:boundary | Mix.compilers()],
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -20,10 +20,10 @@ defmodule LcarsFleet.MixProject do
       aliases: aliases(),
       releases: releases(),
       dialyzer: dialyzer(),
-      # Z4b — fencing des libs sensibles : TOUTE boundary qui les référence doit les
-      # déclarer dans ses deps (frontière vendor/wire visible au compilateur). Les libs
-      # de format (jason, yaml_elixir, ex_json_schema, uuid) restent libres : ubiquitaires,
-      # les fencer = du bruit, pas de la sûreté.
+      # Sensitive-lib fencing: EVERY boundary that references them must declare them
+      # in its deps (vendor/wire frontier visible to the compiler). The format libs
+      # (jason, yaml_elixir, ex_json_schema, uuid) stay free: ubiquitous —
+      # fencing them = noise, not safety.
       boundary: [
         default: [
           check: [apps: [:ex_mcp, :req, :finch, :plug, :plug_cowboy, :phoenix_pubsub]]
@@ -35,47 +35,47 @@ defmodule LcarsFleet.MixProject do
   def application do
     [
       mod: {Fleet.Application, []},
-      # Union des extra_applications des 14 ex-apps : :crypto (cap_profile/sp_builder,
-      # sha256), :eex (sp_builder/project_bootstrap, templates). Le
-      # `:fleet_event_router` qu'un mix.exs forçait ici (ordre de boot inter-app) est
-      # mort avec l'umbrella : l'ordre est porté par les children de Fleet.Application.
+      # Union of the domains' extra_applications: :crypto (cap_profile/sp_builder,
+      # sha256), :eex (sp_builder/project_bootstrap, templates). The boot order is
+      # carried by the children of Fleet.Application — never forced here.
       extra_applications: [:logger, :crypto, :eex]
     ]
   end
 
-  # test/support compilé en :test (ex-elixirc_paths de chaque app, fusionnés —
-  # les stubs/TestEnv vivent sous test/support/<domaine>/).
+  # test/support compiled in :test — the stubs/TestEnv live under
+  # test/support/<domain>/.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # R0.6 — filet de types (Dialyxir). Post-collapse le PLT couvre l'app unique +
-  # `:mix`/`:ex_unit` (tâches Mix : verrou release, lcars.* ; code de test). PLT sous
-  # `_build/plts` (stable entre envs). Les 14 atoms fleet_* d'avant NE DOIVENT PAS
-  # revenir dans plt_add_apps : plus des apps → dialyzer crash « unknown application ».
+  # Type net (Dialyxir). The PLT covers the single app +
+  # `:mix`/`:ex_unit` (Mix tasks: release lock, lcars.*; test code). PLT under
+  # `_build/plts` (stable across envs). The old fleet_* atoms MUST NOT
+  # come back into plt_add_apps: not apps anymore → dialyzer crash "unknown application".
   defp dialyzer do
     [
       plt_add_apps: [:mix, :ex_unit],
       plt_core_path: "_build/plts",
       plt_local_path: "_build/plts",
       ignore_warnings: ".dialyzer_ignore.exs",
-      # signale un filtre d'ignore devenu obsolète (code déplacé/corrigé) → on le nettoie.
+      # flags an ignore filter gone stale (code moved/fixed) → clean it up.
       list_unused_filters: true,
-      # E5 (2026-07-04) — mode STRICT au-delà du défaut : :unmatched_returns (un retour {:error,_}
-      # jeté sans `_ =` = échec potentiellement avalé), :error_handling (fonctions qui ne peuvent que
-      # crasher), :extra_return/:missing_return (specs vs comportement réel). Top-tier = 0 erreur
-      # AVEC ces flags, pas seulement avec le défaut.
+      # STRICT mode beyond the default: :unmatched_returns (an {:error,_} return
+      # discarded without `_ =` = a potentially swallowed failure), :error_handling (functions that can
+      # only crash), :extra_return/:missing_return (specs vs real behavior). Top-tier = 0 errors
+      # WITH these flags, not only with the default.
       flags: [:unmatched_returns, :error_handling, :extra_return, :missing_return]
     ]
   end
 
-  # R7 — `mix gate` doit tourner en :test (sinon l'étape `test` de l'alias s'exécute dans
-  # l'env ambiant `:dev` et Mix refuse / la suite ne boote pas dans le bon env).
+  # `mix gate` must run in :test (otherwise the alias's `test` step executes in
+  # the ambient `:dev` env and Mix refuses / the suite does not boot in the right env).
   def cli do
     [preferred_envs: [gate: :test]]
   end
 
-  # R7 verrou I-CBC — gate CI/dev composable : compile strict + suite + contrats
-  # inter-module + Dialyzer strict. `mix gate` exit≠0 si un contrat est rouge.
+  # Composable CI/dev gate: strict compile + suite + shell_gate (out-of-mix tests) +
+  # inter-module contracts + topology freshness + strict Dialyzer. `mix gate` exits ≠0
+  # if any step is red.
   defp aliases do
     [
       gate: [
@@ -87,26 +87,25 @@ defmodule LcarsFleet.MixProject do
         # `use Boundary` declarations — divergence (new/moved domain, undeclared layer)
         # is refused here, so the committed map can never lie.
         "lcars.topology --check",
-        # Dialyzer STRICT (E5) DANS le gate — dernier de la chaîne : le plus long à froid
-        # (build PLT une fois par _build) ; à chaud ~2s. Tourne en MIX_ENV=test comme le
-        # reste (preferred_envs) — même env que la suite, un seul _build analysé.
+        # STRICT Dialyzer INSIDE the gate — last in the chain: the longest cold
+        # (PLT built once per _build); warm ~2s. Runs in MIX_ENV=test like the
+        # rest (preferred_envs) — same env as the suite, a single _build analyzed.
         "dialyzer"
       ]
     ]
   end
 
-  # Étape `mix gate` : filet des tests HORS-mix (python du bridge MCP stdio + bats
-  # des launchers) que `mix test` (ExUnit) ne voit pas. Sans ce câblage,
-  # test/test_fleet_mcp_stdio_bridge.py peut virer ROUGE en silence — personne ne le
-  # rejoue — exactement le bug (bridge renommé, test jamais rejoué) qui a motivé le filet.
-  # (Historique : la forme fonction-step vient de l'époque umbrella où `mix cmd` était
-  # récursif par-app ; en single-app `mix cmd` marcherait, la fonction reste : elle porte
-  # BATS_MISSING_FATAL et un message d'échec riche que cmd ne donne pas.)
+  # `mix gate` step: the net for OUT-of-mix tests (python of the MCP stdio bridge + bats
+  # of the launchers) that `mix test` (ExUnit) does not see. Without this wiring,
+  # test/test_fleet_mcp_stdio_bridge.py could turn RED silently — nobody replays it
+  # (a renamed bridge with a never-replayed test is exactly the bug class this net closes).
+  # (The function-step form carries BATS_MISSING_FATAL and a rich failure message
+  # that a bare `mix cmd` would not give.)
   #
-  # Durci : BATS_MISSING_FATAL=1 → l'absence de bats FAIT ÉCHOUER `mix gate` (message
-  # d'install clair). Les tests bats des launchers — bwrap (35) + claude_launch (31) — sont vérifiés à
-  # CHAQUE gate — plus jamais absents en silence (régression-invisible vécue : test
-  # claude_launch resté stale sur l'ancien contrat 4-args).
+  # Hardened: BATS_MISSING_FATAL=1 → a missing bats FAILS `mix gate` (clear install
+  # message). The launcher bats tests — bwrap + claude_launch — are verified at
+  # EVERY gate — never silently absent (a stale launcher test on an old contract
+  # would otherwise be an invisible regression).
   defp shell_gate(_args) do
     script = Path.join([__DIR__, "test", "shell_gate.sh"])
 
@@ -117,28 +116,28 @@ defmodule LcarsFleet.MixProject do
 
     if status != 0 do
       Mix.raise(
-        "shell_gate (filet tests hors-mix) : ECHEC (exit #{status}) — test python du bridge MCP rouge, " <>
-          "coquille vide (0 test lance), ou bats absent/rouge (launchers bwrap+claude_launch). Voir la sortie."
+        "shell_gate (out-of-mix test net): FAILED (exit #{status}) — MCP bridge python test red, " <>
+          "empty shell (0 tests run), or bats missing/red (bwrap+claude_launch launchers). See the output."
       )
     end
   end
 
-  # R7 verrou I-CBC — step de `mix release` : refuse de bâtir la release si un contrat
-  # inter-module est rouge. Aucune release rouge ne se construit ⇒ réalisation mécanique
-  # de « le boot refuse si un contrat est rouvert ». Tourne après la phase compile,
-  # avant :assemble (sources présentes au build → checks grep/introspection valides).
+  # `mix release` step: refuses to build the release if an inter-module contract
+  # is red. No red release ever builds ⇒ the mechanical realization of
+  # "the boot refuses if a contract is reopened". Runs after the compile phase,
+  # before :assemble (sources present at build → grep/introspection checks valid).
   defp verrou_contracts(release) do
-    # Fail-closed : un check qui CRASH (fichier absent, YAML invalide…) rend le statut
-    # des contrats inconnu → on refuse la release avec un message clair, comme pour un
-    # contrat rouge.
+    # Fail-closed: a check that CRASHES (missing file, invalid YAML…) leaves the
+    # contracts status unknown → refuse the release with a clear message, as for a
+    # red contract.
     {overall, checks} =
       try do
         Mix.Tasks.Lcars.Contracts.Check.run_checks()
       rescue
         e ->
           Mix.raise(
-            "Verrou contracts.check (R7 I-CBC) : release REFUSÉE — le checker a planté " <>
-              "(#{Exception.message(e)}). Statut des contrats inconnu → fail-closed."
+            "contracts.check lock: release REFUSED — the checker crashed " <>
+              "(#{Exception.message(e)}). Contracts status unknown → fail-closed."
           )
       end
 
@@ -146,35 +145,35 @@ defmodule LcarsFleet.MixProject do
       rouges = checks |> Enum.filter(&(&1.status == :fail)) |> Enum.map(& &1.id)
 
       Mix.raise(
-        "Verrou contracts.check (R7 I-CBC) : release REFUSÉE — contrats rouges : " <>
-          "#{inspect(rouges)}. Corriger avant de bâtir (cf. mix lcars.contracts.check)."
+        "contracts.check lock: release REFUSED — red contracts: " <>
+          "#{inspect(rouges)}. Fix before building (cf. mix lcars.contracts.check)."
       )
     end
 
-    Mix.shell().info("[verrou] contracts.check vert — release autorisée")
+    Mix.shell().info("[lock] contracts.check green — release authorized")
     release
   end
 
   defp deps do
     [
-      # — substrat & wire —
+      # — substrate & wire —
       {:phoenix_pubsub, "~> 2.1"},
       {:plug, "~> 1.19"},
       {:plug_cowboy, "~> 2.8"},
       {:jason, "~> 1.4"},
       {:ex_json_schema, "~> 0.11"},
       {:yaml_elixir, "~> 2.12"},
-      # — MCP (frontière pod) —
+      # — MCP (pod frontier) —
       {:ex_mcp, "~> 0.9.1"},
       {:jose, "1.11.10", override: true},
-      # — HTTP forge (pilot/starfleet) —
+      # — forge HTTP (pilot/starfleet) —
       {:req, "~> 0.5"},
       {:finch, "~> 0.22"},
-      # — divers runtime —
+      # — runtime misc —
       {:uuid, "~> 1.1"},
-      # — architecture (compile-time tracer, zéro coût runtime) —
+      # — architecture (compile-time tracer, zero runtime cost) —
       {:boundary, "~> 0.10", runtime: false},
-      # — test/outillage (union des flags les plus larges des ex-apps) —
+      # — test/tooling —
       {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -182,10 +181,10 @@ defmodule LcarsFleet.MixProject do
     ]
   end
 
-  # Mix release (lancement per-humain via bin/fleet_v2). Le NOM `fleet_umbrella` est
-  # CONSERVÉ post-collapse (D-08) : bin/fleet_v2 pointe `rel/fleet_umbrella/bin/fleet_umbrella`
-  # — le renommer casserait le launcher pour un gain cosmétique. Une seule app :permanent ;
-  # l'ordre de boot des domaines vit dans Fleet.Application (cicatrice F8 là-bas).
+  # Mix release (per-human launch via bin/fleet_v2). The NAME `fleet_umbrella` is
+  # KEPT (D-08): bin/fleet_v2 points at `rel/fleet_umbrella/bin/fleet_umbrella`
+  # — renaming it would break the launcher for a cosmetic gain. A single :permanent app;
+  # the domain boot order lives in Fleet.Application (F8 scar there).
   defp releases do
     [
       fleet_umbrella: [
@@ -196,10 +195,10 @@ defmodule LcarsFleet.MixProject do
     ]
   end
 
-  # Step de `mix release` : embarque la version du build (SHA git court + dirty + ref)
-  # dans le priv assemblé (priv/api/), AVANT le tar. Le runtime relira ce fichier
-  # (`source=release`) → version constatable sans git ni repo. Délègue à
-  # `Fleet.API.BuildInfo` (module sur le code path au release, comme le checker).
+  # `mix release` step: embeds the build version (short git SHA + dirty + ref)
+  # into the assembled priv (priv/api/), BEFORE the tar. The runtime re-reads that file
+  # (`source=release`) → version observable without git or a repo. Delegates to
+  # `Fleet.API.BuildInfo` (module on the code path at release time, like the checker).
   defp write_build_info(release) do
     Fleet.API.BuildInfo.write_release_file(release)
   end
