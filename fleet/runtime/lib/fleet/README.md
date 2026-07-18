@@ -16,36 +16,36 @@ compile time — the single source of truth. The table below is a generated proj
 
 Derived from the `use Boundary` declarations (enforced at compile time; this table
 is a projection — `mix lcars.topology` regenerates it, the gate refuses divergence).
-Height = 1 + max height of declared deps; 0 = `deps: []` (pure foundation).
-Runtime seams (config-injected, compile-invisible) are NOT in this table — see the
-"Seams runtime" section of `CLAUDE.md`.
+Layers top-down, same order as the root README diagram. H = 1 + max H of declared
+deps; 0 = `deps: []` (pure foundation). Runtime seams (config-injected,
+compile-invisible) are NOT in this table — see the "Seams runtime" section of `CLAUDE.md`.
 
-| H | Domain | Layer |
-|---|--------|-------|
-| 0 | `Fleet.Decision` | foundation |
-| 0 | `Fleet.EnvParse` | foundation |
-| 0 | `Fleet.Event` | foundation |
-| 0 | `Fleet.GitRef` | foundation |
-| 0 | `Fleet.Labels` | foundation |
-| 0 | `Fleet.Layout` | foundation |
-| 0 | `Fleet.SchemaCache` | foundation |
-| 0 | `Fleet.Shutdown.Quiesce` | foundation |
-| 0 | `Fleet.Slug` | foundation |
-| 1 | `Fleet.CapProfile` | substrate |
-| 1 | `Fleet.EventRouter` | substrate |
-| 2 | `Fleet.Coord` | pod primitives |
-| 2 | `Fleet.Credentials` | pod primitives |
-| 2 | `Fleet.SPBuilder` | pod primitives |
-| 2 | `Fleet.TaskQueue` | pod primitives |
-| 3 | `Fleet.ProjectBootstrap` | pod composition |
-| 4 | `Fleet.Spawner` | pod composition |
-| 5 | `Fleet.MCP` | work |
-| 5 | `Fleet.Observation` | surface |
-| 5 | `Fleet.Workflow` | work |
-| 6 | `Fleet.Pilot` | steering |
-| 6 | `Fleet.Starfleet` | steering |
-| 7 | `Fleet.API` | surface |
-| 8 | `Fleet.Application` | OTP root |
+| Layer | Domain | H |
+|-------|--------|---|
+| OTP root | `Fleet.Application` | 8 |
+| surface | `Fleet.Observation` | 5 |
+| surface | `Fleet.API` | 7 |
+| steering | `Fleet.Pilot` | 6 |
+| steering | `Fleet.Starfleet` | 6 |
+| work | `Fleet.MCP` | 5 |
+| work | `Fleet.Workflow` | 5 |
+| pod composition | `Fleet.ProjectBootstrap` | 3 |
+| pod composition | `Fleet.Spawner` | 4 |
+| pod primitives | `Fleet.Coord` | 2 |
+| pod primitives | `Fleet.Credentials` | 2 |
+| pod primitives | `Fleet.SPBuilder` | 2 |
+| pod primitives | `Fleet.TaskQueue` | 2 |
+| substrate | `Fleet.CapProfile` | 1 |
+| substrate | `Fleet.EventRouter` | 1 |
+| foundation | `Fleet.Decision` | 0 |
+| foundation | `Fleet.EnvParse` | 0 |
+| foundation | `Fleet.Event` | 0 |
+| foundation | `Fleet.GitRef` | 0 |
+| foundation | `Fleet.Labels` | 0 |
+| foundation | `Fleet.Layout` | 0 |
+| foundation | `Fleet.SchemaCache` | 0 |
+| foundation | `Fleet.Shutdown.Quiesce` | 0 |
+| foundation | `Fleet.Slug` | 0 |
 <!-- boundary-topology:end -->
 
 ## Reading the table

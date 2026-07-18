@@ -159,17 +159,23 @@ defmodule Mix.Tasks.Lcars.Topology do
 
   # ── rendering ─────────────────────────────────────────────────────────────
 
+  # Same organizing axis as the mermaid (layers, top-down) so the two projections read
+  # symmetrically; H stays as per-domain data — a layer is NOT a homogeneous height
+  # (pod composition spans H3–H4, surface H5–H7), the table shows that honestly.
   defp render_section(by_height) do
+    heights = Enum.flat_map(by_height, fn {h, ms} -> Enum.map(ms, &{&1, h}) end) |> Map.new()
+
     rows =
-      by_height
-      |> Enum.sort()
-      |> Enum.flat_map(fn {h, mods} ->
+      heights
+      |> Map.keys()
+      |> Enum.group_by(fn m ->
+        Map.get(@layers, m) || raise "no layer declared in @layers for #{m}"
+      end)
+      |> Enum.sort_by(fn {_l, ms} -> ms |> Enum.map(&Map.fetch!(heights, &1)) |> Enum.max() end, :desc)
+      |> Enum.flat_map(fn {layer, mods} ->
         mods
-        |> Enum.sort()
-        |> Enum.map(fn m ->
-          layer = Map.get(@layers, m) || raise "no layer declared in @layers for #{m}"
-          "| #{h} | `#{m}` | #{layer} |"
-        end)
+        |> Enum.sort_by(&{Map.fetch!(heights, &1), &1})
+        |> Enum.map(fn m -> "| #{layer} | `#{m}` | #{Map.fetch!(heights, m)} |" end)
       end)
 
     Enum.join(
@@ -178,12 +184,12 @@ defmodule Mix.Tasks.Lcars.Topology do
         "",
         "Derived from the `use Boundary` declarations (enforced at compile time; this table",
         "is a projection — `mix lcars.topology` regenerates it, the gate refuses divergence).",
-        "Height = 1 + max height of declared deps; 0 = `deps: []` (pure foundation).",
-        "Runtime seams (config-injected, compile-invisible) are NOT in this table — see the",
-        "\"Seams runtime\" section of `CLAUDE.md`.",
+        "Layers top-down, same order as the root README diagram. H = 1 + max H of declared",
+        "deps; 0 = `deps: []` (pure foundation). Runtime seams (config-injected,",
+        "compile-invisible) are NOT in this table — see the \"Seams runtime\" section of `CLAUDE.md`.",
         "",
-        "| H | Domain | Layer |",
-        "|---|--------|-------|"
+        "| Layer | Domain | H |",
+        "|-------|--------|---|"
       ] ++ rows ++ [@end_marker],
       "\n"
     )
