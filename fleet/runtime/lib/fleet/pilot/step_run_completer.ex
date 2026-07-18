@@ -400,7 +400,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # `StepDispatcher.promote_pr`. The gatekeeper signature is set INTERNALLY by `seal_and_merge`
     # (sole writer `GatekeeperSeal.as_gatekeeper/1`): this `:promote` terminal (e.g. after escalation)
     # cannot merge on a raw system token without a comment (merge attributed to `lcars-system`).
-    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts, opts) do
+    seal_opts = Keyword.put(opts, :head_branch, Map.get(step_run, :producer_branch))
+
+    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts, seal_opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
       # F-C066 — merge OK but close failed: the NON-`:ok` propagates → the `with` of `route/3`

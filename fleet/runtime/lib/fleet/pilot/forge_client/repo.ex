@@ -99,6 +99,22 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
+  Tip commit sha of `branch` on `repo` (Gitea `GET /repos/{repo}/branches/{branch}` →
+  `commit.id`). Read by the seal's provenance wall (the deliverable head at merge time).
+  """
+  @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
+  def branch_head(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, %{"commit" => %{"id" => sha}}} when is_binary(sha) <-
+           http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+      {:ok, sha}
+    else
+      {:error, _} = err -> err
+      other -> {:error, {:branch_head_unexpected, other}}
+    end
+  end
+
+  @doc """
   Does the branch `branch` exist on `repo`? Gitea `GET /repos/{repo}/branches/{branch}` (200 = yes,
   404 = no). Serves WS4 (import): idempotence of `work/ops` — a re-imported (or already onboarded) repo
   must not have its orphan branch overwritten. `false` on any error (fail-safe: unconfirmed absence

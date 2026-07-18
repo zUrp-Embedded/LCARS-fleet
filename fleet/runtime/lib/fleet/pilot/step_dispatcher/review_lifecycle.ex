@@ -200,7 +200,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              pr_number,
              issue_n,
              producer,
-             ctx.forge_opts
+             ctx.forge_opts,
+             head_branch: head
            ) do
         :ok ->
           # Die-on-promote (return discarded — honestly: the producer is `one-shot`, ALREADY dead at

@@ -29,5 +29,19 @@ defmodule Fleet.Workflow do
       Fleet.EventRouter,
       Fleet.TaskQueue
     ],
-    exports: [Gatekeeper, GateBrief, Loader, Gates, GateDecision, BriefArtifact, Provenance]
+    # BriefTemplate exported: pilot composes its work-order documents through the SAME
+    # calibration-template mechanic as the gate-briefs (F-23) — one renderer, two consumers.
+    # Provenance.Verifier exported: the SEAL (pilot) runs the deterministic triplet wall
+    # on every brick before merging — deliberate API widening (Phase 2 of the verifier brief).
+    exports: [
+      Gatekeeper,
+      GateBrief,
+      Loader,
+      Gates,
+      GateDecision,
+      BriefArtifact,
+      Provenance,
+      Provenance.Verifier,
+      BriefTemplate
+    ]
 end

@@ -125,4 +125,119 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert_received {:close_attempt, 42, 2}
     assert_received {:close_attempt, 42, 3}
   end
+
+
+  # ── Provenance wall (Phase 2) — systematic, card-independent ──────────────
+  defmodule WallForge do
+    # branch_head exported → the wall RUNS (stubs without it exercise the skip path,
+    # which every other test of this file proves).
+    def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}
+
+    def post_comment(_r, n, body, o) do
+      send(self(), {:comment, n, body, o[:dedup_signature]})
+      {:ok, :posted}
+    end
+
+    def merge_pr(_r, pr, _o) do
+      send(self(), {:merge, pr})
+      :ok
+    end
+
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
+    def close_issue(_r, _n, _o), do: {:ok, :closed}
+  end
+
+  defp wall_harness(tmp) do
+    proj = Path.join([tmp, "p", "demo"])
+    work = Path.join([tmp, "w", "demo"])
+    File.mkdir_p!(proj)
+    File.mkdir_p!(work)
+    g = fn dir, args -> {out, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true); out end
+
+    for dir <- [proj, work] do
+      {_, 0} = System.cmd("git", ["init", "-q", dir], stderr_to_stdout: true)
+      g.(dir, ["config", "user.email", "t@lcars.local"])
+      g.(dir, ["config", "user.name", "t"])
+    end
+
+    File.write!(Path.join(proj, "f"), "base")
+    g.(proj, ["add", "."])
+    g.(proj, ["commit", "-qm", "base"])
+    base = String.trim(g.(proj, ["rev-parse", "HEAD"]))
+    File.write!(Path.join(proj, "f"), "delivered")
+    g.(proj, ["add", "."])
+    g.(proj, ["commit", "-qm", "deliverable"])
+    head = String.trim(g.(proj, ["rev-parse", "HEAD"]))
+    main = String.trim(g.(proj, ["rev-parse", "--abbrev-ref", "HEAD"]))
+    g.(proj, ["checkout", "-q", "--orphan", "alien"])
+    File.write!(Path.join(proj, "g"), "x")
+    g.(proj, ["add", "."])
+    g.(proj, ["commit", "-qm", "alien"])
+    alien = String.trim(g.(proj, ["rev-parse", "HEAD"]))
+    g.(proj, ["checkout", "-q", main])
+
+    %{tmp: tmp, base: base, head: head, alien: alien}
+  end
+
+  defp wall_statement(tmp, issue_n, head, input) do
+    work = Path.join([tmp, "w", "demo"])
+
+    {:ok, _} =
+      Fleet.Workflow.Provenance.emit(work, %{
+        livrable_sha: head,
+        input_sha: input,
+        issue: issue_n
+      })
+
+    :ok
+  end
+
+  defp wall_opts(tmp, head) do
+    [
+      head_branch: "lcars/issue-9-engineer",
+      projects_root: Path.join(tmp, "p"),
+      work_root: Path.join(tmp, "w"),
+      __head_sha__: head
+    ]
+  end
+
+  test "provenance wall: an INCOHERENT statement REFUSES the merge (deterministic, no LLM)",
+       %{tmp_dir: tmp} do
+    %{head: head, alien: alien} = wall_harness(tmp)
+    :ok = wall_statement(tmp, 9, head, alien)
+
+    assert {:error, {:provenance_incoherent, {:base_not_ancestor, ^alien, ^head}}} =
+             GatekeeperSeal.seal_and_merge(
+               WallForge,
+               "fleet/demo",
+               4,
+               9,
+               "engineer",
+               wall_opts(tmp, head),
+               wall_opts(tmp, head)
+             )
+
+    # THE point: nothing merged; the wall's user-facing trace is on the PR.
+    refute_received {:merge, _}
+    assert_received {:comment, 4, body, "[provenance-wall:pr-4]"}
+    assert body =~ "Provenance incohérente"
+  end
+
+  test "provenance wall: a COHERENT statement lets the seal proceed", %{tmp_dir: tmp} do
+    %{base: base, head: head} = wall_harness(tmp)
+    :ok = wall_statement(tmp, 9, head, base)
+
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(
+               WallForge,
+               "fleet/demo",
+               4,
+               9,
+               "engineer",
+               wall_opts(tmp, head),
+               wall_opts(tmp, head)
+             )
+
+    assert_received {:merge, 4}
+  end
 end

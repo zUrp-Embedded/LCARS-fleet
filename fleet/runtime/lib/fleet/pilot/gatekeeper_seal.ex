@@ -71,8 +71,24 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         err
 
       {:ok, gk_opts} ->
-        signature = "[merge:pr-#{pr_number}]"
-        body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
+        # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
+        # (a zero-judge card still passes here: the mechanical floor is not the card's to
+        # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
+        # statement passes LOUD (emission is best-effort, DR-010 — absence is recorded,
+        # incoherence blocks). The wall is deterministic (git+JSON, no LLM) — the one
+        # check a confabulating jury consensus cannot cross.
+        with {:error, {:provenance_incoherent, reason}} <-
+               verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
+          {:error, {:provenance_incoherent, reason}}
+        else
+          :ok -> do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts)
+        end
+    end
+  end
+
+  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts) do
+    signature = "[merge:pr-#{pr_number}]"
+    body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
 
         # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
         # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
@@ -175,12 +191,83 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           {:error, _} = err ->
             err
         end
-    end
   end
 
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
     do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Pilot.WorktreeSync)
+
+  # ── Provenance wall (Phase 2) ────────────────────────────────────────────
+  # Deterministic triplet check on the brick being sealed. SKIP paths (all LOUD, never
+  # blocking): seam without branch_head (test stubs), no head branch threaded, forge
+  # read hiccup, no local clone, ABSENT statement (best-effort emission, DR-010). The
+  # ONLY blocking outcome is a PRESENT-but-INCOHERENT statement — then NO merge, and a
+  # user-facing comment (FR) cites the exact failure on the PR.
+  defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
+    head_branch = Keyword.get(opts, :head_branch)
+    # Roots injectable (tests) — defaults = the container layout authority.
+    project_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), project_name(repo))
+    work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), project_name(repo))
+
+    with true <- is_binary(head_branch) || {:skip, :no_head_branch},
+         true <-
+           (Code.ensure_loaded?(forge) and function_exported?(forge, :branch_head, 3)) ||
+             {:skip, :seam_without_branch_head},
+         {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
+         true <- File.dir?(project_dir) || {:skip, :no_local_clone},
+         true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
+         # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch
+         # the head branch so the deliverable objects are verifiable. Best-effort.
+         _ = Fleet.Pilot.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch], auth: true),
+         ref = Fleet.Layout.provenance_ref("issue-#{issue_n}-#{String.slice(head_sha, 0, 7)}"),
+         true <- File.exists?(Path.join(work_dir, ref)) || {:skip, {:no_statement, ref}} do
+      case Fleet.Workflow.Provenance.Verifier.verify(ref,
+             work_dir: work_dir,
+             project_dir: project_dir
+           ) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error(
+            "GatekeeperSeal: #{repo}##{issue_n} provenance INCOHERENT (#{inspect(reason)}) — " <>
+              "merge REFUSED (the statement lies about the brick; deterministic wall, no LLM)"
+          )
+
+          # User-facing trace on the PR (FR), best-effort — the refusal itself is the wall.
+          _ =
+            comment(
+              forge,
+              repo,
+              pr_number,
+              "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
+                "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
+                "Rien n'est mergé tant que la traçabilité ment.",
+              Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
+            )
+
+          {:error, {:provenance_incoherent, reason}}
+      end
+    else
+      {:skip, why} ->
+        Logger.warning(
+          "GatekeeperSeal: #{repo}##{issue_n} provenance wall SKIPPED (#{inspect(why)}) — " <>
+            "sealing without the deterministic check (absence recorded, incoherence alone blocks)"
+        )
+
+        :ok
+
+      {:error, why} ->
+        Logger.warning(
+          "GatekeeperSeal: #{repo}##{issue_n} provenance wall head-read failed (#{inspect(why)}) — " <>
+            "sealing without the deterministic check (a forge hiccup never blocks an approved merge)"
+        )
+
+        :ok
+    end
+  end
+
+  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   defp comment(forge, repo, issue_n, body, opts) do
     case forge.post_comment(repo, issue_n, body, opts) do

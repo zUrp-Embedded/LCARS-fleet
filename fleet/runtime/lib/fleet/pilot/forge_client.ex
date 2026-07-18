@@ -66,6 +66,11 @@ defmodule Fleet.Pilot.ForgeClient do
   # `Fleet.Pilot.ForgeProtocol` (impl + tests live there); this module no longer re-exports it.
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
+  # Tip sha of a branch (seal's provenance wall reads the deliverable head at merge time).
+  # Delegated on the FAÇADE so the seal reaches it through its forge SEAM (test stubs
+  # without it fall into the wall's skip path, function_exported?-guarded).
+  defdelegate branch_head(repo, branch, opts), to: Fleet.Pilot.ForgeClient.Repo
+
   @doc """
   Adds the label `label_name` to the issue `repo`/`issue_number` on the
   forge. Idempotent: if the label is already present, no write.
