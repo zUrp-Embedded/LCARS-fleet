@@ -91,7 +91,7 @@ defmodule Fleet.Workflow.LoaderTest do
 
       # Sans la garde slug, `Path.join(root, "../escape.yaml")` lirait ce YAML hors-catalogue.
       # `cast!` raise AVANT le Path.join.
-      assert_raise ArgumentError, ~r/slug invalide/, fn ->
+      assert_raise ArgumentError, ~r/invalid slug/, fn ->
         Loader.load!("../escape")
       end
 
@@ -99,7 +99,7 @@ defmodule Fleet.Workflow.LoaderTest do
     end
 
     test "nom de pipeline avec slash → REFUSÉ", %{tmp_dir: _tmp_dir} do
-      assert_raise ArgumentError, ~r/slug invalide/, fn ->
+      assert_raise ArgumentError, ~r/invalid slug/, fn ->
         Loader.load!("a/b")
       end
     end

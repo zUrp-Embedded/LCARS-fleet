@@ -1,8 +1,4 @@
 defmodule Fleet.Slug do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
 
   @moduledoc """
@@ -33,8 +29,8 @@ defmodule Fleet.Slug do
       by the charset), no misleading unicode (homoglyphs outside
       `[a-z0-9_-]` are rejected).
 
-  This is the SAME charset as the path-safe regexes historically copied
-  around (role, role_token…) — now centralized here, a single source.
+  Single authority for the path-safe charset — role/role_token/checkpoint
+  names all validate HERE, never through a local regex copy.
 
   ## Confinement to the FS leaf
 
@@ -56,7 +52,7 @@ defmodule Fleet.Slug do
 
   Two functions look like a slug but are NOT, and must NOT be folded in here:
 
-    * `Fleet.Pilot.PodId.component/1` — TRANSFORMS into the pod_id charset
+    * `Fleet.Pilot.PodId` — TRANSFORMS names into the pod_id charset
       `[A-Za-z0-9._-]` (case and `.` preserved, contract `valid_pod_id?`);
       `Fleet.Slug` VALIDATES/rejects, strict lowercase, no `.`.
     * `Fleet.Spawner.SeedStore.slugify/1` — reproduces Claude Code's algo
@@ -106,7 +102,7 @@ defmodule Fleet.Slug do
   def cast!(name) do
     case cast(name) do
       {:ok, slug} -> slug
-      {:error, {:invalid_slug, raw}} -> raise ArgumentError, "slug invalide: #{inspect(raw)}"
+      {:error, {:invalid_slug, raw}} -> raise ArgumentError, "invalid slug: #{inspect(raw)}"
     end
   end
 
@@ -144,12 +140,10 @@ defmodule Fleet.Slug do
     expanded_root = Path.expand(root)
     expanded_dest = Path.expand(dest)
 
-    # The separator is appended ONLY when the root does not already end with one — i.e. only when
-    # the root is not `/` itself. Concatenating unconditionally turned the root `/` into the prefix
-    # `//`, which no expanded path starts with: `under_root?("/x", "/")` came out FALSE and
-    # `confined_join("/", name)` was structurally impossible, though the contract promises "== root
-    # or under root". Fail-CLOSED (a false reject, never an escape) — but a guard that refuses the
-    # legal case is a guard nobody can use. Found by the confinement property.
+    # Separator appended ONLY when the root does not already end with one: a bare `/` root
+    # would otherwise become the `//` prefix that no expanded path starts with — the guard
+    # would refuse its own legal case (`under_root?("/x", "/")` false, `confined_join("/", _)`
+    # unusable) while promising "== root or under root".
     prefix = if String.ends_with?(expanded_root, "/"), do: expanded_root, else: expanded_root <> "/"
 
     expanded_dest == expanded_root or String.starts_with?(expanded_dest, prefix)
