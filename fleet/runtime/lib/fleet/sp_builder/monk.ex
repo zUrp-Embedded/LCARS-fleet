@@ -12,7 +12,7 @@ defmodule Fleet.SPBuilder.Monk do
   **Pure** functions (FS read only, no process). The composer's public API stays
   `Fleet.SPBuilder.resolve_monk_injection/2` (defdelegate to `resolve/2`).
 
-  ## Monks are FROZEN — reactivation is dormant by design (F-C153)
+  ## Monks are FROZEN — reactivation is dormant by design
 
   The registry root defaults to `app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`, a tree
   that is **intentionally ABSENT**: the monks were FROZEN into `priv/cap_profile/canon/_frozen-monks/`
