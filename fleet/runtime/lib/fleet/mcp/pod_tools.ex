@@ -26,6 +26,8 @@ defmodule Fleet.MCP.PodTools do
       - `import_project`   : the arch imports an EXISTING forge repo (dual-dir, main content
         intact — ≠ create_project which starts a fresh one).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `delivered`).
+      - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
+      - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly
   (the queue, its schema, its storage stay invisible to the pod); everything goes through
@@ -34,8 +36,8 @@ defmodule Fleet.MCP.PodTools do
   presence (`:pod_id_required`, fail-closed), the architect gate lives in `Delegation`.
 
   The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
-  `fleet.events` (consumed by `fleet_spawner`/`fleet_coord`) — this module no longer emits
-  a string-topic event (`pod.result_submitted` removed).
+  `fleet.events` — this module emits NO event of its own (the broker is the single
+  emitter of the completion lifecycle).
 
   **Last revised**: 2026-07-18
   """
@@ -48,8 +50,8 @@ defmodule Fleet.MCP.PodTools do
   # F-C138 — the UNIVERSAL pod interface: every pod is a task-worker (pull `get_work_item` IN / push
   # `submit_result` OUT). These two are exposed to EVERY role; the role-GATED extras (create_issue, …) are
   # DERIVED from the cap-profile `allowedTools` (`Fleet.CapProfile.mcp_fleet_tools/1`) and threaded to the
-  # socket acceptor at spawn. The acceptor serves `tools/list` = base + threaded, so the stdio bridge no
-  # longer hard-codes a second, divergent catalogue. SINGLE co-located declaration of the pod base.
+  # socket acceptor at spawn. The acceptor serves `tools/list` = base + threaded — the stdio bridge
+  # carries NO catalogue of its own (a second one would diverge). SINGLE co-located declaration of the pod base.
   @base_tool_names ["get_work_item", "submit_result"]
 
   @doc "The universal pod-interface tool names (task-worker base), exposed to every role."
@@ -296,7 +298,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # create_issue WITHOUT a valid `project` → STRUCTURAL REFUSAL. Goodwill does not impose itself: no default
-  # routing (an omitted `project` used to route silently to the last worked-on project → misroute). `project`
+  # routing (an omitted `project` silently routed to a "last worked-on" project would misroute). `project`
   # is REQUIRED; without it, NO issue is created.
   def handle_tool_call("create_issue", %{"title" => title, "brief" => brief}, state)
       when is_binary(title) and is_binary(brief) do

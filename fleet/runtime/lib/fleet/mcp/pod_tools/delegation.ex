@@ -132,9 +132,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). DR-011: the forge-protocol
-  # vocabulary moved to the foundation `Fleet.Labels` (deps: []), so MCP now DEPENDS ON the SSOT directly — no more
-  # drifting literal ("stage/merged" = `stage_prefix() <> stage_merged()`).
+  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
+  # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
+  # a local literal would drift ("stage/merged" = `stage_prefix() <> stage_merged()`).
   @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
   @doc """
@@ -156,7 +156,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
             {Map.get(issue, "state", "unknown"),
              Enum.map(Map.get(issue, "labels") || [], & &1["name"])}
 
-          # LOUD before the fallback: without the warning, a forge outage was folded into
+          # LOUD before the fallback: without the warning, a forge outage folds into
           # {issue_state: "unknown", delivered: false} — a green result indistinguishable from a
           # real "issue open, no PR yet". delivered:false stays SAFE (the arch waits), but the
           # operator must be able to tell a mute forge from a genuine non-delivery.
@@ -176,9 +176,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # "delivered" = closed BY A MERGE — a multi-issue sequencing signal (the arch only chains issue
         # N+1 on `delivered: true`).
         #
-        # F-C047 (fix; seen live 2026-07-04): `closed` ALONE conflated a real delivery ("closed by a
+        # F-C047: `closed` ALONE would conflate a real delivery ("closed by a
         # merge") with a NON-delivery closure (onboarding marker `[lcars-onboarded]` / manual close) →
-        # false `delivered:true` → the arch chained N+1 on an ABANDONED brick. We now PROVE the merge via
+        # false `delivered:true` → the arch chains N+1 on an ABANDONED brick. We PROVE the merge via
         # the `stage/merged` label (WS1, set by the gatekeeper seal AT MERGE, before the explicit close).
         # A missing label is possible: the seal's `set_stage` failure is discarded un-logged and no
         # rail re-sets it (cf. gatekeeper_seal.ex). Here that reads as a false-NEGATIVE (the arch
@@ -268,12 +268,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Escalation-inbox seam (arch's read/reply path): its 4 forge ops are NOT in the delegation ForgeClient
   # behaviour, and adding them there would cascade onto every DELEGATION stub (StubForge/RecordingForge)
   # → their create_issue-only tests would break. DR-012: rather than a hidden ad-hoc `function_exported?`
-  # list (a SECOND contract next to the official behaviour), the escalation contract is now a DECLARED
+  # list (a SECOND contract next to the official behaviour), the escalation contract is a DECLARED
   # behaviour `EscalationForge` — checked by the SAME `conforming/2` guard (single inspectable surface).
   defp conforming_escalation_forge,
     do: conforming(EscalationForge, EscalationForge.resolved())
 
-  # DR-011: SSOT `Fleet.Labels.awaits_arch/0` (foundation, both domains depend on it) — no drifting literal.
+  # SSOT `Fleet.Labels.awaits_arch/0` (foundation, both domains depend on it) — no drifting literal.
   @awaits_arch_label Fleet.Labels.awaits_arch()
 
   # All the awaits-arch issues of ONE repo (scoped to the human), mapped to escalation entries. A repo
@@ -533,9 +533,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test seam
   # `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role}}` | `{:error, _}`.
   # Default = DIRECT call to `Fleet.Spawner.pod_info/1` — the dep is DECLARED (boundary
-  # Fleet.MCP → Fleet.Spawner, downward; Z5 migration 2026-07-13). The old `apply` idiom
-  # dodged the umbrella compile order, which no longer exists — the boundary compiler now
-  # carries what the hack hid. Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
+  # Fleet.MCP → Fleet.Spawner, downward): the boundary compiler carries this edge,
+  # no `apply` indirection needed. Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
   defp resolve_role(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 
