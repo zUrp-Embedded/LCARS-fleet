@@ -1,18 +1,18 @@
 defmodule Fleet.Pilot.StepDispatcher.Spawn do
   @moduledoc """
-  SINGLE-AUTHORITY spawn leaf extracted from `Fleet.Pilot.StepDispatcher`.
+  SINGLE-AUTHORITY spawn leaf of `Fleet.Pilot.StepDispatcher`.
 
   The dispatcher's TWO flows — issue (`dispatch_issue`, producer) AND PR (`do_dispatch_review`,
   judge/rework/resolution) — CONVERGE here: a single spawn point (`spawn_step/9`), a single
   pod identity (`pod_id_for_scope/4`), a single scope serialization (decision
   `project_scope_decision/4` + gate `gate_scope_decision/1` BEFORE the project resolver,
-  action `maybe_reprovision/5` after — acte4 A-09 split).
+  action `maybe_reprovision/5` after).
   This module DECIDES nothing (route, role, verdict, budget stay in the `StepDispatcher` core): it
   EXECUTES the spawn sequence. There is only ONE copy of each — never an issue/review fork.
   (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
-  live in the `Spawn.Naming` submodule, quasi-pure, called by both flows.)
+  live in the Naming cluster at the bottom of this module, quasi-pure, called by both flows.)
 
-  ## LOAD-BEARING semantics (preserved word-for-word from the core)
+  ## LOAD-BEARING semantics
 
   - **Canonical order** `lock → pod → enqueue → wake` (wake LAST). The label-lock
     `lcars-in-flight` is set BEFORE the pod, else double-spawn.
@@ -112,9 +112,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     issue_id = Fleet.Pilot.IssueId.compose(issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
-    # Capacity pre-flight BEFORE the forge lock (acte4 A-11) — admission condition at the same
-    # stage as the scope gate (`gate_scope_decision`, "gate BEFORE any lock"). At saturation the old flow
-    # locked → discovered `:max_children` at spawn → compensated (unlock) EVERY tick: ~4 forge
+    # Capacity pre-flight BEFORE the forge lock — admission condition at the same
+    # stage as the scope gate (`gate_scope_decision`, "gate BEFORE any lock"). Locking first would
+    # discover `:max_children` at spawn and compensate (unlock) EVERY tick at saturation: ~4 forge
     # writes/issue/30s polluting the timeline, and "full" tallied as an ERROR (poller backoff as
     # if the forge were down). Deferral is a SKIP (truth: "full, waiting"), not an error.
     # `not alive_before?` is load-bearing: a re-brief of a LIVE pipe pod starts no child — gating
@@ -163,10 +163,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          alive_before?,
          log_ctx
        ) do
-    # Brief PHYSIQUE : matérialisé UNE fois (content-addressé work/ops → {ref, sha}) AVANT le spawn,
-    # obligatoirement — le pointeur va à la FOIS dans les spawn_opts (→ data du pod → pod.completed →
-    # triplet SLSA assemblé au completer, à côté de base_sha) ET dans l'enqueue (→ le pod). `physicalize`
-    # dégrade en {nil, nil} (LOUD) sans jamais casser le dispatch.
+    # PHYSICAL brief: materialized ONCE (content-addressed work/ops → {ref, sha}) BEFORE the spawn,
+    # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
+    # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
+    # `physicalize` degrades to {nil, nil} (LOUD) without ever breaking the dispatch.
     {brief_ref, brief_sha} = Fleet.Workflow.BriefArtifact.physicalize(brief, repo)
 
     spawn_opts =
@@ -257,7 +257,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  defp disposition(true = _alive_before?), do: "re-briefed (pod vivant, contexte gardé)"
+  defp disposition(true = _alive_before?), do: "re-briefed (pod alive, context kept)"
   defp disposition(false = _alive_before?), do: "spawned"
 
   # Enqueues the brief in the `Fleet.TaskQueue` broker targeted at pod_id — the claude REPL pulls it via
@@ -268,9 +268,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
   defp enqueue_brief(task_queue, pod_id, role, number, brief, brief_ref, brief_sha) do
-    # Le brief est déjà matérialisé UNE fois au leaf → `{brief_ref, brief_sha}` (`{nil, nil}` en dégradé).
-    # Le work_item porte le POINTEUR content-addressé EN PLUS de la string (migration : la string cohabite
-    # tant que le pod ne lit pas encore l'objet). Même `brief_sha` que celui posé dans les spawn_opts.
+    # The brief is already materialized ONCE at the leaf → `{brief_ref, brief_sha}` (`{nil, nil}` degraded).
+    # The work_item carries the content-addressed POINTER IN ADDITION to the string (the string
+    # cohabits as long as the pod does not yet read the object). Same `brief_sha` as in the spawn_opts.
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
@@ -318,7 +318,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     _ -> :ok
   end
 
-  # Capacity pre-flight (A-11). Default-ALLOW when the seam does not expose `has_capacity?/0`
+  # Capacity pre-flight. Default-ALLOW when the seam does not expose `has_capacity?/0`
   # (test stubs — mirror of safe_wake/pod_alive?) and fail-OPEN on raise: this gate is an
   # admission OPTIMIZATION, the real cap stays enforced by the supervisor's `max_children` +
   # the caller's compensation. A broken capacity check must never STARVE the dispatch (a wrong
@@ -370,14 +370,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     do: Fleet.Pilot.PodId.for_issue(repo, number, role)
 
   @doc """
-  Scope-serialization DECISION (acte4 A-09: split from the reprovision ACTION so the call sites
-  can gate BEFORE the network project resolver — a `:role_busy` tick used to re-pay 1-2×
-  `git ls-remote` (~15-30s) just to throw the result away, and under a slow forge that stalled
+  Scope-serialization DECISION (split from the reprovision ACTION so the call sites
+  can gate BEFORE the network project resolver — otherwise a `:role_busy` tick re-pays 1-2×
+  `git ls-remote` (~15-30s) just to throw the result away and, under a slow forge, stalls
   the whole sequential poll tick).
 
   ONE identity (repo, role) alive at a time (1 Desktop slot), keyed on the SINGLE worker axis
-  `lifetime_scope` (collapse 2026-07-13 — `slot_scope` was its redundant re-encoding; `role_busy` now
-  derives from the ROOT axis « context-long vs one-shot », not a mimicking second property):
+  `lifetime_scope` (`role_busy` derives from the ROOT axis "context-long vs one-shot",
+  never from the derived `slot_scope` — a mimicking second property):
     one-shot (fan-out)    -> `:proceed` (never gated: distinct ids per issue, cold + independent).
     context-long (pipe/…) -> RESIDENT (repo,role) process, per its state (pipe_rebrief_state):
                                dead  -> `:proceed` (fresh spawn, 1st issue);
@@ -387,11 +387,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
                                ready -> `:ready_needs_reprovision` — the ACTION (cold in-place reset,
                                         needs the resolved `project["base_sha"]`) runs AFTER the
                                         resolver via `maybe_reprovision/5`, on the passing path only.
-  The former `project one-shot` branch is GONE: a cold pod serialized per project is a contradiction
-  (one-shot ⟹ instance ⟹ fan-out) — no role ever matched it (dead branch, cf. `CapProfile.slot_scope/1`).
+  There is NO `project one-shot` branch: a cold pod serialized per project is a contradiction
+  (one-shot ⟹ instance ⟹ fan-out) — no role matches it (cf. `CapProfile.slot_scope/1`).
 
   Requires NO project (pure liveness/slot reads) — that is the point of the split. The decision→
-  action gap now spans the resolver call (~15s worst case); the single sequential dispatcher per
+  action gap spans the resolver call (~15s worst case); the single sequential dispatcher per
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
   """
@@ -456,10 +456,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # uncertain pod dead -> serialize `:ok` -> fresh spawn on the deterministic id -> reap/`safe_kill` of a
       # maybe-LIVING pipe eng + its context (the exact destructive path `pod_alive?` guards with "assume ALIVE").
       # A transient raise self-corrects next tick; a persistent one defers visibly (Logger.warning) rather than
-      # acting destructively. This is the "grow a variant" the old `safe_pod_info` comment flagged as needed.
-      # NB: only the RAISE case is closed here — the deeper `pod_info` conflation (a live-but-slow pod whose
+      # acting destructively.
+      # LIMIT: only the RAISE case is closed here — the deeper `pod_info` conflation (a live-but-slow pod whose
       # GenServer.call times out into `{:error, :not_found}`, indistinguishable from a genuinely-absent pod at
-      # THIS layer) needs a pod_info contract split at the spawner and is a separate doctrine item.
+      # THIS layer) needs a pod_info contract split at the spawner.
       :unknown ->
         :busy
 
@@ -504,14 +504,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  # (Ex-cluster J — opts builders / naming: MOVED to `Spawn.Naming` (rc_name /
-  # feature_slug / maybe_put_route / resolve_repo_id). Quasi-pure, shared by the two
-  # dispatcher flows — the leaf keeps the spawn MECHANIC, Naming keeps the NAMES.)
-
-  # ── Naming (fusionné ici — Z6b migration 2026-07-13, ex-Spawn.Naming, aplatissement
-  # du mille-feuille : 79 lignes quasi-pures, 2 consommateurs, même autorité-unique.
-  # Tout ce qui NOMME/RÉSOUT une identité embarquée dans les spawn_opts : rc_name,
-  # feature_slug, maybe_put_route, resolve_repo_id — partagé par les DEUX flux.) ──
+  # ── Naming — everything that NAMES/RESOLVES an identity embedded in the spawn_opts:
+  # rc_name, feature_slug, maybe_put_route, resolve_repo_id. Quasi-pure, shared by the
+  # TWO dispatcher flows — the leaf keeps the spawn MECHANIC, this cluster keeps the NAMES. ──
 
   @doc """
   Desktop RC name = `<project>_<role>` (project = final segment of the repo, e.g.
@@ -546,7 +541,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # (The conditional puts of ONE key — `:project`, `:repo_id` — go through the single source
-  # `Fleet.Pilot.Opts.maybe_put/3` at the call sites: no more fixed-key wrapper here. Only
+  # `Fleet.Pilot.Opts.maybe_put/3` at the call sites: no fixed-key wrapper here. Only
   # `maybe_put_route/2` lives here — it puts TWO coupled keys, which is not the maybe_put idiom.)
 
   @doc "Puts `:workflow_map`/`:step` into the spawn_opts if the route is present (nil = no-op)."
@@ -564,8 +559,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   then an ANOMALY: the mint (`Fleet.Spawner.Pod.SessionMint`) FAILS-LOUD (raises) — we NEVER fabricate a
   random UUID to mask an unresolved forge (forge = organ of LCARS, forge down = stop).
 
-  DR-020 (F-C064 anchor): the `<REPO4>` bound (0..9999) is enforced at the MINT, LOUD — a forge id > 9999
-  is REFUSED, NEVER folded by `rem(id, 10_000)`. The old silent modulo was a HIDDEN collision: repo 10000
+  DR-020: the `<REPO4>` bound (0..9999) is enforced at the MINT, LOUD — a forge id > 9999
+  is REFUSED, NEVER folded by `rem(id, 10_000)`. A silent modulo would be a HIDDEN collision: repo 10000
   and repo 0 would encode the SAME deterministic identity, handing two projects one JSONL-recall / Desktop
   slot / reconstructible id. We pass the raw id through and let the mint refuse an out-of-format id
   explicitly (widening `<REPO4>` = a SessionId FORMAT redesign, deferred) rather than corrupt identity.
@@ -583,10 +578,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   @doc """
-  Lit la route gravée (`{workflow_map, step}` | nil) — wrapper du `forge.get_route` partagé
-  par les DEUX flux (issue via resolve_route, review via RoleDispatch/Remediation). Extrait
-  de StepDispatcher (Z6c migration 2026-07-13 : vivait en capture `route_reader` dans le
-  Ctx — même autorité-unique que le reste de ce module, plus de capture).
+  Reads the engraved route (`{workflow_map, step}` | nil) — wrapper of `forge.get_route` shared
+  by BOTH flows (issue via resolve_route, review via RoleDispatch/Remediation). Same
+  single-authority rule as the rest of this module — never a per-flow capture.
   """
   @spec route_for(module(), String.t(), integer(), keyword()) ::
           {:ok, {String.t(), String.t()} | nil} | {:error, term()}
