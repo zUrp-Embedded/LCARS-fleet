@@ -9,8 +9,7 @@ defmodule Fleet.Credentials.RoleIdentity do
   The void (nil token) is caught HERE, at construction, not at the forge-write site.
 
   `RoleToken` stays policy-NEUTRAL (it reports `nil` + a warning); THIS module carries the fail-closed
-  policy, shared by both consumers — a single source, no divergence (the former split was pilot fail-OPEN
-  vs mcp fail-CLOSED on the very same `nil`).
+  policy, shared by both consumers — a single source, no divergence.
 
   **Last revised**: 2026-07-18
   """
