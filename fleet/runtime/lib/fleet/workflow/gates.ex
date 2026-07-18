@@ -133,7 +133,7 @@ defmodule Fleet.Workflow.Gates do
 
       Map.get(gate, "human_approval_required", false) ->
         {:human_approval,
-         "terminal gate: human_approval_required — human sign-off required (arch escalation, R3)"}
+         "terminal gate: human_approval_required — human sign-off required (arch escalation)"}
 
       true ->
         :pass

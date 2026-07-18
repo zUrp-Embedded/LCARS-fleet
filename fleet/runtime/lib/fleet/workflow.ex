@@ -1,20 +1,20 @@
 defmodule Fleet.Workflow do
   @moduledoc """
-  Façade du domaine workflow — workflow-maps (loader/nav), gates (évaluation PURE),
-  deliverable (publication git-native + DeliverableGate), gatekeeper (juge d'exception).
+  Workflow domain facade — workflow-maps (loader/nav), gates (PURE evaluation),
+  deliverable (git-native publication + DeliverableGate), gatekeeper (exception judge).
 
-  Créée au collapse (Z4, 2026-07-12) comme ANCRE de la boundary ; contrat dans les
-  @moduledoc : `Fleet.Workflow.Loader`, `Fleet.Workflow.Gates`, `Fleet.Workflow.
-  Deliverable`, `Fleet.Workflow.DeliverableGate`, `Fleet.Workflow.Gatekeeper`,
-  `Fleet.Workflow.GateDecision` (vocabulaire décisions).
+  Boundary anchor; the contract lives in each module's @moduledoc:
+  `Fleet.Workflow.Loader`, `Fleet.Workflow.Gates`, `Fleet.Workflow.Deliverable`,
+  `Fleet.Workflow.DeliverableGate`, `Fleet.Workflow.Gatekeeper`,
+  `Fleet.Workflow.GateDecision` (decision vocabulary), `Fleet.Workflow.BriefArtifact`
+  and `Fleet.Workflow.Provenance` (physical-brief provenance).
 
   **Last revised**: 2026-07-18
   """
 
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,

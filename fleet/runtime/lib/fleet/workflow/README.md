@@ -1,4 +1,4 @@
-# fleet_workflow
+# Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
 **Last revised**: 2026-07-18
@@ -25,11 +25,15 @@ is restated, only pointed at.
 - `Fleet.Workflow.Deliverable` — unified publication of a pod deliverable (`:payload` / `:git_native`)
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push
-- `Fleet.GitRef` — `valid?/1`: single authority for git branch/ref name validation (foundation utility)
 - `Fleet.Workflow.Git` — system-side git publication mechanism (add → commit → [push]), fail-closed
+- `Fleet.Workflow.BriefArtifact` — content-addressed physical brief (`briefs/<sha>.md` in work/ops)
+- `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
+
+Related, NOT this domain: `Fleet.GitRef` (`valid?/1`, git ref-name validation) — a foundation
+boundary at `lib/fleet/git_ref.ex`, reachable from any domain.
 
 ## Config & deps
 - Knobs `:workflow_maps_root`, `:schema_path` — read by `Loader` (opts override for async tests), set by `runtime.exs` from `LCARS_WORKFLOW_MAPS_ROOT`.
 - Knobs `:gatekeeper_autoboot`, `:gatekeeper_pod_id` — read by `Gatekeeper` (`test.exs` disables autoboot for hermeticity).
 - Knobs `:git_push_timeout_ms`, `:git_local_timeout_ms` — read by `Git`.
-- Deps: see `mix.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/workflow.ex`).
