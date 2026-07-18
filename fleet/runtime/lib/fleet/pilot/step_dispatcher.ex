@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   ## Effects (`dispatch_issue/2`)
 
   On `:engage`: resolves project + route, then:
-    * **route absent** (routeless issue — create_issue no longer writes it, or a raw human issue) →
+    * **route absent** (routeless issue — create_issue does not write it, or a raw human issue) →
       `ensure_workflow_map_or_onboard` writes the **default workflow_map** (brief-gate) → `{:skipped, :onboarded}`
       (we defer; the next tick sees it routed). This is the system ENTRY: create_issue creates, the poller routes.
     * **route present** → `workflow_map_role` derives `{role, profile, step_spec}` from the workflow_map POSITION (NO
@@ -44,21 +44,19 @@ defmodule Fleet.Pilot.StepDispatcher do
   # are threaded to ReviewLifecycle by CAPTURE in the `%ReviewLifecycle.Ctx{}` — no fork, no cycle.
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle
 
-  # SINGLE-AUTHORITY spawn leaf extracted: the TWO flows (issue + review) CONVERGE on
+  # SINGLE-AUTHORITY spawn leaf: the TWO flows (issue + review) CONVERGE on
   # `Spawn.spawn_step/9` (order lock→pod→enqueue→wake + compensation + `wake_unreached` contract),
   # `Spawn.pod_id_for_scope/4` (pod identity) and the scope gate (`project_scope_decision/4` +
   # `gate_scope_decision/1` + `maybe_reprovision/5`) — one copy each, never a fork. The core
-  # DECIDES (route/role/verdict), Spawn EXECUTES.
+  # DECIDES (route/role/verdict), Spawn EXECUTES (its naming helpers — rc_name / feature_slug /
+  # maybe_put_route / resolve_repo_id — are shared with the review flow, one copy).
   alias Fleet.Pilot.StepDispatcher.Spawn
-
-  # Spawn opts builders / naming (rc_name / feature_slug / maybe_put_route / resolve_repo_id) —
-  # shared with the review flow (RoleDispatch), one copy.
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constants).
   @in_flight_label Fleet.Labels.in_flight()
   @awaits_arch_label Fleet.Labels.awaits_arch()
-  # F-C066 — scoped label `stage/merged` (posé par GatekeeperSeal AVANT le close). Composé des DEUX
-  # autorités Labels (prefix + valeur), pas un littéral forké.
+  # Scoped label `stage/merged` (set by GatekeeperSeal BEFORE the close). Composed from the TWO
+  # Labels authorities (prefix + value), not a forked literal.
   @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
   @type decision :: :engage | {:skip, atom()}
@@ -132,14 +130,14 @@ defmodule Fleet.Pilot.StepDispatcher do
         repo = Keyword.fetch!(opts, :repo)
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
-        # Read-only pre-lock phase, CHEAP GATES FIRST (acte4 A-09): route/role read from the
+        # Read-only pre-lock phase, CHEAP GATES FIRST: route/role read from the
         # poller's prefetch (local), then the LOCAL scope gate — the project resolver (the only
         # NETWORK call of the path, 1-2× `git ls-remote` ~15s worst case) runs LAST, on the
-        # passing path only. A recurring `:role_busy` tick used to re-pay the resolver every
-        # 30s for nothing, and under a degraded forge stalled the whole sequential poll tick.
-        # The forge LOCK (add_label in spawn_step) still comes after EVERYTHING here — a
+        # passing path only. With the resolver first, a recurring `:role_busy` tick would re-pay
+        # it every 30s for nothing and, under a degraded forge, stall the whole sequential poll
+        # tick. The forge LOCK (add_label in spawn_step) still comes after EVERYTHING here — a
         # transient failure anywhere in this phase leaves no orphan lock (invariant unchanged).
-        # ROUTELESS = not yet onboarded (create_issue no longer writes it) → `ensure_workflow_map_or_onboard`
+        # ROUTELESS = not yet onboarded (create_issue does not write it) → `ensure_workflow_map_or_onboard`
         # writes the default workflow_map + returns `{:onboarded, _}` → we DEFER (skip; the next tick sees it
         # routed). Routed → `workflow_map_role` derives the role from the workflow_map POSITION (NO hardcoded producer;
         # route absent at this point = post-onboard anomaly → fail-loud, NEVER the eng silently).
@@ -173,7 +171,7 @@ defmodule Fleet.Pilot.StepDispatcher do
              # Pod identity + serialization READ from the catalogue, never guessed. `pod_id_for_scope/4`
              # takes the slot granularity (`slot_scope`, itself DERIVED from `lifetime_scope`: instance →
              # for_issue fan-out | project → for_repo, ONE identity/project). The scope DECISION keys on the
-             # ROOT axis `lifetime_scope` DIRECTLY (collapse 2026-07-13 — no longer via the derived slot); it
+             # ROOT axis `lifetime_scope` DIRECTLY (not via the derived slot); it
              # gates BEFORE the resolver, its reprovision ACTION (needs project["base_sha"]) runs after.
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
@@ -249,15 +247,15 @@ defmodule Fleet.Pilot.StepDispatcher do
                 log_ctx
               )
 
-            # F-C083 — a DELIVERABLE-judge STEP (multi-step workflow_map) whose criterion (issue body)
+            # A DELIVERABLE-judge STEP (multi-step workflow_map) whose criterion (issue body)
             # can't be READ from the forge → we REFUSE a criterion-less judge (the diff without a criterion
-            # → blind approval = false GREEN) and DEFER. A judge step is instance-scoped
-            # (the scope gate returned `:proceed` WITHOUT a lock) → nothing to release; the poller
-            # re-dispatches next tick (read-error ≠ absence).
+            # → blind approval = false GREEN) and DEFER; the lock lives in `BriefBuilder`. A judge step
+            # is instance-scoped (the scope gate returned `:proceed` WITHOUT a lock) → nothing to release;
+            # the poller re-dispatches next tick (read-error ≠ absence).
             {:error, {:criterion_unavailable, reason}} ->
               Logger.warning(
                 "StepDispatcher: judge criterion unavailable issue=#{repo}##{number} role=#{role} → " <>
-                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
+                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge)"
               )
 
               {:skipped, :criterion_unavailable}
@@ -307,9 +305,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   def dispatch_review(pr, opts) when is_map(pr) do
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
-    # `ctx.<typo>` does not compile. Données PURES depuis Z6c (2026-07-13) : les ex-captures
-    # route_reader/err_tagger sont mortes — les deux flux prennent Spawn.route_for/Opts.tag_err
-    # à la source ; ReviewLifecycle ne référence toujours pas ce module (unidirectionnel, pas de cycle).
+    # `ctx.<typo>` does not compile. PURE data — no captures threaded: both flows take
+    # Spawn.route_for/Opts.tag_err at the source; ReviewLifecycle never references this
+    # module (uni-directional, no cycle).
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
       loader: Keyword.get(opts, :loader, Fleet.CapProfile),
@@ -346,7 +344,7 @@ defmodule Fleet.Pilot.StepDispatcher do
       # (Gitea also refuses its merge, "Work in progress PRs cannot be merged"). We do NOT dispatch
       # a judge on it — else we would judge/merge work that the human explicitly paused. The `draft`
       # field is ALREADY in the PR shape (get_pull) — free read, complete decision guard
-      # (cf. the angle "the machine reads the complete gating forge-state", 2026-07-07).
+      # (the machine reads the complete gating forge-state).
       Map.get(pr, "draft") == true ->
         {:skipped, :draft}
 
@@ -408,10 +406,11 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp login_of(r), do: r |> Map.get("login", "") |> to_string() |> String.downcase()
 
-  # F-C061 — a reviewer login that is NOT a configured judge role is IGNORED from the jury (not a spawn
+  # A reviewer login that is NOT a configured judge role is IGNORED from the jury (not a spawn
   # target, not counted) but SURFACED loud: a human (or non-jury role) posting/being-requested a review on
   # a fleet PR is a real, forge-permitted anomaly (the write side only ever lays `reviewer_roles`). Warning,
-  # not a crash: a benign human review must NOT turn into a pipeline DoS.
+  # not a crash: a benign human review must NOT turn into a pipeline DoS. (The F-C061 tag in the
+  # log below is pinned by a test assert.)
   defp warn_foreign_reviewers([], _repo, _pr_number, _jury_roles), do: :ok
 
   defp warn_foreign_reviewers(foreign, repo, pr_number, jury_roles) do
@@ -474,7 +473,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   # System onboarding. Route present → passthrough `{:ok, route}`. Route nil (routeless issue:
-  # create_issue no longer writes the workflow_map; or a raw human issue) → writes the default workflow_map (brief-gate)
+  # create_issue does not write the workflow_map; or a raw human issue) → writes the default workflow_map (brief-gate)
   # = it ENTERS the gate → `{:onboarded, step}` (dispatch_issue defers: skip this tick, the next one
   # sees it routed). Route posted by the SYSTEM (system forge token). Failure → `{:error, {:onboard, _}}`.
   defp ensure_workflow_map_or_onboard(
@@ -505,7 +504,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp default_workflow_map,
     do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
 
-  # Delegated to the single authority (WorkflowMapNav.safe_load — same tag, no more local rescue).
+  # Delegated to the single authority (WorkflowMapNav.safe_load — same tag; the rescue lives there).
   defp load_workflow_map(workflow_map_name, workflow_map_loader),
     do: Fleet.Pilot.WorkflowMapNav.safe_load(workflow_map_loader, workflow_map_name)
 
