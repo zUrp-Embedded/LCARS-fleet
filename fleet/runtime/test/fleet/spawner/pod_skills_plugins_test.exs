@@ -1,8 +1,8 @@
 defmodule Fleet.Spawner.PodSkillsPluginsTest do
   @moduledoc """
   DN ring1/pod-bootstrap-superpowers — `Fleet.Spawner.Pod.LaunchSpec.skills_plugins_env/1`
-  pur : skills qualifiés `plugin:skill` → env LCARS_SKILLS_PLUGINS
-  (noms plugins uniques). Consommé par bin/bwrap_launch.sh. async.
+  is pure: qualified `plugin:skill` skills → LCARS_SKILLS_PLUGINS env
+  (unique plugin names). Consumed by bin/bwrap_launch.sh. async.
   """
   use ExUnit.Case, async: true
 
@@ -15,7 +15,7 @@ defmodule Fleet.Spawner.PodSkillsPluginsTest do
       spec: %{"knowledge" => %{"skills" => skills}}
     }
 
-  test "skills qualifiés → plugins uniques, ordre préservé" do
+  test "qualified skills → unique plugins, order preserved" do
     assert %{"LCARS_SKILLS_PLUGINS" => "superpowers lcars-fleet"} =
              LaunchSpec.skills_plugins_env(
                cp([
@@ -26,16 +26,16 @@ defmodule Fleet.Spawner.PodSkillsPluginsTest do
              )
   end
 
-  test "skill non-qualifié (sans ':') filtré — pas un plugin (anti-M1)" do
+  test "unqualified skill (no ':') filtered out — not a plugin (anti-M1)" do
     assert %{"LCARS_SKILLS_PLUGINS" => "superpowers"} =
              LaunchSpec.skills_plugins_env(cp(["plain-skill", "superpowers:x"]))
   end
 
-  test "skills vide → %{} (rétro-compatible, pas d'env var)" do
+  test "empty skills → %{} (backward-compatible, no env var)" do
     assert %{} == LaunchSpec.skills_plugins_env(cp([]))
   end
 
-  test "knowledge/skills absent ou nil → %{} (défensif)" do
+  test "knowledge/skills absent or nil → %{} (defensive)" do
     assert %{} ==
              LaunchSpec.skills_plugins_env(%Fleet.CapProfile{
                kind: "CapabilityProfile",
@@ -46,7 +46,7 @@ defmodule Fleet.Spawner.PodSkillsPluginsTest do
     assert %{} == LaunchSpec.skills_plugins_env(cp(nil))
   end
 
-  test "split parts:2 — skill avec ':' multiple → préfixe plugin seul" do
+  test "split parts:2 — skill with multiple ':' → plugin prefix only" do
     assert %{"LCARS_SKILLS_PLUGINS" => "superpowers"} =
              LaunchSpec.skills_plugins_env(cp(["superpowers:ns:deep-skill"]))
   end

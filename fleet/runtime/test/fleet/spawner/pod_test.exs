@@ -4,29 +4,30 @@ defmodule Fleet.Spawner.PodTest do
   alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.LaunchBackend.StubBackend
 
-  # G24-9 (F-CONT-RISK) — disallowedTools minimum exigé par Fleet.CapProfile.validate/1
-  # (câblée au spawn, Z2 ; cf. cap_profile.ex @disallowed_minimum_strict/_prefix). Tout
-  # profil spawné DOIT les porter, sinon la gate le rejette (:cap_profile_invalid).
+  # G24-9 (F-CONT-RISK) — minimum disallowedTools required by Fleet.CapProfile.validate/1
+  # (wired at spawn, Z2; cf. cap_profile.ex @disallowed_minimum_strict/_prefix). Every
+  # spawned profile MUST carry them, otherwise the gate rejects it (:cap_profile_invalid).
   @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
 
-  # repo_id de test pour les rôles PROJECT-BOUND (engineer = défaut `valid_profile/0`, et tout dérivé).
-  # Leur session_id hexspeak EXIGE un repo résolu : sans lui, le mint REFUSE (raise) au lieu de fabriquer
-  # un UUID random — l'absence de repo signale une forge qui n'a pas résolu l'id (forge down). En prod le
-  # repo vient du dispatcher ; ces tests spawnent le pod en direct, donc on pose ce repo neutre dans `opts`
-  # pour exercer le lifecycle. Valeur arbitraire (≠ des id hexspeak codés en dur ailleurs dans ce fichier).
+  # test repo_id for PROJECT-BOUND roles (engineer = `valid_profile/0` default, and any derivative).
+  # Their hexspeak session_id REQUIRES a resolved repo: without it, the mint REFUSES (raise) instead of
+  # fabricating a random UUID — a missing repo signals a forge that did not resolve the id (forge down).
+  # In prod the repo comes from the dispatcher; these tests spawn the pod directly, so we put this
+  # neutral repo in `opts` to exercise the lifecycle. Arbitrary value (≠ the hexspeak ids hardcoded
+  # elsewhere in this file).
   @test_repo_id 7
 
   @moduletag :tmp_dir
 
-  # MA-04 — bus stub : `broadcast/2` LÈVE (simule UnregisteredError / PubSub down). Le Pod
-  # `required_broadcast` doit rescue → `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS
-  # le pod sur une complétion orpheline.
+  # MA-04 — bus stub: `broadcast/2` RAISES (simulates UnregisteredError / PubSub down). The Pod's
+  # `required_broadcast` must rescue → `{:error, {:broadcast_failed, _}}` → `do_extract` does NOT
+  # release/kill the pod on an orphaned completion.
   defmodule RaiseBus do
     def broadcast(_topic, _ev),
       do: raise(Fleet.Event.UnregisteredError, "forced pod.completed fail")
   end
 
-  # Échoue le PREMIER broadcast puis délègue au vrai Bus (état partagé via Agent en app-env).
+  # Fails the FIRST broadcast then delegates to the real Bus (state shared via an Agent in app-env).
   defmodule FlakyBus do
     def broadcast(topic, ev) do
       agent = Application.fetch_env!(:fleet_spawner, :flaky_agent)
@@ -39,17 +40,17 @@ defmodule Fleet.Spawner.PodTest do
     Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
     Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
-    # adr-f : plus de coffre. Les creds viennent du claudeDir bindé par bwrap
-    # (CLAUDE_DIR, défaut config) ; pas de setup coffre en test.
+    # adr-f: no vault. Creds come from the claudeDir bound by bwrap
+    # (CLAUDE_DIR, config default); no vault setup in test.
 
     sp_root = Path.join(tmp_dir, "cap-profiles")
     File.mkdir_p!(sp_root)
     File.write!(Path.join(sp_root, "engineer-role.md"), "# Engineer SP base")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
-    # mundo invocado #1 : auth = mode bind unique (token_arg retiré 2026-06-14). Le gate credentials
-    # (scope/plan) lit toujours le creds natif → fixture creds par défaut pour les tests qui ne testent
-    # pas la porte credentials ; les tests credentials/fail-loud overrident :claude_dir per-test.
+    # mundo invocado #1: auth = single bind mode (token_arg removed). The credentials gate
+    # (scope/plan) always reads the native creds → default creds fixture for the tests that do not
+    # test the credentials gate; the credentials/fail-loud tests override :claude_dir per-test.
     setup_claude = Path.join(tmp_dir, ".claude")
     File.mkdir_p!(setup_claude)
 
@@ -79,36 +80,36 @@ defmodule Fleet.Spawner.PodTest do
     {:ok, tmp_dir: tmp_dir}
   end
 
-  describe "kick_keyword/2 (#5.2 — mot-clé du kick selon l'ACK)" do
-    test "pas encore pollé → 'yop' (bootstrap-arm, JAMAIS gaté)" do
+  describe "kick_keyword/2 (#5.2 — kick keyword based on the ACK)" do
+    test "not yet polled → 'yop' (bootstrap-arm, NEVER gated)" do
       assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true) == "yop"
       assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false) == "yop"
     end
 
-    test "déjà pollé + knob on → 'wake' (fallback)" do
+    test "already polled + knob on → 'wake' (fallback)" do
       assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true) == "wake"
     end
 
-    test "déjà pollé + knob off → nil (flag-only, pas de send-keys)" do
+    test "already polled + knob off → nil (flag-only, no send-keys)" do
       assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false) == nil
     end
   end
 
-  describe "acked?/3 (#5.2 F3 — le contrôle de la boucle = l'ACK, pas un proxy)" do
-    test "wake : pull du brief = ACK (peu importe polled)" do
+  describe "acked?/3 (#5.2 F3 — the loop control = the ACK, not a proxy)" do
+    test "wake: brief pull = ACK (regardless of polled)" do
       assert Fleet.Spawner.Pod.Kick.acked?(true, false, false)
       assert Fleet.Spawner.Pod.Kick.acked?(true, false, true)
     end
 
-    test "bootstrap : poll = ACK (pas de brief à puller, last_poll suffit)" do
+    test "bootstrap: poll = ACK (no brief to pull, last_poll is enough)" do
       assert Fleet.Spawner.Pod.Kick.acked?(false, true, true)
     end
 
-    test "bootstrap pas encore pollé → PAS d'ACK (on continue à kicker 'yop')" do
+    test "bootstrap not yet polled → NO ACK (we keep kicking 'yop')" do
       refute Fleet.Spawner.Pod.Kick.acked?(false, true, false)
     end
 
-    test "worker pas encore pull → PAS d'ACK même si pollé (polled ne compte QUE pour bootstrap)" do
+    test "worker not yet pulled → NO ACK even if polled (polled counts ONLY for bootstrap)" do
       refute Fleet.Spawner.Pod.Kick.acked?(false, false, true)
     end
   end
@@ -116,8 +117,8 @@ defmodule Fleet.Spawner.PodTest do
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      # role_index/protected/fleet_level : le catalogue rôle vit dans le metadata (source du QUOI),
-      # lu par deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo exigé).
+      # role_index/protected/fleet_level: the role catalog lives in the metadata (source of the WHAT),
+      # read by deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo required).
       metadata: %{
         "name" => "engineer",
         "containment" => "bwrap",
@@ -153,7 +154,7 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   defp build_args(pod_id, issue_id) do
-    # engineer = project-bound → repo_id obligatoire pour minter son session_id déterministe.
+    # engineer = project-bound → repo_id mandatory to mint its deterministic session_id.
     %{
       cap_profile: valid_profile(),
       issue_id: issue_id,
@@ -162,7 +163,7 @@ defmodule Fleet.Spawner.PodTest do
     }
   end
 
-  # Repo source pour les tests projet : `main` (src.txt) + branche orpheline `work/ops` (BACKLOG.md).
+  # Source repo for the project tests: `main` (src.txt) + orphan branch `work/ops` (BACKLOG.md).
   defp source_repo_with_doc(dir) do
     File.mkdir_p!(dir)
     g = fn args -> System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true) end
@@ -181,10 +182,10 @@ defmodule Fleet.Spawner.PodTest do
     dir
   end
 
-  # Modèle interactif : le backend ouvre le Port et retourne immédiatement (pas de frame NDJSON).
-  # Forme réelle `LauncherPortBackend.launch/2` = %{port:, tmux_session:} — AUCUN session_id
-  # (vestige NDJSON : le session_id est PRÉ-ALLOUÉ côté pod, jamais rendu par le backend).
-  # tmux_session nil = pod non-kickable, le comportement StubBackend attendu par ces tests.
+  # Interactive model: the backend opens the Port and returns immediately (no NDJSON frame).
+  # Real shape of `LauncherPortBackend.launch/2` = %{port:, tmux_session:} — NO session_id
+  # (NDJSON vestige: the session_id is PRE-ALLOCATED pod-side, never returned by the backend).
+  # tmux_session nil = non-kickable pod, the StubBackend behavior these tests expect.
   defp interactive_reply(opts \\ []) do
     {:ok,
      %{
@@ -193,9 +194,9 @@ defmodule Fleet.Spawner.PodTest do
      }}
   end
 
-  # R-CORE.comm ADR-G — completion event-driven : simule le broker fleet_task_queue broadcastant
-  # %Fleet.Event{work_item.completed} sur fleet.events (= ce qui arrive quand l'agent appelle
-  # submit_result via fleet_mcp). Le pod doit être en :monitoring (subscribed) avant l'appel.
+  # R-CORE.comm ADR-G — event-driven completion: simulates the fleet_task_queue broker broadcasting
+  # %Fleet.Event{work_item.completed} on fleet.events (= what happens when the agent calls
+  # submit_result via fleet_mcp). The pod must be in :monitoring (subscribed) before the call.
   defp submit_result_event(pod_id, payload) do
     Phoenix.PubSub.broadcast(
       Fleet.PubSub,
@@ -226,8 +227,8 @@ defmodule Fleet.Spawner.PodTest do
     :ok
   end
 
-  describe "happy path interactif (event résultat → stop)" do
-    test "pod.result_submitted reçu → extract → release → arrêt :normal" do
+  describe "interactive happy path (result event → stop)" do
+    test "pod.result_submitted received → extract → release → :normal stop" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
@@ -236,32 +237,32 @@ defmodule Fleet.Spawner.PodTest do
       assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:launch_called, _args, env}, 2_000
-      # adr-f : plus d'OAuth env injecté ; le pod reçoit CLAUDE_DIR (claudeDir
-      # humain) que bwrap_launch.sh bind en ~/.claude.
+      # adr-f: no injected OAuth env; the pod receives CLAUDE_DIR (the human's
+      # claudeDir) that bwrap_launch.sh binds as ~/.claude.
       assert env["CLAUDE_DIR"] =~ ".claude"
 
-      # Barrière : pod en :monitoring ⇒ do_monitor a tourné ⇒ subscribed au Bus.
+      # Barrier: pod in :monitoring ⇒ do_monitor ran ⇒ subscribed to the Bus.
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # Le central (fleet_mcp) broadcaste le résultat du pod → extract → release → {:stop, :normal}.
+      # The central (fleet_mcp) broadcasts the pod's result → extract → release → {:stop, :normal}.
       submit_result_event(pod_id, %{"answer" => "OK"})
 
       assert_receive {:EXIT, ^pid, :normal}, 3_000
 
-      # state.json écrit en RELEASE avec phase :succeeded.
+      # state.json written at RELEASE with phase :succeeded.
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["phase"] == "succeeded"
     end
 
-    test "R1-20 : state.json PRÉSENT mais CORROMPU → recover LOUD (error), pas de fresh init silencieux" do
+    test "R1-20: state.json PRESENT but CORRUPT → LOUD recover (error), no silent fresh init" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-corrupt-#{System.unique_integer([:positive])}"
 
-      # point de recovery cassé : fichier présent, JSON illisible (≠ absent = fresh pod normal)
+      # broken recovery point: file present, unreadable JSON (≠ absent = normal fresh pod)
       path = state_fs_path(pod_id)
       File.mkdir_p!(Path.dirname(path))
-      File.write!(path, "{ ceci n'est pas du json")
+      File.write!(path, "{ this is not json")
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -270,10 +271,10 @@ defmodule Fleet.Spawner.PodTest do
         end)
 
       assert log =~ "CORRUPT",
-             "un state.json corrompu doit être LOUD (error, comme state.corrupt du TaskQueue), pas silencieux"
+             "a corrupt state.json must be LOUD (error, like the TaskQueue's state.corrupt), not silent"
     end
 
-    test "R1-20 : state.json ABSENT → fresh init SILENCIEUX (pas de faux warning corrupt)" do
+    test "R1-20: state.json ABSENT → SILENT fresh init (no false corrupt warning)" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-fresh-#{System.unique_integer([:positive])}"
@@ -288,11 +289,12 @@ defmodule Fleet.Spawner.PodTest do
       refute log =~ "recover: state.json"
     end
 
-    # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
-    # le step_run). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
-    # le pod « réussit » mais le step_run ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE
-    # vivant en :monitoring (résultat retenu, deadline ré-armée), PAS d'EXIT :normal.
-    test "MA-04 : broadcast pod.completed qui échoue → pod PAS release/kill (reste vivant), fail-loud" do
+    # MA-04 — THE finding: `pod.completed` is load-bearing LIFECYCLE (the StepRunConsumer depends on it
+    # to finish the step_run). If its diffusion FAILS, the pod must NOT release/kill on an orphaned
+    # completion (otherwise the pod "succeeds" but the step_run never finishes → forge lock forever).
+    # Raising Bus stub → the pod STAYS alive in :monitoring (result retained, deadline re-armed), NO
+    # :normal EXIT.
+    test "MA-04: failing pod.completed broadcast → pod NOT released/killed (stays alive), fail-loud" do
       Process.flag(:trap_exit, true)
       Application.put_env(:fleet_spawner, :event_bus, RaiseBus)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :event_bus) end)
@@ -304,20 +306,20 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, _env}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # Le central broadcaste le résultat → extract → pod.completed (qui ÉCHOUE via RaiseBus).
+      # The central broadcasts the result → extract → pod.completed (which FAILS via RaiseBus).
       submit_result_event(pod_id, %{"answer" => "OK"})
 
-      # LE finding : PAS d'EXIT :normal (le one-shot ne release PAS sur une complétion non diffusée).
+      # THE finding: NO :normal EXIT (the one-shot does NOT release on an undiffused completion).
       refute_receive {:EXIT, ^pid, :normal}, 800
 
-      # Le pod RESTE vivant en :monitoring (fail-loud : le timer :extract_retry re-fire l'extract).
+      # The pod STAYS alive in :monitoring (fail-loud: the :extract_retry timer re-fires the extract).
       assert Process.alive?(pid)
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
       GenServer.stop(pid)
     end
 
-    test "MA-04b : pod.completed échoue au 1er tir puis RÉUSSIT au retry borné → pod.completed enfin émis" do
+    test "MA-04b: pod.completed fails on the 1st shot then SUCCEEDS on the bounded retry → pod.completed finally emitted" do
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
       {:ok, agent} = Agent.start_link(fn -> 0 end)
@@ -336,23 +338,23 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # Le work_item.completed entrant passe par Phoenix.PubSub direct (pas event_bus) → FlakyBus
-      # n'intercepte QUE pod.completed. 1er pod.completed échoue (:transient) → pod reste :monitoring ;
-      # le timer :extract_retry (1s) re-entre :extracting et RE-ÉMET → 2e tir réussit.
+      # The incoming work_item.completed goes through direct Phoenix.PubSub (not event_bus) → FlakyBus
+      # intercepts ONLY pod.completed. 1st pod.completed fails (:transient) → pod stays :monitoring;
+      # the :extract_retry timer (1s) re-enters :extracting and RE-EMITS → 2nd shot succeeds.
       submit_result_event(pod_id, %{"answer" => "OK"})
 
-      # Le retry RE-ÉMET pod.completed avec succès → le one-shot poursuit sa complétion normale
-      # (release → stop :normal). Preuve du rail débloqué : l'event ré-émis PUIS l'arrêt propre
-      # (avant le fix, le pod restait wedgé en :monitoring pour toujours, aucun EXIT :normal).
+      # The retry RE-EMITS pod.completed successfully → the one-shot resumes its normal completion
+      # (release → stop :normal). Proof the rail is unblocked: the re-emitted event THEN the clean
+      # stop (a wedged pod would stay in :monitoring forever, no :normal EXIT).
       assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 5_000
       assert_receive {:EXIT, ^pid, :normal}, 2_000
     end
 
-    test "SLOT-FREEZE : le pod ADOPTE le issue_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
-      # Regression hello-buddy : le pipe gardait son issue_id de SPAWN (issue-4) pour TOUS ses livrables ->
-      # la 2e brique (issue-3) partait sur la branche/PR de issue-4 (ecrasement). Ici le pod spawn sur
-      # "issue-4" mais la tache complétée porte "issue-3" -> le pod.completed (consomme par le StepRunConsumer
-      # qui pousse HEAD:lcars/issue-N) doit porter "issue-3", la brique reellement traitee.
+    test "SLOT-FREEZE: the pod ADOPTS the TASK's issue_id -> the deliverable follows the RIGHT brick (not the spawn's)" do
+      # hello-buddy regression: the pipe kept its SPAWN issue_id (issue-4) for ALL its deliverables ->
+      # the 2nd brick (issue-3) landed on issue-4's branch/PR (overwrite). Here the pod spawns on
+      # "issue-4" but the completed task carries "issue-3" -> the pod.completed (consumed by the
+      # StepRunConsumer which pushes HEAD:lcars/issue-N) must carry "issue-3", the brick actually handled.
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
       StubBackend.set_reply(interactive_reply())
@@ -362,8 +364,8 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # work_item.completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (issue_id dans le payload,
-      # comme le vrai event TaskQueue qui porte completed.issue_id).
+      # work_item.completed for brick issue-3 (re-brief), NOT the issue-4 spawn (issue_id in the payload,
+      # like the real TaskQueue event which carries completed.issue_id).
       Phoenix.PubSub.broadcast(
         Fleet.PubSub,
         "fleet.events",
@@ -374,7 +376,7 @@ defmodule Fleet.Spawner.PodTest do
         )
       )
 
-      # Le pod.completed (= le livrable broadcaste au StepRunConsumer) porte le issue ADOPTE issue-3.
+      # The pod.completed (= the deliverable broadcast to the StepRunConsumer) carries the ADOPTED issue-3.
       assert_receive %Fleet.Event{
                        type: :"pod.completed",
                        payload: %{"issue_id" => "issue-3"}
@@ -382,11 +384,11 @@ defmodule Fleet.Spawner.PodTest do
                      3_000
     end
 
-    test "POD_DIR + artefacts créés (pod en MONITORING tant que pas de livrable)" do
+    test "POD_DIR + artifacts created (pod in MONITORING as long as no deliverable)" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-dir-#{System.unique_integer([:positive])}"
-      # PAS de livrable → le pod reste en :monitoring (poll), GenServer vivant.
+      # NO deliverable → the pod stays in :monitoring (poll), GenServer alive.
       {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, _env}, 2_000
 
@@ -395,35 +397,35 @@ defmodule Fleet.Spawner.PodTest do
       assert File.dir?(info.pod_dir)
       assert File.exists?(Path.join(info.pod_dir, ".cap-profile.json"))
 
-      # P1/C9 — `.claude/` pod-owned : cible du bind creds-only (bwrap bind UNIQUEMENT
-      # .credentials.json dedans, plus le dir humain entier). Doit exister, créé par do_project.
+      # P1/C9 — pod-owned `.claude/`: target of the creds-only bind (bwrap binds ONLY
+      # .credentials.json inside it, not the whole human dir). Must exist, created by do_project.
       assert File.dir?(Path.join(info.pod_dir, ".claude")),
-             "pod_dir/.claude doit exister (cible pod-owned du bind .credentials.json)"
+             "pod_dir/.claude must exist (pod-owned target of the .credentials.json bind)"
 
-      # Aucun settings.json humain ne doit fuiter (userSettings = .claude/settings.json absent
-      # → 0 hook chargé ; getAllHooks ignore --setting-sources, cf JOURNAL-P1-hooks).
+      # No human settings.json may leak (userSettings = .claude/settings.json absent
+      # → 0 hooks loaded; getAllHooks ignores --setting-sources, cf JOURNAL-P1-hooks).
       refute File.exists?(Path.join(info.pod_dir, ".claude/settings.json")),
-             ".claude/settings.json ne doit PAS exister (sinon des hooks chargeraient)"
+             ".claude/settings.json must NOT exist (otherwise hooks would load)"
 
-      # Provisioning du reste HORS .claude/ : .lcars/ + racine pod pour CLAUDE.md.
+      # Provisioning of the rest OUTSIDE .claude/: .lcars/ + pod root for CLAUDE.md.
       assert File.exists?(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert File.exists?(Path.join(info.pod_dir, "CLAUDE.md"))
       assert File.exists?(Path.join(info.pod_dir, ".lcars/protocole-user.md"))
-      # Issue-driven (pivot doctrine) : le brief vit dans issues/<issue_id>.md
-      # (pas context/brief.md). Claude le lit comme contenu projet.
+      # Issue-driven (doctrine pivot): the brief lives in issues/<issue_id>.md
+      # (not context/brief.md). Claude reads it as project content.
       assert File.exists?(Path.join(info.pod_dir, "issues/issue-1.md"))
 
-      # Monitor in-pod (réveil-par-flag, ADR-G) : watch.sh provisionné au pod_dir,
-      # exécutable. L'agent l'arme via l'outil Monitor (cf. SP).
+      # In-pod Monitor (wake-by-flag, ADR-G): watch.sh provisioned at the pod_dir,
+      # executable. The agent arms it via the Monitor tool (cf. SP).
       watch = Path.join(info.pod_dir, "watch.sh")
       assert File.exists?(watch)
       assert File.read!(watch) =~ "ton tour"
       %File.Stat{mode: mode} = File.stat!(watch)
-      assert Bitwise.band(mode, 0o100) != 0, "watch.sh doit être exécutable (owner)"
+      assert Bitwise.band(mode, 0o100) != 0, "watch.sh must be executable (owner)"
 
-      # SP enrichi par le draft de RÔLE (résolu par metadata.name=engineer → agent-engineer-base.md, généré
-      # par blocs) : doit porter l'identité du rôle + le workflow yop → get_work_item → submit_result + le
-      # protocole Monitor (réveil-par-flag), tous portés par core/runtime-contract.
+      # SP enriched by the ROLE draft (resolved via metadata.name=engineer → agent-engineer-base.md,
+      # generated by blocks): must carry the role identity + the yop → get_work_item → submit_result
+      # workflow + the Monitor protocol (wake-by-flag), all carried by core/runtime-contract.
       sp = File.read!(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert sp =~ "System Prompt — engineer"
       assert sp =~ "submit_result"
@@ -434,7 +436,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — le travail (opts[:brief]) est livré dans issues/<issue_id>.md" do
+    test "PUSH — the work (opts[:brief]) is delivered in issues/<issue_id>.md" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-brief-#{System.unique_integer([:positive])}"
@@ -451,10 +453,10 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, _env}, 2_000
 
       info = GenServer.call(pid, :info)
-      # Issue-driven : le brief est dans issues/<issue_id>.md, pas en prompt
-      # canal-user (safety guardrail REPL).
+      # Issue-driven: the brief is in issues/<issue_id>.md, not a user-channel
+      # prompt (REPL safety guardrail).
       issue = File.read!(Path.join(info.pod_dir, "issues/issue-1.md"))
-      # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
+      # F128: neutral frame + interpolated role (no "worker engineer" priming).
       assert issue =~ "LCARS pod (role engineer"
       assert issue =~ brief
       assert issue =~ "submit_result"
@@ -462,7 +464,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — admin.spawn (opts[:brief], aucun dispatcher) enqueue le brief dans la TaskQueue (canal get_work_item) [F-arch-MCP]" do
+    test "PUSH — admin.spawn (opts[:brief], no dispatcher) enqueues the brief in the TaskQueue (get_work_item channel) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq-#{System.unique_integer([:positive])}"
@@ -479,21 +481,21 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # Sans cet enqueue, `get_work_item` rendait `{done:true}` → le pod (qui poll get_work_item) restait idle
-      # (forensic arch 3f12edd9). Le brief est désormais dans le canal canonique.
+      # Without this enqueue, `get_work_item` returns `{done:true}` → the pod (which polls
+      # get_work_item) stays idle (arch forensic 3f12edd9). The brief lives in the canonical channel.
       assert [%{brief: ^brief}] =
                Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
 
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — pas de double-enqueue si un brief est DÉJÀ en file (dispatch step : enqueué avant le spawn) [F-arch-MCP]" do
+    test "PUSH — no double-enqueue if a brief is ALREADY queued (dispatch step: enqueued before the spawn) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
-      # Simule le dispatch step : le brief role-aware est enqueué AVANT le spawn (StepDispatcher).
+      # Simulates the dispatch step: the role-aware brief is enqueued BEFORE the spawn (StepDispatcher).
       {:ok, _} =
         Fleet.TaskQueue.enqueue(pod_id, %{brief: "brief-du-dispatcher", role: "engineer"})
 
@@ -507,19 +509,18 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # Idempotent : un SEUL brief en file, celui du dispatcher (pas "autre-brief") — le spawn n'a pas
-      # ré-enqueué (garde `no_pending_brief?`).
+      # Idempotent: a SINGLE queued brief, the dispatcher's (not "autre-brief") — the spawn did not
+      # re-enqueue (`no_pending_brief?` guard).
       assert [%{brief: "brief-du-dispatcher"}] =
                Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
 
       Process.exit(pid, :kill)
     end
 
-    test "git_ops_denied (cap-profile) fusionné dans disallowedTools du .cap-profile.json écrit au pod" do
-      # Face 1 décision archi git (2026-05-24) : la sémantique catalogue
-      # git_ops_denied doit aboutir en patterns claude CLI disallowedTools dans
-      # le .cap-profile.json écouté par claude_launch.sh — ligne morte → ligne
-      # enforced par le mécanisme générique cap_profile→claude CLI.
+    test "git_ops_denied (cap-profile) merged into disallowedTools of the .cap-profile.json written to the pod" do
+      # git archi decision, face 1: the git_ops_denied catalog semantics must land as claude CLI
+      # disallowedTools patterns in the .cap-profile.json read by claude_launch.sh — dead line →
+      # line enforced by the generic cap_profile→claude CLI mechanism.
       StubBackend.set_reply(interactive_reply())
 
       profile = valid_profile()
@@ -553,10 +554,11 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "state.json écrit après launch (point de recovery, session_id PRÉ-ALLOUÉ)" do
-      # session_id pré-alloué au spawn (DN §A) : passé via opts (le caller l'alloue, comme pod_id).
-      # Le backend ne le capture PLUS (modèle -p mort) — l'état fait foi, persisté tel quel. BND-024 :
-      # un seed explicite DOIT être un UUID valide (recall/boot reprennent une vraie session vendor).
+    test "state.json written after launch (recovery point, PRE-ALLOCATED session_id)" do
+      # session_id pre-allocated at spawn (DN §A): passed via opts (the caller allocates it, like
+      # pod_id). The backend does NOT capture it (the -p model is dead) — the state is authoritative,
+      # persisted as-is. BND-024: an explicit seed MUST be a valid UUID (recall/boot resume a real
+      # vendor session).
       StubBackend.set_reply(interactive_reply())
 
       seed = "abcdef01-2345-4678-9abc-def012345678"
@@ -564,14 +566,14 @@ defmodule Fleet.Spawner.PodTest do
       args = build_args(pod_id, "issue-1") |> Map.put(:opts, session_id: seed)
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
-      # Barrière de sync : :launch_called est émis PENDANT launch_backend.launch, avant que
-      # do_launch ne fasse write_state_fs. GenServer.call est traité après la chaîne handle_continue.
+      # Sync barrier: :launch_called is emitted DURING launch_backend.launch, before do_launch
+      # does write_state_fs. GenServer.call is handled after the handle_continue chain.
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # state.json écrit en LAUNCH (avant MONITOR) → présent même sans livrable.
-      # BL-021 chantier 4 : schéma C-3 complet (v, session_id, cap_profile_name,
-      # started_at, phase, conditions, issue_id). `pod_id` n'est PLUS persisté
-      # (la clé de recovery = path /var/lib/lcars/<scope>/<pod_id>/state.json).
+      # state.json written at LAUNCH (before MONITOR) → present even without a deliverable.
+      # BL-021: full C-3 schema (v, session_id, cap_profile_name,
+      # started_at, phase, conditions, issue_id). `pod_id` is NOT persisted
+      # (the recovery key = path /var/lib/lcars/<scope>/<pod_id>/state.json).
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["v"] == 1
       assert content["issue_id"] == "issue-1"
@@ -584,11 +586,12 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "BND-024 : opts[:session_id] non-UUID → spawn REFUSÉ (jamais une identité arbitraire)" do
-      # Un seed explicite est exporté au launcher (LCARS_POD_SESSION_ID) + persisté pour la recovery/recall.
-      # N'importe quel binaire deviendrait une autorité-identité alternative, non reconstructible. Un seed
-      # présent-mais-non-UUID = corruption caller/seed → refus LOUD (pas d'accept arbitraire, pas de
-      # fallback silencieux au mint qui masquerait le seed corrompu sous une intention recall erronée).
+    test "BND-024: non-UUID opts[:session_id] → spawn REFUSED (never an arbitrary identity)" do
+      # An explicit seed is exported to the launcher (LCARS_POD_SESSION_ID) + persisted for
+      # recovery/recall. Any binary would become an alternative identity authority, not
+      # reconstructible. A present-but-non-UUID seed = caller/seed corruption → LOUD refusal (no
+      # arbitrary accept, no silent fallback to the mint that would hide the corrupt seed under a
+      # mistaken recall intention).
       Process.flag(:trap_exit, true)
       pod_id = "pod-badseed-#{System.unique_integer([:positive])}"
 
@@ -605,14 +608,14 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "BL-055 — session_id déterministe au spawn (Fleet.Spawner.SessionId)" do
+  describe "BL-055 — deterministic session_id at spawn (Fleet.Spawner.SessionId)" do
     setup do
       StubBackend.set_reply(interactive_reply())
       :ok
     end
 
     defp gatekeeper_args(pod_id, opts \\ []) do
-      # gatekeeper = slot 2, worker (1badcafe), fleet-level (repo 0000) — catalogue dans le metadata.
+      # gatekeeper = slot 2, worker (1badcafe), fleet-level (repo 0000) — catalog in the metadata.
       gk = %{
         valid_profile()
         | metadata: %{
@@ -627,19 +630,19 @@ defmodule Fleet.Spawner.PodTest do
       %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: opts}
     end
 
-    test "rôle fleet-level (gatekeeper) → session_id hexspeak déterministe 1badcafe-...02" do
+    test "fleet-level role (gatekeeper) → deterministic hexspeak session_id 1badcafe-...02" do
       pod_id = "pod-gk-det-#{System.unique_integer([:positive])}"
       {:ok, pid} = spawn_via_supervisor(gatekeeper_args(pod_id))
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # barrière sync (state.json écrit en LAUNCH, après :launch_called) — cf. test state.json
+      # sync barrier (state.json written at LAUNCH, after :launch_called) — cf. the state.json test
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["session_id"] == "1badcafe-feed-4dad-babe-0000dec0de02"
     end
 
-    test "opts[:session_id] explicite PRIME (ex. arch boot-from-base sur 0badcafe)" do
+    test "explicit opts[:session_id] WINS (e.g. arch boot-from-base on 0badcafe)" do
       pod_id = "pod-explicit-#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -654,12 +657,13 @@ defmodule Fleet.Spawner.PodTest do
       assert content["session_id"] == "0badcafe-feed-4dad-babe-0000dec0de01"
     end
 
-    test "project-bound (engineer) SANS repo_id → spawn REFUSÉ (identité inconstructible, forge non résolue)" do
-      # engineer = project-bound : son session_id hexspeak EXIGE un repo résolu. SANS repo (la forge n'a
-      # pas rendu l'id — forge down / amont cassé), le mint REFUSE plutôt que de fabriquer un UUID random :
-      # un random masquerait la forge absente et poserait une identité NON reconstructible. Le pod ne
-      # démarre donc PAS — init/1 raise → start_link rend {:error, {%ArgumentError{}, _stacktrace}}, aucun
-      # launch. (Le stop propre côté dispatch est en amont ; ici on fail-loud au mint, dernier recours.)
+    test "project-bound (engineer) WITHOUT repo_id → spawn REFUSED (unconstructible identity, forge unresolved)" do
+      # engineer = project-bound: its hexspeak session_id REQUIRES a resolved repo. WITHOUT a repo (the
+      # forge did not return the id — forge down / broken upstream), the mint REFUSES rather than
+      # fabricating a random UUID: a random would hide the absent forge and set a NON-reconstructible
+      # identity. So the pod does NOT start — init/1 raises → start_link returns
+      # {:error, {%ArgumentError{}, _stacktrace}}, no launch. (The clean stop on the dispatch side is
+      # upstream; here we fail-loud at the mint, last resort.)
       Process.flag(:trap_exit, true)
       pod_id = "pod-eng-norepo-#{System.unique_integer([:positive])}"
 
@@ -676,10 +680,10 @@ defmodule Fleet.Spawner.PodTest do
       refute_received {:launch_called, _args, _env}
     end
 
-    test "DR-020 : repo_id > 9999 (hors <REPO4>) → spawn REFUSÉ loud, PAS de troncature modulo silencieuse" do
-      # Avant : resolve_repo_id foldait `rem(id, 10_000)` → repo 10000 encodait la MÊME identité que
-      # repo 0 (deux projets, un seul session_id déterministe → JSONL/slot/GC confondus). Désormais le
-      # mint REFUSE fort un id hors format plutôt que corrompre l'identité par un modulo caché.
+    test "DR-020: repo_id > 9999 (outside <REPO4>) → spawn REFUSED loud, NO silent modulo truncation" do
+      # A `rem(id, 10_000)` fold would make repo 10000 encode the SAME identity as repo 0 (two
+      # projects, one deterministic session_id → JSONL/slot/GC conflated). The mint REFUSES loud an
+      # out-of-format id rather than corrupting the identity through a hidden modulo.
       Process.flag(:trap_exit, true)
       pod_id = "pod-eng-bigrepo-#{System.unique_integer([:positive])}"
 
@@ -696,7 +700,7 @@ defmodule Fleet.Spawner.PodTest do
       refute_received {:launch_called, _args, _env}
     end
 
-    test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo DÉCIMAL encodé)" do
+    test "project-bound (engineer) WITH repo_id → deterministic hexspeak (DECIMAL repo encoded)" do
       pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
       args = build_args(pod_id, "issue-1") |> Map.put(:opts, repo_id: 161)
       {:ok, pid} = spawn_via_supervisor(args)
@@ -707,12 +711,12 @@ defmodule Fleet.Spawner.PodTest do
       assert content["session_id"] == "1badcafe-feed-4dad-babe-0161dec0de03"
     end
 
-    test "GC d'UUID : un <uuid>.jsonl stale (pod_dir survivant d'un crash) est retiré avant --session-id",
+    test "UUID GC: a stale <uuid>.jsonl (pod_dir surviving a crash) is removed before --session-id",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"
       uuid = "1badcafe-feed-4dad-babe-0000dec0de02"
 
-      # simule un pod_dir survivant (teardown raté) : le jsonl de l'UUID déterministe traîne déjà.
+      # simulates a surviving pod_dir (failed teardown): the deterministic UUID's jsonl already lingers.
       stale =
         Path.join([
           tmp_dir,
@@ -732,7 +736,7 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, _env}, 2_000
       GenServer.call(pid, :info)
 
-      refute File.exists?(stale), "le jsonl stale aurait dû être GC'd avant le --session-id"
+      refute File.exists?(stale), "the stale jsonl should have been GC'd before the --session-id"
     end
   end
 
@@ -742,14 +746,14 @@ defmodule Fleet.Spawner.PodTest do
       :ok
     end
 
-    test "défaut = 'default' (claude_launch → --permission-mode default, listes enforced)" do
+    test "default = 'default' (claude_launch → --permission-mode default, lists enforced)" do
       pod_id = "pod-perm-#{System.unique_integer([:positive])}"
       {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["LCARS_PERMISSION_MODE"] == "default"
     end
 
-    test "cap-profile spec.invocation.permission_mode override le défaut" do
+    test "cap-profile spec.invocation.permission_mode overrides the default" do
       pod_id = "pod-perm-ovr-#{System.unique_integer([:positive])}"
       cp = valid_profile()
       inv = Map.put(cp.spec["invocation"] || %{}, "permission_mode", "bypassPermissions")
@@ -768,12 +772,12 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "LAUNCH-Q — branche containment (host_launch vs bwrap) sur le chemin de lancement" do
-    # Le gap : avant le fix, `do_launch` bwrappait TOUT (containment jamais lu). Ici on prouve que le
-    # launcher N0 passé au backend (`args.launcher_path`) ET le HOME suivent `metadata.containment`.
+  describe "LAUNCH-Q — containment branch (host_launch vs bwrap) on the launch path" do
+    # The gap: a `do_launch` that bwraps EVERYTHING (containment never read). Here we prove that the
+    # N0 launcher passed to the backend (`args.launcher_path`) AND the HOME follow `metadata.containment`.
     defp host_profile, do: put_in(valid_profile().metadata["containment"], "none")
 
-    test "containment: none → launcher host_launch.sh + HOME = home réel de l'humain (auth native)",
+    test "containment: none → host_launch.sh launcher + HOME = the human's real home (native auth)",
          %{
            tmp_dir: tmp_dir
          } do
@@ -791,13 +795,13 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, args, env}, 2_000
       assert String.ends_with?(args.launcher_path, "host_launch.sh")
 
-      # HOME = parent du claudeDir humain (= override config :claude_dir = <tmp_dir>/.claude) → tmp_dir.
-      # claude lit ainsi le ~/.claude humain natif (refresh OAuth, pas de falaise 8h — arch forever).
+      # HOME = parent of the human claudeDir (= config override :claude_dir = <tmp_dir>/.claude) → tmp_dir.
+      # claude thus reads the native human ~/.claude (OAuth refresh, no 8h cliff — arch forever).
       assert env["HOME"] == tmp_dir
       Process.exit(pid, :kill)
     end
 
-    test "containment: bwrap (défaut) → launcher bwrap_launch.sh + HOME = pod_dir (inchangé)" do
+    test "containment: bwrap (default) → bwrap_launch.sh launcher + HOME = pod_dir (unchanged)" do
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-bwrap-#{System.unique_integer([:positive])}"
 
@@ -809,11 +813,11 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "clé containment ABSENTE → rejeté à la porte G24-1 (allocate), JAMAIS lancé sur host" do
-      # Invariant de sécurité LAUNCH-Q : un cap-profile mal formé (sans `containment`) ne peut PAS
-      # atteindre host_launch — la porte G24-1 (`check_containment`, enum {bwrap,none}) le rejette à
-      # l'allocate, AVANT do_launch. (Le défaut "bwrap" de `cap_profile_containment/1` est un filet
-      # defense-in-depth, inatteignable dans le chemin gardé : la porte tranche d'abord.)
+    test "ABSENT containment key → rejected at the G24-1 gate (allocate), NEVER launched on host" do
+      # LAUNCH-Q security invariant: a malformed cap-profile (no `containment`) can NOT reach
+      # host_launch — the G24-1 gate (`check_containment`, enum {bwrap,none}) rejects it at
+      # allocate, BEFORE do_launch. (The "bwrap" default of `cap_profile_containment/1` is a
+      # defense-in-depth net, unreachable in the guarded path: the gate decides first.)
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
       profile = update_in(valid_profile().metadata, &Map.delete(&1, "containment"))
@@ -836,19 +840,19 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "deadline résultat — Z1 (timeout de RÉPONSE, pas budget de vie)" do
-    # `spec.timeouts.response_sec` (champ optionnel) → forçage déterministe court
-    # (le default par scope est 300s, trop long pour un test unit). 1s mini car
-    # Process.send_after exige un integer ; assert_receive/sleep tolèrent le délai.
+  describe "result deadline — Z1 (RESPONSE timeout, not a life budget)" do
+    # `spec.timeouts.response_sec` (optional field) → short deterministic forcing
+    # (the per-scope default is 300s, too long for a unit test). 1s minimum because
+    # Process.send_after requires an integer; assert_receive/sleep tolerate the delay.
     defp short_timeout(profile), do: put_in(profile.spec["timeouts"], %{"response_sec" => 1})
 
-    test "timeout AVEC task active → :failed (result_timeout)" do
+    test "timeout WITH active task → :failed (result_timeout)" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-timeout-active-#{System.unique_integer([:positive])}"
-      # Une task ACTIVE (pending) pour ce pod → au FIRE du deadline,
-      # pod_has_active_task? = true → vrai timeout de réponse → transition_failed.
+      # An ACTIVE (pending) task for this pod → at the deadline FIRE,
+      # pod_has_active_task? = true → real response timeout → transition_failed.
       {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
@@ -865,13 +869,13 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
     end
 
-    test "timeout SANS task active (idle) → pod survit (Z1 : pas d'idle-kill)" do
+    test "timeout WITHOUT active task (idle) → pod survives (Z1: no idle-kill)" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-timeout-idle-#{System.unique_integer([:positive])}"
-      # AUCUNE task → au FIRE, pod_has_active_task? = false → le pod attendait juste
-      # sa prochaine task → PAS de kill. C'est le bug d'origine que le band-aid 60ks
-      # masquait ; ici prouvé corrigé à la racine (vérif au fire, pas à l'armement).
+      # NO task → at the FIRE, pod_has_active_task? = false → the pod was just waiting
+      # for its next task → NO kill. This is the original bug the 60ks band-aid was
+      # hiding; here proven fixed at the root (check at fire, not at arming).
       args = %{
         cap_profile: short_timeout(valid_profile()),
         issue_id: "t1",
@@ -882,24 +886,25 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
 
-      # Au-delà du response_sec (1s) : le deadline a firé, mais idle → pas de kill.
+      # Beyond response_sec (1s): the deadline fired, but idle → no kill.
       Process.sleep(1_300)
-      assert Process.alive?(pid), "pod idle tué par :result_deadline (régression Z1)"
+      assert Process.alive?(pid), "idle pod killed by :result_deadline (Z1 regression)"
       assert GenServer.call(pid, :info).phase == :monitoring
 
       Process.exit(pid, :kill)
     end
 
-    # F-C037 — décision 3-state au FIRE du deadline (couture testable sans TaskQueue injoignable).
-    test "F-C037 :idle → lapse (:keep_state_and_data, PAS de re-arm) — pod entre deux tasks" do
+    # F-C037 — 3-state decision at the deadline FIRE (testable seam without an unreachable TaskQueue).
+    test "F-C037 :idle → lapse (:keep_state_and_data, NO re-arm) — pod between two tasks" do
       data = %{pod_id: "p-idle", cap_profile: valid_profile()}
       assert :keep_state_and_data = Fleet.Spawner.Pod.result_deadline_fire(:idle, data)
     end
 
-    test "F-C037 :unknown (broker injoignable) → RE-ARM le deadline, jamais un lapse (sinon pod hung orphelin)" do
-      # Le bug : pod_has_active_task? conflait :error broker en `false` (= idle) → lapse → un pod HUNG dont
-      # le broker blip pile au fire n'est jamais re-checké (le liveness ne ré-arme que si le pod BOUGE, or un
-      # hung ne bouge pas). Fail-safe : :unknown → re-arm (reste sous surveillance), no-kill préservé.
+    test "F-C037 :unknown (broker unreachable) → RE-ARMS the deadline, never a lapse (else orphaned hung pod)" do
+      # The bug: pod_has_active_task? conflated a broker :error into `false` (= idle) → lapse → a HUNG
+      # pod whose broker blips right at the fire is never re-checked (liveness only re-arms if the pod
+      # MOVES, and a hung one does not move). Fail-safe: :unknown → re-arm (stays under watch),
+      # no-kill preserved.
       data = %{pod_id: "p-unknown", cap_profile: valid_profile()}
 
       assert {:keep_state_and_data, actions} =
@@ -909,16 +914,16 @@ defmodule Fleet.Spawner.PodTest do
                {:state_timeout, ms, :result_deadline} when is_integer(ms) -> true
                _ -> false
              end),
-             "le deadline doit être RE-ARMÉ (state_timeout), pas consommé"
+             "the deadline must be RE-ARMED (state_timeout), not consumed"
     end
 
-    test "pod forever — deadline JAMAIS armé (survit même avec task active + timeout court)" do
+    test "forever pod — deadline NEVER armed (survives even with an active task + short timeout)" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-forever-noarm-#{System.unique_integer([:positive])}"
-      # forever = permanent : arm_result_deadline n'arme PAS (pas de timeout de réponse ;
-      # gouverné par kill_pod externe). Même AVEC une task active + response_sec=1s, pas
-      # de kill — preuve directe du point auditeur (un permanent ne meurt pas sur timeout).
+      # forever = permanent: arm_result_deadline does NOT arm (no response timeout;
+      # governed by external kill_pod). Even WITH an active task + response_sec=1s, no
+      # kill — direct proof of the auditor's point (a permanent does not die on timeout).
       {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "veille", role: "gatekeeper"})
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
@@ -938,19 +943,20 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
 
       Process.sleep(1_300)
-      assert Process.alive?(pid), "pod forever tué par :result_deadline (ne doit JAMAIS armer)"
+      assert Process.alive?(pid), "forever pod killed by :result_deadline (must NEVER arm)"
 
       Process.exit(pid, :kill)
     end
 
-    test "liveness BOUGE → deadline ré-armé → pod survit malgré task active + timeout court (F-RESULT-DEADLINE-LOOP)" do
+    test "liveness MOVES → deadline re-armed → pod survives despite active task + short timeout (F-RESULT-DEADLINE-LOOP)" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-liveness-alive-#{System.unique_integer([:positive])}"
 
-      # Task active : sans le watchdog liveness, le deadline (1s) firerait → result_timeout (cf. test
-      # « timeout AVEC task active »). Ici la sonde renvoie une valeur TOUJOURS croissante (monotonic) → à
-      # chaque tick (100ms) le pod « a bougé » → arm_result_deadline ré-arme → le deadline ne tombe jamais.
+      # Active task: without the liveness watchdog, the deadline (1s) would fire → result_timeout (cf.
+      # the "timeout WITH active task" test). Here the probe returns an ALWAYS increasing value
+      # (monotonic) → on every tick (100ms) the pod "moved" → arm_result_deadline re-arms → the
+      # deadline never falls.
       {:ok, _t} =
         Fleet.TaskQueue.enqueue(pod_id, %{brief: "vrai livrable long", role: "engineer"})
 
@@ -968,26 +974,26 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
 
-      # Bien au-delà du response_sec (1s) : un engineer qui BOUGE ne doit JAMAIS timeout.
+      # Well beyond response_sec (1s): an engineer that MOVES must NEVER time out.
       Process.sleep(1_500)
 
       assert Process.alive?(pid),
-             "engineer qui BOUGE tué par le deadline (F-RESULT-DEADLINE-LOOP non corrigé)"
+             "MOVING engineer killed by the deadline (F-RESULT-DEADLINE-LOOP not fixed)"
 
       assert GenServer.call(pid, :info).phase == :monitoring
 
       Process.exit(pid, :kill)
     end
 
-    test "liveness PLAT (silence) AVEC task active → deadline fire → result_timeout (vrai stuck)" do
+    test "FLAT liveness (silence) WITH active task → deadline fire → result_timeout (real stuck)" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-liveness-stuck-#{System.unique_integer([:positive])}"
 
-      # Sonde CONSTANTE → aucun mouvement → le watchdog ne ré-arme jamais → le deadline (1s) tombe sur
-      # silence total = vrai stuck → transition_failed. (1er tick sans baseline = 1 ré-arme « bénéfice du
-      # doute » → fire ~1 tick plus tard, couvert par assert_receive 5s.)
+      # CONSTANT probe → no movement → the watchdog never re-arms → the deadline (1s) falls on total
+      # silence = real stuck → transition_failed. (1st tick without a baseline = 1 "benefit of the
+      # doubt" re-arm → fire ~1 tick later, covered by the 5s assert_receive.)
       {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
@@ -1007,13 +1013,13 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "Z2 — porte cap-profile G24 au spawn (CAP-D1 / F-CONT-RISK)" do
-    test "profil G24-invalide (server-tools non deny) → :failed, JAMAIS lancé" do
+  describe "Z2 — G24 cap-profile gate at spawn (CAP-D1 / F-CONT-RISK)" do
+    test "G24-invalid profile (server-tools not denied) → :failed, NEVER launched" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
-      # disallowedTools VIDE → viole g24_9 (F-CONT-RISK : web_search/web_fetch/code_execution/…
-      # non deny). La gate validate/1 (do_allocate) doit refuser AVANT tout launch.
+      # EMPTY disallowedTools → violates g24_9 (F-CONT-RISK: web_search/web_fetch/code_execution/…
+      # not denied). The validate/1 gate (do_allocate) must refuse BEFORE any launch.
       profile =
         put_in(valid_profile().spec["scope"], %{"disallowedTools" => [], "git_ops_denied" => []})
 
@@ -1031,19 +1037,20 @@ defmodule Fleet.Spawner.PodTest do
                       {:shutdown, {:allocate_failed, {:cap_profile_invalid, violations}}}},
                      2_000
 
-      assert :g24_9_strict in violations, "la gate doit lever g24_9 (F-CONT-RISK)"
-      # Le refus est au boundary ALLOCATE → le pod n'est JAMAIS lancé (gate effective).
+      assert :g24_9_strict in violations, "the gate must raise g24_9 (F-CONT-RISK)"
+      # The refusal is at the ALLOCATE boundary → the pod is NEVER launched (effective gate).
       refute_received {:launch_called, _, _}
     end
 
-    test "DR-021 : mount injectant (newline) → pod échoue PROPREMENT (raise capté), JAMAIS lancé" do
+    test "DR-021: injecting mount (newline) → pod fails CLEANLY (raise caught), NEVER launched" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
-      # Un mount avec newline = injection LCARS_POD_MOUNTS. LaunchSpec REFUSE (raise) au lieu de dropper-
-      # et-lancer ; le raise est capté par LaunchEnv.build/4 → {:error, {:launch_env_unresolved,_}} →
-      # transition_failed. PREUVE que le reversal R1-21 (refus au lieu de drop) échoue le pod proprement,
-      # SANS crasher le gen_statem (le { :EXIT, :shutdown, _ } propre, pas un {:EXIT, _, {%ArgumentError{}}}).
+      # A mount with a newline = LCARS_POD_MOUNTS injection. LaunchSpec REFUSES (raise) instead of
+      # dropping-and-launching; the raise is caught by LaunchEnv.build/4 →
+      # {:error, {:launch_env_unresolved,_}} → transition_failed. PROOF that the R1-21 reversal
+      # (refusal instead of drop) fails the pod cleanly, WITHOUT crashing the gen_statem (the clean
+      # {:EXIT, :shutdown, _}, not an {:EXIT, _, {%ArgumentError{}}}).
       profile = put_in(valid_profile().metadata["mounts"], [%{"mode" => "ro", "path" => "/x\nrw:/etc"}])
       pod_id = "pod-mount-inject-#{System.unique_integer([:positive])}"
 
@@ -1060,14 +1067,14 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "Z2 — porte credentials au spawn (CRED-D1 : scope + plan)" do
+  describe "Z2 — credentials gate at spawn (CRED-D1: scope + plan)" do
     defp write_creds(dir, oauth) do
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, ".credentials.json"), Jason.encode!(%{"claudeAiOauth" => oauth}))
       Application.put_env(:fleet_spawner, :claude_dir, dir)
     end
 
-    test "scopes insuffisants (manque user:sessions:claude_code) → :failed, jamais lancé",
+    test "insufficient scopes (missing user:sessions:claude_code) → :failed, never launched",
          %{tmp_dir: tmp_dir} do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
@@ -1092,7 +1099,7 @@ defmodule Fleet.Spawner.PodTest do
       refute_received {:launch_called, _, _}
     end
 
-    test "plan non-payant (subscriptionType free) → :failed", %{tmp_dir: tmp_dir} do
+    test "non-paying plan (subscriptionType free) → :failed", %{tmp_dir: tmp_dir} do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
@@ -1115,7 +1122,7 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "launch backend errors" do
-    test "backend :error → phase :failed avec raison" do
+    test "backend :error → phase :failed with a reason" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply({:error, :bwrap_failed})
 
@@ -1126,10 +1133,10 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "exit du process avant résultat" do
-    test "exit_status sans résultat → pod.failed + arrêt {:shutdown, exited_before_result}" do
+  describe "process exit before result" do
+    test "exit_status without result → pod.failed + {:shutdown, exited_before_result} stop" do
       Process.flag(:trap_exit, true)
-      # Fake port vivant (sleep) ; on simule l'exit du process avant tout submit_result.
+      # Live fake port (sleep); we simulate the process exit before any submit_result.
       fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
       StubBackend.set_reply(interactive_reply(port: fake_port))
 
@@ -1137,13 +1144,13 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-exit"))
       assert_receive {:launch_called, _, _}, 2_000
 
-      # Le pod est en :monitoring (aucun résultat reçu). On envoie l'exit du port.
+      # The pod is in :monitoring (no result received). We send the port exit.
       send(pid, {fake_port, {:exit_status, 137}})
 
       assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
     end
 
-    test "exit_status sans résultat GRAVE le tombstone state.json phase=failed (GC-able PodWarden)" do
+    test "exit_status without result ENGRAVES the state.json tombstone phase=failed (PodWarden GC-able)" do
       Process.flag(:trap_exit, true)
       fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
       StubBackend.set_reply(interactive_reply(port: fake_port))
@@ -1154,21 +1161,21 @@ defmodule Fleet.Spawner.PodTest do
       send(pid, {fake_port, {:exit_status, 137}})
       assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
 
-      # Le write est SYNCHRONE avant le stop → l'assertion disque post-EXIT est déterministe.
+      # The write is SYNCHRONOUS before the stop → the post-EXIT disk assertion is deterministic.
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
 
       assert content["phase"] == "failed",
-             "exit-avant-résultat doit graver le tombstone :failed — sinon state.json reste " <>
-               ":monitoring → pod_dir (clone git) invisible au GC PodWarden (fuite monotone)"
+             "exit-before-result must engrave the :failed tombstone — otherwise state.json stays " <>
+               ":monitoring → pod_dir (git clone) invisible to the PodWarden GC (monotonic leak)"
     end
   end
 
-  describe "lifecycle pipe (engineer long-lived)" do
-    # Chantier engineer long-lived (cf. doctrine pipeline-implementation.md
-    # Phase III). Pour lifetime_scope != one-shot, do_extract NE FAIT PAS
-    # release : le pod broadcast pod.completed, reset submitted_result,
-    # retourne à :monitoring, re-arm result_deadline. Release uniquement
-    # sur kill_pod (gatekeeper promote/abandon) ou deadline.
+  describe "pipe lifecycle (long-lived engineer)" do
+    # Long-lived engineer (cf. pipeline-implementation.md doctrine
+    # Phase III). For lifetime_scope != one-shot, do_extract does NOT
+    # release: the pod broadcasts pod.completed, resets submitted_result,
+    # returns to :monitoring, re-arms result_deadline. Release only
+    # on kill_pod (gatekeeper promote/abandon) or deadline.
     defp pipe_profile do
       profile = valid_profile()
 
@@ -1178,15 +1185,16 @@ defmodule Fleet.Spawner.PodTest do
       })
     end
 
-    # Pipe à livrable git async : seul ce mode a un push (lu par le workspace, confirmé par
-    # deliverable.published) à protéger du re-brief → :publishing au submit. pipe_profile() seul
-    # défaute deliverable_mode à "payload" (gatekeeper/architect-like : verdict/interactif, pas de push).
+    # Pipe with an async git deliverable: only this mode has a push (read from the workspace,
+    # confirmed by deliverable.published) to protect from a re-brief → :publishing at submit.
+    # pipe_profile() alone defaults deliverable_mode to "payload" (gatekeeper/architect-like:
+    # verdict/interactive, no push).
     defp git_native_pipe_profile do
       profile = pipe_profile()
       put_in(profile.spec["deliverable_mode"], "git_native")
     end
 
-    test "cycle 1 submit_result → pod.completed broadcastée, pod reste en :monitoring" do
+    test "cycle 1 submit_result → pod.completed broadcast, pod stays in :monitoring" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe"))
 
       pod_id = "pod-pipe-#{System.unique_integer([:positive])}"
@@ -1206,7 +1214,7 @@ defmodule Fleet.Spawner.PodTest do
 
       submit_result_event(pod_id, %{"cycle" => 1, "answer" => "ok"})
 
-      # pod.completed reçue côté Bus.
+      # pod.completed received Bus-side.
       assert_receive %Fleet.Event{
                        source: :spawner,
                        type: :"pod.completed",
@@ -1217,7 +1225,7 @@ defmodule Fleet.Spawner.PodTest do
       assert payload["pod_id"] == pod_id
       assert payload["result"]["cycle"] == 1
 
-      # Pod TOUJOURS vivant + retour :monitoring + submitted_result reset.
+      # Pod STILL alive + back to :monitoring + submitted_result reset.
       Process.sleep(50)
       info = GenServer.call(pid, :info)
       assert info.phase == :monitoring
@@ -1226,7 +1234,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "cycle 2 submit_result après cycle 1 → second pod.completed, pod toujours vivant" do
+    test "cycle 2 submit_result after cycle 1 → second pod.completed, pod still alive" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe2"))
 
       pod_id = "pod-pipe-2cy-#{System.unique_integer([:positive])}"
@@ -1273,7 +1281,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "kill_pod (gatekeeper promote/abandon) → pod release proprement" do
+    test "kill_pod (gatekeeper promote/abandon) → pod releases cleanly" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe-kill"))
 
@@ -1294,15 +1302,15 @@ defmodule Fleet.Spawner.PodTest do
       Process.sleep(50)
       assert GenServer.call(pid, :info).phase == :monitoring
 
-      # Pas via Fleet.Spawner.kill_pod (DynamicSupervisor pas démarré dans
-      # ce test ; les tests existants utilisent Process.exit direct). Test
-      # de surface : le pod accepte un kill brutal sans race state.json.
+      # Not via Fleet.Spawner.kill_pod (DynamicSupervisor not started in
+      # this test; existing tests use direct Process.exit). Surface test:
+      # the pod accepts a brutal kill without a state.json race.
       Process.exit(pid, :kill)
       assert_receive {:EXIT, ^pid, :killed}, 2_000
     end
 
-    # SLOT-FREEZE garde — :publishing n'est armée QUE pour un livrable git async (maybe_enter_publishing).
-    test "submit d'un pipe git_native → condition :publishing armée (push à protéger)" do
+    # SLOT-FREEZE guard — :publishing is armed ONLY for an async git deliverable (maybe_enter_publishing).
+    test "submit of a git_native pipe → :publishing condition armed (push to protect)" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pub-git"))
 
       pod_id = "pod-pub-git-#{System.unique_integer([:positive])}"
@@ -1324,8 +1332,8 @@ defmodule Fleet.Spawner.PodTest do
 
       assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 2_000
 
-      # publish_deadline est à 120s (jamais fire ici) et deliverable.published n'est pas émis
-      # (StepRunCompleter off en test) → :publishing reste présente après le retour à :monitoring.
+      # publish_deadline is at 120s (never fires here) and deliverable.published is not emitted
+      # (StepRunCompleter off in test) → :publishing stays present after the return to :monitoring.
       Process.sleep(50)
       info = GenServer.call(pid, :info)
       assert info.phase == :monitoring
@@ -1334,14 +1342,14 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    # Le nouveau comportement : un pipe payload (pas de push async) n'arme PLUS :publishing — sinon il
-    # armerait un deadline 120s jamais levé par deliverable.published (émis seulement pour git_native).
-    test "submit d'un pipe payload → PAS de condition :publishing (rien à protéger)" do
+    # A payload pipe (no async push) does NOT arm :publishing — otherwise it would arm a 120s
+    # deadline never lifted by deliverable.published (emitted only for git_native).
+    test "submit of a payload pipe → NO :publishing condition (nothing to protect)" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pub-payload"))
 
       pod_id = "pod-pub-payload-#{System.unique_integer([:positive])}"
 
-      # pipe_profile() = deliverable_mode défaut "payload".
+      # pipe_profile() = deliverable_mode defaults to "payload".
       args = %{
         cap_profile: pipe_profile(),
         issue_id: "issue-1",
@@ -1368,8 +1376,8 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "recovery depuis state FS" do
-    test "in-flight → :recreate (session NEUVE, pas --resume)" do
+  describe "recovery from state FS" do
+    test "in-flight → :recreate (FRESH session, not --resume)" do
       pod_id = "pod-recover-os-#{System.unique_integer([:positive])}"
       Process.flag(:trap_exit, true)
 
@@ -1389,10 +1397,10 @@ defmodule Fleet.Spawner.PodTest do
 
       StubBackend.set_reply(interactive_reply(session_id: "ignored"))
 
-      # Toute phase EN VOL sur un (re)spawn → :recreate (le backend est mort sous
-      # `:temporary`, jamais de --resume sur une session morte). Le pod relance avec une
-      # session NEUVE (ici le mint déterministe de l'engineer, repo de test résolu), PAS
-      # --resume session-old : ce qu'on prouve = recreate ≠ resume, pas la forme de l'id.
+      # Any IN-FLIGHT phase on a (re)spawn → :recreate (the backend is dead under
+      # `:temporary`, never --resume on a dead session). The pod relaunches with a
+      # FRESH session (here the engineer's deterministic mint, test repo resolved), NOT
+      # --resume session-old: what we prove = recreate ≠ resume, not the id's shape.
       {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, args, env}, 2_000
       refute args.session_id == "session-old"
@@ -1400,11 +1408,11 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "terminate_pod_port/1 (teardown chaîne bwrap)" do
-    test "SIGTERM le process du port — le holder n'est PAS tué par Port.close seul" do
-      # Reproduit le holder : un process qui IGNORE l'EOF stdin (sleep) → Port.close l'orpheline ;
-      # terminate_pod_port le SIGTERM par os_pid. (Le vrai bwrap+holder est prouvé en e2e ; ici on
-      # verrouille la mécanique exacte du fix en unitaire.)
+  describe "terminate_pod_port/1 (bwrap chain teardown)" do
+    test "SIGTERMs the port's process — the holder is NOT killed by Port.close alone" do
+      # Reproduces the holder: a process that IGNORES stdin EOF (sleep) → Port.close orphans it;
+      # terminate_pod_port SIGTERMs it by os_pid. (The real bwrap+holder is proven in e2e; here we
+      # lock the exact mechanics of the fix at the unit level.)
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       {:os_pid, os_pid} = Port.info(port, :os_pid)
       assert os_alive?(os_pid)
@@ -1414,30 +1422,30 @@ defmodule Fleet.Spawner.PodTest do
       refute os_alive?(os_pid)
     end
 
-    # F-C4b-3 : race TOCTOU — le port se ferme tout seul (claude finit après submit_result)
-    # entre le check et le Port.close → ArgumentError → le GenServer du pod crashait sur une
-    # complétion RÉUSSIE (observé C4b do_release). safe_port_close absorbe l'ArgumentError ;
-    # sans le rescue, ce test crashe (RED).
-    test "safe_port_close sur un port DÉJÀ fermé → :ok (pas de crash, race do_release)" do
+    # F-C4b-3: TOCTOU race — the port closes on its own (claude finishes after submit_result)
+    # between the check and the Port.close → ArgumentError → the pod's GenServer crashed on a
+    # SUCCESSFUL completion (observed at C4b do_release). safe_port_close absorbs the
+    # ArgumentError; without the rescue, this test crashes (RED).
+    test "safe_port_close on an ALREADY closed port → :ok (no crash, do_release race)" do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
-      # port maintenant fermé : un Port.close brut lèverait ArgumentError.
+      # port now closed: a raw Port.close would raise ArgumentError.
       assert :ok = Fleet.Spawner.Pod.Backend.safe_port_close(port)
     end
 
-    test "terminate_pod_port sur un port déjà fermé → :ok (idempotent teardown)" do
+    test "terminate_pod_port on an already closed port → :ok (idempotent teardown)" do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
       assert :ok = Fleet.Spawner.Pod.Backend.terminate_pod_port(port)
     end
   end
 
-  describe "terminate/2 — teardown GARANTI du backend sur tout {:stop} (filet OTP)" do
-    # AVANT le fix : `transition_failed` ({:stop, {:shutdown, _}}) ne tardownait PAS le backend → le
-    # process claude/holder restait ORPHELIN vivant (OAuth+RAM) jusqu'au reaper périodique (~60s, si ON).
-    # terminate/2 le garantit : OTP l'appelle sur TOUT {:stop}. On observe via un fake-port VIVANT (sleep)
-    # dont l'os_pid DOIT être SIGTERM au teardown (le port stub est posé par interactive_reply(port:)).
-    test "transition_failed (result_timeout) → terminate/2 tardownent le backend (os_pid SIGTERM)" do
+  describe "terminate/2 — GUARANTEED backend teardown on every {:stop} (OTP net)" do
+    # A `transition_failed` ({:stop, {:shutdown, _}}) that does not tear down the backend leaves the
+    # claude/holder process alive as an ORPHAN (OAuth+RAM) until the periodic reaper (~60s, if ON).
+    # terminate/2 guarantees it: OTP calls it on EVERY {:stop}. We observe via a LIVE fake-port
+    # (sleep) whose os_pid MUST be SIGTERMed at teardown (the stub port is set by interactive_reply(port:)).
+    test "transition_failed (result_timeout) → terminate/2 tears down the backend (os_pid SIGTERM)" do
       Process.flag(:trap_exit, true)
 
       fake_port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
@@ -1448,7 +1456,7 @@ defmodule Fleet.Spawner.PodTest do
 
       pod_id = "pod-term-tf-#{System.unique_integer([:positive])}"
 
-      # Task active → au FIRE du deadline (response_sec=1s), pod_has_active_task? = true → transition_failed.
+      # Active task → at the deadline FIRE (response_sec=1s), pod_has_active_task? = true → transition_failed.
       {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
@@ -1468,14 +1476,14 @@ defmodule Fleet.Spawner.PodTest do
       Process.sleep(400)
 
       refute os_alive?(os_pid),
-             "backend orphelin : terminate/2 n'a pas torn down le port sur transition_failed"
+             "orphaned backend: terminate/2 did not tear down the port on transition_failed"
     end
 
-    # Le chemin succès (`do_release`) tardownent DÉJÀ explicitement, AVANT le {:stop} ; terminate/2 re-appelle
-    # teardown_backend (le filet). Le double appel doit être IDEMPOTENT : pas de crash (sinon l'EXIT ne serait
-    # pas :normal), backend bien mort. (Le double `terminate_pod_port` sur port fermé est prouvé unitairement
-    # juste au-dessus ; ici on verrouille le double appel sur le chemin de vie COMPLET.)
-    test "double teardown (do_release explicite + terminate/2 filet) idempotent — EXIT :normal, backend mort" do
+    # The success path (`do_release`) ALREADY tears down explicitly, BEFORE the {:stop}; terminate/2
+    # re-calls teardown_backend (the net). The double call must be IDEMPOTENT: no crash (otherwise the
+    # EXIT would not be :normal), backend properly dead. (The double `terminate_pod_port` on a closed
+    # port is proven unit-level just above; here we lock the double call on the FULL life path.)
+    test "double teardown (explicit do_release + terminate/2 net) idempotent — :normal EXIT, backend dead" do
       Process.flag(:trap_exit, true)
 
       fake_port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
@@ -1489,7 +1497,7 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # one-shot : submit_result → extract → release (teardown #1) → {:stop, :normal} → terminate (teardown #2).
+      # one-shot: submit_result → extract → release (teardown #1) → {:stop, :normal} → terminate (teardown #2).
       submit_result_event(pod_id, %{"answer" => "OK"})
 
       assert_receive {:EXIT, ^pid, :normal}, 3_000
@@ -1497,14 +1505,14 @@ defmodule Fleet.Spawner.PodTest do
       Process.sleep(400)
 
       refute os_alive?(os_pid),
-             "backend pas torn down sur le chemin succès (do_release + terminate/2)"
+             "backend not torn down on the success path (do_release + terminate/2)"
     end
   end
 
-  describe "auth — mode bind unique (token_arg retiré 2026-06-14)" do
-    test "tout spawn pose LCARS_AUTH_MODE=bind, jamais de token en clair (LCARS_ANTHROPIC_AUTH_TOKEN)" do
-      # Plus de switch : bind est le seul mode (bwrap monte le .credentials.json RW → refresh OAuth natif,
-      # pas de falaise 8h, pas de fuite en argv). Aucune config :auth_mode à poser.
+  describe "auth — single bind mode (token_arg removed)" do
+    test "every spawn sets LCARS_AUTH_MODE=bind, never a cleartext token (LCARS_ANTHROPIC_AUTH_TOKEN)" do
+      # No switch: bind is the only mode (bwrap mounts the .credentials.json RW → native OAuth
+      # refresh, no 8h cliff, no argv leak). No :auth_mode config to set.
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-auth-bind-#{System.unique_integer([:positive])}"
 
@@ -1514,25 +1522,26 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_AUTH_MODE"] == "bind"
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
 
-      # LCARS_POD_DIR n'est PAS posée par le spawner (dead code : bwrap_launch `--clearenv` la strippe,
-      # host_launch l'`export`e = $POD_DIR, F-E1). La racine pod passe par LCARS_POD_HOME (bwrap, forwardé
-      # par bwrap_launch) + le fallback `$HOME`. cf. pod.ex (Map.put 5001703f réverté).
+      # LCARS_POD_DIR is NOT set by the spawner (dead code: bwrap_launch `--clearenv` strips it,
+      # host_launch `export`s it = $POD_DIR, F-E1). The pod root travels via LCARS_POD_HOME (bwrap,
+      # forwarded by bwrap_launch) + the `$HOME` fallback. cf. pod.ex (Map.put 5001703f reverted).
       refute Map.has_key?(env, "LCARS_POD_DIR")
       assert env["LCARS_POD_HOME"] == "/home/.pod"
     end
   end
 
-  describe "credential per-humain — anti cross-human (résidu de partage accepté)" do
-    test "le CLAUDE_DIR du spawn = le claudeDir per-humain résolu, jamais un dir global hardcodé partagé",
+  describe "per-human credential — anti cross-human (accepted sharing residue)" do
+    test "the spawn's CLAUDE_DIR = the resolved per-human claudeDir, never a shared hardcoded global dir",
          %{tmp_dir: tmp_dir} do
-      # Le `.credentials.json` partagé-writable entre pods du même humain est VOULU (seule mécanique
-      # multi-agent vendor sous abonnement ; cf. le gros bloc « ON N'Y TOUCHE PAS » autour de `claude_dir`
-      # dans pod.ex). Le résidu « un pod lit/écrase le creds de son humain » est ACCEPTÉ (écraser = self-DoS ;
-      # lire = son propre token, pod = AS l'humain). Le SEUL invariant à garder = PER-HUMAIN : le spawn porte
-      # le claudeDir résolu pour l'humain propriétaire (en prod = `~/.claude` de l'user runtime ; en test = la
-      # config `:claude_dir` que le setup pose à `<tmp>/.claude`), JAMAIS un dir GLOBAL hardcodé partagé entre
-      # humains (= l'exfil cross-humain, le seul vrai vecteur). Si quelqu'un câble un claudeDir partagé
-      # (`/var/lib/.../.claude`…), CLAUDE_DIR ≠ `<tmp>/.claude` → CE test casse.
+      # The shared-writable `.credentials.json` between pods of the same human is INTENDED (the only
+      # vendor multi-agent mechanic under subscription; cf. the big "ON N'Y TOUCHE PAS" block around
+      # `claude_dir` in pod.ex). The residue "a pod reads/overwrites its human's creds" is ACCEPTED
+      # (overwriting = self-DoS; reading = its own token, pod = AS the human). The ONLY invariant to
+      # keep = PER-HUMAN: the spawn carries the claudeDir resolved for the owning human (in prod =
+      # the runtime user's `~/.claude`; in test = the `:claude_dir` config the setup points at
+      # `<tmp>/.claude`), NEVER a hardcoded GLOBAL dir shared between humans (= the cross-human
+      # exfil, the only real vector). If someone wires a shared claudeDir (`/var/lib/.../.claude`…),
+      # CLAUDE_DIR ≠ `<tmp>/.claude` → THIS test breaks.
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-cred-perhuman-#{System.unique_integer([:positive])}"
       {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
@@ -1542,11 +1551,11 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "R14 — mcp_server_spec obligatoire pour backend réel" do
-    test "backend réel + mcp_server_spec nil → spawn refusé (fail-loud, pas de pod cassé)" do
-      # Backend réel (non-Stub) sans spec MCP : le pod réel parle MCP → refus net
-      # à do_project (maybe_provision_mcp_config) AVANT tout launch. On NE lance
-      # pas réellement bwrap (l'échec est au provisioning).
+  describe "R14 — mcp_server_spec mandatory for a real backend" do
+    test "real backend + nil mcp_server_spec → spawn refused (fail-loud, no broken pod)" do
+      # Real backend (non-Stub) without an MCP spec: the real pod speaks MCP → clean refusal
+      # at do_project (maybe_provision_mcp_config) BEFORE any launch. We do NOT actually
+      # launch bwrap (the failure is at provisioning).
       Application.put_env(
         :fleet_spawner,
         :launch_backend,
@@ -1568,18 +1577,19 @@ defmodule Fleet.Spawner.PodTest do
                       {:shutdown, {:project_failed, {:mcp_server_spec_required, _backend}}}},
                      2_000
 
-      # Le refus est à do_project (provisioning) AVANT do_launch → jamais de launch.
+      # The refusal is at do_project (provisioning) BEFORE do_launch → never a launch.
       refute_received {:launch_called, _args, _env}
     end
 
-    test "monde-propre : .mcp-fleet.json porte le path IN-NAMESPACE (/home/.pod), pas le pod_dir hôte" do
-      # Régression live 2026-06-22 : la génération posait le path HÔTE (state.pod_dir) du pont dans le
-      # .mcp-fleet.json. bwrap remappant le pod_dir → /home/.pod, ce path n'existe PAS in-sandbox → le pont
-      # MCP n'a jamais démarré → 0 tool mcp__fleet__* → TOUS les pods aveugles (data-plane mort, prouvé
-      # arch+gatekeeper+consultants). Le config doit porter le path sandbox (`sandbox_home`), la COPIE du
-      # pont visant elle le pod_dir hôte. valid_profile = containment bwrap → sandbox_home = /home/.pod.
-      # Plus de clé "env" statique dans la spec : la socket per-pod (LCARS_FLEET_MCP_SOCKET) est injectée
-      # PER-POD par pod.ex (build_fleet_mcp_entry) depuis le provisionneur de socket (stub en test).
+    test "monde-propre: .mcp-fleet.json carries the IN-NAMESPACE path (/home/.pod), not the host pod_dir" do
+      # Live regression: the generation put the bridge's HOST path (state.pod_dir) in the
+      # .mcp-fleet.json. bwrap remaps the pod_dir → /home/.pod, so that path does NOT exist
+      # in-sandbox → the MCP bridge never started → 0 mcp__fleet__* tools → ALL pods blind
+      # (data-plane dead, proven arch+gatekeeper+consultants). The config must carry the sandbox path
+      # (`sandbox_home`), while the bridge's COPY targets the host pod_dir. valid_profile =
+      # containment bwrap → sandbox_home = /home/.pod. No static "env" key in the spec: the per-pod
+      # socket (LCARS_FLEET_MCP_SOCKET) is injected PER-POD by pod.ex (build_fleet_mcp_entry) from
+      # the socket provisioner (stub in test).
       Application.put_env(:fleet_spawner, :mcp_server_spec, %{
         "command" => "bash",
         "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"]
@@ -1598,13 +1608,13 @@ defmodule Fleet.Spawner.PodTest do
 
       assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.py"
       assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.log"
-      # JAMAIS le pod_dir hôte (invisible in-sandbox → c'était LE bug).
+      # NEVER the host pod_dir (invisible in-sandbox → that was THE bug).
       refute cmd =~ pod_dir
 
-      # R9 — l'env du serveur MCP porte SEULEMENT la socket per-pod (chemin host rendu par le
-      # provisionneur stub, contient le pod_id) en `LCARS_FLEET_MCP_SOCKET` : identité = le canal/la
-      # socket, pas un secret sur le fil → plus de `LCARS_POD_ID` (retiré vague B, le pont ne le lit
-      # pas), plus de `LCARS_POD_CAPABILITY`, plus de `LCARS_FLEET_MCP_URL` (HTTP retiré).
+      # R9 — the MCP server env carries ONLY the per-pod socket (host path returned by the stub
+      # provisioner, contains the pod_id) as `LCARS_FLEET_MCP_SOCKET`: identity = the channel/the
+      # socket, not a secret on the wire → no `LCARS_POD_ID` (removed, the bridge does not read
+      # it), no `LCARS_POD_CAPABILITY`, no `LCARS_FLEET_MCP_URL` (HTTP removed).
       env = get_in(config, ["mcpServers", "fleet", "env"])
       assert env["LCARS_FLEET_MCP_SOCKET"] =~ pod_id
       refute Map.has_key?(env, "LCARS_POD_ID")
@@ -1613,10 +1623,10 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "mundo invocado — intégration e2e (#1 creds-inject + cwd + doc-mount dans un spawn)" do
-    test "pod-projet : auth bind + cwd=workspace + code & doc clonés",
+  describe "mundo invocado — e2e integration (#1 creds-inject + cwd + doc-mount in one spawn)" do
+    test "project pod: bind auth + cwd=workspace + code & doc cloned",
          %{tmp_dir: tmp_dir} do
-      # creds fixture per-human (Fleet.Credentials.Gate.validate lit ce claudeDir)
+      # per-human creds fixture (Fleet.Credentials.Gate.validate reads this claudeDir)
       fake_claude = Path.join(tmp_dir, "fake-claude")
       File.mkdir_p!(fake_claude)
 
@@ -1633,11 +1643,11 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # claude_dir override → Fleet.Credentials.Gate.validate lit ce claudeDir (validation scope/plan). Mode = bind.
+      # claude_dir override → Fleet.Credentials.Gate.validate reads this claudeDir (scope/plan validation). Mode = bind.
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
 
-      # repo source avec branche code (main) + branche doc (work/ops)
+      # source repo with a code branch (main) + a doc branch (work/ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
 
       base = valid_profile()
@@ -1667,37 +1677,37 @@ defmodule Fleet.Spawner.PodTest do
 
       assert_receive {:launch_called, _args, env}, 3_000
 
-      # #1 — mode bind (token_arg retiré) : LCARS_AUTH_MODE=bind, aucun token en clair dans l'env
+      # #1 — bind mode (token_arg removed): LCARS_AUTH_MODE=bind, no cleartext token in the env
       assert env["LCARS_AUTH_MODE"] == "bind"
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
 
-      # cwd → la branche CODE (workspace)
+      # cwd → the CODE branch (workspace)
       pod_dir = env["HOME"]
 
-      # #monde-propre Stage B : cwd INTRA-POD relocalisé (le pod_dir réel masqué derrière /home/.pod).
-      # Legacy projet-sans-rc_name → le workspace relocalisé. (Un worker rc_name verrait /home/<project>.)
+      # #monde-propre Stage B: INTRA-POD cwd relocated (the real pod_dir hidden behind /home/.pod).
+      # Legacy project-without-rc_name → the relocated workspace. (An rc_name worker would see /home/<project>.)
       assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"
 
-      # doc-mount : branche code + branche doc clonées côte à côte dans le pod
+      # doc-mount: code branch + doc branch cloned side by side in the pod
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
       assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
 
-      # P2 : CLAUDE.md composé présent À LA RACINE DU CWD (workspace), pas seulement au pod_dir
+      # P2: composed CLAUDE.md present AT THE CWD ROOT (workspace), not only at the pod_dir
       assert File.exists?(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
 
-      # O5 (Brick 5) : l'identité git du rôle n'est PLUS posée par `git config` mutable dans le
-      # workspace (F-01 falsifiable) — elle est injectée en env au lancement (bwrap_launch.sh :
-      # GIT_AUTHOR_*/GIT_COMMITTER_* + GIT_CONFIG_GLOBAL=/dev/null), non observable depuis ce backend
-      # stub. L'enforcement F-01 (gate au push) est couvert par deliverable_gate_test.exs +
-      # executor_post_extract_test.exs (cas git_native usurpation). Donc plus d'assertion sur la
-      # config git locale ici.
+      # O5 (Brick 5): the role's git identity is NOT set by a mutable `git config` in the
+      # workspace (F-01 falsifiable) — it is injected as env at launch (bwrap_launch.sh:
+      # GIT_AUTHOR_*/GIT_COMMITTER_* + GIT_CONFIG_GLOBAL=/dev/null), not observable from this stub
+      # backend. The F-01 enforcement (gate at push) is covered by deliverable_gate_test.exs +
+      # executor_post_extract_test.exs (git_native usurpation case). So no assertion on the local
+      # git config here.
     end
 
-    test "projet injecté par le BRIEF (opts[:project]) — pas besoin du cap_profile statique",
+    test "project injected by the BRIEF (opts[:project]) — no need for the static cap_profile",
          %{tmp_dir: tmp_dir} do
       src = source_repo_with_doc(Path.join(tmp_dir, "brief-src"))
 
-      # cap_profile SANS project (project absent) ; le brief l'injecte via opts.
+      # cap_profile WITHOUT project (project absent); the brief injects it via opts.
       profile = valid_profile()
 
       StubBackend.set_reply(interactive_reply())
@@ -1718,21 +1728,22 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, env}, 3_000
       pod_dir = env["HOME"]
 
-      # le projet du brief est cloné (code + doc) + cwd posé, sans aucun project au catalogue
-      # #monde-propre Stage B : cwd INTRA-POD relocalisé (le pod_dir réel masqué derrière /home/.pod).
-      # Legacy projet-sans-rc_name → le workspace relocalisé. (Un worker rc_name verrait /home/<project>.)
+      # the brief's project is cloned (code + doc) + cwd set, without any project in the catalog
+      # #monde-propre Stage B: INTRA-POD cwd relocated (the real pod_dir hidden behind /home/.pod).
+      # Legacy project-without-rc_name → the relocated workspace. (An rc_name worker would see /home/<project>.)
       assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
       assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
     end
   end
 
-  # BL-055 — sous l'id pod DÉTERMINISTE, un re-dispatch retombe sur le même pod_id : une tombstone
-  # terminale (state.json :succeeded/:released/:killed) d'un cycle précédent ferait court-circuiter
-  # `recover_or_init` en `:release` (stop muet, aucun launch) → boucle orphelin côté poller. `spawn_pod`
-  # appelle `clear_terminal_snapshot/3` AVANT spawn pour repartir FRESH. Régression validée live 2026-06-18.
+  # BL-055 — under the DETERMINISTIC pod id, a re-dispatch lands on the same pod_id: a terminal
+  # tombstone (state.json :succeeded/:released/:killed) from a previous cycle would short-circuit
+  # `recover_or_init` into `:release` (mute stop, no launch) → orphan loop on the poller side.
+  # `spawn_pod` calls `clear_terminal_snapshot/3` BEFORE spawn to restart FRESH. Regression
+  # validated live.
   describe "clear_terminal_snapshot/3 (anti-tombstone)" do
-    test "efface la tombstone TERMINALE (:succeeded) + le pod_dir → re-spawn fresh", %{
+    test "erases the TERMINAL tombstone (:succeeded) + the pod_dir → fresh re-spawn", %{
       tmp_dir: tmp
     } do
       pod_id = "issue-99-engineer"
@@ -1745,7 +1756,7 @@ defmodule Fleet.Spawner.PodTest do
       refute File.exists?(pod_dir)
     end
 
-    test "efface aussi :released et :killed (toutes phases terminales)", %{tmp_dir: tmp} do
+    test "also erases :released and :killed (all terminal phases)", %{tmp_dir: tmp} do
       for phase <- ["released", "killed"] do
         pod_id = "issue-#{phase}-engineer"
         snap = write_snapshot!(tmp, pod_id, phase)
@@ -1757,7 +1768,7 @@ defmodule Fleet.Spawner.PodTest do
       end
     end
 
-    test "PRÉSERVE un snapshot EN VOL (:monitoring) — la recovery reste intacte", %{tmp_dir: tmp} do
+    test "PRESERVES an IN-FLIGHT snapshot (:monitoring) — recovery stays intact", %{tmp_dir: tmp} do
       pod_id = "issue-77-engineer"
       snap = write_snapshot!(tmp, pod_id, "monitoring")
       pod_dir = seed_pod_dir!(tmp, pod_id)
@@ -1768,7 +1779,7 @@ defmodule Fleet.Spawner.PodTest do
       assert File.exists?(pod_dir)
     end
 
-    test "no-op idempotent si aucun snapshot", %{tmp_dir: _tmp} do
+    test "idempotent no-op if no snapshot", %{tmp_dir: _tmp} do
       assert :ok =
                Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(
                  "issue-404-engineer",
@@ -1777,13 +1788,13 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "rm_terminal_artifacts/2,3 — guard path-escape (jamais rm_rf hors racine)" do
-    test "REFUSE un state_dir/pod_dir HORS des racines (state_fs_root/pod_dir_root) — rien effacé",
+  describe "rm_terminal_artifacts/2,3 — path-escape guard (never rm_rf outside a root)" do
+    test "REFUSES a state_dir/pod_dir OUTSIDE the roots (state_fs_root/pod_dir_root) — nothing erased",
          %{
            tmp_dir: tmp
          } do
-      # Un dir-victime SOUS tmp mais HORS des racines `<tmp>/state` et `<tmp>/pods` (simule un state_dir/
-      # pod_dir forgé via un pod_id évadant qui aurait franchi valid_pod_id? — défense en profondeur).
+      # A victim dir UNDER tmp but OUTSIDE the `<tmp>/state` and `<tmp>/pods` roots (simulates a
+      # state_dir/pod_dir forged via an escaping pod_id that got past valid_pod_id? — defense in depth).
       victim = Path.join(tmp, "victim-outside-roots")
       File.mkdir_p!(victim)
       File.write!(Path.join(victim, "precious"), "keep")
@@ -1791,10 +1802,10 @@ defmodule Fleet.Spawner.PodTest do
       assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
 
       assert File.exists?(Path.join(victim, "precious")),
-             "rm_terminal_artifacts a effacé un dir HORS racine — le guard path-escape ne tient pas"
+             "rm_terminal_artifacts erased a dir OUTSIDE the root — the path-escape guard does not hold"
     end
 
-    test "efface bien un state_dir/pod_dir SOUS racine (le chemin nominal marche toujours)", %{
+    test "does erase a state_dir/pod_dir UNDER the root (the nominal path still works)", %{
       tmp_dir: tmp
     } do
       pod_id = "issue-guardok-engineer"
@@ -1807,18 +1818,18 @@ defmodule Fleet.Spawner.PodTest do
       refute File.exists?(pod_dir)
     end
 
-    test "B-#6 — rm_rf ÉCHOUE (I/O) → :ok rendu (non-fatal) MAIS log LOUD (tombstone survivant = boucle)",
+    test "B-#6 — rm_rf FAILS (I/O) → :ok returned (non-fatal) BUT LOUD log (surviving tombstone = loop)",
          %{tmp_dir: tmp} do
-      # Repli B-#6 : `_ = File.rm_rf(dir)` avalait un échec d'effacement. Si le `state.json` SURVIT,
-      # `recover_or_init` le relit → `:release` → `{:stop, :normal}` SILENCIEUX → poller reclaim →
-      # re-dispatch → même tombstone : boucle no-launch INFINIE, masquée par un faux « erased ».
-      # On force un échec I/O DÉTERMINISTE (runner non-root) : le state_dir vit sous un parent read-only
-      # → `rm_rf` supprime le contenu mais échoue au `rmdir` final (`{:error, :eacces, _}`).
+      # B-#6 fold: a `_ = File.rm_rf(dir)` swallows an erase failure. If the `state.json` SURVIVES,
+      # `recover_or_init` re-reads it → `:release` → SILENT `{:stop, :normal}` → poller reclaim →
+      # re-dispatch → same tombstone: INFINITE no-launch loop, masked by a fake "erased".
+      # We force a DETERMINISTIC I/O failure (non-root runner): the state_dir lives under a read-only
+      # parent → `rm_rf` removes the content but fails at the final `rmdir` (`{:error, :eacces, _}`).
       state_root = Path.join(tmp, "state")
       ro_parent = Path.join(state_root, "ro-parent")
       state_dir = Path.join(ro_parent, "doomed")
       File.mkdir_p!(state_dir)
-      # pod_dir bénin (inexistant sous sa racine → rm_rf {:ok, []}, aucun log parasite).
+      # benign pod_dir (nonexistent under its root → rm_rf {:ok, []}, no parasitic log).
       pod_root = Path.join(tmp, "pods")
       File.mkdir_p!(pod_root)
       pod_dir = Path.join(pod_root, "pod_absent")
@@ -1826,7 +1837,7 @@ defmodule Fleet.Spawner.PodTest do
       opts = [state_fs_root: state_root, pod_dir_root: pod_root]
 
       File.chmod!(ro_parent, 0o500)
-      # Restaure l'écriture pour que le nettoyage @tmp_dir d'ExUnit puisse tout effacer.
+      # Restores write access so that ExUnit's @tmp_dir cleanup can erase everything.
       on_exit(fn -> File.chmod(ro_parent, 0o700) end)
 
       log =
@@ -1841,13 +1852,13 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "maybe_recall_restore/1 — total (rescue le bang SeedStore.restore → {:error}, pas de crash)" do
-    test "seed en échec de restore (raise) → {:error, {:recall_restore_failed, _}}", %{
+  describe "maybe_recall_restore/1 — total (rescues the SeedStore.restore bang → {:error}, no crash)" do
+    test "seed failing restore (raise) → {:error, {:recall_restore_failed, _}}", %{
       tmp_dir: tmp
     } do
-      # SeedStore.restore/4 est un BANG : File.cp!/mkdir_p!/escape lèvent. On déclenche le raise avec un
-      # seed_jsonl qui EXISTE mais est un RÉPERTOIRE (File.exists? vrai → File.cp! lève :eisdir). Avant le
-      # fix, ce raise traversait le `with` de :projecting → crash du gen_statem (pas de tombstone).
+      # SeedStore.restore/4 is a BANG: File.cp!/mkdir_p!/escape raise. We trigger the raise with a
+      # seed_jsonl that EXISTS but is a DIRECTORY (File.exists? true → File.cp! raises :eisdir). An
+      # uncaught raise would traverse the :projecting `with` → gen_statem crash (no tombstone).
       seed = Path.join(tmp, "seed-as-dir")
       File.mkdir_p!(seed)
       pod_dir = Path.join(tmp, "pod_recall")
@@ -1864,7 +1875,7 @@ defmodule Fleet.Spawner.PodTest do
                Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
     end
 
-    test "seed absent → {:error, {:recall_seed_missing, _}} (chemin déjà typé, inchangé)", %{
+    test "absent seed → {:error, {:recall_seed_missing, _}} (already-typed path, unchanged)", %{
       tmp_dir: tmp
     } do
       missing = Path.join(tmp, "nope.jsonl")
@@ -1881,8 +1892,8 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "state_fs_path_for/3 — mapping scope → bucket FS (BND-106)" do
-    test "scopes ENUM → bucket attendu, aucun warning d'anomalie" do
+  describe "state_fs_path_for/3 — scope → FS bucket mapping (BND-106)" do
+    test "ENUM scopes → expected bucket, no anomaly warning" do
       root = "/tmp/lcars-scope-test"
 
       for {scope, bucket} <- [
@@ -1903,11 +1914,11 @@ defmodule Fleet.Spawner.PodTest do
             assert path == Path.join([root, bucket, "pod-1", "state.json"])
           end)
 
-        refute log =~ "non-enum", "un scope enum (#{scope}) ne doit PAS logguer une anomalie"
+        refute log =~ "non-enum", "an enum scope (#{scope}) must NOT log an anomaly"
       end
     end
 
-    test "BND-106 : scope HORS-enum → bucket pods/ MAIS warning LOUD (jamais un default silencieux)" do
+    test "BND-106: OUT-OF-enum scope → pods/ bucket BUT LOUD warning (never a silent default)" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           path =
@@ -1917,8 +1928,8 @@ defmodule Fleet.Spawner.PodTest do
               state_fs_root: "/tmp/lcars-scope-test"
             )
 
-          # Toujours bucketé pods/ (safe), mais rendu VISIBLE : un state.json mal-bucketé est un
-          # footgun recovery/GC que le warden re-scannerait de travers.
+          # Always bucketed pods/ (safe), but made VISIBLE: a mis-bucketed state.json is a
+          # recovery/GC footgun the warden would re-scan wrong.
           assert path == Path.join(["/tmp/lcars-scope-test", "pods", "pod-2", "state.json"])
         end)
 
@@ -1926,7 +1937,7 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  # scope_for("one-shot") == "pods" → <state_fs_root>/pods/<pod_id>/state.json (config posée par setup).
+  # scope_for("one-shot") == "pods" → <state_fs_root>/pods/<pod_id>/state.json (config set by setup).
   defp write_snapshot!(tmp, pod_id, phase) do
     path = Path.join([tmp, "state", "pods", pod_id, "state.json"])
     File.mkdir_p!(Path.dirname(path))

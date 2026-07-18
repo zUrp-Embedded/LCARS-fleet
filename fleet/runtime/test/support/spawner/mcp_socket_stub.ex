@@ -1,19 +1,20 @@
 defmodule Fleet.Spawner.MCPSocketStub do
   @moduledoc false
-  # Stub du provisionneur de socket MCP per-pod — adopte le behaviour
-  # `Fleet.Spawner.McpSocketProvisioner` (le contrat du seam `:mcp_socket_provisioner`) : le
-  # compilateur vérifie que le stub reste conforme au contrat réel (anti stub-menteur). Mirror de
-  # `Fleet.Spawner.LaunchBackend.StubBackend` : rend un chemin SANS créer de vrai socket `/run/lcars/...`
-  # (les tests spawner ne polluent pas le FS système ni ne dépendent de fleet_mcp). Défaut test posé par
-  # config/test.exs, exactement comme `launch_backend: StubBackend`.
+  # Stub of the per-pod MCP socket provisioner — adopts the
+  # `Fleet.Spawner.McpSocketProvisioner` behaviour (the contract of the `:mcp_socket_provisioner`
+  # seam): the compiler checks that the stub stays conformant to the real contract (anti
+  # lying-stub). Mirror of `Fleet.Spawner.LaunchBackend.StubBackend`: returns a path WITHOUT
+  # creating a real `/run/lcars/...` socket (spawner tests neither pollute the system FS nor
+  # depend on fleet_mcp). Test default set by config/test.exs, exactly like
+  # `launch_backend: StubBackend`.
   #
-  # Le chemin rendu vit sous `System.tmp_dir!()` (jamais `/run/lcars`) et n'est JAMAIS matérialisé : le
-  # stub ne touche pas le FS. `release_pod_socket/1` est un no-op `:ok`.
+  # The returned path lives under `System.tmp_dir!()` (never `/run/lcars`) and is NEVER
+  # materialized: the stub does not touch the FS. `release_pod_socket/1` is a `:ok` no-op.
 
   @behaviour Fleet.Spawner.McpSocketProvisioner
 
   @doc """
-  Rend `{:ok, socket_path}` (chemin fictif sous tmp, dépendant du pod_id) SANS créer de socket.
+  Returns `{:ok, socket_path}` (fictitious path under tmp, derived from the pod_id) WITHOUT creating a socket.
   """
   @impl Fleet.Spawner.McpSocketProvisioner
   def ensure_pod_socket(pod_id, _tools) when is_binary(pod_id) and pod_id != "" do
@@ -21,7 +22,7 @@ defmodule Fleet.Spawner.MCPSocketStub do
   end
 
   @doc """
-  No-op idempotent (`:ok`) — le stub n'a jamais créé de socket à retirer.
+  Idempotent no-op (`:ok`) — the stub never created a socket to remove.
   """
   @impl Fleet.Spawner.McpSocketProvisioner
   def release_pod_socket(pod_id) when is_binary(pod_id), do: :ok

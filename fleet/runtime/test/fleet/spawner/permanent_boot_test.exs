@@ -1,12 +1,12 @@
 defmodule Fleet.Spawner.PermanentBootTest do
   @moduledoc """
-  Lot 3 inc1 — `Fleet.Spawner.PermanentBoot.boot_at_start?/1` garde D-01
-  CRITIQUE (DN ring1/permanent-pods-boot.md). Pur, string-keyed
-  (anti-M1 : pseudo-code DN atom-keys = illustratif).
+  Lot 3 inc1 — `Fleet.Spawner.PermanentBoot.boot_at_start?/1` CRITICAL D-01
+  guard (DN ring1/permanent-pods-boot.md). Pure, string-keyed
+  (anti-M1: the DN's atom-keyed pseudo-code = illustrative).
 
-  `async: false` : le describe `auto_boot_enabled?/0` mute la config Application
-  globale (`:boot_permanent_at_start`) via `put_env` — couplage config runtime
-  inhérent au prédicat, séquentialiser évite la race inter-module (BL-028).
+  `async: false`: the `auto_boot_enabled?/0` describe mutates global Application
+  config (`:boot_permanent_at_start`) via `put_env` — runtime-config coupling
+  inherent to the predicate; serializing avoids the inter-module race (BL-028).
   """
   use ExUnit.Case, async: false
 
@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "boot_at_start?/1 — Type 1 fleet-level" do
-    test "true : boot_at_start true + forever + host_native false (architect)" do
+    test "true: boot_at_start true + forever + host_native false (architect)" do
       assert PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => true,
@@ -31,27 +31,27 @@ defmodule Fleet.Spawner.PermanentBootTest do
              )
     end
 
-    test "true : host_native absent (défaut non-D-01)" do
+    test "true: host_native absent (non-D-01 default)" do
       assert PermanentBoot.boot_at_start?(
                cp(%{"boot_at_start" => true, "lifetime_scope" => "forever"})
              )
     end
 
-    test "false : boot_at_start false (engineer worker one-shot)" do
+    test "false: boot_at_start false (engineer one-shot worker)" do
       refute PermanentBoot.boot_at_start?(
                cp(%{"boot_at_start" => false, "lifetime_scope" => "one-shot"})
              )
     end
 
-    test "false : boot_at_start true mais lifetime_scope != forever (incohérent G24-10)" do
+    test "false: boot_at_start true but lifetime_scope != forever (inconsistent G24-10)" do
       refute PermanentBoot.boot_at_start?(
                cp(%{"boot_at_start" => true, "lifetime_scope" => "one-shot"})
              )
     end
   end
 
-  describe "garde D-01 CRITIQUE — host_native exclu" do
-    test "false : starfleet (boot_at_start false + host_native true) — JAMAIS fleet_spawner" do
+  describe "CRITICAL D-01 guard — host_native excluded" do
+    test "false: starfleet (boot_at_start false + host_native true) — NEVER fleet_spawner" do
       refute PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => false,
@@ -61,7 +61,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
              )
     end
 
-    test "false DÉFENSIF : host_native true MÊME si boot_at_start true (anti-violation D-01)" do
+    test "DEFENSIVE false: host_native true EVEN IF boot_at_start true (anti D-01 violation)" do
       refute PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => true,
@@ -69,13 +69,13 @@ defmodule Fleet.Spawner.PermanentBootTest do
                  "host_native" => true
                })
              ),
-             "host_native:true ne DOIT JAMAIS booter via fleet_spawner (D-01), " <>
-               "même avec boot_at_start:true mal configuré"
+             "host_native:true must NEVER boot via fleet_spawner (D-01), " <>
+               "even with a misconfigured boot_at_start:true"
     end
   end
 
-  describe "robustesse entrées" do
-    test "spec sans invocation → false" do
+  describe "input robustness" do
+    test "spec without invocation → false" do
       assert PermanentBoot.boot_at_start?(%Fleet.CapProfile{
                kind: "k",
                metadata: %{},
@@ -88,7 +88,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       refute PermanentBoot.boot_at_start?("garbage")
     end
 
-    test "accepte un spec map nu (string-keyed)" do
+    test "accepts a bare spec map (string-keyed)" do
       assert PermanentBoot.boot_at_start?(%{
                "invocation" => %{"boot_at_start" => true, "lifetime_scope" => "forever"}
              })
@@ -96,7 +96,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "select_permanent/1" do
-    test "ne garde que les Type 1, exclut D-01 + workers" do
+    test "keeps only Type 1, excludes D-01 + workers" do
       profiles = [
         cp(%{"boot_at_start" => true, "lifetime_scope" => "forever", "host_native" => false}),
         cp(%{"boot_at_start" => false, "lifetime_scope" => "one-shot"}),
@@ -107,17 +107,17 @@ defmodule Fleet.Spawner.PermanentBootTest do
                PermanentBoot.select_permanent(profiles)
     end
 
-    test "liste vide → []" do
+    test "empty list → []" do
       assert PermanentBoot.select_permanent([]) == []
     end
   end
 
-  describe "boot_permanent_pods/1 (seams injectés — déterministe)" do
+  describe "boot_permanent_pods/1 (injected seams — deterministic)" do
     @describetag :tmp_dir
     setup %{tmp_dir: dir} do
-      # L'énumérateur (`CapProfile.list`) résout par `metadata.name` → fixtures yaml portant le name
-      # (l'identité indexable). Le contenu COMPLET vient du loader injecté (`loader_for`). `notes.txt`
-      # = non-.yaml, ignoré par le scan.
+      # The enumerator (`CapProfile.list`) resolves by `metadata.name` → yaml fixtures carrying the
+      # name (the indexable identity). The FULL content comes from the injected loader (`loader_for`).
+      # `notes.txt` = non-.yaml, ignored by the scan.
       for name <- ~w(architect engineer starfleet) do
         File.write!(Path.join(dir, "#{name}.yaml"), "metadata:\n  name: #{name}\n")
       end
@@ -167,7 +167,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       end
     end
 
-    test "spawn UNIQUEMENT architect (engineer worker + starfleet D-01 exclus)",
+    test "spawns ONLY architect (engineer worker + starfleet D-01 excluded)",
          %{dir: dir} do
       parent = self()
 
@@ -176,7 +176,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      # G9 : le boot rend la LISTE DES RÉSULTATS (safe_boot du BootOrchestrator la classe).
+      # G9: the boot returns the RESULT LIST (the BootOrchestrator's safe_boot classifies it).
       assert [{:ok, pid_arch}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
@@ -184,17 +184,17 @@ defmodule Fleet.Spawner.PermanentBootTest do
                  spawner: spawner
                )
 
-      # BL-055 : pod_id permanent DÉTERMINISTE (plus de `-<os_time>`) → idempotent.
+      # BL-055: DETERMINISTIC permanent pod_id (no `-<os_time>`) → idempotent.
       assert pid_arch == "permanent-architect"
       assert_received {:spawned, "architect", ^pid_arch}
       refute_received {:spawned, "engineer", _}
       refute_received {:spawned, "starfleet", _}
     end
 
-    test "BL-055 : permanent déjà vivant ({:already_started}) → no-op idempotent (pod_id conservé)",
+    test "BL-055: permanent already alive ({:already_started}) → idempotent no-op (pod_id kept)",
          %{dir: dir} do
-      # id déterministe → un re-boot retombe sur `permanent-architect` ; si le pod tourne déjà,
-      # spawn_pod rend {:already_started} → ce n'est PAS une erreur, le pod_id est conservé.
+      # deterministic id → a re-boot lands back on `permanent-architect`; if the pod already runs,
+      # spawn_pod returns {:already_started} → this is NOT an error, the pod_id is kept.
       spawner = fn _cp, _tid, _o -> {:error, {:already_started, self()}} end
 
       assert [{:ok, "permanent-architect"}] =
@@ -205,11 +205,11 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
     end
 
-    test "F-052 : load {:error} sur un rôle → fail-loud (deploy cassé, plus de skip silencieux)",
+    test "F-052: load {:error} on one role → fail-loud (broken deploy, no silent skip)",
          %{dir: dir} do
-      # Avant (doctrine « succès partiel ») : engineer/starfleet invalides étaient skippés, architect
-      # bootait → {:ok, [arch]}. Révision crash-boot : un profil non chargeable = artefact cassé →
-      # on propage. `list_roles` rend les rôles triés → engineer est le 1er à échouer (architect OK).
+      # Crash-boot doctrine: an unloadable profile = broken artifact → propagate (a "partial
+      # success" that skips invalid roles and boots the rest would hide a broken deploy).
+      # `list_roles` returns sorted roles → engineer is the 1st to fail (architect OK).
       loader = fn
         "architect" -> loader_for().("architect")
         _ -> {:error, :invalid_schema}
@@ -223,12 +223,12 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
     end
 
-    test "G9 boot HONNÊTE : spawner {:error} → l'échec est RENDU nommé, plus jamais filtré", %{
+    test "G9 HONEST boot: spawner {:error} → the failure is RETURNED named, never filtered", %{
       dir: dir
     } do
-      # AVANT (bug G9) : {:ok, []} — l'échec du spawn architect était avalé (reject nil) → le
-      # BootOrchestrator émettait fleet.boot_complete MENTEUR. MAINTENANT : l'échec est dans la
-      # liste des résultats, nommé (role + reason) → safe_boot le classe → fleet.boot_partial.
+      # G9: a swallowed architect spawn failure ({:ok, []} via reject nil) would make the
+      # BootOrchestrator emit a LYING fleet.boot_complete. The failure lives in the result
+      # list, named (role + reason) → safe_boot classifies it → fleet.boot_partial.
       assert [{:error, {"architect", :launch_failed}}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
@@ -237,7 +237,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
     end
 
-    test "G5 respawn/2 : re-spawn d'UN permanent via le chemin de boot (idempotent)", %{dir: _dir} do
+    test "G5 respawn/2: re-spawn of ONE permanent via the boot path (idempotent)", %{dir: _dir} do
       parent = self()
 
       spawner = fn %Fleet.CapProfile{metadata: %{"name" => n}}, tid, _o ->
@@ -251,34 +251,34 @@ defmodule Fleet.Spawner.PermanentBootTest do
       assert_received {:respawned, "architect", "permanent-architect"}
     end
 
-    test "G5 respawn/2 : garde-fou — un rôle NON-permanent est refusé fail-loud" do
-      # engineer (boot_at_start: false) : même si un pod_id `permanent-engineer` forgé le demandait,
-      # respawn refuse — un worker one-shot n'a rien à faire dans le cycle permanent.
+    test "G5 respawn/2: guardrail — a NON-permanent role is refused fail-loud" do
+      # engineer (boot_at_start: false): even if a forged `permanent-engineer` pod_id asked for it,
+      # respawn refuses — a one-shot worker has no business in the permanent cycle.
       assert {:error, {"engineer", :not_a_permanent}} =
                PermanentBoot.respawn("engineer",
                  loader: loader_for(),
-                 spawner: fn _c, _t, _o -> flunk("ne doit pas spawner") end
+                 spawner: fn _c, _t, _o -> flunk("must not spawn") end
                )
     end
 
-    test "G5 respawn/2 : cap-profile illisible → {:error, {role, {:cap_profile_load_failed, _}}}" do
+    test "G5 respawn/2: unreadable cap-profile → {:error, {role, {:cap_profile_load_failed, _}}}" do
       assert {:error, {"architect", {:cap_profile_load_failed, :corrupt}}} =
                PermanentBoot.respawn("architect",
                  loader: fn _ -> {:error, :corrupt} end,
-                 spawner: fn _c, _t, _o -> flunk("ne doit pas spawner") end
+                 spawner: fn _c, _t, _o -> flunk("must not spawn") end
                )
     end
 
-    test "répertoire illisible → {:error,{:cap_profiles_dir_unreadable,_}}" do
+    test "unreadable directory → {:error,{:cap_profiles_dir_unreadable,_}}" do
       assert {:error, {:cap_profiles_dir_unreadable, _}} =
                PermanentBoot.boot_permanent_pods(cap_profiles_dir: "/nonexistent/dir/x")
     end
   end
 
-  describe "conformance canon RÉEL — boot_at_start? sur cap-profiles in-repo" do
-    # R0.8-brick5 : canon réabsorbé in-repo (R0.7) à `priv/cap_profile/
-    # canon/cap-profiles/`. Plus de path doctrine `05_data-canon/...`
-    # en dur (inexistant en standard install). Pattern identique brick1
+  describe "REAL canon conformance — boot_at_start? on in-repo cap-profiles" do
+    # R0.8-brick5: canon lives in-repo (R0.7) at `priv/cap_profile/
+    # canon/cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
+    # (nonexistent in a standard install). Same pattern as brick1
     # MonkTest (resolve via Application.app_dir).
     @canon_dir Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
 
@@ -289,20 +289,20 @@ defmodule Fleet.Spawner.PermanentBootTest do
       |> Map.get("spec")
     end
 
-    test "architect.yaml (canon réel) → boot_at_start? TRUE (Type 1)" do
+    test "architect.yaml (real canon) → boot_at_start? TRUE (Type 1)" do
       assert PermanentBoot.boot_at_start?(canon_spec("architect"))
     end
 
-    test "starfleet.yaml (canon réel) → boot_at_start? FALSE (D-01 host_native préservé)" do
+    test "starfleet.yaml (real canon) → boot_at_start? FALSE (D-01 host_native preserved)" do
       refute PermanentBoot.boot_at_start?(canon_spec("starfleet")),
-             "starfleet canon NE DOIT JAMAIS booter via fleet_spawner (D-01 host_native:true)"
+             "canon starfleet must NEVER boot via fleet_spawner (D-01 host_native:true)"
     end
 
-    test "engineer.yaml (canon réel) → boot_at_start? FALSE (worker one-shot)" do
+    test "engineer.yaml (real canon) → boot_at_start? FALSE (one-shot worker)" do
       refute PermanentBoot.boot_at_start?(canon_spec("engineer"))
     end
 
-    test "select_permanent sur les 7 cap-profiles canon → architect seul" do
+    test "select_permanent on the 7 canon cap-profiles → architect alone" do
       profiles =
         ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
         |> Enum.map(fn n ->
@@ -318,15 +318,15 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  # BL-028 (R7→clos) : `auto_boot_enabled?/0` EST le gate canon du boot des pods
-  # permanents (consulté par BootOrchestrator, autorité unique depuis F-14).
-  # Défaut **true** (DN lcars-fleet_service §391) ; `false` désactive.
-  describe "auto_boot_enabled?/0 — gate canon boot pods permanents (défaut true)" do
-    test "défaut true (non configuré) — boote par défaut, canon DN" do
+  # BL-028: `auto_boot_enabled?/0` IS the canon gate for booting permanent pods
+  # (consulted by BootOrchestrator, single authority — F-14).
+  # Default **true** (DN lcars-fleet_service §391); `false` disables.
+  describe "auto_boot_enabled?/0 — canon gate for permanent-pod boot (default true)" do
+    test "default true (unconfigured) — boots by default, DN canon" do
       assert PermanentBoot.auto_boot_enabled?()
     end
 
-    test "false seulement si :boot_permanent_at_start mis explicitement à false" do
+    test "false only if :boot_permanent_at_start is explicitly set to false" do
       Application.put_env(:fleet_spawner, :boot_permanent_at_start, false)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :boot_permanent_at_start) end)
       refute PermanentBoot.auto_boot_enabled?()
@@ -334,17 +334,17 @@ defmodule Fleet.Spawner.PermanentBootTest do
       Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
       assert PermanentBoot.auto_boot_enabled?()
 
-      # Seul le booléen `true` active (pas une string "yes").
+      # Only the boolean `true` enables (not a "yes" string).
       Application.put_env(:fleet_spawner, :boot_permanent_at_start, "yes")
       refute PermanentBoot.auto_boot_enabled?()
     end
   end
 
-  describe "escalate_corrupt_seed/3 (F-C043 — seed permanent corrompu → INCIDENT, pas juste un log)" do
-    test "émet pod.drift (source :spawner, drift_count au seuil DriftMonitor) → escalade au 1er coup" do
-      # Décision user F-C043 : garder le boot (fleet vivante) MAIS escalader la corruption en incident.
-      # `drift_count` = 3 (seuil) : un seed VERSIONNÉ corrompu est un problème CERTAIN, pas un strike à
-      # accumuler → DriftMonitor (source :spawner) escalade dès la 1re occurrence.
+  describe "escalate_corrupt_seed/3 (F-C043 — corrupt permanent seed → INCIDENT, not just a log)" do
+    test "emits pod.drift (source :spawner, drift_count at the DriftMonitor threshold) → escalates on the 1st hit" do
+      # User decision F-C043: keep the boot (fleet alive) BUT escalate the corruption as an incident.
+      # `drift_count` = 3 (threshold): a corrupt VERSIONED seed is a CERTAIN problem, not a strike to
+      # accumulate → DriftMonitor (source :spawner) escalates on the 1st occurrence.
       Fleet.EventRouter.Bus.subscribe()
 
       assert :ok =

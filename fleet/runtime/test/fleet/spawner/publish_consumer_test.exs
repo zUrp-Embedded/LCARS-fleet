@@ -8,24 +8,24 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   alias Fleet.Spawner.PublishConsumer
 
   defmodule StubSpawner do
-    # PASSE-9 — forme réelle `Spawner.spawn_pod/3` = {:ok, pid()}, JAMAIS {:ok, :stub_pod} : un
-    # consommateur qui ré-interpole le pid casserait en prod.
+    # PASSE-9 — real shape of `Spawner.spawn_pod/3` = {:ok, pid()}, NEVER {:ok, :stub_pod}: a
+    # consumer re-interpolating the pid would break in prod.
     def spawn_pod(_cap_profile, issue_id, opts) do
       send(Process.get(:test_pid), {:spawn_called, issue_id, opts})
       {:ok, self()}
     end
   end
 
-  # Spawner qui LÈVE dans `spawn_pod` → exerce le rescue de `handle_info` (spawn droppé). CapProfile.load
-  # doit d'abord réussir pour atteindre spawn_pod : on passe un rôle canon réel ("engineer").
-  # Nommé d'après l'op qui lève : un homonyme `RaisingSpawner` dans fleet_starfleet levait sur
-  # `count_pods` — même nom, contrats différents = piège de lecture (dédup B6, renommés tous deux).
+  # Spawner that RAISES in `spawn_pod` → exercises the `handle_info` rescue (spawn dropped).
+  # CapProfile.load must succeed first to reach spawn_pod: we pass a real canon role ("engineer").
+  # Named after the raising op: a homonym `RaisingSpawner` in fleet_starfleet raises on
+  # `count_pods` — same name, different contracts = reading trap (B6 dedup, both renamed).
   defmodule RaisingOnSpawnSpawner do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: raise("boom spawn (test E-04)")
   end
 
-  # F-C044 — spawn_pod retourne {:error, _} (PAS un raise) → exerce la branche ordinaire {:error} de
-  # `handle_spawn_request` (celle qui ne loggait qu'un warning, sans `spawn.failed`).
+  # F-C044 — spawn_pod returns {:error, _} (NOT a raise) → exercises the ordinary {:error} branch
+  # of `handle_spawn_request` (the one that only logged a warning, without `spawn.failed`).
   defmodule ErrorOnSpawnSpawner do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: {:error, :no_capacity}
   end
@@ -40,26 +40,26 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     {pid, name}
   end
 
-  test "admin.spawn.request avec name absent → log warn, alive, count++" do
+  test "admin.spawn.request with absent name → warn log, alive, count++" do
     {pid, _} = start_consumer()
 
     send(pid, Fleet.Event.new(:api, :"admin.spawn.request"))
 
-    # Mi14 : :sys.get_state = barrière FIFO (send traité avant) → pas de sleep arbitraire.
+    # Mi14: :sys.get_state = FIFO barrier (the send is handled first) → no arbitrary sleep.
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
     refute_received {:spawn_called, _, _}
   end
 
-  # Régression acte4 #32 (2e couche — la frontière Bus no-auth). "" est TRUTHY : sans presence/1,
-  # `cap_profile_name:"" || role` court-circuitait sur "" → load("") → drop APRÈS le 202 (202
-  # menteur). La 1re couche (SpawnAdmission) ne broadcast plus de clés vides, mais le Bus est
-  # no-auth : tout process peut émettre — ce consumer normalise AUSSI.
+  # Regression acte4 #32 (2nd layer — the no-auth Bus boundary). "" is TRUTHY: without presence/1,
+  # `cap_profile_name:"" || role` short-circuits on "" → load("") → drop AFTER the 202 (lying
+  # 202). The 1st layer (SpawnAdmission) no longer broadcasts empty keys, but the Bus is
+  # no-auth: any process can emit — this consumer normalizes TOO.
   defmodule OkSpawner do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: {:ok, self()}
   end
 
-  test "acte4 #32 : cap_profile_name vide + role valide → le role est résolu (spawn tiré)" do
+  test "acte4 #32: empty cap_profile_name + valid role → the role is resolved (spawn fired)" do
     {pid, _} = start_consumer(OkSpawner)
 
     log =
@@ -71,7 +71,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
           )
         )
 
-        # barrière FIFO : le send est traité avant le retour
+        # FIFO barrier: the send is handled before this returns
         _ = :sys.get_state(pid)
       end)
 
@@ -80,7 +80,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     refute log =~ "invalid — name missing/empty"
   end
 
-  test "acte4 #32 : name entièrement vide → spawn.failed émis (drop visible, plus un warning muet)" do
+  test "acte4 #32: fully empty name → spawn.failed emitted (visible drop, not a mute warning)" do
     :ok = Fleet.EventRouter.Bus.subscribe()
     on_exit(fn -> Fleet.EventRouter.Bus.unsubscribe() end)
     {pid, _} = start_consumer()
@@ -94,10 +94,10 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     assert Process.alive?(pid)
 
-    # Le sujet retombe en sentinelle "unknown" (presence/1 sur les deux candidats, classe #32) :
-    # l'alarme atteint TOUJOURS le rail incident avec un sujet binaire (garde is_binary de
-    # IncidentConsumer) — un nom "" ne la fait plus disparaître en silence. `reason` est la
-    # catégorie string (payload JSON-safe de bout en bout).
+    # The subject falls back to the "unknown" sentinel (presence/1 on both candidates, class #32):
+    # the alarm ALWAYS reaches the incident rail with a binary subject (IncidentConsumer's
+    # is_binary guard) — a "" name no longer makes it vanish silently. `reason` is the
+    # string category (JSON-safe payload end to end).
     assert_receive %Fleet.Event{
                      source: :spawner,
                      type: :"spawn.failed",
@@ -112,7 +112,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     refute_received {:spawn_called, _, _}
   end
 
-  test "admin.spawn.request avec name ghost → CapProfile.load fail → log warn, alive" do
+  test "admin.spawn.request with ghost name → CapProfile.load fail → warn log, alive" do
     {pid, _} = start_consumer()
 
     send(
@@ -127,9 +127,9 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     refute_received {:spawn_called, _, _}
   end
 
-  test "dispatch qui LÈVE → event spawn.failed émis sur le Bus (le drop n'est plus silencieux)" do
-    # E-04 : l'API REST a déjà répondu 202 « queued » ; si le dispatch lève, le spawn est droppé.
-    # Sans `spawn.failed`, l'admin croit le pod en file → aucun signal. On capture l'alarme sur le Bus.
+  test "RAISING dispatch → spawn.failed event emitted on the Bus (the drop is no longer silent)" do
+    # E-04: the REST API already answered 202 "queued"; if the dispatch raises, the spawn is dropped.
+    # Without `spawn.failed`, the admin believes the pod is queued → no signal. We capture the alarm on the Bus.
     :ok = Fleet.EventRouter.Bus.subscribe()
     {pid, _} = start_consumer(RaisingOnSpawnSpawner)
 
@@ -140,11 +140,11 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       )
     )
 
-    # Assertion d'INTÉGRATION : le broadcast traverse le consumer (GenServer) + `CapProfile.load` (I/O
-    # disque + parse YAML + validation schéma) AVANT `emit_spawn_failed`. Sous parallélisme `async`, les
-    # 100ms par défaut d'`assert_receive` sont trop serrés → flaky selon le seed d'ordonnancement (le
-    # broadcast arrive après le timeout, mailbox vue vide). Timeout large : on teste QUE l'alarme finit
-    # par arriver, jamais sa latence (qui varie avec la charge des cases async concurrents).
+    # INTEGRATION assertion: the broadcast traverses the consumer (GenServer) + `CapProfile.load`
+    # (disk I/O + YAML parse + schema validation) BEFORE `emit_spawn_failed`. Under `async`
+    # parallelism, `assert_receive`'s default 100ms is too tight → flaky depending on the scheduling
+    # seed (the broadcast lands after the timeout, mailbox seen empty). Wide timeout: we test THAT
+    # the alarm eventually arrives, never its latency (which varies with concurrent async case load).
     assert_receive %Fleet.Event{
                      source: :spawner,
                      type: :"spawn.failed",
@@ -157,14 +157,14 @@ defmodule Fleet.Spawner.PublishConsumerTest do
                    2000
 
     assert reason =~ "boom spawn"
-    # Le drop est non-fatal : le consumer reste vivant et a compté l'event.
+    # The drop is non-fatal: the consumer stays alive and counted the event.
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
   end
 
-  test "F-C044 : CapProfile.load fail → spawn.failed émis (le drop load n'est plus silencieux)" do
-    # Même exigence que le cas RAISE, mais pour un {:error} ORDINAIRE (name ghost → load KO) : l'admin a
-    # eu son 202, le pod ne naît pas → l'alarme doit sortir sur le Bus (read-model observation), pas juste un log.
+  test "F-C044: CapProfile.load fail → spawn.failed emitted (the load drop is no longer silent)" do
+    # Same requirement as the RAISE case, but for an ORDINARY {:error} (ghost name → load KO): the admin
+    # got their 202, the pod is never born → the alarm must reach the Bus (observation read-model), not just a log.
     :ok = Fleet.EventRouter.Bus.subscribe()
     {pid, _} = start_consumer()
 
@@ -189,7 +189,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert Process.alive?(pid)
   end
 
-  test "F-C044 : spawn_pod {:error} → spawn.failed émis (202 queued, 0 pod → alarme, pas silence)" do
+  test "F-C044: spawn_pod {:error} → spawn.failed emitted (202 queued, 0 pod → alarm, not silence)" do
     :ok = Fleet.EventRouter.Bus.subscribe()
     {pid, _} = start_consumer(ErrorOnSpawnSpawner)
 
@@ -214,7 +214,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert Process.alive?(pid)
   end
 
-  test "event autre que admin.spawn.request → ignore (alive, pas spawn_called)" do
+  test "event other than admin.spawn.request → ignored (alive, no spawn_called)" do
     {pid, _} = start_consumer()
 
     send(pid, Fleet.Event.new(:spawner, :"pod.drift"))
@@ -226,7 +226,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     refute_received {:spawn_called, _, _}
   end
 
-  test "msg non-event : pas de crash" do
+  test "non-event msg: no crash" do
     {pid, _} = start_consumer()
     send(pid, :random)
     _ = :sys.get_state(pid)
@@ -234,24 +234,24 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   end
 
   describe "to_keyword/1 — anti atom-leak (finding Vulcan)" do
-    test "clé connue (atom existant) convertie, clé inconnue ignorée (pas de String.to_atom)" do
-      # :brief existe (littéral compilé ci-dessous + option spawn_opts) → conservée
+    test "known key (existing atom) converted, unknown key ignored (no String.to_atom)" do
+      # :brief exists (literal compiled below + spawn_opts option) → kept
       assert PublishConsumer.to_keyword(%{"brief" => "x"}) == [brief: "x"]
 
-      # clé jamais vue comme atome → to_existing_atom raise → filtrée (anti DoS table d'atomes)
+      # key never seen as an atom → to_existing_atom raises → filtered out (anti atom-table DoS)
       garbage = "atom_inexistant_zzz_#{System.unique_integer([:positive])}"
       assert PublishConsumer.to_keyword(%{garbage => 1}) == []
     end
 
-    test "keyword list passe telle quelle ; autre → []" do
+    test "keyword list passes through as-is; anything else → []" do
       assert PublishConsumer.to_keyword(brief: 1) == [brief: 1]
       assert PublishConsumer.to_keyword(nil) == []
     end
 
-    test "R1-30 : opts d'INFRASTRUCTURE (atomes existants mais dangereux) DROPPÉS (allowlist fail-closed)" do
-      # Force l'existence de ces atomes → ils PASSENT le filtre atom-leak (to_existing_atom OK) : ce qui
-      # les drop est donc bien l'ALLOWLIST, pas le filtre. Ils redirigeraient le FS hors home confiné
-      # (pod_dir_root/state_fs_root), ouvriraient l'hôte (containment) ou changeraient le backend.
+    test "R1-30: INFRASTRUCTURE opts (existing but dangerous atoms) DROPPED (fail-closed allowlist)" do
+      # Forces these atoms to exist → they PASS the atom-leak filter (to_existing_atom OK): what
+      # drops them is therefore the ALLOWLIST, not the filter. They would redirect the FS outside
+      # the confined home (pod_dir_root/state_fs_root), open the host (containment) or swap the backend.
       _intern = [:pod_dir_root, :state_fs_root, :containment, :launch_backend]
 
       injected = %{
@@ -273,10 +273,10 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       refute Keyword.has_key?(kept, :launch_backend)
     end
 
-    test "liste NON keyword (tableau JSON décodé) → [] (défense en profondeur, plus gobée brute)" do
-      # Un `opts` arrivé comme tableau JSON (`["module","fun"]` ou `[%{...}]`) n'est JAMAIS une keyword-list
-      # (clés string → maps/scalaires). Avant, `to_keyword(list) = list` le rendait tel quel → opts arbitraires
-      # injectés. Désormais filtré à []. (Le verrou principal reste l'allowlist d'admission de /api/admin/spawn.)
+    test "NON-keyword list (decoded JSON array) → [] (defense in depth, no longer swallowed raw)" do
+      # An `opts` arriving as a JSON array (`["module","fun"]` or `[%{...}]`) is NEVER a keyword-list
+      # (string keys → maps/scalars). A `to_keyword(list) = list` pass-through would inject arbitrary
+      # opts → filtered to []. (The main lock remains the /api/admin/spawn admission allowlist.)
       assert PublishConsumer.to_keyword(["module", "fun"]) == []
       assert PublishConsumer.to_keyword([%{"pod_dir_root" => "/evil"}]) == []
       assert PublishConsumer.to_keyword([{"string_key", 1}]) == []

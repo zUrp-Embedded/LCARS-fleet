@@ -1,8 +1,9 @@
 defmodule Fleet.Spawner.Pod.EventsTest do
   @moduledoc """
-  Acte3 vague E (traçabilité) : les events de cycle-de-vie du pod portent `correlation_id = issue_id`
-  (la clé end-to-end spawn→work→complete→review→merge). AVANT : tout le rail spawner émettait
-  correlation_id=nil → aucun incident n'était tie-able au mandat qui l'a causé (rupture à la frontière).
+  Traceability: pod lifecycle events carry `correlation_id = issue_id` (the end-to-end key
+  spawn→work→complete→review→merge). Without it the whole spawner rail emits
+  correlation_id=nil → no incident can be tied to the mandate that caused it (break at the
+  boundary).
   """
   use ExUnit.Case, async: false
 
@@ -15,7 +16,7 @@ defmodule Fleet.Spawner.Pod.EventsTest do
   end
 
   describe "lossy_broadcast/2 (pod.failed / wake.failed)" do
-    test "corrèle par issue_id" do
+    test "correlates by issue_id" do
       Events.lossy_broadcast("pod.failed", %{
         "pod_id" => "pod-x",
         "issue_id" => "fleet/repo#42",
@@ -30,7 +31,7 @@ defmodule Fleet.Spawner.Pod.EventsTest do
       }
     end
 
-    test "issue_id absent → correlation_id nil (pas de crash, pod hors-projet)" do
+    test "absent issue_id → nil correlation_id (no crash, off-project pod)" do
       Events.lossy_broadcast("pod.failed", %{"pod_id" => "pod-y", "reason" => "boom"})
 
       assert_receive %Fleet.Event{type: :"pod.failed", correlation_id: nil}
@@ -38,7 +39,7 @@ defmodule Fleet.Spawner.Pod.EventsTest do
   end
 
   describe "required_broadcast/2 (pod.completed)" do
-    test "corrèle par issue_id" do
+    test "correlates by issue_id" do
       assert :ok =
                Events.required_broadcast("pod.completed", %{
                  "pod_id" => "pod-z",

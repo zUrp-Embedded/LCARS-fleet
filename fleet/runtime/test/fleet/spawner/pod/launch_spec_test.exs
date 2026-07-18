@@ -12,10 +12,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   end
 
   describe "pod_mounts_env/2 — anti-injection LCARS_POD_MOUNTS (R1-27 / DR-021)" do
-    test "un mount avec newline (injection) → REFUS (raise), pas de drop-and-launch" do
-      # DR-021 : un mount injectant est un état INVALIDE (attaque-shaped). Avant : droppé + launch continue
-      # (réparation aval d'un profil invalide). Désormais : refus LOUD → la projection échoue (le raise est
-      # capté par LaunchEnv.build/4 → {:error, {:launch_env_unresolved, _}}, aucun launch).
+    test "a mount with a newline (injection) → REFUSAL (raise), no drop-and-launch" do
+      # DR-021: an injecting mount is an INVALID state (attack-shaped). Dropping it and continuing the
+      # launch would be downstream repair of an invalid profile. LOUD refusal → the projection fails
+      # (the raise is caught by LaunchEnv.build/4 → {:error, {:launch_env_unresolved, _}}, no launch).
       cap = cap_with_mounts([%{"mode" => "ro", "path" => "/legit\nrw:/etc/shadow"}])
 
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*injection/s, fn ->
@@ -23,7 +23,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       end
     end
 
-    test "un `\\r` (CR) dans un mount → REFUS aussi (même injection)" do
+    test "a `\\r` (CR) in a mount → REFUSAL too (same injection)" do
       cap = cap_with_mounts([%{"mode" => "rw\rro", "path" => "/x"}])
 
       assert_raise ArgumentError, ~r/SECURITY REFUSAL/, fn ->
@@ -31,17 +31,18 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       end
     end
 
-    test "un mount NORMAL est sérialisé (mode:path)" do
+    test "a NORMAL mount is serialized (mode:path)" do
       cap = cap_with_mounts([%{"mode" => "rw", "path" => "/home/project"}])
       env = LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
       assert env =~ "rw:/home/project"
     end
 
-    test "un mount avec mode HORS-ENUM (typo) → REFUS (raise), pas de repli mou vers `ro`" do
-      # DR-021 : `mode` est une propriété de SÉCURITÉ (RO vs RW = écriture hors-sandbox). Un mode nil/typo
-      # (`"RW"`) présent-mais-invalide = profil schéma-bypassé → refus, jamais normalisé à `ro` (normaliser
-      # un RW typoé en RO change silencieusement le sens d'un profil invalide). Le schéma borne déjà
-      # `mode ∈ {ro,rw}` au LOAD ; ce check est la frontière eval. Jumeau de `permission_mode`.
+    test "a mount with an OUT-OF-ENUM mode (typo) → REFUSAL (raise), no soft fallback to `ro`" do
+      # DR-021: `mode` is a SECURITY property (RO vs RW = out-of-sandbox writes). A nil/typo mode
+      # (`"RW"`) present-but-invalid = schema-bypassed profile → refusal, never normalized to `ro`
+      # (normalizing a typoed RW into RO silently changes the meaning of an invalid profile). The
+      # schema already bounds `mode ∈ {ro,rw}` at LOAD; this check is the eval boundary. Twin of
+      # `permission_mode`.
       cap = cap_with_mounts([%{"mode" => "RW", "path" => "/x"}])
 
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*mount mode/s, fn ->
@@ -50,21 +51,22 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
-  describe "project_ops_path/3 — le monde de SON projet (RO, scopé), ni rien ni tout" do
-    # Le sanctuaire projette le work/ops de SON projet (context/doctrine) pour que le worker SACHE au lieu de
-    # deviner les à-côtés — pas `/home/projects.work` entier (le monde des autres = bruit + sur-exposition),
-    # pas rien (famine → il devine = le poison). `work_root` seam = testable (le vrai est hardcodé).
-    test "pas de projet (rc_name absent) → nil : rien à projeter" do
+  describe "project_ops_path/3 — the world of ITS project (RO, scoped), neither nothing nor everything" do
+    # The sanctuary projects ITS project's work/ops (context/doctrine) so the worker KNOWS instead of
+    # guessing the surroundings — not the whole `/home/projects.work` (other projects' world = noise +
+    # over-exposure), not nothing (starvation → it guesses = the poison). `work_root` seam = testable
+    # (the real one is hardcoded).
+    test "no project (rc_name absent) → nil: nothing to project" do
       assert LaunchSpec.project_ops_path([], cap_with_mounts([]), "/tmp") == nil
     end
 
-    test "projet mais work/ops ABSENT → nil (le launcher ro-bind STRICT crasherait sur un source manquant)" do
+    test "project but work/ops ABSENT → nil (the STRICT ro-bind launcher would crash on a missing source)" do
       assert LaunchSpec.project_ops_path([rc_name: "ghost_test"], cap_with_mounts([]), "/tmp/nexiste-pas-42") ==
                nil
     end
 
     @tag :tmp_dir
-    test "projet + work/ops présent → le chemin scopé <work_root>/<projet> (SON monde)", %{tmp_dir: tmp} do
+    test "project + work/ops present → the scoped path <work_root>/<project> (ITS world)", %{tmp_dir: tmp} do
       File.mkdir_p!(Path.join(tmp, "myproj"))
 
       assert LaunchSpec.project_ops_path([rc_name: "myproj_test"], cap_with_mounts([]), tmp) ==
@@ -72,7 +74,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
-  describe "permission_mode/1 — borné à l'enum CLI (R1-28)" do
+  describe "permission_mode/1 — bounded to the CLI enum (R1-28)" do
     defp cap_with_permission_mode(mode) do
       %Fleet.CapProfile{
         kind: "CapabilityProfile",
@@ -81,22 +83,22 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       }
     end
 
-    test "les modes VALIDES de l'enum sont conservés" do
+    test "VALID enum modes are kept" do
       for mode <- ~w(default acceptEdits bypassPermissions plan) do
         assert LaunchSpec.permission_mode(cap_with_permission_mode(mode)) == mode
       end
     end
 
-    test "un mode INCONNU (setting sécurité forgé) → REFUS (raise), pas de fallback \"default\"" do
-      # DR-021 : normaliser un permission_mode invalide en "default" change silencieusement le sens d'un
-      # profil de sécurité forgé (un "bypassPermissions" typoé deviendrait enforced, ou l'inverse). Présent-
-      # mais-hors-enum → refus LOUD ; la projection échoue (raise capté par LaunchEnv.build/4).
+    test "an UNKNOWN mode (forged security setting) → REFUSAL (raise), no \"default\" fallback" do
+      # DR-021: normalizing an invalid permission_mode into "default" silently changes the meaning of a
+      # forged security profile (a typoed "bypassPermissions" would become enforced, or the reverse).
+      # Present-but-out-of-enum → LOUD refusal; the projection fails (raise caught by LaunchEnv.build/4).
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*permission_mode/s, fn ->
         LaunchSpec.permission_mode(cap_with_permission_mode("yolo-bypass-everything"))
       end
     end
 
-    test "absent → default (défaut schéma légitime : non-spécifié = enforced, PAS une valeur invalide)" do
+    test "absent → default (legitimate schema default: unspecified = enforced, NOT an invalid value)" do
       cap = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}
       assert LaunchSpec.permission_mode(cap) == "default"
     end

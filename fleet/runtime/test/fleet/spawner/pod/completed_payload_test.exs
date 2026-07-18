@@ -1,14 +1,14 @@
 defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
-  # async: true — `build/2` est PUR (aucune I/O, aucune mutation, aucun state/config global) : que du
-  # calcul déterministe sur les champs LUS du `data`. Rien à sérialiser entre tests.
+  # async: true — `build/2` is PURE (no I/O, no mutation, no global state/config): only
+  # deterministic computation over the fields READ from `data`. Nothing to serialize between tests.
   use ExUnit.Case, async: true
 
   alias Fleet.Spawner.Pod.CompletedPayload
 
-  # cap_profile minimal : `build/2` ne lit QUE le rôle (`Fleet.CapProfile.name` → metadata["name"]) et
-  # le projet statique (`spec["project"]`, résolu via `LaunchSpec.effective_project`). On le laisse vide
-  # par défaut → le projet EFFECTIF vient des `opts[:project]` du data (dynamique), ce que pose le
-  # dispatcher en prod.
+  # minimal cap_profile: `build/2` reads ONLY the role (`Fleet.CapProfile.name` → metadata["name"])
+  # and the static project (`spec["project"]`, resolved via `LaunchSpec.effective_project`). Left
+  # empty by default → the EFFECTIVE project comes from the data's `opts[:project]` (dynamic), which
+  # is what the dispatcher sets in prod.
   defp cap_profile(spec) do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
     }
   end
 
-  # data représentatif du gen_statem au moment de l'extract (les SEULS champs lus par `build/2`).
+  # data representative of the gen_statem at extract time (the ONLY fields read by `build/2`).
   defp data(opts \\ [], spec \\ %{}) do
     %{
       pod_id: "pod-abc",
@@ -28,8 +28,8 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
     }
   end
 
-  describe "build/2 — payload nu (pas de projet)" do
-    test "sans projet → base uniquement (pod_id/issue_id/result), aucune clé de step-run" do
+  describe "build/2 — bare payload (no project)" do
+    test "without project → base only (pod_id/issue_id/result), no step-run key" do
       payload = CompletedPayload.build(data(), %{"summary" => "done"})
 
       assert payload == %{
@@ -38,40 +38,40 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
                "result" => %{"summary" => "done"}
              }
 
-      # Aucun contexte de fin-de-step-run sur un pod sans projet (memory-X, architect).
+      # No end-of-step-run context on a project-less pod (memory-X, architect).
       refute Map.has_key?(payload, "workspace")
       refute Map.has_key?(payload, "role")
       refute Map.has_key?(payload, "repository")
     end
 
-    test "projet SANS repo_path (map vide implicite) → payload nu" do
-      # `effective_project` rend `%{}` (ni opts[:project], ni spec["project"]) → clause `_` → base.
+    test "project WITHOUT repo_path (implicit empty map) → bare payload" do
+      # `effective_project` returns `%{}` (neither opts[:project] nor spec["project"]) → `_` clause → base.
       payload = CompletedPayload.build(data([], %{"project" => %{}}), %{})
       assert payload == %{"pod_id" => "pod-abc", "issue_id" => "issue-42", "result" => %{}}
     end
   end
 
-  describe "build/2 — pod-projet (repo_path présent)" do
-    test "projet avec repo_path → workspace + base_sha + gate_base_sha + role, sans repo/workflow_map" do
+  describe "build/2 — project pod (repo_path present)" do
+    test "project with repo_path → workspace + base_sha + gate_base_sha + role, without repo/workflow_map" do
       proj = %{"repo_path" => "https://forge/x.git", "base_sha" => "sha-base"}
       payload = CompletedPayload.build(data(project: proj), %{"summary" => "ok"})
 
       assert payload["pod_id"] == "pod-abc"
       assert payload["issue_id"] == "issue-42"
       assert payload["result"] == %{"summary" => "ok"}
-      # Autorité unique du sous-dossier workspace = <pod_dir>/workspace.
+      # Single authority for the workspace subdir = <pod_dir>/workspace.
       assert payload["workspace"] == "/home/human/pods/pod_pod-abc/workspace"
       assert payload["base_sha"] == "sha-base"
-      # Rôle gravé au spawn (source unique Fleet.CapProfile.name).
+      # Role engraved at spawn (single source Fleet.CapProfile.name).
       assert payload["role"] == "engineer"
 
-      # Projet sans `"repo"` → pas d'enrichissement multi-projet ; sans opts workflow_map → pas de ctx.
+      # Project without `"repo"` → no multi-project enrichment; without workflow_map opts → no ctx.
       refute Map.has_key?(payload, "repository")
       refute Map.has_key?(payload, "remote")
       refute Map.has_key?(payload, "workflow_map")
     end
 
-    test "gate_base_sha explicite prime ; absent → fallback base_sha" do
+    test "explicit gate_base_sha wins; absent → base_sha fallback" do
       with_gate =
         CompletedPayload.build(
           data(project: %{"repo_path" => "r", "base_sha" => "b", "gate_base_sha" => "g"}),
@@ -80,14 +80,14 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
 
       assert with_gate["gate_base_sha"] == "g"
 
-      # gate_base_sha absent → égalisé à base_sha (forward build/rework).
+      # gate_base_sha absent → equalized to base_sha (forward build/rework).
       fallback =
         CompletedPayload.build(data(project: %{"repo_path" => "r", "base_sha" => "b"}), %{})
 
       assert fallback["gate_base_sha"] == "b"
     end
 
-    test "projet avec repo → repository{full_name} + remote (repo_path)" do
+    test "project with repo → repository{full_name} + remote (repo_path)" do
       proj = %{
         "repo_path" => "https://forge/owner/name.git",
         "base_sha" => "sha-base",
@@ -97,19 +97,19 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
       payload = CompletedPayload.build(data(project: proj), %{})
 
       assert payload["repository"] == %{"full_name" => "owner/name"}
-      # `remote` = l'URL de push = repo_path.
+      # `remote` = the push URL = repo_path.
       assert payload["remote"] == "https://forge/owner/name.git"
     end
 
-    test "projet EFFECTIF : opts[:project] prime sur spec[project]" do
-      # brief dynamique (opts) > statique (spec) — source unique LaunchSpec.effective_project.
+    test "EFFECTIVE project: opts[:project] wins over spec[project]" do
+      # dynamic brief (opts) > static (spec) — single source LaunchSpec.effective_project.
       dynamic = %{"repo_path" => "dyn", "base_sha" => "dyn-sha"}
       static = %{"repo_path" => "stat", "base_sha" => "stat-sha"}
       payload = CompletedPayload.build(data([project: dynamic], %{"project" => static}), %{})
       assert payload["base_sha"] == "dyn-sha"
     end
 
-    test "contexte workflow_map (opts :workflow_map + :step binaires) → clés workflow_map/step" do
+    test "workflow_map context (binary :workflow_map + :step opts) → workflow_map/step keys" do
       proj = %{"repo_path" => "r", "base_sha" => "b"}
 
       payload =
@@ -120,8 +120,8 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
     end
   end
 
-  describe "build/2 — pureté (ne mute pas le data)" do
-    test "le data passé n'est pas modifié" do
+  describe "build/2 — purity (does not mutate the data)" do
+    test "the passed data is not modified" do
       d = data(project: %{"repo_path" => "r", "base_sha" => "b", "repo" => "o/n"})
       _ = CompletedPayload.build(d, %{"x" => 1})
 

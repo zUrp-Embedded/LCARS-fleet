@@ -1,32 +1,32 @@
 defmodule Fleet.Spawner.PodKickTest do
   @moduledoc """
-  R3b / F-C4b-2 — kick AUTONOME readiness-gated. La boucle remplace le yop à délai
-  fixe (perdu si le REPL n'est pas prêt, observé C4b live).
+  R3b / F-C4b-2 — AUTONOMOUS readiness-gated kick. The loop replaces a fixed-delay
+  yop (lost when the REPL is not ready, observed live at C4b).
 
-  Depuis la migration `Pod` → `gen_statem`, le kick est un **generic timeout nommé
-  `:kick`** : l'event est `{:timeout, :kick}` de contenu `{:attempt, n}`, et le handler
-  est `Pod.handle_event/4` (pas `handle_info/2`). On l'appelle directement et on assert
-  sur les ACTIONS de timer RETOURNÉES (au lieu de l'ancien `send_after`→mailbox observé
-  par `assert_receive`, qui n'existe plus avec un timer natif) :
-    - reschedule = action `{{:timeout, :kick}, retry, {:attempt, n+1}}` ;
-    - stop (ACK / cap) = action d'annulation `{{:timeout, :kick}, :infinity, _}` ;
-    - no-op (pas de tmux) = `:keep_state_and_data` sans action.
-  Le chemin `tmux joignable → yop → stop dès pull` exige un vrai serveur tmux → prouvé
-  LIVE (PASSE 5/6), pas ici.
+  With `Pod` as a `gen_statem`, the kick is a **generic timeout named `:kick`**:
+  the event is `{:timeout, :kick}` with content `{:attempt, n}`, and the handler is
+  `Pod.handle_event/4` (not `handle_info/2`). We call it directly and assert on the
+  RETURNED timer ACTIONS (a native timer has no `send_after`→mailbox to observe
+  with `assert_receive`):
+    - reschedule = action `{{:timeout, :kick}, retry, {:attempt, n+1}}`;
+    - stop (ACK / cap) = cancel action `{{:timeout, :kick}, :infinity, _}`;
+    - no-op (no tmux) = `:keep_state_and_data` without action.
+  The path `tmux reachable → yop → stop on pull` requires a real tmux server → proven
+  LIVE (PASSE 5/6), not here.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod
 
-  # Le kick est insensible à l'état (il matche sur `data.tmux_session`) : on passe un nom
-  # d'état quelconque (:monitoring) en 3ᵉ argument de handle_event/4.
+  # The kick is state-insensitive (it matches on `data.tmux_session`): we pass an arbitrary
+  # state name (:monitoring) as the 3rd argument of handle_event/4.
   @state :monitoring
 
   setup do
     Application.put_env(:fleet_spawner, :kick_retry_ms, 10)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 3)
-    # Les fake_pods n'ont aucun brief → chemin BOOTSTRAP (cap/retry dédiés). On les override
-    # aussi pour garder les tests rapides + bornés.
+    # fake_pods have no brief → BOOTSTRAP path (dedicated cap/retry). We override those too
+    # to keep the tests fast + bounded.
     Application.put_env(:fleet_spawner, :kick_bootstrap_retry_ms, 10)
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 3)
 
@@ -40,14 +40,14 @@ defmodule Fleet.Spawner.PodKickTest do
     :ok
   end
 
-  # Les fixtures `data` portent TOUJOURS `issue_id` : c'est la forme réelle (`Pod.@type data`), et
-  # le broadcast `wake.failed` du cap la lit (l'issue_id nourrit le correlation_id → le bloc
-  # « Mandat lié » de l'issue d'escalade). Une fixture amputée passerait là où la donnée réelle
-  # passe et casserait ailleurs — le stub menteur, en plus discret.
+  # The `data` fixtures ALWAYS carry `issue_id`: that is the real shape (`Pod.@type data`), and
+  # the cap's `wake.failed` broadcast reads it (the issue_id feeds the correlation_id → the
+  # « Mandat lié » block of the escalation issue). An amputated fixture would pass where the real
+  # data passes and break elsewhere — the lying stub, only stealthier.
   defp fake_pod, do: "no-such-pod-#{System.unique_integer([:positive])}"
 
-  test "pas de tmux_session → no-op, aucun re-kick planifié" do
-    # Pas de tmux → no-op pur : aucune action de timer (ni reschedule, ni cancel).
+  test "no tmux_session → no-op, no re-kick scheduled" do
+    # No tmux → pure no-op: no timer action (neither reschedule nor cancel).
     assert :keep_state_and_data =
              Pod.handle_event(
                {:timeout, :kick},
@@ -57,27 +57,27 @@ defmodule Fleet.Spawner.PodKickTest do
              )
   end
 
-  test "tmux pas encore up (serveur absent) + brief non pull → retente (reschedule n+1)" do
+  test "tmux not up yet (no server) + brief not pulled → retries (reschedule n+1)" do
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # `alive?` faux (pas de vrai serveur) → branche reschedule (action attempt n+1), pas yop perdu.
+    # `alive?` false (no real server) → reschedule branch (attempt n+1 action), no lost yop.
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end
 
-  test "cap atteint (n >= max) → abandon (cancel), aucun reschedule" do
+  test "cap reached (n >= max) → gives up (cancel), no reschedule" do
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # cap (3) atteint → action d'ANNULATION du generic timeout :kick (:infinity), pas de reschedule.
+    # cap (3) reached → CANCEL action of the :kick generic timeout (:infinity), no reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
   end
 
-  test "brief déjà pull (task :assigned) → stop (cancel), aucun reschedule" do
+  test "brief already pulled (task :assigned) → stop (cancel), no reschedule" do
     pod = fake_pod()
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
 
-    # get_for_pod = ce que fait le pod via MCP get_work_item → la task passe :pending → :assigned
+    # get_for_pod = what the pod does via MCP get_work_item → the task goes :pending → :assigned
     {:ok, _} = Fleet.TaskQueue.get_for_pod(pod)
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
@@ -89,30 +89,30 @@ defmodule Fleet.Spawner.PodKickTest do
              })
   end
 
-  test "pod SANS brief → mode bootstrap : stop au cap bootstrap, pas au cap worker" do
-    # cap bootstrap (2) < cap worker (9). fake_pod = aucune task → no_pending_brief? = true.
+  test "pod WITHOUT brief → bootstrap mode: stop at the bootstrap cap, not the worker cap" do
+    # bootstrap cap (2) < worker cap (9). fake_pod = no task → no_pending_brief? = true.
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
 
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # n=2 ≥ cap bootstrap (2) → stop (cancel). Si le cap worker (9) s'appliquait, n=2 < 9 → reschedule.
+    # n=2 ≥ bootstrap cap (2) → stop (cancel). If the worker cap (9) applied, n=2 < 9 → reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 2}, @state, data)
   end
 
-  test "pod AVEC brief pending → mode worker : continue au-delà du cap bootstrap" do
+  test "pod WITH pending brief → worker mode: continues beyond the bootstrap cap" do
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
 
     pod = fake_pod()
 
-    # enqueue SANS get_for_pod → task `:pending` (pas pull) → no_pending_brief? = false (worker).
+    # enqueue WITHOUT get_for_pod → task `:pending` (not pulled) → no_pending_brief? = false (worker).
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1"}
-    # n=3 > cap bootstrap (2) MAIS < cap worker (9) → reschedule (chemin worker, tmux pas up).
+    # n=3 > bootstrap cap (2) BUT < worker cap (9) → reschedule (worker path, tmux not up).
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 4}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
   end
