@@ -477,6 +477,16 @@ defmodule Fleet.Spawner.Pod do
     # cap_profile carrying the EFFECTIVE project (the call's, not the static one) for reset_in_place.
     eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
 
+    # F-28: on SUCCESS the fresh project map must ALSO replace the pod's OWN copy
+    # (`opts[:project]`) — `CompletedPayload` derives base_sha/gate_base_sha from it. A
+    # `keep_state_and_data` here applied the fresh base to the WORKSPACE and threw the map
+    # away: every payload of the reused pipe then reported the SPAWN-time base — a LYING
+    # provenance input_sha (lived: issue built on 2d70d4a attested as built on b2707cd) and
+    # a RECEDED base-ancestor gate (a HEAD rewriting the intermediate brick away would still
+    # pass the mechanical wall). On FAILURE the old map stays — the workspace kept the old
+    # base, updating the map anyway would be the INVERSE lie (fresh claim, stale disk).
+    repinned = %{data | opts: Keyword.put(data.opts, :project, project)}
+
     case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
       {:ok, ws, branch} ->
         # `/clear` is the OTHER load-bearing half of the cold reset (git workspace + REPL context). A failed
@@ -497,7 +507,7 @@ defmodule Fleet.Spawner.Pod do
             )
         end
 
-        {:keep_state_and_data, [{:reply, from, :ok}]}
+        {:keep_state, repinned, [{:reply, from, :ok}]}
 
       {:error, reason} = err ->
         Logger.error("pod #{data.pod_id} workspace reprovision FAILED: #{inspect(reason)}")

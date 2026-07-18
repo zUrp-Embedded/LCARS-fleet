@@ -1194,6 +1194,67 @@ defmodule Fleet.Spawner.PodTest do
       put_in(profile.spec["deliverable_mode"], "git_native")
     end
 
+    test "F-28: reprovision repins the pod's PROJECT MAP — the payload reports the re-brief base, never the spawn base",
+         %{tmp_dir: tmp_dir} do
+      # Source repo with TWO commits on main: the spawn pins the OLD base, the re-brief
+      # pins the NEW one (both in clone history → reset_in_place stays local).
+      src = Path.join(tmp_dir, "f28-src")
+      File.mkdir_p!(src)
+      g = fn args -> {_, 0} = System.cmd("git", ["-C", src] ++ args, stderr_to_stdout: true) end
+      {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", src], stderr_to_stdout: true)
+      g.(["config", "user.email", "t@lcars.local"])
+      g.(["config", "user.name", "test"])
+      File.write!(Path.join(src, "f.txt"), "v1")
+      g.(["add", "."])
+      g.(["commit", "-q", "-m", "old base"])
+      {old_out, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"])
+      old_sha = String.trim(old_out)
+      File.write!(Path.join(src, "f.txt"), "v2")
+      g.(["add", "."])
+      g.(["commit", "-q", "-m", "fresh base"])
+      {new_out, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"])
+      new_sha = String.trim(new_out)
+
+      project = fn sha ->
+        %{
+          "repo" => "fleet/f28-demo",
+          "repo_path" => src,
+          "base_branch" => "main",
+          "base_sha" => sha,
+          "gate_base_sha" => sha
+        }
+      end
+
+      StubBackend.set_reply(interactive_reply(session_id: "s-pipe-f28"))
+      pod_id = "pod-pipe-#{System.unique_integer([:positive])}"
+
+      Bus.subscribe()
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{
+          cap_profile: pipe_profile(),
+          issue_id: "issue-1",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id, project: project.(old_sha)]
+        })
+
+      assert_receive {:launch_called, _, _}, 3_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      # Re-brief: the dispatcher resolved a FRESH base and reprovisions the pipe.
+      assert :ok = Fleet.Spawner.reprovision_pipe_workspace(pod_id, project.(new_sha))
+
+      submit_result_event(pod_id, %{"answer" => "ok"})
+
+      assert_receive %Fleet.Event{type: :"pod.completed", payload: payload}, 2_000
+
+      # The regression: `keep_state_and_data` threw the fresh map away → the payload (thus
+      # the branch birth, the ancestor gate AND the provenance input_sha) reported the
+      # SPAWN-time base. The payload must carry the RE-BRIEF base.
+      assert payload["base_sha"] == new_sha
+      assert payload["gate_base_sha"] == new_sha
+    end
+
     test "cycle 1 submit_result → pod.completed broadcast, pod stays in :monitoring" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe"))
 
