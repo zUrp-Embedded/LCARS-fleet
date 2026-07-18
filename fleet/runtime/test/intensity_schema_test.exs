@@ -42,12 +42,12 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "rejects — the DEAD criteria block (user arbitration: fields killed, checklist stays prose)",
+  test "rejects — any structured block beyond the declared fields (a declaration IS exactly the schema)",
        %{schema: schema, canon: canon} do
-    # The 5 criteria died as structured fields (they informed the HUMAN's level choice — the
-    # framing interview; nothing mechanical ever read them). A declaration still carrying the
-    # block is refused (additionalProperties: false) — no zombie fields.
-    bad = Map.put(canon, "criteria", %{"multi_authors" => true})
+    # The declaration carries level + justification + card, nothing else: any extra
+    # non-underscore structure is refused (additionalProperties: false) — the level's WHY
+    # lives in the justification PROSE, never in side data.
+    bad = Map.put(canon, "criteria", %{"anything" => true})
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
