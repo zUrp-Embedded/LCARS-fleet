@@ -57,7 +57,7 @@ defmodule Fleet.Workflow.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # NO more direct git invocation here (2026-07-04): the rev-parses are delegated to
+  # NO direct git invocation in this module: the rev-parses are delegated to
   # `Fleet.Workflow.Git.read_head_sha/1` (bounded, which composes git_safe_config_args itself).
 
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
@@ -153,7 +153,7 @@ defmodule Fleet.Workflow.Deliverable do
   end
 
   # Refspec validation (`<local_ref>:<target_branch>`) delegated to the SINGLE AUTHORITY
-  # `Fleet.GitRef` (foundation primitive; the check-ref-format regex lived here, duplicated with `Git`). We
+  # `Fleet.GitRef` (foundation primitive — a local check-ref-format regex would duplicate it). We
   # keep the typed error shape specific to this module (which carries the offending `ref`).
   defp check_ref(ref) do
     if Fleet.GitRef.valid?(ref), do: :ok, else: {:error, {:invalid_ref, ref}}
@@ -164,8 +164,8 @@ defmodule Fleet.Workflow.Deliverable do
   # ============================================================
 
   # Payload placement + security-validation (path-traversal / `.git` / weaponized
-  # `.gitattributes` / symlink) delegated to the single authority `Fleet.Workflow.PayloadGuard` (filter
-  # extracted 2026-07-05 — the WHY of each closed vector is documented over there).
+  # `.gitattributes` / symlink) delegated to the single authority `Fleet.Workflow.PayloadGuard`
+  # (the WHY of each closed vector is documented over there).
   defp materialize_content(%{mode: :payload} = opts) do
     with :ok <- PayloadGuard.apply_files(opts.workspace, opts.files),
          {:ok, _sha} <- Git.commit(commit_opts(opts)) do
@@ -182,8 +182,8 @@ defmodule Fleet.Workflow.Deliverable do
     head_advanced(opts.workspace, opts.base_sha)
   end
 
-  # HEAD read delegated to the BOUNDED authority Fleet.Workflow.Git.read_head_sha/1 (2026-07-04:
-  # this site was a RAW System.cmd with no deadline — a hung rev-parse blocked publication).
+  # HEAD read delegated to the BOUNDED authority Fleet.Workflow.Git.read_head_sha/1 (a raw
+  # unbounded System.cmd here would let a hung rev-parse block publication).
   # Tagged verdict, NOT a boolean: a REAL git read failure (corrupt workspace, sick FS,
   # rev-parse timeout — read_head_sha's typed reasons) is NOT "the agent produced no commit".
   # Collapsing both into :no_deliverable_commit made an infra failure indistinguishable from an
@@ -226,7 +226,7 @@ defmodule Fleet.Workflow.Deliverable do
   defp push?(opts), do: Map.get(opts, :push?, true)
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
-  # 2026-07-04: delegated to the bounded authority (same error shape {:rev_parse_failed, rc, err},
-  # enriched with {:rev_parse_timeout|:rev_parse_exit} that the raw System.cmd could not produce).
+  # Delegated to the bounded authority (error shape {:rev_parse_failed, rc, err},
+  # plus {:rev_parse_timeout|:rev_parse_exit} which a raw System.cmd could not produce).
   defp head_sha(workspace), do: Fleet.Workflow.Git.read_head_sha(workspace)
 end
