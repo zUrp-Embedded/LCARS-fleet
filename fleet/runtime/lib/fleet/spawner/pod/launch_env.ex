@@ -9,12 +9,11 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `{:error, reason}` ALREADY tagged. `build/4` touches neither Port, nor timer, nor state machine: it returns a
   value, the `Pod` (state `:launching`) wires it onto `do_launch_backend` or `transition_failed`.
 
-  ## CREDENTIAL MECHANISM (déplacé verbatim depuis Pod)
+  ## Credential mechanism
 
-  The creds helpers (`claude_dir*`, `passwd_home`, `claude_bin_in_home`, `maybe_put_*`) and the boxed
-  credential-invariant block that caps them were moved VERBATIM from `Pod`: per-human
-  YES, shared-writable YES, broker NO (cf. the boxed block below). The auth stays single-valued
-  `LCARS_AUTH_MODE=bind` — no switch, no variant.
+  The creds helpers (`claude_dir*`, `passwd_home`, `claude_bin_in_home`, `maybe_put_*`) are capped
+  by the boxed credential-invariant block below: per-human YES, shared-writable YES, broker NO.
+  The auth is single-valued `LCARS_AUTH_MODE=bind` — no switch, no variant.
 
   ## Contract (called by `Pod`)
 
@@ -140,10 +139,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           {:ok, env}
         else
           {:error, {:credentials_invalid, _} = reason} -> {:error, reason}
-          # Tag honnête : `maybe_put_auth_token` est inconditionnel (ne peut pas échouer) — la
-          # seule erreur atteignant cette clause vient de `maybe_put_git_identity` (identité de
-          # commit forge irrésolue). L'ancien tag `:auth_token_required` nommait une cause qui ne
-          # pouvait JAMAIS être la vraie → un opérateur traçant ce tag cherchait un problème OAuth.
+          # Honest tag: `maybe_put_auth_token` is unconditional (cannot fail) — the only error
+          # reaching this clause comes from `maybe_put_git_identity` (unresolved forge commit
+          # identity). Naming any other cause here would send an operator chasing a problem
+          # that can never be the real one.
           {:error, reason} -> {:error, {:git_identity_unresolved, reason}}
         end
 
@@ -158,7 +157,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   # ════════════════════════════════════════════════════════════════════════════════════════
-  # CREDENTIAL MECHANISM — lis le POURQUOI avant de le changer (surtout avant de le "durcir").
+  # CREDENTIAL MECHANISM — read the WHY before changing it (especially before "hardening" it).
   #
   # The pod authenticates by mounting the OAuth `.credentials.json` of ITS human (the `~/.claude`
   # of the runtime user), bound RW by the launcher. This file is SHARED and WRITABLE across all
@@ -180,8 +179,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   #     (= our interactive mode);
   #   - injecting the live access-token = ~8h cliff with no refresh (already tried, already reverted);
   #   - an apiKeyHelper / an API key = METERED billing = leaving the subscription (forbidden).
-  # So: per-human YES, shared-writable YES, broker NO. Pas du code sacré — du code au POURQUOI
-  # contre-intuitif : le "durcir"/"améliorer" sans lire ci-dessus CASSE l'auth (déjà tenté, déjà reverté).
+  # So: per-human YES, shared-writable YES, broker NO. Not sacred code — code with a
+  # counter-intuitive WHY: "hardening"/"improving" it without the above BREAKS the auth.
   # ════════════════════════════════════════════════════════════════════════════════════════
   # Pod creds = the HUMAN's `~/.claude` (= the runtime user). Config override `:claude_dir` honored
   # (tests / non-standard deployment); else derived from their passwd home. Per-human by construction
@@ -291,12 +290,12 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   end
 
   # `System.cmd` has NO native timeout: a network-backed NSS (`getent passwd` over LDAP/SSSD) or a
-  # pathological `readlink` could HANG the whole pod spawn indefinitely (SOC-EFF-001). Bounded through
+  # pathological `readlink` could HANG the whole pod spawn indefinitely. Bounded through
   # `Fleet.Credentials.Shell.run/3`, the SINGLE bounded-exec primitive of the repo: `setsid` +
   # `SIGKILL` to the whole process-GROUP at the wall deadline — the command AND its descendants really
-  # die. The Task+`:brutal_kill` pattern this replaced only killed the BEAM side: the Port closes, but a
-  # hung `getent` (LDAP down) SURVIVED as an OS orphan on every spawn (the same trap three scars of this
-  # repo name). The `{output, exit_status}` shape is kept for the two call sites; any failure (timeout,
+  # die. A Task+`:brutal_kill` pattern would only kill the BEAM side: the Port closes, but a
+  # hung `getent` (LDAP down) would SURVIVE as an OS orphan on every spawn.
+  # The `{output, exit_status}` shape is kept for the two call sites; any failure (timeout,
   # missing binary) yields a non-zero status so their existing fallback fires.
   @cmd_timeout_ms 5_000
   defp cmd_with_timeout(cmd, args) do
