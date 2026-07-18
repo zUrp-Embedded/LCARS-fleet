@@ -31,9 +31,9 @@ defmodule Fleet.Spawner.Pod.Kick do
     cadence + cap, wake vs bootstrap branch (called by the handler
     `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `acked?/3` (PURE decision) — did the agent reach out? STOP of the loop (called by the handler;
-    the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`, no more delegating wrapper on the `Pod` side).
-  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`yop`/`wake`/`nil`) (called by `kick_send`;
-    the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/2`, no more delegating wrapper).
+    the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`).
+  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`yop`/`wake`/`nil`) (called by
+    `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/2`).
   - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).

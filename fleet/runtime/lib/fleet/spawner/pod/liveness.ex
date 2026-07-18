@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   ACTIVITY watchdog + RESPONSE-timeout computation — cluster extracted from `Fleet.Spawner.Pod`.
 
   Two twin roles, both PURE (no timer armed here — arming stays in the core of the Pod).
-  SPLIT REFUSED (module pass, 2026-07-05): these two roles are the two HALVES of the same
+  Deliberately NOT split: these two roles are the two HALVES of the same
   watchdog — `arm_result_deadline_actions` (Pod) arms TOGETHER the deadline (`monitor_timeout_ms`)
   and the tick (`liveness_tick_ms`), and the tick RE-ARMS the deadline when the probe moves.
   Splitting them would yield a ~30-line module (the timeout computation) whose sole consumer
