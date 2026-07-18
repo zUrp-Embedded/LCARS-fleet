@@ -1,5 +1,5 @@
 defmodule Fleet.Credentials.RoleTokenTest do
-  # async: false — mute la config globale `:role_tokens_dir`.
+  # async: false — mutates the global `:role_tokens_dir` config.
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
 
@@ -14,29 +14,29 @@ defmodule Fleet.Credentials.RoleTokenTest do
     {:ok, dir: tmp}
   end
 
-  test "token présent → retourné (trim)", %{dir: dir} do
+  test "token present → returned (trimmed)", %{dir: dir} do
     File.write!(Path.join(dir, "reviewer.gitea_token"), "  tok-abc  \n")
     assert RoleToken.token("reviewer") == "tok-abc"
   end
 
-  # F-029 : le dégradé token-absent était SILENCIEUX (commentaire menteur « RoleToken logge »).
-  # Désormais il émet un Logger.warning → l'indisponibilité du token de rôle est OBSERVABLE
-  # (la politique fail-closed vit dans RoleIdentity ; RoleToken ne fait que reporter, aucun fallback système).
-  test "F-029 : token absent → nil + Logger.warning", _ctx do
+  # F-029: a missing role token emits a Logger.warning — the degraded state must be OBSERVABLE,
+  # never silent (the fail-closed policy lives in RoleIdentity; RoleToken only reports, never a
+  # system fallback).
+  test "F-029: absent token → nil + Logger.warning", _ctx do
     log = capture_log(fn -> assert RoleToken.token("reviewer") == nil end)
     assert log =~ "absent/unreadable"
     assert log =~ "reviewer"
     assert log =~ "unavailable"
   end
 
-  test "F-029 : token vide → nil + Logger.warning", %{dir: dir} do
+  test "F-029: empty token → nil + Logger.warning", %{dir: dir} do
     File.write!(Path.join(dir, "qualifier.gitea_token"), "   \n")
     log = capture_log(fn -> assert RoleToken.token("qualifier") == nil end)
     assert log =~ "empty"
     assert log =~ "qualifier"
   end
 
-  test "rôle invalide (non path-safe) → nil (inchangé)", _ctx do
+  test "invalid role (non path-safe) → nil (unchanged)", _ctx do
     assert RoleToken.token("../etc") == nil
   end
 end

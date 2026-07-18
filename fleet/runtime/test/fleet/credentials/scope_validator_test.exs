@@ -80,7 +80,7 @@ defmodule Fleet.Credentials.ScopeValidatorTest do
              ]
     end
 
-    test "R1-36 : validator TOTAL — args malformés (non-liste / non-map) → refus typé, pas de crash" do
+    test "R1-36: TOTAL validator — malformed args (non-list / non-map) → typed refusal, no crash" do
       assert {:error, {:invalid_scope_args, _}} = ScopeValidator.validate("notalist", %{})
       assert {:error, {:invalid_scope_args, _}} = ScopeValidator.validate([], "notamap")
       assert {:error, {:invalid_scope_args, _}} = ScopeValidator.validate(nil, nil)

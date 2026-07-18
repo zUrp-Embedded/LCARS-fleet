@@ -12,18 +12,18 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     {:ok, dir: tmp}
   end
 
-  test "token présent → {:ok, %RoleIdentity{}} avec le token vérifié", %{dir: dir} do
+  test "token present → {:ok, %RoleIdentity{}} with the verified token", %{dir: dir} do
     File.write!(Path.join(dir, "gatekeeper.gitea_token"), "  tok-gk  \n")
 
     assert {:ok, %RoleIdentity{role: "gatekeeper", token: "tok-gk"}} =
              RoleIdentity.for_role("gatekeeper")
   end
 
-  test "token ABSENT → {:error, :role_token_unavailable} (JAMAIS un fallback système)" do
+  test "token ABSENT → {:error, :role_token_unavailable} (NEVER a system fallback)" do
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role("gatekeeper")
   end
 
-  test "token VIDE → {:error} (fail-closed)", %{dir: dir} do
+  test "EMPTY token → {:error} (fail-closed)", %{dir: dir} do
     File.write!(Path.join(dir, "reviewer.gitea_token"), "   \n")
 
     assert capture_log(fn ->
@@ -31,7 +31,7 @@ defmodule Fleet.Credentials.RoleIdentityTest do
            end) =~ "empty"
   end
 
-  test "rôle non-path-safe / vide / nil → {:error}" do
+  test "non-path-safe / empty / nil role → {:error}" do
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role("../etc")
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role("")
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role(nil)
