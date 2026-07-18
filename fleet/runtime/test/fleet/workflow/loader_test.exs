@@ -15,7 +15,7 @@ defmodule Fleet.Workflow.LoaderTest do
   end
 
   describe "load!/1" do
-    test "pipeline minimal valide → map", %{tmp_dir: tmp_dir} do
+    test "minimal valid pipeline → map", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "minimal.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -28,14 +28,14 @@ defmodule Fleet.Workflow.LoaderTest do
             profile: empty
       """)
 
-      # Forme normalisée `%{"name", "steps"}` : l'enveloppe (kind/metadata/spec)
-      # est déballée au load, seuls `name` (depuis metadata) et `steps` survivent.
+      # Normalized shape `%{"name", "steps"}`: the envelope (kind/metadata/spec)
+      # is unwrapped at load; only `name` (from metadata) and `steps` survive.
       assert %{"name" => "minimal", "steps" => %{"only" => _}} =
                Loader.load!("minimal")
     end
 
-    test "schema invalide (champ steps manquant) → raise", %{tmp_dir: tmp_dir} do
-      # Enveloppe v2.5 valide mais `spec.steps` absent → `spec` exige `steps`.
+    test "invalid schema (missing steps field) → raise", %{tmp_dir: tmp_dir} do
+      # Valid v2.5 envelope but `spec.steps` absent → `spec` requires `steps`.
       File.write!(Path.join(tmp_dir, "invalid.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -48,7 +48,7 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    test "schema invalide (gate type non-supporté) → raise", %{tmp_dir: tmp_dir} do
+    test "invalid schema (unsupported gate type) → raise", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_gate.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -68,15 +68,15 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    test "fichier introuvable → YamlElixir.FileNotFoundError", %{tmp_dir: _tmp_dir} do
+    test "file not found → YamlElixir.FileNotFoundError", %{tmp_dir: _tmp_dir} do
       assert_raise YamlElixir.FileNotFoundError, fn ->
         Loader.load!("nonexistent")
       end
     end
 
-    # Confinement E (WI-E3) : un nom de workflow_map/pipeline non-slug ne traverse JAMAIS la racine.
-    test "nom de pipeline traversant (../) → REFUSÉ avant Path.join", %{tmp_dir: tmp_dir} do
-      # Pose une cible d'évasion : `<root>/../escape.yaml`.
+    # Containment (WI-E3): a non-slug workflow_map/pipeline name NEVER traverses the root.
+    test "traversing pipeline name (../) → REFUSED before Path.join", %{tmp_dir: tmp_dir} do
+      # Plants an escape target: `<root>/../escape.yaml`.
       File.write!(Path.join([tmp_dir, "..", "escape.yaml"]), """
       kind: WorkflowMap
       metadata:
@@ -89,8 +89,8 @@ defmodule Fleet.Workflow.LoaderTest do
             profile: empty
       """)
 
-      # Sans la garde slug, `Path.join(root, "../escape.yaml")` lirait ce YAML hors-catalogue.
-      # `cast!` raise AVANT le Path.join.
+      # Without the slug guard, `Path.join(root, "../escape.yaml")` would read this out-of-catalog YAML.
+      # `cast!` raises BEFORE the Path.join.
       assert_raise ArgumentError, ~r/invalid slug/, fn ->
         Loader.load!("../escape")
       end
@@ -98,13 +98,13 @@ defmodule Fleet.Workflow.LoaderTest do
       File.rm(Path.join([tmp_dir, "..", "escape.yaml"]))
     end
 
-    test "nom de pipeline avec slash → REFUSÉ", %{tmp_dir: _tmp_dir} do
+    test "pipeline name with a slash → REFUSED", %{tmp_dir: _tmp_dir} do
       assert_raise ArgumentError, ~r/invalid slug/, fn ->
         Loader.load!("a/b")
       end
     end
 
-    test "step avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
+    test "step with needs + inputs + valid hard gate", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "complex.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -118,7 +118,7 @@ defmodule Fleet.Workflow.LoaderTest do
             outputs:
               - result_id
           b:
-            role: archiviste
+            role: archivist
             profile: empty
             needs: [a]
             inputs:
@@ -134,7 +134,7 @@ defmodule Fleet.Workflow.LoaderTest do
       assert step_b["gate"]["type"] == "hard"
     end
 
-    test "v2.5 — brief_kind/judge_target/timeout_sec valides → load OK", %{
+    test "valid brief_kind/judge_target/timeout_sec → load OK", %{
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "typed.yaml"), """
@@ -157,10 +157,10 @@ defmodule Fleet.Workflow.LoaderTest do
       assert step["judge_target"] == "brief"
     end
 
-    # Propriété de SÉCURITÉ (frontière) : un brief_kind hors {worker, judge} est rejeté au LOAD
-    # (fail-closed à la frontière). Il ne peut JAMAIS atteindre le dispatcher pour y être inféré en
-    # worker (brief exécutable pour un rôle qui aurait dû être désamorcé).
-    test "v2.5 — brief_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    # SECURITY property (boundary): a brief_kind outside {worker, judge} is rejected at LOAD
+    # (fail-closed at the boundary). It can NEVER reach the dispatcher to be inferred as
+    # worker there (executable brief for a role that should have been defused).
+    test "out-of-vocab brief_kind → rejected at load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -179,9 +179,9 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    # additionalProperties:false : un champ inconnu au step est rejeté au load (anti-typo /
-    # anti-champ-fantôme) au lieu d'être silencieusement ignoré.
-    test "v2.5 — champ de step inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    # additionalProperties:false — an unknown step field is rejected at load (anti-typo /
+    # anti-phantom-field) instead of being silently ignored.
+    test "unknown step field → rejected at load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "unknown_field.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -201,11 +201,11 @@ defmodule Fleet.Workflow.LoaderTest do
     end
   end
 
-  describe "load!/2 — validation de graphe" do
-    # Schema-VALIDE (needs = array de strings) mais graphe-INVALIDE : `b` réfère un step
-    # inexistant. Le schéma laisse passer (contrainte inter-steps inexprimable en draft-07) ;
-    # le linter de graphe raise au load — sinon arête fantôme silencieuse → pipeline figé.
-    test "workflow_map au needs fantôme (passe le schéma) → raise du linter de graphe", %{
+  describe "load!/2 — graph validation" do
+    # Schema-VALID (needs = array of strings) but graph-INVALID: `b` refers to a nonexistent
+    # step. The schema lets it through (inter-step constraint inexpressible in draft-07);
+    # the graph linter raises at load — otherwise silent phantom edge → frozen pipeline.
+    test "workflow_map with a phantom needs (passes the schema) → graph linter raise", %{
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "phantom.yaml"), """
@@ -229,9 +229,9 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    # Garde-fou anti-régression : toutes les workflow_maps canon doivent passer le linter de graphe.
-    # Une workflow_map canon qui échoue ici = soit un vrai bug de workflow_map, soit un invariant trop strict.
-    test "toutes les workflow_maps canon passent le linter" do
+    # Anti-regression guard: every canon workflow_map must pass the graph linter.
+    # A canon workflow_map failing here = either a real workflow_map bug, or an invariant too strict.
+    test "all canon workflow_maps pass the linter" do
       canon_dir = Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
       names =
@@ -240,7 +240,7 @@ defmodule Fleet.Workflow.LoaderTest do
         |> Enum.filter(&String.ends_with?(&1, ".yaml"))
         |> Enum.map(&Path.basename(&1, ".yaml"))
 
-      refute names == [], "aucune workflow_map canon trouvée dans #{canon_dir}"
+      refute names == [], "no canon workflow_map found in #{canon_dir}"
 
       for name <- names do
         assert %{"name" => _, "steps" => _} = Loader.load!(name, workflow_maps_root: canon_dir)

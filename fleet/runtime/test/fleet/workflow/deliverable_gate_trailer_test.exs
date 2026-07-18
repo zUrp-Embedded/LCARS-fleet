@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   @moduledoc """
-  Z4 (forge-identité B') — F-01 volet trailer : `check_coauthor_trailer/3` vérifie au
-  boundary MONDE (lit le `.git`, ne croit pas le pod) que chaque commit base..HEAD porte
-  le trailer `Co-authored-by: LCARS-<role>` attendu. Repo git réel (tmp_dir).
+  F-01 trailer facet: `check_coauthor_trailer/3` verifies at the WORLD boundary
+  (reads the `.git`, does not trust the pod) that every commit in base..HEAD carries
+  the expected `Co-authored-by: LCARS-<role>` trailer. Real git repo (tmp_dir).
   """
   use ExUnit.Case, async: true
 
@@ -28,7 +28,7 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "commit AVEC le trailer attendu → :ok", %{tmp_dir: dir} do
+  test "commit WITH the expected trailer → :ok", %{tmp_dir: dir} do
     base = init_repo(dir)
     commit!(dir, "a.txt", "feat: a\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>")
 
@@ -36,16 +36,16 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "commit SANS trailer → fail-loud {:missing_coauthor_trailer, role, [sha]}", %{tmp_dir: dir} do
+  test "commit WITHOUT trailer → fail-loud {:missing_coauthor_trailer, role, [sha]}", %{tmp_dir: dir} do
     base = init_repo(dir)
-    commit!(dir, "a.txt", "feat: a (pas de trailer)")
+    commit!(dir, "a.txt", "feat: a (no trailer)")
 
     assert {:error, {:missing_coauthor_trailer, "engineer", [_sha]}} =
              DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
   end
 
   @tag :tmp_dir
-  test "trailer présent mais MAUVAIS rôle → fail-loud", %{tmp_dir: dir} do
+  test "trailer present but WRONG role → fail-loud", %{tmp_dir: dir} do
     base = init_repo(dir)
     commit!(dir, "a.txt", "feat: a\n\nCo-authored-by: LCARS-reviewer <reviewer@lcars.local>")
 
@@ -54,10 +54,10 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "plusieurs commits, un seul sans trailer → ce sha est listé", %{tmp_dir: dir} do
+  test "several commits, a single one without trailer → that sha is listed", %{tmp_dir: dir} do
     base = init_repo(dir)
     commit!(dir, "a.txt", "feat: a\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>")
-    commit!(dir, "b.txt", "feat: b (oubli trailer)")
+    commit!(dir, "b.txt", "feat: b (trailer forgotten)")
 
     assert {:error, {:missing_coauthor_trailer, "engineer", missing}} =
              DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
@@ -66,7 +66,7 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "range vide (aucun commit) → :ok (vacuité)", %{tmp_dir: dir} do
+  test "empty range (no commit) → :ok (vacuity)", %{tmp_dir: dir} do
     base = init_repo(dir)
     assert :ok = DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
   end

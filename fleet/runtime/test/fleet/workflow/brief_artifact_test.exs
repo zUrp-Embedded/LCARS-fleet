@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.BriefArtifactTest do
   @moduledoc """
-  Le brief comme objet content-addressé (chantier brief-physique). Un vrai repo git temp
-  (`git init`) — `BriefArtifact` committe pour de vrai, on vérifie l'objet + l'idempotence.
-  L'identité de commit vient de l'env (`GIT_AUTHOR_*`), pas de la config repo → `git init` suffit.
+  The brief as a content-addressed object. A real temp git repo (`git init`) —
+  `BriefArtifact` commits for real; we verify the object + idempotence.
+  The commit identity comes from the env (`GIT_AUTHOR_*`), not from the repo config → `git init` is enough.
   """
   use ExUnit.Case, async: true
 
@@ -20,23 +20,23 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     String.trim(out)
   end
 
-  test "content-addressé : écrit briefs/<sha256>.md, rend {ref, sha}, sha = sha256(contenu), committé",
+  test "content-addressed: writes briefs/<sha256>.md, returns {ref, sha}, sha = sha256(content), committed",
        %{tmp_dir: tmp} do
     git_init(tmp)
-    content = "Brief: fais X.\n"
+    content = "Brief: do X.\n"
     expected = :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(tmp, content)
     assert sha == expected
     assert ref == "briefs/#{sha}.md"
     assert File.read!(Path.join(tmp, ref)) == content
-    # l'objet est COMMITTÉ (HEAD existe) — pas juste écrit sur disque.
+    # the object is COMMITTED (HEAD exists) — not just written to disk.
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
   end
 
-  test "idempotence : même contenu re-committé → même {ref, sha}, ZÉRO nouveau commit", %{tmp_dir: tmp} do
+  test "idempotence: same content re-committed → same {ref, sha}, ZERO new commit", %{tmp_dir: tmp} do
     git_init(tmp)
-    content = "identique\n"
+    content = "identical\n"
 
     {:ok, r1} = BriefArtifact.commit(tmp, content)
     n1 = commit_count(tmp)
@@ -44,10 +44,10 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     n2 = commit_count(tmp)
 
     assert r1 == r2
-    assert n2 == n1, "un re-brief identique ne doit PAS recommitter (content-address = idempotence)"
+    assert n2 == n1, "re-briefing identical content must NOT re-commit (content-address = idempotence)"
   end
 
-  test "contenu DIFFÉRENT → sha/ref différents (jamais de collision de contenu)", %{tmp_dir: tmp} do
+  test "DIFFERENT content → different sha/ref (never a content collision)", %{tmp_dir: tmp} do
     git_init(tmp)
     assert {:ok, a} = BriefArtifact.commit(tmp, "A\n")
     assert {:ok, b} = BriefArtifact.commit(tmp, "B\n")
@@ -55,43 +55,43 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     refute a.ref == b.ref
   end
 
-  test "work_dir absent → {:error, {:work_dir_missing, _}} (fail-loud)", %{tmp_dir: tmp} do
-    ghost = Path.join(tmp, "nexiste-pas")
+  test "work_dir missing → {:error, {:work_dir_missing, _}} (fail-loud)", %{tmp_dir: tmp} do
+    ghost = Path.join(tmp, "does-not-exist")
     assert {:error, {:work_dir_missing, ^ghost}} = BriefArtifact.commit(ghost, "x")
   end
 
-  test "physicalize_attrs : committe l'objet + ajoute brief_ref/brief_sha, attrs préservés", %{tmp_dir: tmp} do
-    # work/ops du projet 'fleet/demo' = <work_root>/demo
+  test "physicalize_attrs: commits the object + adds brief_ref/brief_sha, attrs preserved", %{tmp_dir: tmp} do
+    # the 'fleet/demo' project work/ops = <work_root>/demo
     work_dir = Path.join(tmp, "demo")
     File.mkdir_p!(work_dir)
     git_init(work_dir)
 
-    out = BriefArtifact.physicalize_attrs(%{brief: "fais X\n", role: "engineer"}, "fleet/demo", work_root: tmp)
+    out = BriefArtifact.physicalize_attrs(%{brief: "do X\n", role: "engineer"}, "fleet/demo", work_root: tmp)
 
     assert out.role == "engineer"
     assert is_binary(out.brief_sha)
     assert out.brief_ref == "briefs/#{out.brief_sha}.md"
-    assert File.read!(Path.join(work_dir, out.brief_ref)) == "fais X\n"
+    assert File.read!(Path.join(work_dir, out.brief_ref)) == "do X\n"
   end
 
-  test "physicalize_attrs : DÉGRADE (attrs inchangés) si le work/ops du projet n'existe pas", %{tmp_dir: tmp} do
+  test "physicalize_attrs: DEGRADES (attrs unchanged) when the project work/ops does not exist", %{tmp_dir: tmp} do
     attrs = %{brief: "x\n", role: "engineer"}
-    # <work_root>/demo absent → dégrade, dispatch préservé, pas de brief_ref/brief_sha.
+    # <work_root>/demo missing → degrades, dispatch preserved, no brief_ref/brief_sha.
     assert BriefArtifact.physicalize_attrs(attrs, "fleet/demo", work_root: tmp) == attrs
   end
 
-  test "physicalize_attrs : rien à matérialiser (pas de brief / repo nil / brief vide) → inchangé" do
+  test "physicalize_attrs: nothing to materialize (no brief / nil repo / empty brief) → unchanged" do
     assert BriefArtifact.physicalize_attrs(%{role: "x"}, "fleet/demo") == %{role: "x"}
     assert BriefArtifact.physicalize_attrs(%{brief: "y"}, nil) == %{brief: "y"}
     assert BriefArtifact.physicalize_attrs(%{brief: ""}, "fleet/demo") == %{brief: ""}
   end
 
-  test "commit dans un git WORKTREE orphelin (le work/ops RÉEL : `.git` est un FICHIER, pas un dir)",
+  test "commit inside an orphan git WORKTREE (the REAL work/ops: `.git` is a FILE, not a dir)",
        %{tmp_dir: tmp} do
-    # Régression LIVE 2026-07-13 : `git init` (`.git` = dir) passait, mais le work/ops est un git
-    # WORKTREE orphelin (ProjectOnboard `git worktree add --orphan`) dont le `.git` est un FICHIER →
-    # `ensure_git_workspace` le rejetait (`:not_a_git_workspace`) → brief non committé. Ce test walk
-    # sur le cas RÉEL, pas le plausible.
+    # Live regression: `git init` (`.git` = dir) passed, but the real work/ops is an orphan git
+    # WORKTREE (ProjectOnboard `git worktree add --orphan`) whose `.git` is a FILE →
+    # `ensure_git_workspace` rejected it (`:not_a_git_workspace`) → brief never committed. This test
+    # walks the REAL case, not the plausible one.
     main = Path.join(tmp, "main")
     File.mkdir_p!(main)
     g = fn args -> System.cmd("git", ["-c", "user.name=t", "-c", "user.email=t@t" | args], cd: main) end
@@ -102,12 +102,12 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
     wt = Path.join(tmp, "workops")
     {_, 0} = g.(["worktree", "add", "--orphan", "-b", "work/ops", wt])
-    # LE point : dans un worktree, `.git` est un FICHIER (`gitdir: …`), pas un répertoire.
+    # THE point: in a worktree, `.git` is a FILE (`gitdir: …`), not a directory.
     assert File.regular?(Path.join(wt, ".git"))
 
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(wt, "brief in a worktree\n")
     assert File.read!(Path.join(wt, ref)) == "brief in a worktree\n"
-    # committé POUR DE VRAI dans le worktree (le bug rendait `{nil, nil}` sans commit).
+    # committed FOR REAL inside the worktree (the bug returned `{nil, nil}` with no commit).
     {log, 0} = System.cmd("git", ["log", "--oneline"], cd: wt)
     assert log =~ "brief: briefs/#{sha}.md"
   end

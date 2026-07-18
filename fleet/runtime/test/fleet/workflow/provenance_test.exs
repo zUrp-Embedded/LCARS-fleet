@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.ProvenanceTest do
   @moduledoc """
-  Le triplet SHA (provenance in-toto/SLSA). `statement/1` est pur (testé sans I/O) ; `emit/3` grave +
-  committe dans un vrai repo git temp. Le point dur : un brief_sha absent ne DOIT JAMAIS produire un
-  digest inventé — il grave input→output et omet le digest du configSource.
+  The SHA triplet (in-toto/SLSA provenance). `statement/1` is pure (tested without I/O); `emit/3`
+  engraves + commits into a real temp git repo. The hard point: an absent brief_sha must NEVER
+  produce an invented digest — it engraves input→output and omits the configSource digest.
   """
   use ExUnit.Case, async: true
 
@@ -15,7 +15,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
     :ok
   end
 
-  test "statement : triplet complet (subject=livrable_sha, configSource.digest=brief_sha, input_sha)" do
+  test "statement: full triplet (subject=livrable_sha, configSource.digest=brief_sha, input_sha)" do
     s =
       Provenance.statement(%{
         livrable_sha: "LSHA",
@@ -27,7 +27,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
         issue: 4
       })
 
-    # livrable = commit git → digest `gitCommit` (honnête) ; brief = content-addressé → `sha256`.
+    # deliverable = git commit → `gitCommit` digest (honest); brief = content-addressed → `sha256`.
     assert [%{"digest" => %{"gitCommit" => "LSHA"}}] = s["subject"]
     assert get_in(s, ["predicate", "invocation", "configSource", "digest", "sha256"]) == "BSHA"
     assert get_in(s, ["predicate", "invocation", "configSource", "uri"]) == "briefs/BSHA.md"
@@ -36,48 +36,49 @@ defmodule Fleet.Workflow.ProvenanceTest do
     assert s["predicate"]["buildType"] == "lcars-fleet-pipeline-v2"
   end
 
-  test "statement DÉGRADÉ : brief_sha absent → configSource SANS digest (jamais un brief_sha inventé)" do
-    s = Provenance.statement(%{livrable_sha: "LSHA", input_sha: "ISHA", brief_ref: "briefs/inconnu.md"})
+  test "DEGRADED statement: absent brief_sha → configSource WITHOUT digest (never an invented brief_sha)" do
+    s = Provenance.statement(%{livrable_sha: "LSHA", input_sha: "ISHA", brief_ref: "briefs/unknown.md"})
     cs = get_in(s, ["predicate", "invocation", "configSource"])
 
     refute Map.has_key?(cs, "digest")
-    assert cs["uri"] == "briefs/inconnu.md"
-    # input→output gravé quand même (2/3 vaut mieux que 0, jamais un mensonge).
+    assert cs["uri"] == "briefs/unknown.md"
+    # input→output engraved anyway (2 out of 3 beats 0, never a lie).
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
   end
 
-  test "emit : écrit livrables/<livrable_sha>-provenance.json (in-toto valide) + committe, idempotent",
+  test "emit: writes livrables/<livrable_sha>-provenance.json (valid in-toto) + commits, idempotent",
        %{tmp_dir: tmp} do
     git_init(tmp)
-    attrs = %{livrable_sha: "abc123", brief_sha: "def", input_sha: "ghi", subject_name: "rapport-engineer.md"}
+    attrs = %{livrable_sha: "abc123", brief_sha: "def", input_sha: "ghi", subject_name: "report-engineer.md"}
 
     assert {:ok, %{ref: ref, path: path}} = Provenance.emit(tmp, attrs)
     assert ref == "livrables/abc123-provenance.json"
 
     decoded = path |> File.read!() |> Jason.decode!()
     assert decoded["_type"] == "https://in-toto.io/Statement/v0.1"
-    assert [%{"name" => "rapport-engineer.md", "digest" => %{"gitCommit" => "abc123"}}] = decoded["subject"]
+    assert [%{"name" => "report-engineer.md", "digest" => %{"gitCommit" => "abc123"}}] = decoded["subject"]
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
 
     {n1, 0} = System.cmd("git", ["rev-list", "--count", "HEAD"], cd: tmp)
     assert {:ok, _} = Provenance.emit(tmp, attrs)
     {n2, 0} = System.cmd("git", ["rev-list", "--count", "HEAD"], cd: tmp)
-    assert n1 == n2, "même livrable_sha → no-op, pas de 2e commit (content-address)"
+    assert n1 == n2, "same livrable_sha → no-op, no 2nd commit (content-address)"
   end
 
-  test "emit : work_dir absent → {:error, {:work_dir_missing, _}}", %{tmp_dir: tmp} do
+  test "emit: work_dir missing → {:error, {:work_dir_missing, _}}", %{tmp_dir: tmp} do
     ghost = Path.join(tmp, "nope")
     assert {:error, {:work_dir_missing, ^ghost}} = Provenance.emit(ghost, %{livrable_sha: "x"})
   end
 
-  test "BND-120 : livrable_sha avec séparateur/traversal → refus (jamais interpolé comme segment de chemin)",
+  test "BND-120 : livrable_sha with a separator/traversal → refused (never interpolated as a path segment)",
        %{tmp_dir: tmp} do
-    # livrable_sha est interpolé dans `livrables/<sha>-provenance.json` : un `/` ou `..` échapperait le
-    # work/ops. C'est un digest git (hex) en prod ; une valeur portant un séparateur est refusée AVANT écriture.
+    # livrable_sha is interpolated into `livrables/<sha>-provenance.json`: a `/` or `..` would escape
+    # the work/ops. It is a git digest (hex) in prod; a value carrying a separator is refused BEFORE
+    # any write.
     for hostile <- ["../../etc/passwd", "a/b", "..", "x/../y"] do
       assert {:error, {:invalid_livrable_sha, ^hostile}} =
                Provenance.emit(tmp, %{livrable_sha: hostile}),
-             "livrable_sha #{inspect(hostile)} aurait dû être refusé (path-safety BND-120)"
+             "livrable_sha #{inspect(hostile)} should have been refused (path-safety BND-120)"
     end
   end
 end

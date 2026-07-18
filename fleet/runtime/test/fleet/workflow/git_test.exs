@@ -4,7 +4,7 @@ defmodule Fleet.GitTest do
   @moduletag :tmp_dir
 
   # ============================================================
-  # Helpers (workspace + bare repo distants en tmp_dir)
+  # Helpers (workspace + remote bare repos in tmp_dir)
   # ============================================================
 
   defp init_bare_repo(path) do
@@ -17,10 +17,10 @@ defmodule Fleet.GitTest do
     File.mkdir_p!(path)
     {_out, 0} = System.cmd("git", ["init", "--initial-branch=main", path])
 
-    # Default config local — sinon git refuse les commits sans user.* mais aussi
-    # certains hooks. Notre code force GIT_AUTHOR_*/GIT_COMMITTER_* via env, mais
-    # git lit user.name/user.email pour le commit même quand l'env est posé sur
-    # certaines versions ; on les pose pour neutraliser.
+    # Default local config — otherwise git refuses commits without user.*, and some
+    # hooks too. Our code forces GIT_AUTHOR_*/GIT_COMMITTER_* via env, but git reads
+    # user.name/user.email for the commit even when the env is set on some versions;
+    # we set them to neutralize that.
     {_out, 0} = System.cmd("git", ["config", "user.name", "init-only"], cd: path)
     {_out, 0} = System.cmd("git", ["config", "user.email", "init@example.com"], cd: path)
 
@@ -51,13 +51,13 @@ defmodule Fleet.GitTest do
   end
 
   # ============================================================
-  # commit/1 — add+commit (sans push ; le mode payload de Deliverable)
-  # (acte4 #20 : publish/1 — le chemin couplé add+commit+push legacy, ZÉRO caller prod —
-  # est SUPPRIMÉ ; ses cas partagés sont couverts ici via commit/1, le push via push/3.)
+  # commit/1 — add+commit (no push; Deliverable's payload mode)
+  # (acte4 #20: publish/1 — the legacy coupled add+commit+push path, ZERO prod callers —
+  # is REMOVED; its shared cases are covered here via commit/1, the push via push/3.)
   # ============================================================
 
-  describe "commit/1 — commit local sans push" do
-    test "commit créé avec auteur et committer corrects (D-04)", %{tmp_dir: tmp} do
+  describe "commit/1 — local commit without push" do
+    test "commit created with correct author and committer (D-04)", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws"))
       commit_initial(ws)
       File.write!(Path.join(ws, "feature.md"), "delivered by worker\n")
@@ -73,7 +73,7 @@ defmodule Fleet.GitTest do
       assert String.trim(subject) == "feat: payload from worker"
     end
 
-    test "add_paths restreint le staging", %{tmp_dir: tmp} do
+    test "add_paths restricts the staging", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-paths"))
       commit_initial(ws)
 
@@ -88,26 +88,26 @@ defmodule Fleet.GitTest do
       assert String.trim(staged_files) == "docs/X.md"
     end
 
-    test "fail-closed : workspace absent", %{tmp_dir: tmp} do
+    test "fail-closed: missing workspace", %{tmp_dir: tmp} do
       assert {:error, :workspace_missing} =
                Fleet.Workflow.Git.commit(valid_opts(Path.join(tmp, "nope")))
     end
 
-    test "fail-closed : workspace pas un repo git", %{tmp_dir: tmp} do
+    test "fail-closed: workspace is not a git repo", %{tmp_dir: tmp} do
       ws = Path.join(tmp, "not-git")
       File.mkdir_p!(ws)
 
       assert {:error, :not_a_git_workspace} = Fleet.Workflow.Git.commit(valid_opts(ws))
     end
 
-    test "fail-closed : rien à committer → :nothing_to_commit", %{tmp_dir: tmp} do
+    test "fail-closed: nothing to commit → :nothing_to_commit", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-empty"))
       commit_initial(ws)
-      # AUCUNE modification après le seed → git commit refuse.
+      # NO modification after the seed → git commit refuses.
       assert {:error, :nothing_to_commit} = Fleet.Workflow.Git.commit(valid_opts(ws))
     end
 
-    test "fail-closed : opts manquants", %{tmp_dir: tmp} do
+    test "fail-closed: missing opts", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-bad"))
       commit_initial(ws)
 
@@ -119,11 +119,11 @@ defmodule Fleet.GitTest do
   end
 
   # ============================================================
-  # Injection git (F-014 add / F-046 push) — Pattern C
+  # git injection (F-014 add / F-046 push) — Pattern C
   # ============================================================
 
-  describe "injection git (Pattern C)" do
-    test "F-014 : add_paths leading-`-` est un CHEMIN (via `--`), pas une option — `--all` ne stage pas tout",
+  describe "git injection (Pattern C)" do
+    test "F-014: leading-`-` add_paths is a PATH (via `--`), not an option — `--all` does not stage everything",
          %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-f014"))
       commit_initial(ws)
@@ -131,12 +131,12 @@ defmodule Fleet.GitTest do
 
       opts = Map.put(valid_opts(ws), :add_paths, ["--all"])
 
-      # Sans `--`, `git add --all` staterait sneaky.txt → {:ok}. Avec `--`, "--all" est un pathspec
-      # littéral (absent) → échec : l'option-injection est neutralisée (rien n'est stagé-en-masse).
+      # Without `--`, `git add --all` would stage sneaky.txt → {:ok}. With `--`, "--all" is a literal
+      # pathspec (absent) → failure: the option-injection is neutralized (nothing mass-staged).
       assert {:error, _} = Fleet.Workflow.Git.commit(opts)
     end
 
-    test "F-014 : add_paths invalide (vide / non-binaire / élément vide) → :invalid_add_paths",
+    test "F-014: invalid add_paths (empty / non-binary / empty element) → :invalid_add_paths",
          %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-f014b"))
       commit_initial(ws)
@@ -150,7 +150,7 @@ defmodule Fleet.GitTest do
       end
     end
 
-    test "F-046 : push remote leading-`-` rejeté fail-closed (`-c`, `--receive-pack=`, `--exec=`)",
+    test "F-046: leading-`-` push remote rejected fail-closed (`-c`, `--receive-pack=`, `--exec=`)",
          %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-f046"))
 
@@ -160,7 +160,7 @@ defmodule Fleet.GitTest do
       end
     end
 
-    test "F-046 : push refspec leading-`-` rejeté", %{tmp_dir: tmp} do
+    test "F-046: leading-`-` push refspec rejected", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-f046b"))
 
       assert {:error, {:invalid_refspec, "--force"}} =
@@ -169,73 +169,75 @@ defmodule Fleet.GitTest do
   end
 
   # ============================================================
-  # commit/1 → push/3 — le chaînage payload réel (CONTENT puis PUBLICATION)
+  # commit/1 → push/3 — the real payload chaining (CONTENT then PUBLICATION)
   # ============================================================
 
-  describe "commit/1 puis push/3 — chaînage vers bare repo" do
-    test "le commit local atterrit sur le remote via push/3 (bare repo local)", %{tmp_dir: tmp} do
+  describe "commit/1 then push/3 — chaining to a bare repo" do
+    test "the local commit lands on the remote via push/3 (local bare repo)", %{tmp_dir: tmp} do
       bare = init_bare_repo(Path.join(tmp, "bare.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws)
 
-      # Premier push pour aligner le bare sur main.
+      # First push to align the bare on main.
       {_, 0} = System.cmd("git", ["push", "origin", "main"], cd: ws)
 
       File.write!(Path.join(ws, "feature.md"), "post-extract payload\n")
 
       assert {:ok, sha} = Fleet.Workflow.Git.commit(valid_opts(ws))
-      # commit/1 ne touche PAS le remote (séparation contenu/publication)…
+      # commit/1 does NOT touch the remote (content/publication separation)…
       {bare_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       refute String.trim(bare_head) == sha
 
-      # …c'est push/3 qui publie.
+      # …push/3 is what publishes.
       assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "main:main")
       {bare_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(bare_sha) == sha
     end
   end
 
-  describe "push/3 — F-PARALLEL-PR-CONFLICT (force sur historique réécrit)" do
-    test "push normal rejeté (non-fast-forward) → retry --force land la branche rebasée", %{
+  describe "push/3 — F-PARALLEL-PR-CONFLICT (force on rewritten history)" do
+    test "normal push rejected (non-fast-forward) → --force retry lands the rebased branch", %{
       tmp_dir: tmp
     } do
       bare = init_bare_repo(Path.join(tmp, "remote.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws, "C1")
 
-      # push initial → la remote a C1.
+      # initial push → the remote has C1.
       assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
 
-      # réécrit l'historique (amend = nouvelle sha qui diverge de la remote — comme un rebase de résolution).
+      # rewrite history (amend = new sha diverging from the remote — like a resolution rebase).
       {_o, 0} = System.cmd("git", ["commit", "--amend", "-m", "C1-rebase"], cd: ws)
       {rewritten, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
 
-      # un push normal serait « non-fast-forward » → do_push retry `--force` → land (sans ça, le rebase de
-      # résolution ne land JAMAIS et la PR reste en conflit, le bug live PR#4).
+      # a normal push would be "non-fast-forward" → do_push retries `--force` → lands (without it,
+      # the resolution rebase NEVER lands and the PR stays in conflict, the live PR#4 bug).
       assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
 
       {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(remote_head) == String.trim(rewritten)
     end
 
-    # NB nommage : le tmp_dir ExUnit est dérivé du nom du test ; git embarque ce chemin dans sa sortie
-    # d'erreur. Le nom NE DOIT PAS contenir les substrings classés par `non_fast_forward?` (sinon le chemin
-    # pollue `out` et fait un faux positif). D'où un libellé volontairement neutre.
-    test "MA-05 : push refuse par hook serveur ne declenche AUCUN retry brutal", %{tmp_dir: tmp} do
+    # NB naming: the ExUnit tmp_dir is derived from the test name; git embeds that path in its error
+    # output. The name must NOT contain the substrings classified by `non_fast_forward?` (otherwise the
+    # path pollutes `out` and makes a false positive). Hence a deliberately neutral wording.
+    test "MA-05: push refused by a server hook triggers NO brutal retry", %{tmp_dir: tmp} do
       bare = init_bare_repo(Path.join(tmp, "remote.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws, "C1")
 
-      # Hook pre-receive qui REFUSE tout push → git émet « [remote rejected] … pre-receive hook declined »
-      # (le substring `rejected` SANS `non-fast-forward`). Avant MA-05 : `non_fast_forward?` matchait
-      # `rejected` → retry `--force` à tort (réécriture forcée par-dessus une garde serveur).
+      # pre-receive hook that REFUSES every push → git emits "[remote rejected] … pre-receive hook
+      # declined" (the substring `rejected` WITHOUT `non-fast-forward`). Without MA-05,
+      # `non_fast_forward?` matched `rejected` → wrongful `--force` retry (forced rewrite over a
+      # server-side guard).
       #
-      # DISCRIMINANT : le hook COMPTE ses invocations (1 ligne `x`/appel dans un fichier témoin). Un push
-      # normal seul → 1 invocation. Si le fix régresse et tente `--force`, git relance le push (le force ne
-      # contourne PAS un pre-receive) → 2 invocations. Le COMPTE prouve l'absence de retry-force, là où
-      # observer la remote ne le pouvait pas (force-declined échoue comme push-declined).
-      # Le counter vit dans un chemin SANS caractères spéciaux : le tmp_dir ExUnit embarque le nom du test
-      # (parenthèses, `→`, `≠`) qui, interpolé non-quoté dans le `sh` du hook, casserait la redirection.
+      # DISCRIMINANT: the hook COUNTS its invocations (1 `x` line/call in a witness file). A single
+      # normal push → 1 invocation. If the fix regresses and attempts `--force`, git re-runs the push
+      # (force does NOT bypass a pre-receive) → 2 invocations. The COUNT proves the absence of a
+      # force retry, where observing the remote could not (force-declined fails like push-declined).
+      # The counter lives in a path WITHOUT special characters: the ExUnit tmp_dir embeds the test
+      # name (parentheses, `→`, `≠`) which, interpolated unquoted into the hook's `sh`, would break
+      # the redirection.
       counter =
         Path.join(System.tmp_dir!(), "ma05_hook_calls_#{System.unique_integer([:positive])}")
 
@@ -256,17 +258,17 @@ defmodule Fleet.GitTest do
       assert rc != 0
       assert out =~ "declined" or out =~ "rejected"
 
-      # LE test : le hook n'a été invoqué QU'UNE fois → aucun retry `--force` (qui l'aurait re-déclenché).
+      # THE test: the hook was invoked only ONCE → no `--force` retry (which would have re-triggered it).
       invocations = counter |> File.read!() |> String.split("\n", trim: true) |> length()
 
       assert invocations == 1,
-             "hook invoqué #{invocations}× — un retry --force a été tenté (régression MA-05)"
+             "hook invoked #{invocations}x — a --force retry was attempted (MA-05 regression)"
 
-      # Garde-fou complémentaire : la remote n'a jamais reçu le ref.
+      # Complementary guard: the remote never received the ref.
       {_o, rev_rc} =
         System.cmd("git", ["rev-parse", "--verify", "main"], cd: bare, stderr_to_stdout: true)
 
-      assert rev_rc != 0, "le hook declined ne doit RIEN avoir poussé sur la remote"
+      assert rev_rc != 0, "a declined hook must have pushed NOTHING to the remote"
     end
   end
 end

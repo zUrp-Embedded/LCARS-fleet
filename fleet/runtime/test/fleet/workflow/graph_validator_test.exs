@@ -1,24 +1,24 @@
 defmodule Fleet.Workflow.GraphValidatorTest do
   @moduledoc """
-  Linter de graphe PUR (data → décision), testé sans fichier (`async: true`).
-  Couvre chaque invariant : workflow_map bien formée → :ok ; chaque violation → son `kind`.
+  PURE graph linter (data → decision), tested without files (`async: true`).
+  Covers every invariant: well-formed workflow_map → :ok; each violation → its `kind`.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.GraphValidator
 
-  # Spec de step minimale. `needs` omis = racine (le Loader normalise `needs` absent → []).
+  # Minimal step spec. `needs` omitted = root (the Loader normalizes absent `needs` → []).
   defp step(needs \\ nil) do
     base = %{"role" => "noop", "profile" => "empty"}
     if needs, do: Map.put(base, "needs", needs), else: base
   end
 
-  describe "workflow_map bien formée → :ok" do
-    test "step unique (racine == terminal)" do
+  describe "well-formed workflow_map → :ok" do
+    test "single step (root == terminal)" do
       assert GraphValidator.validate(%{"only" => step()}) == :ok
     end
 
-    test "chaîne linéaire racine → terminal" do
+    test "linear chain root → terminal" do
       steps = %{
         "a" => step(),
         "b" => step(["a"]),
@@ -29,20 +29,20 @@ defmodule Fleet.Workflow.GraphValidatorTest do
     end
   end
 
-  describe "racine" do
-    test "0 racine (graphe entièrement cyclique) → :no_root" do
+  describe "root" do
+    test "0 root (fully cyclic graph) → :no_root" do
       steps = %{"a" => step(["b"]), "b" => step(["a"])}
       assert {:error, {:no_root, _}} = GraphValidator.validate(steps)
     end
 
-    test "≥2 racines → :multiple_roots (avec les noms)" do
+    test "≥2 roots → :multiple_roots (with the names)" do
       steps = %{"a" => step(), "b" => step(), "c" => step(["a", "b"])}
       assert {:error, {:multiple_roots, %{roots: ["a", "b"]}}} = GraphValidator.validate(steps)
     end
   end
 
-  describe "needs fantôme (arête fantôme)" do
-    test "needs réfère un step non déclaré → :phantom_edge (step + needs fautif)" do
+  describe "phantom needs (phantom edge)" do
+    test "needs referring to an undeclared step → :phantom_edge (step + offending needs)" do
       steps = %{"a" => step(), "b" => step(["implment"])}
 
       assert {:error, {:phantom_edge, %{step: "b", needs: "implment"}}} =
@@ -50,9 +50,9 @@ defmodule Fleet.Workflow.GraphValidatorTest do
     end
   end
 
-  describe "acyclicité" do
-    test "cycle SUR la chaîne (atteignable depuis la racine) → :cycle" do
-      # racine r → a → b → a (b boucle sur a). r est racine ; a,b atteignables ; cycle a↔b.
+  describe "acyclicity" do
+    test "cycle ON the chain (reachable from the root) → :cycle" do
+      # root r → a → b → a (b loops back to a). r is root; a,b reachable; cycle a↔b.
       steps = %{
         "r" => step(),
         "a" => step(["r", "b"]),
@@ -63,18 +63,18 @@ defmodule Fleet.Workflow.GraphValidatorTest do
       assert "a" in cyclic and "b" in cyclic
     end
 
-    test "terminal absent (la chaîne boucle, aucun step sans successeur) → rejet" do
-      # Pour ce runtime séquentiel, « aucun terminal atteignable » == « cycle » :
-      # une chaîne r → a → b → a n'a aucun step terminal. Rejetée comme :cycle.
+    test "no terminal (the chain loops, no step without successor) → rejected" do
+      # For this sequential runtime, "no reachable terminal" == "cycle":
+      # a chain r → a → b → a has no terminal step. Rejected as :cycle.
       steps = %{"r" => step(), "a" => step(["r", "b"]), "b" => step(["a"])}
       assert {:error, {:cycle, _}} = GraphValidator.validate(steps)
     end
   end
 
-  describe "atteignabilité" do
-    test "composant orphelin (déconnecté de la racine) → :unreachable" do
-      # r seul = chaîne principale ; x↔y forment un blob déconnecté (non atteignable
-      # depuis r). Diagnostiqué :unreachable (câblage manquant) AVANT l'acyclicité.
+  describe "reachability" do
+    test "orphan component (disconnected from the root) → :unreachable" do
+      # r alone = main chain; x↔y form a disconnected blob (not reachable
+      # from r). Diagnosed :unreachable (missing wiring) BEFORE acyclicity.
       steps = %{
         "r" => step(),
         "x" => step(["y"]),
@@ -86,9 +86,9 @@ defmodule Fleet.Workflow.GraphValidatorTest do
     end
   end
 
-  describe "fan-out (branche parallèle, hors-scope séquentiel)" do
-    test "un step avec ≥2 successeurs → :fan_out" do
-      # a a deux successeurs (b et c) → branche parallèle, rejetée (runtime séquentiel).
+  describe "fan-out (parallel branch, out of sequential scope)" do
+    test "a step with ≥2 successors → :fan_out" do
+      # a has two successors (b and c) → parallel branch, rejected (sequential runtime).
       steps = %{
         "a" => step(),
         "b" => step(["a"]),
@@ -100,8 +100,8 @@ defmodule Fleet.Workflow.GraphValidatorTest do
     end
   end
 
-  describe "describe/1 — message lisible par invariant" do
-    test "phantom_edge nomme le step et le needs fautif" do
+  describe "describe/1 — readable message per invariant" do
+    test "phantom_edge names the step and the offending needs" do
       msg = GraphValidator.describe({:phantom_edge, %{step: "build", needs: "foo"}})
       assert msg =~ "phantom edge"
       assert msg =~ "build"

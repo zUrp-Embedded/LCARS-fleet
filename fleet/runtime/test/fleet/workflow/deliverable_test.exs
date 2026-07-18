@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.DeliverableTest do
-  # Publication unifiée O5 — fixture git RÉELLE (workspace + bare remote). Les 2 modes (payload /
-  # git_native) passent par la MÊME gate + le MÊME push ; seul le temps CONTENU diverge. Un livrable
-  # invalide (secret, identité usurpée, historique réécrit) est irreprésentable au push.
-  # async : fixtures git isolées par tmp_dir (git -C, remotes locaux) — aucun env applicatif muté.
+  # Unified O5 publication — REAL git fixture (workspace + bare remote). Both modes (payload /
+  # git_native) go through the SAME gate + the SAME push; only the CONTENT time differs. An invalid
+  # deliverable (secret, forged identity, rewritten history) is unrepresentable at push time.
+  # async: git fixtures isolated by tmp_dir (git -C, local remotes) — no application env mutated.
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Deliverable
@@ -11,7 +11,7 @@ defmodule Fleet.Workflow.DeliverableTest do
 
   defp g(dir, args), do: System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
 
-  # Bare remote + workspace cloné, avec un commit base (identité engineer). Retourne {ws, bare, base}.
+  # Bare remote + cloned workspace, with a base commit (engineer identity). Returns {ws, bare, base}.
   defp setup_ws(tmp, name) do
     bare = Path.join(tmp, "#{name}.git")
     File.mkdir_p!(bare)
@@ -31,7 +31,7 @@ defmodule Fleet.Workflow.DeliverableTest do
     {ws, bare, String.trim(out)}
   end
 
-  # Identité système-side du commit payload (D-04 : author=rôle, committer=système).
+  # System-side identity of the payload commit (D-04: author=role, committer=system).
   defp payload_identity do
     %{
       author_name: "LCARS-engineer",
@@ -44,7 +44,7 @@ defmodule Fleet.Workflow.DeliverableTest do
   defp payload_allowed, do: ["engineer@lcars.local", "committer@fixture.test"]
 
   describe "mode :payload" do
-    test "écrit + commite (système) + gate OK + push sur la branche système-choisie (F-04)",
+    test "writes + commits (system) + gate OK + push onto the system-chosen branch (F-04)",
          %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-ok")
 
@@ -63,20 +63,20 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:ok, %{commit_sha: <<_::binary-size(40)>> = sha, pushed?: true, mode: :payload}} =
                Deliverable.publish(opts)
 
-      # F-04 : la ref poussée est celle choisie par le système, pas "main".
+      # F-04: the pushed ref is the one chosen by the system, not "main".
       {pushed, 0} = g(bare, ["rev-parse", "deliverables/engineer/m-42"])
       assert String.trim(pushed) == sha
-      # base/main du remote n'a pas bougé.
+      # base/main on the remote did not move.
       {main, 0} = g(bare, ["rev-parse", "main"])
       assert String.trim(main) == base
 
-      # D-04 : author=rôle, committer=système.
+      # D-04: author=role, committer=system.
       {who, 0} = g(ws, ["log", "-1", "--format=%ae|%ce"])
       assert String.trim(who) == "engineer@lcars.local|committer@fixture.test"
     end
 
-    test "R2-07/10 : un champ requis MAL TYPÉ → {:error, {:bad_opt, _}} (types validés, pas juste présence)" do
-      # le type-check coupe AVANT les git ops → pas besoin de vrai ws
+    test "R2-07/10 : a MISTYPED required field → {:error, {:bad_opt, _}} (types validated, not just presence)" do
+      # the type-check cuts BEFORE the git ops → no real ws needed
       base = %{
         mode: :payload,
         workspace: "/tmp/ws",
@@ -97,7 +97,7 @@ defmodule Fleet.Workflow.DeliverableTest do
                Deliverable.publish(%{base | allowed_emails: [42]})
     end
 
-    test "secret dans le payload → gate BLOQUE, AUCUN push", %{tmp_dir: tmp} do
+    test "secret in the payload → gate BLOCKS, NO push", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-secret")
       {before, 0} = g(bare, ["rev-parse", "main"])
 
@@ -115,13 +115,13 @@ defmodule Fleet.Workflow.DeliverableTest do
 
       assert {:error, {:secret_detected, "anthropic_key", _}} = Deliverable.publish(opts)
 
-      # Le commit local a eu lieu (temps 1) mais le push N'A PAS eu lieu (temps 3 jamais atteint).
+      # The local commit happened (time 1) but the push did NOT happen (time 3 never reached).
       {after_push, 0} = g(bare, ["rev-parse", "main"])
       assert before == after_push
       assert {_, 1} = g(bare, ["rev-parse", "--verify", "-q", "deliverables/x"])
     end
 
-    test "payload sans fichiers → :no_files_in_payload", %{tmp_dir: tmp} do
+    test "payload without files → :no_files_in_payload", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-empty")
 
       opts = %{
@@ -139,13 +139,13 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:error, :no_files_in_payload} = Deliverable.publish(opts)
     end
 
-    test "F-07 — hooks .git/hooks/ posés par le pod NE s'exécutent PAS côté monde (commit+push)",
+    test "F-07 — .git/hooks/ planted by the pod do NOT execute world-side (commit+push)",
          %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-hooks")
       sentinel = Path.join(tmp, "pwned")
       hooks = Path.join([ws, ".git", "hooks"])
       File.mkdir_p!(hooks)
-      # Le pod (adversaire) pose pre-commit ET pre-push qui exécuteraient du code côté monde.
+      # The pod (adversary) plants pre-commit AND pre-push hooks that would run code world-side.
       for h <- ["pre-commit", "pre-push"] do
         p = Path.join(hooks, h)
         File.write!(p, "#!/bin/sh\ntouch #{sentinel}\n")
@@ -165,13 +165,13 @@ defmodule Fleet.Workflow.DeliverableTest do
       }
 
       assert {:ok, %{pushed?: true}} = Deliverable.publish(opts)
-      # core.hooksPath=/dev/null sur les ops système-side → aucun hook exécuté.
+      # core.hooksPath=/dev/null on the system-side ops → no hook executed.
       refute File.exists?(sentinel)
-      # Le livrable est quand même bien poussé (le fix ne casse pas la publication).
+      # The deliverable is still properly pushed (the fix does not break publication).
       {_pushed, 0} = g(bare, ["rev-parse", "deliverables/x"])
     end
 
-    test "path traversal dans le payload → BLOQUE avant écriture", %{tmp_dir: tmp} do
+    test "path traversal in the payload → BLOCKS before any write", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-traversal")
 
       opts = %{
@@ -189,13 +189,13 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:error, {:path_traversal, "../escape.txt"}} = Deliverable.publish(opts)
     end
 
-    test "WI-1 — payload `.gitattributes filter=` + filtre clean armé → REFUSÉ, le filtre NE tourne PAS",
+    test "WI-1 — payload `.gitattributes filter=` + armed clean filter → REFUSED, the filter does NOT run",
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-clean-filter")
 
-      # Vecteur RCE : un filtre `clean` à commande arbitraire est armé dans `.git/config` du repo. Le
-      # payload tente d'ajouter le `.gitattributes` qui MAPPE `*.txt` vers ce filtre. Si le livrable n'est
-      # pas refusé, le `git add` système-side qui suit EXÉCUTE la commande du filtre côté monde (hors bwrap).
+      # RCE vector: a `clean` filter with an arbitrary command is armed in the repo's `.git/config`. The
+      # payload tries to add the `.gitattributes` that MAPS `*.txt` to that filter. If the deliverable is
+      # not refused, the system-side `git add` that follows EXECUTES the filter command world-side (outside bwrap).
       sentinel = Path.join(tmp, "clean_filter_ran")
       File.rm(sentinel)
 
@@ -217,17 +217,17 @@ defmodule Fleet.Workflow.DeliverableTest do
         message: "evil filter"
       }
 
-      # Étage CONTENU (load-bearing) : le `.gitattributes` armant `filter=` est refusé AVANT toute écriture.
+      # CONTENT stage (load-bearing): the `.gitattributes` arming `filter=` is refused BEFORE any write.
       assert {:error, {:dangerous_gitattributes, ".gitattributes"}} = Deliverable.publish(opts)
 
-      # Le filtre n'a JAMAIS tourné (aucun git add système-side n'a eu lieu).
+      # The filter NEVER ran (no system-side git add took place).
       refute File.exists?(sentinel)
-      # Rien n'a été écrit (validation 2-passes : tout valider avant tout write).
+      # Nothing was written (2-pass validation: validate everything before writing anything).
       refute File.exists?(Path.join(ws, ".gitattributes"))
       refute File.exists?(Path.join(ws, "x.txt"))
     end
 
-    test "WI-1 — payload écrivant sous `.git/` (ex. `.git/config`) → REFUSÉ avant écriture",
+    test "WI-1 — payload writing under `.git/` (e.g. `.git/config`) → REFUSED before any write",
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-dotgit")
 
@@ -251,7 +251,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:error, {:dotgit_path, ".git/config"}} = Deliverable.publish(opts)
     end
 
-    test "WI-1 — un `.gitattributes` BÉNIN (sans filter=/diff=) reste autorisé",
+    test "WI-1 — a BENIGN `.gitattributes` (no filter=/diff=) stays allowed",
          %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-benign-attrs")
 
@@ -262,7 +262,7 @@ defmodule Fleet.Workflow.DeliverableTest do
         allowed_emails: payload_allowed(),
         remote: "origin",
         target_branch: "deliverables/benign",
-        # `text`/`eol` n'exécutent aucune commande externe → non bloqués (pas de faux positif).
+        # `text`/`eol` execute no external command → not blocked (no false positive).
         files: [%{"path" => ".gitattributes", "content" => "*.txt text eol=lf\n"}],
         identity: payload_identity(),
         message: "benign attrs"
@@ -272,11 +272,11 @@ defmodule Fleet.Workflow.DeliverableTest do
       {_pushed, 0} = g(bare, ["rev-parse", "deliverables/benign"])
     end
 
-    test "F081 — symlink checké-in dans le workspace → BLOQUE (pas d'évasion via File.write)",
+    test "F081 — checked-in symlink in the workspace → BLOCKS (no escape via File.write)",
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-symlink")
-      # Vecteur : un repo cloné avec un symlink piège `out` -> hors workspace. Le check lexical
-      # (Path.expand) passe ; File.write SUIVRAIT le lien → évasion. Doit être bloqué.
+      # Vector: a cloned repo with a trap symlink `out` -> outside the workspace. The lexical check
+      # (Path.expand) passes; File.write WOULD follow the link → escape. Must be blocked.
       escape = Path.join(tmp, "escape-target")
       File.mkdir_p!(escape)
       File.ln_s!(escape, Path.join(ws, "out"))
@@ -299,9 +299,9 @@ defmodule Fleet.Workflow.DeliverableTest do
   end
 
   describe "mode :git_native" do
-    test "l'agent a commité → gate OK + push (système ne réécrit rien)", %{tmp_dir: tmp} do
+    test "the agent committed → gate OK + push (system rewrites nothing)", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "native-ok")
-      # Le pod commite lui-même (identité rôle, injectée immuable en vrai — ici simulée).
+      # The pod commits by itself (role identity, injected immutable in prod — simulated here).
       File.write!(Path.join(ws, "feature.py"), "x = 1\n")
       {_, 0} = g(ws, ["add", "."])
       {_, 0} = g(ws, ["commit", "-q", "-m", "feat: agent work"])
@@ -322,7 +322,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert String.trim(pushed) == sha
     end
 
-    test "aucun commit produit (HEAD == base) → :no_deliverable_commit", %{tmp_dir: tmp} do
+    test "no commit produced (HEAD == base) → :no_deliverable_commit", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "native-empty")
 
       opts = %{
@@ -337,7 +337,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:error, :no_deliverable_commit} = Deliverable.publish(opts)
     end
 
-    test "identité usurpée par l'agent → gate BLOQUE, AUCUN push", %{tmp_dir: tmp} do
+    test "identity forged by the agent → gate BLOCKS, NO push", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "native-fraud")
       {before, 0} = g(bare, ["rev-parse", "main"])
       File.write!(Path.join(ws, "x.py"), "x = 1\n")
@@ -371,7 +371,7 @@ defmodule Fleet.Workflow.DeliverableTest do
   end
 
   describe "validation" do
-    test "mode inconnu → :invalid_mode", %{tmp_dir: tmp} do
+    test "unknown mode → :invalid_mode", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "bad-mode")
 
       assert {:error, {:invalid_mode, :wat}} =
@@ -383,7 +383,7 @@ defmodule Fleet.Workflow.DeliverableTest do
                })
     end
 
-    test "target_branch malformé (F-04 gardé) → :invalid_ref, aucune écriture", %{tmp_dir: tmp} do
+    test "malformed target_branch (F-04 kept) → :invalid_ref, no write", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "bad-ref")
 
       opts = %{
@@ -399,12 +399,12 @@ defmodule Fleet.Workflow.DeliverableTest do
       }
 
       assert {:error, {:invalid_ref, "../evil"}} = Deliverable.publish(opts)
-      # validation AVANT temps 1 : rien n'a été écrit/commité.
+      # validation BEFORE time 1: nothing was written/committed.
       {st, 0} = g(ws, ["status", "--porcelain"])
       assert String.trim(st) == ""
     end
 
-    test "push? false → commit local, pas de push, target_branch facultatif", %{tmp_dir: tmp} do
+    test "push? false → local commit, no push, target_branch optional", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "no-push")
       {before, 0} = g(bare, ["rev-parse", "main"])
 

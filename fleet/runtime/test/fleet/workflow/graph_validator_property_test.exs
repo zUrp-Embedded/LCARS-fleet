@@ -1,41 +1,41 @@
 defmodule Fleet.Workflow.GraphValidatorPropertyTest do
   @moduledoc """
-  Preuve property-based du linter de graphe. `graph_validator_test.exs` fixe des cas
-  NOMMÉS (un cycle câblé, un fan-out câblé) ; ici on prouve les deux propriétés que des
-  exemples ne peuvent pas prouver :
+  Property-based proof of the graph linter. `graph_validator_test.exs` pins NAMED
+  cases (a wired cycle, a wired fan-out); here we prove the two properties that
+  examples cannot prove:
 
-    * TOTALITÉ — `validate/1` ne LÈVE jamais et ne rend jamais un `kind` hors contrat,
-      sur n'importe quelle map `steps` (needs mêlant membres déclarés et tokens fantômes).
-      Le Loader `raise` sur le `{kind, detail}` : une exception ici (au lieu d'un
-      `{:error, …}`) remonterait en `FunctionClauseError`/`Protocol.UndefinedError` opaque
-      au lieu du message actionnable de `describe/1`.
-    * SOUNDNESS — aucune chaîne bien formée n'est refusée (faux-rouge), et AUCUNE mutation
-      qui casse un invariant ne passe en `:ok` (faux-VERT). Le faux-vert est le coût réel :
-      un workflow_map avec une arête fantôme charge sans bruit, et le pipeline GÈLE en prod
-      sur un step qui attend un prédécesseur inexistant.
+    * TOTALITY — `validate/1` never RAISES and never returns a `kind` outside the
+      contract, on any `steps` map (needs mixing declared members and phantom tokens).
+      The Loader `raise`s on the `{kind, detail}`: an exception here (instead of an
+      `{:error, …}`) would surface as an opaque `FunctionClauseError`/`Protocol.UndefinedError`
+      instead of the actionable message from `describe/1`.
+    * SOUNDNESS — no well-formed chain is refused (false-red), and NO mutation
+      breaking an invariant passes as `:ok` (false-GREEN). The false-green is the real
+      cost: a workflow_map with a phantom edge loads silently, and the pipeline FREEZES
+      in prod on a step waiting for a nonexistent predecessor.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
 
   alias Fleet.Workflow.GraphValidator
 
-  # Les kinds du @type de GraphValidator — le contrat de sortie, verrouillé ici.
+  # The kinds from GraphValidator's @type — the output contract, locked here.
   @kinds [:phantom_edge, :no_root, :multiple_roots, :unreachable, :cycle, :fan_out]
 
-  # ── générateurs ──
+  # ── generators ──
 
-  # Nom de step : [a-z]{1,4}. Charset SANS `_` → un nom déclaré ne peut JAMAIS collider avec
-  # un token frais (préfixés `phantom_`/`orphan_*`), ce qui rend les mutations infalsifiables.
+  # Step name: [a-z]{1,4}. Charset WITHOUT `_` → a declared name can NEVER collide with
+  # a fresh token (prefixed `phantom_`/`orphan_*`), which makes the mutations unfalsifiable.
   defp step_name, do: string([?a..?z], min_length: 1, max_length: 4)
 
-  # Token frais garanti NON déclaré (contient `_`, hors charset des noms générés).
+  # Fresh token guaranteed NOT declared (contains `_`, outside the generated-name charset).
   defp fresh(prefix), do: map(step_name(), &(prefix <> "_" <> &1))
 
   defp spec(needs), do: %{"needs" => needs, "role" => "engineer"}
 
-  # Map `steps` arbitraire : chaque step `needs` un mélange de membres déclarés et de tokens
-  # aléatoires (arêtes fantômes), avec self-loops et doublons possibles — le domaine d'entrée
-  # RÉEL de validate/1 (le schéma draft-07 valide chaque step ISOLÉMENT, il laisse tout passer).
+  # Arbitrary `steps` map: each step `needs` a mix of declared members and random tokens
+  # (phantom edges), with possible self-loops and duplicates — the REAL input domain of
+  # validate/1 (the draft-07 schema validates each step in ISOLATION, it lets everything through).
   defp steps_gen do
     gen all(
           names <- uniq_list_of(step_name(), min_length: 1, max_length: 6),
@@ -49,9 +49,9 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
     end
   end
 
-  # Chaîne linéaire s0 → s1 → … → sn (s0 = racine, sn = terminal) : la SEULE forme que le
-  # runtime séquentiel accepte. Les paires sont rendues en LISTE (pas en map) pour que
-  # l'appelant puisse permuter l'ordre d'insertion.
+  # Linear chain s0 → s1 → … → sn (s0 = root, sn = terminal): the ONLY shape the
+  # sequential runtime accepts. The pairs are returned as a LIST (not a map) so the
+  # caller can permute the insertion order.
   defp chain_pairs(names) do
     [root | rest] = names
     [{root, spec([])} | Enum.map(Enum.zip(names, rest), fn {prev, cur} -> {cur, spec([prev])} end)]
@@ -59,24 +59,24 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
 
   defp chain_names(min_length), do: uniq_list_of(step_name(), min_length: min_length, max_length: 6)
 
-  # ── P1 — TOTALITÉ ──
+  # ── P1 — TOTALITY ──
 
-  # INVARIANT : sur TOUTE map `steps` (y compris needs fantômes, self-loops, doublons, graphe
-  # vide), validate/1 rend :ok | {:error, {kind, detail}} avec kind dans les 6 du @type — jamais
-  # d'exception, jamais un kind hors contrat.
-  # POURQUOI : le Loader compose describe/1 sur le kind puis `raise` — un kind inconnu ferait
-  # un FunctionClauseError dans describe/1 (crash opaque au chargement), et une exception ici
-  # remonterait sans le diagnostic actionnable qui est la RAISON D'ÊTRE du module.
-  property "P1 TOTALITÉ — validate/1 ne lève jamais et rend toujours un kind du contrat" do
+  # INVARIANT: on ANY `steps` map (including phantom needs, self-loops, duplicates, empty
+  # graph), validate/1 returns :ok | {:error, {kind, detail}} with kind among the 6 of the
+  # @type — never an exception, never a kind outside the contract.
+  # WHY: the Loader composes describe/1 on the kind and then `raise`s — an unknown kind would
+  # make a FunctionClauseError inside describe/1 (opaque crash at load time), and an exception
+  # here would bubble up without the actionable diagnostic that is this module's REASON TO EXIST.
+  property "P1 TOTALITY — validate/1 never raises and always returns a kind from the contract" do
     check all(steps <- steps_gen(), max_runs: 300) do
       case GraphValidator.validate(steps) do
         :ok ->
           :ok
 
         {:error, {kind, detail}} ->
-          assert kind in @kinds, "kind hors @type: #{inspect(kind)}"
+          assert kind in @kinds, "kind outside @type: #{inspect(kind)}"
           assert is_map(detail)
-          # describe/1 doit savoir parler de TOUT ce que validate/1 rend (le Loader l'appelle).
+          # describe/1 must know how to speak of EVERYTHING validate/1 returns (the Loader calls it).
           assert is_binary(GraphValidator.describe({kind, detail}))
       end
     end
@@ -84,10 +84,10 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
 
   # ── P2 — SOUNDNESS ──
 
-  # INVARIANT : toute chaîne linéaire est :ok, quel que soit l'ORDRE D'INSERTION des clés.
-  # POURQUOI : un faux-rouge dépendant de l'ordre d'itération de la map rendrait le chargement
-  # d'un workflow_map non déterministe (charge ici, `raise` là, pour le MÊME YAML).
-  property "P2a — chaîne linéaire (ordre d'insertion permuté) → toujours :ok" do
+  # INVARIANT: every linear chain is :ok, whatever the INSERTION ORDER of the keys.
+  # WHY: a false-red depending on the map's iteration order would make workflow_map loading
+  # non-deterministic (loads here, `raise`s there, for the SAME YAML).
+  property "P2a — linear chain (permuted insertion order) → always :ok" do
     check all(names <- chain_names(1)) do
       pairs = chain_pairs(names)
 
@@ -96,17 +96,17 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
     end
   end
 
-  # INVARIANT : un `needs` pointant un nom NON déclaré → toujours {:error, {:phantom_edge, _}}.
-  # POURQUOI : c'est LE trou que le schéma JSON ne voit pas (typo `needs: [implment]`). Un
-  # faux-vert = le step attend un prédécesseur inexistant → pipeline gelé, SILENCIEUSEMENT.
-  property "P2b — mutation `needs` → nom non déclaré → :phantom_edge (jamais :ok)" do
+  # INVARIANT: a `needs` pointing to an undeclared name → always {:error, {:phantom_edge, _}}.
+  # WHY: this is THE hole the JSON schema cannot see (typo `needs: [implment]`). A
+  # false-green = the step waits for a nonexistent predecessor → pipeline frozen, SILENTLY.
+  property "P2b — `needs` mutation → undeclared name → :phantom_edge (never :ok)" do
     check all(
             names <- chain_names(2),
             idx <- integer(0..5),
             ghost <- fresh("phantom")
           ) do
       pairs = chain_pairs(names)
-      # On mute un step NON-racine (index ≥ 1) : la racine a `needs: []`, elle n'a pas d'arête.
+      # We mutate a NON-root step (index ≥ 1): the root has `needs: []`, it has no edge.
       victim = Enum.at(names, 1 + rem(idx, length(names) - 1))
       steps = pairs |> Map.new() |> Map.put(victim, spec([ghost]))
 
@@ -115,10 +115,10 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
     end
   end
 
-  # INVARIANT : une 2e racine (`needs: []`) → toujours {:error, {:multiple_roots, _}}.
-  # POURQUOI : le runtime est séquentiel et démarre sur LA racine ; deux points d'entrée =
-  # une moitié du graphe qui ne part jamais (ou un départ non déterministe).
-  property "P2c — mutation racine ajoutée → :multiple_roots (jamais :ok)" do
+  # INVARIANT: a 2nd root (`needs: []`) → always {:error, {:multiple_roots, _}}.
+  # WHY: the runtime is sequential and starts on THE root; two entry points =
+  # half the graph never starting (or a non-deterministic start).
+  property "P2c — added-root mutation → :multiple_roots (never :ok)" do
     check all(names <- chain_names(1), extra <- fresh("phantom")) do
       steps = names |> chain_pairs() |> Map.new() |> Map.put(extra, spec([]))
 
@@ -128,11 +128,11 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
     end
   end
 
-  # INVARIANT : un blob déconnecté (cycle orphelin, aucune arête depuis la racine) → :unreachable.
-  # POURQUOI : le moduledoc PROMET ce diagnostic-là (atteignabilité vérifiée AVANT acyclicité)
-  # parce qu'il est actionnable ("ces steps ne sont pas câblés à l'entrée") là où `:cycle` ne
-  # l'est pas. Un orphelin qui passerait :ok ne tournerait JAMAIS.
-  property "P2d — blob orphelin déconnecté de la racine → :unreachable (jamais :ok)" do
+  # INVARIANT: a disconnected blob (orphan cycle, no edge from the root) → :unreachable.
+  # WHY: the moduledoc PROMISES that exact diagnostic (reachability checked BEFORE acyclicity)
+  # because it is actionable ("these steps are not wired to the entry") where `:cycle` is
+  # not. An orphan passing :ok would NEVER run.
+  property "P2d — orphan blob disconnected from the root → :unreachable (never :ok)" do
     check all(names <- chain_names(1), a <- fresh("orphana"), b <- fresh("orphanb")) do
       steps =
         names
@@ -146,13 +146,13 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
     end
   end
 
-  # INVARIANT : un step avec ≥2 successeurs → toujours {:error, {:fan_out, _}}.
-  # POURQUOI : WorkflowMapNav rejette déjà la branche parallèle À LA NAVIGATION
-  # (`:dag_not_supported`) — on échoue ici au LOAD, plus tôt. Un faux-vert ferait exploser
-  # le workflow en plein vol au lieu du chargement.
-  property "P2e — mutation branche parallèle → :fan_out (jamais :ok)" do
+  # INVARIANT: a step with ≥2 successors → always {:error, {:fan_out, _}}.
+  # WHY: WorkflowMapNav already rejects the parallel branch AT NAVIGATION time
+  # (`:dag_not_supported`) — here we fail at LOAD, earlier. A false-green would blow up
+  # the workflow mid-flight instead of at load time.
+  property "P2e — parallel-branch mutation → :fan_out (never :ok)" do
     check all(names <- chain_names(2), idx <- integer(0..5), leaf <- fresh("phantom")) do
-      # Le step fourché doit DÉJÀ avoir un successeur → tout sauf le terminal.
+      # The forked step must ALREADY have a successor → anything but the terminal.
       forked = Enum.at(names, rem(idx, length(names) - 1))
       steps = names |> chain_pairs() |> Map.new() |> Map.put(leaf, spec([forked]))
 
@@ -166,23 +166,23 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
 
   # ── P3 — CYCLE ──
 
-  # INVARIANT : une chaîne dont un step intermédiaire reboucle sur le TERMINAL → {:error, {:cycle, _}}.
-  # La racine garde `needs: []` (donc racine unique) et tout reste atteignable : le SEUL invariant
-  # cassé est l'acyclicité — c'est le tri de Kahn, et lui seul, qui doit attraper ça.
-  # POURQUOI : un cycle chargé en :ok = pipeline gelé en prod, sans terminal atteignable, sans
-  # aucun message. C'est exactement le mode de panne silencieux que le module existe pour tuer.
-  property "P3 — chaîne + reboucle du terminal → :cycle (jamais :ok)" do
+  # INVARIANT: a chain whose intermediate step loops back onto the TERMINAL → {:error, {:cycle, _}}.
+  # The root keeps `needs: []` (hence a single root) and everything stays reachable: the ONLY broken
+  # invariant is acyclicity — it is Kahn's sort, and it alone, that must catch this.
+  # WHY: a cycle loaded as :ok = pipeline frozen in prod, no reachable terminal, no message
+  # at all. That is exactly the silent failure mode this module exists to kill.
+  property "P3 — chain + terminal loop-back → :cycle (never :ok)" do
     check all(names <- chain_names(3)) do
       [s0, s1 | _] = names
       terminal = List.last(names)
 
-      # s1 `needs` [s0, terminal] → cycle s1 → s2 → … → terminal → s1, racine s0 intacte.
+      # s1 `needs` [s0, terminal] → cycle s1 → s2 → … → terminal → s1, root s0 intact.
       steps = names |> chain_pairs() |> Map.new() |> Map.put(s1, spec([s0, terminal]))
 
       assert {:error, {:cycle, %{steps: cyclic}}} = GraphValidator.validate(steps)
       assert s1 in cyclic
       assert terminal in cyclic
-      refute s0 in cyclic, "la racine est hors du cycle — elle ne doit pas être incriminée"
+      refute s0 in cyclic, "the root is outside the cycle — it must not be incriminated"
     end
   end
 end

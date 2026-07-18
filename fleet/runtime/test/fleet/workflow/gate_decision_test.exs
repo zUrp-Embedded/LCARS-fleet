@@ -1,19 +1,19 @@
 defmodule Fleet.Workflow.GateDecisionTest do
   @moduledoc """
-  Verrouille l'AUTORITÉ unique du vocabulaire gatekeeper et son égalité avec le contrat WIRE
-  `priv/schema/gate-decision-v1.json` : si l'un dérive de l'autre, ce test échoue (anti-drift
-  schema ⇔ code). `GateBrief` et `Fleet.Pilot.StepRunConsumer` consomment tous deux `decisions/0`.
+  Locks the single AUTHORITY over the gatekeeper vocabulary and its equality with the WIRE
+  contract `priv/schema/gate-decision-v1.json`: if one drifts from the other, this test fails
+  (anti-drift schema ⇔ code). `GateBrief` and `Fleet.Pilot.StepRunConsumer` both consume `decisions/0`.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.GateDecision
 
-  test "decisions/0 = les 5 décisions canon" do
+  test "decisions/0 = the 5 canon decisions" do
     assert GateDecision.decisions() ==
              ~w(continue abandon redirect escalate_user halt_wait_input)
   end
 
-  test "le module est le miroir EXACT de l'enum `decision` du schema wire gate-decision-v1.json" do
+  test "the module is the EXACT mirror of the `decision` enum in the gate-decision-v1.json wire schema" do
     schema =
       :lcars_fleet
       |> Application.app_dir("priv/workflow/schema/gate-decision-v1.json")
@@ -22,7 +22,7 @@ defmodule Fleet.Workflow.GateDecisionTest do
 
     schema_enum = get_in(schema, ["properties", "decision", "enum"])
 
-    # Égalité d'ENSEMBLE (l'ordre du JSON n'est pas contractuel, le contenu l'est).
+    # SET equality (the JSON's order is not contractual, its content is).
     assert MapSet.new(schema_enum) == MapSet.new(GateDecision.decisions())
   end
 end
