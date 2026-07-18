@@ -2,9 +2,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   @moduledoc """
   Boot of the fleet-level Type 1 permanent pods **at startup of the fleet_v2
   runtime launched by the human** (`bin/fleet_v2 start` starts the BEAM under
-  the human's UID then boots the permanent architect pod — human-launches
-  model, no more system service, systemd removed). `fleet_spawner` extension
-  (NOT a refactor).
+  the human's UID then boots the permanent architect pod — the human-launches
+  model, no system service).
 
 
   ## CRITICAL anti-violation guard
@@ -33,7 +32,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   # AUTHORITY of the permanent pod_id prefix ("permanent-<role>", deterministic id). Typed ONCE:
   # PermanentWarden (detection of dead pods to respawn) and Shutdown (drain that EXCLUDES the
-  # residents) DERIVE from it — before, the literal lived in 3 modules.
+  # residents) DERIVE from it.
   @permanent_prefix "permanent-"
 
   @doc """
@@ -80,8 +79,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   @doc """
   Boot of the Type 1 permanent pods.
   Invoked post-readiness by the **single authority**
-  `Fleet.Starfleet.BootOrchestrator` (the `Fleet.Spawner.Application` hook
-  that also invoked it was removed to avoid double-boot).
+  `Fleet.Starfleet.BootOrchestrator` (`Fleet.Spawner.Application` boots no
+  permanent pod — one boot authority, no double-boot possible).
 
   Enumerates the roles of the cap-profiles directory → delegates loading+
   validation to the canonical loader `Fleet.CapProfile.load/1` (DRY — no
@@ -118,7 +117,7 @@ defmodule Fleet.Spawner.PermanentBoot do
       (default `&Fleet.Spawner.spawn_pod/3`)
   """
   # Returns the RESULTS LIST `[{:ok, pod_id} | {:error, {role, reason}}]` — a failed spawn
-  # is NO LONGER filtered (the old `reject(&is_nil/1)` returned `{:ok, partial_list}` → LYING boot).
+  # is NEVER filtered out (a filtered partial list would be a LYING boot).
   # `safe_boot` (BootOrchestrator) classifies the list natively: all-ok → boot_complete, mixed →
   # boot_partial. GLOBAL error (broken deploy) → `{:error, reason}` unchanged (→ boot_failed).
   @spec boot_permanent_pods(keyword()) ::
@@ -219,10 +218,6 @@ defmodule Fleet.Spawner.PermanentBoot do
   def auto_boot_enabled? do
     Application.get_env(:fleet_spawner, :boot_permanent_at_start, true) == true
   end
-
-  # `persist_state/2` removed — "single writer" rule: only
-  # `Fleet.Spawner.Pod.StateFs.write_state_fs/1` (called by the `Pod`) writes `state.json`. PermanentBoot
-  # spawns the Pod and delegates the write to the gen_statem.
 
   # --- private ---
 

@@ -4,9 +4,8 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   A permanent pod (`permanent-<role>`: architect, gatekeeper, …) is `restart: :temporary` on the OTP
   side (like every pod: the respawn is EVENT-driven, not supervisor-driven — a bare OTP restart would
-  relaunch the gen_statem without the clean boot sequence). Before this module, its death was a
-  DEFINITIVE stop until the BEAM restart: the only safety net was the gatekeeper's implicit reboot at
-  the next escalation kick — a dead archivist/architect stayed silently absent.
+  relaunch the gen_statem without the clean boot sequence). Without this module, its death would be
+  a DEFINITIVE stop until the BEAM restart — a dead archivist/architect silently absent.
 
   ## Mechanics — two rails, one respawn path
 
@@ -110,7 +109,7 @@ defmodule Fleet.Spawner.PermanentWarden do
         state
       )
       when is_binary(pod_id) do
-    # Permanent prefix: AUTHORITY = PermanentBoot.parse_permanent/1 (the literal no longer lives here).
+    # Permanent prefix: AUTHORITY = PermanentBoot.parse_permanent/1 (the single source of the literal).
     case Fleet.Spawner.PermanentBoot.parse_permanent(pod_id) do
       :not_permanent ->
         {:noreply, state}
@@ -230,9 +229,9 @@ defmodule Fleet.Spawner.PermanentWarden do
   # `boot_at_start?` rule here).
   defp default_expected_roles, do: Fleet.Spawner.PermanentBoot.expected_permanent_roles()
 
-  # Arme le tick suivant. `nil` = réconciliation désactivée (seam de test). Le timer ref n'est
-  # jamais annulé (le tick se re-programme lui-même) → valeur sans signification, jetée ici plutôt
-  # qu'au site d'appel (dialyzer strict : unmatched_return).
+  # Arms the next tick. `nil` = reconciliation disabled (test seam). The timer ref is never
+  # cancelled (the tick re-schedules itself) → a meaningless value, discarded here rather than
+  # at the call site (strict dialyzer: unmatched_return).
   defp schedule_reconcile(ms) when is_integer(ms) do
     _ = Process.send_after(self(), :reconcile, ms)
     :ok
