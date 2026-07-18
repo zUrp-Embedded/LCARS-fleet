@@ -1,8 +1,7 @@
 defmodule Fleet.Pilot.WorkflowMapNav do
   @moduledoc """
   **Pure** navigation within a workflow_map (pipeline) — the forge-driven chaining of steps.
-  Replaces the RAM logic `Executor.next_step_or_done` with a **stateless**
-  resolution: given the
+  A **stateless** resolution: given the
   workflow_map (`Fleet.Workflow.Loader` output) + the **current step name**, computes the
   next step (or terminal).
 
@@ -107,9 +106,9 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   defp role(spec), do: Map.get(spec, "role")
 
   @doc """
-  PROTECTED loading of a workflow_map — SINGLE authority for the rescue of `load!` (consolidates
-  3 wrappers that duplicated it across StepDispatcher/Poller/StepRunConsumer, with 2 divergent error
-  TAGS for the same failure). `loader` = module (`load!/1`) or 1-arity function (test seams for both forms).
+  PROTECTED loading of a workflow_map — SINGLE authority for the rescue of `load!` (shared by
+  StepDispatcher/Poller/StepRunConsumer: one tag, never divergent per-caller
+  wrappers). `loader` = module (`load!/1`) or 1-arity function (test seams for both forms).
   `{:ok, map}` | `{:error, {:workflow_map_load_failed, name, message}}` — unified tag; the WHY
   of the failure (map removed from catalogue, broken schema) is in `message`.
   """
