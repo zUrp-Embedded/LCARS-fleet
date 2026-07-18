@@ -4,8 +4,6 @@ defmodule Fleet.Starfleet.MCPWatcher do
   (`ex_mcp`) on Hex.pm and alerts if a drift is observed between the version
   installed locally and the latest published upstream.
 
-  Design note `orchestration/fleet_starfleet.md` §Extensions V2.
-
   ## Mechanics
 
   GenServer + recursive `Process.send_after/3` (canonical native-Elixir
@@ -111,8 +109,8 @@ defmodule Fleet.Starfleet.MCPWatcher do
   defp current_version(package) when is_binary(package) do
     # `to_existing_atom` (not `to_atom`): a package name that has never been an atom is by construction
     # NOT a loaded app → no local version (nil), same result as `Application.spec` on an unknown app —
-    # but WITHOUT minting a junk atom for a mistyped/upstream-only package (atom-leak hygiene, R2-13).
-    # `ArgumentError` = "no such atom" → nil (behavior-preserving vs the old `to_atom`).
+    # but WITHOUT minting a junk atom for a mistyped/upstream-only package (atom-leak hygiene).
+    # `ArgumentError` = "no such atom" → nil.
     case Application.spec(String.to_existing_atom(package), :vsn) do
       nil -> nil
       vsn -> List.to_string(vsn)
@@ -152,9 +150,9 @@ defmodule Fleet.Starfleet.MCPWatcher do
     e -> {:error, {:exception, e}}
   end
 
-  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # protected-emission policy has ONE substrate authority, which closes the "misaligned twins" drift: this
-  # module had been the only one of the 4 to mask a malformed event). `:silent`: UnregisteredError =
+  # Emission via the protected core `Bus.safe_emit/4` — the protected-emission policy has ONE
+  # substrate authority (never a duplicated local rescue, which would drift from
+  # its twins). `:silent`: UnregisteredError =
   # boot-order tolerated (registry not yet populated), like MCPMonitor. A MALFORMED event
   # (construction bug) is logged ERROR by safe_emit then neutralized — letting it crash would
   # restart the watcher and re-fetch Hex.pm in a loop.
