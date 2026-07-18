@@ -1,15 +1,15 @@
 defmodule Fleet.Pilot.Application do
   @moduledoc """
-  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+  Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
 
-  Supervisor for the `fleet_pilot` app — **STEP mode only** (the forge IS the state machine).
+  Supervisor for the pilot domain — **STEP mode only** (the forge IS the state machine).
 
   Starts, if `:step_dispatch?` is configured (`config/runtime.exs` from the env) and the forge
-  `base_url` resolves, the three processes of the forge-state-machine rail:
+  `base_url` resolves, the processes of the forge-state-machine rail:
 
-    * `Fleet.Pilot.Poller` (step mode) — **MULTI-PROJECT**: DISCOVERS the human's repos by
-      topic (`lcars-fleet-<human>`, no more hard-coded `:poll_repo`), dispatches the **assigned issues**
-      (assignee=human) to the spawn of the **producer** role (`StepDispatcher`).
+    * `Fleet.Pilot.Poller` (step mode) — **MULTI-PROJECT**: DISCOVERS the fleet-org repos by
+      org-membership (`list_org_repos`, WS3 — no hard-coded `:poll_repo`), dispatches the
+      **assigned issues** (assignee=human) to the spawn of the **producer** role (`StepDispatcher`).
     * `Fleet.Pilot.StepRunConsumer` — Bus consumer: on `pod.completed`, runs the **end-of-step-run**
       (publish of the git-native deliverable → system push → PR open → merge). Without it, the chain
       does not advance past the producer spawn.
@@ -18,15 +18,6 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer SEPARATE from the pod FAILURE
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
-
-  ## History — legacy rail REMOVED (2026-06-16)
-
-  The old `AutoDispatcher` rail (Gitea webhook `gitea.*` → `Routing` catalogue → `Dispatcher` →
-  `PipelineInvoker` → `Fleet.Workflow.start_pipeline` = RAM engine `Executor`) has been **removed**:
-  the dual delivery model (RAM + forge) is eliminated, only the **forge rail** remains. With it
-  disappeared `auto_dispatcher.ex` / `dispatcher.ex` / `pipeline_invoker.ex`, the legacy `do_poll` mode
-  of the `Poller`, and the `guard_no_duplicate_poller!` guard (no more possible collision: a single Poller).
-  The RAM engine (`fleet_workflow`) falls downstream (`start_pipeline` orphaned).
 
   **Last revised**: 2026-07-18
   """
@@ -118,7 +109,7 @@ defmodule Fleet.Pilot.Application do
   # singletons under their global names → conflicts / parasitic boot). Used to verify the fail-loud guard.
   def step_children_for_test, do: step_children()
 
-  # MULTI-PROJECT: no more mandatory `:poll_repo` nor remote frozen at boot — the Poller DISCOVERS its
+  # MULTI-PROJECT: no mandatory `:poll_repo` nor remote frozen at boot — the Poller DISCOVERS its
   # repos by org-membership (`list_org_repos`, WS3) and the StepRunConsumer derives the repo+remote
   # PER-STEP-RUN from the event. The essential config that remains = the forge `base_url`: without it, neither
   # discovery (`list_org_repos`) nor push (per-step-run remote) work → dead rail. This is the
@@ -156,16 +147,16 @@ defmodule Fleet.Pilot.Application do
       # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
       # alignments (one `git` at a time per worktree, against index corruption).
       Fleet.Pilot.WorktreeSync,
-      # Neither `:repo` to the Poller (discovery by topic), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
+      # Neither `:repo` to the Poller (org-membership discovery), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
       # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
-      # subscribe_gitea (Z6e/D-13) : le webhook accélère le tick (hint, poll = la vérité).
+      # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).
       {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
       {Fleet.Pilot.StepRunConsumer,
        forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/1}
     ]
   end
 
-  # F-C061 (Vecteur 2 — own-goal config) — the jury config `:reviewer_roles` is fail-loud on ABSENCE
+  # F-C061 (config own-goal) — the jury config `:reviewer_roles` is fail-loud on ABSENCE
   # (`fetch_env!`) but NOT on absurd CONTENT: a non-role login there would be LAID on PRs
   # (`request_reviews_step`) and bumped into `required_approvals`, then WEDGE at dispatch (no cap-profile →
   # silent `:no_role`). We validate at boot that EVERY jury role resolves to a `brief_kind: judge`
