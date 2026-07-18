@@ -1,6 +1,6 @@
 defmodule Fleet.Spawner.Pod.Scaffold do
   @moduledoc """
-  WORKSPACE & SESSION of the pod_dir — island extracted from `Fleet.Spawner.Pod`, re-scoped 2026-07-05.
+  WORKSPACE & SESSION of the pod_dir — island extracted from `Fleet.Spawner.Pod`.
 
   The disk steps of the boot that touch the pod's work SUBSTRATE: GC of the session UUID before a
   re-spawn (`:cleaning`), project workspace bootstrap (git clone + doc branch, `:projecting`) and
@@ -89,7 +89,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                  eff_cap,
                  []
                ),
-             # Doc-mount (mundo invocado): the `work/ops` branch (plans/backlog/conventions) alongside
+             # Doc-mount: the `work/ops` branch (plans/backlog/conventions) alongside
              # the code. nil if the project has no doc branch; fail-loud if declared but absent.
              {:ok, doc} <-
                Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
@@ -99,7 +99,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
           # the agent pops into an already-documented project. The :projecting state writes it at the
           # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
-          # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD (was silently `_ =`),
+          # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD,
           # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
           case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
             :ok ->

@@ -29,8 +29,8 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   `skipDangerousModePermissionPrompt: true` — pre-accepts the interactive warning claude shows
   on first boot under `--dangerously-skip-permissions`; without this key, the pod's tmux session
-  freezes on "By proceeding, you accept..." (option 1/2 + Enter). Pattern taken from the LCARS v1
-  consultant. `hasCompletedOnboarding: true` also skips onboarding (the legacy `.claude.json` — the
+  freezes on "By proceeding, you accept..." (option 1/2 + Enter).
+  `hasCompletedOnboarding: true` also skips onboarding (the legacy `.claude.json` — the
   host user's global config — is not meant to be touched here).
   """
   @spec pod_settings_json() :: String.t()
@@ -84,9 +84,9 @@ defmodule Fleet.Spawner.Pod.Assets do
   (`yop` = trigger the issue-driven workflow, `SeeU` = no-op). Override via config
   `:fleet_spawner, :protocole_user_path` (custom user instance).
 
-  TRAP avoided: pointing at a HUMAN instance's protocole-user (which redefines `yop` as
+  TRAP: pointing at a HUMAN instance's protocole-user (which redefines `yop` as
   "session resume, read handoff", or neutralizes it) → the pod's claude REPL does NOT trigger
-  the worker workflow. (Actually hit on an instance whose protocole-user redefined `yop`.)
+  the worker workflow.
   """
   @spec read_protocole_user() ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
