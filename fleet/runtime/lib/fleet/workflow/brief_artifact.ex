@@ -1,29 +1,31 @@
 defmodule Fleet.Workflow.BriefArtifact do
   @moduledoc """
-  Le brief comme OBJET de première classe (chantier brief-physique, cf.
+  The brief as a FIRST-CLASS object (design:
   `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
 
-  Matérialise le contenu d'un brief en artefact **content-addressé** committé dans le worktree
-  work/ops du système (`<work_dir>/briefs/<sha256>.md`) et rend `{ref, sha}` — le `brief_sha` du
-  triplet SLSA `(brief_sha, input_sha, livrable_sha)`.
+  Materializes a brief's content as a **content-addressed** artifact committed into the system's
+  work/ops worktree (`<work_dir>/briefs/<sha256>.md`) and returns `{ref, sha}` — the `brief_sha` of
+  the SLSA triplet `(brief_sha, input_sha, livrable_sha)`.
 
-  **Provenance BEST-EFFORT, PAS load-bearing pour la livraison** (DR-010) — cf. `physicalize/3` : DÉGRADE,
-  ne casse JAMAIS le dispatch. Le work_item porte le pointeur `{ref, sha}` QUAND la matérialisation réussit ;
-  SINON (pas de work/ops, projet non-onboardé, échec git → `{nil, nil}`) il porte la **string du brief**
-  comme fallback dégradé, et le dispatch continue. Le pod vérifie `sha256(objet) == brief_sha` **quand le
-  sha est présent** (le pointeur peut mentir, l'objet non ; cf. `runtime-contract.md` + l'enveloppe MCP) ;
-  `brief_sha` absent = provenance NON PROUVÉE, jamais un blocage. L'absence de `brief_sha` est donc une
-  PROPRIÉTÉ VISIBLE du mode dégradé — pas une garantie silencieusement contournée, ni « le work_item ne
-  porte plus la string » (il la porte, comme fallback assumé).
+  **Provenance is BEST-EFFORT, NOT load-bearing for delivery** (DR-010) — cf. `physicalize/3`: it
+  DEGRADES, it NEVER breaks the dispatch. The work_item carries the `{ref, sha}` pointer WHEN the
+  materialization succeeds; OTHERWISE (no work/ops, non-onboarded project, git failure → `{nil, nil}`)
+  it carries the **brief string** as the assumed degraded fallback, and the dispatch continues. The
+  pod verifies `sha256(object) == brief_sha` **when the sha is present** (the pointer can lie, the
+  object cannot; cf. `runtime-contract.md` + the MCP envelope); an absent `brief_sha` = provenance
+  NOT PROVEN, never a blocker. The absence of `brief_sha` is thus a VISIBLE property of the degraded
+  mode — not a silently bypassed guarantee (the work_item still carries the string, as the assumed
+  fallback).
 
-  **Idempotence par content-address (LOCALE)** : même contenu ⇒ même chemin ⇒ no-op (`File.exists?` sur
-  l'objet déjà matérialisé). Un re-brief identique (retry, reroll) ne recrée rien et ne conflit jamais ;
-  seul un contenu DIFFÉRENT produit un nouvel objet, à un chemin différent → jamais de conflit de contenu
-  sur la branche work/ops. L'idempotence porte sur l'OBJET LOCAL committé, PAS sur sa publication forge
-  (la durabilité/push est une décision séparée de l'appelant, cf. `:push`) — local ≠ publié (BND-121).
+  **Idempotence by content-address (LOCAL)**: same content ⇒ same path ⇒ no-op (`File.exists?` on the
+  already-materialized object). An identical re-brief (retry, reroll) recreates nothing and never
+  conflicts; only DIFFERENT content produces a new object, at a different path → never a content
+  conflict on the work/ops branch. The idempotence covers the LOCAL committed object, NOT its forge
+  publication (durability/push is the caller's separate decision, cf. `:push`) — local ≠ published.
 
-  `sha` = **sha256(contenu)** (pas le blob-sha git : le triplet in-toto est en sha256, et le pod le
-  recalcule sur les bytes lus pour vérifier). Le commit git DURABILISE l'objet ; `sha` reste l'autorité.
+  `sha` = **sha256(content)** (not the git blob-sha: the in-toto triplet is sha256, and the pod
+  recomputes it over the bytes it reads to verify). The git commit makes the object DURABLE; `sha`
+  stays the authority.
 
   **Last revised**: 2026-07-18
   """
@@ -38,14 +40,14 @@ defmodule Fleet.Workflow.BriefArtifact do
   @type ok :: %{ref: String.t(), sha: String.t()}
 
   @doc """
-  Committe le `content` du brief dans `work_dir` (worktree work/ops du projet) sous
-  `briefs/<sha256>.md`, et rend `{:ok, %{ref, sha}}`. Idempotent (contenu déjà présent → no-op).
+  Commits the brief `content` into `work_dir` (the project's work/ops worktree) under
+  `briefs/<sha256>.md`, and returns `{:ok, %{ref, sha}}`. Idempotent (content already present → no-op).
 
-  `opts` : `:author` = `{name, email}` (défaut système) ; `:push` = `{remote, refspec}` pour publier
-  l'objet sur la forge (défaut : commit LOCAL seul — la publication est une décision de l'appelant,
-  comme `Deliverable` sépare commit et push).
+  `opts`: `:author` = `{name, email}` (system default); `:push` = `{remote, refspec}` to publish
+  the object to the forge (default: LOCAL commit only — publication is the caller's decision,
+  just as `Deliverable` separates commit and push).
 
-  `{:error, term()}` : work_dir absent / non-git, échec write, échec git (propagé tel quel — fail-loud).
+  `{:error, term()}`: work_dir missing / non-git, write failure, git failure (propagated as-is — fail-loud).
   """
   @spec commit(Path.t(), String.t(), keyword()) :: {:ok, ok()} | {:error, term()}
   def commit(work_dir, content, opts \\ []) when is_binary(work_dir) and is_binary(content) do
@@ -58,7 +60,7 @@ defmodule Fleet.Workflow.BriefArtifact do
         {:error, {:work_dir_missing, work_dir}}
 
       File.exists?(abs) ->
-        # content-addressé : l'objet existe déjà (même contenu) → rien à recommitter.
+        # content-addressed: the object already exists (same content) → nothing to recommit.
         {:ok, %{ref: ref, sha: sha}}
 
       true ->
@@ -67,15 +69,15 @@ defmodule Fleet.Workflow.BriefArtifact do
   end
 
   @doc """
-  Augmente des attrs d'enqueue (`%{brief: content, ...}`) avec l'artefact physique : committe le brief
-  dans le worktree work/ops du projet `repo` (`<work_root>/<name>`) et ajoute `:brief_ref`/`:brief_sha`.
-  Le funnel « même code » que les deux sites d'enqueue partagent.
+  Augments enqueue attrs (`%{brief: content, ...}`) with the physical artifact: commits the brief
+  into project `repo`'s work/ops worktree (`<work_root>/<name>`) and adds `:brief_ref`/`:brief_sha`.
+  The same-code funnel both enqueue sites share.
 
-  **DÉGRADE, ne casse JAMAIS le dispatch** : pas de brief / brief vide / `repo` nil / work_dir absent
-  (projet non-onboardé) / échec git → attrs INCHANGÉS (brief string seule), warning LOUD. La provenance
-  est désirable, pas load-bearing pour la livraison — un projet sans work/ops dispatche quand même.
+  **DEGRADES, NEVER breaks the dispatch**: no brief / empty brief / nil `repo` / missing work_dir
+  (non-onboarded project) / git failure → attrs UNCHANGED (brief string alone), LOUD warning.
+  Provenance is desirable, not load-bearing for delivery — a project without work/ops still dispatches.
 
-  `opts[:work_root]` (défaut `Fleet.Layout.work_root/0`) — injectable pour le test.
+  `opts[:work_root]` (default `Fleet.Layout.work_root/0`) — injectable for tests.
   """
   @spec physicalize_attrs(map(), String.t() | nil, keyword()) :: map()
   def physicalize_attrs(attrs, repo, opts \\ [])
@@ -90,11 +92,11 @@ defmodule Fleet.Workflow.BriefArtifact do
   def physicalize_attrs(attrs, _repo, _opts), do: attrs
 
   @doc """
-  Cœur de la matérialisation, forme TUPLE : `{brief_ref, brief_sha}` (ou `{nil, nil}` en dégradé). Le
-  leaf de dispatch l'appelle UNE FOIS (avant le spawn) et pose le pointeur à la fois dans les spawn_opts
-  (→ pod.completed → triplet) ET dans l'enqueue (→ le pod). `physicalize_attrs/3` en dérive. DÉGRADE
-  (LOUD + `{nil, nil}`) si pas de brief / repo / work_dir / échec git — le dispatch n'est JAMAIS cassé.
-  `opts[:work_root]` injectable (test).
+  Core of the materialization, TUPLE form: `{brief_ref, brief_sha}` (or `{nil, nil}` degraded). The
+  dispatch leaf calls it ONCE (before the spawn) and sets the pointer both in the spawn_opts
+  (→ pod.completed → triplet) AND in the enqueue (→ the pod). `physicalize_attrs/3` derives from it.
+  DEGRADES (LOUD + `{nil, nil}`) on no brief / repo / work_dir / git failure — the dispatch is NEVER
+  broken. `opts[:work_root]` injectable (tests).
   """
   @spec physicalize(String.t() | nil, String.t() | nil, keyword()) ::
           {String.t() | nil, String.t() | nil}
@@ -111,8 +113,8 @@ defmodule Fleet.Workflow.BriefArtifact do
 
       {:error, reason} ->
         Logger.warning(
-          "BriefArtifact: brief NON matérialisé (repo=#{repo}) : #{inspect(reason)} — " <>
-            "string seule (dégradé, dispatch préservé)"
+          "BriefArtifact: brief NOT materialized (repo=#{repo}): #{inspect(reason)} — " <>
+            "string only (degraded, dispatch preserved)"
         )
 
         {nil, nil}
@@ -121,7 +123,7 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   def physicalize(_brief, _repo, _opts), do: {nil, nil}
 
-  # `owner/name` → `name` (le work/ops est à `<work_root>/<name>`, cf. ProjectOnboard).
+  # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
   defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   defp materialize(work_dir, abs, ref, sha, content, opts) do
@@ -143,14 +145,14 @@ defmodule Fleet.Workflow.BriefArtifact do
       committer_name: name,
       committer_email: email,
       message: "brief: #{ref}",
-      # `add_paths` limité à l'objet — jamais `["."]` (on ne balaie pas un worktree work/ops entier
-      # dans un commit de brief : un seul objet, atomique).
+      # `add_paths` limited to the object — never `["."]` (a brief commit must not sweep an entire
+      # work/ops worktree: one object, atomic).
       add_paths: [ref]
     }
   end
 
-  # Publication optionnelle sur la forge (l'objet devient une URL — le `configSource.uri` du triplet).
-  # Défaut : pas de push (commit local). L'appelant qui veut la durabilité forge passe `:push`.
+  # Optional forge publication (the object becomes a URL — the triplet's `configSource.uri`).
+  # Default: no push (local commit). A caller wanting forge durability passes `:push`.
   defp maybe_push(work_dir, opts) do
     case Keyword.get(opts, :push) do
       nil -> :ok
