@@ -4,13 +4,13 @@
 
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
    il n'y a rien maintenant : tu attends le prochain réveil sans quitter.
-   - Si ta tâche porte un `brief_sha` (ton brief est un objet **content-addressé**, commité dans
-     work/ops — `brief_ref` en donne le chemin) : **vérifie `sha256(brief) == brief_sha` AVANT
-     d'agir**. Match → le brief est authentique, tu agis dessus, et tu **CITES les 7 premiers hex
-     du `brief_sha`** dans ton résultat/verdict (ex. `brief b2d0aaf vérifié`) — un humain qui lit
-     la forge doit pouvoir rapprocher ton verdict de l'objet, pas te croire sur parole.
-     Mismatch → le brief a été corrompu en transit : **n'agis PAS**, signale-le dans ton `submit_result`
-     (le ref peut mentir, l'objet non). Pas de `brief_sha` → rien à vérifier, continue.
+   - Si ta tâche porte un `brief_sha` (ton brief est un objet commité dans work/ops — `brief_ref`
+     en donne le chemin, `brief_sha` est le **commit git** qui a introduit cette version) :
+     **CITE les 7 premiers hex du `brief_sha`** dans ton résultat/verdict (ex.
+     `brief 266af4c (gate-briefs/issue-3-consultant.md)`) — un humain qui lit la forge doit
+     pouvoir rapprocher ton verdict du commit exact de l'objet, pas te croire sur parole. Tu n'as
+     RIEN à recalculer ni à vérifier toi-même (l'ancre d'authenticité est le commit sur la forge,
+     vérifiable par tout tiers). Pas de `brief_sha` → rien à citer, continue.
 2. Tu traites (selon ton rôle, ci-dessous).
 3. `mcp__fleet__submit_result` avec ton résultat. **Rappelle toujours le `work_item_id`** reçu à l'étape 1.
 4. Le système gère ta vie (il te kill au bon moment). **Tu ne quittes jamais de ta propre initiative.**

@@ -108,12 +108,12 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   defp present_work_item_id(_), do: nil
 
   # JSON envelope of the brief exposed to the pod — work_item_id = correlation_id.
-  # `brief_ref`/`brief_sha` = the CONTENT-ADDRESS of the physical brief (`briefs/issue-<n>-<role>-<sha7>.md`
-  # committed in work/ops; `gate-briefs/` for judges). Exposed so the pod can VERIFY
-  # `sha256(brief) == brief_sha` before acting — the
-  # brief is delivered HERE (MCP, the pod's minimal world), the sha makes it an authenticated object with no
-  # extra mount (the ref can lie, the object cannot). nil when the brief was not physicalized (degraded /
-  # non-producer mandate) → the pod simply skips the check.
+  # `brief_ref`/`brief_sha` = the ADDRESS of the physical brief (`briefs/issue-<n>-<role>.md`
+  # committed in work/ops; `gate-briefs/` for judges; `brief_sha` = the introducing COMMIT).
+  # Exposed so the pod CITES the version it acted on (auditable from the forge) — the
+  # brief is delivered HERE (MCP, the pod's minimal world); the commit sha ties the delivered
+  # content to a forge-verifiable object, no extra mount needed. nil when the brief was not
+  # physicalized (degraded / non-producer mandate) → nothing to cite.
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
       "work_item_id" => t.id,

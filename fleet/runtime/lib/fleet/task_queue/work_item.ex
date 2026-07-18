@@ -34,7 +34,7 @@ defmodule Fleet.TaskQueue.WorkItem do
           issue_id: String.t() | nil,
           role: String.t() | nil,
           brief: String.t() | nil,
-          # PHYSICAL brief: the brief committed content-addressed into work/ops.
+          # PHYSICAL brief: the brief committed into work/ops (version = introducing commit).
           # `brief_ref` = work/ops-relative path (cf. `cast_brief_ref` scheme); `brief_sha` = its SHA256 (pod-side check).
           # Provenance is BEST-EFFORT (DR-010): the `brief` string COHABITS as the assumed degraded
           # FALLBACK — it does NOT become nil (a non-onboarded project / no work/ops dispatches on the
@@ -246,18 +246,18 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_str_nil(s, _field) when is_binary(s), do: {:ok, s}
   defp cast_str_nil(v, field), do: {:error, {:bad_attr, {field, v}}}
 
-  # BND-123: `brief_sha`/`brief_ref` are the CONTENT-ADDRESS of the physical brief, not free text. An
-  # arbitrary string would masquerade as verifiable provenance in the MCP envelope (the pod would then
-  # fail its sha-check, but the WorkItem would already CLAIM a physical brief). Validate the SHAPE at
-  # construction: `brief_sha` = sha256 hex (64 lowercase), `brief_ref` = the BriefArtifact scheme —
-  # `briefs/` (worker) or `gate-briefs/` (judge), human-named `issue-<n>-<role>-<sha7>.md` or the
-  # bare content-address `<sha256>.md` (no-name fallback). nil stays nil (the legit
-  # degraded/best-effort state, DR-010). SSoT for BOTH `new/2` (→ {:bad_attr}) and
-  # `rich_from_map` (→ :invalid via its `else`).
+  # BND-123: `brief_sha`/`brief_ref` are the ADDRESS of the physical brief, not free text. An
+  # arbitrary string would masquerade as verifiable provenance in the MCP envelope. Validate the
+  # SHAPE at construction: `brief_sha` = the introducing COMMIT sha (40 hex — the version's
+  # identity, homogeneous with the triplet's two other git anchors), `brief_ref` = the
+  # BriefArtifact scheme — `briefs/` (worker) or `gate-briefs/` (judge), one plain path-safe
+  # segment (no `/` in the name → no traversal; versions live in git history, not in the name).
+  # nil stays nil (the legit degraded/best-effort state, DR-010). SSoT for BOTH `new/2`
+  # (→ {:bad_attr}) and `rich_from_map` (→ :invalid via its `else`).
   defp cast_brief_sha(nil, _field), do: {:ok, nil}
 
   defp cast_brief_sha(s, field) when is_binary(s) do
-    if Regex.match?(~r/\A[0-9a-f]{64}\z/, s),
+    if Regex.match?(~r/\A[0-9a-f]{40}\z/, s),
       do: {:ok, s},
       else: {:error, {:bad_attr, {field, s}}}
   end
@@ -267,7 +267,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_brief_ref(nil, _field), do: {:ok, nil}
 
   defp cast_brief_ref(s, field) when is_binary(s) do
-    if Regex.match?(~r/\A(briefs|gate-briefs)\/(issue-\d+-[A-Za-z0-9._-]+-[0-9a-f]{7}|[0-9a-f]{64})\.md\z/, s),
+    if Regex.match?(~r/\A(briefs|gate-briefs)\/[A-Za-z0-9][A-Za-z0-9._-]*\.md\z/, s),
       do: {:ok, s},
       else: {:error, {:bad_attr, {field, s}}}
   end

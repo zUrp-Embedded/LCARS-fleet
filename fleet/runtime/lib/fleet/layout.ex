@@ -27,6 +27,18 @@ defmodule Fleet.Layout do
   @work_root "/home/projects.work"
   @state_dirname ".lcars"
 
+  # work/ops artifact layout — the SINGLE truth of where brief/provenance objects live and
+  # what a valid object name looks like. Producer (Fleet.Workflow.BriefArtifact/Provenance)
+  # COMPOSES through it; validator (Fleet.TaskQueue.WorkItem, BND-123) VALIDATES through it —
+  # the two sides of the boundary read one source instead of carrying twin copies.
+  @briefs_subdir "briefs"
+  @gate_briefs_subdir "gate-briefs"
+  @provenance_subdir "provenance"
+  @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  @brief_ref_re Regex.compile!(
+                  "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
+                )
+
   @doc "Root of the working repos (`/home/projects`) — imposed container layout."
   @spec projects_root() :: Path.t()
   def projects_root, do: @projects_root
@@ -42,4 +54,36 @@ defmodule Fleet.Layout do
   """
   @spec state_dir() :: Path.t()
   def state_dir, do: Path.join(System.user_home!(), @state_dirname)
+
+  @doc """
+  work/ops-relative ref of a brief object: `briefs/<name>.md` (worker) or
+  `gate-briefs/<name>.md` (`kind` = `"judge"` — judge work-orders never mix with worker
+  briefs). `name` is sanitized to the path-safe charset (one flat segment: no `/`, no
+  leading dot → no traversal; versions live in git history, not in the name).
+  """
+  @spec brief_ref(String.t() | nil, String.t()) :: String.t()
+  def brief_ref(kind, name) do
+    subdir = if kind == "judge", do: @gate_briefs_subdir, else: @briefs_subdir
+    Path.join(subdir, sanitize_artifact_name(name) <> ".md")
+  end
+
+  @doc "work/ops-relative ref of a provenance statement: `provenance/<name>.json` (sanitized)."
+  @spec provenance_ref(String.t()) :: String.t()
+  def provenance_ref(name), do: Path.join(@provenance_subdir, sanitize_artifact_name(name) <> ".json")
+
+  @doc """
+  Validates a brief ref SHAPE (BND-123 defensive twin of `brief_ref/2` — same truth, one
+  source): `briefs/` or `gate-briefs/`, one flat path-safe `.md` segment. Free text, traversal
+  (`..`, `/` in the name) and foreign subdirs are refused.
+  """
+  @spec valid_brief_ref?(term()) :: boolean()
+  def valid_brief_ref?(ref) when is_binary(ref), do: Regex.match?(@brief_ref_re, ref)
+  def valid_brief_ref?(_), do: false
+
+  @doc "Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused."
+  @spec sanitize_artifact_name(String.t()) :: String.t()
+  def sanitize_artifact_name(name) do
+    sanitized = String.replace(name, ~r/[^A-Za-z0-9._-]/, "-")
+    if Regex.match?(@artifact_name_re, sanitized), do: sanitized, else: "x" <> sanitized
+  end
 end

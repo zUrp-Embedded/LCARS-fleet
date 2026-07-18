@@ -27,9 +27,9 @@ defmodule Fleet.Workflow.ProvenanceTest do
         issue: 4
       })
 
-    # deliverable = git commit → `gitCommit` digest (honest); brief = content-addressed → `sha256`.
+    # deliverable = git commit → `gitCommit` digest; brief = introducing COMMIT → `gitCommit` too (homogeneous).
     assert [%{"digest" => %{"gitCommit" => "LSHA"}}] = s["subject"]
-    assert get_in(s, ["predicate", "invocation", "configSource", "digest", "sha256"]) == "BSHA"
+    assert get_in(s, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) == "BSHA"
     assert get_in(s, ["predicate", "invocation", "configSource", "uri"]) == "briefs/BSHA.md"
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
     assert get_in(s, ["predicate", "buildConfig", "pod_id"]) == "p1"

@@ -330,8 +330,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
-      brief_sha = String.duplicate("b", 64)
-      step_run = pr_step_run(%{brief_sha: brief_sha, brief_ref: "briefs/#{brief_sha}.md"})
+      brief_sha = String.duplicate("b", 40)
+      step_run = pr_step_run(%{brief_sha: brief_sha, brief_ref: "briefs/issue-42-engineer.md"})
       opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
 
       assert {:ok, %{commit_sha: "deadbeef"}} =
@@ -344,7 +344,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       json = prov |> File.read!() |> Jason.decode!()
       # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
       assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
-      assert get_in(json, ["predicate", "invocation", "configSource", "digest", "sha256"]) == brief_sha
+      assert get_in(json, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) == brief_sha
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
       # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)

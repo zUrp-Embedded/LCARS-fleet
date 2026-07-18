@@ -15,7 +15,8 @@ defmodule Fleet.Workflow.Provenance do
     (honest in-toto algo), NOT `sha256`: it is a commit SHA-1, not a content sha256 — lying about
     the algorithm would make an in-toto verifier fail (the triplet must be falsifiable, hence exact).
   - `brief_sha`/`brief_ref` = `invocation.configSource` (what was asked — the committed brief object).
-    The brief IS content-addressed `sha256(content)` (cf. `BriefArtifact`) → `sha256` digest, that one true.
+    `brief_sha` is the COMMIT that introduced the brief version (cf. `BriefArtifact`) → `gitCommit`
+    digest, same honest label as the subject: three homogeneous git anchors.
   - `input_sha` = `buildConfig.input_sha` (the pinned `base_sha` — the starting state; a bare field,
     no algorithm claim).
 
@@ -26,12 +27,8 @@ defmodule Fleet.Workflow.Provenance do
   **Last revised**: 2026-07-18
   """
 
-  require Logger
+  alias Fleet.Workflow.OpsObject
 
-  alias Fleet.Workflow.Git
-
-  @provenance_subdir "provenance"
-  @system_author {"lcars-system", "system@lcars.local"}
   @build_type "lcars-fleet-pipeline-v2"
 
   @type attrs :: %{
@@ -60,25 +57,23 @@ defmodule Fleet.Workflow.Provenance do
   @spec emit(Path.t(), attrs(), keyword()) :: {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
   def emit(work_dir, %{livrable_sha: livrable_sha} = attrs, opts \\ [])
       when is_binary(work_dir) and is_binary(livrable_sha) and livrable_sha != "" do
-    ref = Path.join(@provenance_subdir, statement_name(livrable_sha, attrs))
-    abs = Path.join(work_dir, ref)
-
     cond do
       not safe_path_segment?(livrable_sha) ->
         # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
         # separator/traversal (`/`, `\`, `..`) would escape the work/ops dir. It IS a git commit
         # digest (hex) in production — a value carrying a path separator is refused, never
-        # trusted as a path segment.
+        # trusted as a path segment. (Layout sanitizes too — belt kept: this refuses LOUDLY
+        # instead of silently mangling a corrupt anchor into a plausible name.)
         {:error, {:invalid_livrable_sha, livrable_sha}}
 
-      not File.dir?(work_dir) ->
-        {:error, {:work_dir_missing, work_dir}}
-
-      File.exists?(abs) ->
-        {:ok, %{path: abs, ref: ref}}
-
       true ->
-        write_and_commit(work_dir, abs, ref, statement(attrs), opts)
+        ref = Fleet.Layout.provenance_ref(statement_name(livrable_sha, attrs))
+
+        with {:ok, json} <- encode(statement(attrs)),
+             {:ok, _commit_sha} <-
+               OpsObject.commit_object(work_dir, ref, json, Keyword.put(opts, :label, "provenance")) do
+          {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
+        end
     end
   end
 
@@ -122,21 +117,14 @@ defmodule Fleet.Workflow.Provenance do
   defp config_source(a) do
     case Map.get(a, :brief_sha) do
       sha when is_binary(sha) and sha != "" ->
-        drop_nil(%{"uri" => Map.get(a, :brief_ref), "digest" => %{"sha256" => sha}})
+        # `brief_sha` = the COMMIT that introduced the brief version (BriefArtifact) → honest
+        # in-toto algo label `gitCommit`, exactly like the subject digest. Three homogeneous
+        # git anchors in the triplet.
+        drop_nil(%{"uri" => Map.get(a, :brief_ref), "digest" => %{"gitCommit" => sha}})
 
       _ ->
         # Brief not materialized: record the uri when known, never an invented digest.
         drop_nil(%{"uri" => Map.get(a, :brief_ref)})
-    end
-  end
-
-  defp write_and_commit(work_dir, abs, ref, statement, opts) do
-    with {:ok, json} <- encode(statement),
-         :ok <- File.mkdir_p(Path.dirname(abs)),
-         :ok <- File.write(abs, json),
-         {:ok, _sha} <- Git.commit(commit_opts(work_dir, ref, opts)),
-         :ok <- maybe_push(work_dir, opts) do
-      {:ok, %{path: abs, ref: ref}}
     end
   end
 
@@ -146,50 +134,14 @@ defmodule Fleet.Workflow.Provenance do
     e -> {:error, {:provenance_encode_failed, Exception.message(e)}}
   end
 
-  defp commit_opts(work_dir, ref, opts) do
-    {name, email} = Keyword.get(opts, :author, @system_author)
-
-    %{
-      workspace: work_dir,
-      author_name: name,
-      author_email: email,
-      committer_name: name,
-      committer_email: email,
-      message: "provenance: #{ref}",
-      add_paths: [ref]
-    }
-  end
-
-  # BEST-EFFORT publication (same contract as BriefArtifact, F-15): local commit = base truth,
-  # a failed push logs LOUD and the branch catches up at the next successful push.
-  defp maybe_push(work_dir, opts) do
-    case Keyword.get(opts, :push) do
-      nil ->
-        :ok
-
-      {remote, refspec} ->
-        case Git.push(work_dir, remote, refspec) do
-          {:ok, _} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "Provenance: work/ops publication failed (#{inspect(reason)}) — " <>
-                "local statement kept, forge catches up at next push"
-            )
-
-            :ok
-        end
-    end
-  end
-
-  # Human-first name: `issue-<n>-<sha7>.json` when the issue number is known (an auditor browses
-  # by issue); bare `<livrable_sha>.json` otherwise. The FULL digest lives INSIDE the statement
-  # (subject digest) — the file name is storage, never the proof.
+  # Human-first name (extension appended by `Layout.provenance_ref/1`): `issue-<n>-<sha7>`
+  # when the issue number is known (an auditor browses by issue); bare `<livrable_sha>`
+  # otherwise. The FULL digest lives INSIDE the statement — the file name is storage, never
+  # the proof.
   defp statement_name(livrable_sha, attrs) do
     case Map.get(attrs, :issue) do
-      n when is_integer(n) -> "issue-#{n}-#{String.slice(livrable_sha, 0, 7)}.json"
-      _ -> livrable_sha <> ".json"
+      n when is_integer(n) -> "issue-#{n}-#{String.slice(livrable_sha, 0, 7)}"
+      _ -> livrable_sha
     end
   end
 

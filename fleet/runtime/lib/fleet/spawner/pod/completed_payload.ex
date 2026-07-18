@@ -79,7 +79,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
     end
   end
 
-  # Brief provenance: the content-addressed pointer `{brief_sha, brief_ref}` injected at spawn
+  # Brief provenance: the version pointer `{brief_sha, brief_ref}` (introducing commit + path) injected at spawn
   # (spawn_opts) travels ALL THE WAY HERE, next to `base_sha` — the two dispatch-time provenance
   # inputs of the provenance triplet, together. pod.completed → step_run → StepRunCompleter
   # assembles the triplet. Absent (brief not materialized / pod without dispatch) → payload

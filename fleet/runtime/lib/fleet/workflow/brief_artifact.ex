@@ -1,86 +1,67 @@
 defmodule Fleet.Workflow.BriefArtifact do
   @moduledoc """
   The brief as a FIRST-CLASS object (design:
-  `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
+  `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md` + `DESIGN-vie-du-brief.md`).
 
-  Materializes a brief's content as a **content-addressed** artifact committed into the system's
-  work/ops worktree and returns `{ref, sha}` — the `brief_sha` of the SLSA triplet
-  `(brief_sha, input_sha, livrable_sha)`.
+  BUSINESS layer over `Fleet.Workflow.OpsObject` (the one commit-an-object mechanic): this
+  module only knows brief NAMING and the dispatch degradation semantics. It materializes a
+  brief's content into the system's work/ops worktree and returns `{ref, sha}` — the
+  `brief_sha` of the SLSA triplet `(brief_sha, input_sha, livrable_sha)`.
 
-  **Human-auditable naming**: the object path is `briefs/issue-<n>-<role>-<sha7>.md` (worker
-  briefs) or `gate-briefs/issue-<n>-<role>-<sha7>.md` (judge work-orders, `:kind` = `"judge"`) —
-  a human browsing work/ops reads WHO/WHAT at a glance; the 7-hex suffix keeps the
-  content-address property (same content ⇒ same path). Without a `:name_hint` the path falls
-  back to the bare content-address (`briefs/<sha256>.md`). The sha AUTHORITY is always the full
-  `sha256(content)` — the path is storage, never the proof.
+  **The identity is the COMMIT sha** (like the triplet's two other vertices — three
+  homogeneous git anchors). A brief version = `{path, commit}`; the commit pins the exact
+  content forever, is clickable on the forge, and covers a MULTI-doc brief with a single
+  sha. Never a per-file content digest — per-file bookkeeping hell for zero extra proof.
 
-  **Provenance is BEST-EFFORT, NOT load-bearing for delivery** (DR-010) — cf. `physicalize/3`: it
-  DEGRADES, it NEVER breaks the dispatch. The work_item carries the `{ref, sha}` pointer WHEN the
-  materialization succeeds; OTHERWISE (no work/ops, non-onboarded project, git failure → `{nil, nil}`)
-  it carries the **brief string** as the assumed degraded fallback, and the dispatch continues. The
-  pod verifies `sha256(object) == brief_sha` **when the sha is present** (the pointer can lie, the
-  object cannot; cf. `runtime-contract.md` + the MCP envelope); an absent `brief_sha` = provenance
-  NOT PROVEN, never a blocker. The absence of `brief_sha` is thus a VISIBLE property of the degraded
-  mode — not a silently bypassed guarantee (the work_item still carries the string, as the assumed
-  fallback).
+  **Plain human names** (`Fleet.Layout.brief_ref/2` — the layout truth shared with the
+  WorkItem validator): `briefs/issue-<n>-<role>.md` (worker work-orders) or
+  `gate-briefs/issue-<n>-<role>.md` (judge work-orders, `:kind` = `"judge"`). An UPDATE
+  commits the SAME path with new content — the previous version stays readable at its own
+  commit (git history IS the version ledger). Without a `:name_hint` the name falls back to
+  the content's sha256 (hintless legacy/test path).
 
-  **Idempotence by content-address (LOCAL)**: same content ⇒ same path ⇒ no-op (`File.exists?` on the
-  already-materialized object). An identical re-brief (retry, reroll) recreates nothing and never
-  conflicts; only DIFFERENT content produces a new object, at a different path → never a content
-  conflict on the work/ops branch. The idempotence covers the LOCAL committed object; publication
-  (`:push`) is **best-effort on top**: a push failure logs LOUD and keeps the local success — the
-  forge catches up on the next successful push (git pushes the whole branch history). Local commit
-  failure remains a real failure. F-15: both dispatch-side callers DO pass `:push` — an unpublished
-  triplet is unauditable from the forge and non-durable (D1: the forge is the durable truth).
+  **Provenance is BEST-EFFORT, NOT load-bearing for delivery** (DR-010) — cf. `physicalize/3`:
+  it DEGRADES, it NEVER breaks the dispatch. The work_item carries the `{ref, sha}` pointer
+  WHEN the materialization succeeds; OTHERWISE (no work/ops, non-onboarded project, git
+  failure → `{nil, nil}`) it carries the **brief string** as the assumed degraded fallback,
+  and the dispatch continues. The pod CITES the sha **when present** (cf.
+  `runtime-contract.md` + the MCP envelope) — the authenticity anchor is the forge commit,
+  verifiable by any third party; an absent `brief_sha` = provenance NOT PROVEN, never a
+  blocker (a VISIBLE property of the degraded mode, not a silently bypassed guarantee).
 
-  `sha` = **sha256(content)** (not the git blob-sha: the in-toto triplet is sha256, and the pod
-  recomputes it over the bytes it reads to verify). The git commit makes the object DURABLE; `sha`
-  stays the authority.
+  Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
+  both dispatch-side callers pass `push: :work_ops`).
 
   **Last revised**: 2026-07-18
   """
 
   require Logger
 
-  alias Fleet.Workflow.Git
-
-  @briefs_subdir "briefs"
-  @gate_briefs_subdir "gate-briefs"
-  @system_author {"lcars-system", "system@lcars.local"}
+  alias Fleet.Workflow.OpsObject
 
   @type ok :: %{ref: String.t(), sha: String.t()}
 
   @doc """
   Commits the brief `content` into `work_dir` (the project's work/ops worktree) and returns
-  `{:ok, %{ref, sha}}`. Idempotent (content already present → no-op).
+  `{:ok, %{ref, sha}}` — `sha` = the introducing COMMIT (the version's identity). Idempotent
+  (same content already committed → the introducing commit, no new commit — cf. `OpsObject`).
 
   `opts`:
-  - `:name_hint` = human prefix (e.g. `"issue-3-engineer"`) → `briefs/<hint>-<sha7>.md`;
-    absent → bare content-address `briefs/<sha256>.md`. Sanitized to path-safe chars.
-  - `:kind` = `"judge"` routes the object under `gate-briefs/` (judge work-orders never mix
-    with worker briefs); any other value (or absent) → `briefs/`.
+  - `:name_hint` = human name (e.g. `"issue-3-engineer"`) → `briefs/<hint>.md`; absent → the
+    content's sha256 (hintless legacy/test path). Sanitized by `Fleet.Layout`.
+  - `:kind` = `"judge"` routes the object under `gate-briefs/`; any other value → `briefs/`.
   - `:author` = `{name, email}` (system default).
-  - `:push` = `{remote, refspec}` to publish work/ops to the forge — BEST-EFFORT: a push
-    failure logs LOUD and does NOT fail the call (the local commit is the base truth).
+  - `:push` = `:work_ops` | `{remote, refspec}` — best-effort publication (cf. `OpsObject`).
 
   `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
   """
   @spec commit(Path.t(), String.t(), keyword()) :: {:ok, ok()} | {:error, term()}
   def commit(work_dir, content, opts \\ []) when is_binary(work_dir) and is_binary(content) do
-    sha = sha256_hex(content)
-    ref = Path.join(subdir(opts), object_name(sha, opts))
-    abs = Path.join(work_dir, ref)
+    ref = Fleet.Layout.brief_ref(Keyword.get(opts, :kind), object_name(content, opts))
 
-    cond do
-      not File.dir?(work_dir) ->
-        {:error, {:work_dir_missing, work_dir}}
-
-      File.exists?(abs) ->
-        # content-addressed: the object already exists (same content) → nothing to recommit.
-        {:ok, %{ref: ref, sha: sha}}
-
-      true ->
-        materialize(work_dir, abs, ref, sha, content, opts)
+    case OpsObject.commit_object(work_dir, ref, content, Keyword.put(opts, :label, "brief")) do
+      {:ok, commit_sha} -> {:ok, %{ref: ref, sha: commit_sha}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -123,7 +104,7 @@ defmodule Fleet.Workflow.BriefArtifact do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
     work_dir = Path.join(work_root, project_name(repo))
 
-    case commit(work_dir, brief, opts) do
+    case commit(work_dir, brief, Keyword.delete(opts, :work_root)) do
       {:ok, %{ref: ref, sha: sha}} ->
         {ref, sha}
 
@@ -142,74 +123,12 @@ defmodule Fleet.Workflow.BriefArtifact do
   # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
   defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
-  # Judge work-orders live apart from worker briefs — a human browsing work/ops must never
-  # mistake a machine-composed eval order for a project brief.
-  defp subdir(opts) do
-    case Keyword.get(opts, :kind) do
-      "judge" -> @gate_briefs_subdir
-      _ -> @briefs_subdir
-    end
-  end
-
-  # `issue-3-engineer` + sha → `issue-3-engineer-b2d0aaf.md` (human-first, content-address kept
-  # via the 7-hex suffix). No hint → bare `<sha256>.md`.
-  defp object_name(sha, opts) do
+  # Plain human name from the hint (versions live in git history, not in the filename). No
+  # hint → the content's sha256 (legacy/test path).
+  defp object_name(content, opts) do
     case Keyword.get(opts, :name_hint) do
-      nil -> sha <> ".md"
-      hint -> sanitize(hint) <> "-" <> String.slice(sha, 0, 7) <> ".md"
+      nil -> :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
+      hint -> hint
     end
   end
-
-  defp sanitize(hint), do: String.replace(hint, ~r/[^A-Za-z0-9._-]/, "-")
-
-  defp materialize(work_dir, abs, ref, sha, content, opts) do
-    with :ok <- File.mkdir_p(Path.dirname(abs)),
-         :ok <- File.write(abs, content),
-         {:ok, _commit_sha} <- Git.commit(commit_opts(work_dir, ref, opts)),
-         :ok <- maybe_push(work_dir, opts) do
-      {:ok, %{ref: ref, sha: sha}}
-    end
-  end
-
-  defp commit_opts(work_dir, ref, opts) do
-    {name, email} = Keyword.get(opts, :author, @system_author)
-
-    %{
-      workspace: work_dir,
-      author_name: name,
-      author_email: email,
-      committer_name: name,
-      committer_email: email,
-      message: "brief: #{ref}",
-      # `add_paths` limited to the object — never `["."]` (a brief commit must not sweep an entire
-      # work/ops worktree: one object, atomic).
-      add_paths: [ref]
-    }
-  end
-
-  # Forge publication (the object becomes a URL — the triplet's `configSource.uri`). BEST-EFFORT:
-  # the local commit is the base truth; a failed push logs LOUD and the branch catches up whole
-  # at the next successful push. Never fails the materialization (F-15).
-  defp maybe_push(work_dir, opts) do
-    case Keyword.get(opts, :push) do
-      nil ->
-        :ok
-
-      {remote, refspec} ->
-        case Git.push(work_dir, remote, refspec) do
-          {:ok, _} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "BriefArtifact: work/ops publication failed (#{inspect(reason)}) — " <>
-                "local object kept, forge catches up at next push"
-            )
-
-            :ok
-        end
-    end
-  end
-
-  defp sha256_hex(content), do: :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 end

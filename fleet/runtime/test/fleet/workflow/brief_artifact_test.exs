@@ -1,7 +1,8 @@
 defmodule Fleet.Workflow.BriefArtifactTest do
   @moduledoc """
-  The brief as a content-addressed object. A real temp git repo (`git init`) —
-  `BriefArtifact` commits for real; we verify the object + idempotence.
+  The brief as a committed object whose IDENTITY is the introducing COMMIT sha. A real temp
+  git repo (`git init`) — `BriefArtifact` commits for real (via `OpsObject`, exercised
+  through here); we verify the object, the commit identity and the git-native idempotence.
   The commit identity comes from the env (`GIT_AUTHOR_*`), not from the repo config → `git init` is enough.
   """
   use ExUnit.Case, async: true
@@ -20,36 +21,48 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     String.trim(out)
   end
 
-  test "content-addressed: writes briefs/<sha256>.md, returns {ref, sha}, sha = sha256(content), committed",
+  test "hintless: writes briefs/<sha256-name>.md, returns {ref, sha} with sha = the introducing COMMIT",
        %{tmp_dir: tmp} do
     git_init(tmp)
     content = "Brief: do X.\n"
-    expected = :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
+    name = :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(tmp, content)
-    assert sha == expected
-    assert ref == "briefs/#{sha}.md"
+    assert ref == "briefs/#{name}.md"
     assert File.read!(Path.join(tmp, ref)) == content
-    # the object is COMMITTED (HEAD exists) — not just written to disk.
-    assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
+    # sha = the COMMIT that introduced the object (the version's identity), i.e. HEAD here.
+    {head, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
+    assert sha == String.trim(head)
+    assert sha =~ ~r/\A[0-9a-f]{40}\z/
   end
 
-  test "name_hint: human-first path briefs/issue-<n>-<role>-<sha7>.md, sha authority unchanged",
+  test "name_hint: plain human path briefs/issue-<n>-<role>.md; same content → same identity, no new commit",
        %{tmp_dir: tmp} do
     git_init(tmp)
     content = "Brief: do X.\n"
-    expected = :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 
     assert {:ok, %{ref: ref, sha: sha}} =
              BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
 
-    assert sha == expected
-    assert ref == "briefs/issue-3-engineer-#{String.slice(sha, 0, 7)}.md"
+    assert ref == "briefs/issue-3-engineer.md"
     assert File.read!(Path.join(tmp, ref)) == content
-    # idempotent under the SAME hint (same content → same path → no new commit).
     n = commit_count(tmp)
     assert {:ok, %{ref: ^ref, sha: ^sha}} = BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
     assert commit_count(tmp) == n
+  end
+
+  test "UPDATE: different content on the SAME path → new commit (a version), old version stays at its commit",
+       %{tmp_dir: tmp} do
+    git_init(tmp)
+
+    {:ok, %{ref: ref, sha: c1}} = BriefArtifact.commit(tmp, "v1\n", name_hint: "issue-3-engineer")
+    {:ok, %{ref: ^ref, sha: c2}} = BriefArtifact.commit(tmp, "v2\n", name_hint: "issue-3-engineer")
+
+    refute c1 == c2
+    assert File.read!(Path.join(tmp, ref)) == "v2\n"
+    # the validated version is readable FOREVER at its own commit (git history = the ledger).
+    {old, 0} = System.cmd("git", ["show", "#{c1}:#{ref}"], cd: tmp)
+    assert old == "v1\n"
   end
 
   test "kind judge → routed under gate-briefs/ (never mixed with worker briefs)", %{tmp_dir: tmp} do
@@ -58,24 +71,23 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert {:ok, %{ref: ref}} =
              BriefArtifact.commit(tmp, "judge order\n", name_hint: "issue-3-consultant", kind: "judge")
 
-    assert ref =~ ~r"\Agate-briefs/issue-3-consultant-[0-9a-f]{7}\.md\z"
+    assert ref == "gate-briefs/issue-3-consultant.md"
   end
 
-  test "name_hint sanitized: path-unsafe chars never reach the object path", %{tmp_dir: tmp} do
+  test "name_hint sanitized (Layout truth): path-unsafe chars never reach the object path", %{tmp_dir: tmp} do
     git_init(tmp)
 
     assert {:ok, %{ref: ref}} = BriefArtifact.commit(tmp, "x\n", name_hint: "issue-3-a/b c")
-    assert ref =~ ~r"\Abriefs/issue-3-a-b-c-[0-9a-f]{7}\.md\z"
+    assert ref == "briefs/issue-3-a-b-c.md"
   end
 
   test "push is BEST-EFFORT: unreachable remote → commit still {:ok}, object committed locally",
        %{tmp_dir: tmp} do
     git_init(tmp)
 
-    # No such remote in this repo → Git.push fails; the materialization must NOT (F-15:
-    # local commit = base truth, publication degrades LOUD).
-    assert {:ok, %{ref: ref}} =
-             BriefArtifact.commit(tmp, "pushed brief\n", push: {"origin", "work/ops"})
+    # `:work_ops` resolves to origin/work-ops — no such remote in this repo → Git.push fails;
+    # the materialization must NOT (F-15: local commit = base truth, publication degrades LOUD).
+    assert {:ok, %{ref: ref}} = BriefArtifact.commit(tmp, "pushed brief\n", push: :work_ops)
 
     assert File.exists?(Path.join(tmp, ref))
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
@@ -91,10 +103,10 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     n2 = commit_count(tmp)
 
     assert r1 == r2
-    assert n2 == n1, "re-briefing identical content must NOT re-commit (content-address = idempotence)"
+    assert n2 == n1, "re-briefing identical content must NOT re-commit (git-native idempotence)"
   end
 
-  test "DIFFERENT content → different sha/ref (never a content collision)", %{tmp_dir: tmp} do
+  test "DIFFERENT hintless content → different ref and different identity", %{tmp_dir: tmp} do
     git_init(tmp)
     assert {:ok, a} = BriefArtifact.commit(tmp, "A\n")
     assert {:ok, b} = BriefArtifact.commit(tmp, "B\n")
@@ -116,8 +128,10 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     out = BriefArtifact.physicalize_attrs(%{brief: "do X\n", role: "engineer"}, "fleet/demo", work_root: tmp)
 
     assert out.role == "engineer"
-    assert is_binary(out.brief_sha)
-    assert out.brief_ref == "briefs/#{out.brief_sha}.md"
+    # brief_sha = the introducing COMMIT (40 hex); the hintless ref is named by content sha256.
+    assert out.brief_sha =~ ~r/\A[0-9a-f]{40}\z/
+    name = :crypto.hash(:sha256, "do X\n") |> Base.encode16(case: :lower)
+    assert out.brief_ref == "briefs/#{name}.md"
     assert File.read!(Path.join(work_dir, out.brief_ref)) == "do X\n"
   end
 
@@ -154,8 +168,9 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(wt, "brief in a worktree\n")
     assert File.read!(Path.join(wt, ref)) == "brief in a worktree\n"
+    assert sha =~ ~r/\A[0-9a-f]{40}\z/
     # committed FOR REAL inside the worktree (the bug returned `{nil, nil}` with no commit).
     {log, 0} = System.cmd("git", ["log", "--oneline"], cd: wt)
-    assert log =~ "brief: briefs/#{sha}.md"
+    assert log =~ "brief: #{ref}"
   end
 end

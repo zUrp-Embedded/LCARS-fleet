@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     # Published best-effort (F-15): the statement only serves auditors if it is READABLE from the
     # forge; a push failure warns inside emit and never fails the completion.
-    case Fleet.Workflow.Provenance.emit(work_dir, attrs, push: {"origin", "work/ops"}) do
+    case Fleet.Workflow.Provenance.emit(work_dir, attrs, push: :work_ops) do
       {:ok, _} ->
         :ok
 

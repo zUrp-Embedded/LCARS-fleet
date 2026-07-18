@@ -234,6 +234,27 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
+  SHA of the LAST commit touching `path` in `workspace` (`git log -1 --format=%H -- <path>`),
+  **bounded**. `{:ok, ""}` when no commit touches the path (tracked-but-never-committed residue) —
+  the caller decides (BriefArtifact re-commits). Read-only, same bounded/hooks-off discipline as
+  `read_head_sha/1`.
+  """
+  @spec last_commit_sha(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def last_commit_sha(workspace, path) do
+    with :ok <- validate_cli_arg(path, :invalid_path) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["log", "-1", "--format=%H", "--", path],
+             cd: workspace,
+             timeout_ms: git_local_timeout_ms()
+           ) do
+        {:ok, {sha, 0}} -> {:ok, String.trim(sha)}
+        {:ok, {err, rc}} -> {:error, {:git_log_failed, rc, String.trim(err)}}
+        {:error, {:timeout, ms}} -> {:error, {:git_log_timeout, ms}}
+        {:error, {:exit, reason}} -> {:error, {:git_log_exit, reason}}
+      end
+    end
+  end
+
+  @doc """
   Push-only — pushes `refspec` from `workspace` to `remote`, **bounded** (timeout). NO add/commit:
   the branch is already committed (by the pod in `git_native` mode, or by `commit/1` in `payload`
   mode). `refspec` can be `local_ref:target_branch` so that the pushed ref is **chosen by the

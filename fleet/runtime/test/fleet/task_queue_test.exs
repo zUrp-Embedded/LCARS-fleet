@@ -334,30 +334,31 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
     assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
 
-    # BND-123: brief_sha/brief_ref are the CONTENT-ADDRESS of the physical brief, not free text. A bogus
-    # sha would pass itself off as verifiable provenance in the MCP envelope → shape validated at cast.
-    valid_sha = String.duplicate("a", 64)
+    # BND-123: brief_sha/brief_ref are the ADDRESS of the physical brief, not free text. A bogus
+    # sha would pass itself off as verifiable provenance in the MCP envelope → shape validated at
+    # cast (via the Fleet.Layout truth — same source as the producer).
+    valid_sha = String.duplicate("a", 40)
     assert {:ok, %WorkItem{brief_sha: ^valid_sha}} = WorkItem.new("p1", %{brief_sha: valid_sha})
 
-    assert {:ok, %WorkItem{brief_ref: "briefs/" <> _}} =
-             WorkItem.new("p1", %{brief_ref: "briefs/#{valid_sha}.md"})
-
-    # human-named scheme (BriefArtifact name_hint) — worker AND judge routing both accepted
-    assert {:ok, %WorkItem{brief_ref: "briefs/issue-3-engineer-abc1234.md"}} =
-             WorkItem.new("p1", %{brief_ref: "briefs/issue-3-engineer-abc1234.md"})
+    # plain human names — worker AND judge routing both accepted; hintless sha256 name too
+    assert {:ok, %WorkItem{brief_ref: "briefs/issue-3-engineer.md"}} =
+             WorkItem.new("p1", %{brief_ref: "briefs/issue-3-engineer.md"})
 
     assert {:ok, %WorkItem{brief_ref: "gate-briefs/" <> _}} =
-             WorkItem.new("p1", %{brief_ref: "gate-briefs/issue-3-consultant-abc1234.md"})
+             WorkItem.new("p1", %{brief_ref: "gate-briefs/issue-3-consultant.md"})
+
+    assert {:ok, %WorkItem{brief_ref: "briefs/" <> _}} =
+             WorkItem.new("p1", %{brief_ref: "briefs/#{String.duplicate("c", 64)}.md"})
 
     # nil stays nil (legitimate degraded/best-effort state, DR-010)
     assert {:ok, %WorkItem{brief_sha: nil, brief_ref: nil}} = WorkItem.new("p1", %{})
-    # out-of-shape sha (too short, uppercase, non-hex) → rejected
+    # out-of-shape sha (too short = not a commit sha, uppercase, non-hex) → rejected
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: "def"})
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
-    # out-of-shape ref (free text, traversal, no sha7 suffix) → rejected
-    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/inconnu.md"})
+    # out-of-shape ref (traversal, foreign subdir, nested path) → rejected
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "../escape.md"})
-    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/issue-3-engineer.md"})
+    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "other/x.md"})
+    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/a/b.md"})
   end
 
   test "6g. enqueue propagates the smart-constructor error + casts the ISO deadline", %{

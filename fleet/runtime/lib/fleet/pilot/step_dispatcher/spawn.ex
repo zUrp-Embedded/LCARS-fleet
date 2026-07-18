@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          alive_before?,
          log_ctx
        ) do
-    # PHYSICAL brief: materialized ONCE (content-addressed work/ops → {ref, sha}) BEFORE the spawn,
+    # PHYSICAL brief: materialized ONCE (committed into work/ops → {ref, introducing-commit sha}) BEFORE the spawn,
     # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
     # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
     # `physicalize` degrades to {nil, nil} (LOUD) without ever breaking the dispatch.
@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       Fleet.Workflow.BriefArtifact.physicalize(brief, repo,
         name_hint: "issue-#{issue_number}-#{role}",
         kind: brief_kind,
-        push: {"origin", "work/ops"}
+        push: :work_ops
       )
 
     spawn_opts =
