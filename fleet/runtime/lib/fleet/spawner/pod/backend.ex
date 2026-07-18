@@ -5,8 +5,8 @@ defmodule Fleet.Spawner.Pod.Backend do
   The pod's OS PROCESS, end to end: the path resolvers of the launchers that start it
   (`bwrap`/`host`/`claude` — the LIFE), the launch-backend resolver, the teardown that kills it
   (BEAM Port → SIGTERM of the bwrap/host holder, or a SOCK-AWARE kill of the surviving tmux session — the
-  DEATH) and the reap of an orphan before a (re)launch. The lifecycle of the per-pod MCP SOCKET NO
-  LONGER lives here (refocused 2026-07-05): the whole MCP channel (socket + `.mcp-fleet.json` + env) is
+  DEATH) and the reap of an orphan before a (re)launch. The per-pod MCP SOCKET lifecycle does
+  NOT live here: the whole MCP channel (socket + `.mcp-fleet.json` + env) is
   in `Pod.McpProvision`. `Pod` passes it the `state` (or a `port`/`pod_id`) as an argument; the
   module calls back NO private of `Pod` (no cycle).
 
