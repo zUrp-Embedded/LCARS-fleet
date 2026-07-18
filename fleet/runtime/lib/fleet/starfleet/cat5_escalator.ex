@@ -22,7 +22,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       `Pilot.StepRunConsumer` emits it on a `:workflow_map_load_failed` in the forge-driven
       rail (`step_run_consumer.ex` `emit_workflow_map_failed_draft/3`) → routed here via
       DriftMonitor. Honest-but-partial (covers the main dispatch load-failure, not every rail).
-    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). LIVE (F-C043) via `Fleet.Spawner.PermanentBoot`
+    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). LIVE via `Fleet.Spawner.PermanentBoot`
       (source `:spawner`), emitted on a corrupt permanent-pod base seed. (The originally-intended
       pod-side IPC strike filter is still unbuilt — a distinct producer.)
     * `:oauth_refresh_failed` — on `oauth.refresh.failed`. DORMANT: no wired producer.
@@ -55,8 +55,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     2. SINGLE canonical broadcast `%Fleet.Event{source: :starfleet,
        type: :"starfleet.audit_cat5_pod_drift", correlation_id, ...}` (same for the
        other two sources — type = `starfleet.audit_cat5_` + source, 3 keys registered in
-       events.yaml) — the old legacy event `audit.cat5.<source>` is NO LONGER emitted
-       (compat shim removed)
+       events.yaml)
     3. dispatch `CoordBackend.handle_escalation/3`
 
   Always `:ok` (audit-only fail-safe: a log-write failure does not interrupt
@@ -89,7 +88,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     # Broadcast strict canonical schema %Fleet.Event{source: :starfleet, ...}
     _ = broadcast_canon(source, enriched, correlation_id)
 
-    # Same finding as DriftMonitor (DrDree 2026-07-05): an escalation-policy miss was being swallowed.
+    # An escalation-policy miss must never be swallowed (same rule as DriftMonitor's verdict routing).
     case CoordBackend.resolved().handle_escalation(source, enriched, correlation_id) do
       :ok -> :ok
       {:error, why} -> Logger.warning("Cat5Escalator: escalation NOT routed (#{inspect(why)})")
@@ -110,8 +109,8 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     :ok
   end
 
-  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # protected-emission policy has ONE substrate authority). The type name is SYNTHESIZED: we pass the BINARY
+  # Emission via the protected core `Bus.safe_emit/4` (the protected-emission policy has ONE
+  # substrate authority — never a duplicated local rescue). The type name is SYNTHESIZED: we pass the BINARY
   # `starfleet.audit_cat5_<src>` as-is, safe_emit converts it via `to_existing_atom` (anti
   # atom-leak — the 3 atoms are registered: events.yaml + Starfleet.Application pre-register)
   # UNDER its rescue. An unexpected source (atom never pre-registered) is classed there as a

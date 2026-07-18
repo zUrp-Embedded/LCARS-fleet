@@ -7,8 +7,8 @@ defmodule Fleet.Starfleet.CoordBackend do
   (`:fleet_starfleet, :coord_backend`). Consistent with the deny-by-default +
   fail-safe stance (the audit log is written regardless of the backend).
 
-  The `/1` and `/2` compat shims were removed — only the canonical arities with
-  an explicit correlation_id are kept.
+  Only the canonical arities with an explicit correlation_id exist — no compat
+  shims.
 
   ## Callbacks
 

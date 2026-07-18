@@ -3,7 +3,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
   Pure functions validating a pod gatekeeper's (or other arbitration
   pod's) decision JSON.
 
-  Proven, frozen pattern established in a proof-of-concept: JSON output
+  Frozen pattern: JSON output
   `{decision, reason, details, chain?}`. Strict schema
   `priv/starfleet/schema/decision-v1.json`, `ex_json_schema` validation at load,
   fail-fast.
@@ -13,8 +13,8 @@ defmodule Fleet.Starfleet.Gatekeeper do
   Schema resolved **once** at boot via
   `Fleet.Starfleet.Application.init/1` → `init_schema!/0`, delegated to
   the foundation authority `Fleet.SchemaCache` (`:persistent_term` cache, key
-  `{__MODULE__, :decision_schema}`) — dedup, the read+decode+resolve
-  pipeline used to live copied here.
+  `{__MODULE__, :decision_schema}`) — the read+decode+resolve
+  pipeline has ONE authority, never a local copy.
 
   ## Public API
 
@@ -37,8 +37,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
     * `{:ok, %Decision{}}` — JSON parsed + schema valid
     * `{:error, {:decision_invalid, cause}}` — malformed JSON (`cause` =
       `%Jason.DecodeError{}`) OR invalid schema (`cause` = ExJsonSchema errors).
-      STRUCTURED pattern-matchable tuple (the old string `"decision invalid: …"`
-      was not); the human rendering (`inspect(cause)`) is done by consumers
+      STRUCTURED pattern-matchable tuple (a bare string would not be); the human rendering (`inspect(cause)`) is done by consumers
       when logging/journaling, not here.
 
   Raises `ArgumentError` if the schema was not loaded via
