@@ -7,17 +7,17 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   ## Where the human comes from
 
-  The human of the brief = **the user of the runtime process** (`id -un`). 2026-06-11 doctrine:
-  the ENTIRE fleet runs under the OS user of the human who launches it (`User=<human>`) —
-  each human = their fleet under their user, OS isolation by construction; the pod (BEAM
-  Port) inherits this UID. So the current user IS the human. No literal default
-  (it would mask a wiring hole): `id -un` unresolvable → fail-loud.
+  The human of the brief = **the user of the runtime process** (`id -un`): the ENTIRE
+  fleet runs under the OS user of the human who launches it (the human runs `bin/fleet_v2`,
+  the BEAM inherits their UID — no systemd `User=` directive) — each human = their fleet
+  under their user, OS isolation by construction; the pod (BEAM Port) inherits this UID.
+  So the current user IS the human. No literal default (it would mask a wiring hole):
+  `id -un` unresolvable → fail-loud.
 
   ## Where its git name/email comes from — the OS, not a catalogue
 
-  2026-06-11 doctrine: **if the user exists on the system, it is a human of the fleet**
-  — we do not re-filter through a catalogue (removed). The git identity is DERIVED from the OS,
-  in order:
+  **If the user exists on the system, it is a human of the fleet** — no re-filtering
+  through a catalogue. The git identity is DERIVED from the OS, in order:
 
     * **name**  : `git config --global user.name` (the daemon runs *as* the human → reads
       their `~/.gitconfig`, the identity it ALREADY commits with) → otherwise GECOS
@@ -47,27 +47,26 @@ defmodule Fleet.Credentials.ForgeIdentity do
     * `payload` — the SYSTEM commits (author=human, committer=system) →
       `[human_email, system_email()]`.
 
-  ## Refusal to split (audit judgment, 2026-07-05) — gate policy NOT extracted
+  ## Deliberately NOT split — gate policy stays in this module
 
   `allowed_emails/2` + `system_email/0` (consumed at CHECK time by the commit
-  gate) have a different consumer/moment from the rest (consumed at SPAWN time) —
-  a bundle flagged at audit. The split is REFUSED: both faces derive
-  from the SAME identity literals (`@system_email`, `@role_email_domain` —
-  `system_email` feeds `allowed_emails` on the check side AND `system_identity`
-  on the spawn side; `role_email` feeds the trailer). Separating them = either duplicating
-  the literal (two authorities → the divergence this module exists to
-  forbid, cf. § Destination: "no other module types a git email"),
-  or an inter-module dep for 4 lines. The forge-identity domain is ONE
+  gate) have a different consumer/moment from the rest (consumed at SPAWN time),
+  yet both faces derive from the SAME identity literals (`@system_email`,
+  `@role_email_domain` — `system_email` feeds `allowed_emails` on the check side
+  AND `system_identity` on the spawn side; `role_email` feeds the trailer).
+  Separating them = either duplicating a literal (two authorities → the exact
+  divergence this module exists to forbid — no caller composes a git email by
+  hand), or an inter-module dep for 4 lines. The forge-identity domain is ONE
   boundary; spawn and check are its two moments, not two concerns.
 
-  ## Identity destination (contract, 2026-07-04)
+  ## Identity destination
 
   These identities are those of the LOCAL FORGE (real role accounts, emails mapped → avatars/traceability).
   The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (which sets
   GIT_AUTHOR/COMMITTER `<role>@lcars.local` in env at launch) — a divergence is caught
   STRUCTURALLY by the commit-identity gate (push rejected fail-closed).
 
-  GitHub PUBLISH (2026-07-07): the LCARS role steps aside at publish, the CO-AUTHOR becomes THE
+  GitHub PUBLISH: the LCARS role steps aside at publish, the CO-AUTHOR becomes THE
   VENDOR (not a role, never hardcoded — Claude today, another vendor tomorrow), derived from the
   fact co-located with the active N1 launcher (`bin/<vendor>_launch.identity`, cf.
   `bin/claude_launch.identity`) — same discipline as the N0/N1 vendor boundary. The AUTHOR becomes
@@ -80,10 +79,8 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   @role_email_domain "lcars.local"
   @system_name "lcars-system"
-  # Real SYSTEM forge account (verified 2026-07-04: the `lcars-system@lcars.local` commits are
-  # mapped to the `lcars-system` forge account, avatar/traceability active). The old `system@lcars.local`
-  # was a PHANTOM (zero producer, zero commit, zero account) while the onboard re-typed
-  # the real identity hardcoded on its side. ONE system identity, here.
+  # Real SYSTEM forge account: `lcars-system@lcars.local` commits map to the `lcars-system`
+  # forge account (avatar/traceability active). ONE system identity, defined HERE only.
   @system_email "#{@system_name}@#{@role_email_domain}"
 
   @type identity :: %{
@@ -150,7 +147,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   def coauthor_instruction(role) when is_binary(role) do
     "MANDATORY signature — add the exact trailer to EVERY git commit:\n" <>
       "`#{coauthor_trailer(role)}`\n" <>
-      "(without it, the deliverable is rejected at push — gate F-01)."
+      "(without it, the deliverable is rejected at push)."
   end
 
   @doc """
@@ -182,7 +179,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   """
   @spec role_email(String.t()) :: String.t()
   def role_email(role) when is_binary(role) and role != "",
-    # F-C018 — strip control chars from `role` before it enters the email (commit-header sink, R1-14),
+    # Strip control chars from `role` before it enters the email (commit-header sink),
     # same hygiene as the human identity fields. No-op on the clean canon slugs.
     do: "#{strip_control(role)}@#{@role_email_domain}"
 
@@ -227,12 +224,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
     case Keyword.get(opts, :identity) do
       %{name: name, email: email} when is_binary(name) and is_binary(email) ->
         # A caller-supplied identity is hygiened too (defense in depth): strip control chars so it can
-        # never carry a newline into the git identity (R1-14).
+        # never carry a newline into the git identity.
         {:ok, %{name: strip_control(name), email: strip_control(email)}}
 
       _ ->
         # Each human-editable source (~/.gitconfig, GECOS) is HYGIENED before it enters the identity — a
-        # newline/control char would inject a `git config` line or a commit-header line (R1-14). A source
+        # newline/control char would inject a `git config` line or a commit-header line. A source
         # that strips to blank → nil, so the chain falls through to the safe OS-derived fallback.
         name =
           sanitize_identity(git_config("user.name")) || sanitize_identity(gecos_name(human)) ||
