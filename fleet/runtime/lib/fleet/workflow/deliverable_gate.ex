@@ -293,9 +293,9 @@ defmodule Fleet.Workflow.DeliverableGate do
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   defp git(workspace, args) do
-    # Bounded by `Fleet.Credentials.Shell.git/2` (setsid + SIGKILL of the OS process-GROUP at the deadline)
-    # instead of the old pattern `Task.async + Task.shutdown(:brutal_kill)` which killed ONLY the BEAM Task
-    # while letting the OS `git` process leak (a `git log -p` on a big diff exceeding 15 s left a
+    # Bounded by `Fleet.Credentials.Shell.git/2` (setsid + SIGKILL of the OS process-GROUP at the deadline).
+    # A `Task.async + Task.shutdown(:brutal_kill)` pattern would kill ONLY the BEAM Task
+    # while letting the OS `git` process leak (a `git log -p` on a big diff exceeding 15 s leaves a
     # zombie holding FDs on the workspace; unbounded accumulation under concurrent gates). `@hooks_off`
     # stays composed HERE: Shell.git does NOT auto-compose the config neutralization (it is load-bearing —
     # anti-RCE `diff.external` on `git log -p`), the caller keeps it. External contract `{out, exit_code}`
