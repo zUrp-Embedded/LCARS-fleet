@@ -10,9 +10,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
       falling together = the very signature of an error-handler's job);
     - **write** (`note`) = serialized upsert + **local WAL** (JSON, atomic write tmp+rename →
       crash-survivable) THEN triggers an **ASYNC forge sync** → the dispatcher NEVER blocks on the forge.
-      Un WAL en échec de WRITE est SURFACÉ, jamais avalé (BND-055) : le WAL est la seule durabilité d'une
-      1ʳᵉ occurrence (pas d'escalade), donc `note/3` rend `{:error, {:wal_write_failed,_}}` et
-      `record_or_escalate/4` rend `{:recorded_volatile,_}` — jamais un `:ok`/`:recorded` menteur ;
+      A FAILED WAL write is SURFACED, never swallowed: the WAL is the only durability of a
+      1st occurrence (no escalation), so `note/3` returns `{:error, {:wal_write_failed,_}}` and
+      `record_or_escalate/4` returns `{:recorded_volatile,_}` — never a lying `:ok`/`:recorded`;
     - **forge = durable cross-machine backing-store** (branch `work/ops`), debounced + retried async sync,
       **bidirectional merge** (incidents from other machines absorbed); forge unreachable = **fail-LOUD** log,
       never a loss (the WAL holds, re-sync on return) nor a silent re-roll.
@@ -77,14 +77,14 @@ defmodule Fleet.Pilot.IncidentRegistry do
   `last_escalated_at`/`escalated_issue` in the signature entry, and a recurrence under
   `:incident_escalation_cooldown_ms` (config `:fleet_pilot`, default 1 h) is SUPPRESSED instead of
   opening a new forge issue. Without this, a durable failure (workflow_map unreadable on a routed
-  issue) opened ONE ISSUE PER TICK — ~2 880/day, self-amplified by the webhook kick.
+  issue) would open ONE ISSUE PER TICK — ~2 880/day, self-amplified by the webhook kick.
 
   HONEST return — it carries what ACTUALLY happened, never an optimistic success:
 
     - `:recorded` — first time, incident recorded in memory + local WAL.
-    - `{:recorded_volatile, reason}` — first time, incident en MÉMOIRE mais le write WAL a ÉCHOUÉ
-      (BND-055) : PAS durable cross-session tant que la sync forge async ne l'a pas absorbé. Le caller
-      doit le DISTINGUER d'un `:recorded` (log/telemetry LOUD), jamais rassurer sur une durabilité absente.
+    - `{:recorded_volatile, reason}` — first time, incident in MEMORY but the WAL write FAILED:
+      NOT durable cross-session until the async forge sync absorbs it. The caller
+      must DISTINGUISH it from `:recorded` (LOUD log/telemetry), never reassure about an absent durability.
     - `{:escalated, issue_number}` — recurrence, sysadmin issue ACTUALLY opened (the number PROVES it).
     - `{:escalation_suppressed, issue_number | nil}` — recurrence NOTED (count/last_seen updated) but
       under cooldown of the previous escalation: NO new issue (the existing one carries the alarm).
@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         :recorded
 
       {:recorded_first_volatile, wal_reason} ->
-        # BND-055 : mémoire OK, WAL KO → durabilité non prouvée (le caller LOUD, ne rassure pas).
+        # Memory OK, WAL KO → durability not proven (the caller is LOUD, never reassures).
         {:recorded_volatile, wal_reason}
 
       {:suppressed, issue} ->
@@ -140,8 +140,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # ALSO decides the escalation gate — the cooldown check and the note must not race across
   # two calls, and the recurrence must be engraved even when suppressed.
   defp observe(sig, reason, opts) do
-    # Le cooldown est résolu CÔTÉ APPELANT (opts > config > défaut) et voyage dans le message :
-    # le handler ne relit pas state.opts — le seam de test et un override par-appel marchent.
+    # The cooldown is resolved CALLER-SIDE (opts > config > default) and travels in the message:
+    # the handler does not re-read state.opts — the test seam and a per-call override both work.
     GenServer.call(server(opts), {:observe, sig, reason, now(opts), cooldown_ms(opts)})
   catch
     :exit, why ->
@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   @doc """
   Cat-5 façade: escalates through the registry's cooldown gate while PRESERVING
-  « issue on the FIRST occurrence » (no recurrence gate — max severity, doctrine A-06): only the
+  "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
   REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
   suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays
   stateless; the memory lives here. If the registry owner is down, we FAIL-OPEN to the
@@ -248,10 +248,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
     registry = upsert(state.registry, sig, reason, now)
 
     # Local crash-survivable WAL BEFORE the forge; the forge is async (never on the dispatcher's path).
-    # Le WAL est la SEULE durabilité de `note/3` (pas d'escalade = pas d'issue forge) : un échec de write
-    # NE PEUT PAS être avalé en `:ok` (BND-055). Sans ça, mémoire mise à jour + WAL échoué + crash avant
-    # la sync forge async = incident jamais durable, alors que le retour disait « enregistré ». On propage
-    # l'échec typé ; `WakeRecovery` le voit déjà (`note OK → recorded` sinon LOUD « anchor NOT recorded »).
+    # The WAL is the ONLY durability of `note/3` (no escalation = no forge issue): a failed write
+    # CANNOT be swallowed as `:ok`. Otherwise, memory updated + WAL failed + crash before
+    # the async forge sync = incident never durable while the return said "recorded". We propagate
+    # the typed failure; `WakeRecovery` handles it (`note OK → recorded`, else LOUD "anchor NOT recorded").
     reply =
       case write_wal(state.wal_path, registry) do
         :ok -> :ok
@@ -272,11 +272,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
     wal = write_wal(state.wal_path, registry)
     state = schedule_sync(%{state | registry: registry})
 
-    # BND-055 : sur une PREMIÈRE occurrence (`:recorded_first` → `:recorded`, PAS d'escalade), le WAL est
-    # la seule durabilité — un échec de write ne doit pas ressortir `:recorded`. On distingue
-    # `{:recorded_first_volatile, _}` (mémoire OK, WAL KO → durabilité suspendue à la sync forge async).
-    # Sur une RÉCURRENCE (`:should_escalate`/`:suppressed`), la durabilité = l'ISSUE forge ouverte par
-    # l'escalade (write WAL déjà loggué LOUD à l'intérieur) → on n'altère pas le gate d'escalade.
+    # BND-055 — on a FIRST occurrence (`:recorded_first` → `:recorded`, NO escalation), the WAL is
+    # the only durability — a failed write must not come out as `:recorded`. We distinguish
+    # `{:recorded_first_volatile, _}` (memory OK, WAL KO → durability suspended on the async forge sync).
+    # On a RECURRENCE (`:should_escalate`/`:suppressed`), the durability = the forge ISSUE opened by
+    # the escalation (the WAL write is already logged LOUD inside) → the escalation gate is untouched.
     reply =
       cond do
         not known? and match?({:error, _}, wal) -> {:recorded_first_volatile, elem(wal, 1)}
@@ -327,11 +327,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
         fails = state.forge_fails + 1
 
         # Throttle (E4): at the threshold THEN every 20 tries (~10 min at 30s retry) — a forge down
-        # for a week no longer generates ~86k identical lines/month, and the incident stays VISIBLE.
+        # for a week does not generate ~86k identical lines/month, and the incident stays VISIBLE.
         if fails == @forge_fail_threshold or rem(fails, 20) == 0 do
           Logger.error(
             "IncidentRegistry: backing-store forge unreachable for #{fails} attempts (#{inspect(reason)}) " <>
-              "— fail-LOUD. Data SAFE in the local WAL (#{state.wal_path}) ; re-sync when forge returns."
+              "— fail-LOUD. Data SAFE in the local WAL (#{state.wal_path}); re-sync when forge returns."
           )
         end
 
@@ -364,9 +364,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
     registry |> Map.put(sig, entry) |> prune()
   end
 
-  # PRUNE (E4): the registry was the runtime's only structurally UNBOUNDED state (no eviction,
+  # PRUNE (E4): the registry would otherwise be the runtime's only structurally UNBOUNDED state (no eviction,
   # merge = monotone union, signatures with open cardinality via stringified reasons) — months
-  # of varied incidents = endless growth of the WAL + of the forge file REWRITTEN IN FULL on each note.
+  # of varied incidents would mean endless growth of the WAL + of the forge file REWRITTEN IN FULL on each note.
   # Eviction by last_seen (ISO lexicographic = chronological) beyond `:max_entries`
   # (default 500 — well above nominal; the bound targets the anomaly). Applied to the upsert AND the
   # forge merge (both growth paths).
@@ -561,7 +561,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp now(opts), do: opts[:now] || DateTime.to_iso8601(DateTime.utc_now())
 
   # Recurrence cooldown of the sysadmin escalation: default 1 h (a durable failure keeps ONE
-  # open issue as its alarm instead of one per tick — the storm was ~2 880 issues/day,
+  # open issue as its alarm instead of one per tick — otherwise ~2 880 issues/day,
   # self-amplified by the webhook kick). Seam `:escalation_cooldown_ms` (tests) overrides the
   # config knob. Entries without a stamp (pre-cooldown WAL/forge, or escalation never done)
   # → nil → the gate lets the escalation through (back-compat = old behavior).
@@ -589,7 +589,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   # SINGLE ops-repo authority (`:ops_repo`): the incident REGISTRY (this file, work/ops branch) and
   # the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces of
-  # one incident. They used to read two separate keys with two inline defaults: one edit away from
+  # one incident. Two separate keys with two inline defaults would sit one edit away from
   # a registry on repo A and its issues on repo B, with nothing to catch it. `:incident_registry_repo`
   # survives as an explicit override for the rare split.
   defp repo(opts),
@@ -617,7 +617,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:author] ||
         Application.get_env(:fleet_pilot, :incident_registry_author, %{
           name: "LCARS-starfleet",
-          # Role email: AUTHORITY = ForgeIdentity (H2 2026-07-04, the domain is no longer retyped here).
+          # Role email: AUTHORITY = ForgeIdentity (never retype the domain here).
           email: Fleet.Credentials.ForgeIdentity.role_email("starfleet")
         })
 
