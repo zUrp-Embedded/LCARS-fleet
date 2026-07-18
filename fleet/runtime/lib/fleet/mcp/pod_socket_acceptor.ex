@@ -6,9 +6,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   received on THIS socket necessarily comes from THIS pod: the `pod_id` is the
   acceptor's immutable state (carried at startup, from the socket name), never
   read off the wire. There is nothing left to prove — no secret presented, no
-  `pod_id` to compare: the channel discriminates. (The old HTTP loopback
-  transport was shared by all pods; the `pod_id` there was guessable, hence the
-  old capability. The per-pod socket closes that hole by construction.)
+  `pod_id` to compare: the channel discriminates (a SHARED transport would make
+  the pod_id guessable; the per-pod socket closes that hole by construction).
 
   One acceptor = one process = one socket: there is a genuine runtime reason (a
   socket is I/O state that persists across lines). It owns the listen socket,
@@ -46,10 +45,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # startup anyway — cf. `rm_stale/1`).
   # `buffer` MUST exceed the longest possible JSON-RPC line: with `packet: :line`,
   # a line longer than the buffer (inet default ~1460 B) is delivered TRUNCATED into
-  # fragments, each fragment is invalid JSON, and the server then waited for a
-  # complete line that never arrived -> silent hang, 30 s timeout on the bridge side,
-  # tool payload > ~1.4 KB LOST (seen live 2026-07-04: arch brief + engineer/
-  # reviewer summaries). 1 MiB covers every realistic payload; beyond that, handle_line answers -32700.
+  # fragments, each fragment is invalid JSON, and the server then waits for a
+  # complete line that never arrives -> silent hang, 30 s timeout on the bridge side,
+  # tool payload > ~1.4 KB LOST. 1 MiB covers every realistic payload; beyond that,
+  # handle_line answers -32700.
   @socket_opts [
     :binary,
     {:packet, :line},
@@ -119,13 +118,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
-        # La boucle {:continue, :accept} + accept BLOQUANT ne rend JAMAIS la main à la mailbox
-        # (un {:continue} repasse avant les messages) → handle_info({:DOWN}), qui libère le slot
-        # d'une connexion finie, ne tourne jamais tant que des connexions arrivent → le compte ne
-        # fait que MONTER → après @max_conns_per_pod connexions CUMULÉES sur la vie du pod, le
-        # permanent est refusé À VIE (constaté : 0 connexion réelle, 8 comptées, arch verrouillé).
-        # On draine donc les {:DOWN} en attente ICI, juste avant le plafond : on compte les
-        # connexions VIVANTES et on vide la mailbox (sinon les {:DOWN} fuient en mémoire).
+        # The {:continue, :accept} loop + BLOCKING accept NEVER yields to the mailbox
+        # (a {:continue} runs before messages) → handle_info({:DOWN}), which frees the slot of
+        # a finished connection, never runs while connections keep arriving → the count only
+        # RISES → after @max_conns_per_pod CUMULATIVE connections over the pod's life, a
+        # permanent pod would be refused FOR LIFE (0 real connections, 8 counted).
+        # So we drain the pending {:DOWN}s HERE, right before the ceiling: we count LIVE
+        # connections and empty the mailbox (otherwise the {:DOWN}s leak in memory).
         state = reap_down(state)
 
         # PER-POD CEILING, checked BEFORE reaching for the shared pool: the Task.Supervisor's
@@ -170,11 +169,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp live_conns(%{conns: conns}), do: map_size(conns)
 
-  # Draine (non-bloquant, `after 0`) les {:DOWN} des Tasks de connexion terminées et applique les
-  # libérations de slot MAINTENANT — cf. le commentaire dans handle_continue(:accept) : la boucle
-  # d'accept affame la mailbox, donc on ne peut pas compter sur handle_info({:DOWN}) pour
-  # décrémenter le plafond en temps voulu. Ne pêche QUE les {:DOWN} (le seul monitor de l'acceptor
-  # = les Tasks de connexion, cf. spawn_conn) ; le reste de la mailbox est laissé intact.
+  # Drains (non-blocking, `after 0`) the {:DOWN}s of finished connection Tasks and applies the
+  # slot releases NOW — cf. the comment in handle_continue(:accept): the accept loop starves the
+  # mailbox, so handle_info({:DOWN}) cannot be relied on to decrement the ceiling in time.
+  # Fishes ONLY the {:DOWN}s (the acceptor's only monitors = the connection Tasks, cf. spawn_conn);
+  # the rest of the mailbox is left intact.
   defp reap_down(state) do
     receive do
       {:DOWN, ref, :process, _pid, _reason} ->
@@ -258,19 +257,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Decode the JSON-RPC line. Only `tools/call` is dispatched to PodTools. A
   # notification with no `id` is ignored (nothing to answer, JSON-RPC contract). An
   # INVALID JSON (truncated/broken line) -> -32700 response + warning: NEVER swallowed
-  # silently — swallowing turned every invalid line into a 30 s timeout
-  # indistinguable on the bridge side, zero BEAM trace (seen live 2026-07-04). Another `method`
+  # silently — swallowing turns every invalid line into a 30 s timeout
+  # indistinguishable on the bridge side, zero BEAM trace. Another `method`
   # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled above) -> -32601.
   defp handle_line(line, pod_id, tools) do
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})
 
-      # F-C138 — the pod socket NOW serves `tools/list` (it was answered by the stdio bridge from a
-      # hard-coded catalogue that DRIFTED from the deftools — `import_project` was invisible to pods). Single
+      # F-C138 — the pod socket serves `tools/list` (a bridge-side hard-coded catalogue would
+      # DRIFT from the deftools). Single
       # source: the schemas come from `PodTools.get_tools/0` (the `deftool` authority), filtered to this
       # pod's surface = base (universal) + the role-gated names threaded at spawn (derived from the
-      # cap-profile `allowedTools`). Presence = authorization, per role. The bridge now forwards blindly.
+      # cap-profile `allowedTools`). Presence = authorization, per role. The bridge forwards blindly.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
@@ -302,9 +301,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   # `pod_id` comes from the acceptor's STATE (the channel), NEVER from `tool_args`: we
   # do not read an identity off the wire. The result format follows the MCP convention.
-  # A slow tools/call must be VISIBLE on the server side: before 2026-07-04 a 30 s
-  # hang left NO BEAM trace (the bridge logs on its side, but the server
-  # was blind -> forensics impossible). Threshold deliberately high: we trace
+  # A slow tools/call must be VISIBLE on the server side: without this trace a 30 s
+  # hang leaves NO BEAM trace (the bridge logs on its side, but the server
+  # stays blind -> forensics impossible). Threshold deliberately high: we trace
   # the anomaly, not the noise.
   @slow_tool_warn_ms 5_000
 
@@ -362,12 +361,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     PodTools.get_tools() |> Map.take(allowed) |> Map.values() |> Enum.map(&to_mcp_wire/1)
   end
 
-  # F1 — `get_tools/0` (ExMCP) rend sa forme INTERNE : `input_schema` (snake) + `display_name`/`meta`. Or CE
-  # `tools/list` EST le wire MCP (le pont stdio le forwarde VERBATIM à claude), et le protocole MCP exige
-  # `inputSchema` (camel). Un `input_schema` snake = claude ne parse pas le schéma → tool REJETÉ (« No such
-  # tool available », claude re-`tools/list` en boucle sans jamais registrer). Avant F-C138 le pont portait un
-  # catalogue camelCase à la main ; le passage au forward (single-source) a perdu la conversion. On projette
-  # ICI, à la frontière socket=wire, vers les 3 champs MCP standard : central MCP-compliant, pont pur pass-through.
+  # `get_tools/0` (ExMCP) returns its INTERNAL form: `input_schema` (snake) + `display_name`/`meta`. But
+  # THIS `tools/list` IS the MCP wire (the stdio bridge forwards it VERBATIM to claude), and the MCP
+  # protocol requires `inputSchema` (camel). A snake `input_schema` = claude cannot parse the schema →
+  # tool REJECTED ("No such tool available", claude loops on `tools/list` without ever registering).
+  # We project HERE, at the socket=wire boundary, onto the 3 standard MCP fields: MCP-compliant
+  # central, pure pass-through bridge.
   defp to_mcp_wire(tool) do
     t = Map.new(tool, fn {k, v} -> {to_string(k), v} end)
     %{"name" => t["name"], "description" => t["description"], "inputSchema" => t["input_schema"]}

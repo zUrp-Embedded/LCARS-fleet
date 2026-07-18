@@ -3,8 +3,8 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   DynamicSupervisor of the pod-facing socket acceptors + lifecycle API for the
   spawner (seam `fleet_spawner → fleet_mcp`).
 
-  The pod-facing transport is no longer a shared HTTP listener but a PER-POD
-  AF_UNIX socket: each pod has its own (mounted inside its sole sandbox), so
+  The pod-facing transport is a PER-POD
+  AF_UNIX socket (never a shared listener): each pod has its own (mounted inside its sole sandbox), so
   "which socket receives" = "which pod" — the identity IS the channel (cf.
   `Fleet.MCP.PodSocketAcceptor`). This DynamicSupervisor carries the fan-out (one
   acceptor per pod); it runs host-side unconditionally (nothing is created until
