@@ -79,22 +79,20 @@ defmodule Fleet.Coord.Policies do
     :ok
   end
 
-  # STRUCTURAL validation of the parsed YAML against `priv/coord/schema/coord-policies-v1.json` (ExJsonSchema). The
-  # schema advertised itself as "Validated by ex_json_schema at init_policies!/0" but was NOT: the code
-  # only accepted "is a map" → a malformed coord-policies (mapping without `action`, non-array
-  # `escalation_path`, key outside the pattern, additional property…) passed silently and then broke every
-  # lookup. Now FAIL-LOUD at boot, the SAME dead-man's-switch contract as an absent/unreadable file (the BEAM
-  # exits non-zero, the launcher escalates) rather than a structurally broken routing table kept alive.
-  # The schema is STRUCTURAL-ONLY (cf. its `$id`): the resolvability of action handlers and the existence of
-  # escalation targets stay verified at runtime by Fleet.Coord, not here.
+  # STRUCTURAL validation of the parsed YAML against `priv/coord/schema/coord-policies-v1.json`
+  # (ExJsonSchema). Without it, a malformed coord-policies (mapping without `action`, non-array
+  # `escalation_path`, key outside the pattern, additional property…) would load silently and then
+  # break every lookup. FAIL-LOUD at boot, the SAME dead-man's-switch contract as an absent/unreadable
+  # file (the BEAM exits non-zero, the launcher escalates) — never a structurally broken routing table
+  # kept alive. The schema is STRUCTURAL-ONLY (cf. its `$id`): the resolvability of action handlers and
+  # the existence of escalation targets stay verified at runtime by Fleet.Coord, not here.
   defp validate_against_schema!(data, path) do
     schema_path =
       :code.priv_dir(:lcars_fleet)
       |> to_string()
       |> Path.join("coord/schema/coord-policies-v1.json")
 
-    # IMMUTABLE priv schema, resolved ONCE via the foundation authority `Fleet.SchemaCache`
-    # (dedup: before, re-read+decode+resolve of the file on EACH call, no cache).
+    # IMMUTABLE priv schema, resolved ONCE via the foundation authority `Fleet.SchemaCache`.
     schema =
       Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, schema_path}, schema_path)
 
@@ -111,19 +109,17 @@ defmodule Fleet.Coord.Policies do
   @doc """
   Dispatch of a validated Gatekeeper decision.
 
-  Extended arity: explicit `correlation_id` (task.id UUID v4 of the work item
-  that produced the verdict, may be nil outside a work item).
+  `correlation_id` is explicit and always passed: the task.id UUID v4 of the
+  work item that produced the verdict, nil outside a work item.
 
   Lookup `{decision, reason}` → policies table → broadcast of the canonical schema
   `%Fleet.Event{source: :coord, type, correlation_id, …}`.
-  The `handle_decision/1` compat shim (without correlation_id) is removed.
 
   Returns:
     * `:ok` — policy match + broadcast done
     * `{:error, {:no_policy_match, {decision, reason}}}` — no policy match.
-      STRUCTURED tuple (pattern-matchable by consumers — the old string
-      `"no policy match for …"` was not); the human message lives in the
-      consumers' logs (`DriftMonitor`), not in the tuple.
+      STRUCTURED tuple (pattern-matchable by consumers); the human message
+      lives in the consumers' logs (`DriftMonitor`), not in the tuple.
     * `{:error, {:invalid_decision, term}}` — the input is NOT a validated
       `%Fleet.Decision{}` (raw map refused at the boundary, BND-002).
   """
@@ -142,21 +138,19 @@ defmodule Fleet.Coord.Policies do
     end
   end
 
-  # La frontière n'accepte QUE le verdict VALIDÉ `%Fleet.Decision{}` (sortie de
-  # `Fleet.Starfleet.Gatekeeper.validate/1`, seule construction). Une map brute `%{decision, reason}`
-  # passait ici (le contrat annonçait « décision validée » mais acceptait « map à 2 clés ») → un
-  # appelant pouvait court-circuiter le schema Starfleet et router un verdict non validé. On REFUSE,
-  # typé (l'appelant `DriftMonitor` loggue le `{:error, _}`) — l'état invalide n'est plus représentable
-  # à la frontière, jamais normalisé en aval. (Le type ne pouvait être exigé tant qu'il vivait dans
-  # Starfleet : Coord ne peut nommer un type de Starfleet — hence `Fleet.Decision` moving down to the foundation.)
+  # The boundary accepts ONLY the VALIDATED verdict `%Fleet.Decision{}` (built solely by
+  # `Fleet.Starfleet.Gatekeeper.validate/1`). A raw `%{decision, reason}` map would let a caller
+  # short-circuit the Starfleet schema and route an unvalidated verdict → REFUSED, typed (the
+  # `DriftMonitor` caller logs the `{:error, _}`) — the invalid state is unrepresentable at the
+  # boundary, never normalized downstream. (`Fleet.Decision` lives at the foundation layer because
+  # Coord cannot name a Starfleet type — that edge would close a cycle.)
   def handle_decision(other, _correlation_id), do: {:error, {:invalid_decision, other}}
 
   @doc """
   Dispatch of a Cat 5 escalation.
 
-  Extended arity: explicit `correlation_id` (extracted from the upstream event
-  that triggered the escalation, may be nil outside a work item). The
-  `handle_escalation/2` compat shim (without correlation_id) is removed.
+  `correlation_id` is explicit and always passed: extracted from the upstream
+  event that triggered the escalation, nil outside a work item.
 
   Returns:
     * `:ok` — policy match + broadcast done
