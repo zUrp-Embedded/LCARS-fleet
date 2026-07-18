@@ -5,7 +5,7 @@ defmodule Fleet.Coord.Emitter do
   into a canonical `%Fleet.Event{source: :coord}` and broadcasts it on
   `fleet.events`.
 
-  Split out of `Policies` (2026-07-05): the table lookup
+  Split out of `Policies`: the table lookup
   (load/validate/query the YAML) and the build+broadcast of a wire event are
   two distinct passes that share NO helper — the table knows nothing of the
   event schema, the emission never reads the table. `Policies` stays the
