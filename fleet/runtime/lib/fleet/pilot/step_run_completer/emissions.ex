@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   @moduledoc """
   SIDE emissions of the producer delivery (eng voice + slot-freeze event),
-  extracted from `Fleet.Pilot.StepRunCompleter`: everything that accompanies the publication
+  of `Fleet.Pilot.StepRunCompleter`: everything that accompanies the publication
   of a deliverable WITHOUT being part of the completion sequence.
 
   ## Out of the completion sequence by contract
@@ -33,8 +33,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   SLOT-FREEZE: signals that the producer's deliverable is CONFIRMED on the forge (commit pushed + PR
   open) → a resident pipe pod can then reset its workspace for the next issue WITHOUT racing
   the push. Carries the `pod_id` (the producer pod, from the pod.completed payload). Source `:workflow`
-  (the publication is a workflow-engine op; atom aligned on the fleet_pipeline→fleet_workflow rename —
-  the bare :pipeline atom had survived the rename sed, sole emitter, zero matcher by source).
+  (the publication is a workflow-engine op).
   This event is the fast-path release of the freeze: the truth (the deliverable on the forge) is already
   durable, and a missed emission is logged warning here and re-derived pod-side by the `:publish_deadline`
   backstop (the `:publishing` flag lifts anyway at the deadline) — a miss costs slot latency, never the
@@ -47,7 +46,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         result =
           Fleet.EventRouter.Bus.emit(:workflow, :"deliverable.published",
             pod_id: pod_id,
-            # Traceability (acte3 vague E): correlate to the issue (end-to-end key).
+            # Traceability: correlate to the issue (end-to-end key).
             correlation_id: to_string(Map.fetch!(step_run, :issue_number)),
             payload: %{
               "repo" => Map.fetch!(step_run, :repo),
@@ -87,13 +86,12 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   here — RoleToken logs it. Absent/empty → nothing (no empty comment).
 
   DEDUP (footprint): the FULL NOTE goes on the ISSUE (the ticket = canonical record of the work,
-  "here is what I did" in response to the brief) — the PR NO LONGER receives a copy nor a separate
-  pointer: the pointer is now FOLDED into the PR OPENING body (`Texts.pr_body/3`,
-  `open_deliverable_pr`), not a 2nd comment posted right after (QoL 2026-07-07, uncovered by reading the
-  real forge rendering of a delivered PR: two "as engineer" posts in a row for ONE related piece of info).
-  Before this fix, the same `summary` (~1 KB) was posted verbatim on both sides — pure noise; the previous
-  fix (footprint dedup) had already reduced that to a separate pointer, this one folds the pointer
-  into the opening — only a SINGLE PR post total (the opening body), zero PR comment added.
+  "here is what I did" in response to the brief) — the PR receives NO copy and NO separate
+  pointer: the pointer is FOLDED into the PR OPENING body (`Texts.pr_body/3`,
+  `open_deliverable_pr`), never a 2nd comment posted right after. A verbatim copy on both sides
+  would be ~1 KB of pure noise; a separate pointer comment would render as two "as engineer"
+  posts in a row for ONE piece of info — only a SINGLE PR post total (the opening body),
+  zero PR comment added.
   """
   @spec post_eng_summary(map(), keyword()) :: :ok | :noop
   def post_eng_summary(step_run, opts) do
