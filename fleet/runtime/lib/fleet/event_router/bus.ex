@@ -24,18 +24,18 @@ defmodule Fleet.EventRouter.Bus do
     * `authorized_event_types/0` — MapSet of atoms loaded at boot by `Catalog.load!/0`
     * `set_authorized_event_types/1` — called by `Catalog.load!/0` at boot
 
-  ## Why struct-only (no tuple shim)
+  ## Struct-only
 
-  There is NO `broadcast(event_type, payload[, opts])` variant that would construct
-  an event + soft-validate a JSON + emit a `{atom, map}` tuple. ALL producers (pod, starfleet, coord, webhooks, signals) emit the struct via `broadcast/2`.
-  That is why there is neither `Fleet.Event.SchemaError` nor
-  `Fleet.EventRouter.Schema`: no JSON soft-validate, the only validation is the
-  registry (`UnregisteredError`).
+  ALL producers (pod, starfleet, coord, webhooks) emit the `%Fleet.Event{}` struct via
+  `broadcast/2` — a subscriber always receives the struct, never a tuple to unwrap. The
+  only validation on the broadcast path is the registry (`UnregisteredError`); the struct
+  shape itself is enforced at construction (`Fleet.Event.new/3`).
 
   ## Mandatory registry
 
-  ... at boot from `priv/event_router/events.yaml` via `:persistent_term`. As soon as it is populated, any event
-  outside the set raises `UnregisteredError`.
+  Populated at boot from `priv/event_router/events.yaml` via `:persistent_term`
+  (`Catalog.load!/0`). As soon as it is populated, any event outside the set raises
+  `UnregisteredError`.
 
   The behavior when the set is EMPTY (test `load_event_registry: false`, or any config that disables
   the boot-time `Catalog.load!`) is **explicit** via `:fleet_event_router, :permit_when_registry_empty`:
@@ -96,8 +96,8 @@ defmodule Fleet.EventRouter.Bus do
 
   @doc """
   Constructs a `%Fleet.Event{}` via `Fleet.Event.new/3` and broadcasts it on the main
-  topic via `broadcast_main/1` — a single call for the producer idiom "construct the
-  canonical envelope + broadcast to main", repeated across ~10 sites.
+  topic via `broadcast_main/1` — the single call for the producer idiom "construct the
+  canonical envelope + broadcast to main".
 
   Factors ONLY the construction + broadcast: `emit/3` rescues nothing, classes nothing.
   Two error regimes exist among producers:
@@ -122,11 +122,10 @@ defmodule Fleet.EventRouter.Bus do
   end
 
   @doc """
-  PROTECTED variant of `emit/3` — the SINGLE core of the "protected-bus-emission"
-  idiom, which was duplicated across 7 sites / 3 apps (coord policies, starfleet cat5/boot/
-  mcp_monitor/mcp_watcher, spawner pod events) with local rescues of INCONSISTENT
-  behavior (some swallowed everything silently, others propagated). Now a single
-  authority: here, in the substrate, next to `emit/3` whose signature it shares.
+  PROTECTED variant of `emit/3` — the SINGLE authority of the "protected-bus-emission"
+  idiom (fire-and-forget emitters: coord, starfleet monitors, spawner pod events). A local
+  rescue around `emit/3` is exactly the duplication this core absorbs — never re-implement
+  one. Lives here, in the substrate, next to `emit/3` whose signature it shares.
 
   4th argument `safe_opts`:
 
