@@ -31,19 +31,35 @@ mobile). Détail config : `etc/fleet_v2.env.template`.
   Un dashboard web « start fleet » (futur) est une surface alternative, pas une dépendance.
   Pas de systemd-in-docker (pas de boîte dans la boîte). La forge tourne dans son conteneur à côté.
 
-## Binaires partagés à installer (RO, owner système)
+## Install canonique & deploy — `/local/LCARS_v2` (SSoT, ne pas re-dériver)
 
-Le spawner lit les launchers à des **paths absolus** `/usr/local/bin/*_launch.sh` (hors `/home`,`/tmp`
-sinon masqués par le `--tmpfs` du sandbox). Absents → 1er spawn KO `:executable_missing`.
+**UNE install partagée multi-humains** : `/local/LCARS_v2/` (LCARS = le projet ; `fleet_*` = l'applicatif ;
+le `_v2` est provisoire, reste du dev v1→v2). Elle contient **rel/ ET bin/ co-localisés** — les launchers
+sont lus depuis `$BIN_DIR` de l'install (`bin/fleet_v2` exporte `LCARS_*_LAUNCH_PATH=$BIN_DIR/...`) :
+**ZÉRO copie de launcher dans `/usr/local/bin`** (les copies éparpillées de juin ont divergé 3 semaines —
+cicatrice 2026-07-18 : deux installs parallèles, deux fleets sur des builds à 5 jours d'écart, personne
+d'alerté). Seuls les **symlinks PATH** vivent dans `/usr/local/bin` :
 
 ```bash
-# Launchers N0/N1 pod : bwrap_launch (containment bwrap) · host_launch (containment none, LAUNCH-Q) ·
-# claude_launch (launcher vendor N1, ADR-G).
-sudo cp bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/{bwrap_launch.sh,host_launch.sh,claude_launch.sh}
-# CLI opérateur (spawn/list/attach un pod). `attach` exige le même UID que la fleet (= l'humain).
-sudo cp bin/lcars /usr/local/bin/ && sudo chmod +x /usr/local/bin/lcars
+/usr/local/bin/fleet_v2 -> /local/LCARS_v2/bin/fleet_v2
+/usr/local/bin/lcars    -> /local/LCARS_v2/bin/lcars
 ```
+
+Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c'est le contrat.
+
+**Procédure de deploy** (depuis `fleet/runtime`, gate vert exigé avant) :
+
+```bash
+MIX_ENV=prod mix release --overwrite
+sudo rsync -a --delete _build/prod/rel/fleet_umbrella/ /local/LCARS_v2/rel/fleet_umbrella/
+sudo cp bin/fleet_v2 bin/lcars bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh \
+        bin/fleet_mcp_stdio_bridge.py bin/claude_launch.identity /local/LCARS_v2/bin/
+sudo chgrp -R fleet /local/LCARS_v2 && sudo chmod g+rx /local/LCARS_v2/bin/*
+# CHAQUE humain relance SA fleet pour recharger le BEAM : fleet_v2 stop && fleet_v2 start
+```
+
+⚠ `rel/` seul ne suffit PAS : `bin/` porte les launchers N0/N1 (le monde des pods) — un deploy qui
+oublie `bin/` fait tourner le nouveau BEAM avec les vieux sandboxes.
 
 ## Tests intégration
 
