@@ -1,9 +1,7 @@
 defmodule Fleet.Coord.Application do
   @moduledoc """
-  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
-  migration 2026-07-12 ; nom conservé pour zéro churn de références).
-
-  Domain supervisor `fleet_coord`.
+  Coord domain supervisor ("Application" is a historical name, kept to avoid
+  reference churn — this is a plain Supervisor, not an OTP app callback).
 
   At boot:
 
@@ -19,14 +17,12 @@ defmodule Fleet.Coord.Application do
 
   ## No pre-registration of event atoms
 
-  The supervisor pre-declares no atom vocab: it would be pointless. The
-  events actually emitted (`coord.notification_routed` / `coord.escalation_triggered` /
+  The supervisor pre-declares no atom vocab: the events actually emitted
+  (`coord.notification_routed` / `coord.escalation_triggered` /
   `coord.action_dispatched`) are interned at compile-time by the
-  `:"coord.*"` literals in `emitter.ex` (the emission pass extracted from Policies) and
-  registered in `events.yaml` — no need for a
-  `String.to_existing_atom` at boot. (Any atom list placed here would be
-  dead vocab, disjoint from what is emitted and never broadcast, like the old
-  `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` with 0 callers.)
+  `:"coord.*"` literals in `emitter.ex` and registered in `events.yaml` — no
+  `String.to_existing_atom` needed at boot. An atom list placed here would be
+  a SECOND copy of the vocabulary, free to drift from what is emitted.
 
   **Last revised**: 2026-07-18
   """
