@@ -1,26 +1,27 @@
 defmodule Fleet.EventRouter.TestEnv do
   @moduledoc """
-  Helper d'env applicatif pour les tests de cette app (dédup B6 du harnais).
+  App-env helper for this domain's tests (harness dedup B6).
 
-  Remplace l'idiome réécrit dans chaque fichier : « save `prev = Application.get_env` ;
-  `on_exit` → `put_env(prev)` ou `delete_env` ». La capture passe par `Application.fetch_env/2`
-  (pas `get_env`) : une clé ABSENTE est re-supprimée au retour, une clé POSÉE — même à `nil` ou
-  `false` — est reposée telle quelle. L'ancien idiome confondait les deux via le `nil` de `get_env`.
+  Replaces the idiom rewritten in every file: "save `prev = Application.get_env`;
+  `on_exit` → `put_env(prev)` or `delete_env`". Capture goes through `Application.fetch_env/2`
+  (not `get_env`): an ABSENT key is deleted again on restore, a SET key — even set to `nil` or
+  `false` — is put back as-is. A `get_env`-based capture would conflate the two via its `nil`.
 
-  À appeler depuis `setup`/`test` (le process du test) : la restauration s'enregistre via
-  `ExUnit.Callbacks.on_exit/1`. Les `on_exit` s'exécutent en LIFO → des poses imbriquées
-  (setup de module puis de describe) se dénouent dans le bon ordre.
+  Call from `setup`/`test` (the test process): restoration is registered via
+  `ExUnit.Callbacks.on_exit/1`. `on_exit` callbacks run LIFO → nested puts
+  (module setup then describe setup) unwind in the right order.
 
-  Chaque app de l'umbrella porte SA copie de ce module (même corps, module préfixé par l'app) :
-  les test/support ne se voient pas entre apps et on ne crée pas de dépendance test cross-app.
+  Each domain carries its OWN copy of this module (same body, module prefixed per domain):
+  test/support helpers are not visible across domains and must not create cross-domain
+  test dependencies.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   @doc """
-  Pose `value` sous `{app, key}` et enregistre la restauration de la valeur PRÉCÉDENTE
-  (repose, ou suppression si la clé était absente) à la fin du test. Pose + restauration
-  en un appel — le site d'usage n'a plus ni `prev` ni `on_exit` à écrire.
+  Puts `value` under `{app, key}` and registers restoration of the PREVIOUS value
+  (put back, or deleted if the key was absent) at the end of the test. Put + restore
+  in one call — the call site has no `prev` nor `on_exit` left to write.
   """
   def put_env_restoring(app, key, value) do
     restore_env_on_exit(app, key)
@@ -28,9 +29,9 @@ defmodule Fleet.EventRouter.TestEnv do
   end
 
   @doc """
-  Capture la valeur actuelle de `{app, key}` et enregistre sa restauration à la fin du test,
-  SANS rien poser. Pour les setups dont les tests mutent ensuite la clé eux-mêmes
-  (`put_env`/`delete_env` libres dans le corps du test).
+  Captures the current value of `{app, key}` and registers its restoration at the end of
+  the test, WITHOUT putting anything. For setups whose tests then mutate the key themselves
+  (free `put_env`/`delete_env` in the test body).
   """
   def restore_env_on_exit(app, key) do
     prev = Application.fetch_env(app, key)

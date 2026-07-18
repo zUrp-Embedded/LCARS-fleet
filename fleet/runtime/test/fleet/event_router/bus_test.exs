@@ -9,14 +9,14 @@ defmodule Fleet.EventRouter.BusTest do
     :ok
   end
 
-  # Z5 (ER-D2) — les blocs `broadcast/3` (shim legacy `{atom, map}`) retirés avec le legacy.
-  # Le chemin canon `broadcast/2 (topic, %Fleet.Event{})` est testé ici + dans
+  # Z5 (ER-D2) — the `broadcast/3` blocks (legacy `{atom, map}` shim) are gone with the legacy.
+  # The canonical path `broadcast/2 (topic, %Fleet.Event{})` is tested here + in
   # r1_seam_broadcast_test (registry / UnregisteredError).
 
   defp ev(type), do: Fleet.Event.new(:spawner, type)
 
   describe "subscribe/unsubscribe" do
-    test "unsubscribe stoppe la réception" do
+    test "unsubscribe stops delivery" do
       Bus.broadcast("fleet.events", ev(:"pod.completed"))
       assert_receive %Fleet.Event{type: :"pod.completed"}
 

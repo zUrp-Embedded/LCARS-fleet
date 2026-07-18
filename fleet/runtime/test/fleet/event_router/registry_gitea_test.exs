@@ -1,13 +1,14 @@
 defmodule Fleet.EventRouter.RegistryGiteaTest do
   @moduledoc """
-  Z5 #9 — garde de cohérence producteur↔registry. `WebhooksGitea` émet `gitea.<action>`
-  (actions pré-enregistrées `Application.gitea_event_types/0`). CHAQUE action DOIT être une
-  clé d'`events.yaml`, sinon `Bus.broadcast` fail-loud `UnregisteredError` → drop muet du
-  webhook (HTTP 200 mais event jamais routé — le bug #9, prod-only). Verrouille la régression.
+  Z5 #9 — producer↔registry consistency guard. `WebhooksGitea` emits `gitea.<action>`
+  (actions preregistered by `Application.gitea_event_types/0`). EVERY action MUST be a
+  key of `events.yaml`, otherwise `Bus.broadcast` fail-louds `UnregisteredError` → silent
+  drop of the webhook (HTTP 200 but event never routed — bug #9, prod-only). Locks the
+  regression.
   """
   use ExUnit.Case, async: true
 
-  test "toutes les actions gitea pré-enregistrées sont des clés events.yaml (pas de drop muet #9)" do
+  test "every preregistered gitea action is an events.yaml key (no silent drop #9)" do
     registry =
       :lcars_fleet
       |> :code.priv_dir()
@@ -24,7 +25,7 @@ defmodule Fleet.EventRouter.RegistryGiteaTest do
       )
 
     assert missing == [],
-           "actions gitea émises par WebhooksGitea mais ABSENTES du registry events.yaml " <>
-             "→ drop muet en prod (#9) : #{inspect(missing)}"
+           "gitea actions emitted by WebhooksGitea but ABSENT from the events.yaml registry " <>
+             "→ silent drop in prod (#9): #{inspect(missing)}"
   end
 end

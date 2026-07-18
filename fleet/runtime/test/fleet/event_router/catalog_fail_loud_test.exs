@@ -48,9 +48,9 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     end
   end
 
-  # Non-régression de l'AUTRE lecteur du parse : `event_type_strings/0` (source de
-  # `preregister_event_atoms/0`) doit toujours rendre `[]` sur un events.yaml vide — il n'a rien à
-  # pré-enregistrer et NE doit PAS fail-loud (sinon `Application.preregister_event_atoms/0` casserait).
+  # Non-regression for the OTHER reader of the parse: `event_type_strings/0` (source of
+  # `preregister_event_atoms/0`) must still return `[]` on an empty events.yaml — it has nothing to
+  # preregister and must NOT fail-loud (otherwise `Application.preregister_event_atoms/0` would break).
   @tag :tmp_dir
   test "event_type_strings/0 returns [] on EMPTY events.yaml (preregister unchanged, no raise)",
        %{tmp_dir: tmp_dir} do

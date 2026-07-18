@@ -32,8 +32,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
   end
 
   describe "POST /webhook/gitea" do
-    test "HMAC valide → 200 + broadcast event gitea.<action>", %{secret: secret} do
-      # Un vrai webhook Gitea porte TOUJOURS `repository.full_name` → l'issue_ref le reflète (multi-repo).
+    test "valid HMAC → 200 + broadcast of gitea.<action> event", %{secret: secret} do
+      # A real Gitea webhook ALWAYS carries `repository.full_name` → the issue_ref reflects it (multi-repo).
       body = %{
         "action" => "opened",
         "issue" => %{"id" => 42},
@@ -53,12 +53,13 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
-    test "broadcast {:error} → 422, JAMAIS ACK 200 (un event droppé ne doit pas être cru livré)",
+    test "broadcast {:error} → 422, NEVER ACK 200 (a dropped event must not be believed delivered)",
          %{
            secret: secret
          } do
-      # Repli B-#1 : `_ = Bus.emit` jetait le tuple `{:error}` → `send_resp 200` → Gitea croit livré, ne
-      # rejoue jamais → event forge perdu en silence. Fix : matcher le retour → `{:error}` → 422 (retry/alerte).
+      # B-#1: a `_ = Bus.emit` that discards the `{:error}` tuple → `send_resp 200` → Gitea believes
+      # it delivered, never replays → forge event silently lost. The return is matched: `{:error}` →
+      # 422 (retry/alert).
       Fleet.EventRouter.TestEnv.put_env_restoring(
         :fleet_event_router,
         :webhook_emit_fun,
@@ -71,7 +72,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 422
     end
 
-    test "M20 : sans action, event_type via header X-Gitea-Event (pas défaut 'push')", %{
+    test "M20: without action, event_type comes from the X-Gitea-Event header (no 'push' default)", %{
       secret: secret
     } do
       body = %{"ref" => "refs/heads/main"}
@@ -85,7 +86,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.push"}, 500
     end
 
-    test "M20 : sans action ni header → gitea.unknown (pas mislabel 'push')", %{secret: secret} do
+    test "M20: without action nor header → gitea.unknown (no 'push' mislabel)", %{secret: secret} do
       body = %{"ref" => "refs/heads/main"}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -93,20 +94,20 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
     end
 
-    # Régression acte4 #24 — Plug.Parsers garantit que body est une MAP, pas que `action` est une
-    # string. Un `{"action": 123}` signé nourrissait `"gitea." <> 123` AVANT le try → ArgumentError
-    # hors try → Cowboy 500, contournant la discipline « jamais ACK un drop, 422 sur dérive ».
-    # Fix : action non-string ≈ absent → même chemin que M20 (fallback header, sinon gitea.unknown).
-    test "acte4 #24 : action non-string → pas de crash ; traité comme absent (header sinon unknown)",
+    # Regression acte4 #24 — Plug.Parsers guarantees the body is a MAP, not that `action` is a
+    # string. A signed `{"action": 123}` would feed `"gitea." <> 123` BEFORE the try → ArgumentError
+    # outside the try → Cowboy 500, bypassing the "never ACK a drop, 422 on drift" discipline.
+    # A non-string action ≈ absent → same path as M20 (header fallback, else gitea.unknown).
+    test "acte4 #24: non-string action → no crash; treated as absent (header else unknown)",
          %{secret: secret} do
-      # sans header → gitea.unknown, comme « sans action »
+      # without header → gitea.unknown, same as "no action"
       body = %{"action" => 123, "ref" => "refs/heads/main"}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
 
-      # avec header → le fallback header route (toujours pas de crash)
+      # with header → the header fallback routes (still no crash)
       conn2 =
         post_with_sig(%{"action" => %{"nested" => true}}, secret)
         |> put_req_header("x-gitea-event", "push")
@@ -116,7 +117,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.push"}, 500
     end
 
-    test "M21 : issue extrait d'une pull request (pas seulement issue)", %{secret: secret} do
+    test "M21: issue extracted from a pull request (not only issue)", %{secret: secret} do
       body = %{
         "action" => "opened",
         "pull_request" => %{"id" => 99},
@@ -135,10 +136,10 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
-    test "F-C010 : webhook SANS repository.full_name (payload dégénéré) → sentinelle `unknown`, PAS un vrai repo fabriqué",
+    test "F-C010: webhook WITHOUT repository.full_name (degenerate payload) → `unknown` sentinel, NOT a fabricated real repo",
          %{secret: secret} do
-      # Un vrai webhook Gitea porte toujours full_name ; un payload sans = malformé. On NE fabrique PAS
-      # `fleet/lcars` (impersone un vrai repo dans l'event display) → sentinelle honnête `unknown`.
+      # A real Gitea webhook always carries full_name; a payload without it is malformed. We do NOT
+      # fabricate `fleet/lcars` (impersonates a real repo in the event display) → honest `unknown` sentinel.
       body = %{"action" => "opened", "issue" => %{"id" => 7}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -152,14 +153,14 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
-    test "repository NON-MAP (corps forgé) → sentinelle `unknown`, PAS un crash 500 hors discipline 422", %{
+    test "non-MAP repository (forged body) → `unknown` sentinel, NOT a 500 crash outside the 422 discipline", %{
       secret: secret
     } do
-      # `Plug.Parsers` garantit que `body` est une map, PAS que `repository` en est une. Un corps
-      # forgé `{"repository": "x"}` faisait lever `get_in("x", ["full_name"])` (FunctionClauseError
-      # dans Access) DANS extract_issue, AVANT le `try` → Cowboy 500, hors de la discipline
-      # 422-on-drift du module (le `|| "unknown"` n'attrapait que repository ABSENT). Jumeau exact du
-      # cas `action` non-string déjà durci. Le fix pattern-matche la structure → `unknown`, pas un raise.
+      # `Plug.Parsers` guarantees `body` is a map, NOT that `repository` is one. A forged body
+      # `{"repository": "x"}` would make `get_in("x", ["full_name"])` raise (FunctionClauseError
+      # in Access) INSIDE extract_issue, BEFORE the `try` → Cowboy 500, outside the module's
+      # 422-on-drift discipline (the `|| "unknown"` only catches an ABSENT repository). Exact twin
+      # of the non-string `action` case. Pattern-matching the structure yields `unknown`, not a raise.
       body = %{"action" => "opened", "issue" => %{"id" => 7}, "repository" => "x"}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -173,7 +174,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
-    test "R0-EVT-008 : repo DYNAMIQUE depuis repository.full_name (plus hardcodé fleet/lcars)", %{
+    test "R0-EVT-008: DYNAMIC repo from repository.full_name (no hardcoded fleet/lcars)", %{
       secret: secret
     } do
       body = %{
@@ -187,40 +188,40 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{payload: %{"issue_id" => "acme/widgets#7"}}, 500
     end
 
-    test "F-009 : event type drift (atome `gitea.*` inconnu) → 422, plus d'ACK 200 silencieux", %{
+    test "F-009: event type drift (unknown `gitea.*` atom) → 422, no silent ACK 200", %{
       secret: secret
     } do
-      # action jamais déclarée → `String.to_existing_atom("gitea.<action>")` lève ArgumentError →
-      # avant F-009 le handler renvoyait 200 « ok » (la forge croyait l'event livré, drop muet).
+      # never-declared action → `String.to_existing_atom("gitea.<action>")` raises ArgumentError →
+      # a 200 "ok" here would make the forge believe the event delivered (silent drop, F-009).
       body = %{"action" => "zzz_drift_action_inexistante_42", "issue" => %{"id" => 7}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 422
       assert Jason.decode!(conn.resp_body)["error"] == "unknown event type"
-      # pas de broadcast d'un event drift
+      # no broadcast of a drift event
       refute_receive %Fleet.Event{source: :event_router}, 200
     end
 
-    test "REPRO R0-EVT-007 : gros payload (~900KB, <1MB) HMAC-valide → 200 (raw_body complet)", %{
+    test "REPRO R0-EVT-007: large HMAC-valid payload (~900KB, <1MB) → 200 (full raw_body)", %{
       secret: secret
     } do
-      # Falsification du finding « 401 sur gros payload légitime » : un body sous le cap 1 MB doit passer.
-      # Si le raw_body était tronqué (branche {:more}/partial), l'HMAC ne matcherait pas → 401.
+      # Falsifies the "401 on a large legitimate payload" finding: a body under the 1 MB cap must
+      # pass. If the raw_body were truncated ({:more}/partial branch), the HMAC would not match → 401.
       big = String.duplicate("x", 900_000)
       body = %{"action" => "opened", "issue" => %{"id" => 1}, "blob" => big}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200,
-             "gros payload HMAC-valide refusé (#{conn.status}) — raw_body tronqué ?"
+             "HMAC-valid large payload refused (#{conn.status}) — truncated raw_body?"
     end
 
-    test "au-dessus du cap 1MB → borne explicite (RequestTooLargeError), PAS un 401 HMAC-tronqué",
+    test "above the 1MB cap → explicit bound (RequestTooLargeError), NOT a truncated-HMAC 401",
          %{
            secret: secret
          } do
-      # Le seul cas où read_body rend {:more} = body > :length (1MB). Plug.Parsers le REFUSE avant le
-      # dispatch (jamais verify_hmac) → borne 413, pas un 401 sur raw_body tronqué. C'est la preuve que la
-      # branche {:more}/partial n'est PAS un trou HMAC : elle est court-circuitée par le cap.
+      # The only case where read_body returns {:more} is body > :length (1MB). Plug.Parsers REFUSES
+      # it before the dispatch (verify_hmac never runs) → 413 bound, not a 401 on a truncated
+      # raw_body. Proof that the {:more}/partial branch is NOT an HMAC hole: the cap short-circuits it.
       big = String.duplicate("y", 1_200_000)
       body = %{"action" => "opened", "blob" => big}
 
@@ -229,7 +230,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       end
     end
 
-    test "HMAC manquante → 401", %{secret: _secret} do
+    test "missing HMAC → 401", %{secret: _secret} do
       body = Jason.encode!(%{"action" => "opened"})
 
       conn =
@@ -240,7 +241,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 401
     end
 
-    test "HMAC fausse → 401" do
+    test "wrong HMAC → 401" do
       body = Jason.encode!(%{"action" => "opened"})
 
       conn =
@@ -252,7 +253,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 401
     end
 
-    test "secret manquant → 401" do
+    test "missing secret → 401" do
       Application.put_env(:fleet_event_router, :webhook_secret_path, "/nonexistent")
 
       body = Jason.encode!(%{"action" => "opened"})
@@ -264,15 +265,15 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
-      # D1 : reason structuré (:secret_missing) — Jason encode l'atome en string sur le wire.
+      # D1: structured reason (:secret_missing) — Jason encodes the atom as a string on the wire.
       assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
     end
 
-    test "MA-13 : secret fichier VIDE/whitespace → 401 fail-closed (PAS d'HMAC à clé vide forgeable)",
+    test "MA-13: EMPTY/whitespace secret file → 401 fail-closed (NO forgeable empty-key HMAC)",
          %{tmp_dir: tmp_dir} do
-      # Fichier secret EXISTANT mais vide (whitespace) → AVANT MA-13 : compute_hmac("", body) → un attaquant
-      # forge une signature valide sans connaître AUCUN secret (fail-open). On vérifie que la signature
-      # CALCULÉE-SUR-CLÉ-VIDE (ce que ferait l'attaquant) est REFUSÉE.
+      # Secret file PRESENT but empty (whitespace) → without MA-13, compute_hmac("", body) lets an
+      # attacker forge a valid signature knowing NO secret (fail-open). We verify that the
+      # COMPUTED-ON-EMPTY-KEY signature (what the attacker would send) is REFUSED.
       empty_secret = Path.join(tmp_dir, "empty-secret")
       File.write!(empty_secret, "   \n  \t\n")
       Application.put_env(:fleet_event_router, :webhook_secret_path, empty_secret)
@@ -287,7 +288,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
-      # D1 : reason structuré (:secret_missing) — Jason encode l'atome en string sur le wire.
+      # D1: structured reason (:secret_missing) — Jason encodes the atom as a string on the wire.
       assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
       refute_receive %Fleet.Event{source: :event_router}, 200
     end
@@ -309,7 +310,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
   end
 
   describe "compute_hmac/2" do
-    test "déterministe + 64-hex chars" do
+    test "deterministic + 64 hex chars" do
       h1 = WebhooksGitea.compute_hmac("secret", "body")
       h2 = WebhooksGitea.compute_hmac("secret", "body")
       assert h1 == h2
