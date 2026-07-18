@@ -1,25 +1,25 @@
 defmodule Fleet.Workflow.Provenance do
   @moduledoc """
-  Le **triplet SHA** de la doctrine : provenance SLSA/in-toto d'un livrable (chantier brief-physique,
-  cf. `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
+  The doctrine's **SHA triplet**: SLSA/in-toto provenance of a deliverable (design:
+  `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
 
-  Assemble un in-toto Statement `(brief_sha, input_sha, livrable_sha)` — QUOI a été demandé (le brief),
-  DE QUOI on est parti (l'état de base), CE QUI est sorti (le livrable) — et le committe content-addressé
-  dans `livrables/<livrable_sha>-provenance.json`. **bash+jq+git côté doctrine ; ici Jason + Git, ZÉRO
-  tooling externe** (pas de cosign, pas de SLSA CLI).
+  Assembles an in-toto Statement `(brief_sha, input_sha, livrable_sha)` — WHAT was asked (the brief),
+  WHAT we started from (the base state), WHAT came out (the deliverable) — and commits it
+  content-addressed into `livrables/<livrable_sha>-provenance.json`. **bash+jq+git on the doctrine
+  side; HERE Jason + Git, ZERO external tooling** (no cosign, no SLSA CLI).
 
-  - `livrable_sha` = subject digest + nom de fichier (l'autorité : la provenance d'UN livrable donné).
-    Le livrable est un **commit git** (ce qui a été poussé) → son digest est étiqueté `gitCommit`
-    (algo in-toto honnête), PAS `sha256` : c'est un SHA-1 de commit, pas un sha256 de contenu — mentir
-    l'algorithme ferait échouer un vérifieur in-toto (le triplet doit être falsifiable, donc exact).
-  - `brief_sha`/`brief_ref` = `invocation.configSource` (ce qui a été demandé — l'objet brief committé).
-    Le brief EST content-addressé `sha256(contenu)` (cf. `BriefArtifact`) → digest `sha256`, lui vrai.
-  - `input_sha` = `buildConfig.input_sha` (le `base_sha` pinné — l'état de départ ; champ nu, sans
-    prétention d'algorithme).
+  - `livrable_sha` = subject digest + file name (the anchor: the provenance of ONE given deliverable).
+    The deliverable is a **git commit** (what was pushed) → its digest is labeled `gitCommit`
+    (honest in-toto algo), NOT `sha256`: it is a commit SHA-1, not a content sha256 — lying about
+    the algorithm would make an in-toto verifier fail (the triplet must be falsifiable, hence exact).
+  - `brief_sha`/`brief_ref` = `invocation.configSource` (what was asked — the committed brief object).
+    The brief IS content-addressed `sha256(content)` (cf. `BriefArtifact`) → `sha256` digest, that one true.
+  - `input_sha` = `buildConfig.input_sha` (the pinned `base_sha` — the starting state; a bare field,
+    no algorithm claim).
 
-  **Tolérant au dégradé** : si `brief_sha` manque (brief non matérialisé, cf. `BriefArtifact`), le Statement
-  omet le digest du configSource mais grave quand même input→output (2/3 vaut mieux que 0). Idempotent par
-  content-address (même `livrable_sha` = même fichier = no-op).
+  **Degraded-tolerant**: if `brief_sha` is missing (brief not materialized, cf. `BriefArtifact`), the
+  Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
+  content-address (same `livrable_sha` = same file = no-op).
 
   **Last revised**: 2026-07-18
   """
@@ -46,11 +46,13 @@ defmodule Fleet.Workflow.Provenance do
         }
 
   @doc """
-  Grave la provenance in-toto du livrable dans `work_dir` (`livrables/<livrable_sha>-provenance.json`),
-  committée. `attrs.livrable_sha` REQUIS (l'ancre) ; le reste enrichit le Statement (dégrade si absent).
+  Records the deliverable's in-toto provenance into `work_dir`
+  (`livrables/<livrable_sha>-provenance.json`), committed. `attrs.livrable_sha` REQUIRED (the anchor);
+  the rest enriches the Statement (degrades when absent).
 
-  `opts` : `:author` `{name, email}` (défaut système) ; `:push` `{remote, refspec}` (défaut commit local).
-  `{:error, term()}` : work_dir absent / échec write / échec git — propagé (fail-loud, non fatal côté appelant).
+  `opts`: `:author` `{name, email}` (system default); `:push` `{remote, refspec}` (default local commit).
+  `{:error, term()}`: work_dir missing / write failure / git failure — propagated (fail-loud,
+  non-fatal caller-side).
   """
   @spec emit(Path.t(), attrs(), keyword()) :: {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
   def emit(work_dir, %{livrable_sha: livrable_sha} = attrs, opts \\ [])
@@ -80,21 +82,22 @@ defmodule Fleet.Workflow.Provenance do
   # Path-SAFE segment for the provenance filename (BND-120): no separator, no traversal.
   defp safe_path_segment?(s), do: not String.contains?(s, ["/", "\\", ".."])
 
-  @doc "Le Statement in-toto (map JSON-able) — pur, sans I/O (testable + réutilisable)."
+  @doc "The in-toto Statement (JSON-able map) — pure, no I/O (testable + reusable)."
   @spec statement(attrs()) :: map()
   def statement(%{livrable_sha: livrable_sha} = a) do
     %{
       "_type" => "https://in-toto.io/Statement/v0.1",
       "subject" => [
-        # `gitCommit` (pas `sha256`) : le livrable est le commit git publié (SHA-1), pas un sha256 de
-        # contenu — étiquette honnête, sans quoi un vérifieur in-toto échouerait sur l'algorithme.
+        # `gitCommit` (not `sha256`): the deliverable is the published git commit (SHA-1), not a
+        # content sha256 — an honest label, without which an in-toto verifier would fail on the algorithm.
         %{"name" => Map.get(a, :subject_name, "deliverable"), "digest" => %{"gitCommit" => livrable_sha}}
       ],
       "predicateType" => "https://slsa.dev/provenance/v1.0",
       "predicate" => %{
         "buildType" => @build_type,
-        # configSource = ce qui a été demandé : l'objet brief committé. Digest omis si brief non matérialisé
-        # (dégradé) — le triplet devient un couple input→output, jamais une provenance qui MENT un brief_sha.
+        # configSource = what was asked: the committed brief object. Digest omitted if the brief was not
+        # materialized (degraded) — the triplet becomes an input→output pair, never a provenance that
+        # LIES about a brief_sha.
         "invocation" => %{"configSource" => config_source(a)},
         "buildConfig" =>
           drop_nil(%{
@@ -119,7 +122,7 @@ defmodule Fleet.Workflow.Provenance do
         drop_nil(%{"uri" => Map.get(a, :brief_ref), "digest" => %{"sha256" => sha}})
 
       _ ->
-        # Brief non matérialisé : on note l'uri si connue, jamais un digest inventé.
+        # Brief not materialized: record the uri when known, never an invented digest.
         drop_nil(%{"uri" => Map.get(a, :brief_ref)})
     end
   end
