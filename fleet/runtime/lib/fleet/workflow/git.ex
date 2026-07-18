@@ -9,8 +9,8 @@ defmodule Fleet.Workflow.Git do
     * `commit/1` — `git add <paths> → git commit` in workspace (no push); input = workspace,
       author/committer identities, message, add_paths; output = `{:ok, commit_sha}`.
     * `push/3` — bounded `git push <remote> <refspec>` (no add/commit).
-  (No coupled add+commit+push entry point: the legacy `publish/1` had ZERO production caller —
-  Deliverable always goes commit → gate → push — and only its own tests kept it alive.)
+  (No coupled add+commit+push entry point: Deliverable always goes commit → gate → push —
+  the gate must run between the two.)
 
   Fail-closed on inputs: neither `--force` nor `--no-verify` is ever composed
   from caller data or as a default option. `--no-verify` is never composed at all.
@@ -97,11 +97,11 @@ defmodule Fleet.Workflow.Git do
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
 
   defp ensure_git_workspace(ws) do
-    # `.git` = un RÉPERTOIRE dans un clone normal, mais un FICHIER (`gitdir: …`) dans un git WORKTREE
-    # (`git worktree add`). Le work/ops du projet EST un worktree orphelin (cf. ProjectOnboard) → un
-    # `File.dir?(".git")` le rejetait à tort (`:not_a_git_workspace`, brief/provenance non committés,
-    # attrapé en preuve LIVE : les tests utilisaient `git init` = dir, jamais le cas worktree réel).
-    # `File.exists?` accepte les deux ; un dossier non-git (ni fichier ni dir `.git`) reste refusé.
+    # `.git` = a DIRECTORY in a normal clone, but a FILE (`gitdir: …`) in a git WORKTREE
+    # (`git worktree add`). A project's work/ops IS an orphan worktree (cf. ProjectOnboard) → a
+    # `File.dir?(".git")` check would wrongly reject it (`:not_a_git_workspace` → brief/provenance
+    # never committed). `File.exists?` accepts both; a non-git dir (neither file nor dir `.git`)
+    # stays refused.
     case {File.dir?(ws), File.exists?(Path.join(ws, ".git"))} do
       {false, _} -> {:error, :workspace_missing}
       {true, false} -> {:error, :not_a_git_workspace}
@@ -215,9 +215,8 @@ defmodule Fleet.Workflow.Git do
 
   @doc """
   SHA of `workspace`'s HEAD, **bounded** (Shell.git: deadline + SIGKILL of the process-group — a
-  `rev-parse` hung on a sick FS never blocks the caller). SINGLE AUTHORITY for the system-side rev-parse
-  (2026-07-04: `Deliverable` used to carry 2 copies via RAW unbounded `System.cmd` —
-  a hung rev-parse there blocked publication).
+  `rev-parse` hung on a sick FS never blocks the caller). SINGLE AUTHORITY for the system-side
+  rev-parse — an unbounded copy elsewhere would re-open the hung-publication hole.
   """
   @spec read_head_sha(Path.t()) :: {:ok, String.t()} | {:error, term()}
   def read_head_sha(workspace) do
