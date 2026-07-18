@@ -13,10 +13,11 @@ defmodule Fleet.SPBuilder.BlocksTest do
   test "each role in the map composes a non-empty, titled SP" do
     roles = Blocks.role_map(blocks_dir())
 
-    # Anti-vacuité : un `for` sur une map VIDE ne lève rien → le test passerait VERT sans exécuter la
-    # moindre assertion (ex. sp-map.yaml introuvable dans _build). On exige au moins un rôle AVANT la boucle.
+    # Anti-vacuity: a `for` over an EMPTY map raises nothing → the test would pass GREEN without
+    # running a single assertion (e.g. sp-map.yaml not found in _build). Require at least one role
+    # BEFORE the loop.
     assert map_size(roles) > 0,
-           "role_map vide (sp-map.yaml introuvable ?) → la boucle ne teste RIEN"
+           "empty role_map (sp-map.yaml not found?) → the loop tests NOTHING"
 
     for {role, blocks} <- roles do
       sp = Blocks.compose!(role, blocks, blocks_dir())
@@ -29,7 +30,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
     roles = Blocks.role_map(blocks_dir())
 
     assert map_size(roles) > 0,
-           "role_map vide (sp-map.yaml introuvable ?) → le no-drift ne compare RIEN"
+           "empty role_map (sp-map.yaml not found?) → the no-drift compares NOTHING"
 
     for {role, blocks} <- roles do
       committed = drafts_dir() |> Path.join("agent-#{role}-base.md") |> File.read!()

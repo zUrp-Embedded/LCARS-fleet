@@ -1,18 +1,18 @@
 defmodule Fleet.Support.CapProfileFixture do
   @moduledoc """
-  Builder de fixtures `%Fleet.CapProfile{}` adossé au constructeur validé `Fleet.CapProfile.from_map!/1`
-  (BND-001) : une fixture NOMINALE franchit la MÊME frontière schema que la prod, au lieu de forger un
-  `%CapProfile{spec: …}` partiel qui court-circuite le schema (l'état invalide redevenu représentable).
+  `%Fleet.CapProfile{}` fixture builder backed by the validated constructor `Fleet.CapProfile.from_map!/1`
+  (BND-001): a NOMINAL fixture crosses the SAME schema boundary as prod, instead of forging a partial
+  `%CapProfile{spec: …}` that short-circuits the schema (the invalid state made representable again).
 
-  `build/2` part d'un profil CANON réel (le YAML de `priv/cap_profile/canon/cap-profiles/` lu DIRECTEMENT
-  — source unique = le canon, pas une 2e copie du schema en dur ; lecture par chemin priv, indépendante du
-  `:root_dir` global que d'autres tests mutent), deep-merge les `overrides` (clés stringifiées), et
-  RE-VALIDE le tout. Un override qui casse le schema fait raise à la construction : la fixture est fausse,
-  pas le code.
+  `build/2` starts from a real CANON profile (the YAML of `priv/cap_profile/canon/cap-profiles/` read
+  DIRECTLY — single source = the canon, not a 2nd hardcoded copy of the schema; read by priv path,
+  independent of the global `:root_dir` other tests mutate), deep-merges the `overrides` (stringified
+  keys), and RE-VALIDATES the whole. An override breaking the schema raises at construction: the
+  fixture is wrong, not the code.
 
-  À NE PAS utiliser pour tester DÉLIBÉRÉMENT un profil schema-bypassé (p.ex. le fail-loud d'un accesseur
-  sur un champ absent) : ces cas restent `%CapProfile{}` hand-built, dans un test explicitement nommé
-  « schema bypass » — le builder ne les remplace pas.
+  NOT to be used to DELIBERATELY test a schema-bypassed profile (e.g. an accessor's fail-loud on an
+  absent field): those cases remain hand-built `%CapProfile{}`, in a test explicitly named
+  "schema bypass" — the builder does not replace them.
   """
   use Boundary, deps: [Fleet.CapProfile], exports: []
 
@@ -21,16 +21,16 @@ defmodule Fleet.Support.CapProfileFixture do
   @canon_rel Path.join(["cap_profile", "canon", "cap-profiles"])
 
   @doc """
-  Profil canon `base_role` (défaut `"engineer"`) deep-mergé avec `overrides` (clés stringifiées) puis
-  RE-VALIDÉ via `Fleet.CapProfile.from_map!/1`. Rend un `%CapProfile{}` schema-conforme, ou raise.
+  Canon profile `base_role` (default `"engineer"`) deep-merged with `overrides` (stringified keys) then
+  RE-VALIDATED via `Fleet.CapProfile.from_map!/1`. Returns a schema-conformant `%CapProfile{}`, or raises.
   """
   @spec build(map(), String.t()) :: CapProfile.t()
   def build(overrides \\ %{}, base_role \\ "engineer") do
     CapProfile.from_map!(deep_merge(canon_base(base_role), stringify(overrides)))
   end
 
-  # Lit le YAML canon DIRECTEMENT (chemin priv figé) — pas via le loader, dont le `:root_dir` est un
-  # global qu'un autre test peut avoir repointé vers un catalogue tmp sans ce rôle.
+  # Reads the canon YAML DIRECTLY (frozen priv path) — not via the loader, whose `:root_dir` is a
+  # global another test may have repointed to a tmp catalogue without this role.
   defp canon_base(role) do
     path = Path.join([:code.priv_dir(:lcars_fleet), @canon_rel, "#{role}.yaml"])
     {:ok, raw} = YamlElixir.read_from_file(path)

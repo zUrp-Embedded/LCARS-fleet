@@ -1,23 +1,23 @@
 defmodule Fleet.Workflow.LoaderV25Test do
   @moduledoc """
-  Loader — enveloppe pipeline V2.5 (`kind/metadata/spec`), seule forme acceptée.
+  Loader — V2.5 pipeline envelope (`kind/metadata/spec`), the only accepted form.
 
-  `Loader.load!` NORMALISE le résultat vers la forme interne unique
-  `%{"name", "steps"}` : l'enveloppe v2.5 est déballée au load (les tests
-  assertent la forme normalisée, pas le YAML brut), puis le schema
-  `workflow-map-v2.5.json` valide la structure (fail-loud).
+  `Loader.load!` NORMALIZES the result to the single internal form
+  `%{"name", "steps"}`: the v2.5 envelope is unwrapped at load (tests assert
+  the normalized form, not the raw YAML), then the `workflow-map-v2.5.json`
+  schema validates the structure (fail-loud).
 
-  `async: true` : on passe `:workflow_maps_root` via opts à `Loader.load!/2`
-  (pas de couplage Application env global).
+  `async: true`: `:workflow_maps_root` is passed via opts to `Loader.load!/2`
+  (no coupling to the global Application env).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Loader
 
-  # R0.8-brick6 : canon pipelines réabsorbés in-repo.
+  # R0.8-brick6: canon pipelines reabsorbed in-repo.
   @canon_pipelines Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
-  test "canon standard-qa.yaml (V2.5) normalisé → name + steps top-level" do
+  test "canon standard-qa.yaml (V2.5) normalized → name + steps top-level" do
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
     assert is_map(pipe["steps"])
@@ -25,17 +25,17 @@ defmodule Fleet.Workflow.LoaderV25Test do
     refute Map.has_key?(pipe, "spec")
   end
 
-  test "canon audit-only.yaml (V2.5) normalisé → name + steps top-level" do
+  test "canon audit-only.yaml (V2.5) normalized → name + steps top-level" do
     pipe = Loader.load!("audit-only", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "audit-only"
     assert is_map(pipe["steps"])
     refute Map.has_key?(pipe, "spec")
   end
 
-  # F-C160 : brief-gate EST la workflow_map DÉFAUT du dispatch prod (StepDispatcher) mais était exclue de
-  # la conformance canon (seules standard-qa + audit-only étaient couvertes). On la couvre : elle doit
-  # normaliser proprement + porter sa forme load-bearing (gate de brief consultant-juge AVANT l'engineer).
-  test "canon brief-gate.yaml (V2.5, map DÉFAUT prod) normalisé → brief-review(judge) gate build" do
+  # F-C160: brief-gate IS the DEFAULT workflow_map of the prod dispatch (StepDispatcher) → it must be
+  # covered by canon conformance like standard-qa + audit-only: it must normalize cleanly + carry its
+  # load-bearing shape (consultant-judge brief gate BEFORE the engineer).
+  test "canon brief-gate.yaml (V2.5, prod DEFAULT map) normalized → brief-review(judge) gate build" do
     pipe = Loader.load!("brief-gate", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "brief-gate"
     assert is_map(pipe["steps"])
@@ -47,7 +47,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "V2.5 step avec post_extract.git valide schema (face 2 décision archi git)",
+  test "V2.5 step with post_extract.git passes schema (face 2 of the git architecture decision)",
        %{tmp_dir: dir} do
     yaml = """
     kind: WorkflowMap
@@ -77,7 +77,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "V2.5 post_extract.git sans repo_url ni branch → invalide", %{tmp_dir: dir} do
+  test "V2.5 post_extract.git without repo_url nor branch → invalid", %{tmp_dir: dir} do
     yaml = """
     kind: WorkflowMap
     metadata:
@@ -101,13 +101,13 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "V2.5 needs avec DOUBLON → rejet SCHEMA (plus de diagnostic :fan_out menteur)", %{
+  test "V2.5 needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
   } do
-    # `needs: [a, a]` (copier-coller) passait le schema, l'arête était posée DEUX fois, et le
-    # GraphValidator rejetait en :fan_out avec un diagnostic FAUX (« 2 successeurs [b, b] » sur
-    # une chaîne linéaire) : fail-closed mais trace menteuse — l'auteur du map cherchait un
-    # fan-out inexistant. Le rejet vit désormais en AMONT (uniqueItems), avec le vrai motif.
+    # `needs: [a, a]` (copy-paste) would pass the schema, the edge got laid TWICE, and the
+    # GraphValidator rejected as :fan_out with a WRONG diagnostic ("2 successors [b, b]" on a
+    # linear chain): fail-closed but a lying trace — the map author would hunt a nonexistent
+    # fan-out. The rejection lives UPSTREAM (uniqueItems), with the true reason.
     yaml = """
     kind: WorkflowMap
     metadata:
@@ -132,7 +132,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "V2.5 structurellement invalide → raise schema workflow-map-v2.5", %{tmp_dir: dir} do
+  test "structurally invalid V2.5 → raise schema workflow-map-v2.5", %{tmp_dir: dir} do
     bad = """
     kind: WorkflowMap
     metadata:
@@ -150,13 +150,13 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "soft-default #4 — hard gate avec rules VIDES → raise schema (n'applique rien = fail-open)",
+  test "soft-default #4 — hard gate with EMPTY rules → raise schema (enforcing nothing = fail-open)",
        %{
          tmp_dir: dir
        } do
-    # Verrou amont : une hard-gate à rules vides passait `Enum.all?([]) == true` → :pass (gate qui
-    # n'applique RIEN). Le schéma la REJETTE au load (`if type==hard then rules minItems 1`) → le cas
-    # est inreprésentable en amont. (terminal garde des rules vides légitimes : la gate `finish`.)
+    # Upstream lock: a hard-gate with empty rules would pass `Enum.all?([]) == true` → :pass (a gate
+    # enforcing NOTHING). The schema REJECTS it at load (`if type==hard then rules minItems 1`) → the
+    # case is unrepresentable upstream. (terminal keeps legitimate empty rules: the `finish` gate.)
     bad = """
     kind: WorkflowMap
     metadata:

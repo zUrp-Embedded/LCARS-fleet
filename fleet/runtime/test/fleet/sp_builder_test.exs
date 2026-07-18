@@ -40,11 +40,11 @@ defmodule Fleet.SPBuilderTest do
             "git_ops_denied" => ["push"]
           },
           "knowledge" => %{"skills" => ["memory-query", "loop"]},
-          # R12 : lifetime_scope nesté sous invocation (schéma v2.5).
+          # R12: lifetime_scope nested under invocation (v2.5 schema).
           "invocation" => %{"lifetime_scope" => "one-shot"},
           "injects" => %{},
           "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 600},
-          # modop_set = MAP (schéma v2.5 : default/optional/incompatible).
+          # modop_set = MAP (v2.5 schema: default/optional/incompatible).
           "modop_set" => %{"default" => []}
         },
         extra_spec
@@ -123,9 +123,9 @@ defmodule Fleet.SPBuilderTest do
       refute sp_md =~ "Role base"
     end
 
-    test "R1-04 : opts load-bearing malformés → {:error, {:bad_opt, _}} (parse au bord, pas de raise)" do
-      # `preloaded_paths` non-liste crashait le `++` ; `spawned_at` non-DateTime crashait
-      # `DateTime.to_iso8601`. Bornés en erreur typée.
+    test "R1-04: malformed load-bearing opts → {:error, {:bad_opt, _}} (parse at the edge, no raise)" do
+      # A non-list `preloaded_paths` would crash the `++`; a non-DateTime `spawned_at` would
+      # crash `DateTime.to_iso8601`. Bounded into a typed error.
       assert {:error, {:bad_opt, {:preloaded_paths, _}}} =
                Fleet.SPBuilder.compose(valid_cap_profile(), [], preloaded_paths: "/not/a/list")
 
@@ -136,52 +136,52 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.compose(valid_cap_profile(), [], spawned_at: "2030-01-01")
     end
 
-    test "R1-01 : systemPrompt en traversée (`../`) → {:error, {:sp_role_path_escape, _}} (confiné)" do
+    test "R1-01: systemPrompt with traversal (`../`) → {:error, {:sp_role_path_escape, _}} (confined)" do
       profile = valid_cap_profile(%{"systemPrompt" => "../../../etc/passwd"})
       assert {:error, {:sp_role_path_escape, _}} = Fleet.SPBuilder.compose(profile, [])
     end
 
-    test "R1-01 : systemPrompt avec null byte → {:error, {:sp_role_path_unsafe, _}} (pas de raise)" do
+    test "R1-01: systemPrompt with null byte → {:error, {:sp_role_path_unsafe, _}} (no raise)" do
       profile = valid_cap_profile(%{"systemPrompt" => "role\0.md"})
       assert {:error, {:sp_role_path_unsafe, _}} = Fleet.SPBuilder.compose(profile, [])
     end
 
-    test "R1-02/03 : modop bundle en traversée (`../`) → {:error, {:modop_bundle_unsafe, _}} (confined_join)" do
-      # systemPrompt=nil → sp_role_base vide, on isole le confinement du modop.
+    test "R1-02/03: modop bundle with traversal (`../`) → {:error, {:modop_bundle_unsafe, _}} (confined_join)" do
+      # systemPrompt=nil → empty sp_role_base, isolating the modop confinement.
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
       assert {:error, {:modop_bundle_unsafe, {"../evil", _}}} =
                Fleet.SPBuilder.compose(profile, ["../evil"])
     end
 
-    test "R1-29 : un nom de skill non-slug (traversée) → {:error, {:skills_unsafe, _}}", %{
+    test "R1-29: a non-slug skill name (traversal) → {:error, {:skills_unsafe, _}}", %{
       sp_role_root: root
     } do
-      # `root` existe (dir) → on dépasse le garde File.dir? ; "../../etc" est rejeté AVANT File.exists?.
+      # `root` exists (dir) → we get past the File.dir? guard; "../../etc" is rejected BEFORE File.exists?.
       profile = valid_cap_profile(%{"knowledge" => %{"skills" => ["../../etc", "loop"]}})
 
       assert {:error, {:skills_unsafe, ["../../etc"]}} =
                Fleet.SPBuilder.filter_skills(profile, root)
     end
 
-    test "modop_root a un DÉFAUT (fleet_cap_profile/modop-bundles) : modop sans config explicite → composé (F-C146/PORT)" do
-      # EXERCE le DÉFAUT runtime : on retire l'override → modop_root non configuré → défaut
-      # app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles") (les bundles y ont été
-      # déplacés). `fire-mode` y existe → composé. Plus de :modop_root_unconfigured : le PORT a câblé le
-      # défaut, comme sp_role_root — c'est ce qui rend les overlays modop enfin appliqués au spawn.
+    test "modop_root has a DEFAULT (fleet_cap_profile/modop-bundles): modop without explicit config → composed (F-C146/PORT)" do
+      # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
+      # app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles") (where the bundles live).
+      # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
+      # default, like sp_role_root — this is what makes modop overlays actually applied at spawn.
       Application.delete_env(:fleet_sp_builder, :modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
       assert {:ok, %{sp_md: sp_md, metadata: %{modop_bundles_used: ["fire-mode"]}}} =
                Fleet.SPBuilder.compose(profile, ["fire-mode"])
 
-      # Le fragment SP du modop fire-mode est bien INJECTÉ dans le system-prompt.
+      # The fire-mode modop's SP fragment is indeed INJECTED into the system-prompt.
       assert sp_md =~ "fire-mode"
     end
 
-    test "subagent_template (F-C147/PORT) : le fragment SP est injecté ; fichier absent → fail-loud" do
-      # reviewer→code-quality-reviewer : subagent-code-quality-reviewer.md existe dans le canon (root défaut
-      # = app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates"), non overridé par le setup).
+    test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud" do
+      # reviewer→code-quality-reviewer: subagent-code-quality-reviewer.md exists in the canon (default root
+      # = app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates"), not overridden by the setup).
       profile =
         valid_cap_profile(%{
           "systemPrompt" => nil,
@@ -195,7 +195,7 @@ defmodule Fleet.SPBuilderTest do
       assert sp_md =~ "subagent-template:code-quality-reviewer"
       assert sp_md =~ "code-quality-reviewer"
 
-      # Déclaré mais fichier absent → fail-loud (le pod ne se lance pas sur un SP à moitié composé).
+      # Declared but file absent → fail-loud (the pod does not launch on a half-composed SP).
       bad =
         valid_cap_profile(%{
           "systemPrompt" => nil,
@@ -297,9 +297,9 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "Repo conventions"
     end
 
-    # R12 : compose_claude_md lit lifetime_scope sous spec.invocation (v2.5).
-    # Avant le fix, il lisait spec.lifetime_scope → rendait toujours "unknown".
-    test "surfaces lifetime_scope depuis spec.invocation (pas 'unknown')" do
+    # R12: compose_claude_md reads lifetime_scope under spec.invocation (v2.5).
+    # Reading spec.lifetime_scope instead would always render "unknown".
+    test "surfaces lifetime_scope from spec.invocation (not 'unknown')" do
       profile =
         valid_cap_profile(%{"invocation" => %{"lifetime_scope" => "forever"}})
 
@@ -361,9 +361,9 @@ defmodule Fleet.SPBuilderTest do
       refute Enum.any?(paths, &String.ends_with?(&1, "extra-not-listed"))
     end
 
-    # R11 : un skill plain whitelisté mais absent du FS = fail-loud (plus de
-    # filtrage silencieux). Ici "loop" manque (seul "memory-query" existe).
-    test "fail-loud {:skills_missing} quand un skill whitelisté est absent du FS",
+    # R11: a plain whitelisted skill absent from the FS = fail-loud (no silent
+    # filtering). Here "loop" is missing (only "memory-query" exists).
+    test "fail-loud {:skills_missing} when a whitelisted skill is absent from the FS",
          %{tmp_dir: tmp_dir} do
       skills_root = Path.join(tmp_dir, "skills")
       File.mkdir_p!(Path.join(skills_root, "memory-query"))
@@ -372,9 +372,9 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.filter_skills(valid_cap_profile(), skills_root)
     end
 
-    # R11 : les skills QUALIFIÉS `plugin:skill` sont livrés via LCARS_SKILLS_PLUGINS,
-    # pas comme paths montés → JAMAIS flaggés absents (même si le path n'existe pas).
-    test "les skills plugin:skill ne sont pas flaggés absents", %{tmp_dir: tmp_dir} do
+    # R11: QUALIFIED `plugin:skill` skills are delivered via LCARS_SKILLS_PLUGINS,
+    # not as mounted paths → NEVER flagged absent (even if the path does not exist).
+    test "plugin:skill skills are not flagged absent", %{tmp_dir: tmp_dir} do
       skills_root = Path.join(tmp_dir, "skills")
       File.mkdir_p!(Path.join(skills_root, "memory-query"))
       File.mkdir_p!(Path.join(skills_root, "loop"))
@@ -396,7 +396,7 @@ defmodule Fleet.SPBuilderTest do
   end
 
   # ============================================================
-  # Property-based — déterminisme sha256
+  # Property-based — sha256 determinism
   # ============================================================
 
   defp non_empty_string_gen do

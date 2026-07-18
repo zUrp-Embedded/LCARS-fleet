@@ -1,6 +1,6 @@
 defmodule Fleet.Shutdown.QuiesceTest do
-  # async: false — flag global :persistent_term. on_exit resume! IMPÉRATIF :
-  # une fuite quiescing=true casserait tous les tests start_pipeline downstream.
+  # async: false — global :persistent_term flag. on_exit resume! IMPERATIVE:
+  # a leaked quiescing=true would break every downstream start_pipeline test.
   use ExUnit.Case, async: false
 
   alias Fleet.Shutdown.Quiesce
@@ -10,7 +10,7 @@ defmodule Fleet.Shutdown.QuiesceTest do
     :ok
   end
 
-  test "défaut : pas en quiescence" do
+  test "default: not quiescing" do
     Quiesce.resume!()
     refute Quiesce.quiescing?()
   end

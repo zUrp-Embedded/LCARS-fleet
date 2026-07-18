@@ -6,13 +6,13 @@ defmodule Fleet.EnvParseTest do
   alias Fleet.EnvParse
 
   describe "port/2" do
-    test "valide (bornes incluses)" do
+    test "valid (bounds inclusive)" do
       assert EnvParse.port("P", "8080") == 8080
       assert EnvParse.port("P", "1") == 1
       assert EnvParse.port("P", "65535") == 65_535
     end
 
-    test "SOC-CONF-001 : hors-domaine / non-entier → raise (boot refusé)" do
+    test "SOC-CONF-001: out-of-domain / non-integer → raise (boot refused)" do
       for bad <- ["0", "65536", "-1", "abc", "80x", ""] do
         assert_raise RuntimeError, ~r/boot refused/, fn -> EnvParse.port("P", bad) end
       end
@@ -20,13 +20,13 @@ defmodule Fleet.EnvParseTest do
   end
 
   describe "positive_ms/2 + count/2" do
-    test "positive_ms : > 0 ; ≤ 0 → raise" do
+    test "positive_ms: > 0; ≤ 0 → raise" do
       assert EnvParse.positive_ms("I", "500") == 500
       assert_raise RuntimeError, fn -> EnvParse.positive_ms("I", "0") end
       assert_raise RuntimeError, fn -> EnvParse.positive_ms("I", "-5") end
     end
 
-    test "count : ≥ 0 ; négatif → raise" do
+    test "count: ≥ 0; negative → raise" do
       assert EnvParse.count("C", "0") == 0
       assert EnvParse.count("C", "3") == 3
       assert_raise RuntimeError, fn -> EnvParse.count("C", "-1") end
@@ -34,18 +34,18 @@ defmodule Fleet.EnvParseTest do
   end
 
   describe "bool/3" do
-    test "SOC-CONF-002 : formes true/false reconnues (insensible casse, trimmées)" do
+    test "SOC-CONF-002: recognized true/false forms (case-insensitive, trimmed)" do
       for v <- ~w(true 1 yes on TRUE Yes ON), do: assert(EnvParse.bool("B", v, false) == true)
       for v <- ~w(false 0 no off FALSE No OFF), do: assert(EnvParse.bool("B", v, true) == false)
       assert EnvParse.bool("B", " true ", false) == true
     end
 
-    test "nil (env non posé) → default" do
+    test "nil (env not set) → default" do
       assert EnvParse.bool("B", nil, true) == true
       assert EnvParse.bool("B", nil, false) == false
     end
 
-    test "SOC-CONF-002 : valeur INCONNUE → default + warning LOUD (jamais un silence)" do
+    test "SOC-CONF-002: UNKNOWN value → default + LOUD warning (never a silence)" do
       log =
         capture_log(fn ->
           assert EnvParse.bool("B", "flase", true) == true
@@ -56,12 +56,12 @@ defmodule Fleet.EnvParseTest do
   end
 
   describe "path/2" do
-    test "normalise (~ / relatif → absolu)" do
+    test "normalizes (~ / relative → absolute)" do
       assert EnvParse.path("PA", "/a/b") == "/a/b"
       assert EnvParse.path("PA", "~/x") == Path.expand("~/x")
     end
 
-    test "SOC-CONF-003 : `..` (traversée) / control char → raise (boot refusé)" do
+    test "SOC-CONF-003: `..` (traversal) / control char → raise (boot refused)" do
       assert_raise RuntimeError, ~r/traversal/, fn -> EnvParse.path("PA", "/a/../etc") end
       assert_raise RuntimeError, ~r/control char/, fn -> EnvParse.path("PA", "/a\0b") end
     end

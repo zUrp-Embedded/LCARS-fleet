@@ -1,25 +1,24 @@
 defmodule Fleet.SPBuilder.MonkTest do
   @moduledoc """
-  Lot 6 inc3 — `Fleet.SPBuilder.resolve_monk_injection/2` (DN
-  ring2/fleet_memory.md L478 : injecter registry persona_hint+corpus_paths
-  dans SP monk). Pur, canon réel. La régression compose/3 (additif
-  byte-identique non-monk) = suite chantier-2 complète (mix test app).
-  `async: true`.
+  `Fleet.SPBuilder.resolve_monk_injection/2` (DN ring2/fleet_memory.md L478:
+  inject registry persona_hint+corpus_paths into the monk SP). Pure, real canon.
+  The compose/3 regression (byte-identical additive for non-monk) is covered by
+  the full suite (mix test). `async: true`.
   """
   use ExUnit.Case, async: true
 
-  # GELÉ (BL — Memory-X frozen 2026-06-19) : les fixtures de ce test = les cap-profiles monk réels
-  # (`cap-profiles/monks/alpha.yaml`…), désormais ARCHIVÉS dans `priv/canon/_frozen-monks/` (Memory-X
-  # sorti de la boucle de boot : doit être per-project + system-wide sous lcars, pas per-fleet). Le code
-  # `resolve_monk_injection/2` reste en place ; ré-activer ces tests (et re-pointer les fixtures) au
-  # re-home de Memory-X. cf. work/backlog.md.
+  # FROZEN (BL — Memory-X frozen): this test's fixtures = the real monk cap-profiles
+  # (`cap-profiles/monks/alpha.yaml`…), ARCHIVED in `priv/canon/_frozen-monks/` (Memory-X out
+  # of the boot loop: must be per-project + system-wide under lcars, not per-fleet). The
+  # `resolve_monk_injection/2` code stays in place; re-enable these tests (and re-point the
+  # fixtures) when Memory-X is re-homed. cf. work/backlog.md.
   @moduletag skip:
-               "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
+               "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at the per-project re-home"
 
   alias Fleet.SPBuilder
 
-  # R0.8-brick1 : root canon in-repo (R0.7 réabsorption), pas path doctrine
-  # 05_data-canon/... (inexistant en standard install).
+  # R0.8-brick1: canon root in-repo (R0.7 reabsorption), not the doctrine path
+  # 05_data-canon/... (nonexistent in a standard install).
   @monks_dir Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
 
   defp monk_cp(instance) do
@@ -43,7 +42,7 @@ defmodule Fleet.SPBuilder.MonkTest do
     }
   end
 
-  test "monk canon réel (vision-doctrine) → persona_hint + corpus_paths du registry" do
+  test "real canon monk (vision-doctrine) → persona_hint + corpus_paths from the registry" do
     assert {:ok, %{persona_hint: ph, corpus_paths: cps}} =
              SPBuilder.resolve_monk_injection(monk_cp("vision-doctrine"),
                monk_registry_root: @monks_dir
@@ -54,7 +53,7 @@ defmodule Fleet.SPBuilder.MonkTest do
     assert length(cps) == 3
   end
 
-  test "monk canon réel (archive) → entrée distincte" do
+  test "real canon monk (archive) → distinct entry" do
     assert {:ok, %{persona_hint: ph, corpus_paths: [cp]}} =
              SPBuilder.resolve_monk_injection(monk_cp("archive"),
                monk_registry_root: @monks_dir
@@ -64,16 +63,16 @@ defmodule Fleet.SPBuilder.MonkTest do
     assert cp == "00_doctrine/moon-shot-ref/#99_archive/"
   end
 
-  test "cap-profile non-monk → :not_a_monk (compose reste byte-identique chantier-2)" do
+  test "non-monk cap-profile → :not_a_monk (compose stays byte-identical)" do
     assert :not_a_monk = SPBuilder.resolve_monk_injection(plain_cp(), [])
   end
 
-  test "monk_instance absent du registry → {:error,{:monk_instance_not_found,_}}" do
+  test "monk_instance absent from the registry → {:error,{:monk_instance_not_found,_}}" do
     assert {:error, {:monk_instance_not_found, "ghost"}} =
              SPBuilder.resolve_monk_injection(monk_cp("ghost"), monk_registry_root: @monks_dir)
   end
 
-  test "registry path illisible → {:error,{:registry_unreadable,_,_}}" do
+  test "unreadable registry path → {:error,{:registry_unreadable,_,_}}" do
     cp = monk_cp("vision-doctrine")
 
     assert {:error, {:registry_unreadable, _, _}} =

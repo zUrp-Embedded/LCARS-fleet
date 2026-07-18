@@ -1,7 +1,7 @@
 defmodule Fleet.SpawnerTest.UnresponsivePod do
   @moduledoc false
-  # Faux pod : s'enregistre dans Fleet.Spawner.Registry sous `pod_id` puis CRASHE sur `:kill` → le
-  # `GenServer.call(:kill)` de kill_pod exit → déclenche le fallback BRUTAL (R1-18).
+  # Fake pod: registers in Fleet.Spawner.Registry under `pod_id` then CRASHES on `:kill` → the
+  # `GenServer.call(:kill)` in kill_pod exits → triggers the BRUTAL fallback (R1-18).
   use GenServer
 
   def start(pod_id), do: GenServer.start(__MODULE__, pod_id)
@@ -21,15 +21,15 @@ defmodule Fleet.SpawnerTest do
 
   alias Fleet.Spawner.LaunchBackend.StubBackend
 
-  # G24-9 (F-CONT-RISK) — disallowedTools minimum exigé par validate/1 câblée au spawn
-  # (Z2 ; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
+  # G24-9 (F-CONT-RISK) — minimum disallowedTools required by validate/1 wired at spawn
+  # (Z2; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
   @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
 
-  # repo_id de test pour les rôles PROJECT-BOUND (engineer = `valid_profile/0` et `forever_profile/0`).
-  # Leur session_id hexspeak EXIGE un repo résolu : sans lui le mint REFUSE (raise) plutôt que de fabriquer
-  # un UUID random — l'absence de repo signale une forge non résolue (forge down). En prod le dispatcher
-  # pose ce repo ; ces tests spawnent en direct, donc on le passe en `opts`. Omis volontairement dans les
-  # cas qui DOIVENT échouer avant le mint (refus brief, pod_id non path-safe).
+  # Test repo_id for PROJECT-BOUND roles (engineer = `valid_profile/0` and `forever_profile/0`).
+  # Their hexspeak session_id REQUIRES a resolved repo: without it the mint REFUSES (raise) rather than
+  # fabricating a random UUID — a missing repo signals an unresolved forge (forge down). In prod the
+  # dispatcher sets this repo; these tests spawn directly, so we pass it via `opts`. Deliberately omitted
+  # in the cases that MUST fail before the mint (brief refusal, non path-safe pod_id).
   @test_repo_id 7
 
   @moduletag :tmp_dir
@@ -38,16 +38,16 @@ defmodule Fleet.SpawnerTest do
     Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
     Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
-    # adr-f : plus de coffre (creds via claudeDir bind bwrap).
+    # adr-f: no vault anymore (creds via claudeDir bwrap bind).
 
     sp_root = Path.join(tmp_dir, "cap-profiles")
     File.mkdir_p!(sp_root)
     File.write!(Path.join(sp_root, "engineer-role.md"), "# SP")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
-    # auth = mode bind unique (token_arg retiré 2026-06-14) ; le gate credentials lit quand même le creds
-    # natif (scope/plan). Fixture creds par défaut (ces tests ne testent pas la porte credentials) —
-    # cf. pod_test.exs. Sans ça : {:credentials_invalid, _} → pod meurt au boot.
+    # auth = single bind mode (token_arg removed); the credentials gate still reads the native
+    # creds (scope/plan). Default creds fixture (these tests do not test the credentials door) —
+    # cf. pod_test.exs. Without it: {:credentials_invalid, _} → pod dies at boot.
     setup_claude = Path.join(tmp_dir, ".claude")
     File.mkdir_p!(setup_claude)
 
@@ -72,9 +72,9 @@ defmodule Fleet.SpawnerTest do
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      # B5 #576 : NE PAS delete :launch_backend — laisse la baseline
-      # hermétique config/test.exs (StubBackend) en place, sinon le
-      # code-default LauncherPortBackend RÉEL est atteint sous race async.
+      # B5 #576: do NOT delete :launch_backend — leave the hermetic
+      # config/test.exs baseline (StubBackend) in place, otherwise the
+      # REAL code-default LauncherPortBackend is reached under async race.
       Application.delete_env(:fleet_sp_builder, :sp_role_root)
       Application.delete_env(:fleet_spawner, :claude_dir)
     end)
@@ -85,8 +85,8 @@ defmodule Fleet.SpawnerTest do
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      # role_index/protected/fleet_level : le catalogue rôle vit dans le metadata (source du QUOI),
-      # lu par deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo exigé).
+      # role_index/protected/fleet_level: the role catalogue lives in the metadata (source of the WHAT),
+      # read by deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo required).
       metadata: %{
         "name" => "engineer",
         "containment" => "bwrap",
@@ -124,17 +124,17 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  describe "R18 — refus spawn one-shot sans brief" do
-    test "valid_pod_id?/1 est l'autorité publique du charset pod_id" do
-      # "p1" (court) est ACCEPTÉ : l'admission n'impose PAS de longueur mini — le len≥4 est la
-      # sur-armure LOCALE de pkill (PodTmux.pkill_pattern), pas une règle d'admission.
+  describe "R18 — refuse one-shot spawn without brief" do
+    test "valid_pod_id?/1 is the public authority on the pod_id charset" do
+      # "p1" (short) is ACCEPTED: admission does NOT impose a minimum length — the len≥4 is
+      # pkill's LOCAL over-armour (PodTmux.pkill_pattern), not an admission rule.
       for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4(), "p1"] do
-        assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} devrait être accepté"
+        assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} should be accepted"
       end
 
-      # tête NON-alnum (`.`/`_`/`-`) et longueur absurde refusées : tout id admis doit être sûr chez
-      # TOUS les consommateurs (tête alnum = anti-motif-pkill-dégénéré ; borne = anti-DoS, sun_path
-      # précis à la frontière socket).
+      # NON-alnum head (`.`/`_`/`-`) and absurd length rejected: any admitted id must be safe for
+      # ALL consumers (alnum head = anti-degenerate-pkill-pattern; bound = anti-DoS, precise
+      # sun_path at the socket boundary).
       for bad <- [
             "../etc/passwd",
             "a/b",
@@ -149,34 +149,34 @@ defmodule Fleet.SpawnerTest do
             "-flag",
             String.duplicate("a", 200)
           ] do
-        refute Fleet.Spawner.valid_pod_id?(bad), "pod_id #{inspect(bad)} devrait être refusé"
+        refute Fleet.Spawner.valid_pod_id?(bad), "pod_id #{inspect(bad)} should be rejected"
       end
     end
 
-    test "brief_required?/1 — autorité partagée : one-shot → true, autres scopes / absent → false" do
-      # one-shot EXPLICITE = la seule forme qui exige un brief.
+    test "brief_required?/1 — shared authority: one-shot → true, other scopes / absent → false" do
+      # EXPLICIT one-shot = the only form that requires a brief.
       assert Fleet.Spawner.brief_required?(valid_profile())
 
-      # forever/run/pipe/permanent : long-lived, pull via MCP → exemptés.
+      # forever/run/pipe/permanent: long-lived, pull via MCP → exempt.
       for scope <- ["forever", "run", "pipe", "permanent"] do
         cap = put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => scope})
 
         refute Fleet.Spawner.brief_required?(cap),
-               "scope #{scope} ne devrait PAS exiger de brief"
+               "scope #{scope} should NOT require a brief"
       end
 
-      # lifetime_scope absent : brief_required? lit le "one-shot" EXPLICITE → false. C'est désormais un
-      # défaut mort-sûr : spawn_pod REFUSE un profil sans scope en amont (DR-019, test dédié ci-dessous),
-      # ce prédicat n'est jamais consulté sur un no-scope réel dans le chemin de spawn.
+      # lifetime_scope absent: brief_required? reads the EXPLICIT "one-shot" → false. This is a
+      # dead-safe default: spawn_pod REFUSES a profile without scope upstream (DR-019, dedicated test
+      # below), so this predicate is never consulted on a real no-scope in the spawn path.
       no_scope = put_in(valid_profile().spec["invocation"], %{})
       refute Fleet.Spawner.brief_required?(no_scope)
     end
 
-    test "DR-019 : cap-profile SANS lifetime_scope → spawn REFUSÉ (état invalide, jamais spawné)" do
-      # `lifetime_scope` est schema-REQUIRED : un %CapProfile{} sans lui n'a jamais été validé par le
-      # schéma. Le laisser spawner lui donnait des lectures aval DIVERGENTES (brief-exempté au guard, mais
-      # "one-shot" à l'extraction → release). Le choke point spawn_pod le refuse fail-loud — même avec un
-      # brief, même avec allow_no_brief (l'invalidité du profil précède la question du brief).
+    test "DR-019: cap-profile WITHOUT lifetime_scope → spawn REFUSED (invalid state, never spawned)" do
+      # `lifetime_scope` is schema-REQUIRED: a %CapProfile{} without it was never validated by the
+      # schema. Letting it spawn gives downstream reads that DIVERGE (brief-exempt at the guard, but
+      # "one-shot" at extraction → release). The spawn_pod choke point refuses it fail-loud — even with
+      # a brief, even with allow_no_brief (the profile's invalidity precedes the brief question).
       no_scope = put_in(valid_profile().spec["invocation"], %{})
 
       assert {:error, :cap_profile_no_lifetime_scope} =
@@ -186,21 +186,21 @@ defmodule Fleet.SpawnerTest do
                Fleet.Spawner.spawn_pod(no_scope, "issue-no-scope", allow_no_brief: true)
     end
 
-    test "one-shot + pas de brief → {:error, :brief_required}" do
+    test "one-shot + no brief → {:error, :brief_required}" do
       assert {:error, :brief_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-no-brief")
     end
 
-    test "one-shot + brief VIDE (ex. StageSpawner ctx vide) → {:error, :brief_required}" do
+    test "one-shot + EMPTY brief (e.g. empty StageSpawner ctx) → {:error, :brief_required}" do
       assert {:error, :brief_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-empty-brief", brief: "")
     end
 
-    test "F076 — pod_id non path-safe (.. ou / ou vide) → {:error, :invalid_pod_id}, aucun spawn" do
-      # pod_id file dans pod_dir/sock_path/state recovery (Path.join + interpolation) → un pod_id non
-      # path-safe traverserait hors de ~/pods. Refus CLAIR AVANT tout spawn. Les ids légitimes
-      # UUID / `permanent-<name>-ts` / `issue-<n>-<role>-ts` (charset [A-Za-z0-9._-]) passent — couverts
-      # par les tests qui spawnent avec des ids UUID (hyphénés = même charset).
+    test "F076 — non path-safe pod_id (.. or / or empty) → {:error, :invalid_pod_id}, no spawn" do
+      # pod_id flows into pod_dir/sock_path/state recovery (Path.join + interpolation) → a non
+      # path-safe pod_id would traverse outside ~/pods. CLEAR refusal BEFORE any spawn. Legitimate ids
+      # UUID / `permanent-<name>-ts` / `issue-<n>-<role>-ts` (charset [A-Za-z0-9._-]) pass — covered
+      # by the tests spawning with UUID ids (hyphenated = same charset).
       for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", ""] do
         assert match?(
                  {:error, :invalid_pod_id},
@@ -209,14 +209,14 @@ defmodule Fleet.SpawnerTest do
                    brief: "do x"
                  )
                ),
-               "pod_id #{inspect(bad)} aurait dû être rejeté (path-traversal)"
+               "pod_id #{inspect(bad)} should have been rejected (path-traversal)"
       end
     end
 
     test "one-shot + brief → {:ok, _}" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-brief",
-                 brief: "répare le bug X",
+                 brief: "fix bug X",
                  pod_id: "pod-r18-brief-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
                )
@@ -231,7 +231,7 @@ defmodule Fleet.SpawnerTest do
                )
     end
 
-    test "long-lived (forever) sans brief → {:ok, _} (exempté, pull via MCP)" do
+    test "long-lived (forever) without brief → {:ok, _} (exempt, pull via MCP)" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(forever_profile(), "issue-forever",
                  pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}",
@@ -252,22 +252,22 @@ defmodule Fleet.SpawnerTest do
 
     assert is_pid(pid)
 
-    # Mi14 : registration synchrone (name: {:via, Registry, ...}) → pod enregistré dès {:ok, pid}.
+    # Mi14: synchronous registration (name: {:via, Registry, ...}) → pod registered as of {:ok, pid}.
     assert {:ok, %{pod_id: ^pod_id}} = Fleet.Spawner.pod_info(pod_id)
   end
 
-  # STATE-004 (couplage DN-recovery B) : sous `:temporary`, un pod qui meurt sans
-  # complétion n'est pas relancé → sa task active doit être libérée (clear_for_pod)
-  # sinon elle reste orpheline. Backend en échec → transition_failed → clear.
-  test "un pod qui échoue libère sa task active (STATE-004)" do
+  # STATE-004 (DN-recovery B coupling): under `:temporary`, a pod dying without
+  # completion is not restarted → its active task must be released (clear_for_pod)
+  # otherwise it stays orphaned. Failing backend → transition_failed → clear.
+  test "a failing pod releases its active task (STATE-004)" do
     pod_id = "pod-orphan-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
-    # task active présente avant l'échec
+    # active task present before the failure
     assert {:ok, status} = Fleet.TaskQueue.pod_status(pod_id)
     refute is_nil(status)
 
-    # backend en échec → le pod meurt via transition_failed → clear_pod_task
+    # failing backend → the pod dies via transition_failed → clear_pod_task
     StubBackend.set_reply({:error, :stub_launch_fail})
 
     {:ok, _pid} =
@@ -277,16 +277,16 @@ defmodule Fleet.SpawnerTest do
         repo_id: @test_repo_id
       )
 
-    # la task active passe à `:cleared` (≠ `:pending`/`:assigned`) — clear ASYNC à la mort du pod
-    # (clear_pod_task ; un clear raté est loggué warning côté Pod) → poll borné
+    # the active task goes `:cleared` (≠ `:pending`/`:assigned`) — ASYNC clear at pod death
+    # (clear_pod_task; a failed clear is logged warning on the Pod side) → bounded poll
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
-           "la task du pod mort devrait être :cleared, statut actuel : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
+           "the dead pod's task should be :cleared, current status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
-  # LIFE-003 (DN-recovery B §5) : kill_pod = release DÉLIBÉRÉE (handle_call(:kill) →
-  # teardown + clear_for_pod + état :killed), pas un terminate_child brutal. Discriminant :
-  # la task active est libérée (`:cleared`) — un kill brutal ne clearait pas.
-  test "kill_pod fait une release propre : task libérée + pod parti (LIFE-003)" do
+  # LIFE-003 (DN-recovery B §5): kill_pod = DELIBERATE release (handle_call(:kill) →
+  # teardown + clear_for_pod + :killed state), not a brutal terminate_child. Discriminant:
+  # the active task is released (`:cleared`) — a brutal kill would not clear.
+  test "kill_pod does a clean release: task released + pod gone (LIFE-003)" do
     pod_id = "pod-killclean-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
@@ -300,25 +300,25 @@ defmodule Fleet.SpawnerTest do
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
 
-    # release propre : la task est libérée (vs kill brutal qui ne clear pas)
+    # clean release: the task is released (vs a brutal kill which does not clear)
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
-           "kill_pod devrait libérer la task (release propre), statut : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
+           "kill_pod should release the task (clean release), status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
 
     assert wait_until(fn -> match?({:error, :not_found}, Fleet.Spawner.pod_info(pod_id)) end)
   end
 
-  test "R1-18 : kill_pod fallback BRUTAL (pod muet) libère quand même le mandat (pas de reclaim loop)" do
+  test "R1-18: BRUTAL kill_pod fallback (mute pod) still releases the mandate (no reclaim loop)" do
     pod_id = "pod-brutal-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
-    # pod fake ENREGISTRÉ mais qui CRASHE sur :kill → GenServer.call(:kill) exit → fallback brutal
+    # fake pod REGISTERED but CRASHING on :kill → GenServer.call(:kill) exits → brutal fallback
     {:ok, _fake} = Fleet.SpawnerTest.UnresponsivePod.start(pod_id)
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
 
-    # le mandat DOIT être libéré (sinon le poller le re-dispatche → loop), même sans release gracieuse
+    # the mandate MUST be released (otherwise the poller re-dispatches it → loop), even without a graceful release
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
-           "le fallback brutal aurait dû libérer la task, statut : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
+           "the brutal fallback should have released the task, status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
   test "pod_info returns :not_found when pod doesn't exist" do
@@ -336,8 +336,8 @@ defmodule Fleet.SpawnerTest do
       )
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
-    # Mi14 : terminate_child est sync sur la mort, MAIS le cleanup Registry (via monitor) est
-    # async → poll borné déterministe (≤200ms) au lieu d'un sleep fixe flaky.
+    # Mi14: terminate_child is sync on death, BUT the Registry cleanup (via monitor) is
+    # async → deterministic bounded poll (≤200ms) instead of a flaky fixed sleep.
     assert :ok = wait_unregistered(pod_id)
     assert {:error, :not_found} = Fleet.Spawner.pod_info(pod_id)
   end
@@ -374,10 +374,10 @@ defmodule Fleet.SpawnerTest do
         repo_id: @test_repo_id
       )
 
-    # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child. Le pod que JE
-    # viens de spawner est actif → count ≥ 1. PAS d'assertion sur un DELTA `initial+1` : le
-    # registre pods est GLOBAL (singleton DynamicSupervisor) partagé entre tests async → un
-    # spawn/terminate concurrent fausse le delta (flaky observé). `≥ 1` est déterministe.
+    # Mi14: count_children reflects the active child as of start_child's {:ok}. The pod I
+    # just spawned is active → count ≥ 1. NO assertion on an `initial+1` DELTA: the pod
+    # registry is GLOBAL (singleton DynamicSupervisor) shared across async tests → a
+    # concurrent spawn/terminate skews the delta (observed flaky). `≥ 1` is deterministic.
     assert Fleet.Spawner.count_pods() >= 1
   end
 
@@ -386,7 +386,7 @@ defmodule Fleet.SpawnerTest do
       assert {:error, :not_found} = Fleet.Spawner.wake_pod("never-spawned-id")
     end
 
-    test "wake_pod :not_a_tmux_pod si le pod existe mais pas via TmuxBackend (StubBackend → tmux_session nil)" do
+    test "wake_pod :not_a_tmux_pod when the pod exists but not via TmuxBackend (StubBackend → tmux_session nil)" do
       pod_id = "pod-wake-stub-#{System.unique_integer([:positive])}"
 
       {:ok, _pid} =
@@ -396,15 +396,15 @@ defmodule Fleet.SpawnerTest do
           repo_id: @test_repo_id
         )
 
-      # StubBackend ne pose pas tmux_session dans launched → pod_info renvoie
-      # tmux_session: nil → wake_pod refuse proprement (pas de send-keys).
+      # StubBackend does not set tmux_session in launched → pod_info returns
+      # tmux_session: nil → wake_pod refuses cleanly (no send-keys).
       assert {:error, :not_a_tmux_pod} = Fleet.Spawner.wake_pod(pod_id)
 
       Fleet.Spawner.kill_pod(pod_id)
     end
 
     @tag :tmp_dir
-    test "TurnFlag.write : token UNIQUE à chaque appel (anti-collision watch.sh content-based)",
+    test "TurnFlag.write: UNIQUE token on every call (content-based watch.sh anti-collision)",
          %{
            tmp_dir: tmp
          } do
@@ -412,12 +412,12 @@ defmodule Fleet.SpawnerTest do
       t1 = File.read!(Path.join(tmp, "turn.flag"))
       assert :ok = Fleet.Spawner.Pod.TurnFlag.write(tmp)
       t2 = File.read!(Path.join(tmp, "turn.flag"))
-      # watch.sh fire sur `cur != last` → chaque écriture DOIT changer le contenu.
+      # watch.sh fires on `cur != last` → every write MUST change the content.
       assert t1 != t2
     end
 
     @tag :tmp_dir
-    test "TurnFlag.write : dir absent → :ok (loggué warning, pas de crash — le wake retombe sur send-keys + result_deadline)",
+    test "TurnFlag.write: missing dir → :ok (logged warning, no crash — wake falls back to send-keys + result_deadline)",
          %{
            tmp_dir: tmp
          } do
@@ -425,8 +425,8 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  # Poll borné déterministe (Mi14) : attend le cleanup Registry async post-terminate_child
-  # (≤200ms). Remplace un sleep fixe : réussit dès que nettoyé, échoue après le bound.
+  # Deterministic bounded poll (Mi14): waits for the async Registry cleanup post-terminate_child
+  # (≤200ms). Replaces a fixed sleep: succeeds as soon as cleaned, fails after the bound.
   defp wait_unregistered(pod_id, tries \\ 100) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [] ->

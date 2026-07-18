@@ -1,18 +1,18 @@
 defmodule Fleet.SchemaCacheTest do
   @moduledoc """
-  `Fleet.SchemaCache` — autorité foundation du pattern « chargé une fois, caché en
-  `:persistent_term` » (dédup B-R2).
+  `Fleet.SchemaCache` — foundation authority for the "loaded once, cached in
+  `:persistent_term`" pattern (B-R2 dedup).
 
-  `async: true` : `:persistent_term` est un état GLOBAL BEAM, mais chaque test
-  utilise une clé UNIQUE (`unique_key/1`) effacée en `on_exit` — pas de collision
-  inter-tests, pas de fuite d'entrées.
+  `async: true`: `:persistent_term` is GLOBAL BEAM state, but each test uses a
+  UNIQUE key (`unique_key/1`) erased in `on_exit` — no inter-test collision, no
+  leaked entries.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.SchemaCache
 
-  # Un JSON-schema minimal mais discriminant (required) : prouve que le résolu
-  # est un vrai schema exploitable par le Validator, pas juste une map décodée.
+  # A minimal but discriminating JSON-schema (required): proves the resolved value
+  # is a real schema usable by the Validator, not just a decoded map.
   @schema_json ~s({"type": "object", "required": ["decision"]})
 
   defp unique_key(label) do
@@ -29,7 +29,7 @@ defmodule Fleet.SchemaCacheTest do
 
   describe "resolve_json_schema!/2" do
     @tag :tmp_dir
-    test "read+decode+resolve → schema exploitable par le Validator", %{tmp_dir: dir} do
+    test "read+decode+resolve → schema usable by the Validator", %{tmp_dir: dir} do
       path = write_schema!(dir, @schema_json)
       key = unique_key(:resolve)
 
@@ -41,28 +41,28 @@ defmodule Fleet.SchemaCacheTest do
     end
 
     @tag :tmp_dir
-    test "idempotent : un hit ne relit PAS le fichier (supprimé après le 1er appel)",
+    test "idempotent: a hit does NOT re-read the file (deleted after the 1st call)",
          %{tmp_dir: dir} do
       path = write_schema!(dir, @schema_json)
       key = unique_key(:idempotent)
 
       first = SchemaCache.resolve_json_schema!(key, path)
-      # Le fichier disparaît : si le 2e appel relisait, il raiserait File.Error.
+      # The file disappears: if the 2nd call re-read, it would raise File.Error.
       File.rm!(path)
       assert SchemaCache.resolve_json_schema!(key, path) == first
     end
 
-    test "fail-loud : fichier absent → File.Error (rien n'est caché)" do
+    test "fail-loud: missing file → File.Error (nothing cached)" do
       key = unique_key(:absent)
       path = "/nonexistent/schema-cache-#{System.unique_integer([:positive])}.json"
 
       assert_raise File.Error, fn -> SchemaCache.resolve_json_schema!(key, path) end
-      # L'échec n'a rien caché : fetch! raise toujours « pas chargée ».
+      # The failure cached nothing: fetch! still raises "not loaded".
       assert_raise ArgumentError, fn -> SchemaCache.fetch!(key) end
     end
 
     @tag :tmp_dir
-    test "fail-loud : JSON malformé → Jason.DecodeError", %{tmp_dir: dir} do
+    test "fail-loud: malformed JSON → Jason.DecodeError", %{tmp_dir: dir} do
       path = write_schema!(dir, "{not valid json")
       key = unique_key(:malformed)
 
@@ -72,7 +72,7 @@ defmodule Fleet.SchemaCacheTest do
 
   describe "fetch!/2" do
     @tag :tmp_dir
-    test "retourne la valeur chargée par resolve_json_schema!/2", %{tmp_dir: dir} do
+    test "returns the value loaded by resolve_json_schema!/2", %{tmp_dir: dir} do
       path = write_schema!(dir, @schema_json)
       key = unique_key(:fetch_hit)
 
@@ -80,7 +80,7 @@ defmodule Fleet.SchemaCacheTest do
       assert SchemaCache.fetch!(key) == loaded
     end
 
-    test "clé pas chargée → ArgumentError avec message actionnable (hint boot)" do
+    test "key not loaded → ArgumentError with actionable message (boot hint)" do
       key = unique_key(:fetch_miss)
 
       err =
@@ -92,7 +92,7 @@ defmodule Fleet.SchemaCacheTest do
       assert err.message =~ "call Fleet.Coord.Policies.init_policies!/0 at boot"
     end
 
-    test "clé pas chargée, sans hint → message générique « init boot-time »" do
+    test "key not loaded, no hint → generic \"boot-time init\" message" do
       key = unique_key(:fetch_miss_no_hint)
 
       err = assert_raise(ArgumentError, fn -> SchemaCache.fetch!(key) end)
@@ -101,7 +101,7 @@ defmodule Fleet.SchemaCacheTest do
   end
 
   describe "cached/2" do
-    test "lazy sentinel : le fun ne tourne qu'au premier appel" do
+    test "lazy sentinel: the fun runs only on the first call" do
       key = unique_key(:cached_once)
       parent = self()
 
@@ -116,14 +116,14 @@ defmodule Fleet.SchemaCacheTest do
       refute_received :fun_ran
     end
 
-    test "un fun qui raise ne cache RIEN — le prochain appel retente" do
+    test "a raising fun caches NOTHING — the next call retries" do
       key = unique_key(:cached_raise)
 
       assert_raise RuntimeError, "boom", fn ->
         SchemaCache.cached(key, fn -> raise "boom" end)
       end
 
-      # Le raise a précédé le put : l'appel suivant exécute bien le fun.
+      # The raise preceded the put: the next call does execute the fun.
       assert SchemaCache.cached(key, fn -> :recovered end) == :recovered
     end
   end

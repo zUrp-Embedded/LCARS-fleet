@@ -1,10 +1,10 @@
 defmodule Fleet.TaskQueueTest do
   @moduledoc """
-  Tests conformance du broker — DN `orchestration/task-queue` §G (10 tests).
-  Tous les `assert_receive` matchent le schema canon `%Fleet.Event{}`.
+  Broker conformance tests — DN `orchestration/task-queue` §G (10 tests).
+  Every `assert_receive` matches the canonical `%Fleet.Event{}` schema.
 
-  Isolation async : topic PubSub unique par test (défaut canonique `fleet.events`
-  surchargé via opt `:topic`) + `@moduletag :tmp_dir` pour le `state.json`.
+  Async isolation: one unique PubSub topic per test (canonical default `fleet.events`
+  overridden via the `:topic` opt) + `@moduletag :tmp_dir` for the `state.json`.
   """
   use ExUnit.Case, async: true
   @moduletag :tmp_dir
@@ -12,14 +12,14 @@ defmodule Fleet.TaskQueueTest do
   alias Fleet.TaskQueue
   alias Fleet.TaskQueue.Server
 
-  # MA-04 — bus stub : `broadcast/2` RETOURNE `{:error, _}` (simule un PubSub qui refuse, ex.
-  # UnregisteredError downgradé). Le chemin lifecycle doit propager, pas avaler.
+  # MA-04 — bus stub: `broadcast/2` RETURNS `{:error, _}` (simulates a refusing PubSub, e.g.
+  # a downgraded UnregisteredError). The lifecycle path must propagate, not swallow.
   defmodule FailBus do
     def broadcast(_topic, _ev), do: {:error, :forced_broadcast_fail}
   end
 
-  # MA-04 — bus stub : `broadcast/2` LÈVE (simule UnregisteredError / PubSub pas démarré). Le
-  # `required_broadcast` doit rescue → `{:error, {:broadcast_failed, _}}`, jamais `:ok` muet.
+  # MA-04 — bus stub: `broadcast/2` RAISES (simulates UnregisteredError / PubSub not started).
+  # `required_broadcast` must rescue → `{:error, {:broadcast_failed, _}}`, never a mute `:ok`.
   defmodule RaiseBus do
     def broadcast(_topic, _ev), do: raise(Fleet.Event.UnregisteredError, "forced raise")
   end
@@ -42,7 +42,7 @@ defmodule Fleet.TaskQueueTest do
       type: :"work_item.enqueued",
       pod_id: "pod-A",
       correlation_id: ^tid,
-      # F144 : payload = %{work_item_id} (cohérent + JSON-safe), plus le %WorkItem{} brut.
+      # F144: payload = %{work_item_id} (consistent + JSON-safe), no longer the raw %WorkItem{}.
       payload: %{work_item_id: ^tid}
     }
 
@@ -57,58 +57,58 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
-  test "AXIOME cleanup : enqueue supersède le :pending existant du pod (1 work item actif/pod, le frais gagne)",
+  test "AXIOM cleanup: enqueue supersedes the pod's existing :pending (1 active work item/pod, the fresh one wins)",
        %{q: q} do
     {:ok, _stale} = TaskQueue.enqueue(q, "pod-X", %{brief: "stale", role: "engineer"})
-    {:ok, fresh} = TaskQueue.enqueue(q, "pod-X", %{brief: "frais", role: "engineer"})
+    {:ok, fresh} = TaskQueue.enqueue(q, "pod-X", %{brief: "fresh", role: "engineer"})
 
-    # un SEUL :pending pour pod-X = le frais ; le stale est superséded → pas d'empilement intra-session
-    # (la cause des 1124 "en cours"). [[axiome source-unique : nettoyé quand ce n'est plus vrai]]
-    assert [%{brief: "frais", state: :pending} = only] =
+    # a SINGLE :pending for pod-X = the fresh one; the stale one is superseded → no intra-session
+    # pile-up. [[single-source axiom: cleaned up when no longer true]]
+    assert [%{brief: "fresh", state: :pending} = only] =
              TaskQueue.list_pending(q) |> Enum.filter(&(&1.pod_id == "pod-X"))
 
     assert only.id == fresh.id
-    # get_for_pod sert le frais, pas le résidu
-    assert {:ok, %{brief: "frais"}} = TaskQueue.get_for_pod(q, "pod-X")
+    # get_for_pod serves the fresh one, not the residue
+    assert {:ok, %{brief: "fresh"}} = TaskQueue.get_for_pod(q, "pod-X")
   end
 
-  test "last_poll : get_for_pod enregistre le poll MÊME sans work item (ACK bootstrap in-band)",
+  test "last_poll: get_for_pod records the poll EVEN without a work item (in-band bootstrap ACK)",
        %{
          q: q
        } do
     assert TaskQueue.last_poll(q, "pod-boot") == nil
-    # pas de work item → :no_work_item, mais l'agent a TENDU LA MAIN → le poll est gravé
+    # no work item → :no_work_item, but the agent REACHED OUT → the poll is recorded
     assert {:error, :no_work_item} = TaskQueue.get_for_pod(q, "pod-boot")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-boot")
   end
 
-  test "last_poll : tracké aussi sur un pull (avec work item)", %{q: q} do
+  test "last_poll: also tracked on a pull (with work item)", %{q: q} do
     {:ok, _} = TaskQueue.enqueue(q, "pod-W", %{brief: "x", role: "engineer"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-W")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-W")
   end
 
-  test "last_poll : clear_for_pod oublie le poll du pod (pas d'accumulation de pod_id morts)", %{
+  test "last_poll: clear_for_pod forgets the pod's poll (no dead pod_id accumulation)", %{
     q: q
   } do
-    # Le pod a tendu la main (poll gravé), puis est décommissionné via clear_for_pod.
+    # The pod reached out (poll recorded), then gets decommissioned via clear_for_pod.
     {:error, :no_work_item} = TaskQueue.get_for_pod(q, "pod-dead")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-dead")
 
     assert :ok = TaskQueue.clear_for_pod(q, "pod-dead")
-    # Le clear est le point de purge canonique du pod → son last-poll est oublié (sinon `polls`
-    # accumulerait indéfiniment les pod_id morts).
+    # Clear is the pod's canonical purge point → its last-poll is forgotten (otherwise `polls`
+    # would accumulate dead pod_ids indefinitely).
     assert TaskQueue.last_poll(q, "pod-dead") == nil
   end
 
-  test "2. get_for_pod idempotent (résiste au /clear one_shot, pas de double dispatch)", %{q: q} do
+  test "2. get_for_pod idempotent (survives one_shot /clear, no double dispatch)", %{q: q} do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     assert_receive %Fleet.Event{type: :"work_item.enqueued"}
 
     {:ok, a1} = TaskQueue.get_for_pod(q, "pod-A")
     assert_receive %Fleet.Event{type: :"work_item.assigned"}
 
-    # 2e appel → MÊME work item, PAS de nouveau broadcast :"work_item.assigned"
+    # 2nd call → SAME work item, NO new :"work_item.assigned" broadcast
     {:ok, a2} = TaskQueue.get_for_pod(q, "pod-A")
     assert a1.id == t1.id
     assert a2.id == a1.id
@@ -134,10 +134,11 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
-  # MA-04 — LE finding : `work_item.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
-  # le step_run). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
-  # accepté alors que le step_run ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
-  test "3b. MA-04 : broadcast work_item.completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
+  # MA-04 — THE finding: `work_item.completed` is load-bearing LIFECYCLE (StepRunConsumer depends on it to
+  # finish the step_run). If its broadcast fails, `submit_result` does NOT return a mute `{:ok}` (the pod would
+  # believe its deliverable accepted while the step_run never finishes → forge lock forever) — it propagates
+  # `{:error,{:broadcast_failed,_}}`.
+  test "3b. MA-04: work_item.completed broadcast RETURNING {:error} → submit_result {:error,{:broadcast_failed,_}}, not {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_failbus.json")
 
@@ -152,14 +153,14 @@ defmodule Fleet.TaskQueueTest do
 
     result = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
 
-    # PAS un succès muet. Le caller VOIT l'échec lifecycle.
+    # NOT a mute success. The caller SEES the lifecycle failure.
     refute match?({:ok, _}, result)
     assert {:error, {:broadcast_failed, :forced_broadcast_fail}} = result
   end
 
-  # MA-04 — variante : le broadcast LÈVE (UnregisteredError / PubSub down). Le `required_broadcast` rescue
-  # et propage `{:error,{:broadcast_failed,_}}`, jamais `:ok` muet (le rescue ne ré-avale plus le lifecycle).
-  test "3c. MA-04 : broadcast work_item.completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
+  # MA-04 — variant: the broadcast RAISES (UnregisteredError / PubSub down). `required_broadcast` rescues
+  # and propagates `{:error,{:broadcast_failed,_}}`, never a mute `:ok` (the rescue does not re-swallow lifecycle).
+  test "3c. MA-04: work_item.completed broadcast that RAISES → {:error,{:broadcast_failed,_}}, not {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_raisebus.json")
 
@@ -178,7 +179,7 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:broadcast_failed, _}} = result
   end
 
-  test "4. submit_result idempotent (double submit ignoré, pas de double broadcast)", %{q: q} do
+  test "4. submit_result idempotent (double submit ignored, no double broadcast)", %{q: q} do
     {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
     {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
@@ -202,14 +203,14 @@ defmodule Fleet.TaskQueueTest do
     :ok = stop_supervised(:q1)
 
     {:ok, q2} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :q2)
-    # 3 tasks total : A completed, B + C pending — état reconstruit
+    # 3 work items total: A completed, B + C pending — state rebuilt
     assert {:ok, :completed} = TaskQueue.pod_status(q2, "pod-A")
 
     assert [%{pod_id: "pod-B"}, %{pod_id: "pod-C"}] =
              q2 |> TaskQueue.list_pending() |> Enum.sort_by(& &1.pod_id)
   end
 
-  test "6. recovery schema mismatch → state.corrupt + state vide (non-bloquant)", %{
+  test "6. recovery schema mismatch → state.corrupt + empty state (non-blocking)", %{
     topic: topic,
     tmp_dir: tmp_dir
   } do
@@ -218,19 +219,19 @@ defmodule Fleet.TaskQueueTest do
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qc)
 
-    # `found` est stringifié au producteur (inspect/1) : le payload reste JSON-safe de bout
-    # en bout (le bord WS l'encode brut).
+    # `found` is stringified at the producer (inspect/1): the payload stays JSON-safe
+    # end to end (the WS edge encodes it raw).
     assert_receive %Fleet.Event{
       source: :task_queue,
       type: :"state.corrupt",
       payload: %{expected: 1, found: "99"}
     }
 
-    # fallback non-bloquant : la queue tourne, state vide
+    # non-blocking fallback: the queue runs, empty state
     assert [] = TaskQueue.list_pending(q)
   end
 
-  test "6b. WorkItem.from_map round-trip préserve les champs riches (fix deep-02 : recovery ne perd plus brief/role/metadata)" do
+  test "6b. WorkItem.from_map round-trip preserves rich fields (deep-02 fix: recovery no longer loses brief/role/metadata)" do
     t = %Fleet.TaskQueue.WorkItem{
       id: "t1",
       pod_id: "p1",
@@ -238,7 +239,7 @@ defmodule Fleet.TaskQueueTest do
       state: :assigned,
       issue_id: "tk1",
       role: "engineer",
-      brief: "fais X",
+      brief: "do X",
       metadata: %{"step" => "qa"},
       result: %{"ok" => true}
     }
@@ -246,7 +247,7 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, back} = Fleet.TaskQueue.WorkItem.from_map(Fleet.TaskQueue.WorkItem.to_map(t))
 
     assert %{
-             brief: "fais X",
+             brief: "do X",
              role: "engineer",
              issue_id: "tk1",
              state: :assigned,
@@ -255,7 +256,7 @@ defmodule Fleet.TaskQueueTest do
            } = back
   end
 
-  test "6c. recovery d'une tâche au state INCONNU → state.corrupt (fix deep-02 : fail-loud, pas de raise ni drop silencieux)",
+  test "6c. recovery of a work item with an UNKNOWN state → state.corrupt (deep-02 fix: fail-loud, no raise nor silent drop)",
        %{topic: topic, tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "badstate.json")
 
@@ -276,8 +277,8 @@ defmodule Fleet.TaskQueueTest do
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qbs)
 
-    # La variante {:work_item, id, reason} était le SEUL `found` non-JSON-encodable : le
-    # producteur la stringifie (inspect/1) pour que l'event traverse le bord WS sans crash.
+    # The {:work_item, id, reason} variant was the ONLY non-JSON-encodable `found`: the
+    # producer stringifies it (inspect/1) so the event crosses the WS edge without crashing.
     assert_receive %Fleet.Event{
       source: :task_queue,
       type: :"state.corrupt",
@@ -290,12 +291,12 @@ defmodule Fleet.TaskQueueTest do
     assert [] = TaskQueue.list_pending(q)
   end
 
-  test "6d. enqueued_at ISO invalide → {:error,:invalid} (champ requis, pas de nil silencieux — fix after-9b3aea3d)" do
-    bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "pas-une-date", "state" => "pending"}
+  test "6d. invalid ISO enqueued_at → {:error,:invalid} (required field, no silent nil — after-9b3aea3d fix)" do
+    bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "not-a-date", "state" => "pending"}
     assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
   end
 
-  test "6e. from_map REFUSE un optionnel malformé (metadata/result non-map, id non-binaire) → :invalid" do
+  test "6e. from_map REJECTS a malformed optional (non-map metadata/result, non-binary id) → :invalid" do
     base = %{
       "id" => "t1",
       "pod_id" => "p1",
@@ -309,15 +310,15 @@ defmodule Fleet.TaskQueueTest do
           Map.put(base, "issue_id", 42)
         ] do
       assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad),
-             "map #{inspect(bad)} devrait être :invalid"
+             "map #{inspect(bad)} should be :invalid"
     end
 
-    # A-15 : un ANCIEN state.json portant la clé vestigiale retry_count reste lisible (clé ignorée).
+    # A-15: an OLD state.json carrying the vestigial retry_count key stays readable (key ignored).
     assert {:ok, %Fleet.TaskQueue.WorkItem{}} =
              Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "retry_count", 0))
   end
 
-  test "6f. WorkItem.new/2 = smart-constructor : caste (deadline ISO→DateTime), refuse un attr malformé" do
+  test "6f. WorkItem.new/2 = smart-constructor: casts (deadline ISO→DateTime), rejects a malformed attr" do
     alias Fleet.TaskQueue.WorkItem
 
     assert {:ok,
@@ -333,25 +334,25 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
     assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
 
-    # BND-123 : brief_sha/brief_ref sont le CONTENT-ADDRESS du brief physique, pas du texte libre. Un sha
-    # bidon se ferait passer pour une provenance vérifiable dans l'enveloppe MCP → shape validée au cast.
+    # BND-123: brief_sha/brief_ref are the CONTENT-ADDRESS of the physical brief, not free text. A bogus
+    # sha would pass itself off as verifiable provenance in the MCP envelope → shape validated at cast.
     valid_sha = String.duplicate("a", 64)
     assert {:ok, %WorkItem{brief_sha: ^valid_sha}} = WorkItem.new("p1", %{brief_sha: valid_sha})
 
     assert {:ok, %WorkItem{brief_ref: "briefs/" <> _}} =
              WorkItem.new("p1", %{brief_ref: "briefs/#{valid_sha}.md"})
 
-    # nil reste nil (état dégradé/best-effort légitime, DR-010)
+    # nil stays nil (legitimate degraded/best-effort state, DR-010)
     assert {:ok, %WorkItem{brief_sha: nil, brief_ref: nil}} = WorkItem.new("p1", %{})
-    # sha hors-forme (trop court, majuscules, non-hex) → refus
+    # out-of-shape sha (too short, uppercase, non-hex) → rejected
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: "def"})
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
-    # ref hors-forme (pas briefs/<sha>.md) → refus
+    # out-of-shape ref (not briefs/<sha>.md) → rejected
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/inconnu.md"})
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "../escape.md"})
   end
 
-  test "6g. enqueue propage l'erreur du smart-constructor + caste le deadline ISO", %{
+  test "6g. enqueue propagates the smart-constructor error + casts the ISO deadline", %{
     topic: topic
   } do
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qenq)
@@ -363,7 +364,7 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.enqueue(q, "p2", %{deadline: "2030-01-01T00:00:00Z"})
   end
 
-  test "6e. recovery ré-arme les deadlines actives — expirée pendant le downtime → fail (fix deep-02 P1)",
+  test "6e. recovery re-arms active deadlines — expired during downtime → fail (deep-02 P1 fix)",
        %{topic: topic, tmp_dir: tmp_dir} do
     now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
     past_iso = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
@@ -398,44 +399,44 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, :failed} = TaskQueue.pod_status(q, "p1")
   end
 
-  test "MINE-TQ-02 : deadline max-DateTime (année 9999) → enqueue ne crashe PAS le GenServer (clamp du timer)",
+  test "MINE-TQ-02: max-DateTime deadline (year 9999) → enqueue does NOT crash the GenServer (timer clamp)",
        %{topic: topic} do
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qfar)
 
-    # DateTime MAX valide d'Elixir : ms ≈ 2.5e14 > le plafond `Process.send_after` de l'ERTS → sans clamp,
-    # `send_after` lève ArgumentError DANS handle_call(:enqueue) → crash du GenServer (idem à la recovery).
+    # Elixir's MAX valid DateTime: ms ≈ 2.5e14 > the ERTS `Process.send_after` ceiling → without a clamp,
+    # `send_after` raises ArgumentError INSIDE handle_call(:enqueue) → GenServer crash (same at recovery).
     far = ~U[9999-12-31 23:59:59Z]
 
     assert {:ok, %{deadline: %DateTime{}}} = TaskQueue.enqueue(q, "p1", %{deadline: far})
 
     assert Process.alive?(q),
-           "le GenServer TaskQueue a crashé sur une deadline lointaine (send_after non clampé)"
+           "the TaskQueue GenServer crashed on a far deadline (send_after not clamped)"
 
     assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
   end
 
-  test "MINE-TQ-02 : check_deadline PRÉMATURÉ (deadline pas atteinte) → re-arme, ne fail PAS", %{
+  test "MINE-TQ-02: PREMATURE check_deadline (deadline not reached) → re-arms, does NOT fail", %{
     topic: topic
   } do
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qearly)
 
-    # deadline dans 1h : un check_deadline qui arrive AVANT (timer clampé qui fire early) ne doit PAS
-    # failer l'item — seule une deadline VRAIMENT atteinte le fait.
+    # deadline in 1h: a check_deadline arriving BEFORE it (clamped timer firing early) must NOT
+    # fail the item — only a deadline ACTUALLY reached does.
     future = DateTime.add(DateTime.utc_now(), 3600, :second)
     {:ok, wi} = TaskQueue.enqueue(q, "p1", %{deadline: future})
 
     send(q, {:check_deadline, wi.id})
-    # list_pending = call synchrone → flushe le check_deadline (FIFO) avant l'assert.
+    # list_pending = synchronous call → flushes the check_deadline (FIFO) before the assert.
     assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
   end
 
-  test "MINE-TQ-02 : recovery d'une deadline lointaine (année 9999) → boot SANS crash (clamp au ré-arme)",
+  test "MINE-TQ-02: recovery of a far deadline (year 9999) → boot WITHOUT crash (clamp on re-arm)",
        %{topic: topic, tmp_dir: tmp_dir} do
     now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
     path = Path.join(tmp_dir, "far_deadline_recovery.json")
 
-    # Le pire scénario : une deadline lointaine PERSISTÉE → init la ré-arme → sans clamp, crash au boot
-    # (potentiellement en BOUCLE, la state.json rechargée re-crashe à chaque redémarrage).
+    # Worst case: a PERSISTED far deadline → init re-arms it → without a clamp, crash at boot
+    # (potentially in a LOOP, the reloaded state.json re-crashes on every restart).
     File.write!(
       path,
       Jason.encode!(%{
@@ -454,12 +455,12 @@ defmodule Fleet.TaskQueueTest do
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qfarrec)
 
-    assert Process.alive?(q), "le GenServer a crashé au boot en ré-armant une deadline lointaine"
-    # item recovered actif (la deadline lointaine n'expire pas) — pas de fail spurious.
+    assert Process.alive?(q), "the GenServer crashed at boot while re-arming a far deadline"
+    # recovered item active (the far deadline does not expire) — no spurious fail.
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "p1")
   end
 
-  test "MINE-TQ-01 : les polls STALE (> TTL) sont purgés → `polls` borné (pod mort sans clear ne fuit pas)",
+  test "MINE-TQ-01: STALE polls (> TTL) are purged → `polls` bounded (dead pod without clear does not leak)",
        %{topic: topic} do
     {:ok, q} =
       start_supervised(
@@ -467,16 +468,16 @@ defmodule Fleet.TaskQueueTest do
         id: :qpolls
       )
 
-    # podA poll (get_for_pod enregistre le poll même sans work item = signal bootstrap)
+    # podA polls (get_for_pod records the poll even without a work item = bootstrap signal)
     TaskQueue.get_for_pod(q, "podA")
     assert %DateTime{} = TaskQueue.last_poll(q, "podA")
 
-    # au-delà du TTL (30ms) sans re-poll ni clear : podB poll → le poll STALE de podA est purgé
+    # past the TTL (30ms) without re-poll nor clear: podB polls → podA's STALE poll is purged
     Process.sleep(60)
     TaskQueue.get_for_pod(q, "podB")
 
     assert TaskQueue.last_poll(q, "podA") == nil,
-           "le poll stale de podA (pod mort sans clear) aurait dû être purgé"
+           "podA's stale poll (dead pod without clear) should have been purged"
 
     assert %DateTime{} = TaskQueue.last_poll(q, "podB")
   end
@@ -498,7 +499,7 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, :failed} = TaskQueue.pod_status(q, "pod-A")
   end
 
-  test "8. list_pending (Query Port, pas de broadcast)", %{q: q} do
+  test "8. list_pending (Query Port, no broadcast)", %{q: q} do
     for n <- 1..5, do: TaskQueue.enqueue(q, "pod-#{n}", %{brief: "t#{n}"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-1")
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-2")
@@ -506,9 +507,9 @@ defmodule Fleet.TaskQueueTest do
     assert [_, _, _] = TaskQueue.list_pending(q)
   end
 
-  test "8bis. list_active = pending+assigned+in_progress ; cleared (supersede) et completed EXCLUS",
+  test "8bis. list_active = pending+assigned+in_progress; cleared (supersede) and completed EXCLUDED",
        %{q: q} do
-    # 3 pods : A assigned (pullé), B pending (jamais pullé), C complété — puis D supersédé.
+    # 3 pods: A assigned (pulled), B pending (never pulled), C completed — then D superseded.
     {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "a"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
     {:ok, _} = TaskQueue.enqueue(q, "pod-B", %{brief: "b"})
@@ -516,16 +517,16 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-C")
     {:ok, _} = TaskQueue.submit_result(q, "pod-C", %{"work_item_id" => tc.id, "out" => "ok"})
 
-    # D : la 1re tâche est SUPERSÉDÉE (:cleared) par la 2e à l'enqueue (axiome 1-actif/pod tenu à
-    # l'écriture) → seule la 2e est active. C'est le cas G1 « éval clobbée » : la cleared ne doit
-    # PAS être possédée (sinon un verrou orphelin serait masqué à vie par un fantôme).
+    # D: the 1st work item is SUPERSEDED (:cleared) by the 2nd at enqueue (1-active/pod axiom held
+    # at write time) → only the 2nd is active. This is the G1 "clobbered eval" case: the cleared one
+    # must NOT be owned (otherwise an orphan lock would be masked forever by a ghost).
     {:ok, d1} = TaskQueue.enqueue(q, "pod-D", %{brief: "d1"})
     {:ok, d2} = TaskQueue.enqueue(q, "pod-D", %{brief: "d2"})
 
     active = TaskQueue.list_active(q)
     active_ids = MapSet.new(active, & &1.id)
 
-    # A (assigned) + B (pending) + D2 (pending) = 3 actives ; C (completed) et D1 (cleared) exclues.
+    # A (assigned) + B (pending) + D2 (pending) = 3 active; C (completed) and D1 (cleared) excluded.
     assert length(active) == 3
     assert MapSet.member?(active_ids, d2.id)
     refute MapSet.member?(active_ids, d1.id)
@@ -550,44 +551,44 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, :cleared} = TaskQueue.pod_status(q, "pod-A")
   end
 
-  test "10. conformance schema %Fleet.Event{} sur les events", %{q: q} do
+  test "10. %Fleet.Event{} schema conformance on events", %{q: q} do
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
 
     assert_receive %Fleet.Event{} = ev
     assert ev.source == :task_queue
-    # enforce_keys présents
+    # enforce_keys present
     assert ev.timestamp != nil and ev.type != nil
-    # correlation_id == task.id quand un work item existe
+    # correlation_id == task.id when a work item exists
     assert ev.correlation_id == t.id
     assert Fleet.Event.valid_source?(ev.source)
   end
 
-  test "11. submit_result avec work_item_id ≠ work item actif → :work_item_id_mismatch (§A.70, pas de mutation)",
+  test "11. submit_result with work_item_id ≠ active work item → :work_item_id_mismatch (§A.70, no mutation)",
        %{q: q} do
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
     assert_receive %Fleet.Event{type: :"work_item.enqueued"}
     assert_receive %Fleet.Event{type: :"work_item.assigned"}
 
-    # Le pod renvoie un work_item_id forgé/périmé ≠ son work item actif → rejet.
+    # The pod returns a forged/stale work_item_id ≠ its active work item → rejected.
     assert {:error, :work_item_id_mismatch} =
              TaskQueue.submit_result(q, "pod-A", %{
                "work_item_id" => "forged-uuid",
                "verdict" => "x"
              })
 
-    # Aucune mutation : le work item reste actif, pas de :"work_item.completed".
+    # No mutation: the work item stays active, no :"work_item.completed".
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
     refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
 
-    # Avec le bon work_item_id → OK.
+    # With the right work_item_id → OK.
     assert {:ok, _} =
              TaskQueue.submit_result(q, "pod-A", %{"work_item_id" => t.id, "verdict" => "ok"})
 
     assert_receive %Fleet.Event{type: :"work_item.completed"}
   end
 
-  test "12. F148 — rétention borne les tâches terminales (actives intactes + double-submit du plus récent)",
+  test "12. F148 — retention bounds terminal work items (active ones intact + double-submit of the most recent)",
        %{topic: topic, tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "retention.json")
 
@@ -597,7 +598,7 @@ defmodule Fleet.TaskQueueTest do
         id: :qret
       )
 
-    # 5 pods menés à complétion (terminal :completed) ; cap = 3.
+    # 5 pods driven to completion (terminal :completed); cap = 3.
     for i <- 1..5 do
       pod = "pod-#{i}"
       {:ok, _} = TaskQueue.enqueue(q, pod, %{brief: "b#{i}"})
@@ -605,40 +606,40 @@ defmodule Fleet.TaskQueueTest do
       {:ok, _} = TaskQueue.submit_result(q, pod, %{"verdict" => "ok"})
     end
 
-    # + un work item ACTIF : ne doit JAMAIS être élagué.
-    {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "en cours"})
+    # + one ACTIVE work item: must NEVER be pruned.
+    {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "in progress"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-active")
 
     work_items = :sys.get_state(q).work_items |> Map.values()
     terminal = Enum.filter(work_items, &(&1.state == :completed))
     active = Enum.filter(work_items, &(&1.state in [:pending, :assigned, :in_progress]))
 
-    # Borne dure : 5 complétées → au plus 3 conservées (2 élaguées).
+    # Hard bound: 5 completed → at most 3 kept (2 pruned).
     assert length(terminal) == 3
-    # L'active survit toujours (jamais comptée ni coupée).
+    # The active one always survives (never counted nor cut).
     assert [%{pod_id: "pod-active", state: :assigned}] = active
 
-    # Le plus récent complété (pod-5) survit → double-submit TOUJOURS détecté, pas dégradé
-    # en :no_active_work_item par une rétention qui couperait la mauvaise tâche (récence, pas FIFO).
+    # The most recently completed (pod-5) survives → double-submit ALWAYS detected, not degraded
+    # into :no_active_work_item by a retention cutting the wrong item (recency, not FIFO).
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
   end
 
-  # MA-27 — invariant « 1 work item ACTIF/pod » tenu À L'ÉCRITURE. Un re-brief d'un pod portant une
-  # `:assigned` existante doit la SUPERSÉDER (→ `:cleared`) : sinon la vieille `:assigned` FUYAIT à côté du
-  # nouveau pending (invisible aux gardes — `find_active`/`max_by` la masquait sans la retirer). RED avant le
-  # fix (`supersede_pending` gardait les `:assigned`) → 2 actives ; GREEN après (`supersede_active`) → 1.
-  test "MA-27 re-brief d'un pod avec :assigned existante → 1 SEULE active (l'ancienne :cleared)",
+  # MA-27 — "1 ACTIVE work item/pod" invariant held AT WRITE TIME. Re-briefing a pod carrying an
+  # existing `:assigned` must SUPERSEDE it (→ `:cleared`): otherwise the old `:assigned` would LEAK
+  # next to the new pending (invisible to the guards — `find_active`/`max_by` masks it without
+  # removing it), leaving 2 active items instead of 1 (`supersede_active`, not `supersede_pending`).
+  test "MA-27 re-brief of a pod with an existing :assigned → ONLY 1 active (the old one :cleared)",
        %{
          q: q
        } do
-    {:ok, old} = TaskQueue.enqueue(q, "pod-Z", %{brief: "ancien work item"})
-    # pull → l'ancien passe :assigned (le pod « travaille dessus »).
+    {:ok, old} = TaskQueue.enqueue(q, "pod-Z", %{brief: "old work item"})
+    # pull → the old one goes :assigned (the pod is "working on it").
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-Z")
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-Z")
 
-    # RE-BRIEF : un nouveau work item frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
-    {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "nouveau work item"})
+    # RE-BRIEF: a fresh new work item (forge re-dispatch) arrives WHILE the old one is :assigned.
+    {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "new work item"})
 
     work_items = :sys.get_state(q).work_items |> Map.values()
 
@@ -648,33 +649,33 @@ defmodule Fleet.TaskQueueTest do
         &(&1.pod_id == "pod-Z" and &1.state in [:pending, :assigned, :in_progress])
       )
 
-    # 1 SEULE active = le frais (:pending). L'ancien :assigned est superséded → :cleared.
+    # ONLY 1 active = the fresh one (:pending). The old :assigned is superseded → :cleared.
     assert [%{state: :pending} = only] = active
     assert only.id == fresh.id
 
     old_now = Enum.find(work_items, &(&1.id == old.id))
     assert old_now.state == :cleared
 
-    # Sémantique re-brief validée : le pod prend le NOUVEAU work item au prochain pull (seul actif restant).
+    # Re-brief semantics validated: the pod takes the NEW work item at the next pull (only active left).
     fresh_id = fresh.id
-    assert {:ok, %{brief: "nouveau work item", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
+    assert {:ok, %{brief: "new work item", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
 
-    # Et le vieux work item ne peut plus muter la queue : son submit tombe sur une active = le frais
-    # (work_item_id mismatch) — jamais une complétion de l'ancien fantôme.
+    # And the old work item can no longer mutate the queue: its submit hits an active = the fresh one
+    # (work_item_id mismatch) — never a completion of the old ghost.
     assert {:error, :work_item_id_mismatch} =
              TaskQueue.submit_result(q, "pod-Z", %{"work_item_id" => old.id, "verdict" => "stale"})
   end
 
-  test "supersede ÉMET work_item.cleared (la seule transition terminale muette — trace + purge des consumers)",
+  test "supersede EMITS work_item.cleared (no mute terminal transition — trace + consumer purge)",
        %{q: q, topic: _topic} do
-    # Le supersede était la SEULE transition terminale sans event : l'item passait :cleared
-    # derrière un Logger.debug → (a) la trace d'audit mentait par omission sur le sort d'un
-    # mandat, (b) tout consumer portant du contexte per-mandat (StepRunConsumer.gate_evals :
-    # payload + workflow_map ENTIÈRE) le gardait à vie. L'event le libère.
-    {:ok, old} = TaskQueue.enqueue(q, "pod-S", %{brief: "ancien"})
+    # A supersede without an event would make the item go :cleared behind a Logger.debug →
+    # (a) the audit trace would lie by omission about a mandate's fate, (b) any consumer carrying
+    # per-mandate context (StepRunConsumer.gate_evals: payload + ENTIRE workflow_map) would keep
+    # it forever. The event frees it.
+    {:ok, old} = TaskQueue.enqueue(q, "pod-S", %{brief: "old"})
     assert_receive %Fleet.Event{type: :"work_item.enqueued"}
 
-    {:ok, _fresh} = TaskQueue.enqueue(q, "pod-S", %{brief: "frais"})
+    {:ok, _fresh} = TaskQueue.enqueue(q, "pod-S", %{brief: "fresh"})
 
     old_id = old.id
 
@@ -686,18 +687,19 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
-  # MA-27 — `clear_for_pod` purge TOUTES les actives du pod (pas seulement la + récente via `find_active`).
-  # Avec l'invariant tenu à l'enqueue il n'y en a normalement qu'une ; le test pose volontairement DEUX
-  # actives (en court-circuitant l'unicité via la map d'état directe) pour prouver que clear est TOTAL.
-  test "MA-27 clear_for_pod purge TOUTES les actives du pod (clear total, pas seulement la + récente)",
+  # MA-27 — `clear_for_pod` purges ALL of the pod's active items (not just the most recent via
+  # `find_active`). With the invariant held at enqueue there is normally only one; the test
+  # deliberately plants TWO active items (bypassing uniqueness via the direct state map) to prove
+  # that clear is TOTAL.
+  test "MA-27 clear_for_pod purges ALL of the pod's active items (total clear, not just the most recent)",
        %{
          q: q
        } do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-M", %{brief: "m1"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-M")
 
-    # Injecte une 2e active (:assigned) pour le MÊME pod, en contournant supersede_active (qui en prod
-    # garantit l'unicité) — on veut prouver que clear_for_pod ne LAISSE PAS de stale même s'il y en avait.
+    # Inject a 2nd active (:assigned) for the SAME pod, bypassing supersede_active (which in prod
+    # guarantees uniqueness) — proving clear_for_pod LEAVES NO stale item even if there were any.
     :sys.replace_state(q, fn st ->
       ghost = %Fleet.TaskQueue.WorkItem{
         id: "ghost-uuid",

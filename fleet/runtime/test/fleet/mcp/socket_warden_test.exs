@@ -1,12 +1,12 @@
 defmodule Fleet.MCP.SocketWardenTest do
   @moduledoc """
-  Le filet RUNTIME des sockets MCP orphelines.
+  The RUNTIME net for orphaned MCP sockets.
 
-  `release_pod_socket/1` tourne dans le `terminate/3` du pod — qu'un kill BRUTAL (teardown tmux
-  wedgé, kill -9) n'exécute JAMAIS : acceptor + listener AF_UNIX + entrée Registry + fichier
-  survivaient à leur pod jusqu'au reboot BEAM (le sweep cold-boot ne couvre que le boot). Les tmux
-  et pod_dirs avaient leur warden ; les sockets non. Ce warden ferme l'asymétrie — en réconciliant,
-  jamais en devinant.
+  `release_pod_socket/1` runs in the pod's `terminate/3` — which a BRUTAL kill (wedged tmux
+  teardown, kill -9) NEVER executes: acceptor + AF_UNIX listener + Registry entry + file would
+  outlive their pod until the BEAM reboots (the cold-boot sweep only covers boot). tmux and
+  pod_dirs have their warden; sockets need theirs too. This warden closes the asymmetry — by
+  reconciling, never by guessing.
   """
   use ExUnit.Case, async: true
 
@@ -16,7 +16,7 @@ defmodule Fleet.MCP.SocketWardenTest do
     start_supervised!({SocketWarden, [name: nil, tick_ms: 10] ++ opts})
   end
 
-  test "socket dont le pod a DISPARU → réclamée, mais seulement au 2e tick (grâce)" do
+  test "socket whose pod has VANISHED → reclaimed, but only at the 2nd tick (grace)" do
     parent = self()
 
     start_warden(
@@ -25,31 +25,31 @@ defmodule Fleet.MCP.SocketWardenTest do
       release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
     )
 
-    # 1er tick : suspect. 2e tick : orphelin CONFIRMÉ → release. La grâce existe parce que
-    # `ensure_pod_socket` tourne pendant :projecting — une socket peut légitimement exister
-    # quelques instants avant que le pod ne s'enregistre. Réclamer au 1er coup tuerait la socket
-    # d'un pod en train de naître.
+    # 1st tick: suspect. 2nd tick: orphan CONFIRMED → release. The grace exists because
+    # `ensure_pod_socket` runs during :projecting — a socket can legitimately exist for a few
+    # moments before the pod registers. Reclaiming on the 1st hit would kill the socket of a
+    # pod being born.
     assert_receive {:released, "pod-ghost"}, 1_000
     refute_received {:released, "pod-live"}
   end
 
-  test "énumération des pods vivants en ÉCHEC → RIEN réclamé (une réconciliation ne devient pas la panne qu'elle prévient)" do
+  test "live-pod enumeration FAILING → NOTHING reclaimed (a reconciliation does not become the outage it prevents)" do
     parent = self()
 
     warden =
       start_warden(
         owned_fun: fn -> ["pod-a", "pod-b"] end,
-        live_pods_fun: fn -> raise "spawner indisponible" end,
+        live_pods_fun: fn -> raise "spawner unavailable" end,
         release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
       )
 
-    # Un live-set vide ferait passer TOUTES les sockets pour orphelines : le fail-safe rend
-    # :error → aucun release, l'état des suspects est préservé.
+    # An empty live-set would make ALL sockets look orphaned: the fail-safe returns
+    # :error → no release, the suspects' state is preserved.
     refute_receive {:released, _}, 200
     assert Process.alive?(warden)
   end
 
-  test "toutes les sockets ont leur pod vivant → aucun release (propre = silencieux)" do
+  test "every socket has its pod alive → no release (clean = silent)" do
     parent = self()
 
     start_warden(
@@ -61,15 +61,15 @@ defmodule Fleet.MCP.SocketWardenTest do
     refute_receive {:released, _}, 200
   end
 
-  test "un pod qui REVIENT entre les deux ticks n'est PAS réclamé (la grâce protège la course)" do
+  test "a pod COMING BACK between the two ticks is NOT reclaimed (the grace protects the race)" do
     parent = self()
     counter = :counters.new(1, [])
 
     start_warden(
       owned_fun: fn -> ["pod-slow"] end,
       live_pods_fun: fn ->
-        # 1er tick : le pod n'est pas encore enregistré (il projette) → suspect.
-        # Ticks suivants : il est là → l'orphelin n'est jamais CONFIRMÉ.
+        # 1st tick: the pod is not registered yet (it is projecting) → suspect.
+        # Following ticks: it is there → the orphan is never CONFIRMED.
         :counters.add(counter, 1, 1)
         if :counters.get(counter, 1) == 1, do: [], else: ["pod-slow"]
       end,
