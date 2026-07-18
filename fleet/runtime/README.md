@@ -14,7 +14,7 @@ source de vérité.
 
 Implémentation Elixir/OTP. Les frontières inter-domaines sont **compilées** par `boundary` (le graphe
 de dépendances est vérifié à la compilation, pas tenu par discipline) ; `mix gate` vert = compile strict
-+ suite ExUnit + contrats inter-modules + Dialyzer.
++ suite ExUnit + tests hors-mix (shell_gate) + contrats inter-modules + fraîcheur topologie + Dialyzer strict.
 
 ## Architecture — un graphe de dépendances vérifié à la compilation
 
@@ -139,6 +139,7 @@ mix gate
 ├─ test                            # suite ExUnit hermétique (aucune socket, aucun spawn réel)
 ├─ tests hors-mix                  # bridge MCP stdio (python) + tests bats des launchers (bwrap/claude)
 ├─ lcars.contracts.check          # contrats inter-modules — 20 invariants à cliquet
+├─ lcars.topology --check         # fraîcheur de la carte générée (lib/fleet/README.md ≡ use Boundary)
 └─ dialyzer                        # strict (unmatched_returns, error_handling, extra_return…)
 ```
 
