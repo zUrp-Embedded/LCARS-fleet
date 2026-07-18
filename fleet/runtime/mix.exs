@@ -83,6 +83,10 @@ defmodule LcarsFleet.MixProject do
         "test",
         &shell_gate/1,
         "lcars.contracts.check",
+        # Topology map freshness: lib/fleet/README.md is a generated projection of the
+        # `use Boundary` declarations — divergence (new/moved domain, undeclared layer)
+        # is refused here, so the committed map can never lie.
+        "lcars.topology --check",
         # Dialyzer STRICT (E5) DANS le gate — dernier de la chaîne : le plus long à froid
         # (build PLT une fois par _build) ; à chaud ~2s. Tourne en MIX_ENV=test comme le
         # reste (preferred_envs) — même env que la suite, un seul _build analysé.

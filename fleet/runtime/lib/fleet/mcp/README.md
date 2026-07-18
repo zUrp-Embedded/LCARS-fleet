@@ -1,11 +1,11 @@
 # fleet_mcp
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — serveur MCP pod-facing, socket AF_UNIX per-pod (Ring 2, frontière vendor)
+**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — serveur MCP pod-facing, socket AF_UNIX per-pod (frontière vendor)
 **Référencé par** : —
 
-LCARS MCP server (Ring 2) — vendor boundary `mcp_*`: wraps the `ex_mcp` SDK behind an
+LCARS MCP server — vendor boundary `mcp_*`: wraps the `ex_mcp` SDK behind an
 opaque contract and exposes the runtime's MCP tools to the pods over one AF_UNIX socket
 per pod (identity IS the channel), system-side, outside bwrap.
 

@@ -124,7 +124,7 @@ defmodule Fleet.EventRouter.Bus do
   idiom, which was duplicated across 7 sites / 3 apps (coord policies, starfleet cat5/boot/
   mcp_monitor/mcp_watcher, spawner pod events) with local rescues of INCONSISTENT
   behavior (some swallowed everything silently, others propagated). Now a single
-  authority: here, Ring 0, next to `emit/3` whose signature it shares.
+  authority: here, in the substrate, next to `emit/3` whose signature it shares.
 
   4th argument `safe_opts`:
 
@@ -296,7 +296,7 @@ defmodule Fleet.EventRouter.Bus do
   @doc """
   Is `pid` currently subscribed to `topic` (default the main topic)? Phoenix.PubSub 2.x keeps local
   subscriptions in a Registry NAMED like the pubsub (`subscribe/2` = `Registry.register(name, topic, _)`),
-  so a pid is subscribed iff it appears among the topic's Registry entries. Owned HERE (Ring 0, the PubSub
+  so a pid is subscribed iff it appears among the topic's Registry entries. Owned HERE (the PubSub
   authority) so consumers can probe liveness WITHOUT leaking the Registry detail — cf. readiness anti-hollow-green.
   """
   @spec subscribed?(pid(), String.t()) :: boolean()

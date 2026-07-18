@@ -96,7 +96,7 @@ defmodule Fleet.API.Readiness do
   # The forge-state-machine rail (Poller step + StepRunConsumer) is probed — its
   # runtime death (fallen singleton) flips to `:degraded` instead of a hollow-green. Delegated to fleet_pilot,
   # which owns the rail topology (`Fleet.Pilot.Application.step_status/0`) — no leak of
-  # Ring 3 process names into Ring 4. `:inactive` if step off (doesn't alter the global verdict).
+  # pilot process names into the surface. `:inactive` if step off (doesn't alter the global verdict).
   # (The forge-state-machine rail is the ONLY dispatch rail: no legacy RAM dispatcher probe.)
   defp pilot_step do
     {state, detail} = Fleet.Pilot.Application.step_status()
@@ -106,7 +106,7 @@ defmodule Fleet.API.Readiness do
   # The admin.spawn.request WRITE rail: `Fleet.Spawner.PublishConsumer` is its UNIQUE subscriber; if it
   # is off/dead/not-subscribed, `POST /api/admin/spawn` still answers 202 while the broadcast is lost
   # (Bus lossy) — the 202 lies. Delegated to the write-path owner
-  # `Fleet.Spawner.Application.spawn_dispatch_status/0` (no Ring 1 process name here). `:degraded` flips
+  # `Fleet.Spawner.Application.spawn_dispatch_status/0` (no spawner process name here). `:degraded` flips
   # the global verdict — the exact hollow-green this module exists to kill.
   defp spawn_dispatch do
     {state, detail} = Fleet.Spawner.Application.spawn_dispatch_status()
@@ -186,7 +186,7 @@ defmodule Fleet.API.Readiness do
   # MCP pod-facing: pods' pull transport. Probes the REAL PROCESS (is the
   # per-pod socket-acceptor DynamicSupervisor running?) delegated to the
   # topology owner `Fleet.MCP.Supervisor.pod_facing_status/0` — not a config
-  # knob. Delegation = no leak of Ring 2 process names into Ring 4 (same
+  # knob. Delegation = no leak of MCP process names into the surface (same
   # pattern as `pilot.step`). The `mcp_server_spec` (spawner side) stays
   # probed in config: it's the spec injected TO the pods, not a process — its
   # presence/absence is the real state at this level. Live substrate + present spec →

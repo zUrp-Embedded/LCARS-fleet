@@ -1,11 +1,11 @@
 # fleet_project_bootstrap
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — provisioning du workspace projet d'un pod (Ring 1)
+**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — provisioning du workspace projet d'un pod
 **Référencé par** : —
 
-Pod-workspace provisioning (Ring 1, pod primitives): clone/reset the project repo
+Pod-workspace provisioning (pod composition layer): clone/reset the project repo
 into the pod dir BEFORE spawn, so the agent boots on a vanilla workspace. Pure
 functions (File / Path / git), no process.
 

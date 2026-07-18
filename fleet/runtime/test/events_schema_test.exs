@@ -7,7 +7,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
   R0.3 fix : @canon_path pointait `05_data-canon/config/events.yaml` (chemin DOCTRINE,
   absent du repo de code post-bascule) → setup_all échouait → 7 tests invalid. Repointé
   sur le canon in-repo `priv/events.yaml` (single-source). Drift priv↔doctrine (47 vs 144 l)
-  = réconciliation [DATA] Ring 2 (cf. v2-reabsorption-inventory.md / portfolio Ring 2).
+  = data-side reconciliation.
   """
   use ExUnit.Case, async: true
 

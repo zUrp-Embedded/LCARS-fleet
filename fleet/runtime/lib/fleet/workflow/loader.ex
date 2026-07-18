@@ -109,7 +109,7 @@ defmodule Fleet.Workflow.Loader do
       Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
   end
 
-  # Resolved schema (read+decode+resolve) via the Ring 0 authority `Fleet.SchemaCache`
+  # Resolved schema (read+decode+resolve) via the foundation authority `Fleet.SchemaCache`
   # (dedup — this pipeline lived copied here), keyed by the RESOLVED path (the tests'
   # `:schema_path` overrides have their own entry → no prod↔test pollution). Lazy-init,
   # fail-loud if the schema file is absent/malformed.

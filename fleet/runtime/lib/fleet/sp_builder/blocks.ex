@@ -5,11 +5,11 @@ defmodule Fleet.SPBuilder.Blocks do
   (`mix lcars.sp.gen`) writes `priv/sp_builder/sp_drafts/agent-<role>-base.md` — the flat draft that
   `Fleet.Spawner.Pod.Assets` reads and injects (N2). Split = debuggable + a single source of truth.
 
-  Ring boundary: the SP is an APPLICATIVE primitive (it consumes the Ring 0 cap-profile → it lives at
-  Ring 1, here). It carries ONLY Ring 0/1 invariants. Anything Ring 2+ (the `gate-decision-v1` vocabulary,
+  Layer boundary: the SP is an APPLICATIVE primitive (it consumes the cap-profile and lives just
+  above it, here). It carries ONLY substrate-level invariants. Anything owned by higher domains (the `gate-decision-v1` vocabulary,
   the contract schema, the forge model) is NOT in the SP: it reaches the pod through the BRIEF (assembled
   higher up, `fleet_pilot`/`GateBrief`), single source. An SP block never duplicates the authority of a
-  higher ring.
+  higher domain.
 
   HARD RULE (no-fallback, cf. memory `no-sp-no-pod-no-fleet`): a role with no blocks, or a listed block
   absent from disk → `compose!/3` RAISES. No SP → no pod → no fleet; never a silent degradation.

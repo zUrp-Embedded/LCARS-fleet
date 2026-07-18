@@ -3,7 +3,7 @@ defmodule Fleet.Observation.Application do
   Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
   migration 2026-07-12 ; nom conservé pour zéro churn de références).
 
-  Domain supervisor `fleet_observation` (Ring 4 — observation deck).
+  Domain supervisor `fleet_observation` (surface — observation deck).
 
   Read / observability frontier of the core. A dedicated
   Cowboy listener on its port (per-human, bin/fleet_v2) serves `Fleet.Observation.Deck` (LCARS HTML +
@@ -14,8 +14,8 @@ defmodule Fleet.Observation.Application do
 
   ## Cardinal principle
 
-  The deck **does not touch the core**: it depends downward (Ring 0 — bus
-  `fleet_event_router` + catalogue `fleet_cap_profile`; Ring 1 — `fleet_spawner`
+  The deck **does not touch the core**: it depends downward (bus
+  `fleet_event_router` + catalogue `fleet_cap_profile`; `fleet_spawner`
   for `list_pods/0`), no core app depends on it. Read-only, intra-release, no-auth
   (frontier = network/container isolation, like `fleet_api`): it observes, it mutates nothing.
 

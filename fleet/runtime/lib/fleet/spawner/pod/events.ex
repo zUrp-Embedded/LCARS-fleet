@@ -15,7 +15,7 @@ defmodule Fleet.Spawner.Pod.Events do
 
   - `lossy_broadcast/2` (PUBLIC) — OBSERVABILITY/escalation (`pod.failed`, `wake.failed`).
     A failure is non-blocking; always returns `:ok`. Emits via the protected core
-    `Fleet.EventRouter.Bus.safe_emit/4` (the UNIFIED lossy-emit policy, Ring 0: failure logged,
+    `Fleet.EventRouter.Bus.safe_emit/4` (the UNIFIED lossy-emit policy, single substrate authority: failure logged,
     never a crash of the pod).
   - `required_broadcast/2` (PUBLIC) — load-bearing LIFECYCLE (`pod.completed`). The failure is NOT
     swallowed: returns `:ok` | `{:error, {:broadcast_failed, _}}`. The `:extracting` state
@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.Pod.Events do
 
   @doc """
   OBSERVABILITY/escalation broadcast (`pod.failed`, `wake.failed`): emission via the protected core
-  `Bus.safe_emit/4` (the lossy-emit policy has ONE authority, Ring 0). An event_router crash
+  `Bus.safe_emit/4` (the lossy-emit policy has ONE substrate authority). An event_router crash
   (malformed event, unknown type name) NEVER crashes the pod process (gen_statem):
   safe_emit logs and neutralizes. The BINARY `event_type` is passed as-is — the anti atom-leak
   conversion (`to_existing_atom`) lives UNDER safe_emit's rescue. `:on_unregistered` default

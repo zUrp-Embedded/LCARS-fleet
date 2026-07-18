@@ -12,7 +12,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
 
   Schema resolved **once** at boot via
   `Fleet.Starfleet.Application.init/1` → `init_schema!/0`, delegated to
-  the Ring 0 authority `Fleet.SchemaCache` (`:persistent_term` cache, key
+  the foundation authority `Fleet.SchemaCache` (`:persistent_term` cache, key
   `{__MODULE__, :decision_schema}`) — dedup, the read+decode+resolve
   pipeline used to live copied here.
 
@@ -74,7 +74,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
 
   @doc """
   Loads the decision JSON schema and persists it in `:persistent_term`
-  via `Fleet.SchemaCache` (Ring 0 authority for the load-and-cache pattern).
+  via `Fleet.SchemaCache` (foundation authority for the load-and-cache pattern).
 
   Called at boot by `Fleet.Starfleet.Application.init/1`. Fail-fast:
   raises if the schema file is absent or the JSON is malformed. Idempotent

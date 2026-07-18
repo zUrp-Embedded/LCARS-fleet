@@ -97,7 +97,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
   # IMMUTABLE priv baseline: read+parse once, cached in `:persistent_term`
   # (lazy-init; an error is not cached — the bang re-raises on the next call).
   # DELIBERATE local copy of the `Fleet.SchemaCache.cached/2` skeleton (fleet_event_router —
-  # the Ring 0 authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
+  # the substrate authority for load-once-cache): fleet_cap_profile sits just as low WITHOUT a dep onto
   # fleet_event_router, and we do not add an intra-R0 boundary dep (`use Boundary`) for ten lines.
   # If the edge appears one day for another reason, migrate this site (and `CapProfile.Schema`).
   defp load_baseline_git_ops_denied! do

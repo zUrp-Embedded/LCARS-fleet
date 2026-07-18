@@ -1,13 +1,13 @@
 # fleet_cap_profile
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — composeur/loader/validateur de cap-profiles (Ring 0 substrat, schéma v2.5)
+**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — composeur/loader/validateur de cap-profiles (substrat, schéma v2.5)
 **Référencé par** : —
 
-Capability Profile composer/loader/validator (Ring 0 substrat, LCARS schema v2.5):
+Capability Profile composer/loader/validator (substrate, LCARS schema v2.5):
 a pure data transformer, YAML on disk → composed `%Fleet.CapProfile{}` struct, no
-process/state. Also hosts two cross-cutting Ring 0 utilities: `Fleet.Slug` and `Fleet.Layout`.
+process/state. Also hosts two cross-cutting foundation utilities: `Fleet.Slug` and `Fleet.Layout`.
 
 **This file is a map, not the contract.** Each module owns its contract in its own
 `@moduledoc` — read those (`h Fleet.CapProfile` in IEx, or `lib/`). Nothing here is

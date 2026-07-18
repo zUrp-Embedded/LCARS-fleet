@@ -9,7 +9,7 @@ defmodule Fleet.Labels do
   (poller/dispatcher/completer/consumer) AND `Fleet.MCP` (the arch's delegation reads `stage/merged` /
   `lcars-awaits-arch`) must name byte-for-byte. It lived under `Fleet.Pilot` and MCP could not depend upward
   on Pilot (forbidden compile edge) → MCP re-declared the literals, a silent-drift risk on a rename. Now at
-  Ring-0 (`deps: []`), a single authority both domains DEPEND ON — the literals are gone from MCP.
+  Foundation (`deps: []`), a single authority both domains DEPEND ON — the literals are gone from MCP.
 
   These constants ARE NOT config: they ARE the protocol. Re-declaring them as `@attr` per module = silent
   drift on a rename. Centralized here, consumed everywhere.

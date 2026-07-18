@@ -6,7 +6,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a compile dep
+  `fleet_pilot` sits ABOVE `fleet_mcp` in the boundary ladder: a compile dep
   `fleet_mcp → fleet_pilot` would be UPWARD, forbidden (the boundary compiler
   would reject it). The module is resolved at
   RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time

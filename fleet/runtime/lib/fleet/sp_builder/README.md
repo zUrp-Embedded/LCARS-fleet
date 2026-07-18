@@ -1,11 +1,11 @@
 # fleet_sp_builder
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — composeur de System Prompts depuis blocs (Ring 1)
+**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — composeur de System Prompts depuis blocs
 **Référencé par** : —
 
-System Prompt builder/composer (Ring 1): a pure data-transformer turning a
+System Prompt builder/composer (pod primitive): a pure data-transformer turning a
 `%Fleet.CapProfile{}` + modop bundles + pod identifiers into a `system-prompt.md`,
 a pod `CLAUDE.md`, and a filtered skills list. No process, no state.
 

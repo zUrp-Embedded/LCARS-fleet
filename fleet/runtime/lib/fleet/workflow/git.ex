@@ -82,7 +82,7 @@ defmodule Fleet.Workflow.Git do
   # Validation
   # ============================================================
   # (Ref validation lives with the callers: `Deliverable` validates its target refs via the
-  # Ring-0 authority `Fleet.GitRef`; `push/3` fail-closes leading-`-` remote/refspec itself.)
+  # foundation authority `Fleet.GitRef`; `push/3` fail-closes leading-`-` remote/refspec itself.)
 
   defp check_required_keys(opts, keys) do
     case Enum.reject(keys, &Map.has_key?(opts, &1)) do

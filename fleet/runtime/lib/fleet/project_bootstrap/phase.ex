@@ -95,7 +95,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # injects `git_env/0` (anti-prompt + forge auth).
           # base_branch (catalogue/brief) + feature (built from the dispatcher slug) VALIDATED as git refs
           # BEFORE they reach `git clone --branch`/`checkout` (R1-07/08): a malformed ref → a CLEAR typed
-          # error, not a cryptic git failure. `Fleet.GitRef` = the Ring-0 check-ref-format authority.
+          # error, not a cryptic git failure. `Fleet.GitRef` = the foundation check-ref-format authority.
           with true <- Fleet.GitRef.valid?(base) or {:invalid_base_branch, base},
                true <- Fleet.GitRef.valid?(feature) or {:invalid_feature_branch, feature},
                {:ok, {_, 0}} <-
@@ -267,7 +267,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     end
 
     # pod_dir CONFINEMENT lives UPSTREAM: the spawner builds pod_dir as `<pod_dir_root>/pod_<pod_id>`
-    # from a pod_id validated by `Fleet.Spawner.valid_pod_id?` (no `..`, no `/`). This module (Ring 1)
+    # from a pod_id validated by `Fleet.Spawner.valid_pod_id?` (no `..`, no `/`). This module
     # CANNOT re-derive that root without a `fleet_spawner` dep (compile cycle), so it cannot check
     # "under root" here. What it CAN and MUST assert before any `rm_rf`/`mkdir` is that pod_dir is
     # ABSOLUTE: a relative pod_dir would make the fixed subdirs `<pod_dir>/workspace|work` resolve

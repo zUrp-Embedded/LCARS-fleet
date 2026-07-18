@@ -17,14 +17,14 @@ defmodule Fleet.Spawner do
       Fleet.EventRouter,
       Fleet.ProjectBootstrap,
       Fleet.TaskQueue,
-      # Ring-0 primitif (flag :persistent_term, deps: []) — lisible vers le bas depuis n'importe
-      # quel ring. Le PermanentWarden le consulte pour ne pas respawner pendant un drain (A-13).
+      # Foundation primitive (:persistent_term flag, deps: []) — readable from any
+      # domain. The PermanentWarden le consulte pour ne pas respawner pendant un drain (A-13).
       Fleet.Shutdown.Quiesce
     ],
     exports: [Application, PermanentBoot, PodTmux, Pod.McpProvision, LaunchBackend]
 
   @moduledoc """
-  Drives the LCARS v2 pod lifecycle (Ring 1 pod primitive).
+  Drives the LCARS v2 pod lifecycle (pod-composition layer).
 
   Spawns, watches and terminates ephemeral agent pods. Each pod is a
   `Fleet.Spawner.Pod` (`gen_statem`) supervised by `Fleet.Spawner.Supervisor`:
@@ -378,7 +378,7 @@ defmodule Fleet.Spawner do
   Lists the keys of `Fleet.Spawner.Registry` and collects each one's `:info`
   via `pod_info/1`; pods that are dead but still briefly registered (async monitor
   cleanup race, cf. `pod_info/1`) are discarded. Read-only — alters no
-  state. This is the only exposed enumeration seam: readers (the Ring 4
+  state. This is the only exposed enumeration seam: readers (the surface
   observability deck) go through here, **never** through the Registry directly.
   """
   @spec list_pods() :: [map()]

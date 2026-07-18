@@ -13,8 +13,8 @@ defmodule Fleet.GitRef do
   name from reaching a raw `git clone`/`push`/`commit`. Enforces the `git check-ref-format` rules that a
   charset regex alone misses (R2-06 — full git authority, not "roughly aligned").
 
-  PURE primitive living in Ring 0 (alongside `Fleet.Slug`) so BOTH the workflow (`Git`/`Deliverable`,
-  Ring 2) and the project bootstrap (`Phase.Clone`, Ring 1) validate refs at their OWN boundary without
+  PURE foundation primitive (alongside `Fleet.Slug`) so BOTH the workflow (`Git`/`Deliverable`,
+  `Fleet.Workflow`) and the project bootstrap (`Phase.Clone`, `Fleet.ProjectBootstrap`) validate refs at their OWN boundary without
   an upward compile edge — the reason it moved out of `fleet_workflow` (R1-07/08). Each caller keeps ITS
   typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized.
   """

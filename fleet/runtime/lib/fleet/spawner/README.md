@@ -1,11 +1,11 @@
 # Fleet.Spawner
 
 **Date** : 2026-07-11
-**Dernière révision** : 2026-07-12
-**Statut** : actif — carte du Ring 1 spawner (contrats dans les `@moduledoc`)
+**Dernière révision** : 2026-07-18
+**Statut** : actif — carte du domaine spawner (contrats dans les `@moduledoc`)
 **Référencé par** : `mix.exs`, `_remediation/` (F-C040)
 
-Pod lifecycle primitive (Ring 1): spawns, watches and terminates ephemeral
+Pod lifecycle (pod composition layer): spawns, watches and terminates ephemeral
 agent pods. Each pod is a `gen_statem` (`Fleet.Spawner.Pod`) whose STATES are
 the phases of the canonical cycle; the lifecycle IS the responsibility.
 
@@ -31,7 +31,7 @@ Boot / respawn / seams:
 - `Fleet.Spawner.SeedStore` — checkpoint/restore of a pod's session jsonl for recall (`--resume`)
 - `Fleet.Spawner.LaunchBackend` (behaviour) + `.LauncherPortBackend` (the real Port/bwrap backend) / `StubBackend` (tests)
 - `Fleet.Spawner.SessionId` — pure hexspeak encoder of the deterministic claude `session_id`
-- `Fleet.Spawner.McpSocketProvisioner` — behaviour of the runtime seam `:mcp_socket_provisioner` (→ `fleet_mcp`, Ring 2)
+- `Fleet.Spawner.McpSocketProvisioner` — behaviour of the runtime seam `:mcp_socket_provisioner` (→ `fleet_mcp`, above spawner)
 
 - `Fleet.Spawner.Pod.*` — the 20 `gen_statem` lifecycle islands (each stateless: no state/Port/timer of its own — the `Pod` core orchestrates, the islands compute/decide/do the I/O). See each `@moduledoc`; grouped by concern:
   - placement & launch env: `Pod.Paths`, `Pod.LaunchSpec`, `Pod.LaunchEnv`, `Pod.McpProvision`, `Pod.SessionMint`

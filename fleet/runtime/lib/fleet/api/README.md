@@ -1,11 +1,11 @@
 # fleet_api
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-15 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
-**Statut** : actif — API publique REST + WS (Ring 4)
+**Dernière révision** : 2026-07-18 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
+**Statut** : actif — API publique REST + WS (surface)
 **Référencé par** : —
 
-LCARS public API (Ring 4 — external surface): REST + WS on a per-human port. Client-agnostic
+LCARS public API (external surface): REST + WS on a per-human port. Client-agnostic
 (consumers: `bin/lcars`, health/readiness probes). **No-auth by design** — the security contract
 is the container's network isolation, not an app-level token (see `Fleet.API.Rest` § Auth).
 
@@ -28,5 +28,5 @@ only pointed at.
 - Knob `:fleet_api, :http_port` — Cowboy port, `fetch_env!` fail-loud (A7); set by `runtime.exs` from `FLEET_API_PORT` (per-human, `bin/fleet_v2`); `0` in `:test`.
 - Knob `:fleet_api, :start_listener` (default `true`; `false` in `:test` — REST via `Plug.Test`, WS via direct callbacks).
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — listener bind IP; local-only by default (frontier = network isolation).
-- Deps (all descending, Ring 4 → down): `fleet_event_router` (R0, Bus + listener), `fleet_pilot` (R3, readiness step probe), `fleet_mcp` (R2, readiness pod-facing probe), `fleet_spawner` (R1, admission + backend), `fleet_starfleet` (R2, shutdown dispatcher), `fleet_cap_profile` (R0, cap-profile validation), + `plug`/`plug_cowboy`/`jason`. See `mix.exs`.
+- Deps (all descending — see `use Boundary`): `fleet_event_router` (Bus + listener), `fleet_pilot` (readiness step probe), `fleet_mcp` (readiness pod-facing probe), `fleet_spawner` (admission + backend), `fleet_starfleet` (shutdown dispatcher), `fleet_cap_profile` (cap-profile validation), + `plug`/`plug_cowboy`/`jason`.
 - Vendor frontier: N0 (vendor-agnostic). Split (D1): deferred — see design note `fleet_api.md`.

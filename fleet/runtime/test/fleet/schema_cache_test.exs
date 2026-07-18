@@ -1,6 +1,6 @@
 defmodule Fleet.SchemaCacheTest do
   @moduledoc """
-  `Fleet.SchemaCache` — autorité Ring 0 du pattern « chargé une fois, caché en
+  `Fleet.SchemaCache` — autorité foundation du pattern « chargé une fois, caché en
   `:persistent_term` » (dédup B-R2).
 
   `async: true` : `:persistent_term` est un état GLOBAL BEAM, mais chaque test

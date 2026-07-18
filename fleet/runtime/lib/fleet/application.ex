@@ -64,24 +64,24 @@ defmodule Fleet.Application do
   @impl Application
   def start(_type, _args) do
     children = [
-      # Ring 0 — le Bus d'abord (substrat PubSub de tout le monde).
+      # The Bus first (everyone's PubSub substrate).
       Fleet.EventRouter.Application,
-      # Ring 1 — broker de mandats (dep : Bus).
+      # Work-item broker (dep: Bus).
       Fleet.TaskQueue.Application,
-      # Ring 2 — substrat MCP (sockets per-pod). ⚠ AVANT spawner (cicatrice F8, cf. moduledoc).
+      # MCP substrate (per-pod sockets). ⚠ BEFORE spawner (F8 scar, cf. moduledoc).
       Fleet.MCP.Supervisor,
-      # Ring 1 — spawner (pods). Après mcp : son provisionneur de sockets résout vers MCP au runtime.
+      # Spawner (pods). After mcp: its socket provisioner resolves to MCP at runtime.
       Fleet.Spawner.Application,
-      # Ring 2 — policy coord (init_policies! fail-fast dans son init/1).
+      # Coord policies (init_policies! fail-fast in its init/1).
       Fleet.Coord.Application,
-      # Ring 2 — audit + monitors (DriftMonitor/AuditConsumer/Shutdown/MCP*). Le BootOrchestrator
+      # Starfleet audit + monitors (DriftMonitor/AuditConsumer/Shutdown/MCP*). The BootOrchestrator
       # n'y est PLUS : déclenché post-boot par la racine (A-08, cf. bas de start/2).
       Fleet.Starfleet.Application,
-      # Ring 3 — driver forge (inerte sans :step_dispatch?).
+      # Forge driver (inert without :step_dispatch?).
       Fleet.Pilot.Application,
-      # Ring 4 — surface REST/WS (readiness interroge les domaines précédents).
+      # REST/WS surface (readiness probes the domains above).
       Fleet.API.Application,
-      # Ring 4 — observation deck read-only (rien du core n'en dépend → dernier).
+      # Read-only observation deck (nothing depends on it → last).
       Fleet.Observation.Application
     ]
 
@@ -96,7 +96,7 @@ defmodule Fleet.Application do
 
         # BootOrchestrator (spawn des pods permanents = dépense claude RÉELLE) déclenché ICI,
         # structurellement POST-boot (acte4 A-08) : avant, child mid-boot de starfleet, son Task
-        # async pouvait spawner AVANT que pilot/api soient up — si un ring tardif ratait son
+        # async pouvait spawner AVANT que pilot/api soient up — si un domaine tardif ratait son
         # start_link (port pris), les permanents étaient déjà lancés dans une fleet à moitié
         # morte (spend gaspillé, process orphelins). Ici, si le boot avorte, AUCUN spawn n'a eu
         # lieu. Via la FAÇADE (le domaine possède son gate `:start_boot_orchestrator` — false en

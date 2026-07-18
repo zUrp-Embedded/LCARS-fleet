@@ -6,8 +6,8 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
 
   ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_spawner` is Ring 1, `fleet_mcp` is Ring 2 (above): a compile-time dep
-  (boundary edge) `fleet_spawner → fleet_mcp` would be an UPWARD dep (low ring → high ring),
+  `fleet_mcp` sits ABOVE `fleet_spawner` in the boundary ladder: a compile-time dep
+  (boundary edge) `fleet_spawner → fleet_mcp` would be an UPWARD dep,
   FORBIDDEN by the layering. The module is therefore resolved at RUNTIME (`resolved/0`:
   app-env + default as a literal atom → NO compile-time dep, hence no cycle).
   `Fleet.Application` starts the whole domain → the real impl is live when a pod

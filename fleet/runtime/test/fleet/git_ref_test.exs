@@ -1,6 +1,6 @@
 defmodule Fleet.GitRefTest do
   @moduledoc """
-  Verrouille l'AUTORITÉ unique de validation de ref git — primitive Ring 0 (`Fleet.Workflow.Git`,
+  Verrouille l'AUTORITÉ unique de validation de ref git — foundation primitive (`Fleet.Workflow.Git`,
   `Fleet.Workflow.Deliverable` et `Fleet.ProjectBootstrap.Phase.Clone` délèguent ici). Couvre les cas
   frontière du check-ref-format.
   """

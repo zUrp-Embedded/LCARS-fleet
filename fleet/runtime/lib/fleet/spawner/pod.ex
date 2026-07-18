@@ -588,7 +588,7 @@ defmodule Fleet.Spawner.Pod do
   # UNIFIED ack-driven KICK loop (bootstrap + wake-fallback, parameterized: cap/retry/keyword/ACK).
   # Bounded tick. The control = the agent's ACK (`acked?/3`), NEVER a proxy:
   #   - ACK (pull for a wake / poll for a bootstrap) → cancel the :kick generic timeout;
-  #   - cap without ACK → broadcast `wake.failed` (ring-clean escalation) + cancel;
+  #   - cap without ACK → broadcast `wake.failed` (layer-clean escalation: Bus broadcast, no upward call) + cancel;
   #   - tmux reachable → kick_send (keyword `yop` bootstrap / `wake` fallback) + reschedule;
   #   - tmux not up yet → reschedule without consuming a send-keys.
   # A send-keys error does not interrupt the pod (the monitor time-out covers it).
@@ -615,8 +615,8 @@ defmodule Fleet.Spawner.Pod do
         {:keep_state_and_data, [cancel_kick_action()]}
 
       n >= cap ->
-        # Cap exhausted = the agent NEVER acked. Ring-clean: we BROADCAST (Ring 1) → a fleet_pilot
-        # consumer (Ring 3) `record_or_escalate` → recurring = `:sp_suspect`.
+        # Cap exhausted = the agent NEVER acked. Layer-clean: we BROADCAST → a fleet_pilot
+        # consumer `record_or_escalate` → recurring = `:sp_suspect`.
         phase = if bootstrap?, do: :bootstrap, else: :wake
 
         Logger.warning(

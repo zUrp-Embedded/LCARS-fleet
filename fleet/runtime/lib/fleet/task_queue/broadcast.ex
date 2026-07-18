@@ -31,7 +31,7 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   ## Why NOT `Fleet.EventRouter.Bus.safe_emit/4`
 
-  `safe_emit` is the Ring 0 protected-emission core — but it emits via `emit/3` →
+  `safe_emit` is the substrate protected-emission core — but it emits via `emit/3` →
   `broadcast_main/1`, i.e. ALWAYS the real Bus on the main topic. The broker
   carries two per-instance knobs (`:bus` seam + `:topic`, options of `Server.start_link/1`)
   that serve test isolation (stub bus that fails/raises on `work_item.completed`, dedicated topic

@@ -73,7 +73,7 @@ defmodule Fleet.Pilot.Application do
   @doc """
   Liveness status of the forge-state-machine step rail, for readiness. fleet_pilot
   owns the rail topology → it is the one that knows whether the singletons are alive (fleet_api only
-  asks, no leak of Ring 2 process names into Ring 4).
+  asks, no MCP process name leaks into the surface).
 
     * `{:inactive, _}`    — `:step_dispatch?` off (rail deliberately absent, expected outside prod-step).
     * `{:operational, _}` — Poller + StepRunConsumer alive.

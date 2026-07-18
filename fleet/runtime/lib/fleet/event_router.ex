@@ -25,7 +25,7 @@ defmodule Fleet.EventRouter do
     exports: [Bus, Listener]
 
   @moduledoc """
-  LCARS v2 event bus + event registry (Ring 0 — substrate: PubSub `fleet.events`, 0 deps,
+  LCARS v2 event bus + event registry (substrate: PubSub `fleet.events`, 0 deps,
   ~12 apps depend on it; consumption = direct PubSub subscribers, no dispatch table).
   See the sub-modules:
 

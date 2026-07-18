@@ -4,7 +4,7 @@ defmodule Fleet.Observation.ReadModel do
 
   **A single** process consumes the `%Fleet.Event{}` stream (subscribed to the
   `Fleet.EventRouter.Bus` bus, topic `fleet.events`) and maintains a readable
-  **projection** in an ETS table it owns. The readers (the Ring 4 `Deck`)
+  **projection** in an ETS table it owns. The readers (the surface `Deck`)
   read the projection via `projection/0` — a **direct ETS read** that *bypasses*
   the GenServer (OTP Iron Law: writes serialize through the process, reads
   don't touch it).

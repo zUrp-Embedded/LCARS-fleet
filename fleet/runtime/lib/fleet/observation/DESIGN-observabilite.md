@@ -1,7 +1,7 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-15
+**Dernière révision** : 2026-07-18
 **Statut** : ⚠ HISTORIQUE / exploratoire — PAS l'autorité courante (cf. bannière ci-dessous).
 **Référencé par** : `lib/fleet/observation/README.md`
 **Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
@@ -45,7 +45,7 @@ C'est **le** critère, pas un détail esthétique. Le test architectural BL-020/
 > pas que je bricole.
 
 Conséquences dures :
-- `fleet_observation` dépend **vers le bas** (Ring 4 → lit Ring 1/2/3), jamais l'inverse.
+- `fleet_observation` dépend **vers le bas** (surface → lit les domaines sous elle), jamais l'inverse.
 - **Aucune** app du core ne dépend de `fleet_observation`, n'en importe un module, ni n'émet « pour le dashboard ».
 - Le dashboard lit **deux** choses, et rien d'autre :
   1. le **stream d'events** `%Fleet.Event{}` (la colonne vertébrale, déjà là) ;
@@ -93,10 +93,10 @@ du skill OTP : **un seul** processus consomme le flux et maintient la projection
 
 ## 3. Catalogue exhaustif de l'observable (dérivé du core remédié)
 
-Par ring/app — ce que chaque expose, et la **source read-only**. (Audit-exhaustif : on liste
+Par domaine — ce que chaque expose, et la **source read-only**. (Audit-exhaustif : on liste
 TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est un mensonge.)
 
-### Ring 1 — substrat pod
+### Substrat pod
 | Observable | Détail | Source |
 |---|---|---|
 | **Pods vivants** | `pod_id`, rôle, `phase` (state machine), `conditions`, `issue_id`, `session_id`, `tmux_session` | `Fleet.Spawner.list_pods/0` |
@@ -105,7 +105,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 | Identité forge | rôle→humain résolu (Z4), trailer co-author | (config, peu « live ») |
 | Cap-profiles chargés | profils disponibles, containment/lifetime/monitor | `fleet_cap_profile` (read) |
 
-### Ring 2 — backbone orchestration
+### Backbone orchestration
 | Observable | Détail | Source |
 |---|---|---|
 | **Event stream** | LE flux `%Fleet.Event{}` (type, source, trace_id, ts, payload) | `Fleet.EventRouter.Bus.subscribe/1` |
@@ -113,7 +113,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 | **File de mandats** | tasks pending/active/completed/failed (get_work_item/submit_result) | `fleet_task_queue` |
 | Pilot | dispatcher on/off, routes chargées, poll repo/intervalle | `fleet_pilot` |
 
-### Ring 3 — coordination + policy
+### Coordination + policy
 | Observable | Détail | Source |
 |---|---|---|
 | **Pipelines** | pipelines par état, stages, transitions | events pipeline |
@@ -122,7 +122,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 | Coord | policies chargées, actions coord | `fleet_coord` |
 | MCP | configured/unconfigured, bridge stdio vivant | `fleet_mcp` |
 
-### Ring 4 / substrat — surface & santé
+### Surface & santé
 | Observable | Détail | Source |
 |---|---|---|
 | **Readiness deep** | le jumeau runtime de `contracts.check` (anti-vert-creux) | `Fleet.API.Readiness.deep/0` |
@@ -190,7 +190,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
    - **Flag convergence** : à la fusion des branches, 2 « dashboards » natifs cohabiteront
      (`fleet_dashboard` :8089 et `fleet_observation` :8091). Décision de ménage = user, plus tard.
 2. **Port** : `:8091`, knob `LCARS_OBSERVATION_PORT`. Coexiste avec 8080/8089/8090.
-3. **Ring 4**, listener Cowboy dédié, **guardé `:test`** (`start_listener: false` en test — invariant
+3. **Surface**, listener Cowboy dédié, **guardé `:test`** (`start_listener: false` en test — invariant
    hermétique, sinon `mix test` bind le port).
 4. **Auth** : **aucune** sur le deck (read-only, GET-only, intra-release, ADR-C « 5-zéros »).
    Distinct de la question API-D1 (WS `/ws`) — ici c'est de la **lecture** pure, pas de mutation.

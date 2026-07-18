@@ -31,7 +31,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   # A pod's deliverable workspace = `<pod_dir>/workspace` (under `$POD_DIR`, bwrap-bound RW).
   # Subdir centralized HERE — single authority for the placement convention (the
   # `Fleet.Spawner.pod_workspace_path/1` facade delegates; the `Pod.*` islands call it directly).
-  # `ProjectBootstrap.Clone` keeps its copy (Ring 1 cannot depend on spawner without a
+  # `ProjectBootstrap.Clone` keeps its copy (ProjectBootstrap cannot depend on spawner without a
   # spawner⇄bootstrap cycle) BUT it RETURNS the computed workspace → authoritative producer.
   @pod_workspace_subdir "workspace"
 

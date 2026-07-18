@@ -23,7 +23,7 @@ defmodule Fleet.Coord.Emitter do
 
   ## Broadcast policy (fire-and-forget, never blocking)
 
-  Via the protected core `Bus.safe_emit/4` (the Ring 0 authority of this
+  Via the protected core `Bus.safe_emit/4` (the substrate authority of this
   policy): `UnregisteredError` (registry not yet populated at boot order)
   tolerated in SILENCE so as not to break the boot — fire-and-forget; a
   MALFORMED event (build bug) is logged ERROR by safe_emit then neutralized —
@@ -105,7 +105,7 @@ defmodule Fleet.Coord.Emitter do
     do: :"coord.escalation_triggered"
 
   # Strict canonical broadcast (source :coord) via the protected core `Bus.safe_emit/4` — the
-  # protected-emission policy has ONE authority (Ring 0). `:silent`: UnregisteredError tolerated without
+  # protected-emission policy has ONE substrate authority). `:silent`: UnregisteredError tolerated without
   # noise (boot order); malformed event logged ERROR by safe_emit then neutralized (cf. moduledoc).
   # A PubSub `{:error, _}` passes THROUGH safe_emit unlogged (its passthrough contract) — logged
   # HERE: a lost coord event (escalation_triggered / notification_routed) has NO re-derive rail;

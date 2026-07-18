@@ -10,8 +10,8 @@ defmodule Fleet.Coord do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      # Verdict validé Ring-0 (BND-002) : `Policies.handle_decision/2` l'EXIGE (map brute refusée). Ce
-      # type ne pouvait vivre dans Starfleet (Starfleet dépend de Coord → cycle) — d'où sa descente Ring-0.
+      # Validated verdict, foundation value: `Policies.handle_decision/2` l'EXIGE (map brute refusée). Ce
+      # type ne pouvait vivre dans Starfleet (Starfleet dépend de Coord → cycle) — hence its descent to the foundation layer.
       Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.EventRouter
@@ -20,7 +20,7 @@ defmodule Fleet.Coord do
 
   @moduledoc """
   System-side Elixir module: declarative routing table
-  `{verdict, reason} → {action, escalation_path}` LCARS v2 Ring 2
+  `{verdict, reason} → {action, escalation_path}` LCARS
   orchestration.
 
   Coord = declarative rule, **not LLM reasoning** (meta-axiom:

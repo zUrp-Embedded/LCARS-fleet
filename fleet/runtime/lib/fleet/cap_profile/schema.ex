@@ -89,8 +89,8 @@ defmodule Fleet.CapProfile.Schema do
   # IMMUTABLE priv schema: read+decode+resolve once, cached in `:persistent_term`
   # keyed by the RESOLVED path (the `schema_dir/0` test overrides get their entry). Lazy-init,
   # errors not cached.
-  # DELIBERATE local copy of the `Fleet.SchemaCache` pattern (fleet_event_router — the Ring 0
-  # authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
+  # DELIBERATE local copy of the `Fleet.SchemaCache` pattern (fleet_event_router — the substrate
+  # authority for load-once-cache): fleet_cap_profile sits just as low WITHOUT a dep onto
   # fleet_event_router, and we do not add an intra-R0 boundary dep (`use Boundary`) for these lines.
   # It differs from `cached/2` on one INTENTIONAL point: `{:error, :schema_unavailable}` is NOT
   # cached (retryable). If the edge appears one day for another reason, migrate this site

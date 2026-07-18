@@ -254,7 +254,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   #  - `not quiescing?` : during a drain the fleet is being torn down — respawning a dead permanent
   #    would fight the drain (the drain is a DEBUG path to inspect pods without killing them; a
   #    real shutdown nukes the node and this tick dies with it). `Fleet.Shutdown.Quiesce` is a
-  #    Ring-0 zero-dep primitive (a `:persistent_term` flag), reachable downward from any ring —
+  #    foundation zero-dep primitive (a `:persistent_term` flag), reachable from any domain —
   #    declared in this domain's boundary, no cycle. (A-13 for THIS tick: a fix, not a decision.)
   defp default_reconcile_enabled? do
     Fleet.Spawner.PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()

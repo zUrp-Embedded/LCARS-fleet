@@ -181,7 +181,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   end
 
   test "tick de réconciliation : pendant un DRAIN (quiesce), gate PAR DÉFAUT off → aucun respawn" do
-    # A-13 (fix, pas décision) : le gate par défaut lit Fleet.Shutdown.Quiesce (Ring-0). Pendant un
+    # A-13 (fix, pas décision) : le gate par défaut lit Fleet.Shutdown.Quiesce (foundation). Pendant un
     # drain, respawner un permanent mort combattrait le drain (cattle : un vrai shutdown nuke le node
     # et ce tick meurt avec ; le drain gracieux est un chemin DEBUG pour inspecter sans tuer). On teste
     # le chemin PAR DÉFAUT (pas le seam) : quiesce ON → pas de respawn ; quiesce OFF → respawn.

@@ -225,7 +225,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   # DEGENERATE/malformed. We fall back to an explicit sentinel `"unknown"`, NOT a fabricated real repo name
   # (`"fleet/lcars"` would IMPERSONATE an actual repo in the display event) — honest: we don't know the repo.
   # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). This divergence
-  # is LATENT today (F-C011): the legacy webhook→pilot correlation rail (AutoDispatcher, Ring 3) was REMOVED
+  # is LATENT today (F-C011): the legacy webhook→pilot correlation rail (AutoDispatcher, pilot-side) was REMOVED
   # (2026-06-16, cf. Fleet.Pilot.Application history) — the only live `gitea.*` consumers are display
   # (observation read-model / API WS), which don't key on this ref. The Poller ingests issues via the forge
   # API keyed on `number` independently. If a webhook→pod correlation is ever re-wired, switch to `number`

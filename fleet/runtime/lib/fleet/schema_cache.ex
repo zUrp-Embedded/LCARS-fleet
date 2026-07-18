@@ -13,7 +13,7 @@ defmodule Fleet.SchemaCache do
   + `:persistent_term` cache lived copied across `fleet_workflow` (Loader),
   `fleet_starfleet` (Gatekeeper) and `fleet_coord` (Policies — which re-read and
   re-resolved the schema file on EVERY validation, without a cache). A single
-  implementation here, Ring 0: workflow/starfleet/coord already depend on the event_router domain, zero new dependency edge (deps are enforced by `use Boundary`).
+  implementation here, foundation: workflow/starfleet/coord already depend on the event_router domain, zero new dependency edge (deps are enforced by `use Boundary`).
 
   ## Why `:persistent_term` (and not ETS / a GenServer)
 
@@ -34,9 +34,9 @@ defmodule Fleet.SchemaCache do
   artifacts loaded once at boot and re-read by `fetch!/2` (which does not know the
   path).
 
-  ## Ring 0 note (cap_profile)
+  ## Foundation note (cap_profile)
 
-  `fleet_cap_profile` (Ring 0 as well, WITHOUT a dep toward `fleet_event_router`)
+  `fleet_cap_profile` (low in the ladder too, WITHOUT a dep toward `fleet_event_router`)
   keeps two local copies of the `cached/2` skeleton
   (`CapProfile.Schema.load_schema_file/1`,
   `CapProfile.DisallowedTools.load_baseline_git_ops_denied!/0`): we do not add an

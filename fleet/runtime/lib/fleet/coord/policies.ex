@@ -91,7 +91,7 @@ defmodule Fleet.Coord.Policies do
       |> to_string()
       |> Path.join("coord/schema/coord-policies-v1.json")
 
-    # IMMUTABLE priv schema, resolved ONCE via the Ring 0 authority `Fleet.SchemaCache`
+    # IMMUTABLE priv schema, resolved ONCE via the foundation authority `Fleet.SchemaCache`
     # (dedup: before, re-read+decode+resolve of the file on EACH call, no cache).
     schema =
       Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, schema_path}, schema_path)
@@ -146,7 +146,7 @@ defmodule Fleet.Coord.Policies do
   # appelant pouvait court-circuiter le schema Starfleet et router un verdict non validé. On REFUSE,
   # typé (l'appelant `DriftMonitor` loggue le `{:error, _}`) — l'état invalide n'est plus représentable
   # à la frontière, jamais normalisé en aval. (Le type ne pouvait être exigé tant qu'il vivait dans
-  # Starfleet : Coord ne peut nommer un type de Starfleet — d'où la descente Ring-0 de `Fleet.Decision`.)
+  # Starfleet : Coord ne peut nommer un type de Starfleet — hence `Fleet.Decision` moving down to the foundation.)
   def handle_decision(other, _correlation_id), do: {:error, {:invalid_decision, other}}
 
   @doc """

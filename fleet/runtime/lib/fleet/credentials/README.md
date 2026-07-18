@@ -1,11 +1,11 @@
 # fleet_credentials
 
 **Date** : 2026-07-11
-**Dernière révision** : 2026-07-11
+**Dernière révision** : 2026-07-18
 **Statut** : actif — carte du module
 **Référencé par** : —
 
-Ring 1 (pod primitives + vendor boundary). Credential + identity primitives for LCARS
+Pod primitives + vendor boundary. Credential + identity primitives for LCARS
 pods: the auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`,
 per-human, shared across a UID's pods) gated at the spawn-boundary — LCARS stores and
 refreshes nothing (delegated to the `claude` binary). Also the single source of the

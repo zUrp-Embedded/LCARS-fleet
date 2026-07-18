@@ -35,7 +35,7 @@ defmodule Fleet.API do
     exports: [Application]
 
   @moduledoc """
-  LCARS v2 public API (Ring 4 — external boundaries): REST + WS.
+  LCARS v2 public API (surface — external boundaries): REST + WS.
 
   **Client-agnostic API** — the native dashboard / observation deck is *one*
   possible consumer among others, not coupled to the v2 arch.

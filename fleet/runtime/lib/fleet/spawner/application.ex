@@ -96,8 +96,8 @@ defmodule Fleet.Spawner.Application do
   @doc """
   LIVE state of the admin-spawn dispatch rail, for readiness (anti-hollow-green). fleet_spawner
   owns the write-path topology → it knows whether the UNIQUE subscriber of `admin.spawn.request`
-  (`Fleet.Spawner.PublishConsumer`) is alive AND subscribed. fleet_api only asks (no Ring 1
-  process name leaks into Ring 4).
+  (`Fleet.Spawner.PublishConsumer`) is alive AND subscribed. fleet_api only asks (no spawner
+  process name leaks into the surface).
 
     * `{:operational, _}` — PublishConsumer alive AND subscribed to `fleet.events` → the
       broadcast→consume→spawn_pod chain is wired.

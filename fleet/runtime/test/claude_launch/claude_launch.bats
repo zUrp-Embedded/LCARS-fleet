@@ -4,7 +4,7 @@
 # STARDATE: 2026-06-01
 # STATUS: beyond_#5 chantier 3 — tests bats bin/claude_launch.sh v2 (ADR-G, RC interactif)
 #
-# Tests intégration bin/claude_launch.sh (Ring 1, frontière vendor N1) au contrat ADR-G ACTUEL :
+# Tests intégration bin/claude_launch.sh (frontière vendor N1) au contrat ADR-G ACTUEL :
 # 3 args positionnels <role> <pod_id> <pod_dir> (le SP N'est PLUS un arg — durcissement anti-fuite
 # /proc/cmdline 2026-06-14). Le launcher lit le SP depuis $POD_DIR/.lcars/system-prompt.md (écrit par
 # le spawner en do_project) et le passe via --system-prompt-file (replace + TRUSTED). Session UUID

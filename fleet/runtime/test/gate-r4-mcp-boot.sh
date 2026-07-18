@@ -3,7 +3,7 @@
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
 # STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (réécrit F175 puis retiré, cf. « GATE RETIRÉ » plus bas).
-# gate-r4-mcp-boot.sh — R-CORE.comm Ring 4 (fleet_mcp central bootable). exit 0 ssi le superviseur
+# gate-r4-mcp-boot.sh — R-CORE.comm (fleet_mcp central bootable). exit 0 ssi le superviseur
 # fleet_mcp, démarré avec `:pod_facing_port` configuré (host-side), boote le serveur MCP pod-facing
 # CENTRAL (PodTools :http) sur ce port, et qu'un client MCP round-trip get_task/submit_result contre
 # le broker per-pod `Fleet.TaskQueue`. = le central que les pods atteignent en PROD (via le pont stdio
@@ -82,14 +82,14 @@ IO.puts("PASS  central booté + round-trip get_task/submit_result per-pod OK (po
 System.halt(0)
 EXS
 
-echo "== Gate R-CORE.comm Ring 4 — fleet_mcp central bootable (PodTools :http + broker per-pod) =="
+echo "== Gate R-CORE.comm — fleet_mcp central bootable (PodTools :http + broker per-pod) =="
 cd "$RT" && timeout 120 mix run --no-start ".gate-r4.exs"
 RC=$?
 rm -f "$RT/.gate-r4.exs"
 echo "---"
 if [ "$RC" -eq 0 ]; then
-  echo "GATE R-CORE.comm Ring 4 : exit 0 — central pod-facing bootable + servant (config :pod_facing_port)"
+  echo "GATE R-CORE.comm : exit 0 — central pod-facing bootable + servant (config :pod_facing_port)"
 else
-  echo "GATE R-CORE.comm Ring 4 : exit 1 (rc=$RC)"
+  echo "GATE R-CORE.comm : exit 1 (rc=$RC)"
 fi
 exit "$RC"

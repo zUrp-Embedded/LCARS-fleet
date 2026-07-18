@@ -1,11 +1,11 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-15 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
-**Statut** : actif — driver forge (Ring 3, client du core)
-**Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
+**Dernière révision** : 2026-07-18 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
+**Statut** : actif — driver forge (steering, client du core)
+**Référencé par** : —
 
-Self-orchestration of Gitea issues (Ring 3 — forge driver, `:step_dispatch?` off by default).
+Self-orchestration of Gitea issues (forge driver, `:step_dispatch?` off by default).
 A **client of the core**, not the core: the forge IS the state machine (the route label engraved
 on the issue), and this app reacts to it — it discovers the fleet-org repos (`list_org_repos`, WS3),
 spawns the current step's role, drives the PR review lifecycle, and escalates to the human
@@ -45,5 +45,5 @@ restated, only pointed at.
 ## Config & deps
 
 - Boot: `:step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet_v2.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
-- Deps (all descending, Ring 3 → down): `fleet_workflow` (R2, workflow-map nav + gate briefs), `fleet_spawner` (R1), `fleet_credentials` (R1), `fleet_cap_profile` (R0), `fleet_event_router` (R0). Two upward runtime seams (duck-typed, NOT compile deps): `:forge_client` consumed by `fleet_mcp`, readiness probed by `fleet_api`. See `mix.exs`.
-- Not core (Ring 3 client): the core can be driven manually OR by `fleet_pilot` afterwards — decoupled (`topologie-ring.md` § Élagage).
+- Deps (all descending — see `use Boundary`): `fleet_workflow` (workflow-map nav + gate briefs), `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_event_router`. Two upward runtime seams (duck-typed, NOT compile deps): `:forge_client` consumed by `fleet_mcp`, readiness probed by `fleet_api`. See `mix.exs`.
+- Not core: the core can be driven manually OR by `fleet_pilot` afterwards — decoupled by design.

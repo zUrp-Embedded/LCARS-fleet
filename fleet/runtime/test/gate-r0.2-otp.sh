@@ -3,7 +3,7 @@
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
 # STATUS: SONDE MANUELLE v2 (DR-032) — standalone, hors mix gate (non-CI ; mix gate = ExUnit + shell_gate[python+bats] + contracts.check + dialyzer).
-# gate-r0.2-otp.sh — R0.2 (Ring 0, OTP supervisor). exit 0 ssi l'app compile (lifecycle BEAM
+# gate-r0.2-otp.sh — R0.2 (kernel mechanic: OTP supervisor). exit 0 ssi l'app compile (lifecycle BEAM
 # buildable = supervision tree buildable). NB : plus de check « daemon systemd actif » — la fleet est
 # lancée per-humain via bin/fleet_v2 (modèle humain-lance, ADR-E), pas un service système toujours-on.
 set -uo pipefail

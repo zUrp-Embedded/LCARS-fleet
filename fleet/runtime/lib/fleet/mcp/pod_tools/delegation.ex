@@ -131,7 +131,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). DR-011: the forge-protocol
-  # vocabulary moved to Ring-0 `Fleet.Labels` (deps: []), so MCP now DEPENDS ON the SSOT directly — no more
+  # vocabulary moved to the foundation `Fleet.Labels` (deps: []), so MCP now DEPENDS ON the SSOT directly — no more
   # drifting literal ("stage/merged" = `stage_prefix() <> stage_merged()`).
   @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
@@ -271,7 +271,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp conforming_escalation_forge,
     do: conforming(EscalationForge, EscalationForge.resolved())
 
-  # DR-011: SSOT `Fleet.Labels.awaits_arch/0` (Ring-0, both domains depend on it) — no drifting literal.
+  # DR-011: SSOT `Fleet.Labels.awaits_arch/0` (foundation, both domains depend on it) — no drifting literal.
   @awaits_arch_label Fleet.Labels.awaits_arch()
 
   # All the awaits-arch issues of ONE repo (scoped to the human), mapped to escalation entries. A repo

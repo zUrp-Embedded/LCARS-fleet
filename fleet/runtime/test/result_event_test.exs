@@ -3,7 +3,7 @@ defmodule Fleet.MCP.ResultEventTest do
   Completion event-driven — sur `submit_result`, le **broker** `fleet_task_queue`
   broadcast `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` sur `fleet.events`.
 
-  `pod.ex` (Ring 1) y souscrit pour déclencher sa complétion SANS lire fleet_mcp (Ring 4)
+  `pod.ex` (spawner) y souscrit pour déclencher sa complétion SANS lire fleet_mcp
   en direct. Ici on prouve l'émission via le tool `submit_result` (PUR, pas de claude).
   L'identité du pod vient du `state` (`%{pod_id: pod}`) — porté par l'accepteur de socket
   en prod, jamais des arguments.

@@ -10,7 +10,7 @@ defmodule Fleet.Starfleet do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      # Verdict validé Ring-0 (descendu ici depuis Starfleet, BND-002) : Gatekeeper le CONSTRUIT.
+      # Validated verdict, foundation value (moved down out of Starfleet so Coord can require it): Gatekeeper BUILDS it.
       Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.Shutdown.Quiesce,
@@ -27,7 +27,7 @@ defmodule Fleet.Starfleet do
 
   @moduledoc """
   System-side module consuming the outputs of arbitration pods
-  (gatekeeper + other decision-making roles) on the LCARS core Ring 2 side.
+  (gatekeeper + other decision-making roles) on the system side.
 
   **No pod, no inference in this module** — validation, parsing, audit,
   Cat 5 escalation only.
@@ -36,7 +36,7 @@ defmodule Fleet.Starfleet do
 
     * `Fleet.Starfleet.Application` — the app's supervisor (consumers gated
       by config: test hermeticity)
-    * `Fleet.Decision` — validated-output struct (Ring-0, descendu ici pour BND-002)
+    * `Fleet.Decision` — validated-output struct (foundation — moved down so Coord can require it without a Starfleet dep)
     * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
       validation (frozen `{decision, reason, details, chain}` schema)
     * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,

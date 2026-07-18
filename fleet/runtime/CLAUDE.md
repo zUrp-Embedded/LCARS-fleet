@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-15 (règle GRAVÉE : langue du code = anglais, sans exception — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
+**Dernière révision** : 2026-07-18 (règle GRAVÉE : langue du code = anglais, sans exception — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -38,7 +38,7 @@ L'ex-umbrella (14 apps) est collapsée en une app unique ; les ex-apps sont des 
 
 **Boot** : `Fleet.Application` (l'UNIQUE callback OTP) démarre les superviseurs de domaine dans un ordre qui EST l'invariant (cicatrice F8 inline : event_router premier, mcp avant spawner). Le spawn des pods permanents (BootOrchestrator) est déclenché POST-boot par la racine — après le `start_link` OK, fleet entière prouvée up (acte4 A-08 ; « post-readiness » mécanique, plus une promesse). `max_restarts: 0` au sommet = mort d'un domaine → mort du node (sémantique umbrella conservée, cf. D-17 du chantier migration). Le check `boot.order_f8` de `mix lcars.contracts.check` verrouille l'ordre.
 
-**Strates (mémo de lecture, l'enforcement est dans boundary)** : utils Ring-0 (`Fleet.Slug`, `EnvParse`, `GitRef`, `Layout`, `Event`, `SchemaCache`, `Shutdown.Quiesce` — deps: []) ; substrat (`event_router` = Bus PubSub `fleet.events`, `cap_profile`) ; primitives pod (`credentials`, `sp_builder`, `project_bootstrap`, `task_queue` broker de mandats, `spawner` + launchers `bin/`) ; coordination (`mcp`, `workflow`, `coord`, `starfleet`) ; driver forge (`pilot` — client du core, off sans `:step_dispatch?`) ; surfaces (`api` REST/WS no-auth by design, `observation` read-only).
+**Topologie (l'enforcement est dans boundary ; la carte est GÉNÉRÉE)** : la vue en couches vit dans `lib/fleet/README.md`, projetée depuis les `use Boundary` par `mix lcars.topology` (le gate refuse toute divergence — la carte ne peut pas mentir). Vocabulaire : la position d'un domaine ne se déclare JAMAIS en prose (elle EST sa déclaration boundary) ; une relation se nomme par DOMAINE (`Pilot.GateBrief`), jamais par numéro d'étage ; seul nom de couche mécaniquement vérifiable : **foundation** ≡ `deps: []` (le terme « Ring N » est banni du code — héritage `topologie-ring.md` #3.1, acceptions divergentes, cf. chantier doc-coherence 2026-07-18). Repères : `pilot` = driver forge (off sans `:step_dispatch?`), `api` REST/WS no-auth by design, `observation` read-only, launchers `bin/` sous `spawner`.
 
 **Seams runtime ASSUMÉS** (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:forge_client`/`:project_onboard` — Pilot ∉ deps de MCP) ; `starfleet→coord` (`:coord_backend`, relais d'escalade doctrine D1 — la trace durable est l'audit log, écrit AVANT le routage ; un routage raté est loggué warning par Cat5Escalator/DriftMonitor) ; `:launch_backend` (hermétisme test).
 

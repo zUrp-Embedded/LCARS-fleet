@@ -17,7 +17,7 @@ defmodule Fleet.Observation.Deck do
 
   ## Read frontier
 
-  `/api/pods` reads `Fleet.Spawner.list_pods/0` (Ring 1 direct read, live snapshot).
+  `/api/pods` reads `Fleet.Spawner.list_pods/0` (direct spawner read, live snapshot).
   `/api/projection` reads `Fleet.Observation.ReadModel` (projection of the
   `%Fleet.Event{}` stream); the deck reads **the projection**, never
   the internal GenServer state of a third party.

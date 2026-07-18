@@ -167,7 +167,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
   # Canonical schema broadcast %Fleet.Event{source: :starfleet}, via the protected core
   # `Bus.safe_emit/4` (local duplicated rescue removed — the protected-emission policy has ONE
-  # authority, Ring 0). `:silent`: this Task emits DURING boot — an UnregisteredError
+  # substrate authority). `:silent`: this Task emits DURING boot — an UnregisteredError
   # (registry not yet populated) is the nominal case here, not an alarm. A MALFORMED event
   # (construction bug) is logged ERROR by safe_emit then neutralized — otherwise it would mask a
   # boot_failed/boot_partial silently, and this `:transient` Task must NEVER crash (a

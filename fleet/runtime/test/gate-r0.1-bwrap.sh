@@ -4,7 +4,7 @@
 # STARDATE: 2026.146
 # STATUS: RÉÉCRIT (audit transverse lot 6, 2026-07-12) — sonde d'isolation e2e RÉELLE, modèle détaché ADR-G
 #
-# gate-r0.1-bwrap.sh — R0.1 (Ring 0, primitive bwrap). exit 0 ssi le VRAI bin/bwrap_launch.sh,
+# gate-r0.1-bwrap.sh — R0.1 (kernel mechanic: bwrap primitive). exit 0 ssi le VRAI bin/bwrap_launch.sh,
 # invoqué au CONTRAT COURANT (env spawner complet), projette un sandbox où — vu DE L'INTÉRIEUR :
 #   env_home        HOME intra-pod = le pod home (--setenv HOME, side-channel indépendant de HOME)
 #   iso_home        le home host est MASQUÉ (--tmpfs /home : sentinelle posée dans ~ INVISIBLE)

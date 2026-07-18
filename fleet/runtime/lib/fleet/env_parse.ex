@@ -7,7 +7,7 @@ defmodule Fleet.EnvParse do
 
   @moduledoc """
   Domain-typed parsing of environment variables for `config/runtime.exs` — a PURE, TESTABLE primitive
-  (Ring 0, alongside `Fleet.Slug`/`Fleet.GitRef`).
+  (foundation, alongside `Fleet.Slug`/`Fleet.GitRef`).
 
   `runtime.exs` is wrapped in `if config_env() != :test do … end`, so an inline lambda there can NEVER be
   unit-tested — the root of SOC-CONF-001/002/003 (a `parse_int` that checked the syntactic integer but not

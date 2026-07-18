@@ -1,11 +1,11 @@
 # fleet_task_queue
 
 **Date** : 2026-07-13
-**Dernière révision** : 2026-07-15 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — broker de mandats get_work_item/submit_result (Ring 1)
+**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
+**Statut** : actif — broker de mandats get_work_item/submit_result
 **Référencé par** : —
 
-Cross-pod orchestration broker (Ring 1): a single-writer GenServer that distributes work
+Cross-pod orchestration broker (pod primitive): a single-writer GenServer that distributes work
 items to pods and collects their results, event-driven completion. Ephemeral in prod — the
 forge is the source of truth, the broker is only its RAM front (`persist: false`).
 

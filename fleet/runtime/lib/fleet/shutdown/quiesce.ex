@@ -22,12 +22,12 @@ defmodule Fleet.Shutdown.Quiesce do
   enqueuing a brief) does NOT consult this flag — otherwise the in-flight work
   could no longer finish, the opposite of the drain's purpose.
 
-  ## Why a standalone Ring-0 boundary (and not inside starfleet)
+  ## Why a standalone foundation boundary (and not inside starfleet)
 
   `Fleet.Shutdown.Quiesce` is its OWN zero-dep boundary (`use Boundary, deps: []` above —
-  post-collapse it does NOT live in event_router). A reader in a Ring-2 domain cannot take
-  `Fleet.Starfleet` (Ring 2) as a dependency without coupling siblings; a `deps: []` Ring-0
-  primitive is reachable DOWNWARD from any ring precisely because it depends on nothing.
+  post-collapse it does NOT live in event_router). A sibling domain cannot take
+  `Fleet.Starfleet` as a dependency without coupling siblings; a `deps: []` foundation
+  primitive is reachable from any domain precisely because it depends on nothing.
   The **primitive** (the flag) therefore lives here; the **policy** (when to quiesce, the
   in-flight aggregator) stays in `Fleet.Starfleet`. Iron Law: no process, just
   `:persistent_term`.

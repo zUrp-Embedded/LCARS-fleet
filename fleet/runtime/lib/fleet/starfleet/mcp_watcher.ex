@@ -151,7 +151,7 @@ defmodule Fleet.Starfleet.MCPWatcher do
   end
 
   # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # protected-emission policy has ONE authority, Ring 0, which closes the "misaligned twins" drift: this
+  # protected-emission policy has ONE substrate authority, which closes the "misaligned twins" drift: this
   # module had been the only one of the 4 to mask a malformed event). `:silent`: UnregisteredError =
   # boot-order tolerated (registry not yet populated), like MCPMonitor. A MALFORMED event
   # (construction bug) is logged ERROR by safe_emit then neutralized — letting it crash would
