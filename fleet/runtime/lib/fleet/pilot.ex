@@ -1,55 +1,55 @@
 defmodule Fleet.Pilot do
   @moduledoc """
-  Façade du domaine pilot — le DRIVER de la forge-state-machine. C'est le processus
-  métier entier de la fleet ; tout le reste du runtime est de la machinerie. Réactif :
-  tick Poller + consumers Bus — personne n'appelle « dans » pilot sauf l'api
-  (`step_status`, onboarding) et l'opérateur (délégations ci-dessous).
+  Façade of the pilot domain — the DRIVER of the forge-state-machine. This is the
+  fleet's entire business process; everything else in the runtime is machinery.
+  Reactive: Poller tick + Bus consumers — nobody calls "into" pilot except the api
+  (`step_status`, onboarding) and the operator (delegates below).
 
-  ## Le récit transverse — les 5 phases d'un cycle (LE point d'entrée de lecture)
+  ## The transverse narrative — the 5 phases of a cycle (THE reading entry point)
 
-  La forge EST la state machine ; pilot réagit à ses transitions. Un fait n'est jamais
-  porté par la RAM seule : label forge (verrou), commentaire signé (preuve), TaskQueue
-  (mandat), Bus (latence). Le spécimen exécutable de ce récit est
-  `test/fleet/pilot/chain_integration_test.exs` (modules réels contre forge simulée,
-  synchrone) — le lire EN PREMIER pour suivre une chaîne complète.
+  The forge IS the state machine; pilot reacts to its transitions. A fact is never
+  carried by RAM alone: forge label (lock), signed comment (proof), TaskQueue
+  (mandate), Bus (latency). The executable specimen of this narrative is
+  `test/fleet/pilot/chain_integration_test.exs` (real modules against a simulated
+  forge, synchronous) — read it FIRST to follow a full chain.
 
-  **A — Détection** (`Poller`, tick ~30 s) : découvre les repos par org-membership,
-  liste issues+PRs, réconcilie les 3 encodages du « en vol » (label `lcars-in-flight` /
-  pod vivant / mandat TaskQueue — `Poller.Reconciliation`, grâce 2-ticks), pose le
-  lease par repo (`Poller.Lease`) et délègue.
+  **A — Detection** (`Poller`, tick ~30 s): discovers repos by org-membership,
+  lists issues+PRs, reconciles the 3 encodings of "in flight" (label `lcars-in-flight` /
+  live pod / TaskQueue mandate — `Poller.Reconciliation`, 2-tick grace), takes the
+  per-repo lease (`Poller.Lease`) and delegates.
 
-  **B — Dispatch** (`StepDispatcher`) : `decide/1` (gate PUR sur les labels) →
-  résolution projet/route (le label `stage/*` porte la position workflow_map) →
-  `Spawn.spawn_step` (AUTORITÉ UNIQUE des deux flux, ordre canonique : label
-  lock AVANT pod → enqueue brief → wake).
+  **B — Dispatch** (`StepDispatcher`): `decide/1` (PURE gate over the labels) →
+  project/route resolution (the `stage/*` label carries the workflow_map position) →
+  `Spawn.spawn_step` (SINGLE AUTHORITY of both flows, canonical order: lock label
+  BEFORE pod → enqueue brief → wake).
 
-  **C — Exécution** : le pod (forge-blind) tire son mandat par MCP
-  (`get_work_item`/`submit_result` → TaskQueue) ; la complétion remonte par le Bus
-  (`work_item.completed` → le Pod enrichit → `pod.completed`).
+  **C — Execution**: the pod (forge-blind) pulls its mandate via MCP
+  (`get_work_item`/`submit_result` → TaskQueue); completion comes back over the Bus
+  (`work_item.completed` → the Pod enriches → `pod.completed`).
 
-  **D — Complétion** (`StepRunConsumer` → `StepRunCompleter`) : gate de l'étape
-  (`GateEngine`, PUR — pass/rebond/escalade gatekeeper), puis la séquence forge
-  IDEMPOTENTE (deliverable→push, commentaire signé `[step_run:role:sha]` dédupliqué,
-  assignee suivant OU close, verrou levé EN DERNIER — un crash laisse le verrou,
-  le replay est sûr).
+  **D — Completion** (`StepRunConsumer` → `StepRunCompleter`): step gate
+  (`GateEngine`, PURE — pass/bounce/gatekeeper escalation), then the IDEMPOTENT
+  forge sequence (deliverable→push, signed comment `[step_run:role:sha]` deduplicated,
+  next assignee OR close, lock lifted LAST — a crash leaves the lock,
+  the replay is safe).
 
-  **E — Review & merge** (tick suivant : `dispatch_review` → `ReviewLifecycle`) :
-  verdicts commit-scopés → juges/rework → promotion via `GatekeeperSeal`
-  (AUTORITÉ UNIQUE du merge signé) → `WorktreeSync` → unlock.
+  **E — Review & merge** (next tick: `dispatch_review` → `ReviewLifecycle`):
+  commit-scoped verdicts → judges/rework → promotion via `GatekeeperSeal`
+  (SINGLE AUTHORITY of the signed merge) → `WorktreeSync` → unlock.
 
-  Rail transverse : les échecs (`pod.failed`/`wake.failed`) vont à
-  `IncidentConsumer`→`IncidentRegistry` (WAL + sync forge), blast-radius isolé du
-  rail de complétion. Sortie HTTP forge UNIQUE : `ForgeClient` (+`Transport`).
+  Transverse rail: failures (`pod.failed`/`wake.failed`) go to
+  `IncidentConsumer`→`IncidentRegistry` (WAL + forge sync), blast-radius isolated
+  from the completion rail. SINGLE forge HTTP exit: `ForgeClient` (+`Transport`).
 
-  ## Entrées opérateur (déléguées ici — la façade est le contrat)
+  ## Operator entries (delegated here — the façade is the contract)
 
   **Last revised**: 2026-07-18
   """
 
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
+  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
+  # deliberate API gesture.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -71,12 +71,12 @@ defmodule Fleet.Pilot do
     ],
     exports: [Application]
 
-  @doc "Santé du rail step (inactive/operational/degraded) — cf. `Fleet.Pilot.Application.step_status/0`."
+  @doc "Step-rail health (inactive/operational/degraded) — cf. `Fleet.Pilot.Application.step_status/0`."
   defdelegate step_status, to: Fleet.Pilot.Application
 
-  @doc "Poll immédiat synchrone (ops/debug) — cf. `Fleet.Pilot.Poller.force_poll/1`."
+  @doc "Immediate synchronous poll (ops/debug) — cf. `Fleet.Pilot.Poller.force_poll/1`."
   defdelegate force_poll, to: Fleet.Pilot.Poller
 
-  @doc "Onboarding d'un projet neuf (repo + dual-worktree + scaffold) — cf. `Fleet.Pilot.ProjectOnboard.onboard/2`."
+  @doc "Onboarding of a fresh project (repo + dual-worktree + scaffold) — cf. `Fleet.Pilot.ProjectOnboard.onboard/2`."
   defdelegate onboard(name, opts \\ []), to: Fleet.Pilot.ProjectOnboard
 end
