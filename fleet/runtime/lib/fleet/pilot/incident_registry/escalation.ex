@@ -67,8 +67,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
     # established pattern (`PodTools.do_create_issue`): create the issue (with the assignee) THEN set the label by
     # NAME via `add_label` (name->id resolution + org-label auto-creation on the ForgeClient side). Passing
-    # `labels: [name-string]` to the POST -> 422 Gitea « cannot unmarshal string into int64 »: seen LIVE
-    # 2026-07-04 (run poc-morse), the sysadmin escalation created NO issue (silent dead rail).
+    # `labels: [name-string]` to the POST -> 422 Gitea "cannot unmarshal string into int64" — the
+    # sysadmin escalation would create NO issue (silent dead rail).
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
       # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
       # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log).
@@ -133,11 +133,11 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # label, and the missing assignee is visible on the issue). Forge down on both attempts -> {:error, _}
   # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
   #
-  # F-C076 (KEEP, D1): the retry drops the assignee on ANY first error, not only an invalid-assignee 422.
+  # KEEP: the retry drops the assignee on ANY first error, not only an invalid-assignee 422.
   # Assessed harmless → KEPT: a real forge-down fails BOTH attempts (→ {:error}, no spurious drop); the
   # invalid-assignee case is exactly when dropping is correct; only a transient error resolving BETWEEN the
   # two attempts drops a valid assignee — a rare race. And the assignee is a SECONDARY discovery path: the
-  # DURABLE one is the `error_system` label (now retried + fail-loud-surfaced, F-C075), so a dropped assignee
+  # DURABLE one is the `error_system` label (retried + fail-loud-surfaced, F-C075), so a dropped assignee
   # loses NO discoverability. A precise "drop only on a 422-assignee error" would couple to the forge HTTP
   # error shape (fragile) for a negligible gain — not worth it.
   defp create_system_issue(create_fun, repo, title, body, assignee) do
@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # Full failure detail (producer-side `inspect/1` of the original reason term) — « Raison »
+  # Full failure detail (producer-side `inspect/1` of the original reason term) — "Raison"
   # above carries the STABLE dedup category only; this block restores the variable part for
   # the human diagnosis. Empty when the producer had nothing beyond the category.
   defp detail_block(detail) when is_binary(detail) and detail != "" do
@@ -156,15 +156,15 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp detail_block(_), do: ""
 
-  # « Captured screen » block (offloaded fallback-ACK) attached to the issue — empty if no pane.
+  # "Captured screen" block (offloaded fallback-ACK) attached to the issue — empty if no pane.
   defp pane_block(pane) when is_binary(pane) and pane != "" do
     "\n## Écran capturé (ce que l'agent affichait au moment de l'échec)\n```\n#{pane}\n```\n"
   end
 
   defp pane_block(_), do: ""
 
-  # Lien incident ↔ mandat (correlation_id = l'issue source, posée bout-en-bout depuis la vague E) :
-  # l'opérateur remonte du symptôme Cat-5 au mandat qui l'a causé sans fouiller les logs.
+  # Incident ↔ mandate link (correlation_id = the source issue, threaded end-to-end): the
+  # operator walks back from the Cat-5 symptom to the causing mandate without digging the logs.
   defp correlation_block(corr) when is_binary(corr) and corr != "" do
     "Mandat lié (correlation_id) : `#{corr}`.\n"
   end
