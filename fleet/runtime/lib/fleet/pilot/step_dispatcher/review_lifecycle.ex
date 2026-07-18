@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   @moduledoc """
-  REVIEW (PR) lifecycle extracted from `Fleet.Pilot.StepDispatcher`.
+  REVIEW (PR) lifecycle of `Fleet.Pilot.StepDispatcher`.
 
   `StepDispatcher.dispatch_review/2` (PUBLIC — the poller's contract) stays at the core: it does the PR
   gate (`in-flight`/`awaits-arch`), reads `pr_review_state` (commit-scoped verdicts + stable jury) THEN
@@ -35,13 +35,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   silently). The sub-modules re-build `Spawn.Seams`/`ArchEscalation.Seams` from this `Ctx` at the
   call site of each leaf (narrow boundary preserved).
 
-  ## Helpers SHARED with the core — pris à la SOURCE, sans cycle ni fork (Z6c 2026-07-13)
+  ## Helpers SHARED with the core — taken at the SOURCE, no cycle, no fork
 
-  `Spawn.route_for/4` (lecture de la route gravée) et `Opts.tag_err/2` (tag d'erreur de
-  résolution) servent les DEUX flux (issue au core + review ici) depuis leurs modules
-  d'autorité — plus de captures dans le `Ctx` (l'ancien détour `route_reader`/`err_tagger`
-  évitait un renvoi vers `StepDispatcher` ; les prendre à la source garde
-  l'unidirectionnalité core→ReviewLifecycle→Spawn sans fn dans un struct, sans fork).
+  `Spawn.route_for/4` (reads the engraved route) and `Opts.tag_err/2` (resolution error
+  tag) serve BOTH flows (issue at the core + review here) from their authority modules —
+  no captures in the `Ctx`: taking them at the source keeps the
+  core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
 
   **Last revised**: 2026-07-18
   """
@@ -64,9 +63,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     @moduledoc """
     Full context of the review flow, built at the SINGLE site `StepDispatcher.dispatch_review/2` and
     threaded through routing/rework/promotion. DEDICATED struct (not a map): `@enforce_keys`
-    forces every field, a `ctx.<typo>` access does not compile. (Z6c migration 2026-07-13 :
-    les captures `route_reader`/`err_tagger` sont MORTES — les deux flux prennent désormais
-    `Spawn.route_for`/`Opts.tag_err` à la source, l'unidirectionnalité tient sans détour.)
+    forces every field, a `ctx.<typo>` access does not compile. (No fn captures: both flows
+    take `Spawn.route_for`/`Opts.tag_err` at the source.)
     """
     @enforce_keys [
       :forge,
@@ -144,8 +142,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       true ->
         # All approved → MERGE. A merge failure is NOT necessarily a conflict: we re-read the PR object
         # and route on the REAL cause (`route_merge_failure`: already-merged / cancelled / draft / policy
-        # re-request / real conflict / unknown). Gone is the catch-all "conflict → eng rebase impossible" (wall
-        # 2026-07-07) and the lying seal from before `merge first`.
+        # re-request / real conflict / unknown) — never a catch-all "conflict", never a seal
+        # claimed before the merge holds.
         case promote_pr(pr_number, head, ctx) do
           {:error, {:merge, reason}} ->
             Remediation.route_merge_failure(pr_number, head, reason, ctx)
@@ -184,8 +182,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # (we don't lie, we show): delivered by the eng, validated by the judges (APPROVED), merged
   # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
   # `rebase` merge (LINEAR, handles a `main` advanced under a parallel PR — multi-issue, cf. merge_pr) —
-  # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (no more `Closes #N`/Gitea auto-close,
-  # coherent chronology, QoL 2026-07-07). No lock (single-process poller); PR already
+  # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
+  # auto-close: coherent chronology). No lock (single-process poller); PR already
   # merged → 409 → the PR disappears on the next tick (idempotent).
   #
   # `promote_comment` + the gatekeeper role + the merge live in `Fleet.Pilot.GatekeeperSeal`
@@ -217,10 +215,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           _ =
             Spawn.safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
-          # ISSUE lock (QoL regression 2026-07-07: this path NEVER lifted it — the PR-lock lifts
+          # ISSUE lock — this poller-driven path must lift it ITSELF: the PR-lock lifts
           # via each judge's `StepRunCompleter.route(:reviewed)`, but the ISSUE-lock, started by the
-          # PRODUCER at `dispatch_issue` and persisting through the whole review, was removed ONLY by
-          # `StepRunCompleter.route(:promote)` — never reached on this poller-driven path). `producer`
+          # PRODUCER at `dispatch_issue` and persisting through the whole review, is removed ONLY by
+          # `StepRunCompleter.route(:promote)` — never reached on this path. `producer`
           # (parsed from the `lcars/issue-N-<role>` branch) IS the identity that started this stopwatch —
           # same `StepRunCompleter.unlock/5` authority as the workflow_map path (no fork).
           _ =
