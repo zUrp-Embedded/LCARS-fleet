@@ -1,4 +1,4 @@
-# fleet_cap_profile
+# Fleet.CapProfile — domain card
 
 **Date**: 2026-07-13
 **Last revised**: 2026-07-18
@@ -7,7 +7,7 @@
 
 Capability Profile composer/loader/validator (substrate, LCARS schema v2.5):
 a pure data transformer, YAML on disk → composed `%Fleet.CapProfile{}` struct, no
-process/state. Also hosts two cross-cutting foundation utilities: `Fleet.Slug` and `Fleet.Layout`.
+process/state.
 
 **This file is a map, not the contract.** Each module owns its contract in its own
 `@moduledoc` — read those (`h Fleet.CapProfile` in IEx, or `lib/`). Nothing here is
@@ -21,10 +21,11 @@ restated, only pointed at.
 - `Fleet.CapProfile.Catalog` — FS front of the catalogue (scan/decode, resolve by `metadata.name`, Slug-confined)
 - `Fleet.CapProfile.DisallowedTools` — write-time `spec.scope.disallowedTools` resolution (baseline ∪ profile patterns)
 - `Fleet.CapProfile.CanonicalJson` — canonical (order-independent) JSON encode + sha256 (FROZEN hash format)
-- `Fleet.Slug` — path-safe smart-constructor `^[a-z0-9][a-z0-9_-]*$` (cross-cutting R0 utility, reused fleet-wide)
-- `Fleet.Layout` — platform layout authority ("where things live", hard-coded roots — cross-cutting R0 utility)
+
+Related, NOT this domain: `Fleet.Slug` and `Fleet.Layout` (own foundation boundaries at
+`lib/fleet/slug.ex` / `lib/fleet/layout.ex`, reachable from any domain).
 
 ## Config & deps
-... default = bundled `priv/cap_profile/canon/cap-profiles`.
+- Knob `:fleet_cap_profile, :root_dir` — read by `Catalog`; default = bundled `priv/cap_profile/canon/cap-profiles`.
 - Knob `:fleet_cap_profile, :schema_dir` — read by `Schema`; default = bundled `priv/cap_profile/schema`.
-- Deps: see `mix.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/cap_profile.ex`).
