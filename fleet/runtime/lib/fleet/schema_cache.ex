@@ -1,19 +1,14 @@
 defmodule Fleet.SchemaCache do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
 
   @moduledoc """
   Single authority for the "load an artifact once, cache it in `:persistent_term`"
   pattern (resolved JSON schemas, boot-time configs).
 
-  Dedup: the pipeline `File.read! |> Jason.decode! |> ExJsonSchema.Schema.resolve`
-  + `:persistent_term` cache lived copied across `fleet_workflow` (Loader),
-  `fleet_starfleet` (Gatekeeper) and `fleet_coord` (Policies — which re-read and
-  re-resolved the schema file on EVERY validation, without a cache). A single
-  implementation here, foundation: workflow/starfleet/coord already depend on the event_router domain, zero new dependency edge (deps are enforced by `use Boundary`).
+  The pipeline `File.read! |> Jason.decode! |> ExJsonSchema.Schema.resolve` +
+  `:persistent_term` cache has ONE implementation — here. Consumers (`Workflow.Loader`,
+  `Starfleet.Gatekeeper`, `Coord.Policies`) call it instead of keeping a local copy;
+  a foundation boundary (`deps: []`), reachable from any domain.
 
   ## Why `:persistent_term` (and not ETS / a GenServer)
 
