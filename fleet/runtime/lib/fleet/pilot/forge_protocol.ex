@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   **Co-located build+parse invariant**: each format has its BUILDER and its PARSER in
   THIS module, glued to each other — a format change happens HERE, both together,
-  never one without the other (no more drift between what is written and what is re-read).
+  never one without the other (no drift between what is written and what is re-read).
   The consumers (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) call these
   functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `ForgeClient`
   (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
@@ -57,7 +57,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   def parse_feature_branch(_), do: :error
 
-  # (The workflow_map position is no longer a `[lcars-route:...]` comment-marker: it lives in the
+  # (The workflow_map position is NOT a `[lcars-route:...]` comment-marker: it lives in the
   # issue's SCOPED label `stage/*` — Gitea native mutex, human-visible, read without a comment scan.
   # Builder/reader: `Fleet.Pilot.ForgeClient.post_route`/`get_route`.)
 
@@ -145,8 +145,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   # ============================================================
   # Trust primitive (bot-authored markers on comments: route/step_run/result).
-  # (The admission marker `[lcars-onboarded:<human>]` + `admitted?`/`post_onboard_marker` are
-  # REMOVED — WS3: admission is org-membership, no more server-side seal to set/read.)
+  # (WS3: admission is org-membership — no server-side admission marker in this vocabulary.)
   # ============================================================
 
   @doc false
