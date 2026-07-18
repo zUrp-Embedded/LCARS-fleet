@@ -1,19 +1,15 @@
 defmodule Fleet.EnvParse do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
 
   @moduledoc """
   Domain-typed parsing of environment variables for `config/runtime.exs` — a PURE, TESTABLE primitive
   (foundation, alongside `Fleet.Slug`/`Fleet.GitRef`).
 
-  `runtime.exs` is wrapped in `if config_env() != :test do … end`, so an inline lambda there can NEVER be
-  unit-tested — the root of SOC-CONF-001/002/003 (a `parse_int` that checked the syntactic integer but not
-  the DOMAIN: a negative/zero/out-of-range port passed). Each function here parses the DOMAIN.
+  `runtime.exs` is wrapped in `if config_env() != :test do … end`, so an inline lambda there can NEVER
+  be unit-tested — and a parser that only checks the syntactic integer lets a negative/zero/out-of-range
+  port through. Each function here parses the DOMAIN, and is testable.
 
-  Doctrine (matches the old `parse_int`): a LOAD-BEARING knob (port, interval) with an invalid value →
+  Doctrine: a LOAD-BEARING knob (port, interval) with an invalid value →
   `raise` a clear message = boot REFUSED (a typo must not boot a broken daemon, but with a readable error,
   not an opaque `String.to_integer` stacktrace). A boolean feature-flag typo → the documented default +
   a LOUD warning (a flag typo should be visible, but must not kill the boot).
@@ -51,8 +47,8 @@ defmodule Fleet.EnvParse do
 
   @doc """
   Boolean env value. Recognizes `true/1/yes/on` and `false/0/no/off` (case-insensitive, trimmed). `nil`
-  (unset) → `default`. An UNRECOGNIZED value → `default` + a LOUD warning (SOC-CONF-002: a typo like
-  `flase` must not silently become the default — it is logged).
+  (unset) → `default`. An UNRECOGNIZED value → `default` + a LOUD warning (a typo like `flase`
+  must not silently become the default — it is logged).
   """
   @spec bool(String.t(), String.t() | nil, boolean()) :: boolean()
   def bool(_name, nil, default) when is_boolean(default), do: default
@@ -77,7 +73,7 @@ defmodule Fleet.EnvParse do
 
   @doc """
   Normalize an operator-provided path: `Path.expand` (resolves `~`/relative → absolute). A NUL/control
-  char, or a `..` traversal → raise = boot refused (SOC-CONF-003). NO root-policy: the operator sets these
+  char, or a `..` traversal → raise = boot refused. NO root-policy: the operator sets these
   paths intentionally; only the manifestly-broken is refused.
   """
   @spec path(String.t(), String.t()) :: String.t()
