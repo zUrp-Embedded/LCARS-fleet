@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @moduledoc """
-  Step-rail gate DECISION engine, extracted from `Fleet.Pilot.StepRunConsumer`:
+  Step-rail gate DECISION engine of `Fleet.Pilot.StepRunConsumer`:
   at the end of a step_run, decides what COMES NEXT — advance in the workflow_map, bounce
   back into rework (bounded), apply a judge's verdict, or escalate to the permanent gatekeeper.
 
@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       :loader,
       # Resolves a role's deliverable_mode ("git_native" producer / "payload" judge).
       :deliverable_mode_fun,
-      # (The bounce's anti-runaway bound is NO LONGER a seam: it's DATA in the map, read by `rebound`.)
+      # (The bounce's anti-runaway bound is NOT a seam: it's DATA in the map, read by `rebound`.)
       # Repo "owner/name" of the step_run (per-step-run, derived from the event) — budget counter + logs.
       :repo,
       # Forge opts (token…) passed to the client for the budget counter.
@@ -121,9 +121,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
             # PR LIFECYCLE STAGE (review/merged): set POST-MAP by complete_producer/gatekeeper_seal, this
             # is NOT a workflow_map step. A judge finishing there reviews the PR of a TERMINAL producer
             # (e.g. brief-gate `build`→PR): never map navigation (which would fail `:unknown_step`) →
-            # no-workflow_map resolution (record review; merge = dispatch_review quorum). Before scoped
-            # labels, the step stayed the producer's (`build`, inherited route) and `inherited_route?`
-            # decided; the stage/* lifecycle (WS2) moved this switch HERE, explicitly.
+            # no-workflow_map resolution (record review; merge = dispatch_review quorum). The stage/*
+            # lifecycle (WS2) puts this switch HERE, explicitly — not on the inherited-route heuristic.
             lifecycle_stage?(workflow_map, step) ->
               no_workflow_map_resolve(payload, seams)
 
