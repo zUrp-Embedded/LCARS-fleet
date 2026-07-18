@@ -1,33 +1,34 @@
-# Cap-profile : consultant
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: consultant
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: consultant
   containment: bwrap
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
+  # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 6
   protected: false
   fleet_level: false
 spec:
-  # Profil WORKER : brief exécutable par défaut. Devient juge VIA l'override per-step (`brief_kind: judge`
-  # au step brief-review) — pas de profil dupliqué. REQUIS (schéma) — la judge-ness ne s'infère jamais.
+  # WORKER profile: executable brief by default. Becomes a judge VIA the per-step override
+  # (`brief_kind: judge` on the brief-review step) — no duplicated profile. REQUIRED (schema) —
+  # judge-ness is never inferred.
   brief_kind: worker
   scope:
     allowedTools:
       - Read
       - Glob
       - Grep
-      # #kill-yolo : Bash GÉNÉRIQUE (scopé = hang en --permission-mode default). Enforcement = MOUNT (RO/RW)
-      # + git_ops_denied (push/reset/rebase/commit hard-denied → lecture seule côté forge ET commit).
+      # GENERIC Bash (a SCOPED pattern-list hangs in --permission-mode default). Real
+      # enforcement = the MOUNT (RO/RW) + git_ops_denied (push/reset/rebase/commit
+      # hard-denied -> read-only toward the forge AND commit-less).
       - Bash
-      # Rapport : Write/Edit bornés par le MOUNT RW (pas la tool-list).
+      # Report writing: Write/Edit bounded by the RW MOUNT (not by the tool-list).
       - Write
       - Edit
-      # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
+      # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
       - Monitor
       - ToolSearch
     disallowedTools:
@@ -38,10 +39,10 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # `push --force`, `reset --hard`, `rebase main` etc déclarés au baseline
-    # universel (`_baseline-git-denied.yaml`) — pas dupliqués ici. Restent les
-    # restrictions spécifiques consultant : pas de push/reset/rebase/commit
-    # (rôle audit, ne touche pas le workspace).
+    # `push --force`, `reset --hard`, `rebase main` etc. come from the universal
+    # baseline (`_baseline-git-denied.yaml`) — not duplicated here. Consultant-specific
+    # restrictions remain: no push/reset/rebase/commit (audit role, never touches
+    # the workspace).
     git_ops_denied: ["push", "reset", "rebase", "commit"]
     outputs: ["/home/commons/consultant/"]
   knowledge:
@@ -50,18 +51,18 @@ spec:
       - methodologie-protocole-design-note
       - methodologie-doctrine-yolo
       - methodologie-anti-patterns-agent-2026-05-16
-    skills: []  # modops listés dans modop_set, pas dans skills (cf. F-12 audit consultant)
+    skills: []  # modops are listed in modop_set, not in skills
     mcpServers: []
     plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
-    model: opus        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     subagent_template: null
-    mcp_channels: ["fleet-control.consultant.*", "fleet-forge.consultant"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
+    mcp_channels: ["fleet-control.consultant.*", "fleet-forge.consultant"]  # fleet-control: Memory-X + coord; fleet-forge: Gitea ticket routing
     host_native: false
     max_alive_sec: 7200
     heartbeat_keepalive: false

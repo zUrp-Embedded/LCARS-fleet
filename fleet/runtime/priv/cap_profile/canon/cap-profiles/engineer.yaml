@@ -1,14 +1,13 @@
-# Cap-profile : engineer
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: engineer
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: engineer
   containment: bwrap
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
+  # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 3
   protected: false
   fleet_level: false
@@ -20,13 +19,14 @@ spec:
       - Grep
       - Edit
       - Write
-      # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
+      # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
       - Monitor
       - ToolSearch
-      # #kill-yolo : Bash GÉNÉRIQUE (shell + git local + build : mix/npm/cargo/make/pytest…). Le Bash SCOPÉ
-      # (allow-as-restriction) est incompatible --permission-mode default : toute commande hors-pattern
-      # (printf/cat/pwd…) PROMPTE→hang. L'enforcement réel = le MOUNT (RO/RW, zones shapées) + `git_ops_denied`
-      # (`push` → `Bash(git push:*)` hard-denied = forge-aveugle ; DeliverableGate F-04 : le SYSTÈME pousse).
+      # GENERIC Bash (shell + local git + build: mix/npm/cargo/make/pytest...). A SCOPED Bash
+      # (allow-as-restriction) is incompatible with --permission-mode default: any off-pattern
+      # command (printf/cat/pwd...) PROMPTS -> hang. Real enforcement = the MOUNT (RO/RW, shaped
+      # zones) + `git_ops_denied` (`push` -> `Bash(git push:*)` hard-denied = forge-blind;
+      # the SYSTEM pushes via the DeliverableGate).
       - Bash
       - TaskCreate
       - TaskUpdate
@@ -41,53 +41,46 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Patterns destructeurs déclarés au baseline universel
-    # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
-    # `push` ajouté ici = barrière forge-aveugle MÉCANIQUE (DN §4) : `Bash(git push:*)` devient
-    # disallowed (disallow > allow), pas seulement absent de l'allowlist. Le pod NE PEUT PAS push.
+    # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`,
+    # intangible) — not duplicated here. `push` added here = the MECHANICAL forge-blind
+    # barrier: `Bash(git push:*)` becomes disallowed (disallow > allow), not merely absent
+    # from the allowlist. The pod CANNOT push.
     git_ops_denied: [push]
     outputs: ["/home/commons/engineer/"]
   knowledge:
     libs:
       - methodologie-axiome-inference-vs-mecanisable
       - methodologie-protocole-design-note
-    skills: []  # modops listés dans modop_set
+    skills: []  # modops are listed in modop_set
     mcpServers: []
     plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
-    # `one-shot` : 1 task = 1 vie de pod (extract → release → kill, cf.
-    # `Fleet.Spawner.Pod.do_extract`). L'engineer rend sa révision via MCP
-    # `submit_result` puis MEURT ; le SYSTÈME publie sur la forge (forge-aveugle).
-    # Un rework (renvoi-au-dev avec findings du gatekeeper) re-spawne un pod
-    # FRAIS sur l'id déterministe `issue-<n>-engineer` (`Fleet.Pilot.StepDispatcher`),
-    # qui relit son contexte depuis la forge (PR + findings) — l'état vit sur la
-    # forge, pas en RAM (forge-state-machine, BL-043). Les judges (qualifier,
-    # reviewer, consultant) sont déjà one-shot : modèle désormais UNIFORME pour
-    # tous les workers de dispatch.
-    #
-    # Decision 2026-06-17 : one-shot. REOUVERTE 2026-06-28 (slot-freeze) : PIPE retenu pour donner 1 SLOT
-    # Claude Desktop par projet. Le slot Desktop = la connexion d'un PROCESS (atteste live) : un one-shot
-    # respawne N fois = N slots ; un pipe = 1 process resident re-brief = 1 slot. Le cold par ticket
-    # (workspace propre + /clear) est gere SANS rm_rf (bind mount bwrap vivant) par le pipeline de
-    # re-brief idle-aware : do_extract pose :publishing -> deliverable.published (POST-push) leve :ready
-    # -> le gate StepDispatcher reprovisionne in-place (reset_in_place + /clear) au re-brief d'un pipe
-    # :ready. Reversible : remettre `one-shot` ici (le gate retombe sur la voie one-shot, INCHANGEE).
-    # Cf. BL-055 + DESIGN-eng-1slot.md (#5.3).
+    # `pipe`: ONE resident engineer process per project, re-briefed between tickets.
+    # A Claude Desktop slot attests a live PROCESS: a one-shot respawning N times burns
+    # N slots; a pipe holds 1. Cold-per-ticket (clean workspace + /clear) is achieved
+    # WITHOUT rm_rf (the bwrap bind mount stays alive) by the idle-aware re-brief
+    # pipeline: do_extract sets :publishing -> deliverable.published (POST-push) raises
+    # :ready -> the StepDispatcher gate reprovisions in-place (reset_in_place + /clear)
+    # when re-briefing a :ready pipe. The engineer submits via MCP `submit_result`; the
+    # SYSTEM publishes to the forge (forge-blind). State lives on the forge, not in RAM:
+    # a rework re-brief re-reads its context from the forge (PR + findings). The judges
+    # (qualifier, reviewer, consultant) are one-shot. Reversible: set `one-shot` back
+    # here — the gate's one-shot path is UNCHANGED.
     lifetime_scope: pipe
-    model: opus        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
-    # subagent_template null : l'engineer exécute son brief DIRECTEMENT
-    # (get_work_item → travail → submit_result via tools MCP), pas via un subagent
-    # dispatché. Note : `lifetime_scope: pipe` ⟹ réintroduire un subagent_template `implementer`
-    # VIOLERAIT G24-11 (subagent_template ⟹ one-shot) ; on reste sur l'exécution directe (plus simple).
-    # Pattern subagent fire-mode-quick → cap-profile séparé.
+    # null: the engineer executes its brief DIRECTLY (get_work_item -> work ->
+    # submit_result over MCP tools), not via a dispatched subagent. NB: with
+    # `lifetime_scope: pipe`, reintroducing a subagent_template would VIOLATE G24-11
+    # (subagent_template implies one-shot) — direct execution stays. A subagent
+    # pattern belongs in a separate cap-profile.
     subagent_template: null
-    # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
-    # n'a aucun canal d'écriture forge. Il lit son brief / rend son livrable via MCP get_work_item/
-    # submit_result (le runtime fait commit/comment/PATCH côté système). fleet-control = Memory-X/coord.
+    # No forge write channel — forge-blind barrier: the engineer reads its brief and
+    # returns its deliverable via MCP get_work_item/submit_result (the runtime does
+    # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
     mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
     max_alive_sec: 3600
@@ -105,11 +98,11 @@ spec:
     optional: [tdd, subagent-driven, rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null
-  # O5 — l'engineer EST un dev : il commite son code dans son workspace (git-natif).
-  # Le système vérifie (gate I-CBC : identité/secrets/base) puis pousse sur la branche
-  # qu'IL choisit (forge-aveugle). Les juges restent en `payload` (défaut) : leur livrable
-  # est un verdict structuré, pas un patch git. Cf. JOURNAL-deliverable-model-2026-06-07.
+  # The engineer IS a dev: it commits its code in its own workspace (git-native). The
+  # system verifies (I-CBC gate: identity/secrets/base) then pushes on the branch IT
+  # chose (forge-blind). Judges stay on `payload` (default): their deliverable is a
+  # structured verdict, not a git patch.
   deliverable_mode: git_native
-  # Dual d'ENTRÉE de deliverable_mode : brief = instruction exécutable (corps de l'issue), le rôle AGIT.
-  # REQUIS (schéma) — la judge-ness ne s'infère jamais.
+  # Entry dual of deliverable_mode: brief = executable instruction (the issue body), the
+  # role ACTS. REQUIRED (schema) — judge-ness is never inferred.
   brief_kind: worker

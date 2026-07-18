@@ -1,28 +1,28 @@
-# Cap-profile : starfleet
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante). Dérogation
-# host-natif D-01 = le `lifetime_scope: forever` + `containment` documentés inline plus bas.
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: starfleet
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 #
-# D-01 : starfleet hors-bwrap (host-natif sysadmin avec sudo).
-# Justification : starfleet doit gérer infrastructure host (systemd, ACL, bwrap config, provisioning).
-# Mitigation : isolation via system_user 'starfleet' UID + sudoers strict allowlist.
+# starfleet lives OUTSIDE bwrap (host-native sysadmin): it manages host
+# infrastructure (systemd, ACL, bwrap config, provisioning), which a sandbox
+# would break. Like every host-native role it would run AS the human by UID
+# inheritance (host_launch.sh — no UID drop, no sandbox).
 kind: CapabilityProfile
 metadata:
   name: starfleet
   containment: none
-  # Coordonnees d'identite du role (le metadata EST la source unique du QUOI), lues via Fleet.CapProfile
-  # par le spawner pour minter le session_id hexspeak (l'encodeur SessionId ne catalogue plus) :
-  # role_index = slot role dans l'UUID ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
-  # starfleet n'a PAS de pod aujourd'hui (sysadmin host-natif, hors-fleet) ; ces champs reservent son slot R=0.
+  # Role identity coordinates (the metadata IS the single source of the WHAT), read via
+  # Fleet.CapProfile by the spawner to mint the hexspeak session_id (the SessionId encoder
+  # holds no catalogue): role_index = role slot in the UUID; protected = tier spared by
+  # the worker kill; fleet_level = single instance with no project dimension (repo 0000).
+  # starfleet has NO pod today (host-native sysadmin, outside the fleet); these fields
+  # reserve its role_index 0 slot.
   role_index: 0
   protected: true
-  # fleet_level true : le sysadmin-runtime ne touche pas aux projets -> fleet-level (repo 0000).
-  # Inerte tant que starfleet ne spawne pas de pod.
+  # fleet_level true: the runtime sysadmin does not touch projects -> fleet-level (repo 0000).
+  # Inert as long as starfleet spawns no pod.
   fleet_level: true
 spec:
-  # Rôle système host-native : brief = instruction exécutable, jamais un juge. REQUIS (schéma) — jamais inféré.
+  # Host-native system role: brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
   scope:
     allowedTools:
@@ -40,8 +40,8 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Pattern destructeur push --force déclaré au baseline universel
-    # (`_baseline-git-denied.yaml`, intangible) — pas dupliqué ici.
+    # Destructive patterns come from the universal baseline
+    # (`_baseline-git-denied.yaml`, intangible) — not duplicated here.
     git_ops_denied: []
     outputs: ["/home/commons/starfleet/", "/var/log/fleet-starfleet.jsonl"]
   knowledge:
@@ -49,20 +49,20 @@ spec:
       - methodologie-axiome-inference-vs-mecanisable
       - methodologie-doctrine-yolo
       - methodologie-regles-yolo
-    skills: []  # modops listés dans modop_set
+    skills: []  # modops are listed in modop_set
     mcpServers: []
     plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
-    lifetime_scope: forever  # D-01 host-natif process permanent
-    model: opus        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
-    boot_at_start: false     # D-01 : starfleet boot via lcars-starfleet-host.sh systemd unit séparée, JAMAIS via fleet_spawner bwrap
+    lifetime_scope: forever  # host-native permanent process
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
+    boot_at_start: false     # starfleet is NEVER spawned by the fleet boot (no pod today — identity reserved)
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: true
-    max_alive_sec: null  # forever — D-01 starfleet host-natif jusqu'à shutdown fleet
+    max_alive_sec: null  # forever — host-native, until fleet shutdown
     heartbeat_keepalive: false
     bridge_enabled: false
     policy: hide

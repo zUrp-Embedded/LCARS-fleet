@@ -1,35 +1,35 @@
-# Cap-profile : architect
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: architect
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: architect
-  # bwrap (réaligné #5.2 2026-06-20) : l'arch est persistant ET sandboxé. Son besoin réel = voir tous les
-  # projets (via mounts catalogue ci-dessous), PAS "être le home de l'humain" (effet de bord host_launch,
-  # nocif : contamination doctrine BUG-3 + zéro sandbox). En bwrap, HOME=pod_dir → claude lit pod_dir/.claude,
-  # plus le ~/.claude humain → BUG-3 disparaît à la racine. Interactif via `lcars attach` (marche sur bwrap).
+  # bwrap: the arch is persistent AND sandboxed. Its real need = seeing every project
+  # (via the catalogue mounts below), NOT "being the human's home" (a host_launch side
+  # effect — harmful: doctrine contamination through the human's ~/.claude + zero sandbox).
+  # Under bwrap, HOME=pod_dir -> claude reads pod_dir/.claude, never the human's ~/.claude,
+  # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
   containment: bwrap
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
+  # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 1
   protected: true
   fleet_level: true
   mounts:
-    - path: /home/projects        # RO : lire le code pour cadrer les briefs (tous les projets d'un coup)
+    - path: /home/projects        # RO: read the code to frame briefs (every project at once)
       mode: ro
-    - path: /home/projects.work   # RW : écrire la DOC (moon-shot/beyond), en amont des tickets
+    - path: /home/projects.work   # RW: write the DOC (moon-shot/beyond), upstream of tickets
       mode: rw
 spec:
-  # Rôle worker (interactif) : brief = instruction exécutable, jamais un juge. REQUIS (schéma) — jamais inféré.
+  # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
   scope:
-    # Convention nommage tools (cohérent fleet_cap_profile G24-9 F-CONT-RISK gate) :
-    #   - PascalCase  = tools Claude Code natifs côté pod, validés via `can_use_tool` permission callback
-    #   - snake_case  = server tools API Anthropic (bypass can_use_tool, exécutés server-side)
-    # Les 2 espaces de noms sont DISJOINTS — pas de contradiction quand un nom apparaît dans les 2 listes
-    # (ex: `WebFetch` allowed côté pod + `web_fetch` disallowed côté server API)
+    # Tool naming convention (consistent with G24-9):
+    #   - PascalCase  = native Claude Code tools pod-side, validated via the `can_use_tool` permission callback
+    #   - snake_case  = Anthropic API server tools (bypass can_use_tool, executed server-side)
+    # The 2 namespaces are DISJOINT — no contradiction when a name appears in both lists
+    # (e.g. `WebFetch` allowed pod-side + `web_fetch` disallowed server-API-side).
     allowedTools:
       - Read
       - Glob
@@ -37,20 +37,21 @@ spec:
       - Bash
       - Write
       - Edit
-      - WebFetch       # PascalCase : tool Claude Code natif autorisé côté pod
-      - WebSearch      # PascalCase : tool Claude Code natif autorisé côté pod
-      - ToolSearch     # PascalCase : charge les tools déférés (Monitor, mcp__fleet__*)
-      - Monitor        # PascalCase : réveil-par-flag (watch.sh) — wake sans send-keys de contenu (ADR-G pt3)
-      # MCP fleet role-specific de l'arch (délégation) — requis en --permission-mode default (sinon prompt).
-      # get_work_item/submit_result (universels) viennent du launcher #kill-yolo.
+      - WebFetch       # PascalCase: native Claude Code tool, allowed pod-side
+      - WebSearch      # PascalCase: native Claude Code tool, allowed pod-side
+      - ToolSearch     # PascalCase: loads the deferred tools (Monitor, mcp__fleet__*)
+      - Monitor        # PascalCase: wake-by-flag (watch.sh) — wake without content send-keys
+      # Role-specific fleet MCP tools of the arch (delegation) — required in
+      # --permission-mode default (otherwise prompt). get_work_item/submit_result
+      # (universal) come from the launcher.
       - mcp__fleet__create_project
-      - mcp__fleet__import_project   # jumeau de create_project : ADOPTE un repo existant (F-C142/F-C138)
+      - mcp__fleet__import_project   # twin of create_project: ADOPTS an existing repo
       - mcp__fleet__create_issue
       - mcp__fleet__get_issue_status
-      - mcp__fleet__list_escalations  # canal retour : lit les escalades awaits-arch (verdict worker)
-      - mcp__fleet__comment_issue     # canal retour : répond sur un ticket en vol (au nom du rôle)
+      - mcp__fleet__list_escalations  # return channel: reads the awaits-arch escalations (worker verdict)
+      - mcp__fleet__comment_issue     # return channel: replies on an in-flight ticket (in the role's name)
     disallowedTools:
-      # snake_case : server tools API Anthropic bypassant can_use_tool — F-CONT-RISK gate
+      # snake_case: Anthropic API server tools, which bypass can_use_tool
       - web_search
       - web_fetch
       - code_execution
@@ -58,8 +59,8 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Patterns destructeurs déclarés au baseline universel
-    # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
+    # Destructive patterns come from the universal baseline
+    # (`_baseline-git-denied.yaml`, intangible) — not duplicated here.
     git_ops_denied: []
     outputs: ["/home/ready-room/outbox/"]
   knowledge:
@@ -77,14 +78,14 @@ spec:
     monk_registry: null
     monk_instance: null
   invocation:
-    lifetime_scope: forever  # G24-10 : boot_at_start: true requires forever (pod permanent Type 1)
-    model: opus        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    lifetime_scope: forever  # G24-10: boot_at_start: true requires forever (permanent pod)
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: true
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false
-    max_alive_sec: null  # forever — pod permanent jusqu'à shutdown fleet
+    max_alive_sec: null  # forever — permanent pod until fleet shutdown
     heartbeat_keepalive: false
     bridge_enabled: true
     policy: hide

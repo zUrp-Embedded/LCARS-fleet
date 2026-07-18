@@ -1,35 +1,35 @@
-# Cap-profile : qualifier
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: qualifier
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: qualifier
   containment: bwrap
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
+  # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 4
   protected: false
   fleet_level: false
 spec:
-  # ②.1d — juge de PR (DN §1.4 : « les tests sont honnêtes », une REVIEW). Reçoit un GateBrief
-  # DÉSAMORCÉ (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — I-CBC) au lieu
-  # du corps de l'issue : sans ça (défaut `worker`), le qualifier exécuterait le build au lieu de juger.
-  # Dual d'entrée de deliverable_mode (sortie = `payload` par défaut : verdict, pas un patch git).
+  # PR judge ("the tests are honest" — a REVIEW). Receives a DEFUSED GateBrief (context +
+  # deliverable + verdict contract, NO executable instruction — I-CBC) instead of the issue
+  # body: without it (default `worker`) the qualifier would EXECUTE the build instead of
+  # judging it. Entry dual of deliverable_mode (output = `payload` default: a verdict, not a git patch).
   brief_kind: judge
   scope:
     allowedTools:
       - Read
       - Glob
       - Grep
-      # #kill-yolo : Bash GÉNÉRIQUE (git read + mix test/pytest + shell). Scopé = hang en default mode.
-      # Enforcement = MOUNT (RO/RW) + git_ops_denied (push/rebase hard-denied → forge-aveugle).
+      # GENERIC Bash (git read + mix test/pytest + shell). A SCOPED Bash pattern-list hangs in
+      # --permission-mode default (off-pattern command -> prompt). Real enforcement = the MOUNT
+      # (RO/RW) + git_ops_denied (push/rebase hard-denied -> forge-blind).
       - Bash
-      # Rapport : Write/Edit bornés par le MOUNT RW (pas la tool-list).
+      # Report writing: Write/Edit bounded by the RW MOUNT (not by the tool-list).
       - Write
       - Edit
-      # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
+      # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
       - Monitor
       - ToolSearch
     disallowedTools:
@@ -40,33 +40,33 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # `push --force` et `reset --hard` déclarés au baseline universel
-    # (`_baseline-git-denied.yaml`) — pas dupliqués ici. Restent les
-    # restrictions spécifiques qualifier : pas de push (verdict-only)
-    # et pas de rebase (préserve l'historique testé).
+    # `push --force` and `reset --hard` come from the universal baseline
+    # (`_baseline-git-denied.yaml`) — not duplicated here. Qualifier-specific
+    # restrictions remain: no push (verdict-only) and no rebase (preserves
+    # the tested history).
     git_ops_denied: ["push", "rebase"]
     outputs: ["/home/commons/qualifier/"]
   knowledge:
     libs:
       - methodologie-axiome-inference-vs-mecanisable
       - methodologie-protocole-design-note
-    skills: []  # modops listés dans modop_set
+    skills: []  # modops are listed in modop_set
     mcpServers: []
     plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
-    model: sonnet        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    model: sonnet        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     subagent_template: spec-reviewer
-    mcp_channels: ["fleet-control.qualifier.*"]  # fleet-control: Memory-X + coord. PAS de fleet-forge (F-C007) : juge = clone in-pod + verdict payload → RIEN à faire avec la forge.
+    mcp_channels: ["fleet-control.qualifier.*"]  # fleet-control: Memory-X + coord. NO fleet-forge channel: a judge clones in-pod and returns a payload verdict — NOTHING to do with the forge.
     host_native: false
     max_alive_sec: 1800
     heartbeat_keepalive: false
     bridge_enabled: false
-    remote_control: false  # invisible Claude Desktop (juge éphémère, churny) — pas de --remote-control
+    remote_control: false  # invisible to Claude Desktop (ephemeral, churny judge) — no --remote-control
     policy: hide
     rubber_duck_enabled: false
     long_session_protocol: false

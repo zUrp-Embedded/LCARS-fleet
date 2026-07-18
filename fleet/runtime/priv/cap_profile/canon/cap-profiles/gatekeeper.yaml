@@ -1,14 +1,13 @@
-# Cap-profile : gatekeeper
-# Date : 2026-05-18
-# Contrat : schema embarqué (ci-dessous) + Fleet.CapProfile (@moduledoc, SSoT courante).
-# Schema : ../../schema/cap-profile-v2.5.json
+# Cap-profile: gatekeeper
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
   name: gatekeeper
   containment: bwrap
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
-  # fleet_level = instance unique sans dimension projet (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
+  # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 2
   protected: false
   fleet_level: true
@@ -18,22 +17,22 @@ spec:
       - Read
       - Grep
       - Glob
-      # #kill-yolo : Bash GÉNÉRIQUE (inspecter le livrable : git diff/log/show + shell). Le scopé est
-      # incompatible --permission-mode default (commande hors-pattern → prompt→hang). Enforcement = MOUNT
-      # (RO/RW) + git_ops_denied (push → `Bash(git push:*)` hard-denied = forge-aveugle).
+      # GENERIC Bash (inspect the deliverable: git diff/log/show + shell). A SCOPED
+      # pattern-list is incompatible with --permission-mode default (off-pattern command
+      # -> prompt -> hang). Real enforcement = the MOUNT (RO/RW) + git_ops_denied
+      # (push -> `Bash(git push:*)` hard-denied = forge-blind).
       - Bash
-      # rail wake (Monitor armé via ToolSearch au boot) — requis en --permission-mode default.
+      # Wake rail (Monitor loaded via ToolSearch at boot) — required in --permission-mode default.
       - Monitor
       - ToolSearch
-      # Rapport de jugement : Write/Edit BORNÉS par le MOUNT RW (zones RO/RW shapées par le pod), pas
-      # par la tool-list ; la forge reste hors de portée (push denied + forge-aveugle ci-dessous).
+      # Judgment report: Write/Edit BOUNDED by the RW MOUNT (RO/RW zones shaped per pod),
+      # not by the tool-list; the forge stays out of reach (push denied + forge-blind below).
       - Write
       - Edit
-      # `git push/commit/mv/tag` + `tea issues edit/close/comment` RETIRÉS — barrière
-      # forge-aveugle (DN forge-state-machine §4 ; gatekeeper-forge-encoding-v2 §4/§9.9 ;
-      # analogue engineer A1.2a `c49b32eb`). Le gatekeeper rend son verdict par
-      # `submit_result` (canal fleet-control) ; le SYSTÈME écrit `verdict.json` + push +
-      # route. Le pod ne touche JAMAIS la forge. Voir git_ops_denied + mcp_channels.
+      # No git push/commit/mv/tag, no `tea issues edit/close/comment` — forge-blind
+      # barrier: the gatekeeper hands off its verdict via `submit_result`
+      # (fleet-control channel); the SYSTEM writes `verdict.json` + pushes + routes.
+      # The pod NEVER touches the forge. See git_ops_denied + mcp_channels.
     disallowedTools:
       - web_search
       - web_fetch
@@ -42,10 +41,10 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Patterns destructeurs déclarés au baseline universel
-    # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
-    # `push` = barrière forge-aveugle MÉCANIQUE (DN §4) : `Bash(git push:*)` devient
-    # un no-op même si ré-ajouté à allowedTools (défense en profondeur, analogue engineer).
+    # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`,
+    # intangible) — not duplicated here. `push` = the MECHANICAL forge-blind barrier:
+    # `Bash(git push:*)` stays denied even if re-added to allowedTools (defense in
+    # depth, same as engineer).
     git_ops_denied: [push]
     outputs: ["/home/commons/gatekeeper/"]
   knowledge:
@@ -60,13 +59,12 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: pipe
-    model: opus        # catalogue → --model (alias/nom complet ; tunable)
-    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     subagent_template: null
-    # `fleet-forge.*` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4 ;
-    # gatekeeper-forge-encoding-v2 §9.9). Le gatekeeper hand-off son verdict via
-    # `fleet-control.gatekeeper.*` (submit_result) ; le système écrit la forge.
+    # No forge channel — forge-blind barrier: the gatekeeper hands off its verdict via
+    # `fleet-control.gatekeeper.*` (submit_result); the system writes the forge.
     mcp_channels: ["fleet-control.gatekeeper.*"]
     host_native: false
     max_alive_sec: 3600
@@ -84,7 +82,7 @@ spec:
     optional: [fire-mode]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null
-  # F077 — le gatekeeper est un JUGE : il reçoit un GateBrief I-CBC DÉSAMORCÉ (contexte +
-  # livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 #11/#12). Déclaré
-  # par catalogue (pas un nom magique "gatekeeper" en ring2). Dual d'entrée de deliverable_mode.
+  # The gatekeeper is a JUDGE: it receives a DEFUSED I-CBC GateBrief (context +
+  # deliverable + verdict contract, NO executable instruction). Declared by catalogue
+  # (not a magic "gatekeeper" name in the code). Entry dual of deliverable_mode.
   brief_kind: judge
