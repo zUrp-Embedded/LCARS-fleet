@@ -67,16 +67,15 @@ install_hooks_to() {
         local src="$SRC_DIR/$HOOK"
         local dst="$hooks_dir/$HOOK"
         [[ -f "$src" ]] || { echo "  SKIP: $src not found"; continue; }
+        # SYMLINK, not copy: the versioned source stays the ONLY file. A local "hotfix"
+        # of .git/hooks would edit the source through the link and show up in git status —
+        # the copy+hotfix divergence (observed April 2026) becomes impossible.
         if [[ -f "$dst" && ! -L "$dst" ]]; then
-            if cmp -s "$src" "$dst"; then
-                echo "  [up to date] $HOOK"
-                continue
-            fi
             cp "$dst" "$dst.bak"
         fi
-        cp "$src" "$dst"
-        chmod +x "$dst"
-        echo "  [installed] $HOOK"
+        ln -sfn "$src" "$dst"
+        [[ -x "$src" ]] || chmod +x "$src"
+        echo "  [linked] $HOOK"
     done
 }
 
