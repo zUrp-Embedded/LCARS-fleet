@@ -2,8 +2,7 @@ defmodule Fleet.Observation.Deck.View do
   @moduledoc """
   PURE HTML rendering of the observation deck — the template (inline HTML + CSS + JS),
   separated from the controller (`Fleet.Observation.Deck`: Plug routing + role-catalogue
-  derivation + live snapshots). Extracted from `Deck` (C4 split
-  2026-07-05): ~85% of this file is template, zero router logic.
+  derivation + live snapshots): ~85% of this file is template, zero router logic.
 
   Two views, two philosophies:
 

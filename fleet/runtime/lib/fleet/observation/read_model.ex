@@ -159,7 +159,7 @@ defmodule Fleet.Observation.ReadModel do
 
       other ->
         # DR-027 hollow-green: a failed subscribe leaves the read-model ALIVE but DEAF — no event will
-        # ever arrive, yet `projection_status/0` used to say :live (a deaf process INDISTINGUISHABLE from
+        # ever arrive, and `projection_status/0` would otherwise say :live (a deaf process INDISTINGUISHABLE from
         # a quiet-healthy fleet). We leave `:subscribed` FALSE → status reports :deaf, and we LOG LOUD.
         Logger.error(
           "ReadModel: subscribe #{topic} FAILED (#{inspect(other)}) — read-model is DEAF: no event " <>
