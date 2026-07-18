@@ -80,13 +80,11 @@ defmodule Fleet.Spawner.PublishConsumer do
   def handle_info(_other, state), do: {:noreply, state}
 
   # `payload` = application map (the canonical %Fleet.Event{} carries issue_id IN the payload).
-  # (No `envelope` param anymore: it was a vestige of the legacy `{atom, map}` tuple clause the
-  # moduledoc declares dead — the fallback read of a root-level issue_id could never fire.)
   defp handle_spawn_request(payload, state) do
     # `presence/1` on EACH candidate before the fallback (the Bus is no-auth: SpawnAdmission
     # broadcasts a parsed DTO, but any process can emit on fleet.events) — a truthy "" in
-    # `cap_profile_name` would short-circuit `||` and mask a valid `role` (the acte4 #32
-    # regression class). This consumer is a REAL boundary, not defensive re-validation.
+    # `cap_profile_name` would short-circuit `||` and mask a valid `role`.
+    # This consumer is a REAL boundary, not defensive re-validation.
     name = presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role"))
 
     issue_id = Map.get(payload, "issue_id") || ""
@@ -149,8 +147,8 @@ defmodule Fleet.Spawner.PublishConsumer do
     # JSON-safe + rail-reaching: "reason" = stable category (tuple reasons {:spawn_pod,_}/
     # {:cap_profile_load,_} would crash the WS edge AND leak variable detail into the
     # IncidentRegistry dedup signature if blindly inspected), detail aside. The subject falls
-    # through presence/1 (a truthy "" would mask `role` — the #32 class this file already
-    # neutralizes in handle_spawn_request) down to "unknown": the alarm must ALWAYS reach the
+    # through presence/1 (a truthy "" would mask `role` — the same class handle_spawn_request
+    # neutralizes) down to "unknown": the alarm must ALWAYS reach the
     # incident rail with a binary subject (IncidentConsumer guards is_binary(name)).
     {reason_cat, reason_detail} = Fleet.Event.reason_fields(reason)
 
@@ -198,8 +196,8 @@ defmodule Fleet.Spawner.PublishConsumer do
   of maps/scalars) — so it would be filtered to `[]` rather than swallowed raw as spawner opts.
 
   ALLOWLIST (R1-30): beyond the atom-leak filter, only `@allowed_spawn_opts` keys are kept — the DROP
-  of everything else is what actually "doubles" the `/api/admin/spawn` admission lock (the moduledoc
-  claimed it; the code did not). The allowlist mirrors the SOLE producer
+  of everything else is what actually doubles the `/api/admin/spawn` admission lock.
+  The allowlist mirrors the SOLE producer
   (`Fleet.API.SpawnAdmission.build_admin_opts`, which emits ONLY `brief` + `pod_id`). The infrastructure
   opts (`pod_dir_root`/`state_fs_root` = FS redirect out of the confined home, `containment` = host-native
   escape, `launch_backend`/`fleet_spawner` = backend override) are all existing atoms → they PASS the
