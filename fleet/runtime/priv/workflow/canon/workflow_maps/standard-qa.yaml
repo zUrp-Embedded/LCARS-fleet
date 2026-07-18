@@ -12,7 +12,7 @@ kind: WorkflowMap
 metadata:
   name: standard-qa
   description: "Workflow méthodologique brainstorm → plan → implement (TDD) → spec-review → code-review → finish"
-  presentation: "L2→L4 — Le pipeline méthodologique COMPLET : brainstorm → plan → TDD → double review → finish, avec approbations humaines. ⚠ PAS OPÉRATIONNELLE de bout en bout aujourd'hui (constat live 2026-07-18 : ses steps racine `architect`/`starfleet` ne sont pas servis par le dispatch actuel — le projet reste en attente silencieuse). Préférer brief-gate en attendant sa réhabilitation."
+  presentation: "L2→L4 — Le pipeline méthodologique COMPLET : brainstorm (architecte) → plan → implémentation TDD (engineer) → revue de spec (qualifier) → revue de code (reviewer) → finish, approbations humaines aux gates de spec et de plan, jury qualifier + reviewer sur la PR. ⚠ PAS OPÉRATIONNELLE de bout en bout aujourd'hui (constat live 2026-07-18 : les steps `architect`/`starfleet` ne sont pas servis par le dispatch — le projet part en boucle/attente). Préférer brief-gate en attendant sa réhabilitation."
   applicable_intensity: [L2, L3, L4]  # L0-L1 fast-track via audit-only
   applicable_regime: [R1, R2]
 
