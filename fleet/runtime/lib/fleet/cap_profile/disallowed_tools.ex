@@ -16,9 +16,8 @@ defmodule Fleet.CapProfile.DisallowedTools do
   `load`/`compose` core.
 
   I/O: reads the IMMUTABLE priv baseline `priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`
-  (resolved via `:code.priv_dir(:lcars_fleet)` — the same file as before the
-  extraction), read+parse cached once in `:persistent_term` (lazy-init; errors not
-  cached — the bang re-raises on the next call).
+  (resolved via `:code.priv_dir(:lcars_fleet)`), read+parse cached once in
+  `:persistent_term` (lazy-init; errors not cached — the bang re-raises on the next call).
 
   **Last revised**: 2026-07-18
   """
