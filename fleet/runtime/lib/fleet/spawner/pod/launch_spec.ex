@@ -301,7 +301,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # (`--ro-bind /usr`); since the install (`/local/LCARS_v2/bin`) or the dev source (`/home/.../bin`) it must
   # be bound explicitly. Derived from the launcher path (= install parameter) → follows the deployment without hardcode.
   # Goes through the catalogue channel `LCARS_POD_MOUNTS` (applied AFTER `--tmpfs /home` → re-exposes even a
-  # `/home/...` path) ⇒ le sanctuaire du pod reste INTACT. Skip if already under `/usr` (covered by
+  # `/home/...` path) ⇒ the pod's sanctuary stays INTACT. Skip if already under `/usr` (covered by
   # `--ro-bind /usr` → useless redundant bind; the legacy default `/usr/local/bin` case, incl. its tests).
   defp system_mounts(claude_launch_path) do
     bin = Path.dirname(claude_launch_path)
@@ -340,9 +340,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end)
   end
 
-  # (Plus de clause `mounts_env(_)` fallback : depuis l'ajout du mount projet-ops, `pod_mounts_env` compose
-  # TOUJOURS trois listes via `++` → l'entrée est prouvée-liste, le fallback non-liste était mort — dialyzer
-  # `pattern_match_cov`. Une non-liste crasherait de toute façon AU `++`, jamais ici.)
+  # (No `mounts_env(_)` fallback clause: `pod_mounts_env` ALWAYS composes three lists via `++` →
+  # the input is proven-list, a non-list fallback would be a dead branch — dialyzer
+  # `pattern_match_cov`. A non-list would crash at the `++` anyway, never here.)
 
   defp mount_has_newline?(m) do
     has_newline?(Map.get(m, "mode") || Map.get(m, :mode)) or
