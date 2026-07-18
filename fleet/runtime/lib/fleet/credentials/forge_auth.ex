@@ -3,7 +3,7 @@ defmodule Fleet.Credentials.ForgeAuth do
   System-side git auth for private forge ops (clone / fetch / ls-remote / push). SINGLE source:
   this helper has one owner here rather than a byte-for-byte duplicate in `Fleet.Workflow.Git` AND
   `Fleet.ProjectBootstrap.Phase.Clone` — the `workflow ⇄ bootstrap` compile cycle forbids sharing
-  between them. `fleet_credentials` sits below both (common dependency) → the right owner; and
+  between them. The credentials domain sits below both (common dependency) → the right owner; and
   the forge token IS a credential.
 
   ## Secret kept off the argv
