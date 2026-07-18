@@ -1,8 +1,6 @@
 defmodule Fleet.EventRouter.Application do
-  # Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
-  # migration 2026-07-12 ; nom conservé pour zéro churn de références).
-  # @moduledoc false RESTAURÉ : module interne délibérément caché (le contrat public
-  # du domaine vit dans la façade Fleet.EventRouter/Bus) — la conversion ne change pas ça.
+  # Domain supervisor. Deliberately undocumented internal (`@moduledoc false`): the
+  # domain's public contract lives in the `Fleet.EventRouter` facade and `Bus`.
   @moduledoc false
 
   use Supervisor
@@ -68,7 +66,7 @@ defmodule Fleet.EventRouter.Application do
     # `:gitea.<action>` atom resolves via `to_existing_atom`.
     # These types MUST also be events.yaml keys, otherwise `Bus.broadcast` fails loud with
     # `UnregisteredError` → a silent drop of the webhook. Guard: test
-    # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
+    # `gitea_event_types/0 ⊆ registry` (registry_gitea_test.exs).
     # (No `unknown_event` fallback atom: zero producer, zero consumer, zero events.yaml key —
     # the list stays aligned on the registry + the two dynamic families above.)
     Enum.each(
