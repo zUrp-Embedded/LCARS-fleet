@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.PodWarden do
 
   Gated on `:start_pod_warden` (default true in prod, false in test).
 
-  ## Why ONE module for two duties (split refused, modules pass 2026-07-05)
+  ## Why ONE module for two duties (deliberately not split)
 
   Both duties share the whole decision SUBSTRATE: a single clock (`:reap_tick`), a single source of the
   live set (`live_pod_ids/0` — including the guard "Registry unavailable ⇒ skip the WHOLE tick", which
@@ -106,8 +106,8 @@ defmodule Fleet.Spawner.PodWarden do
         {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
 
       :unavailable ->
-        # Compliance 2026-07-04: an unavailable Registry used to yield a silent EMPTY MapSet → ALL the
-        # socks looked orphaned → 2 ticks down = reap of LIVE pods. Without the live list we can decide
+        # An unavailable Registry folded to a silent EMPTY MapSet would make ALL the
+        # socks look orphaned → 2 ticks down = reap of LIVE pods. Without the live list we can decide
         # NOTHING: skip the WHOLE tick (suspects frozen as-is — neither accused nor cleared), visibly.
         # Registry back → the 2-tick grace resumes, nothing lost.
         Logger.warning(
@@ -197,7 +197,7 @@ defmodule Fleet.Spawner.PodWarden do
   # Reap of an orphan socket (mechanism shared with Pod.Backend.reap_orphan_pod/1).
   defp reap(pod_id) do
     Logger.warning(
-      "PodWarden: pod #{pod_id} = persistent orphan (live sock, no GenServer) — reap (BL-036b)"
+      "PodWarden: pod #{pod_id} = persistent orphan (live sock, no GenServer) — reap"
     )
 
     PodTmux.kill_holder(pod_id)
