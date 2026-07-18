@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @moduledoc """
   PURE step-run verdict cluster: **decoding** (reading the gate-decision-v1 decision
   buried in the TaskQueue/worker envelopes) + **text rendering** (readable verdict trace,
-  review body, eng voice) extracted from `Fleet.Pilot.StepRunConsumer`.
+  review body, eng voice) of `Fleet.Pilot.StepRunConsumer`.
 
   No function here carries `state`: they operate on the raw payload/result of an event
   (`pod.completed` / `work_item.completed`) and return a decision string or forge text. The
@@ -51,9 +51,9 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # absent/malformed verdict → routes to await_arch). `halt_invalid` is NOT in the canon list (internal fallback).
   #
   # F-C161 — `reason` is ENFORCED here, not only in the schema. gate-decision-v1.json declares
-  # `required: [decision, reason]` (reason minLength 1), but the decoder used to validate ONLY the decision
-  # enum → a `continue` with NO reason crossed the gate = an approval with no durable justification (the
-  # verdict trace is what sank v1 by its absence). We now require BOTH: a valid decision AND a non-empty
+  # `required: [decision, reason]` (reason minLength 1); validating ONLY the decision enum would let
+  # a `continue` with NO reason cross the gate = an approval with no durable justification (the
+  # verdict trace is what sank v1 by its absence). We require BOTH: a valid decision AND a non-empty
   # reason, else fail-closed `halt_invalid` (→ human escalation). A judge is instructed to justify (GateBrief
   # `gate-decision-v1` contract); a decision without a reason is a malformed verdict, not a silent approval.
   def gate_decision(result) when is_map(result) do
