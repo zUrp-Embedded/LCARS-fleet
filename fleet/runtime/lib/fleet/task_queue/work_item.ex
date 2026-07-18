@@ -5,23 +5,23 @@ defmodule Fleet.TaskQueue.WorkItem do
   `id` = the work item's UUID v4 (= the canonical `correlation_id`, propagated end-to-end).
   Distinct from `pod_id` (the target pod's session UUID).
 
-  ## Frontière de construction (BND-005)
+  ## Construction boundary
 
-  DEUX seuls chemins de construction VALIDÉS, et le `Fleet.TaskQueue.Server` ne route ses transitions que
-  sur des items qui en sortent :
+  The ONLY two VALIDATED construction paths — `Fleet.TaskQueue.Server` routes its
+  transitions only on items coming out of them:
 
-    * `new/2` — item FRAIS (enqueue) : cast strict des attrs (atom|string keys), rejette un
-      `deadline`/`metadata`/`role`/`brief`… malformé en `{:error, {:bad_attr, _}}`, pose `id`/`enqueued_at`/
-      `state: :pending` lui-même ;
-    * `from_map/1` — recovery depuis `state.json` : `state` par LISTE FERMÉE (pas `to_existing_atom`),
-      champ requis absent ou corruption → `{:error, :invalid}` (→ le `state.corrupt` du Server).
+    * `new/2` — FRESH item (enqueue): strict cast of the attrs (atom|string keys), rejects a
+      malformed `deadline`/`metadata`/`role`/`brief`… as `{:error, {:bad_attr, _}}`, sets `id`/
+      `enqueued_at`/`state: :pending` itself;
+    * `from_map/1` — recovery from `state.json`: `state` via a CLOSED list (not `to_existing_atom`),
+      absent required field or corruption → `{:error, :invalid}` (→ the Server's `state.corrupt`).
 
-  Forger un `%WorkItem{}` à la main court-circuite ces casts (`state` hors vocabulaire, `metadata` non-map) :
-  toléré UNIQUEMENT dans les tests de corruption/ghost-state explicitement nommés (injection
-  `:sys.replace_state` pour prouver que le cleanup est TOTAL). L'opacité pleine du struct + des variantes
-  `metadata` construites (ordinary-brief vs gate-eval-resume) restent différées comme disproportionnées —
-  même arbitrage que `Fleet.CapProfile` : valeur-donnée partagée en lecture par tout le domaine
-  pilot/taskqueue, une opacité `@opaque` japperait sur chaque lecteur légitime.
+  Hand-forging a `%WorkItem{}` bypasses these casts (`state` outside the vocabulary, non-map
+  `metadata`): tolerated ONLY in explicitly named corruption/ghost-state tests (`:sys.replace_state`
+  injection to prove the cleanup is TOTAL). Full struct opacity + built `metadata` variants
+  (ordinary-brief vs gate-eval-resume) stay deferred as disproportionate — same trade-off as
+  `Fleet.CapProfile`: a data value read across the whole pilot/taskqueue domain, an `@opaque`
+  would bark at every legitimate reader.
 
   **Last revised**: 2026-07-18
   """
@@ -34,11 +34,12 @@ defmodule Fleet.TaskQueue.WorkItem do
           issue_id: String.t() | nil,
           role: String.t() | nil,
           brief: String.t() | nil,
-          # Brief PHYSIQUE (chantier brief-physique) : le brief committé content-addressé dans work/ops.
-          # `brief_ref` = chemin relatif work/ops (`briefs/<sha>.md`) ; `brief_sha` = son SHA256 (vérif pod).
-          # DR-010 : provenance BEST-EFFORT. `brief` (string) COHABITE comme FALLBACK dégradé assumé — il ne
-          # devient PAS nil (un projet non-onboardé / sans work/ops dispatche sur la string seule, cf.
-          # `BriefArtifact`). `brief_sha` présent = provenance vérifiable ; absent = mode dégradé VISIBLE.
+          # PHYSICAL brief: the brief committed content-addressed into work/ops.
+          # `brief_ref` = work/ops-relative path (`briefs/<sha>.md`); `brief_sha` = its SHA256 (pod-side check).
+          # Provenance is BEST-EFFORT (DR-010): the `brief` string COHABITS as the assumed degraded
+          # FALLBACK — it does NOT become nil (a non-onboarded project / no work/ops dispatches on the
+          # string alone, cf. `BriefArtifact`). `brief_sha` present = verifiable provenance; absent = a
+          # VISIBLE degraded mode.
           brief_ref: String.t() | nil,
           brief_sha: String.t() | nil,
           deadline: DateTime.t() | nil,
@@ -68,10 +69,9 @@ defmodule Fleet.TaskQueue.WorkItem do
     metadata: %{}
   ]
 
-  # (No `retry_count` field: it was vestigial — never incremented, always 0, serialized for
-  # nothing. The system-side bounded retry deliberately does NOT live here (it must not be
-  # pod-influenceable): the forge-driven rail (`max_rework_rounds`) bounds the rework. Removed
-  # acte4 A-15; an old `state.json` carrying the key is simply ignored by `from_map`.)
+  # (No `retry_count` field. The system-side bounded retry deliberately does NOT live here
+  # (it must not be pod-influenceable): the forge-driven rail (`max_rework_rounds`) bounds the
+  # rework. An old `state.json` carrying the key is simply ignored by `from_map`.)
 
   # ACTIVE states = a work item still OWNS its pod's slot/lock. The TERMINAL states
   # (`:completed`/`:failed`/`:cleared`) do NOT: a `:completed` item is DELIVERED — its completion
