@@ -44,6 +44,7 @@ spec:
       # Role-specific fleet MCP tools of the arch (delegation) — required in
       # --permission-mode default (otherwise prompt). get_work_item/submit_result
       # (universal) come from the launcher.
+      - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
       - mcp__fleet__create_project
       - mcp__fleet__import_project   # twin of create_project: ADOPTS an existing repo
       - mcp__fleet__create_issue
