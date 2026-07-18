@@ -24,7 +24,7 @@ defmodule Fleet.Credentials.Shell do
   descendants alive after the deadline — they keep consuming resources/credentials and the forge auth
   extraheader stays in their environment. So we run the command in its **own session/process-group**
   (`setsid`) and, at the deadline, we kill the **whole GROUP** (`kill -KILL -<pgid>`): the top-level
-  AND its entire descent die together. Field-verified (2026-06-24): a `bash -lc "sleep 30 & wait"`
+  AND its entire descent die together. Verified: a `bash -lc "sleep 30 & wait"`
   that detaches a descendant — `kill -KILL <top>` alone leaves the `sleep` a ZOMBIE, whereas
   `kill -KILL -<pgid>` takes it with it.
 
@@ -36,7 +36,7 @@ defmodule Fleet.Credentials.Shell do
   its target scenario. So we compute an **absolute deadline** (`monotonic_now + timeout_ms`) ONCE at
   startup; the `receive` loop waits only for the REMAINING time (`deadline - now`), never a re-armed
   `after timeout_ms`. The total wall-clock is bounded whatever the cadence of the output.
-  Field-verified: a process that emits continuously (drip) is killed at the wall deadline.
+  Verified: a process that emits continuously (drip) is killed at the wall deadline.
 
   ## The process-group mechanism (setsid + PGID discovery)
 
@@ -51,8 +51,8 @@ defmodule Fleet.Credentials.Shell do
   (whole group) then closing the port and `kill` of the `setsid` wrapper.
 
   ⚠ The `--` separator of `kill` is LOAD-BEARING: otherwise `/usr/bin/kill` (util-linux) reads the
-  `-<pgid>` (starts with `-`) as an OPTION and returns rc 0 WITHOUT killing the group (field-verified
-  2026-06-24). So we pass the signal via `-s KILL` then `--` then the negative target.
+  `-<pgid>` (starts with `-`) as an OPTION and returns rc 0 WITHOUT killing the group. So we pass
+  the signal via `-s KILL` then `--` then the negative target.
 
   If group discovery fails (rare race, /proc unavailable), we fall back to the wrapper's
   `kill -KILL <os_pid>`: an honest degradation (the wrapper dies, a detached descendant CAN survive) —
@@ -61,21 +61,22 @@ defmodule Fleet.Credentials.Shell do
 
   ## Placement (compile cycle)
 
-  `fleet_project_bootstrap` CANNOT depend on `fleet_workflow` nor `fleet_spawner` (compile cycle, cf.
-  CLAUDE.md). `fleet_credentials` is BELOW all three (a common dependency) — it is already the owner
-  of `Fleet.Credentials.ForgeAuth.git_env/0` for the same reason. So the wrapper lives here, reachable
-  by bootstrap, workflow AND pilot without introducing a cycle.
+  `Fleet.ProjectBootstrap` CANNOT depend on `Fleet.Workflow` nor `Fleet.Spawner` (it would close a
+  compile cycle — the boundary declarations enforce it). The credentials domain is BELOW all three
+  (a common dependency) — it is already the owner of `Fleet.Credentials.ForgeAuth.git_env/0` for the
+  same reason. So the wrapper lives here, reachable by bootstrap, workflow AND pilot without
+  introducing a cycle.
 
   ## Default env
 
   Without `:env`, the system-side git env is injected (`ForgeAuth.git_env/0` → `GIT_TERMINAL_PROMPT=0`
   + auth extraheader if configured). A non-git caller passes `env: [...]` (or `env: []`).
 
-  ## Split refused (audit judgment, 2026-07-05) — `git_safe_config_args/0` NOT extracted
+  ## Deliberately NOT split — `git_safe_config_args/0` stays in this module
 
   The config-hardening vocabulary (`@git_safe_config_args`) shares no helper with the execution
-  machinery — a bundle flagged in the audit. The cut is REFUSED: the two are the two faces of THE SAME
-  boundary "invoke git system-side without executing the pod's code" — the bound (deadline + kill-group
+  machinery, yet the two are the two faces of THE SAME boundary "invoke git
+  system-side without executing the pod's code" — the bound (deadline + kill-group
   + anti-prompt) closes the TIME/interaction vector, the `-c …` closes the CONFIG vector, and the
   consumers (`Fleet.Workflow.Git`/`DeliverableGate`) ALWAYS compose the two together on `git/2`. A
   one-function module would split the authority of this boundary across two files without decoupling
@@ -383,7 +384,7 @@ defmodule Fleet.Credentials.Shell do
   # SIGKILL to the whole process-GROUP (negative PID = the group in `kill(2)` semantics). We pass the
   # signal via `-s KILL` and SEPARATE the target argument with `--`: otherwise `/usr/bin/kill`
   # (util-linux) reads the `-<pgid>` (starts with `-`) as an OPTION and NOT as a target → it returns
-  # rc 0 WITHOUT killing the group (field-verified 2026-06-24: `kill -KILL -<pgid>` leaves the
+  # rc 0 WITHOUT killing the group (verified: `kill -KILL -<pgid>` leaves the
   # descendant alive; `kill -s KILL -- -<pgid>` kills it). The `--` closes option parsing → the
   # `-<pgid>` is interpreted as the target.
   defp kill_group(pgid) do
