@@ -255,6 +255,29 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
+  Content of `path` at commit `sha` in `workspace` (`git show <sha>:<path>`), **bounded**.
+  The pointer can lie, git cannot: an unknown commit or a path absent from that commit is a
+  plain `{:error, {:git_show_failed, …}}` — the caller decides (BriefBuilder DEFERS the
+  dispatch, never serves a guessed brief). Read-only, hooks-off, same discipline as
+  `read_head_sha/1`.
+  """
+  @spec show(Path.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def show(workspace, sha, path) do
+    with :ok <- validate_cli_arg(sha, :invalid_sha),
+         :ok <- validate_cli_arg(path, :invalid_path) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["show", "#{sha}:#{path}"],
+             cd: workspace,
+             timeout_ms: git_local_timeout_ms()
+           ) do
+        {:ok, {content, 0}} -> {:ok, content}
+        {:ok, {err, rc}} -> {:error, {:git_show_failed, rc, String.trim(err)}}
+        {:error, {:timeout, ms}} -> {:error, {:git_show_timeout, ms}}
+        {:error, {:exit, reason}} -> {:error, {:git_show_exit, reason}}
+      end
+    end
+  end
+
+  @doc """
   Push-only — pushes `refspec` from `workspace` to `remote`, **bounded** (timeout). NO add/commit:
   the branch is already committed (by the pod in `git_native` mode, or by `commit/1` in `payload`
   mode). `refspec` can be `local_ref:target_branch` so that the pushed ref is **chosen by the

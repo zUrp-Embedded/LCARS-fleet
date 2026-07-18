@@ -67,17 +67,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
   posting under the system account would mask traceability and bypass
   least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge).
   """
-  @spec create_issue(String.t(), String.t(), String.t(), map()) ::
+  @spec create_issue(String.t(), String.t(), String.t(), map(), {String.t(), String.t()} | nil) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(repo, title, brief, state)
+  def create_issue(repo, title, brief, state, brief_pointer \\ nil)
       when is_binary(repo) and is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The arch then
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
+    # `brief_pointer` (E4, validated by the tool handler): the ticket body becomes
+    # summary + the canonical pointer line (Layout notation) — the pinned work/ops doc IS the
+    # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
+    # dispatch-time work/ops push (F-15) — no separate publication rail.
     with {:ok, forge} <- conforming_forge(),
          {:ok, role} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
-      do_create_issue(forge, repo, title, brief, token: identity.token)
+      do_create_issue(forge, repo, title, with_pointer(brief, brief_pointer), token: identity.token)
     else
       {:error, :role_token_unavailable} = err ->
         # Pod proven but role token not found on disk = provisioning hole (the role account has no
@@ -419,6 +423,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
       end
     end
   end
+
+  # summary + pointer line, or the inline brief untouched (both channels honest, same downstream).
+  defp with_pointer(brief, nil), do: brief
+
+  defp with_pointer(brief, {ref, sha}),
+    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
   # Places the issue (author = role account via `author_opts`, assignee = human owner) and its visual label.
   defp do_create_issue(forge, repo, title, brief, author_opts) do

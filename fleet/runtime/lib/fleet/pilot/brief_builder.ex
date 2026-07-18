@@ -73,7 +73,8 @@ defmodule Fleet.Pilot.BriefBuilder do
           map(),
           keyword(),
           {String.t(), String.t()} | term(),
-          map()
+          map(),
+          keyword()
         ) :: {:ok, String.t(), String.t()} | {:error, {:criterion_unavailable, term()}}
   def build_brief(
         profile,
@@ -84,8 +85,22 @@ defmodule Fleet.Pilot.BriefBuilder do
         issue,
         forge_opts,
         route,
-        step_spec
+        step_spec,
+        opts \\ []
       ) do
+    # POINTER resolution FIRST (E4): a consequential brief lives as a doc committed in
+    # work/ops; the ticket body then carries summary + `Brief: <ref> @ <commit>` (composed by
+    # the delegation tool, notation in Fleet.Layout). Resolved HERE, once, for every path
+    # (worker order, brief judge, deliverable-judge criterion): the pinned doc BECOMES the
+    # brief downstream. Unresolvable pointer → DEFER (`:criterion_unavailable` — the existing
+    # rail; never a guessed brief). `:none` → the body IS the brief (inline PoC path, both
+    # channels honest, same downstream).
+    with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
+      do_build_brief(profile, role, forge, repo, number, issue, forge_opts, route, step_spec, opts)
+    end
+  end
+
+  defp do_build_brief(profile, role, forge, repo, number, issue, forge_opts, route, step_spec, opts) do
     # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — reuses
     # a worker (consultant) profile as a JUDGE without a duplicate profile. ABSENT at the step → profile default
     # (itself "worker" by default, fail-safe) via the `||`: absence is NOT an anomaly. What
@@ -101,13 +116,13 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route), "judge"}
+        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts), "judge"}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
       # (F-C083: a read-error on the criterion DEFERS, it never yields a criterion-less judge).
       {"judge", target} when target in [nil, "deliverable"] ->
-        with {:ok, brief} <- build_judge_brief(role, forge, repo, number, forge_opts, route) do
+        with {:ok, brief} <- build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
           {:ok, brief, "judge"}
         end
 
@@ -148,7 +163,27 @@ defmodule Fleet.Pilot.BriefBuilder do
   # options**). The `result_K` to judge is read from the previous step_run's comment (engraved by
   # StepRunCompleter); the pod stays forge-blind (the runtime reads the comment, no
   # clone).
-  defp build_judge_brief(role, forge, repo, number, forge_opts, route) do
+  # The brief-pointer resolution (E4) applied to a ticket body: `:none` → body unchanged
+  # (inline brief); a well-formed pointer → the PINNED doc replaces the body (the doc IS the
+  # brief — summary stays human-facing on the forge); unresolvable/invalid → DEFER via the
+  # criterion rail (the pointer can lie, git cannot; never a guessed brief).
+  defp resolve_issue_brief(issue, repo, opts) do
+    case Fleet.Layout.parse_brief_pointer(issue["body"]) do
+      :none ->
+        {:ok, issue}
+
+      {:ok, {ref, sha}} ->
+        case Fleet.Workflow.BriefArtifact.resolve(repo, ref, sha, Keyword.take(opts, [:work_root])) do
+          {:ok, content} -> {:ok, Map.put(issue, "body", content)}
+          {:error, reason} -> {:error, {:criterion_unavailable, {:brief_pointer, reason}}}
+        end
+
+      {:error, reason} ->
+        {:error, {:criterion_unavailable, {:brief_pointer, reason}}}
+    end
+  end
+
+  defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
     predecessor =
       case forge.get_predecessor_result(repo, number, forge_opts) do
         {:ok, result} when is_map(result) and map_size(result) > 0 -> result
@@ -192,14 +227,18 @@ defmodule Fleet.Pilot.BriefBuilder do
     # not a transient failure (a persona judge fail-closes `halt_wait_input` on emptiness, it does not RE-build).
     case forge.get_issue(repo, number, forge_opts) do
       {:ok, issue} ->
-        {:ok,
-         Fleet.Workflow.GateBrief.build(%{
-           step: step,
-           workflow_map_id: workflow_map_name,
-           gate: nil,
-           outputs: outputs,
-           request: Map.get(issue, "body")
-         })}
+        # The criterion goes through the SAME pointer resolution as the dispatch entry (E4):
+        # a pointer-ticket's criterion is the PINNED doc, never the pointer line itself.
+        with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
+          {:ok,
+           Fleet.Workflow.GateBrief.build(%{
+             step: step,
+             workflow_map_id: workflow_map_name,
+             gate: nil,
+             outputs: outputs,
+             request: Map.get(issue, "body")
+           })}
+        end
 
       {:error, reason} ->
         {:error, {:criterion_unavailable, reason}}
@@ -212,10 +251,11 @@ defmodule Fleet.Pilot.BriefBuilder do
   # `subject: :brief` reframes the "thing to judge". The BRIEF goes into `outputs` (the thing TO JUDGE; ≠
   # build_judge_brief where outputs = the deliverable/code); no `request` (the executability criterion is
   # carried by the :brief framing). The judge is PRE-PR (no clone, no deliverable) → N0-consistent.
-  defp build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route) do
-    # The brief = the ISSUE body, ALREADY in hand (the poller listed the issue; brief-review is
-    # always issue-path). We use it → no redundant `get_issue`. Fallback fetch if body absent (robustness).
-    brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
+  defp build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts) do
+    # The brief = the ISSUE body, ALREADY in hand AND already pointer-resolved (the entry
+    # resolution of `build_brief`). Fallback fetch if body absent (robustness) — the fetched
+    # body gets the same resolution, best-effort.
+    brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts, opts)
 
     {workflow_map_name, step} =
       case route do
@@ -232,16 +272,21 @@ defmodule Fleet.Pilot.BriefBuilder do
     })
   end
 
-  # Body of the issue ALREADY listed by the poller → used directly; fetch ONLY as a fallback
-  # (body absent/empty — defensive; brief-review is always issue-path, the issue is in hand).
-  defp issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts) do
+  # Body of the issue ALREADY listed by the poller → used directly (pointer-resolved at the
+  # `build_brief` entry); fetch ONLY as a fallback (body absent/empty — defensive). The
+  # FETCHED body gets the pointer resolution too, best-effort: an unresolvable pointer here
+  # degrades to "" (the existing degenerate-empty path — the persona judge fail-closes
+  # `halt_wait_input`, never judges the pointer line as prose).
+  defp issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts, opts) do
     case Map.get(issue, "body") do
       body when is_binary(body) and body != "" ->
         body
 
       _ ->
-        case forge.get_issue(repo, number, forge_opts) do
-          {:ok, fetched} -> Map.get(fetched, "body") || ""
+        with {:ok, fetched} <- forge.get_issue(repo, number, forge_opts),
+             {:ok, resolved} <- resolve_issue_brief(fetched, repo, opts) do
+          Map.get(resolved, "body") || ""
+        else
           _ -> ""
         end
     end

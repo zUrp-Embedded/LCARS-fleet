@@ -120,6 +120,26 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   def physicalize(_brief, _repo, _opts), do: {nil, nil}
 
+  @doc """
+  Reads a brief object at its PINNED version (`git show <sha>:<ref>` in the project's
+  work/ops worktree) — the resolution side of the ticket pointer (`Layout.parse_brief_pointer`).
+  The pointer can lie, git cannot: unknown commit / path absent from that commit / missing
+  worktree → typed error, the caller DEFERS (never a guessed brief). `opts[:work_root]`
+  injectable (tests).
+  """
+  @spec resolve(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def resolve(repo, ref, sha, opts \\ []) when is_binary(repo) and is_binary(ref) and is_binary(sha) do
+    work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
+    work_dir = Path.join(work_root, project_name(repo))
+
+    cond do
+      not Fleet.Layout.valid_brief_ref?(ref) -> {:error, {:invalid_pointer_ref, ref}}
+      not File.dir?(work_dir) -> {:error, {:work_dir_missing, work_dir}}
+      true -> Fleet.Workflow.Git.show(work_dir, sha, ref)
+    end
+  end
+
   # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
   defp project_name(repo), do: repo |> String.split("/") |> List.last()
 

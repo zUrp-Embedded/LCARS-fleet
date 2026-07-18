@@ -51,5 +51,24 @@ defmodule Fleet.LayoutTest do
       assert Layout.sanitize_artifact_name("issue-3-a/b c") == "issue-3-a-b-c"
       assert Layout.sanitize_artifact_name(".dotfile") == "x.dotfile"
     end
+
+    test "brief pointer notation: trailer round-trips through parse (one truth, two domains)" do
+      sha = String.duplicate("a", 40)
+      body = "Résumé humain.\n\n---\n" <> Layout.brief_pointer_trailer("briefs/my-slug.md", sha)
+
+      assert {:ok, {"briefs/my-slug.md", ^sha}} = Layout.parse_brief_pointer(body)
+    end
+
+    test "parse_brief_pointer: no pointer line → :none (inline brief, the normal PoC path)" do
+      assert Layout.parse_brief_pointer("just a plain brief") == :none
+      assert Layout.parse_brief_pointer("Brief: not-a-pointer @ short") == :none
+      assert Layout.parse_brief_pointer(nil) == :none
+    end
+
+    test "parse_brief_pointer: full pointer shape with an out-of-scheme ref → LOUD error, never prose" do
+      sha = String.duplicate("a", 40)
+      assert {:error, {:invalid_pointer_ref, "../evil.md"}} =
+               Layout.parse_brief_pointer("Brief: ../evil.md @ #{sha}")
+    end
   end
 end

@@ -70,4 +70,71 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, _brief, "judge"} = build(_issue: {:ok, %{"number" => 42}})
     end
   end
+
+  describe "brief pointer (E4) — the ticket points at a work/ops-authored doc" do
+    @moduletag :tmp_dir
+
+    defp worker_profile do
+      %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{"brief_kind" => "worker"}
+      }
+    end
+
+    defp build_worker(issue, opts) do
+      BriefBuilder.build_brief(
+        worker_profile(),
+        "engineer",
+        StubForge,
+        "acme/widget",
+        42,
+        issue,
+        [],
+        {"pipe", "build"},
+        %{},
+        opts
+      )
+    end
+
+    defp authored_workops(tmp) do
+      # the project's work/ops = <work_root>/widget with an authored brief committed.
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      {:ok, %{ref: ref, sha: sha}} =
+        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE DOC COMPLET.\n", name_hint: "my-slug")
+
+      {ref, sha}
+    end
+
+    test "pointer ticket → the PINNED doc becomes the brief (worker order carries the doc, not the pointer)",
+         %{tmp_dir: tmp} do
+      {ref, sha} = authored_workops(tmp)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+
+      assert {:ok, brief, "worker"} =
+               build_worker(%{"number" => 42, "body" => body}, work_root: tmp)
+
+      assert brief =~ "LE DOC COMPLET."
+      refute brief =~ "Brief: #{ref}"
+    end
+
+    test "unresolvable pointer (wrong sha) → DEFER via the criterion rail, never a guessed brief",
+         %{tmp_dir: tmp} do
+      {ref, _sha} = authored_workops(tmp)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40))
+
+      assert {:error, {:criterion_unavailable, {:brief_pointer, _}}} =
+               build_worker(%{"number" => 42, "body" => body}, work_root: tmp)
+    end
+
+    test "no pointer → inline body IS the brief (both channels honest, same downstream)", %{tmp_dir: tmp} do
+      assert {:ok, brief, "worker"} =
+               build_worker(%{"number" => 42, "body" => "inline brief"}, work_root: tmp)
+
+      assert brief =~ "inline brief"
+    end
+  end
 end

@@ -104,6 +104,10 @@ defmodule Fleet.MCP.PodTools do
           "`brief` = the clear brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
           "the repo returned by `create_project`, or the project designated by the human. The fleet does NOT route by " <>
           "default — without `project`, the issue is REFUSED (never a silent misroute to another project). " <>
+          "For a CONSEQUENTIAL brief (multi-page/multi-doc): author it as doc(s) in the project's work/ops, " <>
+          "commit it, then pass `brief_ref` (the entry doc, e.g. `briefs/<slug>.md`) + `brief_sha` (the " <>
+          "introducing COMMIT sha) — `brief` then carries the human SUMMARY and the fleet reads the pinned doc. " <>
+          "Trivial brief: inline `brief` alone, as before. " <>
           "Returns {\"status\":\"issue_created\",\"repo\":...}."
       )
     end
@@ -113,7 +117,9 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "title" => %{"type" => "string"},
         "brief" => %{"type" => "string"},
-        "project" => %{"type" => "string"}
+        "project" => %{"type" => "string"},
+        "brief_ref" => %{"type" => "string"},
+        "brief_sha" => %{"type" => "string"}
       },
       "required" => ["title", "brief", "project"]
     })
@@ -281,19 +287,29 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call(
         "create_issue",
-        %{"title" => title, "brief" => brief, "project" => repo},
+        %{"title" => title, "brief" => brief, "project" => repo} = args,
         state
       )
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
-    if valid_repo_ref?(repo) do
-      case Delegation.create_issue(repo, title, brief, state) do
-        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-        {:error, reason} -> {:error, reason, state}
-      end
-    else
-      {:error,
-       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
-       state}
+    cond do
+      not valid_repo_ref?(repo) ->
+        {:error,
+         {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
+         state}
+
+      # Pointer args are a PAIR: one without the other, or an out-of-scheme value, is a
+      # STRUCTURAL REFUSAL (mirror of the `project` gate) — never a ticket with a half-pointer.
+      not valid_brief_pointer_args?(args) ->
+        {:error,
+         {:invalid_brief_pointer,
+          "`brief_ref`+`brief_sha` come TOGETHER: ref = work/ops brief path " <>
+            "(e.g. `briefs/<slug>.md`), sha = the introducing 40-hex COMMIT sha"}, state}
+
+      true ->
+        case Delegation.create_issue(repo, title, brief, state, brief_pointer(args)) do
+          {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+          {:error, reason} -> {:error, reason, state}
+        end
     end
   end
 
@@ -426,6 +442,28 @@ defmodule Fleet.MCP.PodTools do
     case String.split(ref, "/") do
       [owner, name] -> owner != "" and name != "" and not String.match?(ref, ~r/\s/)
       _ -> false
+    end
+  end
+
+  # Both absent → inline brief (fine). Both present and well-formed → pointer. Anything
+  # else → refusal (cf. the create_issue handler). The ref/sha SHAPES come from the Layout truth.
+  defp valid_brief_pointer_args?(args) do
+    case {Map.get(args, "brief_ref"), Map.get(args, "brief_sha")} do
+      {nil, nil} ->
+        true
+
+      {ref, sha} when is_binary(ref) and is_binary(sha) ->
+        Fleet.Layout.valid_brief_ref?(ref) and Regex.match?(~r/\A[0-9a-f]{40}\z/, sha)
+
+      _ ->
+        false
+    end
+  end
+
+  defp brief_pointer(args) do
+    case {Map.get(args, "brief_ref"), Map.get(args, "brief_sha")} do
+      {ref, sha} when is_binary(ref) and is_binary(sha) -> {ref, sha}
+      _ -> nil
     end
   end
 end

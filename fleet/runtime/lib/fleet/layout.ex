@@ -86,4 +86,32 @@ defmodule Fleet.Layout do
     sanitized = String.replace(name, ~r/[^A-Za-z0-9._-]/, "-")
     if Regex.match?(@artifact_name_re, sanitized), do: sanitized, else: "x" <> sanitized
   end
+
+  # ── brief POINTER notation ────────────────────────────────────────────────
+  # A consequential brief lives as doc(s) committed in work/ops; the ticket body then carries a
+  # SUMMARY + this pointer line (`Brief: <ref> @ <commit>`). Composed by the delegation tool
+  # (mcp), parsed by the dispatch (pilot) — the notation lives HERE once (same reason as the
+  # ref shapes: two domains, one truth, foundation).
+  @brief_pointer_re Regex.compile!("^Brief: (\\S+) @ ([0-9a-f]{40})$", "m")
+
+  @doc "The pointer line for a work/ops-authored brief: `Brief: <ref> @ <commit-sha>`."
+  @spec brief_pointer_trailer(String.t(), String.t()) :: String.t()
+  def brief_pointer_trailer(ref, sha), do: "Brief: #{ref} @ #{sha}"
+
+  @doc """
+  Scans a ticket body for the brief-pointer line. `:none` when absent (inline brief — the
+  normal PoC path). `{:ok, {ref, sha}}` on a well-formed pointer. `{:error, {:invalid_pointer_ref, ref}}`
+  when a line has the FULL pointer shape (40-hex commit) but an out-of-scheme ref — that is an
+  intent with a bad address, refused LOUDLY, never read as prose.
+  """
+  @spec parse_brief_pointer(String.t() | nil) ::
+          {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_pointer_ref, String.t()}}
+  def parse_brief_pointer(nil), do: :none
+
+  def parse_brief_pointer(body) when is_binary(body) do
+    case Regex.run(@brief_pointer_re, body) do
+      nil -> :none
+      [_, ref, sha] -> if valid_brief_ref?(ref), do: {:ok, {ref, sha}}, else: {:error, {:invalid_pointer_ref, ref}}
+    end
+  end
 end
