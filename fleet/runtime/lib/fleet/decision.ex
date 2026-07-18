@@ -2,24 +2,24 @@ defmodule Fleet.Decision do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Verdict VALIDÉ d'une évaluation de gate — shared **foundation** value (deps: []).
+  VALIDATED verdict of a gate evaluation — shared **foundation** value (`deps: []`).
 
-  Descendue de `Fleet.Starfleet.Decision` (2026-07-13, BND-002) : le PRODUCTEUR
-  (`Fleet.Starfleet.Gatekeeper.validate/1`) vit dans Starfleet, le CONSOMMATEUR
-  (`Fleet.Coord.Policies.handle_decision/2`) dans Coord — et Starfleet DÉPEND de Coord (seam d'escalade
-  D1). Tant que le type vivait dans Starfleet, Coord ne pouvait PAS le nommer sans fermer un cycle → il
-  repliait sur une map brute (« le contrat dit décision validée mais accepte une map à 2 clés » = le trou
-  cycle). As a foundation value, Coord AND Starfleet l'exigent : la frontière Coord n'accepte QUE `%Fleet.Decision{}`,
-  la map non validée est refusée à la frontière (pas normalisée en aval).
+  The PRODUCER (`Fleet.Starfleet.Gatekeeper.validate/1`) lives in Starfleet, the CONSUMER
+  (`Fleet.Coord.Policies.handle_decision/2`) in Coord — and Starfleet DEPENDS on Coord (the
+  escalation relay). A shared type must therefore live BELOW both: hosted in either domain,
+  the other could not name it without closing a cycle and would fall back to a raw 2-key map
+  — "the contract says validated decision but accepts any map". As a foundation value both
+  can require, the Coord frontier accepts ONLY `%Fleet.Decision{}`: an unvalidated map is
+  refused at the frontier, never normalized downstream.
 
-  Pattern figé : JSON de décision `{decision, reason, details, chain}`, jamais un atome opaque.
+  Fixed shape: the decision JSON `{decision, reason, details, chain}` — never an opaque atom.
 
-  ## Champs
+  ## Fields
 
     * `decision` — enum `"allow" | "halt" | "escalate" | "retry"`
-    * `reason` — string non vide
-    * `details` — map (objet JSON arbitraire)
-    * `chain` — liste de strings (trace d'audit, défaut `[]`)
+    * `reason` — non-empty string
+    * `details` — map (arbitrary JSON object)
+    * `chain` — list of strings (audit trail, default `[]`)
 
   **Last revised**: 2026-07-18
   """
