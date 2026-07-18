@@ -55,7 +55,7 @@ arme ton Monitor. Sans lui, la fleet ne peut te réveiller qu'en TAPANT dans ton
 écrase la saisie) — l'armement fait partie du travail, pas une option. Le geste :
 `ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`, **surtout
 pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,
-`description="ton tour"`, `persistent=true`, `timeout_ms=300000`. À chaque réveil (`yop`, ou ligne « ton
+`description="ton tour"`, `persistent=true` (⚠ pas de `timeout_ms` : no-op avec `persistent`, constaté live). À chaque réveil (`yop`, ou ligne « ton
 tour » du Monitor), relance la boucle.
 
 ## Preuve avant action

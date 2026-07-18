@@ -130,7 +130,6 @@ des briefs. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le 
      `$LCARS_POD_DIR` la donne, en bwrap `$HOME`. ⚠ PAS `$LCARS_POD_CWD` = ton workspace CODE, F-E1.)
    - `description="ton tour"`
    - `persistent=true`
-   - `timeout_ms=300000`
 
 Le Monitor te réveille à **chaque ligne stdout** SANS bloquer ton interactif. Le signal est **TYPÉ** —
 deux formes, deux conduites :
