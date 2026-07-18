@@ -1,8 +1,4 @@
 defmodule Fleet.Shutdown.Quiesce do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
 
   @moduledoc """
@@ -13,10 +9,11 @@ defmodule Fleet.Shutdown.Quiesce do
   flips to `true`; the **entry points for new top-level work** consult it and
   refuse to admit new work.
 
-  Current reader: `Fleet.API.ControlRouter` (the `POST /api/admin/spawn` write door) — a new
-  operator pod is refused while draining. (A workflow-activation reader once
-  lived here too, but that entry point was removed; re-wiring it is part of the graceful-shutdown; its trigger `Fleet.Starfleet.Shutdown.begin/1` is
-  invoked by the graceful-stop path (`bin/fleet_v2` stop). See that module.)
+  Two readers: `Fleet.API.ControlRouter` (the `POST /api/admin/spawn` write door — a new
+  operator pod is refused while draining) and `Fleet.Spawner.PermanentWarden` (its respawn
+  gate — a permanent pod is not resurrected into a draining daemon). The trigger,
+  `Fleet.Starfleet.Shutdown.begin/1`, is invoked by the graceful-stop path
+  (`bin/fleet_v2 stop`) — see that module.
 
   The **internal** work of already-in-flight work (spawning the next step,
   enqueuing a brief) does NOT consult this flag — otherwise the in-flight work
@@ -24,8 +21,8 @@ defmodule Fleet.Shutdown.Quiesce do
 
   ## Why a standalone foundation boundary (and not inside starfleet)
 
-  `Fleet.Shutdown.Quiesce` is its OWN zero-dep boundary (`use Boundary, deps: []` above —
-  post-collapse it does NOT live in event_router). A sibling domain cannot take
+  `Fleet.Shutdown.Quiesce` is its OWN zero-dep boundary (`use Boundary, deps: []`
+  above). A sibling domain cannot take
   `Fleet.Starfleet` as a dependency without coupling siblings; a `deps: []` foundation
   primitive is reachable from any domain precisely because it depends on nothing.
   The **primitive** (the flag) therefore lives here; the **policy** (when to quiesce, the
