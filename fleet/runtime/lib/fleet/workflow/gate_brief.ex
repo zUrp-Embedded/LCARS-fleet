@@ -13,7 +13,7 @@ defmodule Fleet.Workflow.GateBrief do
   """
 
   # Decision vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile time, so
-  # this brief recompiles if the canonical list changes — no more local vocabulary drifting from the validator).
+  # this brief recompiles if the canonical list changes — a local vocabulary could not drift from the validator).
   @decisions Fleet.Workflow.GateDecision.decisions()
 
   @doc """

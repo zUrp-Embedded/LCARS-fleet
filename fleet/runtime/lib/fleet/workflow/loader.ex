@@ -100,7 +100,7 @@ defmodule Fleet.Workflow.Loader do
       "name" => get_in(yaml, ["metadata", "name"]),
       "steps" => steps,
       # Map-level rework budget (mandatory in the schema → always present here; fail-loud
-      # otherwise). The kernel reads it as DATA (gate_engine), no more hardcoded global default.
+      # otherwise). The kernel reads it as DATA (gate_engine) — no hardcoded global default.
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds")
     }
   end
