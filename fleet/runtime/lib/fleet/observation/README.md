@@ -1,4 +1,4 @@
-# fleet_observation
+# Fleet.Observation — domain card
 
 **Date**: 2026-06-10
 **Last revised**: 2026-07-18

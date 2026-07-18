@@ -1,18 +1,19 @@
 defmodule Fleet.Observation do
   @moduledoc """
-  Façade du domaine observation — deck read-only (:8091), rien du core n'en dépend.
+  Façade of the observation domain — read-only deck (:8091), nothing in the core
+  depends on it.
 
-  Créée au collapse (Z4, 2026-07-12) comme ANCRE de la boundary ; contrat dans les
-  @moduledoc : `Fleet.Observation.Deck` (HTTP), `Fleet.Observation.ReadModel` (projection
-  Bus, off par défaut en test).
+  The boundary ANCHOR of the domain; the contracts live in the `@moduledoc`s:
+  `Fleet.Observation.Deck` (HTTP), `Fleet.Observation.ReadModel` (Bus projection,
+  off by default in test).
 
   **Last revised**: 2026-07-18
   """
 
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
+  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
+  # deliberate API gesture.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -24,7 +25,7 @@ defmodule Fleet.Observation do
       Fleet.Spawner,
       Fleet.CapProfile,
       Fleet.EventRouter,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every reference is declared) —
       Plug,
       Plug.Builder,
       Plug.Conn,
