@@ -1,22 +1,21 @@
 defmodule Fleet.MCP do
   @moduledoc """
-  Façade du domaine MCP — substrat de communication pod↔système (sockets AF_UNIX per-pod,
-  identité = canal, drive PULL-only).
+  MCP domain facade — the pod↔system communication substrate (per-pod AF_UNIX sockets,
+  identity = the channel, PULL-only drive).
 
-  Créée au collapse (Z4, 2026-07-12) comme ANCRE de la boundary ; le contrat vit dans les
-  @moduledoc des modules : `Fleet.MCP.Supervisor` (arbre du domaine + doctrine PULL-only),
-  `Fleet.MCP.Server` (garde host/pod), `Fleet.MCP.PodSocketSupervisor`/`PodSocketAcceptor`
-  (frontière wire — projection MCP-wire `inputSchema`, cicatrice F1), `Fleet.MCP.PodTools`.
-  NB : la dep vers Fleet.Spawner régularise l'appel RUNTIME de PodTools.Delegation
-  (pod_info — descendant, ex-seam apply désormais déclaré).
+  Boundary anchor; the contract lives in each module's @moduledoc:
+  `Fleet.MCP.Supervisor` (domain tree + PULL-only doctrine), `Fleet.MCP.Server`
+  (host/pod guard), `Fleet.MCP.PodSocketSupervisor`/`PodSocketAcceptor` (the wire
+  boundary — MCP-wire `inputSchema` projection), `Fleet.MCP.PodTools`.
+  NB: the dep onto Fleet.Spawner covers PodTools.Delegation's RUNTIME call
+  (pod_info — a downward call, declared).
 
   **Last revised**: 2026-07-18
   """
 
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -30,7 +29,7 @@ defmodule Fleet.MCP do
       Fleet.EventRouter,
       Fleet.TaskQueue,
       Fleet.Spawner,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every ExMCP reference is declared) —
       ExMCP.ContentHelpers,
       ExMCP.DSL.Meta,
       ExMCP.DSL.Tool,
