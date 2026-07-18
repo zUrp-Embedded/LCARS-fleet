@@ -25,7 +25,7 @@ defmodule Fleet.Observation.Deck do
   ## View frontier
 
   The TEMPLATE (inline HTML/CSS/JS) lives in `Fleet.Observation.Deck.View`
-  (pure rendering — C4 split 2026-07-05): this module remains the CONTROLLER
+  (pure rendering): this module remains the CONTROLLER
   (routing + role-catalogue derivation + live snapshots) and passes the
   data to the view as an argument. The view reads no source itself.
 
@@ -133,8 +133,8 @@ defmodule Fleet.Observation.Deck do
   end
 
   # DISPLAY catalogue (role → dedicated SVG icon) DERIVED from the assets actually present in
-  # `priv/observation/static/assets`: any `<role>.svg` dropped there is recognized automatically → no more hard-coded
-  # list to keep in sync with the files (the list↔assets duplication disappears, the asset is the authority).
+  # `priv/observation/static/assets`: any `<role>.svg` dropped there is recognized automatically — never a
+  # hard-coded list to keep in sync with the files (the asset is the authority).
   # Exclusions: the `favicon*.svg` (chrome, not a role) and `starfleet` (out-of-band system domain,
   # the asset exists but no panel instruments it). `File.ls` KO (dir absent) → `[]`: safe degradation
   # (all pods on the generic icon, never a crash). Resolved via `app_dir` = same priv as `Plug.Static`.
@@ -191,7 +191,7 @@ defmodule Fleet.Observation.Deck do
     end
   end
 
-  # R6: the JSON send (content-type + encode + send) typed ONCE — the inline sends were diverging
+  # The JSON send (content-type + encode + send) typed ONCE — inline sends would diverge
   # (content-type forgotten on the 404).
   defp json(conn, status, payload) do
     conn

@@ -1,16 +1,15 @@
 defmodule Fleet.Observation.Application do
   @moduledoc """
-  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
-  migration 2026-07-12 ; nom conservé pour zéro churn de références).
+  Domain supervisor (the module keeps the historical `Application` name — zero
+  reference churn).
 
-  Domain supervisor `fleet_observation` (surface — observation deck).
+  Supervisor of the observation domain (surface — observation deck).
 
   Read / observability frontier of the core. A dedicated
   Cowboy listener on its port (per-human, bin/fleet_v2) serves `Fleet.Observation.Deck` (LCARS HTML +
-  JSON read endpoints). Coexists with the other surfaces — **we cut off
-  nothing** (cleanup at the end):
+  JSON read endpoints). Coexists with the COMMAND surface:
 
-    * `fleet_api` (the API port (per-human), no-auth by design) — **command** surface.
+    * the api domain (per-human API port, no-auth by design) — **command** surface.
 
   ## Cardinal principle
 
@@ -47,7 +46,7 @@ defmodule Fleet.Observation.Application do
   def init(_init_arg) do
     children = readmodel_children() ++ listener_children()
 
-    # F4 (E1): 3/60 intensity EXPLICIT (event_router/task_queue doctrine — OTP's 3/5 too tight for a blip; the window is a CHOICE).
+    # 3/60 intensity EXPLICIT (event_router/task_queue doctrine — OTP's 3/5 too tight for a blip; the window is a CHOICE).
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
@@ -74,7 +73,7 @@ defmodule Fleet.Observation.Application do
   """
   def listener_children do
     if Application.get_env(:fleet_observation, :start_listener, true) do
-      # No static default (A7): per-human via bin/fleet_v2 → runtime.exs; fail-loud if absent.
+      # No static default: per-human via bin/fleet_v2 → runtime.exs; fail-loud if absent.
       port = Application.fetch_env!(:fleet_observation, :http_port)
 
       # Child-spec via the single source Fleet.EventRouter.Listener: loopback bind by default
