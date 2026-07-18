@@ -730,7 +730,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     # E4: ALL the construction (including the judge-branch resolution → inline list_open_pulls HTTP,
-    # timeout 10s) lives INSIDE the offloaded closure — a degraded forge + a burst of pod.completed no longer
+    # timeout 10s) lives INSIDE the offloaded closure — a degraded forge + a burst of pod.completed does not
     # blocks the singleton's mailbox (handle_info becomes O(1) again in prod, the offload carries the I/O).
     run_completion(state, "##{n}", fn ->
       # DR-013: `build/5` returns `{:error, _}` if the producer/judge classification is UNKNOWN

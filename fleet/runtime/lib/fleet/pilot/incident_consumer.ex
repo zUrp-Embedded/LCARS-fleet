@@ -7,10 +7,10 @@ defmodule Fleet.Pilot.IncidentConsumer do
   ## Why a consumer SEPARATE from the StepRunConsumer
 
   Pod failures are a **distinct** concern from step-run-end (completion): they touch neither the
-  workflow_map, nor the gate, nor the completion state — just « this incident, 1st or recurrent? » → registry.
+  workflow_map, nor the gate, nor the completion state — just "this incident, 1st or recurrent?" → registry.
   Both handlers are **stateless** (they read no state of the consumer). Isolating them in their
-  own singleton: (a) the StepRunConsumer (completion singleton) no longer carries a 2nd
-  bolted-on responsibility, (b) a burst of failures no longer shares the completion path's mailbox (reduced
+  own singleton: (a) the StepRunConsumer (completion singleton) does not carry a 2nd
+  bolted-on responsibility, (b) a burst of failures does not share the completion path's mailbox (reduced
   blast-radius). The escalation POLICY (1st=note / recurrent=root-cause, kinds, labels) lives in
   `IncidentRegistry`; this module only **routes the event to it**.
 

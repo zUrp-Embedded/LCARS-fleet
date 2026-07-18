@@ -65,7 +65,7 @@ defmodule Fleet.Pilot do
       Fleet.Credentials,
       Fleet.CapProfile,
       Fleet.TaskQueue,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every reference is declared) —
       Req,
       Req.Response
     ],
