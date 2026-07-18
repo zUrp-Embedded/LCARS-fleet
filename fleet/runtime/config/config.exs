@@ -10,12 +10,10 @@ import Config
 #       metadata: [:user_id]
 #
 
-# Jury (juges PR) du modèle single-brique : les rôles dont la review est demandée sur la PR d'un
-# producteur, et qui sont seedés comme collaborateurs write à l'onboarding (sinon leur verdict ne
-# compterait pas au gate forge). Source data UNIQUE du jury (compile-time default, déclarée ici une
-# seule fois — l'accesseur est `Fleet.Pilot.Roles.reviewer_roles/1`). Surchargeable par projet/test
-# via l'opt `:reviewer_roles`.
-config :fleet_pilot, reviewer_roles: ["qualifier", "reviewer"]
+# Le jury (juges PR) n'a PLUS de config moteur : LA CARTE workflow est la source unique
+# (`spec.jury`, schéma-required — accesseur `Fleet.Pilot.Roles.jury/2` ; l'opt
+# `:reviewer_roles` reste un seam d'injection test, jamais une config). La voie config
+# parallèle est morte avec l'arbitrage « la carte gouverne le jugement ».
 
 if File.exists?(Path.join(__DIR__, "#{Mix.env()}.exs")) do
   import_config "#{Mix.env()}.exs"

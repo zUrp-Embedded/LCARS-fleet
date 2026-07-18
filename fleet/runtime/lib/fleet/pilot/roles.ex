@@ -27,13 +27,37 @@ defmodule Fleet.Pilot.Roles do
 
   @doc """
   Jury (PR judges) of the single-brick model: the roles whose review is requested on a
-  producer's PR, and seeded at onboarding. Override by the opt `:reviewer_roles` (project/test); otherwise the
-  config (single data source, `config/config.exs`). `fetch_env!` = fail-loud if the config is absent
-  (it MUST be set — no hard-coded default here).
+  producer's PR, whose approvals gate the seal, and whose count sizes the branch
+  protection at onboarding.
+
+  **THE CARD is the single source** (`spec.jury`, schema-required — the card governs the
+  judgment layer; there is NO engine config for the jury). Pass the loaded workflow map
+  when in hand; `nil` loads the delegation DEFAULT card (today: every issue runs it —
+  per-project card selection is the intensity chain, F-29). The `:reviewer_roles` opt is
+  an INJECTION SEAM (tests / hermetic overrides), never a config: the config key died
+  with the parallel lane.
   """
-  @spec reviewer_roles(keyword()) :: [String.t()]
-  def reviewer_roles(opts \\ []) do
-    Keyword.get(opts, :reviewer_roles) || Application.fetch_env!(:fleet_pilot, :reviewer_roles)
+  @spec jury(map() | nil, keyword()) :: [String.t()]
+  def jury(workflow_map, opts \\ []) do
+    case Keyword.fetch(opts, :reviewer_roles) do
+      {:ok, jury} when is_list(jury) -> jury
+      :error -> jury_of(workflow_map, opts)
+    end
+  end
+
+  defp jury_of(%{"jury" => jury}, _opts) when is_list(jury), do: jury
+  defp jury_of(nil, opts), do: Fleet.Workflow.Loader.load!(delegation_workflow_map(opts))["jury"]
+
+  @doc """
+  Name of the delegation DEFAULT workflow map (burned on any routeless issue and used as
+  the jury source when no per-issue map is in hand). Opt `:delegation_workflow_map` (test),
+  else config `:fleet_pilot, :delegation_workflow_map` (default `"brief-gate"`). SINGLE
+  accessor — the literal is not rewritten at the callers.
+  """
+  @spec delegation_workflow_map(keyword()) :: String.t()
+  def delegation_workflow_map(opts \\ []) do
+    Keyword.get(opts, :delegation_workflow_map) ||
+      Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
   end
 
   @doc """

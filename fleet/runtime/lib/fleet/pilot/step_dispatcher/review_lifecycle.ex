@@ -164,7 +164,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # same adoption path re-runs). No crash, no silent skip.
   # Idempotent: re-laying the same reviewers = Gitea no-op (an adopted PR is never re-adopted: requested ≠ []).
   defp adopt_orphan_pr(pr_number, %Ctx{} = ctx) do
-    reviewers = Fleet.Pilot.Roles.reviewer_roles(ctx.opts)
+    reviewers = Fleet.Pilot.Roles.jury(nil, ctx.opts)
 
     case ctx.forge.request_review(ctx.repo, pr_number, reviewers, ctx.forge_opts) do
       :ok -> {:ok, {:adopted, pr_number, reviewers}}

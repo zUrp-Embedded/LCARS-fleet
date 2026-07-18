@@ -381,7 +381,9 @@ defmodule Fleet.Pilot.StepDispatcher do
             # that also tags the gatekeeper (a verdict-reader/sealer, not a jury member) — the jury axis is
             # `reviewer_roles`. A foreign reviewer is surfaced LOUD (not swallowed), never a crash (a benign
             # human review must not DoS the pipe).
-            jury_roles = MapSet.new(Fleet.Pilot.Roles.reviewer_roles(opts), &String.downcase/1)
+            # Jury source = THE CARD (default delegation card here — the per-issue map threading
+            # arrives with the intensity chain, F-29); `:reviewer_roles` opt = test seam.
+            jury_roles = MapSet.new(Fleet.Pilot.Roles.jury(nil, opts), &String.downcase/1)
 
             {requested, foreign} =
               Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))
@@ -505,7 +507,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
   # consultant reviews the brief BEFORE the eng). Data-catalogue, not a hardcoded magic name.
   defp default_workflow_map,
-    do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
+    do: Fleet.Pilot.Roles.delegation_workflow_map()
 
   # Delegated to the single authority (WorkflowMapNav.safe_load — same tag; the rescue lives there).
   defp load_workflow_map(workflow_map_name, workflow_map_loader),

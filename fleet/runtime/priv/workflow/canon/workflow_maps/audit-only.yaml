@@ -24,6 +24,9 @@ metadata:
   applicable_regime: [R1, R2]
 
 spec:
+  # Jury VIDE délibéré (fast-track L0/L1) : pas de juges de PR — le plancher mécanique
+  # (identité, secrets, ancêtre, sceau) tient seul ; le consultant audite post-hoc.
+  jury: []
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.Application do
               "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
 
-    validate_reviewer_roles!()
+    validate_card_juries!()
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
@@ -156,28 +156,32 @@ defmodule Fleet.Pilot.Application do
     ]
   end
 
-  # F-C061 (config own-goal) — the jury config `:reviewer_roles` is fail-loud on ABSENCE
-  # (`fetch_env!`) but NOT on absurd CONTENT: a non-role login there would be LAID on PRs
-  # (`request_reviews_step`) and bumped into `required_approvals`, then WEDGE at dispatch (no cap-profile →
-  # silent `:no_role`). We validate at boot that EVERY jury role resolves to a `brief_kind: judge`
-  # cap-profile — a jury that can't judge = a broken deploy, fail-loud HERE, not a silent wedge on the
-  # first PR. (Symmetric to the read-frontier filter in `StepDispatcher.dispatch_review`, which restricts
-  # the forge-sourced reviewer set to `reviewer_roles`: this guards the config side, that guards the forge side.)
-  defp validate_reviewer_roles! do
-    for role <- Fleet.Pilot.Roles.reviewer_roles([]) do
+  # F-C061 (jury own-goal, re-seated on the CARDS) — the jury lives in each workflow map
+  # (`spec.jury`, schema-required; the card governs the judgment layer, no engine config).
+  # The schema guards the SHAPE but not absurd CONTENT: a non-role login in a card's jury
+  # would be LAID on PRs (`request_reviews_step`) and bumped into `required_approvals`, then
+  # WEDGE at dispatch (no cap-profile → silent `:no_role`). We validate at boot that EVERY
+  # jury role of EVERY canon card resolves to a `brief_kind: judge` cap-profile — a jury
+  # that can't judge = a broken canon, fail-loud HERE, not a silent wedge on the first PR.
+  # (Symmetric to the read-frontier filter in `StepDispatcher.dispatch_review`, which
+  # restricts the forge-sourced reviewer set to the card's jury: this guards the canon
+  # side, that guards the forge side.)
+  defp validate_card_juries! do
+    for map_name <- Fleet.Workflow.Loader.canon_names(),
+        role <- Fleet.Workflow.Loader.load!(map_name)["jury"] do
       case Fleet.CapProfile.load(role) do
         {:ok, cp} ->
           kind = Fleet.CapProfile.brief_kind(cp)
 
           unless kind == "judge" do
-            raise "fleet_pilot: :reviewer_roles contains #{inspect(role)} whose cap-profile is NOT a judge " <>
-                    "(brief_kind=#{inspect(kind)}) — the jury must be judge roles. Fix config :fleet_pilot, :reviewer_roles."
+            raise "fleet_pilot: workflow map #{map_name} jury contains #{inspect(role)} whose cap-profile " <>
+                    "is NOT a judge (brief_kind=#{inspect(kind)}) — the jury must be judge roles. Fix the card."
           end
 
         {:error, reason} ->
-          raise "fleet_pilot: :reviewer_roles contains #{inspect(role)} that does NOT resolve to a cap-profile " <>
-                  "(#{inspect(reason)}) — a non-role login in the jury WEDGES at dispatch (no cap-profile → " <>
-                  ":no_role). Fix config :fleet_pilot, :reviewer_roles."
+          raise "fleet_pilot: workflow map #{map_name} jury contains #{inspect(role)} that does NOT resolve " <>
+                  "to a cap-profile (#{inspect(reason)}) — a non-role login in a jury WEDGES at dispatch " <>
+                  "(no cap-profile → :no_role). Fix the card."
       end
     end
 

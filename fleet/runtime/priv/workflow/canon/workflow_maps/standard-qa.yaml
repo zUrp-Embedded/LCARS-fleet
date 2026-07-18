@@ -16,6 +16,8 @@ metadata:
   applicable_regime: [R1, R2]
 
 spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement).
+  jury: [qualifier, reviewer]
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

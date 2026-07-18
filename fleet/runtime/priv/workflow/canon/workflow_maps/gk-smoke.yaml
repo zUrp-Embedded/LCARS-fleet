@@ -16,6 +16,8 @@ metadata:
   name: gk-smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
 spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
+  jury: [qualifier, reviewer]
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

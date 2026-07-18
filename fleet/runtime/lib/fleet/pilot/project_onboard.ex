@@ -202,7 +202,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp protect_main(repo, opts) do
     rule = %{
       rule_name: "main",
-      required_approvals: length(Roles.reviewer_roles(opts)),
+      # Sized by the project's CARD jury (default delegation card until per-project card
+      # selection, F-29) — repo-level protection follows the card, never an engine config.
+      required_approvals: length(Roles.jury(nil, opts)),
       dismiss_stale_approvals: true,
       block_on_rejected_reviews: true,
       enable_push: false

@@ -2,11 +2,12 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   # async: false — mutates the global :fleet_pilot config (step_dispatch?/poll_repo/...).
   use ExUnit.Case, async: false
 
-  @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge, :reviewer_roles]
+  @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge]
 
   setup do
     # Tests set these keys themselves; we only register their restoration here.
     Enum.each(@keys, &Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
+    Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
     :ok
   end
 
@@ -49,24 +50,46 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
   end
 
-  # F-C061 Vector 2 (config own-goal): `:reviewer_roles` is fail-loud on ABSENCE but not on absurd
-  # content. A non-role login would be set on PRs + bump required_approvals, then wedge silently at
-  # dispatch. The boot guard validates that each juror resolves to a judge cap-profile.
-  test "F-C061 V2: :reviewer_roles with a NON-role login (human) → raise at boot" do
+  # F-C061 Vector 2, re-seated on the CARDS: the jury lives in each workflow map
+  # (spec.jury — no engine config). The schema guards the shape, the boot guard the
+  # CONTENT: every jury role of every canon card must resolve to a judge cap-profile —
+  # else the card would lay a non-judging reviewer on PRs and wedge at dispatch.
+  @moduletag :tmp_dir
+
+  defp canon_with_jury(tmp, jury) do
+    File.write!(Path.join(tmp, "bad-card.yaml"), """
+    kind: WorkflowMap
+    metadata:
+      name: bad-card
+    spec:
+      jury: #{jury}
+      max_rework_rounds: 1
+      steps:
+        only:
+          role: engineer
+          profile: engineer.yaml
+    """)
+
+    Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)
+  end
+
+  test "F-C061 V2 (cards): a card jury with a NON-role login (human) → raise at boot",
+       %{tmp_dir: tmp} do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
-    Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "lordzurp"])
+    canon_with_jury(tmp, "[qualifier, lordzurp]")
 
     assert_raise RuntimeError, ~r/does NOT resolve/, fn ->
       Fleet.Pilot.Application.step_children_for_test()
     end
   end
 
-  test "F-C061 V2: :reviewer_roles with a NON-judge role (worker) → raise at boot" do
+  test "F-C061 V2 (cards): a card jury with a NON-judge role (worker) → raise at boot",
+       %{tmp_dir: tmp} do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
     # engineer resolves (cap-profile) but brief_kind: worker → not a valid juror.
-    Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "engineer"])
+    canon_with_jury(tmp, "[qualifier, engineer]")
 
     assert_raise RuntimeError, ~r/NOT a judge/, fn ->
       Fleet.Pilot.Application.step_children_for_test()

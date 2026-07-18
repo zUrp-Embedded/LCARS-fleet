@@ -651,7 +651,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # case: the lock was on the PR (set by `dispatch_review` :rework, held by the re-dispatched
     # producer). The ISSUE lock, though, is NOT lifted here (doctrine above, cf. `:advance`): the
     # brick stays in-flight until the final `:promote`, first delivery or not.
-    with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
+    with :ok <- request_reviews_step(forge, repo, pr, Roles.jury(nil, opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
          # Producer → judges hand-off: closes ITS build stopwatch (on the ISSUE), decoupled from the lock (the
          # ISSUE lock persists until the merge; the PR unlock below covers only the rework re-delivery

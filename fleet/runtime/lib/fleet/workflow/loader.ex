@@ -101,8 +101,25 @@ defmodule Fleet.Workflow.Loader do
       "steps" => steps,
       # Map-level rework budget (mandatory in the schema → always present here; fail-loud
       # otherwise). The kernel reads it as DATA (gate_engine) — no hardcoded global default.
-      "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds")
+      "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds"),
+      # PR-deliverable jury (mandatory in the schema): THE card is the single jury source —
+      # the engine has NO jury config (`Fleet.Pilot.Roles.jury/2` reads this field).
+      "jury" => Map.fetch!(spec, "jury")
     }
+  end
+
+  @doc """
+  Names of the canon workflow maps (`*.yaml` basenames under the maps root). Single
+  listing authority — the root derivation is NOT re-derived at callers (boot validation
+  of the card juries walks this).
+  """
+  @spec canon_names(keyword()) :: [String.t()]
+  def canon_names(opts \\ []) do
+    workflow_maps_root(opts)
+    |> Path.join("*.yaml")
+    |> Path.wildcard()
+    |> Enum.map(&Path.basename(&1, ".yaml"))
+    |> Enum.sort()
   end
 
   defp workflow_maps_root(opts) do

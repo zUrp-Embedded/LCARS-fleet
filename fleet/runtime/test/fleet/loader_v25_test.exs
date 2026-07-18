@@ -55,6 +55,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: face2-step
     spec:
       max_rework_rounds: 1
+      jury: []
       steps:
         publish:
           role: engineer
@@ -84,6 +85,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: face2-missing-required
     spec:
       max_rework_rounds: 1
+      jury: []
       steps:
         publish:
           role: engineer
@@ -114,6 +116,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: dup-needs
     spec:
       max_rework_rounds: 1
+      jury: []
       steps:
         a:
           role: engineer
@@ -139,6 +142,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: bad
     spec:
       max_rework_rounds: 1
+      jury: []
       steps: {}
     """
 
@@ -163,6 +167,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: empty-hard
     spec:
       max_rework_rounds: 1
+      jury: []
       steps:
         build:
           role: engineer
@@ -187,6 +192,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
       name: override-target
     spec:
       max_rework_rounds: 1
+      jury: []
       steps:
         only:
           role: engineer
