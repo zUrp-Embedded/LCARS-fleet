@@ -1,8 +1,8 @@
 defmodule Fleet.Starfleet.Application do
   @moduledoc """
-  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
+  Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
 
-  Supervisor for `fleet_starfleet`.
+  Supervisor for the starfleet domain.
 
   Starts:
 
@@ -20,9 +20,9 @@ defmodule Fleet.Starfleet.Application do
          opt-in only where outbound is allowed
        * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
 
-  `BootOrchestrator` is NOT a child here anymore (acte4 A-08): as a mid-boot Task it could
-  spawn permanent pods (real claude spend) BEFORE the later rings (pilot/api) were up — its
-  "post-readiness" claim was a promise, not a mechanism. It is now TRIGGERED by
+  `BootOrchestrator` is NOT a child here: as a mid-boot Task it could
+  spawn permanent pods (real claude spend) BEFORE the later domains (pilot/api) are up —
+  "post-readiness" would be a promise, not a mechanism. It is TRIGGERED by
   `Fleet.Application` AFTER the root `Supervisor.start_link` returns `{:ok, _}` (the whole
   fleet is provably up), still gated by `:start_boot_orchestrator` (read via `boot_enabled?/2`).
 
@@ -45,9 +45,8 @@ defmodule Fleet.Starfleet.Application do
 
   use Supervisor
 
-  # The atoms Cat5Escalator ACTUALLY emits are
-  # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator) — the old
-  # `audit.cat5.*` (only ever sketched) were vestiges never emitted.
+  # The atoms Cat5Escalator ACTUALLY emits:
+  # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator).
   @starfleet_event_atoms [
     :"starfleet.audit_cat5_pod_drift",
     :"starfleet.audit_cat5_workflow_map_failed",
