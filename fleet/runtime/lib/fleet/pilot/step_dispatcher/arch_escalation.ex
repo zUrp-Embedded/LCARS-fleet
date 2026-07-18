@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   @moduledoc """
-  IMPURE cluster "arch escalation" (forge write) extracted from `Fleet.Pilot.StepDispatcher`.
+  IMPURE cluster "arch escalation" (forge write) of `Fleet.Pilot.StepDispatcher`.
 
   When `StepDispatcher`'s decision core has ruled that a PR can no longer advance on its own —
   non-convergent rework (rounds budget exhausted, MA-06) or a merge blocked and not auto-resolvable (real
@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   ## Naming
 
   The public API is `escalate_rework/4` + `escalate_merge_blocked/5` (not `escalate_rework_to_arch`:
-  the `_to_arch` suffix is now carried by the module name — `ArchEscalation.escalate_rework`
+  the `_to_arch` suffix is carried by the module name — `ArchEscalation.escalate_rework`
   reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
   describes the escalation).
 
