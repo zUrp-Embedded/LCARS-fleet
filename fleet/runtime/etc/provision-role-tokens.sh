@@ -27,7 +27,7 @@
 # (exit≠0 si un token est invalide) — c'est la sonde du futur nuke-drill.
 #
 # USAGE :
-#   provision-role-tokens.sh --forge URL --passwords-file /root/roles.json \
+#   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
 #       --extra-token lcars-system:system.gitea_token        # les 6 rôles + le token système = A4 complet
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 # Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 7) ·
