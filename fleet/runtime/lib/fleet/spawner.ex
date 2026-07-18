@@ -1,8 +1,7 @@
 defmodule Fleet.Spawner do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -18,7 +17,7 @@ defmodule Fleet.Spawner do
       Fleet.ProjectBootstrap,
       Fleet.TaskQueue,
       # Foundation primitive (:persistent_term flag, deps: []) — readable from any
-      # domain. The PermanentWarden le consulte pour ne pas respawner pendant un drain (A-13).
+      # domain. The PermanentWarden consults it so as not to respawn during a drain (A-13).
       Fleet.Shutdown.Quiesce
     ],
     exports: [Application, PermanentBoot, PodTmux, Pod.McpProvision, LaunchBackend]
@@ -53,7 +52,7 @@ defmodule Fleet.Spawner do
   (`Pod.Recovery`): terminal phase → `:release` (nothing to relaunch), everything else →
   `:recreate` (from scratch, FRESH session). Resurrection is a **deliberate** act
   of the boot-orchestrator; recovery NEVER attempts `--resume` on a session dead
-  server-side (claude exit → zombie pod, proven live) — the task left in the queue
+  server-side (claude exits → zombie pod) — the task left in the queue
   re-drives a fresh REPL. Only a deliberate RECALL (`recall/2`) resumes a session.
 
   ## pod_id generation
@@ -244,7 +243,7 @@ defmodule Fleet.Spawner do
       brief_required?(cap_profile) ->
         # Diagnosable (not a silent refusal): clearly distinguishes the case.
         Logger.warning(
-          "Spawner: spawn_pod refused (R18): one-shot pod without brief — " <>
+          "Spawner: spawn_pod refused: one-shot pod without brief — " <>
             "provide :brief (the work) or :allow_no_brief (admin/diagnostic)."
         )
 
