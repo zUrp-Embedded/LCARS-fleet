@@ -2,11 +2,8 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   @moduledoc """
   **Repo provisioning** in the agent machine — sub-domain of `Fleet.Pilot.ForgeClient`:
   repo creation, discovery by org-membership (WS3), branch-protection, the repo's forge
-  identity. (The `post_onboard_marker`/`admitted?` admission seal + the topic discovery
-  `search_repos_by_topic`/`add_topic` are REMOVED — admission is org membership, managed
-  UPSTREAM by the human admin; no more server-side marker to set/read. The collaborator
-  cluster `add_collaborator`/`collaborator?`/`last_worked_repo` is REMOVED for the same
-  reason: superseded by the org-membership admission, zero caller.)
+  identity. (Admission is org membership, managed UPSTREAM by the human admin — no
+  server-side admission marker, no mutable topic, no collaborator management here.)
 
   The *seam-faced* ops (`repo_id`, `list_org_repos`) are forwarded by `ForgeClient` (the module injected
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
@@ -64,9 +61,9 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`, **PAGINATED** (DR-016/BND-057). **THE poller's
+  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`, **PAGINATED**. **THE poller's
   discovery (WS3)**: org membership IS the admission (the org = the trust group, managed UPSTREAM by the
-  human admin) — no more mutable topic nor server-side seal. The per-human scoping stays `assigned_by`
+  human admin) — no mutable topic nor server-side seal. The per-human scoping stays `assigned_by`
   (issue-level, anti-theft guard: the fleet processes ONLY its issues, even if it sees the group's other
   repos). Returns the `full_name`s (`"owner/name"`).
   """
@@ -76,7 +73,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     # repo of the fleet org". A single `?limit=50` page silently HID repos 51+ (beyond 50 repos = invisible
     # projects: no dispatch, no reconciliation, no re-kick, no event nor error — the forge+poll backstop
     # broken in a zone the poll never re-reads). We loop like every other SSOT read (`paginate/3`: fail-loud
-    # on an unexpected page shape via `:unexpected_page_shape`). The "small-team org < 50" assumption is GONE.
+    # on an unexpected page shape via `:unexpected_page_shape`) — no "small-team org < 50" assumption.
     with {:ok, config} <- resolve_config(opts),
          {:ok, body} <- paginate(config, "/orgs/#{encode_seg(org)}/repos", "") do
       {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
@@ -119,10 +116,10 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Le compte forge `username` existe-t-il ? (`GET /users/<u>`). Distingue l'ABSENCE PROUVÉE
-  (`{:ok, false}`, http 404) de la forge en panne (`{:error, _}`) — F2 (Z7c migration) :
-  le preflight d'onboarding ne dit « crée le compte » QUE sur absence prouvée, jamais
-  sur une panne (sinon on enverrait l'opérateur créer un compte qui existe).
+  Does the forge account `username` exist? (`GET /users/<u>`). Distinguishes PROVEN absence
+  (`{:ok, false}`, http 404) from a forge outage (`{:error, _}`) — F2:
+  the onboarding preflight says "create the account" ONLY on proven absence, never
+  on an outage (otherwise it would send the operator to create an account that exists).
   """
   @spec user_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
   def user_exists?(username, opts \\ []) when is_binary(username) do
@@ -136,12 +133,12 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  `username` est-il membre de la team `team` de l'org ? (2 GET : liste des teams de l'org
-  → membership). Même contrat tri-état que `user_exists?/2` : `{:ok, false}` = absence
-  PROUVÉE (team trouvée, membre 404 — ou team inexistante : un humain ne peut pas être
-  membre d'une team absente, c'est le MÊME geste admin qui crée les deux), `{:error, _}`
-  = forge en panne. F2 (Z7c migration) — la team `humans` est la porte d'admission des
-  humains (modèle tofu-teams, cf. ProjectOnboard).
+  Is `username` a member of the org's `team`? (2 GETs: the org's team list
+  → membership). Same tri-state contract as `user_exists?/2`: `{:ok, false}` = PROVEN
+  absence (team found, member 404 — or nonexistent team: a human cannot be a
+  member of an absent team, the SAME admin gesture creates both), `{:error, _}`
+  = forge outage. F2 — the `humans` team is the admission gate of the
+  humans (tofu-teams model, cf. ProjectOnboard).
   """
   @spec team_member?(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
@@ -193,11 +190,10 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   `block_on_rejected_reviews`, `enable_push`, …). It's the **forge-enforced gate**: on the sandbox
   repo, the forge refuses the merge as long as the guards (N approvals, no REQUEST_CHANGES) are
   not green → the arbiter is the forge, not the runtime. Requires repo-admin.
-  Idempotent: an already-placed rule → `:ok`. Empirically verified (WS4 e2e, 2026-07-07): Gitea returns
-  **403** `"Branch protection already exist"` for this precise case — NOT 409/422 as documented before
-  (latent bug, also present on the `onboard/2` side on any post-protect re-run; flushed out by the tested
-  idempotence of `import/2`). We CANNOT swallow every 403 (a real permission refusal would be masked) →
-  we match the precise MESSAGE, not just the code.
+  Idempotent: an already-placed rule → `:ok`. Gitea returns
+  **403** `"Branch protection already exist"` for this precise case — NOT 409/422 (the codes its
+  docs suggest; both are accepted too). We CANNOT swallow every 403 (a real permission refusal
+  would be masked) → we match the precise MESSAGE, not just the code.
   """
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
