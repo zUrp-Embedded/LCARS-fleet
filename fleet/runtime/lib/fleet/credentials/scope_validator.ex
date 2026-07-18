@@ -6,15 +6,15 @@ defmodule Fleet.Credentials.ScopeValidator do
   `Fleet.Spawner.Pod` at launch): reads the scopes from the human's `.credentials.json` (bound native, no copy) and refuses the
   spawn (`{:credentials_invalid, {:insufficient_scopes, …}}`) if insufficient. Preflight defense in
   depth (the claude binary also enforces the scopes via 401, but we fail
-  early and clear on the runtime side). No vault nor `setup-credentials.sh`: the human's claudeDir
-  is bound directly, there is no `/var/lib/lcars/credentials` vault.
+  early and clear on the runtime side). The human's claudeDir is bound directly —
+  the ONLY credential source, nothing is copied or stored fleet-side.
 
   ## Scope profiles
 
     * `default` — operational minimum (`user:inference`,
       `user:sessions:claude_code`)
     * `bridge_enabled` — adds `user:profile` (Bridge / Remote
-      Control opt-in, out-of-MVP but the profile is ready)
+      Control opt-in)
     * `mcp_oauth` — adds `user:mcp_servers` (MCP OAuth
       Anthropic-mediated)
 
@@ -69,7 +69,7 @@ defmodule Fleet.Credentials.ScopeValidator do
     if missing == [], do: :ok, else: {:error, {:insufficient_scopes, missing}}
   end
 
-  # Total (R1-36): malformed args (oauth_scopes not a list, role_profile_flags not a map) → typed refusal,
+  # Total: malformed args (oauth_scopes not a list, role_profile_flags not a map) → typed refusal,
   # not a FunctionClauseError. A caller (Gate) normalizes upstream, but the validator stands total on its own.
   def validate(oauth_scopes, role_profile_flags),
     do: {:error, {:invalid_scope_args, {oauth_scopes, role_profile_flags}}}
