@@ -2,10 +2,13 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @moduledoc """
   Onboarding of a project: "idea → the project exists".
 
-  Replicates the dual-dir architecture of LCARS itself (one repo, **two worktrees**):
+  Replicates the dual-dir architecture of LCARS itself (one forge repo, **two local repos**):
 
-    * `/home/projects/<name>`       → worktree branch `main`     (the deliverable, push origin)
-    * `/home/projects.work/<name>`  → worktree branch `work/ops` (orphan: plans, backlog, ops)
+    * `/home/projects/<name>`       → clone, branch `main`       (the deliverable, push origin)
+    * `/home/projects.work/<name>`  → STANDALONE repo, branch `work/ops` (orphan: plans, backlog,
+      briefs, provenance). Its ENTIRE gitdir lives on the `.work` side (F-24): the arch pod
+      mounts `/home/projects` ro — a linked worktree would leave work/ops uncommittable for
+      the producer (`add_work_ops` carries the full rationale).
 
   It is a **mechanical rail** (structural compliance): the arch *triggers* via the MCP
   tool `create_project`, the SYSTEM *executes* this deterministic sequence — the arch never types git.
@@ -18,7 +21,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     2. `git clone --branch main` → `/home/projects/<name>`
     3. scaffold `main` (README, .gitignore, .editorconfig, docs/spec.md)
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
-    5. `git worktree add --orphan -b work/ops` → `/home/projects.work/<name>`
+    5. `git init -b work/ops` + `remote add origin` → `/home/projects.work/<name>` (standalone)
     6. scaffold `work/ops` (backlog.md, scratchpad.md, plans/)
     7. commit + push `-u work/ops`
 
@@ -96,7 +99,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
-         :ok <- add_work_ops(proj_dir, work_dir),
+         :ok <- add_work_ops(work_dir, url),
          :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
          :ok <- publish_work_ops(full_name, work_dir, opts),
@@ -168,12 +171,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # work/ops idempotent: present (re-import, or repo already onboarded) → we DO NOT OVERWRITE it (skip). Absent
   # (the nominal case of an external repo) → same sequence as onboard (steps 5-7): orphan branch + scaffold
   # + commit + push.
-  defp ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts) do
+  defp ensure_work_ops(full_name, url, _proj_dir, work_dir, name, opts) do
     if ForgeClient.Repo.branch_exists?(full_name, "work/ops", fc_opts(opts)) do
       File.mkdir_p!(Path.dirname(work_dir))
       GitOps.run(["clone", "--branch", "work/ops", url, work_dir], auth: true)
     else
-      with :ok <- add_work_ops(proj_dir, work_dir),
+      with :ok <- add_work_ops(work_dir, url),
            :ok <- Scaffold.work(work_dir, name, opts),
            :ok <- commit(work_dir, "chore(import): init work/ops") do
         publish_work_ops(full_name, work_dir, opts)
@@ -377,13 +380,20 @@ defmodule Fleet.Pilot.ProjectOnboard do
     push(work_dir, "work/ops", true)
   end
 
-  defp add_work_ops(proj_dir, work_dir) do
+  # STANDALONE repo (own `.git` under work_dir), NOT a linked worktree of the main clone —
+  # F-24: a linked worktree keeps its gitdir (index, refs, objects) under
+  # `<proj_dir>/.git/worktrees/…`, which is the ARCH pod's read-only mount (its containment
+  # keeps code repos ro by design) → the arch could EDIT work/ops but never COMMIT it, and
+  # the producer-commits rail (DESIGN-vie-du-brief) is dead by construction. A standalone
+  # repo puts the whole gitdir on the rw side: the arch commits natively (local git, no
+  # credential — forge-blind preserved; pushing stays system-side). Same shape as what
+  # `import` already produces (`clone --branch work/ops`): the two paths converge.
+  defp add_work_ops(work_dir, url) do
     File.mkdir_p!(Path.dirname(work_dir))
 
-    # git 2.43: --orphan -b <branch> <path> → linked worktree, orphan branch (empty merge-base).
-    GitOps.run(["-C", proj_dir, "worktree", "add", "--orphan", "-b", "work/ops", work_dir],
-      auth: false
-    )
+    with :ok <- GitOps.run(["init", "-q", "-b", "work/ops", work_dir], auth: false) do
+      GitOps.run(["-C", work_dir, "remote", "add", "origin", url], auth: false)
+    end
   end
 
   defp commit(dir, message) do
