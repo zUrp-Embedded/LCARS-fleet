@@ -117,10 +117,10 @@ defmodule Fleet.CapProfile.DisallowedTools do
         entries
 
       {:ok, _other} ->
-        raise "fleet_cap_profile baseline #{path}: key `git_ops_denied` absent or invalid format (intangible baseline — fail-closed)"
+        raise "DisallowedTools: baseline #{path}: key `git_ops_denied` absent or invalid format (intangible baseline — fail-closed)"
 
       {:error, reason} ->
-        raise "fleet_cap_profile baseline #{path} absent or corrupt (#{inspect(reason)}) (intangible baseline — fail-closed)"
+        raise "DisallowedTools: baseline #{path} absent or corrupt (#{inspect(reason)}) (intangible baseline — fail-closed)"
     end
   end
 end

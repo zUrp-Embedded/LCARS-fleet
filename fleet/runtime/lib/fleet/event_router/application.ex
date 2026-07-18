@@ -124,7 +124,7 @@ defmodule Fleet.EventRouter.Application do
       # legitimate need: if the Gitea forge is ON ANOTHER MACHINE, its POSTs cannot reach a
       # loopback. That is exactly the role of the surface override `LCARS_WEBHOOK_BIND_HOST`
       # (e.g. `0.0.0.0`) — a named opt-in that opens ONLY the webhook, not the command surfaces
-      # (fleet_api, deck). Co-located forge (loopback) → no override needed. The protection stays
+      # (API, deck). Co-located forge (loopback) → no override needed. The protection stays
       # the HMAC SHA256 over the shared secret, independent of the bind.
       [
         Fleet.EventRouter.Listener.cowboy_child(

@@ -3,7 +3,7 @@ defmodule Fleet.EventRouter.Listener do
   SINGLE SOURCE of the **Cowboy child-spec** for the runtime's HTTP listeners — the "spec"
   counterpart of `Fleet.EventRouter.BindAddress` (same concern: *how a listener is exposed*).
 
-  The runtime's three HTTP surfaces — `fleet_api` (REST + WS), `fleet_observation` (deck) and
+  The runtime's three HTTP surfaces — `Fleet.API` (REST + WS), `Fleet.Observation` (deck) and
   this domain's Gitea webhook — all build their listener HERE: the invariant "loopback bind by
   default, exposure = named opt-in" is enforced BY CONSTRUCTION (a listener routed through
   `cowboy_child/1` cannot forget the `:ip`; see the `BindAddress` moduledoc for the full
@@ -32,7 +32,7 @@ defmodule Fleet.EventRouter.Listener do
     * `:plug` (required) — the Plug module served.
     * `:port` (required) — TCP port, resolved by the caller (fetch_env! per-human / webhook default).
     * `:scheme` — default `:http`.
-    * `:dispatch` — optional Cowboy dispatch (e.g. `fleet_api`'s WS route), passed RAW
+    * `:dispatch` — optional Cowboy dispatch (e.g. the API domain's WS route), passed RAW
       (not pre-compiled): Plug.Cowboy compiles it internally via `to_args/5`; a pre-compiled
       dispatch would be re-compiled — decomposed segments reinterpreted as raw paths →
       ArgumentError at bind. Tests never exercise the bind (`start_listener: false`), so this
