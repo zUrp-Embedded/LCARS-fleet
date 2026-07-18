@@ -1,16 +1,12 @@
 defmodule Fleet.Event do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: [UnregisteredError]
 
   @moduledoc """
   Canonical schema of the events published on the Phoenix.PubSub topic `fleet.events`.
 
-  SINGLE wire format: every producer emits this `%Fleet.Event{}` struct. The `Bus` exposes no
-  3-arity `{atom, map}` shim — "subscribe to `fleet.events`" therefore guarantees a single shape,
-  not a tuple to un-wrap on the consumer side.
+  SINGLE wire format: every producer emits this `%Fleet.Event{}` struct and the `Bus` broadcasts
+  it as-is — "subscribe to `fleet.events`" guarantees a subscriber always receives the struct,
+  never a tuple to un-wrap.
 
   The `source` is a **closed enum** (the `source()` type below), defined and enforced HERE only:
   `new/3` (the canonical constructor) raises on an out-of-enum source, so the invalid event is never
@@ -167,12 +163,11 @@ defmodule Fleet.Event do
 
   def reason_fields(reason), do: {inspect(reason), inspect(reason)}
 
+  # The ONLY validation error on the broadcast path: `Bus.broadcast/2` pattern-matches
+  # `%Fleet.Event{}` and checks the type against the `events.yaml` registry — the struct
+  # shape itself is enforced at construction (`new/3`), a malformed event is unrepresentable.
   defmodule UnregisteredError do
     @moduledoc "Event published outside the `events.yaml` registry (strict fail-loud)."
     defexception [:message]
   end
-
-  # No `SchemaError` here: the canonical `Bus.broadcast/2` path validates no JSON schema, it
-  # pattern-matches `%Fleet.Event{}` and checks the registry → the only validation error is
-  # `UnregisteredError`. (A malformed event simply does not compile / does not match the struct.)
 end
