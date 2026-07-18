@@ -1,27 +1,26 @@
-# Baseline universel des opérations git refusées à TOUS les workers (face 1
-# décision archi git, baseline + override-par-discussion-archi, 2026-05-24).
+# Universal baseline of git operations denied to ALL workers.
 #
-# Lu par `Fleet.CapProfile.with_resolved_disallowed_tools/1` et unioné
-# (uniq) avec `spec.scope.git_ops_denied` du cap-profile worker. Pas
-# d'override silencieux : retirer un pattern de cette liste = décision
-# archi explicite (édit de ce fichier).
+# Read by `Fleet.CapProfile.with_resolved_disallowed_tools/1` and unioned
+# (uniq) with the worker cap-profile's `spec.scope.git_ops_denied`. No silent
+# override: removing a pattern from this list is an explicit architecture
+# decision (edit this file).
 #
-# Ce N'EST PAS un cap-profile (pas d'apiVersion/kind/metadata/spec) — c'est
-# un slice catalogue dédié, consommé par le mécanisme générique de
-# résolution `disallowedTools` claude CLI.
+# This is NOT a cap-profile (no kind/metadata/spec) — it is a dedicated
+# catalogue slice, consumed by the generic claude CLI `disallowedTools`
+# resolution mechanism.
 #
-# Politique : patterns universellement destructeurs pour l'historique git
-# partagé (main/master) ou la perte de travail local sans recovery
-# possible. Hors baseline = opérations légitimes selon D-04 (worker peut
-# commit, push simple, rebase feature branch).
+# Policy: patterns that are universally destructive for the shared git
+# history (main/master) or lose local work without recovery. Outside this
+# baseline, git operations are legitimate: a worker MAY commit, push
+# (plain), and rebase its own feature branch.
 
 git_ops_denied:
-  - push --force            # destructive remote (réécrit historique partagé)
-  - push -f                 # alias short de push --force
-  - push --force-with-lease # idem mais conditionnel (refusé par défaut, override = décision)
-  - reset --hard            # perte travail local sans recovery
-  - branch -D               # delete branch force (perte si non poussée)
-  - rebase main             # réécrit historique main partagé
-  - rebase master           # idem variante main
-  - checkout main           # quitte la branche worker → risque WIP perdu
-  - checkout master         # idem variante main
+  - push --force            # destructive remote (rewrites shared history)
+  - push -f                 # short alias of push --force
+  - push --force-with-lease # same but conditional (denied by default, override = a decision)
+  - reset --hard            # local work lost without recovery
+  - branch -D               # force branch delete (lost if never pushed)
+  - rebase main             # rewrites shared main history
+  - rebase master           # same, master variant
+  - checkout main           # leaves the worker branch, WIP at risk
+  - checkout master         # same, master variant
