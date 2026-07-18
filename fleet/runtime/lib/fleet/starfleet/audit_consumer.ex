@@ -12,11 +12,10 @@ defmodule Fleet.Starfleet.AuditConsumer do
       `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
 
   `:"pod.drift"` handler (type-only clause): producer LIVE — `Fleet.Spawner.PermanentBoot`
-  (source `:spawner`, F-C043); also consumed by DriftMonitor. `pod.refuse_pattern_match` left with the
-  legacy stack (removed from the registry, 0 producer / 0 consumer).
+  (source `:spawner`, F-C043); also consumed by DriftMonitor.
 
   GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
-  (the legacy `{atom, map}` tuple stack is RAZED — 0 producer). No runtime side effect
+  ONLY (no tuple format exists on the Bus). No runtime side effect
   beyond the log (forensics + a separate dashboard subscriber).
 
   Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
@@ -41,11 +40,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:ok, %{events_count: 0}}
   end
 
-  # Legacy {atom, map} tuple stack RAZED (conformance 2026-07-04): NO producer of the tuple
-  # format on the Bus anymore (verified: zero Bus.broadcast outside %Fleet.Event{}); the clauses
-  # lay dormant, duplicating the logging of the canonical clauses below (boot_*, pod.completed/failed).
-
-  # Strict canonical %Fleet.Event{} schema (task_queue lifecycle).
+  # Strict canonical %Fleet.Event{} schema (task_queue lifecycle) — every Bus producer emits
+  # %Fleet.Event{}, no tuple-format clause exists here.
   @impl true
   def handle_info(%Fleet.Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
@@ -79,7 +75,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # boot_orchestrator events migrated to the canonical schema.
+  # boot_orchestrator events (canonical schema).
   def handle_info(
         %Fleet.Event{source: :starfleet, type: type, payload: payload},
         state
@@ -89,7 +85,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Pod GenServer Port stream lifecycle migrated to the canonical schema.
+  # Pod GenServer Port stream lifecycle (canonical schema).
   def handle_info(
         %Fleet.Event{source: :spawner, type: type, payload: payload},
         state
@@ -98,10 +94,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     log_pod_lifecycle_event(type, payload)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
-
-  # git.published/git.publish_failed clause RAZED (conformance 2026-07-04): 0 producer AND, since this
-  # raze, 0 consumer → both keys are now REMOVED from events.yaml too (registry-lie cleanup: a 0/0 key
-  # must not linger claiming "consumer wired"). Re-add a clause here only if a producer + registry key return.
 
   # pod.drift: producer LIVE via `Fleet.Spawner.PermanentBoot` (source :spawner, F-C043). This
   # AuditConsumer clause stays TYPE-ONLY (audit rail, no anti-spoof), UNLIKE DriftMonitor which
@@ -142,9 +134,9 @@ defmodule Fleet.Starfleet.AuditConsumer do
          correlation_id: tid,
          payload: p
        }) do
-    # Clé ATOME seule : l'unique producteur (task_queue/server) émet %{reason: …} et le Bus est
-    # in-process (Phoenix.PubSub, aucun round-trip JSON qui stringifierait) — un fallback
-    # string-key serait de la re-validation d'une forme que la frontière garantit déjà.
+    # ATOM key only: the single producer (task_queue/server) emits %{reason: …} and the Bus is
+    # in-process (Phoenix.PubSub, no JSON round-trip that would stringify) — a string-key
+    # fallback would re-validate a shape the boundary already guarantees.
     reason = Map.get(p, :reason, "?")
 
     Logger.warning(
