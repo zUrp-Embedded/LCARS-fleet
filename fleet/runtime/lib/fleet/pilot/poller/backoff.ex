@@ -1,11 +1,10 @@
 defmodule Fleet.Pilot.Poller.Backoff do
   @moduledoc """
-  Poller timing (extracted from `Fleet.Pilot.Poller`): anti thundering-herd jitter +
-  capped exponential backoff. PURE computation (modulo `:rand` for the jitter) — no seam,
+  Poller timing: anti thundering-herd jitter + capped exponential backoff. PURE computation (modulo `:rand` for the jitter) — no seam,
   no state: the GenServer keeps the EFFECT (`Process.send_after`) and the loop rescue
   (`safe_poll`), this module only yields the DELAY.
 
-  ## Why these two mechanisms (port from v1.5 `LcarsFleetPoller`, retained)
+  ## Why these two mechanisms
 
     * **Jitter ±10 %** — N daemons that restart together must not hammer the
       forge in phase (anti thundering-herd). 1 s floor (never a null/negative delay).
