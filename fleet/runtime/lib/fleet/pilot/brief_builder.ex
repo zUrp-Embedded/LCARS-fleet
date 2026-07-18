@@ -2,8 +2,8 @@ defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
   Authority over the FORMAT of briefs: worker / judge / brief-review / rework, plus the
   eng voice instructions. `StepDispatcher` CALLS (it chooses WHICH brief based on the forge state),
-  it no longer FORMS the brief itself. (No conflict-resolution brief — merge conflicts are
-  ESCALATED to the architect since 2026-07-07, the forge-blind pod cannot rebase.)
+  it does not FORM the brief itself. (No conflict-resolution brief — merge conflicts are
+  ESCALATED to the architect; the forge-blind pod cannot rebase.)
 
   Judge-ness (and a judge's target) is a SECURITY property: it is NEVER inferred by
   omission of a clause. `build_brief/9` is a TOTAL sum and fail-loud on out-of-vocab `brief_kind`/`judge_target`
@@ -82,7 +82,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
-  # name in ring2. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
+  # role name. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
   #
   # Returns `{:ok, brief}` | `{:error, {:criterion_unavailable, reason}}`. The error is reachable ONLY on
   # the DELIVERABLE-judge path, when the criterion (issue body) can't be READ from the forge (F-C083:
@@ -169,8 +169,8 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   # A **judge** pod must know WHAT
   # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`
-  # (context + deliverable + question + **`gate-decision-v1.json` contract + canonical options**) — the same
-  # as the RAM model. The `result_K` to judge is read from the previous step_run's comment (engraved by
+  # (context + deliverable + question + **`gate-decision-v1.json` contract + canonical
+  # options**). The `result_K` to judge is read from the previous step_run's comment (engraved by
   # StepRunCompleter); the pod stays forge-blind (the runtime reads the comment, no
   # clone).
   defp build_judge_brief(role, forge, repo, number, forge_opts, route) do
@@ -208,9 +208,9 @@ defmodule Fleet.Pilot.BriefBuilder do
     # `build_judge_brief` only serves PERSONA judges (qualifier/reviewer, `subagent_template`
     # spec-reviewer/code-quality-reviewer): GateBrief knows how to render `request` defused.
     #
-    # F-C083 — READ-ERROR ≠ ABSENCE. The criterion read can FAIL (forge unreachable/transient). The old
-    # `_ -> nil` CONFLATED a read-error with a genuinely-empty body → the judge got the deliverable (diff
-    # via `outputs`) with NO criterion → it could approve CRITERION-LESS (false GREEN). We FAIL-CLOSED on a
+    # F-C083 — READ-ERROR ≠ ABSENCE. The criterion read can FAIL (forge unreachable/transient). A bare
+    # `_ -> nil` clause would CONFLATE a read-error with a genuinely-empty body → the judge gets the
+    # deliverable (diff via `outputs`) with NO criterion → a CRITERION-LESS approval (false GREEN). We FAIL-CLOSED on a
     # read-error: `{:error, {:criterion_unavailable, reason}}` → the dispatch DEFERS (skip, retry next tick),
     # it NEVER spawns a blind judge. A genuinely-absent body (`{:ok, issue}`, body nil) is a REAL (rare)
     # state → we PROCEED: the judge still has the diff, the empty criterion is the arch's degenerate brief,
