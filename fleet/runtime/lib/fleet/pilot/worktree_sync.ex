@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   alias Fleet.Pilot.GitOps
 
-  # Derives from the single authority of the container layout (Fleet.Layout, R0).
+  # Derives from the single authority of the container layout (Fleet.Layout).
   @projects_root Fleet.Layout.projects_root()
 
   def start_link(opts \\ []) do
