@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   @moduledoc """
-  Construction of the **PR-native step_run** from the `pod.completed` event, extracted from
+  Construction of the **PR-native step_run** from the `pod.completed` event, for
   `Fleet.Pilot.StepRunConsumer`: classifies the role that FINISHES (producer/judge), resolves the
   PR branch, and assembles the `step_run` map that `StepRunCompleter.complete_pr` routes.
 
@@ -116,7 +116,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
       intent: route.intent,
       next_assignee: route.next_assignee,
       # Transitional bridge: workflow_map_name+next_step engrave the route the StepDispatcher reads
-      # to spawn the next step (removed at increment 4, switch onto the review-request).
+      # to spawn the next step.
       next_step: route.next_step,
       workflow_map: payload["workflow_map"],
       producer_branch: producer_branch,
@@ -126,9 +126,9 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     # judge_target (brief|nil) → complete_judge decides PR-review trace vs issue-comment;
     # absent (normal/gatekeeper path) → default PR behavior (fail-loud if no PR).
     |> put_unless_nil(:judge_target, Map.get(route, :judge_target))
-    # Provenance du brief (chantier brief-physique) : le pointeur content-addressé voyagé via pod.completed
-    # → le StepRunCompleter assemble le triplet SLSA `(brief_sha, base_sha, livrable_sha)` après publish.
-    # Absent (brief non matérialisé / judge sans brief) → non posé.
+    # Brief provenance: the content-addressed pointer travels via pod.completed → the
+    # StepRunCompleter assembles the SLSA triplet `(brief_sha, base_sha, deliverable_sha)` after
+    # the publish. Absent (brief not materialized / judge without a brief) → not set.
     |> put_unless_nil(:brief_sha, payload["brief_sha"])
     |> put_unless_nil(:brief_ref, payload["brief_ref"])
     |> maybe_put_deliverable(pr_role, role, payload, n, seams)
@@ -250,7 +250,8 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   # (what it did / answer to the review / blocked reason). We extract it from the result (unwrapped from
   # the worker envelope) → `StepRunCompleter` posts it as a PR comment (`as_role` engineer). Coerced by
   # `safe_str` (the eng may return a non-binary → don't crash the singleton). Absent/empty → nothing
-  # posted. OUTGOING twin of the INCOMING info starvation — completes the "bidirectional substance outage".
+  # posted. OUTGOING twin of the INCOMING brief substance — both directions of the pod's
+  # information flow carry substance, never bare mechanics.
   defp maybe_put_eng_summary(step_run, :producer, payload) do
     case Verdict.eng_summary(payload) do
       "" -> step_run
