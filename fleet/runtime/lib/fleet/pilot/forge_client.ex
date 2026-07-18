@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # The workflow_map POSITION (= the state-machine state) lives in the SCOPED label `stage/*` (Gitea
   # native mutex, single source visible to human+machine), set by `post_route` / read by `get_route`.
-  # No more `[lcars-route:...]` comment (noise). The FLAT locks (`lcars-in-flight`) stay
+  # Never a `[lcars-route:...]` comment (noise). The FLAT locks (`lcars-in-flight`) stay
   # non-scoped via `add_label`/`remove_label`.
 
   @doc """
@@ -355,8 +355,8 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Opens a pull request `head` → `base` on `repo` (Gitea `POST /repos/{repo}/pulls`).
   IDEMPOTENT: if an open PR already exists for this `head`, returns its number (the
-  Gitea 409 is not an error). `opts[:body]` = body. (No `Closes #N` auto-close: it was removed
-  2026-07-07 — the issue is closed EXPLICITLY by `GatekeeperSeal.seal_and_merge` after the seal.)
+  Gitea 409 is not an error). `opts[:body]` = body. (No `Closes #N` auto-close — the issue
+  is closed EXPLICITLY by `GatekeeperSeal.seal_and_merge` after the seal.)
 
   ## Returns
     * `{:ok, number}` — PR opened (or already existing)
@@ -380,7 +380,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Creates the branch `branch` on `repo` from `old_ref` (branch/tag/COMMIT the server already
-  knows) via the Gitea API. NB (measured live 2026-07-18): EVERY branch birth — API or push —
+  knows) via the Gitea API. NB: EVERY branch birth — API or push —
   emits a twin same-second action pair ("branch created" + birth snapshot); the pair is
   structural to Gitea and unsplittable client-side. What API-birthing + a `WriteSpacing.gap`
   before the content push buys is that the CONTENT action (the commits humans read) lands in
@@ -553,9 +553,9 @@ defmodule Fleet.Pilot.ForgeClient do
   defp merge_checking?(_), do: false
 
   # Deletes the merged feature-branch `lcars/issue-N-role` (hygiene: no pile-up of dead branches)
-  # as a SEPARATE call AFTER a `WriteSpacing.gap` — `delete_branch_after_merge` bundled both into one
-  # Gitea transaction, whose two feed events ("pushed on main" + "branch deleted") tied in the same
-  # second and displayed in an arbitrary order. The merge stays the authority: any failure here is a
+  # as a SEPARATE call AFTER a `WriteSpacing.gap` — bundling both into one Gitea
+  # transaction would tie its two feed events ("pushed on main" + "branch deleted") in the same
+  # second, displayed in an arbitrary order. The merge stays the authority: any failure here is a
   # WARNING (a surviving dead branch is cosmetic), never a merge error.
   defp delete_head_branch_spaced(config, repo, index) do
     with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
@@ -687,7 +687,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # ============================================================
   # workflow_map position — 2 SCOPED labels on the issue (the forge IS the state machine).
-  # Replaces the old `[lcars-route:<map>:<step>]` comment (noise in the human thread):
+  # Never a `[lcars-route:<map>:<step>]` comment (noise in the human thread):
   #   `stage/<step>`: the CURRENT step, mobile (Gitea native mutex: setting a step removes the previous one).
   #   `wfmap/<map>` : WHICH map this issue follows, set once (mutex: a single map per issue).
   # Both VISIBLE (human glance), read directly (no comment scan), unfalsifiable
@@ -834,8 +834,8 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ADD a label by NAME (POST = adds without replacing the existing). Gitea resolves the name against the
-  # REPO **and ORG** labels server-side (`IssueLabelsOption.labels` = « strings representing label
-  # names », swagger doc) → no more repo-id resolution client-side. The wire-protocol lock-labels
+  # REPO **and ORG** labels server-side (`IssueLabelsOption.labels` = "strings representing label
+  # names", swagger doc) → no repo-id resolution client-side. The wire-protocol lock-labels
   # are created PER-REPO (`ensure_repo_label`, via the system account's repo-write): no org-ownership
   # required, and the routing state stays self-contained in its repo.
   #
@@ -843,7 +843,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # 200, but the label is NOT set) → the protocol lock would be a phantom → re-dispatch loop
   # (e.g. `lcars-awaits-arch` absent from the org). So we do NOT rely on the 200 alone: we VERIFY
   # that the label is in the response; absent → we CREATE it (repo's org) then retry; still
-  # absent → fail-loud `{:label_not_added}` (never a lying :ok). No more dependence on hand-created
+  # absent → fail-loud `{:label_not_added}` (never a lying :ok). No dependence on hand-created
   # labels.
   defp add_issue_label(config, repo, issue_number, label_name) do
     case post_issue_label(config, repo, issue_number, label_name) do
@@ -878,9 +878,9 @@ defmodule Fleet.Pilot.ForgeClient do
   # Creates the missing protocol label at the REPO level. The routing labels (`stage/*`/`wfmap/*`) and the
   # flat locks (`lcars-*`) live PER-REPO: the routing state belongs to ITS repo's issues (the
   # forge = state-store, self-contained per project), and the system account creates them via its **repo-write** —
-  # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 « Must be an organization
-  # owner »). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
-  # the human hovering over the label on the forge — before: the same cryptic string for all, « F-E5 » means
+  # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 "Must be an organization
+  # owner"). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
+  # the human hovering over the label on the forge — a cryptic protocol string means
   # nothing outside the code). Tolerant: a failure (created concurrently) → `:ok` — it's the re-POST + its verification
   # that decide (otherwise `add_issue_label`'s fail-loud propagates).
   defp ensure_repo_label(config, repo, label_name) do
