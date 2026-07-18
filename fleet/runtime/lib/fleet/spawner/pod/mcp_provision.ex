@@ -3,8 +3,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   The pod↔fleet MCP CHANNEL, end to end — island extracted from `Fleet.Spawner.Pod`.
 
   The `fleet` MCP server is the SOLE pod↔fleet comm channel (never scraping). This module
-  carries the WHOLE channel (recentered 2026-07-05 — the socket lifecycle lived in `Pod.Backend`,
-  the "OS process life & death" module, where it was an orphan concern):
+  carries the WHOLE channel:
 
   - the **per-pod AF_UNIX SOCKET**: `ensure_pod_socket/1` (creation before launch) /
     `release_pod_socket/1` (release at terminate) via the RUNTIME SEAM
@@ -45,7 +44,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # (`Fleet.MCP.PodSocketSupervisor` in prod, `Fleet.Spawner.MCPSocketStub` set by config/test.exs).
   defp mcp_socket_provisioner, do: McpSocketProvisioner.resolved()
 
-  # The seam is DUCK-TYPED and stays INJECTED post-collapse (Z5, 2026-07-13) : this is THE assumed
+  # The seam is DUCK-TYPED and INJECTED: this is THE assumed
   # upward runtime seam — mcp already declares Fleet.Spawner (boundary dep, Delegation), so
   # spawner→mcp as a literal call would close a boundary CYCLE (forbidden by the compiler; and
   # doctrinally the core must not compile-depend on its own substrate consumer). So a
@@ -151,7 +150,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   `Fleet.Spawner.pod_info`, keyed by the channel), never from a wire field a pod could forge. Set
   HERE covers host_launch AND bwrap (which re-`--setenv`s it in its sandbox).
 
-  No more `LCARS_POD_CAPABILITY`: the pod's identity is no longer a secret presented on the wire but
+  The pod's identity is NOT a secret presented on the wire but
   the CHANNEL itself — each pod has its AF_UNIX MCP socket (mounted in its sole sandbox) → "which
   socket receives" = "which pod" (cf. `Fleet.MCP.PodSocketAcceptor`). The path of this socket
   travels in `LCARS_FLEET_MCP_SOCKET` in the MCP SERVER's env (`build_fleet_mcp_entry`), not here
