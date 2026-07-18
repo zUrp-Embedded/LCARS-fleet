@@ -1,8 +1,4 @@
 defmodule Fleet.CapProfile do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -20,11 +16,11 @@ defmodule Fleet.CapProfile do
   Pure data transformer: YAML on disk → composed `%Fleet.CapProfile{}`
   struct. No process, no state.
 
-  **Frontière de construction** : la struct ne se fabrique QUE via `to_struct/1` (privé), atteint
-  uniquement après validation schema — trois chemins d'entrée : `load/1` (catalogue disque par nom),
-  `compose/2` (base + modops), `from_map/1` (map en mémoire, même validation). Fabriquer un
-  `%CapProfile{spec: …}` à la main court-circuite le schema (l'état invalide redevient représentable,
-  BND-001) : le code de prod passe par ces trois-là, et les fixtures par `from_map!/1` (builder de test).
+  **Construction boundary**: the struct is ONLY built via `to_struct/1` (private), reached
+  exclusively after schema validation — three entry paths: `load/1` (disk catalogue by name),
+  `compose/2` (base + modops), `from_map/1` (in-memory map, same validation). Hand-building a
+  `%CapProfile{spec: …}` short-circuits the schema (the invalid state becomes representable
+  again): production code goes through those three, fixtures through `from_map!/1`.
 
   Two roles in one module:
 
@@ -35,10 +31,9 @@ defmodule Fleet.CapProfile do
       `lifetime_scope/2`, `deliverable_mode/2`, `brief_kind/2`, …) — each the
       sole reader of its field, so cross-app callers never re-derive it.
 
-  The schema version (LCARS v2.5) is pinned by the code / the bundled schema file path
-  (`priv/schema/cap-profile-v2.5.json`), NOT by an embedded `apiVersion` field (that field was
-  removed — R0.8-brick3). Every profile is matched against `priv/schema/cap-profile-v2.5.json`
-  at load time. Modops are
+  The schema version (LCARS v2.5) is pinned by the code / the bundled schema file path —
+  never by a field embedded in the YAML. Every profile is matched against
+  `priv/schema/cap-profile-v2.5.json` at load time. Modops are
   matched against `priv/schema/modop-profile.json` (strict — reserved
   keys forbidden, so a modop cannot override the base profile's
   containment/name/kind).
@@ -163,7 +158,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The role's DEFAULT modops — `spec.modop_set.default` — the overlays applied AT SPAWN (their SP fragments
-  are composed into the pod's system prompt by `SPBuilder.compose`, F-C146/PORT). `[]` if absent, or if
+  are composed into the pod's system prompt by `SPBuilder.compose`). `[]` if absent, or if
   `modop_set`/`default` is any shape other than a map holding a list (defensive: a malformed/stub spec
   yields no overlay rather than crashing the spawn).
   """
@@ -203,18 +198,18 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Construit un `%Fleet.CapProfile{}` depuis une map EN MÉMOIRE (≠ `load/1`, qui résout un profil du
-  catalogue disque par `metadata.name`), en franchissant la **MÊME** validation schema que `load`/`compose`.
+  Builds a `%Fleet.CapProfile{}` from an IN-MEMORY map (≠ `load/1`, which resolves a disk-catalogue
+  profile by `metadata.name`), crossing the **SAME** schema validation as `load`/`compose`.
 
-  **Seul chemin d'entrée validé** pour fabriquer un profil hors catalogue : sans lui, du code (fixtures,
-  composition ad-hoc) forge `%CapProfile{spec: %{}}` à la main → le schema est court-circuité et l'état
-  invalide redevient représentable (la faiblesse BND-001). Un profil sorti d'ICI EST schema-conforme
-  (kind/metadata/spec + champs requis) ; `to_struct/1` (privé) reste l'unique FABRICANT de la struct, et
-  n'est jamais atteint sans validation préalable (load / compose / ici).
+  **The only validated entry path** for a profile outside the catalogue: without it, code (fixtures,
+  ad-hoc composition) hand-forges `%CapProfile{spec: %{}}` → the schema is short-circuited and the
+  invalid state becomes representable again. A profile coming out of HERE IS schema-conformant
+  (kind/metadata/spec + required fields); `to_struct/1` (private) stays the sole MAKER of the struct,
+  never reached without prior validation (load / compose / here).
 
-    * `{:ok, %Fleet.CapProfile{}}` — map schema-conforme
-    * `{:error, :invalid_schema}` — non-conforme (MÊME verdict que `load`)
-    * `{:error, :schema_unavailable}` — le schema priv est absent/corrompu
+    * `{:ok, %Fleet.CapProfile{}}` — schema-conformant map
+    * `{:error, :invalid_schema}` — nonconformant (SAME verdict as `load`)
+    * `{:error, :schema_unavailable}` — the priv schema file is absent/corrupt
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, atom() | String.t()}
   def from_map(raw) when is_map(raw) do
@@ -224,11 +219,11 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Variante bang de `from_map/1` : rend la struct, ou **raise** si la map n'est pas schema-conforme.
-  Destinée aux FIXTURES nominales (le builder de support `Fleet.Support.CapProfileFixture` s'appuie
-  dessus) — une fixture nominale franchit alors la MÊME frontière que la prod au lieu de forger un
-  `%CapProfile{}` partiel. (Un profil DÉLIBÉRÉMENT schema-bypassé, pour tester le fail-loud d'un
-  accesseur, reste hand-built dans un test explicitement nommé « schema bypass ».)
+  Bang variant of `from_map/1`: returns the struct, or **raises** if the map is not
+  schema-conformant. Meant for NOMINAL fixtures (the `Fleet.Support.CapProfileFixture` support
+  builder relies on it) — a nominal fixture then crosses the SAME boundary as production instead
+  of forging a partial `%CapProfile{}`. (A DELIBERATELY schema-bypassed profile, to test an
+  accessor's fail-loud, stays hand-built in a test explicitly named "schema bypass".)
   """
   @spec from_map!(map()) :: t()
   def from_map!(raw) do
@@ -238,8 +233,8 @@ defmodule Fleet.CapProfile do
 
       {:error, reason} ->
         raise ArgumentError,
-              "CapProfile.from_map!/1 : map non schema-conforme (#{inspect(reason)}) — " <>
-                "une fixture nominale doit être un profil complet (cf. Fleet.Support.CapProfileFixture)"
+              "CapProfile.from_map!/1: map not schema-conformant (#{inspect(reason)}) — " <>
+                "a nominal fixture must be a complete profile (cf. Fleet.Support.CapProfileFixture)"
     end
   end
 
@@ -386,14 +381,11 @@ defmodule Fleet.CapProfile do
   def fleet_level?(%__MODULE__{}), do: false
 
   @doc """
-  The role's identity/slot granularity — **DERIVED from `lifetime_scope`** (collapse 2026-07-13). It is NO
-  LONGER a declared property: `slot_scope` and `lifetime_scope` were labelled two "orthogonal" axes, but the
-  catalogue proves them PERFECTLY correlated — `one-shot ⟺ instance` (cold, fan-out), context-long
-  (`pipe`/`run`/`forever`) `⟺ project` (a single accumulating instance, serialized), zero counter-example
-  over the 7 roles. « unique vs multi » is not data to declare: it is a CONSEQUENCE of « context-long vs
-  one-shot » (context-long ⟹ one instance that keeps context ⟹ serialize ; one-shot ⟹ cold, independent ⟹
-  fan-out). A "project one-shot" is a contradiction (why serialize a cold pod that shares nothing?), which
-  is why `project_scope_decision` had a dead branch for it. SINGLE SOURCE now = `lifetime_scope`.
+  The role's identity/slot granularity — **DERIVED from `lifetime_scope`**, never a declared
+  property: "unique vs multi" is not data, it is a CONSEQUENCE of "context-long vs one-shot"
+  (context-long ⟹ one instance that keeps context ⟹ serialize; one-shot ⟹ cold, independent ⟹
+  fan-out). A "project one-shot" would be a contradiction — why serialize a cold pod that shares
+  nothing? SINGLE SOURCE = `lifetime_scope`.
 
     * `"instance"` (one-shot): pod_id per (repo, number, role) → fan-out per issue/PR (ephemeral judges).
     * `"project"` (context-long): pod_id per (repo, role) → ONE identity per project → ONE stable Desktop
@@ -491,7 +483,7 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Load-bearing accessor for `lifetime_scope` — NO default (DR-019/R18). `{:ok, scope}` iff the
+  Load-bearing accessor for `lifetime_scope` — NO default. `{:ok, scope}` iff the
   schema-REQUIRED field is present as a non-empty string, `{:error, :no_lifetime_scope}` otherwise.
 
   `lifetime_scope` decides at least four things (brief-required, slot scope, state-fs scope, release).
@@ -546,9 +538,9 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The role's fleet-MCP tool surface, DERIVED from `spec.scope.allowedTools` — the `mcp__fleet__<tool>`
-  entries, stripped to `<tool>`. **Single source** (F-C138): the pod-facing MCP `tools/list` is BUILT from
-  this (the central serves it, filtered per role by the names the spawner threads from HERE) — the stdio
-  bridge no longer hard-codes a second, divergent catalogue. The UNIVERSAL base
+  entries, stripped to `<tool>`. **Single source**: the pod-facing MCP `tools/list` is BUILT from
+  this (the central serves it, filtered per role by the names the spawner threads from HERE) —
+  one catalogue, no second copy anywhere on the wire path. The UNIVERSAL base
   (`get_work_item`/`submit_result` — every pod is a task-worker) is NOT here: it is the pod interface,
   added by the MCP authority; this returns only the role-GATED extras. Absent/empty `allowedTools` → `[]`.
   """

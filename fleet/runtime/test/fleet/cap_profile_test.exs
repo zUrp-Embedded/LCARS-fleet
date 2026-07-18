@@ -574,7 +574,7 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "from_map!/1 raise sur map non conforme (fixture fausse = raise, pas un profil partiel)" do
-      assert_raise ArgumentError, ~r/non schema-conforme/, fn ->
+      assert_raise ArgumentError, ~r/not schema-conformant/, fn ->
         Fleet.CapProfile.from_map!(%{"kind" => "x", "metadata" => %{}, "spec" => %{}})
       end
     end
