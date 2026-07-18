@@ -1,6 +1,6 @@
 defmodule Fleet.EventRouter.WebhooksGitea do
   @moduledoc """
-  Webhooks Gitea HTTP endpoint (Plug.Router + Plug.Cowboy port `:8081`).
+  Webhooks Gitea HTTP endpoint (Plug.Router + Plug.Cowboy, port `:webhook_port`, default 8081).
 
   Mandatory HMAC SHA256 verification with the secret
   `/etc/fleet/webhook-secret` (root:lcars 600 ro, not mounted into
@@ -223,22 +223,21 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   defp extract_issue(_), do: nil
 
   # `<repository.full_name>#<id>` — the repo comes from the webhook PAYLOAD, not hardcoded (multi-repo
-  # correct). F-C010 — a real Gitea webhook ALWAYS carries `repository.full_name`; a body without it is
+  # correct). A real Gitea webhook ALWAYS carries `repository.full_name`; a body without it is
   # DEGENERATE/malformed. We fall back to an explicit sentinel `"unknown"`, NOT a fabricated real repo name
   # (`"fleet/lcars"` would IMPERSONATE an actual repo in the display event) — honest: we don't know the repo.
-  # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). This divergence
-  # is LATENT today (F-C011): the legacy webhook→pilot correlation rail (AutoDispatcher, pilot-side) was REMOVED
-  # (2026-06-16, cf. Fleet.Pilot.Application history) — the only live `gitea.*` consumers are display
-  # (observation read-model / API WS), which don't key on this ref. The Poller ingests issues via the forge
-  # API keyed on `number` independently. If a webhook→pod correlation is ever re-wired, switch to `number`
-  # (the Poller's key), not `id` — not a unilateral R0 edit until then.
+  # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). LATENT
+  # divergence: today's `gitea.*` consumers — display (observation read-model / API WS) and the
+  # Poller's coalesced poll-hint (`gitea_event?`, never a source of truth) — none key on this ref;
+  # the Poller ingests issues via the forge API keyed on `number` independently. If a webhook→pod
+  # correlation is ever wired, key it on `number` (the Poller's key), not `id`.
   defp issue_ref(body, id) do
     # Pattern-match the body STRUCTURE, not `get_in` then a guard: `Plug.Parsers` guarantees `body`
     # is a map, NOT that `repository` is one. On `{"repository": "x"}` (a forged/malformed body),
     # `get_in("x", ["full_name"])` raises `FunctionClauseError` in `Access` — and the `|| "unknown"`
     # only catches `repository` ABSENT, not non-map. That raise fires in `extract_issue/1` at the
     # call site ABOVE the `try` → Cowboy 500, OUTSIDE the 422-on-drift discipline this module holds.
-    # Same hardening already applied to `action` (is_binary guard) — the twin case, left undone here.
+    # The twin of the `action` is_binary guard above — both untrusted-shape gates.
     repo =
       case body do
         %{"repository" => %{"full_name" => full_name}} when is_binary(full_name) -> full_name
