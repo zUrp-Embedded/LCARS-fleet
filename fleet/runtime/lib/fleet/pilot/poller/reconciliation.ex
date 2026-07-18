@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.Poller.Reconciliation do
   @moduledoc """
-  IMPURE "orphaned lock reconciliation" cluster extracted from `Fleet.Pilot.Poller`.
+  IMPURE "orphaned lock reconciliation" cluster of `Fleet.Pilot.Poller`.
 
   A `lcars-in-flight` lock is ORPHANED if the brick carries it but no live pod is
   working it. Cause: a dead pod (`:result_timeout` deadline, crash, BEAM restart) reaped by the
@@ -19,19 +19,19 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   THIS repo's subset of the previous tick's suspects as `prior_suspects` and re-writes the yielded
   set into the state).
 
-  ## 2-REGULAR-tick grace + REPO-QUALIFIED refs (load-bearing semantics, verbatim)
+  ## 2-REGULAR-tick grace + REPO-QUALIFIED refs (load-bearing semantics)
 
   We only reclaim a CONFIRMED orphan: `reconcile/5` intersects the orphans seen THIS tick with
   `prior_suspects` (the orphans seen at the PREVIOUS tick) — never a freshly dispatched pod (not
   yet registered) or one in the process of dying. The grace unit is the REGULAR tick (~30s):
-  webhook kick-polls are dispatch-only and NEVER call `reconcile/5` (counting them compressed
-  the ~60s grace to the webhook rate — reclaim mid-publication, double dispatch; Z6e class).
+  webhook kick-polls are dispatch-only and NEVER call `reconcile/5` (counting them would compress
+  the ~60s grace to the webhook rate — reclaim mid-publication, double dispatch).
   The lock refs are REPO-QUALIFIED (`{repo, :issue|:pr, n}`): the key carries the repo, so the
   refs of the live pods (`owned`, scoped to the current repo) and the suspects (repo-scoped by
-  the caller) no longer collide on the number alone. An orphan #N/repoA is no longer masked by
-  a live pod #N/repoB, and the grace no longer contaminates across repos.
+  the caller) cannot collide on the number alone. An orphan #N/repoA is not masked by
+  a live pod #N/repoB, and the grace does not contaminate across repos.
 
-  ## Fail-safe (verbatim)
+  ## Fail-safe
 
   If the enumeration of live pods fails (`live_owned_refs/1 → :error`), we reclaim NOTHING and
   keep `prior_suspects` as is — NEVER unlock blindly.
@@ -108,26 +108,26 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       owned ->
         repo = seams.repo
 
-        # NB (lesson 2026-07-07 + F-C050): we do NOT derive the PR lock from the ownership of the ISSUE.
+        # NB: we do NOT derive the PR lock from the ownership of the ISSUE.
         # Naive temptation: "a PR whose parent issue is owned is owned too". TWO reasons it stays wrong:
         #  (1) a DELIVERED engineer would protect the PR lock of a DEAD JUDGE (the PR lock in review belongs
-        #      to the judge, not the producer) → judge never re-dispatched = WALL (seen live
-        #      martine-o-matic PR#2). The PR-lock churn during a REAL producer rework is minor and
+        #      to the judge, not the producer) → judge never re-dispatched = WALL. The PR-lock churn
+        #      during a REAL producer rework is minor and
         #      self-heals (serialize `:role_busy` prevents the double-spawn).
-        #  (2) `pod_has_active_task?` no longer counts `:completed` as owning (F-C050 fix): `:completed` is
+        #  (2) `pod_has_active_task?` does not count `:completed` as owning: `:completed` is
         #      TERMINAL (`WorkItem.active?/1`) — a delivered engineer's completion (push → open PR →
-        #      unlock) is running-or-done, its lock is released at the END. Counting it as active masked an
-        #      orphaned ISSUE lock FOREVER when the completion was LOST before open_pr (permanent silent
-        #      wedge). The legitimate publication window (push ≤30s) is covered by the 2-REGULAR-tick
+        #      unlock) is running-or-done, its lock is released at the END. Counting it as active would
+        #      mask an orphaned ISSUE lock FOREVER when the completion is LOST before open_pr (permanent
+        #      silent wedge). The legitimate publication window (push ≤30s) is covered by the 2-REGULAR-tick
         #      grace (~60s at the 30s interval — webhook kick-polls never enter reconcile, so the forge
-        #      traffic of the completion sequence itself cannot compress this window; Z6e)
+        #      traffic of the completion sequence itself cannot compress this window)
         #      + the idempotent completion sequence (a late reclaim = a harmless replay), so excluding
         #      `:completed` reclaims the lost-completion orphan WITHOUT churning the nominal window.
 
         # REPO-QUALIFIED orphans (`{repo, :issue|:pr, n}`): the lock key carries the repo, so
         # `owned` (repo-scoped refs of the live pods of THIS repo) and `prior_suspects` (cross-tick,
-        # repo-scoped by the caller) no longer collide on the number alone. An orphan #N/repoA is no
-        # longer masked by a live pod #N/repoB, and the 2-tick grace no longer contaminates across repos.
+        # repo-scoped by the caller) cannot collide on the number alone. An orphan #N/repoA is not
+        # masked by a live pod #N/repoB, and the 2-tick grace does not contaminate across repos.
         issue_orphans =
           for i <- issues,
               n = i["number"],
@@ -165,10 +165,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # ref `{:issue, N}` → it would MASK the orphan #N/repoA (lock never reclaimed = wedge) AND the 2-tick
   # grace would contaminate cross-repo (double-spawn). The REPO-QUALIFIED lock key = the real identity.
   #
-  # G1 — a brick under GATEKEEPER EVAL is owned TOO: during the eval (a claude turn = minutes),
+  # A brick under GATEKEEPER EVAL is owned TOO: during the eval (a claude turn = minutes),
   # the PRODUCER pod is done (dead one-shot or idle) and the GATEKEEPER carries the eval task under a
-  # pod_id `permanent-*` (no repo slug) → without `gate_eval_owned_refs`, the ref looked orphaned and
-  # the 2-tick grace (~60s) RECLAIMED it in the middle of the eval → re-dispatch of the concurrent step (double
+  # pod_id `permanent-*` (no repo slug) → without `gate_eval_owned_refs`, the ref would look orphaned
+  # and the 2-tick grace (~60s) would RECLAIM it mid-eval → re-dispatch of the concurrent step (double
   # workflow_run + ghost verdict on return). The union is done INSIDE the try: a failure to enumerate the
   # evals makes `:error` → the fail-safe "reclaim nothing" covers both sources.
   defp live_owned_refs(%Seams{spawner: spawner, task_queue: tq, repo: repo}) do
@@ -186,10 +186,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   end
 
   # G1 — refs owned by the ACTIVE GATEKEEPER EVALS of the broker. The source of truth already exists:
-  # the eval task (MA-03, self-describing metadata) carries `gate_eval: true` + `resume_n` (issue number)
+  # the eval task metadata is self-describing: it carries `gate_eval: true` + `resume_n` (issue number)
   # + `resume_payload.repository.full_name` (repo — multi-project: an eval of repoB does NOT own a
   # ref of repoA). ACTIVE states only (`TaskQueue.list_active`): an eval `:cleared` (clobbered by
-  # a supersede at enqueue — MA-27 bounds to 1 active work item/pod) or `:completed` (verdict rendered,
+  # a supersede at enqueue — 1 active work item/pod bound) or `:completed` (verdict rendered,
   # resume in flight — window covered by the 2-tick grace) no longer owns its ref → the reclaim takes
   # back control and the re-dispatch re-escalates (self-heal bounded by the rework budget). The evals are on
   # ISSUES (the PR judges go through dispatch_review, without a gate) → refs `{repo, :issue, n}`.
