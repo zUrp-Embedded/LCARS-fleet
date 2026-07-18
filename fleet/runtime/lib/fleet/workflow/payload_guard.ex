@@ -3,7 +3,7 @@ defmodule Fleet.Workflow.PayloadGuard do
   Placement + SECURITY-validation of an UNTRUSTED file payload into a
   workspace: "write what the pod produced, without letting it escape the
   workspace or arm the world-side git plumbing". Standalone filter, extracted
-  from `Fleet.Workflow.Deliverable` (split 2026-07-05) — it knows nothing
+  from `Fleet.Workflow.Deliverable` — it knows nothing
   about deliverable modes, the gate, nor the push: it only knows a workspace
   and an adversarial `%{"path" => …, "content" => …}` list.
 

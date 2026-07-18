@@ -83,8 +83,8 @@ defmodule Fleet.Workflow.GateBrief do
   defp subject_phrases(:brief, step) do
     %{
       # ROLE-NEUTRAL title: this brief goes to N judges (consultant in brief-review, qualifier/reviewer/
-      # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge = drift (seen live
-      # 2026-07-04: the consultant introduced itself as "gatekeeper role"). The judged subject carries the title.
+      # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge makes a non-gatekeeper
+      # judge adopt the wrong persona. The judged subject carries the title.
       title: "Brief eval — judge decision",
       intro: "The BRIEF to validate (written by the architect) is quoted below.",
       question:
