@@ -10,7 +10,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
     bootstrap kick as soon as the REPL responds. Takes the `state` (reads `state.pod_id`).
   - `pod_has_active_task?/1` — does the pod have an ACTIVE task (`pending|assigned|in_progress`) here,
     right now? Reporting boolean (`pod_info`) ONLY — the `:result_deadline` fire uses
-    `active_task_state/1` (3-state, F-C037: the boolean conflates idle and unknown).
+    `active_task_state/1` (3-state: the boolean conflates idle and unknown).
   - `brief_pulled?/1` — is the brief already pulled (`assigned|in_progress|completed`)? Stops the wake loop.
   - `no_pending_brief?/1` — NO brief pending (`{:ok, nil}`, never enqueued)? Distinguishes the
     permanent/interactive pod (bootstrap) from the worker (brief `pending` at spawn).
@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
 
   - `polled?/1` — bootstrap-stop of the kick (handler `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `pod_has_active_task?/1` — the `pod_info` reporting boolean ONLY (its own docstring explains
-    why the boolean is the WRONG shape at deadline-fire time, F-C037).
+    why the boolean is the WRONG shape at deadline-fire time).
   - `active_task_state/1` — the `:result_deadline` fire decision (3-state: `:active|:idle|:unknown`,
     fail-closed on `:unknown`).
   - `brief_pulled?/1` — reduced to the boolean passed to `Kick.acked?/3` by the handler.
@@ -72,7 +72,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   @doc """
   Does the pod have an ACTIVE task (`pending`/`assigned`/`in_progress`) here, right now?
   REPORTING boolean, consumed by `pod_info` alone. NOT the `:result_deadline` fire probe:
-  a boolean is the WRONG shape there (F-C037 — it conflates "idle, let it lapse" with
+  a boolean is the WRONG shape there (it conflates "idle, let it lapse" with
   "broker unknown, don't act on ignorance"); the fire reads `active_task_state/1` (3-state,
   fail-closed on `:unknown`). Same source as `brief_pulled?`/`no_pending_brief?`
   (`TaskQueue.pod_status` via `safe_pod_status`).
@@ -82,7 +82,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
     do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
 
   @doc """
-  3-STATE version of `pod_has_active_task?` for the `:result_deadline` fire (F-C037). The boolean
+  3-STATE version of `pod_has_active_task?` for the `:result_deadline` fire. The boolean
   version CONFLATES `:error` (broker unreachable) into `false` (= idle), which is safe for a
   *reporting* field but WRONG at the deadline fire: a hung pod whose broker blips at the exact fire
   moment would be classed "idle" → the deadline lapses (never re-armed unless the pod MOVES, which a
