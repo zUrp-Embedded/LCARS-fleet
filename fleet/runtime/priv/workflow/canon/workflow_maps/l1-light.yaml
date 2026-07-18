@@ -15,6 +15,7 @@ kind: WorkflowMap
 metadata:
   name: l1-light
   description: "Light L1 : engineer + qualifier seul juge (plancher : le code compile ; tests runner à venir)."
+  presentation: "L1 — LÉGÈRE : l'engineer livre, UN seul juge (qualifier) dont le plancher est « le code compile ». Pour un outil qui doit tenir debout sans mériter le pipeline complet."
   applicable_intensity: [L1]
   applicable_regime: [R1, R2]
 

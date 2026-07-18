@@ -133,14 +133,16 @@ defmodule Fleet.MCP.PodTools do
         "Start a NEW project: creates the repo on the forge + the 2 dual-dir folders " <>
           "(`/home/projects/<name>` on `main`, `/home/projects.work/<name>` on `work/ops`) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
-          "`name` = kebab-case slug. RELAY the project's criticality DECLARED BY THE HUMAN " <>
-          "(`intensity_level` L0..L4 + `intensity_justification`): you MAY ask the framing questions " <>
-          "(is there mains voltage? can it cut fingers? how long will it live?) — the stated FACTS make " <>
-          "the level obvious (rubber-duck, not assessor): you RELAY what falls out, you NEVER weigh or " <>
-          "discount criticality yourself; if the human has not declared it, pass nothing " <>
-          "(the project is recorded L0, marked undeclared). Optional: `nature` (domain hint, " <>
-          "e.g. web-gui/hardware), `workflow_map` (EXPLICIT card override — accepted even off-matrix, " <>
-          "logged loud). " <>
+          "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
+          "catalogue first (`list_workflow_cards`) and pass the human's chosen card as `workflow_map` " <>
+          "(accepted even off-matrix — logged loud, the human has the last word). A declared level " <>
+          "(`intensity_level` L0..L4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
+          "verbatim when the human states one: you MAY ask the framing questions (mains voltage? cuts " <>
+          "fingers? how long will it live?) — rubber-duck, not assessor: you NEVER weigh criticality " <>
+          "yourself, and a card without a level is a complete declaration (level recorded ABSENT, never " <>
+          "fabricated). If the human declares NOTHING (no card, no level), pass nothing: the project is " <>
+          "recorded L0 undeclared on the default card. Optional: `nature` (domain hint, e.g. " <>
+          "web-gui/hardware). " <>
           "Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
           "`create_issue` passing it `project: <the returned repo>` to deliver INTO this project."
       )
@@ -220,6 +222,26 @@ defmodule Fleet.MCP.PodTools do
           "with `repo`, `number`, `title` and `verdict` (the worker's escalation comment — the reasoning). " <>
           "Then act: fix + re-`create_issue`, `comment_issue` your decision, or bring it to your human. " <>
           "No arguments — it is your inbox across all the fleet's projects."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
+  end
+
+  deftool "list_workflow_cards" do
+    meta do
+      name("List Workflow Cards")
+
+      description(
+        "List the validation-card catalogue (the canon workflow maps). Use it DURING project framing, " <>
+          "BEFORE create_project: the card choice IS the criticality declaration (naming a card = declaring), " <>
+          "so PRESENT the catalogue to the human and let THEM choose — you may pre-filter or advise from the " <>
+          "framing facts (mains voltage? cuts fingers? how long will it live?), you never decide for them. " <>
+          "Each entry carries `name` (pass it as create_project's `workflow_map`), `presentation` (FR, show it " <>
+          "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
+          "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
+          "`jury` (the PR judges the card convenes) and `steps`. Cards marked TECHNIQUE are fleet tooling, " <>
+          "not for real projects. No arguments."
       )
     end
 
@@ -407,6 +429,13 @@ defmodule Fleet.MCP.PodTools do
   # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
   def handle_tool_call("list_escalations", _arguments, state) do
     case Delegation.list_escalations(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("list_workflow_cards", _arguments, state) do
+    case Delegation.list_workflow_cards(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end

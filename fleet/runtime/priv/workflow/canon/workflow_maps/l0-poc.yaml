@@ -14,6 +14,7 @@ kind: WorkflowMap
 metadata:
   name: l0-poc
   description: "PoC L0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
+  presentation: "L0 — PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
   applicable_intensity: [L0]
   applicable_regime: [R1, R2]
 

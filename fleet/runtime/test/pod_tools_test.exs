@@ -582,6 +582,37 @@ defmodule Fleet.MCP.PodToolsTest do
   # `create_project`, `import_project`, `create_issue`, `get_issue_status` require the `architect`
   # role resolved from the channel's pod_id. Any non-architect role (engineer, reviewer, nil/unknown
   # role), an unknown pod, or a state without pod_id → REFUSAL on all 4 tools; architect → passes.
+  describe "list_workflow_cards (the framing catalogue — the card choice IS the declaration)" do
+    setup do
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect"}}
+      end)
+
+      :ok
+    end
+
+    test "returns the canon catalogue: every card carries its human-facing voice + jury; the type cards are present" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+
+      %{"cards" => cards} = Jason.decode!(txt)
+      by_name = Map.new(cards, &{&1["name"], &1})
+
+      # Every canon card is listed with a non-empty FR presentation (the human's read) and a jury.
+      for {name, card} <- by_name do
+        assert is_binary(card["presentation"]) and card["presentation"] != "",
+               "card #{name} has no presentation"
+
+        assert is_list(card["jury"]), "card #{name} has no jury list"
+      end
+
+      assert %{"jury" => [], "applicable_intensity" => ["L0"]} = by_name["l0-poc"]
+      assert %{"jury" => ["qualifier"], "applicable_intensity" => ["L1"]} = by_name["l1-light"]
+      assert by_name["brief-gate"]["jury"] == ["qualifier", "reviewer"]
+      assert map_size(by_name) >= 7
+    end
+  end
+
   describe "architect gate (refusal of any non-architect role on the privileged tools)" do
     @describetag :tmp_dir
 
@@ -590,7 +621,8 @@ defmodule Fleet.MCP.PodToolsTest do
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
       {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
-      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
+      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}},
+      {"list_workflow_cards", %{}}
     ]
 
     # Roles not authorized to delegate/onboard/track. `nil` models a pod without an engraved role

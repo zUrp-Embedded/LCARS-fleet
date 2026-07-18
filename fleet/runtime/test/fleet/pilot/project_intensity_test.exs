@@ -37,6 +37,25 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
     assert d["justification"] =~ "NON DÉCLARÉ"
   end
 
+  test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declared_by architect, NO off-matrix noise",
+       %{tmp_dir: tmp} do
+    # standard-qa claims [L2..L4]: under the old behavior the fabricated L0 default made
+    # this off-matrix LOUD — a "disagreement" nobody expressed. A system default can never
+    # be off-matrix against a human choice.
+    log =
+      capture_log(fn ->
+        assert :ok = ProjectIntensity.write(tmp, workflow_map: "standard-qa")
+      end)
+
+    refute log =~ "OFF-MATRIX"
+
+    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    refute Map.has_key?(d, "level")
+    assert d["declared_by"] == "architect"
+    assert d["justification"] =~ "carte choisie explicitement"
+    assert d["pipeline_default"] == "standard-qa"
+  end
+
   test "malformed FORM is returned (fixing a format is not lying)", %{tmp_dir: tmp} do
     assert {:error, {:invalid_declaration, _}} =
              ProjectIntensity.write(tmp, intensity_level: "L9")

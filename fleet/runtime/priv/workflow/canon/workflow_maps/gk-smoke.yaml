@@ -15,6 +15,7 @@ kind: WorkflowMap
 metadata:
   name: gk-smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
+  presentation: "Carte TECHNIQUE (smoke-test du chemin d'escalade gatekeeper) — outillage fleet, PAS pour un projet réel."
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
   jury: [qualifier, reviewer]

@@ -80,23 +80,48 @@ defmodule Fleet.Pilot.ProjectIntensity do
   defp compose(opts) do
     level = Keyword.get(opts, :intensity_level)
     justification = Keyword.get(opts, :intensity_justification)
-    declared? = is_binary(level)
+    card = Keyword.get(opts, :workflow_map)
+
+    # Naming a card IS a declaration (the card choice is the criticality mechanic — the
+    # doctrine above, applied): the L0 system-default applies ONLY when the human declared
+    # NOTHING at all. An explicit card without a level records the level as ABSENT (never
+    # fabricated into an L0 the human did not say) — `declared_by` stays truthful.
+    declared? = is_binary(level) or is_binary(card)
 
     base = %{
       "_schema" => "lcars/intensity-v1",
-      "level" => level || "L0",
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: "architect", else: "system-default"),
-      "justification" =>
-        justification ||
-          "NON DÉCLARÉ — défaut système (posture PoC L0). L'humain n'a pas déclaré la criticité.",
-      "pipeline_default" =>
-        Keyword.get(opts, :workflow_map) || Fleet.Pilot.Roles.delegation_workflow_map(opts)
+      "justification" => justification || default_justification(level, card),
+      "pipeline_default" => card || Fleet.Pilot.Roles.delegation_workflow_map(opts)
     }
+
+    base =
+      cond do
+        # Declared level → recorded verbatim.
+        is_binary(level) -> Map.put(base, "level", level)
+        # Card chosen without a level → the level is honestly ABSENT (schema allows it).
+        is_binary(card) -> base
+        # Nothing declared → the honest L0 default posture, explicitly marked.
+        true -> Map.put(base, "level", "L0")
+      end
 
     case Keyword.get(opts, :intensity_nature) do
       nature when is_binary(nature) and nature != "" -> Map.put(base, "nature", nature)
       _ -> base
+    end
+  end
+
+  defp default_justification(level, card) do
+    cond do
+      is_binary(level) ->
+        "Justification non fournie — niveau #{level} déclaré par l'humain."
+
+      is_binary(card) ->
+        "Niveau non déclaré — carte choisie explicitement par l'humain : #{card}."
+
+      true ->
+        "NON DÉCLARÉ — défaut système (posture PoC L0). L'humain n'a pas déclaré la criticité."
     end
   end
 
@@ -109,12 +134,16 @@ defmodule Fleet.Pilot.ProjectIntensity do
 
   # An explicit override outside the card's `applicable_intensity` is a CHOICE, not an
   # error — accepted, logged LOUD (the human has the last word; a wall here would teach
-  # lying). A card that declares no applicable_intensity gives no basis to warn.
+  # lying). Compared ONLY against a DECLARED level: an absent level (card-only
+  # declaration) is not a disagreement — a system default can never be "off-matrix"
+  # against a human choice. A card that declares no applicable_intensity gives no basis
+  # to warn either.
   defp warn_off_matrix(declaration, opts) do
-    with override when is_binary(override) <- Keyword.get(opts, :workflow_map),
+    with level when is_binary(level) <- declaration["level"],
+         override when is_binary(override) <- Keyword.get(opts, :workflow_map),
          %{"applicable_intensity" => levels} when levels != [] <-
            safe_load_card(override),
-         false <- declaration["level"] in levels do
+         false <- level in levels do
       Logger.warning(
         "ProjectIntensity: explicit card override #{inspect(override)} is OFF-MATRIX for " <>
           "declared level #{declaration["level"]} (card claims #{inspect(levels)}) — " <>

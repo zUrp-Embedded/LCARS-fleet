@@ -56,6 +56,12 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
+  test "accepts — declaration WITHOUT level (card-only declaration: absence recorded, never fabricated)",
+       %{schema: schema, canon: canon} do
+    ok = Map.delete(canon, "level")
+    assert :ok = ExJsonSchema.Validator.validate(schema, ok)
+  end
+
   test "rejects — unknown non-underscore key", %{schema: schema, canon: canon} do
     bad = Map.put(canon, "rogue", true)
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)

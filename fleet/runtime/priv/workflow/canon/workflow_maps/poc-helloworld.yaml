@@ -13,6 +13,7 @@ kind: WorkflowMap
 metadata:
   name: poc-helloworld
   description: "PoC délégation : engineer implémente hello_world (1 step, no human-gate)"
+  presentation: "Carte TECHNIQUE (démo de la chaîne de délégation minimale) — outillage fleet, PAS pour un projet réel ; pour un vrai PoC prendre l0-poc."
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.

@@ -196,6 +196,61 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Reads the validation-card catalogue (canon workflow maps) for the framing interview: for each
+  card `name` (the `workflow_map` value of `create_project`), FR `presentation` (shown to the
+  human VERBATIM — the card's own voice), `applicable_intensity` (level matrix), `jury` (PR
+  judges) and `steps`. Architect gate (framing is the arch's job). Pure priv-data read — no
+  forge, no engine state. A card that fails to parse is SKIPPED loud and reported in
+  `unreadable`: the catalogue never lies silently.
+  """
+  @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
+  def list_workflow_cards(state) do
+    with {:ok, _role} <- require_architect(state) do
+      dir = Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
+
+      {cards, unreadable} =
+        dir
+        |> File.ls!()
+        |> Enum.filter(&String.ends_with?(&1, ".yaml"))
+        |> Enum.sort()
+        |> Enum.reduce({[], []}, fn file, {ok, bad} ->
+          case read_card(Path.join(dir, file)) do
+            {:ok, card} -> {[card | ok], bad}
+            :error -> {ok, [file | bad]}
+          end
+        end)
+
+      base = %{"cards" => Enum.reverse(cards)}
+
+      case unreadable do
+        [] -> {:ok, base}
+        bad -> {:ok, Map.put(base, "unreadable", Enum.reverse(bad))}
+      end
+    end
+  end
+
+  defp read_card(path) do
+    case YamlElixir.read_from_file(path) do
+      {:ok, %{"metadata" => meta, "spec" => spec}} when is_map(meta) and is_map(spec) ->
+        {:ok,
+         %{
+           "name" => meta["name"],
+           "presentation" => meta["presentation"] || meta["description"],
+           "applicable_intensity" => meta["applicable_intensity"],
+           "jury" => spec["jury"],
+           "steps" => spec["steps"] |> Map.keys() |> Enum.sort()
+         }}
+
+      _ ->
+        Logger.warning(
+          "Delegation: workflow card #{Path.basename(path)} unreadable — excluded from the catalogue listing"
+        )
+
+        :error
+    end
+  end
+
+  @doc """
   Lists the escalations awaiting the architect's arbitration: the issues carrying `lcars-awaits-arch`
   (a worker hit `escalate_user` and handed the decision back). For each: `repo`, `number`, `title`,
   and `verdict` (the escalation comment — the WHY). Read-only, architect gate. The wake ("ton tour")

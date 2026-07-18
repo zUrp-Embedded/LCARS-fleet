@@ -28,6 +28,11 @@
     "description": {
      "type": "string"
     },
+    "presentation": {
+     "type": "string",
+     "minLength": 1,
+     "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the list_workflow_cards tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
+    },
     "applicable_intensity": {
      "type": "array",
      "items": {

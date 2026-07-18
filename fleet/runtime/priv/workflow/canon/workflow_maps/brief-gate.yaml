@@ -15,6 +15,7 @@ kind: WorkflowMap
 metadata:
   name: brief-gate
   description: "Revue du brief (consultant-juge) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
+  presentation: "L1→L4 — La carte STANDARD : un consultant-juge valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
   applicable_intensity: [L1, L2, L3, L4]
   applicable_regime: [R1, R2]
 
