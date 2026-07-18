@@ -32,6 +32,7 @@ defmodule Fleet.Event do
           | :task_queue
           | :mcp
           | :coord
+          | :pilot
           | :workflow
           | :starfleet
           | :event_router
@@ -54,7 +55,9 @@ defmodule Fleet.Event do
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
   # Closed enum of sources — the SOLE authority for `source`. (events.yaml registers event *types*, not sources.)
-  @canonical_sources ~w(spawner task_queue mcp coord workflow starfleet event_router credentials capprofile spbuilder doctrine api)a
+  # `:pilot` added 2026-07-18: the seal (GatekeeperSeal) emits `brick.sealed` — the pilot
+  # rail becomes a producer (arch activity feed), it was consumer-only before.
+  @canonical_sources ~w(spawner task_queue mcp coord workflow pilot starfleet event_router credentials capprofile spbuilder doctrine api)a
 
   @doc "True if the source belongs to the canonical closed enum."
   @spec valid_source?(atom()) :: boolean()

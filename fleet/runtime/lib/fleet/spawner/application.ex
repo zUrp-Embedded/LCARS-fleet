@@ -68,7 +68,17 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    children = base ++ publish ++ reaper ++ permanent_warden
+    # The architect's local activity feed (Bus consumer → fleet.feed in the arch pod_dir +
+    # the single informational wake on brick.sealed). Gated `:start_arch_feed`
+    # (default true prod, false test — hermeticity: no Bus consumers in async tests).
+    arch_feed =
+      if Application.get_env(:fleet_spawner, :start_arch_feed, true) do
+        [Fleet.Spawner.ArchFeed]
+      else
+        []
+      end
+
+    children = base ++ publish ++ reaper ++ permanent_warden ++ arch_feed
 
     # No boot of permanent pods here — sole authority =
     # Fleet.Starfleet.BootOrchestrator (post-readiness). This app only

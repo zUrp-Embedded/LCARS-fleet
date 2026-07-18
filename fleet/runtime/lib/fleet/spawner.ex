@@ -483,6 +483,23 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  INFORMATIONAL wake — flag ONLY, typed message. Writes `"<token> <message>"` into the
+  pod's `turn.flag`: the in-pod monitor emits the message verbatim (vs the fixed
+  "ton tour" of a mandate wake). Deliberately does NOT arm the ack-driven kick net nor
+  the response deadline: an info wake expects NO pull (`get_work_item`), so the send-keys
+  fallback would eventually type into the human's terminal for nothing — the exact
+  interference the info channel must never cause. Best-effort: unknown/flagless pod →
+  `:ok` (the durable trail is the arch feed file; a lost info wake costs nothing).
+  """
+  @spec notify_pod(String.t(), String.t()) :: :ok
+  def notify_pod(pod_id, message) when is_binary(pod_id) and is_binary(message) do
+    case pod_info(pod_id) do
+      {:ok, info} -> Fleet.Spawner.Pod.TurnFlag.touch(info, message)
+      {:error, _} -> :ok
+    end
+  end
+
+  @doc """
   A pod's restart strategy: `:temporary` for ALL scopes. The
   `DynamicSupervisor` NEVER resurrects a pod — a
   dead pod (normal exit OR crash) is removed, full stop. Resurrection

@@ -414,6 +414,20 @@ defmodule Fleet.SpawnerTest do
       t2 = File.read!(Path.join(tmp, "turn.flag"))
       # watch.sh fires on `cur != last` → every write MUST change the content.
       assert t1 != t2
+      # bare token (mandate wake): NO space → watch.sh emits the fixed "ton tour".
+      refute String.trim(t2) =~ " "
+    end
+
+    @tag :tmp_dir
+    test "TurnFlag.write with MESSAGE: typed info wake — '<token> <message>', one line, newlines flattened",
+         %{tmp_dir: tmp} do
+      assert :ok = Fleet.Spawner.Pod.TurnFlag.write(tmp, "info : brique fleet/x#12 LIVRÉE\nsur main")
+      content = tmp |> Path.join("turn.flag") |> File.read!() |> String.trim()
+
+      [_token, msg] = String.split(content, " ", parts: 2)
+      assert msg == "info : brique fleet/x#12 LIVRÉE sur main"
+      # single line contract (watch.sh cats the whole file)
+      refute content =~ "\n"
     end
 
     @tag :tmp_dir

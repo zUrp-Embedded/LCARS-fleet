@@ -68,6 +68,7 @@ config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_starfleet, start_drift_monitor: false
 config :fleet_starfleet, start_shutdown: false
 config :fleet_spawner, start_publish_consumer: false
+config :fleet_spawner, start_arch_feed: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_pod_warden: false
 # G5 : pas de respawn de permanents en test (pas de vrais permanents ; un test qui en a besoin

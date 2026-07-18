@@ -139,3 +139,6 @@ events:
   # --- V2 extensions (MCPWatcher / MCPMonitor) ---
   sdk.upstream_alert: []
   mcp.server_crashed: []
+
+  # --- Pilot seal (source :pilot) — terminal brick milestone, consumed by the arch feed ---
+  brick.sealed: []

@@ -36,6 +36,19 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   def touch(_info), do: :ok
 
   @doc """
+  Touches the flag WITH an informational message: the flag carries `"<token> <message>"`
+  and `watch.sh` emits the MESSAGE verbatim (instead of the fixed "ton tour"). The typed
+  wake channel: "ton tour" = a mandate awaits (`get_work_item`); anything else = pure
+  information (progress milestone), the agent must NOT pull. One line only (newlines
+  flattened — the flag is a single-line contract).
+  """
+  @spec touch(map(), String.t()) :: :ok
+  def touch(%{pod_dir: pod_dir}, message) when is_binary(pod_dir) and is_binary(message),
+    do: write(pod_dir, message)
+
+  def touch(_info, _message), do: :ok
+
+  @doc """
   Writes a UNIQUE token into `pod_dir/turn.flag`. `watch.sh` compares the CONTENT (`cur != last`):
   a BARE ms can repeat (2 wakes in the same ms) → identical token → wake MISSED; the unique suffix
   (`System.unique_integer`) guarantees each write changes the content → always detected. `File.write`
@@ -43,14 +56,22 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   rail: a mute flag = log-LOUD (warning), never a failure — the send-keys fallback + the
   result_deadline re-derive the wake; the miss costs latency, not the turn.
   """
-  @spec write(Path.t()) :: :ok
-  def write(pod_dir) when is_binary(pod_dir) do
+  @spec write(Path.t(), String.t() | nil) :: :ok
+  def write(pod_dir, message \\ nil) when is_binary(pod_dir) do
     flag = Path.join(pod_dir, "turn.flag")
 
     token =
       "#{System.system_time(:millisecond)}-#{System.unique_integer([:positive, :monotonic])}"
 
-    case File.write(flag, token <> "\n") do
+    # Bare token → watch.sh emits the fixed "ton tour" (mandate wake, unchanged contract).
+    # "<token> <message>" → watch.sh emits the message verbatim (informational wake).
+    content =
+      case message do
+        nil -> token
+        msg -> token <> " " <> String.replace(msg, ~r/\s*\n\s*/, " ")
+      end
+
+    case File.write(flag, content <> "\n") do
       :ok ->
         :ok
 

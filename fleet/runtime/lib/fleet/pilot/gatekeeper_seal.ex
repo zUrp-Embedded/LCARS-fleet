@@ -106,6 +106,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
         case do_merge(forge, repo, pr_number, gk_opts) do
           :ok ->
+            # Terminal brick milestone on the Bus (best-effort, lossy by doctrine): feeds the
+            # arch activity feed + its single informational wake (ArchFeed). The merge above
+            # stays the authoritative truth — a failed emit never blocks the seal sequence.
+            _ = emit_brick_sealed(repo, issue_n, pr_number)
+
             # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
             # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
             # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
@@ -331,5 +336,26 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     > ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** (push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le `gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**. Traça honnête : rien n'est maquillé.
     """
+  end
+
+  # Bus emission of the terminal brick milestone (source :pilot). Best-effort by doctrine
+  # (the Bus is the lossy fast-path; the forge stays the truth): any failure — registry,
+  # PubSub down — is logged warning and never touches the seal's outcome.
+  defp emit_brick_sealed(repo, issue_n, pr_number) do
+    event =
+      Fleet.Event.new(:pilot, :"brick.sealed",
+        payload: %{"repo" => repo, "issue" => issue_n, "pr" => pr_number}
+      )
+
+    _ = Fleet.EventRouter.Bus.broadcast_main(event)
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "GatekeeperSeal: brick.sealed emit failed for #{repo}##{issue_n} " <>
+          "(#{Exception.message(e)}) — seal unaffected, the arch feed misses one line"
+      )
+
+      :ok
   end
 end

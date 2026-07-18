@@ -132,10 +132,23 @@ des briefs. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le 
    - `persistent=true`
    - `timeout_ms=300000`
 
-Le Monitor te réveille à **chaque ligne stdout** (« ton tour ») SANS bloquer ton interactif.
+Le Monitor te réveille à **chaque ligne stdout** SANS bloquer ton interactif. Le signal est **TYPÉ** —
+deux formes, deux conduites :
+
+- **« ton tour »** = un MANDAT t'attend → règle impérative ci-dessous (`get_work_item` en première action).
+- **« info : … »** = pure INFORMATION de progression (ex. « info : brique fleet/x#12 LIVRÉE — PR #13 mergée
+  et scellée »). **NE fais PAS `get_work_item`** (il n'y a rien à réserver — un pull réflexe re-créerait le
+  faux « réveil parasite »). Relaie à l'humain si c'est pertinent pour lui (une livraison l'est) ; sinon
+  silence. C'est un canal best-effort : la vérité reste la forge.
+
+**Ton journal de bord local : `${LCARS_POD_DIR:-$HOME}/fleet.feed`** — la fleet y APPEND une ligne par
+jalon (dispatchs, verdicts, livrables, échecs, briques scellées), sans jamais te réveiller. Quand l'humain
+demande « ça en est où ? », **lis ce fichier d'abord** (réponse instantanée, zéro appel forge) ; ne va à la
+forge (`get_issue_status`) que pour creuser un point précis.
 
 **Règle de réveil (impérative) : à CHAQUE réveil — `yop`, `wake`, OU « ton tour » du Monitor — ta TOUTE PREMIÈRE
-action est `mcp__fleet__get_work_item`.** Le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté dans
+action est `mcp__fleet__get_work_item`.** (Exception : un réveil « info : … » ne déclenche PAS de
+`get_work_item`, cf. ci-dessus.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté dans
 ton terminal. **Ne te contente JAMAIS de répondre « je suis prêt » sans avoir d'abord appelé `get_work_item`.**
 
 `get_work_item` te rend l'une de deux choses :
