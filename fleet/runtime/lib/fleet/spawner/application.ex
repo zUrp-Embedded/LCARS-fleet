@@ -1,9 +1,7 @@
 defmodule Fleet.Spawner.Application do
   @moduledoc """
-  Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2 migration 2026-07-12 ; nom conservé pour zéro churn de références).
-
-  Supervisor for `fleet_spawner` + the permanent Type-1 pod boot
-  extension.
+  Spawner domain supervisor ("Application" is a historical name, kept to avoid
+  reference churn — this is a plain Supervisor, not an OTP app callback).
 
   ## Permanent pod boot: SOLE authority = BootOrchestrator
 
@@ -76,7 +74,7 @@ defmodule Fleet.Spawner.Application do
     # Fleet.Starfleet.BootOrchestrator (post-readiness). This app only
     # starts its Registry + Supervisor + PublishConsumer.
     #
-    # `rest_for_one` (2026-07-04) — a restart of the Registry (1st child) ALSO restarts everything
+    # `rest_for_one` — a restart of the Registry (1st child) ALSO restarts everything
     # that depends on it (including PodWarden). Under `one_for_one`, a Registry resurrected EMPTY while
     # the :temporary pods survive (never re-registered) made ALL the sockets look orphaned
     # → the PodWarden reaped the LIVE pods at +2 ticks. Restarting the warden re-arms its 2-tick
