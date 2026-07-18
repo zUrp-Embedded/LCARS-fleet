@@ -1,8 +1,8 @@
 defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
-  Repo-serialized lease of the step rail (extracted from `Fleet.Pilot.Poller`): **at most ONE
+  Repo-serialized lease of the step rail: **at most ONE
   active workflow_run per repo**. Classifies each issue of the tick (ENGAGED / QUEUED), then
-  dispatches under this lease — dispatches under this lease — the feature-branches stay sequential → clean rebase merge (linear history; FF is NOT guaranteed, `main` advances under parallel PRs — cf. `ForgeClient.merge_pr` `Do: rebase`).
+  dispatches under this lease — the feature-branches stay sequential → clean rebase merge (linear history; FF is NOT guaranteed, `main` advances under parallel PRs — cf. `ForgeClient.merge_pr` `Do: rebase`).
 
   ## The decision (business core)
 
@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.Poller.Lease do
     * The lease reads on the ROUTE (append-only, robust), NEVER on the success of the
       workflow_map load: a TRANSIENTLY unreadable workflow_map cannot
       exclude an advanced workflow_run → **fail-closed** (classified ENGAGED, lease HELD).
-      DURABLE absence → G6 escalation (IncidentRegistry: 1st = note, recurrence = ONE issue
+      DURABLE absence → escalation (IncidentRegistry: 1st = note, recurrence = ONE issue
       then cooldown — the registry's escalation memory IS the throttle) — never a
       silently blocked repo.
 
@@ -62,7 +62,7 @@ defmodule Fleet.Pilot.Poller.Lease do
       :forge_opts,
       # workflow_map loader (module with .load!/1) — never nil here.
       :workflow_map_loader,
-      # G6 escalation of an unreadable workflow_map (arity 4) — never nil here.
+      # Escalation of an unreadable workflow_map (arity 4) — never nil here.
       :incident_fun
     ]
 
@@ -104,16 +104,16 @@ defmodule Fleet.Pilot.Poller.Lease do
   """
   @spec process_issues([map()], MapSet.t(), keyword(), Seams.t()) :: tally()
   def process_issues(issues, pr_issue_ids, dispatch_opts, %Seams{} = seams) do
-    # Coherence: the routing lives in the ROUTE-COMMENT (state-machine, engraved at onboard) — no more
-    # routing by label. We read the route → dispatch (workflow_map_role). The lease "1 active workflow_run/repo"
+    # Coherence: the routing lives in the ROUTE-COMMENT (state-machine, engraved at onboard) — never
+    # by label. We read the route → dispatch (workflow_map_role). The lease "1 active workflow_run/repo"
     # also reads on the route (robust, append-only). We classify each issue ONCE:
     #   - ENGAGED (in-flight, or route advanced beyond the 1st step = workflow_run started) → holds the lease;
     #     we dispatch its current step (continues the step_run, or skips if in-flight).
     #   - QUEUED (routed at the 1st step, or routeless to be onboarded, not yet dispatched) → starts only
     #     if the lease is free; otherwise waits (serialization → sequential feature-branches → rebase merge, cf. `ForgeClient.merge_pr`).
     # `classify_issue` reads the route (+ loads the workflow_map) ONCE and THREADS it to the dispatch via
-    # `prefetch` (merged into the opts) → end of the double get_route / double workflow_map load (the lease classif and the
-    # dispatch read the SAME data 2×).
+    # `prefetch` (merged into the opts) → the lease classification and the dispatch read the SAME
+    # data without a second get_route / workflow_map load.
     classified =
       Enum.map(issues, fn issue ->
         pr? = MapSet.member?(pr_issue_ids, Map.get(issue, "number"))
@@ -252,7 +252,7 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   # Loads the workflow_map; `nil` on failure (the dispatch will retry → fail-loud).
   defp load_workflow_map_or_nil(workflow_map_name, seams) do
-    # R4: the rescue lives in the single authority (WorkflowMapNav.safe_load); THIS site keeps its
+    # The rescue lives in the single authority (WorkflowMapNav.safe_load); THIS site keeps its
     # own semantics (nil = fail-closed lease + G6 escalation below).
     case Fleet.Pilot.WorkflowMapNav.safe_load(seams.workflow_map_loader, workflow_map_name) do
       {:ok, map} ->
