@@ -6,8 +6,8 @@ defmodule Fleet.Spawner.ArchFeed do
 
   PULL side of the arch's situational awareness: the arch READS the file to answer the
   human's "où ça en est ?" instantly — no forge polling, no refresh. Writing a line NEVER
-  wakes the arch. The single PUSH exception: `brick.sealed` (a DELIVERED brick, the
-  terminal milestone — rare and meaningful) also sends an INFORMATIONAL wake via
+  wakes the arch. The single PUSH exception: the `:delivered` unlock (`step.unlocked`
+  milestone — a DELIVERED brick, rare and meaningful) also sends an INFORMATIONAL wake via
   `Fleet.Spawner.notify_pod/2` (typed flag message, NO kick net, zero send-keys — it must
   never interfere with the human's typing; the arch relays "brique livrée" and does NOT
   `get_work_item`).
@@ -32,8 +32,12 @@ defmodule Fleet.Spawner.ArchFeed do
   @max_lines 200
   @feed_file "fleet.feed"
 
+  # `step.unlocked` = the PROGRESS rail (user design 2026-07-18): every lock release IS a
+  # step crossed, emitted at the gesture itself (after the forge reflects it — no announce
+  # can run ahead of reality). The rest are the HYBRID ⚠/context events the lock mechanic
+  # does not carry (failures, deliverable push, run ends).
   @watched [
-    :"brick.sealed",
+    :"step.unlocked",
     :"deliverable.published",
     :"work_item.completed",
     :"pod.completed",
@@ -66,8 +70,10 @@ defmodule Fleet.Spawner.ArchFeed do
     line = render_line(type, payload)
     _ = append(line, state)
 
-    # The ONLY push: a delivered brick. Everything else stays pull-only (the feed).
-    if type == :"brick.sealed", do: _ = state.notify.(state.arch_pod_id, "info : " <> line)
+    # The ONLY push: a DELIVERED brick (the `:delivered` unlock — terminal milestone).
+    # Everything else stays pull-only (the feed).
+    if type == :"step.unlocked" and payload["milestone"] == "delivered",
+      do: _ = state.notify.(state.arch_pod_id, "info : " <> line)
 
     {:noreply, state}
   end
@@ -76,8 +82,20 @@ defmodule Fleet.Spawner.ArchFeed do
 
   # ── Rendering — one short FR line per milestone (the arch relays it to the human) ──
 
-  defp render_line(:"brick.sealed", p),
-    do: "brique #{p["repo"]}##{p["issue"]} LIVRÉE — PR ##{p["pr"]} mergée et scellée"
+  defp render_line(:"step.unlocked", %{"milestone" => "delivered"} = p),
+    do: "brique #{p["repo"]}##{p["number"]} LIVRÉE — mergée, scellée, verrou levé"
+
+  defp render_line(:"step.unlocked", %{"milestone" => "verdict"} = p),
+    do: "verdict rendu par #{p["role"]}#{ctx(p)}"
+
+  defp render_line(:"step.unlocked", %{"milestone" => "rework"} = p),
+    do: "retour au producteur (rework)#{ctx(p)}"
+
+  defp render_line(:"step.unlocked", %{"milestone" => "handoff"} = p),
+    do: "livraison remise aux juges#{ctx(p)}"
+
+  defp render_line(:"step.unlocked", p),
+    do: "étape franchie par #{p["role"] || "?"}#{ctx(p)}"
 
   defp render_line(:"deliverable.published", p),
     do: "livrable poussé#{ctx(p)} — PR en route"
@@ -101,7 +119,7 @@ defmodule Fleet.Spawner.ArchFeed do
   # per producer — the feed is a courtesy line, not a schema consumer).
   defp ctx(p) when is_map(p) do
     repo = p["repo"] || p[:repo]
-    issue = p["issue"] || p[:issue] || p["issue_id"] || p[:issue_id]
+    issue = p["issue"] || p[:issue] || p["number"] || p[:number] || p["issue_id"] || p[:issue_id]
 
     cond do
       repo && issue -> " (#{repo}##{issue})"

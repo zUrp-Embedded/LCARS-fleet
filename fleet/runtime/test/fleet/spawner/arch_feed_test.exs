@@ -50,15 +50,44 @@ defmodule Fleet.Spawner.ArchFeedTest do
     refute_received {:notified, _, _}
   end
 
-  test "brick.sealed: the SINGLE push — line appended AND informational wake sent", %{tmp_dir: tmp} do
+  test "the :delivered unlock is the SINGLE push — line appended AND informational wake sent",
+       %{tmp_dir: tmp} do
     pid = start_feed(tmp)
 
-    send(pid, event(:"brick.sealed", %{"repo" => "fleet/demo", "issue" => 12, "pr" => 13}))
+    send(
+      pid,
+      event(:"step.unlocked", %{
+        "repo" => "fleet/demo",
+        "number" => 12,
+        "role" => "engineer",
+        "milestone" => "delivered"
+      })
+    )
+
     :sys.get_state(pid)
 
-    assert feed(tmp) =~ "brique fleet/demo#12 LIVRÉE — PR #13 mergée et scellée"
+    assert feed(tmp) =~ "brique fleet/demo#12 LIVRÉE — mergée, scellée, verrou levé"
     assert_received {:notified, "permanent-architect", "info : " <> msg}
     assert msg =~ "LIVRÉE"
+  end
+
+  test "a NON-terminal unlock (verdict) feeds the line but NEVER wakes", %{tmp_dir: tmp} do
+    pid = start_feed(tmp)
+
+    send(
+      pid,
+      event(:"step.unlocked", %{
+        "repo" => "fleet/demo",
+        "number" => 12,
+        "role" => "qualifier",
+        "milestone" => "verdict"
+      })
+    )
+
+    :sys.get_state(pid)
+
+    assert feed(tmp) =~ "verdict rendu par qualifier (fleet/demo#12)"
+    refute_received {:notified, _, _}
   end
 
   test "unwatched event types are ignored (no file, no wake)", %{tmp_dir: tmp} do

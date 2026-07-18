@@ -603,7 +603,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
              step_run.repo,
              step_run.issue_number,
              forge_opts,
-             Roles.producer_role(opts)
+             Roles.producer_role(opts),
+             :delivered
            ) do
       {:ok, :promoted}
     end
@@ -634,7 +635,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with {:ok, _} <-
            post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
-         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role) do
+         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role, :rework) do
       {:ok, :rework_requested}
     end
   end
@@ -661,7 +662,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # case). Cf. `maybe_unlock_judge_advance` producer for the WHY of the stopwatch↔lock decoupling.
          :ok <-
            stop_build_stopwatch(forge, repo, step_run.issue_number, forge_opts, step_run.role),
-         {:ok, _} <- unlock(forge, repo, pr, forge_opts, step_run.role) do
+         {:ok, _} <- unlock(forge, repo, pr, forge_opts, step_run.role, :handoff) do
       {:ok, :review_requested}
     end
   end
@@ -676,7 +677,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     with {:ok, _} <-
-           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role) do
+           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role, :verdict) do
       {:ok, :reviewed}
     end
   end
@@ -685,7 +686,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # final `:promote`); non-terminal JUDGE (PR lock, qualifier→reviewer) → NORMAL unlock (THIS judge's
   # turn is done, the next one sets its own via dispatch_review — per-turn granularity, not the brick).
   defp maybe_unlock_judge_advance(forge, repo, %{pr_role: :judge} = step_run, pr, forge_opts) do
-    case unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role) do
+    case unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role, :verdict) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -793,7 +794,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   """
   @spec unlock(module(), String.t(), integer(), keyword(), String.t()) ::
           {:ok, term()} | {:error, term()}
-  def unlock(forge, repo, n, forge_opts, role) do
+  def unlock(forge, repo, n, forge_opts, role, milestone \\ nil) do
     # Stopwatch: stopped HERE, symmetric to the start at spawn (`Spawn.spawn_step`) — same object (`n` =
     # issue or PR depending on the role), same global mechanics, SAME identity (`as_role`). The discarded
     # value carries no correctness: the load-bearing op is the `remove_label` below (the real unlock).
@@ -806,9 +807,42 @@ defmodule Fleet.Pilot.StepRunCompleter do
            do: forge.stop_stopwatch(repo, n, ro)
 
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> {:error, {:unlock, reason}}
+      {:ok, _} = ok ->
+        # EVERY lock release IS a step crossed — the arch's progress ping rides THE gesture
+        # (user design 2026-07-18: "on a déjà la mécanique fiable"). Emitted AFTER the forge
+        # reflects the step (the unlock is a step's LAST act), so the feed can never announce
+        # ahead of reality — the structural cure of the brick.sealed race. Best-effort, lossy
+        # by doctrine; `milestone` (caller-known) types the line: `:delivered` alone also
+        # triggers the arch's single informational wake (ArchFeed).
+        _ = emit_step_unlocked(repo, n, role, milestone)
+        ok
+
+      {:error, reason} ->
+        {:error, {:unlock, reason}}
     end
+  end
+
+  defp emit_step_unlocked(repo, n, role, milestone) do
+    event =
+      Fleet.Event.new(:pilot, :"step.unlocked",
+        payload: %{
+          "repo" => repo,
+          "number" => n,
+          "role" => role,
+          "milestone" => milestone && Atom.to_string(milestone)
+        }
+      )
+
+    _ = Fleet.EventRouter.Bus.broadcast_main(event)
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "StepRunCompleter: step.unlocked emit failed for #{repo}##{n} " <>
+          "(#{Exception.message(e)}) — unlock unaffected, the arch feed misses one line"
+      )
+
+      :ok
   end
 
   # Closes the producer's BUILD stopwatch (on the ISSUE), at its hand-off to the review — DECOUPLED from

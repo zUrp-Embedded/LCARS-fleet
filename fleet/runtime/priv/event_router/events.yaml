@@ -140,5 +140,6 @@ events:
   sdk.upstream_alert: []
   mcp.server_crashed: []
 
-  # --- Pilot seal (source :pilot) — terminal brick milestone, consumed by the arch feed ---
-  brick.sealed: []
+  # --- Pilot step transitions (source :pilot) — every lock release is a step crossed,
+  # emitted at the unlock gesture (StepRunCompleter.unlock), consumed by the arch feed ---
+  step.unlocked: []

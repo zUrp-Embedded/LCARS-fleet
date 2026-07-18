@@ -69,7 +69,7 @@ defmodule Fleet.Spawner.Application do
       end
 
     # The architect's local activity feed (Bus consumer → fleet.feed in the arch pod_dir +
-    # the single informational wake on brick.sealed). Gated `:start_arch_feed`
+    # the single informational wake on the :delivered unlock). Gated `:start_arch_feed`
     # (default true prod, false test — hermeticity: no Bus consumers in async tests).
     arch_feed =
       if Application.get_env(:fleet_spawner, :start_arch_feed, true) do

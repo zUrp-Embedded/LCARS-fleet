@@ -178,15 +178,6 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
             case close_result do
               :ok ->
-                # Terminal brick milestone on the Bus (arch feed + its single informational
-                # wake) — emitted at the very END of the seal sequence, once the FORGE
-                # REFLECTS the delivery (comment + stage/merged + close all landed). Emitted
-                # any earlier it races the seal's own write-spacing: a diligent arch verifying
-                # the announce reads the intermediate state (issue open, no PR) and calls the
-                # feed a liar — observed live 2026-07-18 on the first typed info-wake.
-                # Best-effort, lossy by doctrine; a failed close skips the announce (the feed
-                # misses one line, the ERROR-loud close path is the visible signal).
-                _ = emit_brick_sealed(repo, issue_n, pr_number)
                 :ok
 
               {:error, reason} ->
@@ -342,24 +333,4 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     """
   end
 
-  # Bus emission of the terminal brick milestone (source :pilot). Best-effort by doctrine
-  # (the Bus is the lossy fast-path; the forge stays the truth): any failure — registry,
-  # PubSub down — is logged warning and never touches the seal's outcome.
-  defp emit_brick_sealed(repo, issue_n, pr_number) do
-    event =
-      Fleet.Event.new(:pilot, :"brick.sealed",
-        payload: %{"repo" => repo, "issue" => issue_n, "pr" => pr_number}
-      )
-
-    _ = Fleet.EventRouter.Bus.broadcast_main(event)
-    :ok
-  rescue
-    e ->
-      Logger.warning(
-        "GatekeeperSeal: brick.sealed emit failed for #{repo}##{issue_n} " <>
-          "(#{Exception.message(e)}) — seal unaffected, the arch feed misses one line"
-      )
-
-      :ok
-  end
 end
