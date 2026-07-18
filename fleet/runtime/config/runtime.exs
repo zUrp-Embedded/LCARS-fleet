@@ -1,60 +1,58 @@
-# LCARS Fleet runtime config — chantier 16 (lancement per-humain via bin/fleet_v2)
+# LCARS Fleet runtime config (per-human launch via bin/fleet_v2)
 #
-# Évalué à chaque démarrage du release (post-Mix release build, runtime)
-# ET par `mix test` (Mix charge config/runtime.exs dans TOUS les envs).
+# Evaluated at every release start (post-Mix release build, runtime)
+# AND by `mix test` (Mix loads config/runtime.exs in ALL envs).
 #
-# Garde `config_env() != :test` OBLIGATOIRE : ce fichier est de la
-# config de boot (lit des env vars du run humain `~/.lcars/fleet_v2.env`
-# inexistantes en test) et il est évalué APRÈS `config/test.exs`. Sans la
-# garde, `config :fleet_api, start_listener: true` (l.~) override le
-# `start_listener: false` hermétique de test.exs → fleet_api démarre le
-# listener Cowboy en test → crash boot → boot du daemon mort. (Régression B8
-# avérée par StarFleet : `rel/runtime.exs` orphelin ne tournait jamais ;
-# déplacé en config/runtime.exs il s'active partout — d'où la garde.)
-# Cohérent discipline hermétique B4/B5 (config runtime ≠ tests).
+# The `config_env() != :test` guard is MANDATORY: this file is boot
+# config (it reads env vars of the human run `~/.lcars/fleet_v2.env`,
+# nonexistent in test) and it is evaluated AFTER `config/test.exs`. Without the
+# guard, `config :fleet_api, start_listener: true` (below) overrides the
+# hermetic `start_listener: false` of test.exs → fleet_api starts the
+# Cowboy listener in test → boot crash → dead daemon boot. Any runtime
+# config added STAYS INSIDE the guard (hermetic discipline: runtime config ≠ tests).
 
 import Config
 
 if config_env() != :test do
   # ============================================================
-  # R-no-root-runtime (FORGE-D1, Z4) — boot guard anti-root
+  # R-no-root-runtime — anti-root boot guard
   # ============================================================
-  # Le daemon fleet ne tourne JAMAIS en root (la BEAM tourne sous l'UID de l'humain ; ce
-  # self-check attrape les lancements dev/manuel en root, où ~/.gitea_token
-  # résoudrait /root/.gitea_token = token admin — cf. FORGE-D1). starfleet/
-  # sysadmin est HORS-fleet (invoqué hors daemon) → pas d'exception ici. Hygiène,
-  # pas défense anti-adversaire (threat-model coopératif). Garde `== :prod` : ne
-  # gêne ni le dev ni `mix lcars.contracts.check` (qui tourne en :dev).
+  # The fleet daemon NEVER runs as root (the BEAM runs under the human's UID; this
+  # self-check catches dev/manual launches as root, where ~/.gitea_token would
+  # resolve to /root/.gitea_token = the admin token). starfleet/
+  # sysadmin is OUT-of-fleet (invoked outside the daemon) → no exception here. Hygiene,
+  # not an anti-adversary defense (cooperative threat model). `== :prod` guard: bothers
+  # neither dev nor `mix lcars.contracts.check` (which runs in :dev).
   if config_env() == :prod do
     {uid, 0} = System.cmd("id", ["-u"])
 
     if String.trim(uid) == "0" do
-      raise "R-no-root-runtime : le daemon fleet refuse de tourner en root " <>
-              "(lancer sous ton UID humain via bin/fleet_v2, jamais en root)"
+      raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
+              "(launch under your human UID via bin/fleet_v2, never as root)"
     end
   end
 
   # ============================================================
-  # fleet_mcp — boot guard fail-closed (soft-default #6)
+  # fleet_mcp — fail-closed boot guard
   # ============================================================
-  # Le défaut code de `Fleet.MCP.Server.boot_environment` est `:pod` (refuse PAR OMISSION). runtime.exs ne
-  # tourne QU'AU boot du daemon HOST → on y déclare `:host` POSITIVEMENT. Un boot qui ne passe pas par ici
-  # (ni par config/test.exs) est refusé, jamais démarré permissivement. Résiduel wire-time : un pod qui
-  # tournerait la BEAM umbrella complète exécuterait aussi runtime.exs ; les pods sont des REPL claude +
-  # bridge.py, PAS la BEAM (latent — un signal host per-boot de bin/fleet_v2 durcirait encore).
+  # The code default of `Fleet.MCP.Server.boot_environment` is `:pod` (refuses BY OMISSION). runtime.exs
+  # only runs at the HOST daemon boot → we declare `:host` POSITIVELY here. A boot that goes through
+  # neither this file nor config/test.exs is refused, never started permissively. Wire-time residual: a pod
+  # that ran the full BEAM would also execute runtime.exs; pods are claude REPLs +
+  # bridge.py, NOT the BEAM (latent — a per-boot host signal from bin/fleet_v2 would harden further).
   config :fleet_mcp, boot_environment: :host
 
-  # Z6 (CFG-CR) — parsing des env vars DÉLÉGUÉ à `Fleet.EnvParse` (Ring 0, TESTABLE — ce fichier est
-  # wrappé `config_env() != :test`, un lambda inline ne serait jamais testé : SOC-CONF-001/002/003).
-  # Domaine borné : `port` (1..65535), `positive_ms` (>0), `count` (≥0), `bool` (formes reconnues +
-  # défaut si inconnu), `path` (expand + rejet `..`/control). Un knob load-bearing invalide → raise clair.
+  # Env-var parsing is DELEGATED to `Fleet.EnvParse` (foundation, TESTABLE — this file is
+  # wrapped `config_env() != :test`, an inline lambda would never be tested).
+  # Bounded domain: `port` (1..65535), `positive_ms` (>0), `count` (≥0), `bool` (recognized forms +
+  # default if unknown), `path` (expand + `..`/control rejection). An invalid load-bearing knob → clear raise.
 
   # ============================================================
   # Logger
   # ============================================================
-  # Z6 (CFG-CR) — `String.to_existing_atom` crashait le boot sur un niveau inconnu
-  # (ex. LCARS_LOG_LEVEL=verbose). Validé contre l'enum Logger ; inconnu → fallback :info
-  # + warning stderr (un mauvais niveau de log NE doit PAS empêcher le boot — non-critique).
+  # A bare `String.to_existing_atom` would crash the boot on an unknown level
+  # (e.g. LCARS_LOG_LEVEL=verbose). Validated against the Logger enum; unknown → :info fallback
+  # + stderr warning (a bad log level must NOT prevent the boot — non-critical).
   log_level =
     case System.get_env("LCARS_LOG_LEVEL", "info") do
       lvl when lvl in ~w(emergency alert critical error warning notice info debug) ->
@@ -63,7 +61,7 @@ if config_env() != :test do
       other ->
         IO.puts(
           :stderr,
-          "LCARS config: LCARS_LOG_LEVEL=#{inspect(other)} invalide — fallback :info"
+          "LCARS config: LCARS_LOG_LEVEL=#{inspect(other)} invalid — falling back to :info"
         )
 
         :info
@@ -72,47 +70,47 @@ if config_env() != :test do
   config :logger, level: log_level
 
   # ============================================================
-  # fleet_cap_profile (ch1) — chemin catalogue cap-profiles
+  # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
     path = Fleet.EnvParse.path("LCARS_CAPPROFILES_ROOT", path)
-    # Clé `:root_dir` (pas `:capprofiles_root`) — ce que
-    # Fleet.CapProfile.root_dir/0 lit réellement (cap_profile.ex:206).
+    # Key `:root_dir` (not `:capprofiles_root`) — what
+    # Fleet.CapProfile.root_dir/0 actually reads.
     config :fleet_cap_profile, root_dir: path
-    # #582 re-bounce sf : Fleet.Spawner.PermanentBoot.cap_profiles_dir/0
-    # lit `:fleet_spawner, :cap_profiles_dir` (config séparée du loader
-    # ch1). Même env source → même path partagé canon.
+    # Fleet.Spawner.PermanentBoot.cap_profiles_dir/0
+    # reads `:fleet_spawner, :cap_profiles_dir` (a config separate from the
+    # loader). Same env source → same shared canonical path.
     config :fleet_spawner, cap_profiles_dir: path
   end
 
   # ============================================================
-  # fleet_credentials (ch3) — ADR-F : plus de coffre. Le knob LCARS_CREDENTIALS_ROOT
-  # (→ :credentials_root) a été RETIRÉ (Fable F160) : aucun module ne lisait `credentials_root`
-  # (les creds = claudeDir humain bindé par bwrap, pas un coffre).
+  # fleet_credentials — no vault. The LCARS_CREDENTIALS_ROOT knob
+  # (→ :credentials_root) is RETIRED: no module reads `credentials_root`
+  # (the creds = the human claudeDir bind-mounted by bwrap, not a vault).
   # ============================================================
 
-  # Z4 (forge-identité B') — l'identité git de l'humain est DÉRIVÉE de l'OS (git config →
-  # GECOS → login), plus de catalogue `settings_users.yaml` (doctrine 2026-06-11 : si l'user
-  # existe sur le système, c'est un humain de la fleet, on n'over-filtre pas). Aucun knob.
+  # The human's git identity is DERIVED from the OS (git config →
+  # GECOS → login) — no user catalogue (doctrine: if the user
+  # exists on the system, they are a fleet human; we do not over-filter). No knob.
 
   # ============================================================
-  # fleet_event_router (ch11) — webhook Gitea + signaux OS
+  # fleet_event_router — Gitea webhook + OS signals
   # ============================================================
   if path = System.get_env("FLEET_WEBHOOK_SECRET_PATH") do
     config :fleet_event_router,
       webhook_secret_path: Fleet.EnvParse.path("FLEET_WEBHOOK_SECRET_PATH", path)
   end
 
-  # F161/F036 : ON-SWITCH du listener webhook Gitea (:8081 HMAC). Sans lui, `:start_webhooks` restait
-  # à `false` partout → WebhooksGitea + le secret + les clés gitea.* du registre étaient une surface
-  # de config qui ne pouvait JAMAIS démarrer. Défaut OFF (intégration forge opt-in). Port surchargeable.
+  # ON-SWITCH of the Gitea webhook listener (:8081 HMAC). Without it, `:start_webhooks` stays
+  # `false` everywhere → WebhooksGitea + the secret + the gitea.* registry keys would be a config
+  # surface that can NEVER start. Default OFF (forge integration opt-in). Port overridable.
   #
-  # ⚠ DÉCISION (user 2026-07-13) — reste OFF DÉLIBÉRÉMENT, ce n'est PAS juste « pas encore branché ».
-  # Le webhook n'est qu'un ACCÉLÉRATEUR de poll : il fait réagir le Poller à un changement forge tout
-  # de suite au lieu d'attendre le prochain tick (~30 s). Or (a) c'est un hint LOSSY qui peut foirer /
-  # se perdre (la vérité durable vit dans le poll, doctrine D1), et (b) gagner 30 s ne pèse rien quand
-  # la réaction des agents se compte en MINUTES. Le rapport coût/risque/bénéfice ne le justifie pas.
-  # Ne pas le rallumer « pour la latence » sans re-poser cette question à l'humain.
+  # ⚠ USER DECISION — stays OFF DELIBERATELY; this is NOT just "not wired yet".
+  # The webhook is only a poll ACCELERATOR: it makes the Poller react to a forge change right
+  # away instead of waiting for the next tick (~30 s). But (a) it is a LOSSY hint that can fail /
+  # get lost (the durable truth lives in the poll, doctrine D1), and (b) saving 30 s weighs nothing when
+  # the agents' reaction is measured in MINUTES. The cost/risk/benefit ratio does not justify it.
+  # Do NOT turn it back on "for latency" without re-asking the human this question.
   if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
     config :fleet_event_router, start_webhooks: true
 
@@ -122,22 +120,22 @@ if config_env() != :test do
     end
   end
 
-  # SignalsOS (:start_signals) : PAS d'on-switch — le module est un stub NON-IMPLÉMENTÉ dont
-  # `init/1` RAISE avant tout `:os.set_signal` (boot fail-loud : l'activer est une misconfiguration,
-  # jamais une capture silencieuse de SIGTERM/SIGHUP). Le vrai fix, le jour venu = un gen_event
-  # handler sur `:erl_signal_server` (les signaux OS n'atteignent pas un GenServer). Reste gated-off ;
-  # os.signal.* du registre = dormant en attendant.
+  # SignalsOS (:start_signals): NO on-switch — the module is a NON-IMPLEMENTED stub whose
+  # `init/1` RAISES before any `:os.set_signal` (fail-loud boot: enabling it is a misconfiguration,
+  # never a silent capture of SIGTERM/SIGHUP). The real fix, when the day comes = a gen_event
+  # handler on `:erl_signal_server` (OS signals do not reach a GenServer). Stays gated-off;
+  # the registry's os.signal.* = dormant meanwhile.
 
   # ============================================================
-  # fleet_spawner (Lot 3) — pods permanents
-  # BL-028 (clos) : `:boot_permanent_at_start` EST le gate canon du boot des pods
-  # permanents (consulté par `Fleet.Starfleet.BootOrchestrator` via
-  # `PermanentBoot.auto_boot_enabled?/0`, l'autorité unique depuis F-14). Défaut
-  # **true** (canon DN lcars-fleet_service §391 : « default true en prod ») ;
-  # `LCARS_BOOT_PERMANENT_AT_START=false` désactive (BootOrchestrator wire les
-  # consumers + émet boot_complete mais ne spawn aucun pod permanent). Le second
-  # gate `:start_boot_orchestrator` (défaut true) contrôle si l'orchestrateur
-  # tourne du tout. Deux knobs distincts et significatifs.
+  # fleet_spawner — permanent pods
+  # `:boot_permanent_at_start` IS the canonical gate of the permanent-pod boot
+  # (consulted by `Fleet.Starfleet.BootOrchestrator` via
+  # `PermanentBoot.auto_boot_enabled?/0`, the single authority). Default
+  # **true** (prod);
+  # `LCARS_BOOT_PERMANENT_AT_START=false` disables it (BootOrchestrator wires the
+  # consumers + emits boot_complete but spawns no permanent pod). The second
+  # gate `:start_boot_orchestrator` (default true) controls whether the orchestrator
+  # runs at all. Two distinct, meaningful knobs.
   # ============================================================
   config :fleet_spawner,
     boot_permanent_at_start:
@@ -148,115 +146,107 @@ if config_env() != :test do
       )
 
   # ============================================================
-  # fleet_spawner pod_dir : PER-HUMAIN, dérivé du HOME du process runtime (pod.ex `pod_dir_for` →
-  # `~/pods/pod_<id>`). Décision 2026-06-09 : plus de knob env `LCARS_PODS_ROOT` (il écrasait le
-  # per-humain et a re-cassé le runtime le 2026-06-08 ; cf. journal). L'humain = l'user qui lance le
-  # runtime, point. Override éventuel = `config :fleet_spawner, pod_dir_root: …` directement (tests).
+  # fleet_spawner pod_dir: PER-HUMAN, derived from the runtime process HOME (pod.ex `pod_dir_for` →
+  # `~/pods/pod_<id>`). User decision: no `LCARS_PODS_ROOT` env knob (it would override the
+  # per-human derivation). The human = the user who launches the
+  # runtime, period. Any override = `config :fleet_spawner, pod_dir_root: …` directly (tests).
   # ============================================================
 
-  # tmux sock-dir base — le défaut côté Elixir est home-relatif `~/.lcars/run/tmux-sock`
-  # (`Fleet.Spawner.PodTmux.sock_base`, fleet lancée par un humain : un chemin writable sans privilège).
-  # Cet env (posé par bin/fleet_v2) le surcharge explicitement pour que TOUS les côtés calculent le même
-  # chemin. Pose à la fois le côté runtime (`:tmux_sock_base`) et, via do_launch, l'env
-  # `LCARS_TMUX_SOCK_BASE` que les launchers lisent. (`/run/lcars/tmux-sock` = ancien RuntimeDirectory du
-  # service systemd retiré, jamais le défaut courant.)
+  # tmux sock-dir base — the Elixir-side default is home-relative `~/.lcars/run/tmux-sock`
+  # (`Fleet.Spawner.PodTmux.sock_base`, fleet launched by a human: a path writable without privilege).
+  # This env (set by bin/fleet_v2) overrides it explicitly so that ALL sides compute the same
+  # path. Sets both the runtime side (`:tmux_sock_base`) and, via do_launch, the
+  # `LCARS_TMUX_SOCK_BASE` env the launchers read.
   if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
     config :fleet_spawner, tmux_sock_base: Fleet.EnvParse.path("LCARS_TMUX_SOCK_BASE", sock_base)
   end
 
   # ============================================================
-  # Backend de lancement : LauncherPortBackend (chaîne bwrap) — défaut et unique.
+  # Launch backend: LauncherPortBackend (bwrap chain) — the default and the only one.
   # ============================================================
-  # TmuxBackend (claude --remote-control HORS bwrap, containment: none, control-path cassé depuis la
-  # convergence PodTmux 2026-06-02) a été SUPPRIMÉ (Fable F103). Le bloc d'opt-in quarantaine
-  # `LCARS_LAUNCH_BACKEND=tmux` + `LCARS_UNSAFE_ALLOW_HOST_TMUX=1` est retiré avec lui : il n'y a plus
-  # de backend hors-bwrap à activer. La chaîne bwrap est la seule voie de lancement sandboxé
-  # (elle projette le sanctuaire du pod — le monde clos fourni À l'agent).
+  # There is NO out-of-bwrap backend to enable. The bwrap chain is the only sandboxed launch
+  # path (it projects the pod's sanctuary — the closed world provided TO the agent).
 
   # ============================================================
-  # fleet_mcp — base des sockets MCP per-pod (transport AF_UNIX, R9)
+  # fleet_mcp — per-pod MCP socket base (AF_UNIX transport)
   # ============================================================
-  # Le transport pod-facing n'est plus un listener HTTP partagé (`:pod_facing_port` retiré — dead config
-  # sans lecteur depuis la bascule socket) mais une socket AF_UNIX PAR POD (`<base>/<pod_id>/sock`, créée
-  # par `Fleet.MCP.PodSocketSupervisor.ensure_pod_socket`, lue par le pod via `LCARS_FLEET_MCP_SOCKET`).
-  # Défaut `:sock_base` = `/run/lcars/mcp` (côté fleet_mcp). Quand le runtime est lancé par un HUMAIN (pas
-  # un service système), `/run/lcars` n'est pas writable sans privilège → override SOUS son home, EXACTEMENT
-  # comme `LCARS_TMUX_SOCK_BASE` le fait pour la socket tmux des pods. La socket est bindée au MÊME chemin
-  # absolu dans le sandbox bwrap (`--bind X X`) → host == namespace (pas de remap du chemin).
+  # The pod-facing transport is a PER-POD AF_UNIX socket (`<base>/<pod_id>/sock`, created
+  # by `Fleet.MCP.PodSocketSupervisor.ensure_pod_socket`, read by the pod via `LCARS_FLEET_MCP_SOCKET`)
+  # — never a shared HTTP listener.
+  # Default `:sock_base` = `/run/lcars/mcp` (fleet_mcp side). When the runtime is launched by a HUMAN (not
+  # a system service), `/run/lcars` is not writable without privilege → override UNDER their home, EXACTLY
+  # as `LCARS_TMUX_SOCK_BASE` does for the pod tmux socket. The socket is bound at the SAME
+  # absolute path inside the bwrap sandbox (`--bind X X`) → host == namespace (no path remap).
   if sock_base = System.get_env("LCARS_FLEET_MCP_SOCK_BASE") do
     config :fleet_mcp, sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
   end
 
   # ============================================================
-  # fleet_spawner — mcp_server_spec (config du `.mcp-fleet.json`
-  # écrit dans chaque pod par pod.ex maybe_provision_mcp_config)
+  # fleet_spawner — mcp_server_spec (config of the `.mcp-fleet.json`
+  # written into each pod by pod.ex maybe_provision_mcp_config)
   # ============================================================
-  # Le pod claude REPL démarre le bridge.py via cette spec ; le bridge parle au central via la socket
-  # AF_UNIX per-pod dont le chemin est injecté PER-POD par pod.ex en `LCARS_FLEET_MCP_SOCKET`
-  # (build_fleet_mcp_entry) — plus de `LCARS_FLEET_MCP_URL` (l'ancien transport HTTP loopback partagé a
-  # disparu, R9). `LCARS_POD_ID` est lui aussi ajouté per-pod par pod.ex.
+  # The claude REPL pod starts bridge.py via this spec; the bridge talks to the central via the per-pod
+  # AF_UNIX socket whose path is injected PER-POD by pod.ex as `LCARS_FLEET_MCP_SOCKET`
+  # (build_fleet_mcp_entry) — no `LCARS_FLEET_MCP_URL` (no shared HTTP loopback transport
+  # exists). `LCARS_POD_ID` is also added per-pod by pod.ex.
   #
-  # PASSE-9 (2026-06-08) : le bridge NE peut PAS être lancé via son chemin hôte
-  # (`/var/lib/lcars/bin/...`) — le sandbox bwrap ne monte PAS `/var/lib/lcars`.
-  # On fournit donc `bridge_source` (chemin HÔTE à COPIER) ; pod.ex le projette
-  # sous `pod_dir/.lcars/` et résout les placeholders `{{BRIDGE}}`/`{{BRIDGE_LOG}}`
-  # sur ce chemin pod-local (pod_dir est le SEUL espace RW monté dans le sandbox,
-  # au même chemin absolu hôte+sandbox). Cf. pod.ex build_fleet_mcp_entry.
+  # The bridge CANNOT be launched via its host path
+  # (`/var/lib/lcars/bin/...`) — the bwrap sandbox does NOT mount `/var/lib/lcars`.
+  # So we provide `bridge_source` (HOST path to COPY); pod.ex projects it
+  # under `pod_dir/.lcars/` and resolves the `{{BRIDGE}}`/`{{BRIDGE_LOG}}` placeholders
+  # onto that pod-local path (pod_dir is the ONLY RW space mounted in the sandbox,
+  # at the same absolute path host+sandbox). Cf. pod.ex build_fleet_mcp_entry.
   #
-  # Gate sur `bridge_path` SEUL (le bridge doit être copiable) : la cible de comm n'est plus une URL mais
-  # la socket per-pod, résolue au runtime côté pod, pas une config statique de boot.
+  # Gate on `bridge_path` ALONE (the bridge must be copyable): the comm target is not a URL but
+  # the per-pod socket, resolved at runtime pod-side, not a static boot config.
   if bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH") do
     config :fleet_spawner, :mcp_server_spec, %{
-      # Chemin HÔTE du bridge, copié per-pod par pod.ex (pas lancé en place).
+      # HOST path of the bridge, copied per-pod by pod.ex (not launched in place).
       "bridge_source" => Fleet.EnvParse.path("LCARS_FLEET_MCP_BRIDGE_PATH", bridge_path),
       "command" => "bash",
       "args" => [
         "-c",
-        # {{BRIDGE}}/{{BRIDGE_LOG}} = chemins POD-LOCAUX résolus par pod.ex (sous
-        # pod_dir/.lcars/, RW dans le sandbox). PAS de chemin hôte ici : invisible
-        # dans le sandbox bwrap.
+        # {{BRIDGE}}/{{BRIDGE_LOG}} = POD-LOCAL paths resolved by pod.ex (under
+        # pod_dir/.lcars/, RW in the sandbox). NO host path here: invisible
+        # inside the bwrap sandbox.
         "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"
       ]
-      # Pas de clé "env" statique : `LCARS_FLEET_MCP_SOCKET` (socket per-pod) + `LCARS_POD_ID` sont
-      # injectés PER-POD par pod.ex (build_fleet_mcp_entry), pas figés ici.
+      # No static "env" key: `LCARS_FLEET_MCP_SOCKET` (per-pod socket) + `LCARS_POD_ID` are
+      # injected PER-POD by pod.ex (build_fleet_mcp_entry), not frozen here.
     }
   end
 
   # ============================================================
-  # fleet_workflow (ch12) — racine catalogue pipelines YAML
+  # fleet_workflow — workflow-map YAML catalogue root
   # ============================================================
   if path = System.get_env("LCARS_WORKFLOW_MAPS_ROOT") do
     config :fleet_workflow,
       workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
   end
 
-  # TOMBSTONE (D3 2026-07-05) : le knob `LCARS_WORKSPACES_ROOT` (→ `:fleet_workflow,
-  # :workspaces_root`, racine des workspaces scratch git de pipeline) est RETIRÉ — son
-  # dernier lecteur (`WorkspaceProvisioner`, pile du moteur RAM) a été supprimé avec le
-  # retrait du moteur RAM (Executor + pile) ; la config restait posée sans AUCUN lecteur.
-  # Ne pas réintroduire : les workspaces actuels sont per-pod (pod_dir), pas un scratch
-  # git partagé de pipeline.
+  # TOMBSTONE: the `LCARS_WORKSPACES_ROOT` knob (→ `:fleet_workflow,
+  # :workspaces_root`, root of the pipeline scratch git workspaces) is RETIRED — it has
+  # NO reader. Do not reintroduce: current workspaces are per-pod (pod_dir), not a
+  # shared pipeline git scratch.
 
   # ============================================================
-  # fleet_starfleet (ch13) — log audit Cat 5
+  # fleet_starfleet — Cat 5 audit log
   # ============================================================
   if path = System.get_env("LCARS_STARFLEET_AUDIT_LOG") do
     config :fleet_starfleet,
       audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
   end
 
-  # Drain de shutdown : backend réel (agrège l'in-flight Spawner + TaskQueue et active la
-  # quiescence — le Pipeline RAM historique a disparu du décompte). Hors `:test` (ce fichier est guardé) →
-  # les tests gardent le défaut `NoOpDispatcher` (hermétisme). Décision user
-  # 2026-06-05 : pas de god-module Fleet.Dispatcher, le seam EST l'abstraction.
+  # Shutdown drain: real backend (aggregates the Spawner + TaskQueue in-flight and activates
+  # quiescence). Outside `:test` (this file is guarded) →
+  # tests keep the `NoOpDispatcher` default (hermeticity). User decision:
+  # no Fleet.Dispatcher god-module, the seam IS the abstraction.
   config :fleet_starfleet,
          :shutdown_dispatcher,
          Fleet.Starfleet.Shutdown.AggregateDispatcher
 
   # ============================================================
-  # fleet_coord (ch14) — wired backend Fleet.Coord pour ch13
-  # (ch12/pipeline : soft gate consolidé sur le gatekeeper côté pipeline, R06 —
-  #  plus de :fleet_workflow, :coord_backend)
+  # fleet_coord — wired Fleet.Coord backend for starfleet
   # ============================================================
   config :fleet_starfleet, :coord_backend, Fleet.Coord
 
@@ -265,16 +255,16 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_api (ch15) — port HTTP (pas d'auth app, cf. rest.ex § Auth)
+  # fleet_api — HTTP port (no app auth, cf. rest.ex § Auth)
   # ============================================================
-  # A7 (accord des ports) : les ports sont per-humain (bloc UID calculé par bin/fleet_v2) — un
-  # défaut statique (l'ancien 8080) n'est JAMAIS le vrai port et divergeait du reste de la fleet.
-  # Absent = boot hors bin/fleet_v2 → fail-loud (même règle que LCARS_FLEET_MCP_BRIDGE_PATH).
+  # Port agreement: ports are per-human (UID block computed by bin/fleet_v2) — a
+  # static default is NEVER the real port and would diverge from the rest of the fleet.
+  # Absent = boot outside bin/fleet_v2 → fail-loud (same rule as LCARS_FLEET_MCP_BRIDGE_PATH).
   http_port =
     case System.get_env("FLEET_API_PORT") do
       nil ->
-        raise "FLEET_API_PORT manquant — les ports sont posés par bin/fleet_v2 (bloc per-humain). " <>
-                "Lance via fleet_v2 start, ou pose la var explicitement."
+        raise "FLEET_API_PORT missing — ports are set by bin/fleet_v2 (per-human block). " <>
+                "Launch via fleet_v2 start, or set the var explicitly."
 
       str ->
         Fleet.EnvParse.port("FLEET_API_PORT", str)
@@ -283,24 +273,24 @@ if config_env() != :test do
   config :fleet_api, http_port: http_port
   config :fleet_api, start_listener: true
 
-  # AF_UNIX control socket pour la porte d'écriture (POST /api/admin/spawn, ControlRouter) —
-  # hors du réseau que le pod partage (A-21). Défaut : ~/.lcars/run/api.sock (per-humain, home
-  # réel jamais bindé dans le pod → inatteignable). Override LCARS_API_SOCK (posé par bin/fleet_v2).
+  # AF_UNIX control socket for the write door (POST /api/admin/spawn, ControlRouter) —
+  # off the network the pod shares (A-21). Default: ~/.lcars/run/api.sock (per-human, real
+  # home never bound into the pod → unreachable). Override LCARS_API_SOCK (set by bin/fleet_v2).
   config :fleet_api,
     control_socket:
       System.get_env("LCARS_API_SOCK") ||
         Path.join([System.fetch_env!("HOME"), ".lcars", "run", "api.sock"])
 
   # ============================================================
-  # fleet_observation — observation deck read-only, port per-humain (BL-026)
+  # fleet_observation — read-only observation deck, per-human port
   # ============================================================
-  # Listener démarré en prod/dev (le `start_listener: false` hermétique de
-  # test.exs n'est pas atteint ici : runtime.exs est gardé hors :test).
+  # Listener started in prod/dev (the hermetic `start_listener: false` of
+  # test.exs is not reached here: runtime.exs is guarded out of :test).
   obs_port =
     case System.get_env("LCARS_OBSERVATION_PORT") do
       nil ->
-        raise "LCARS_OBSERVATION_PORT manquant — posé par bin/fleet_v2 (bloc per-humain). " <>
-                "Lance via fleet_v2 start, ou pose la var explicitement."
+        raise "LCARS_OBSERVATION_PORT missing — set by bin/fleet_v2 (per-human block). " <>
+                "Launch via fleet_v2 start, or set the var explicitly."
 
       str ->
         Fleet.EnvParse.port("LCARS_OBSERVATION_PORT", str)
@@ -310,19 +300,18 @@ if config_env() != :test do
   config :fleet_observation, start_listener: true
 
   # ============================================================
-  # fleet_pilot — le knob legacy `start_dispatcher` / `LCARS_PILOT_DISPATCHER` et le catalogue
-  # `LCARS_PILOT_ROUTING_PATH` (→ `forge-routing.yaml`) sont SUPPRIMÉS avec le rail AutoDispatcher
-  # (webhook→route→Executor RAM). Aucun code ne lisait plus `:forge_routing_path`. Seul le rail
-  # forge-state-machine subsiste (config `LCARS_PILOT_STEP` / `LCARS_PILOT_POLL_REPO`, plus bas).
+  # fleet_pilot — only the forge-state-machine rail exists
+  # (config `LCARS_PILOT_STEP` / `LCARS_PILOT_POLL_REPO`, below). There is no
+  # label-routing knob and no legacy dispatcher knob.
   # ============================================================
 
-  # F-037 MULTI-PROJET : le Poller ne scanne PLUS un repo fixe — il DÉCOUVRE ses projets par topic
-  # (`lcars-fleet-<human>`, posé à l'onboarding). `LCARS_PILOT_POLL_REPO` n'est donc PLUS requis pour que
-  # le rail tourne (la garde fail-loud boot est sur FORGE_BASE_URL, cf. Fleet.Pilot.Application).
-  # ÉTAT VRAI (D3 2026-07-05) : cette config est posée SANS lecteur runtime (aucun
-  # `get_env(:fleet_pilot, :poll_repo)` dans le code ; les tests injectent repo/remote par opts directs).
-  # CONSERVÉE délibérément comme contrat ops (l'env var reste reconnue, pas un no-op surprise si un
-  # déploiement la pose). En prod multi-projet, repo+remote voyagent dans l'event `pod.completed`.
+  # F-037 MULTI-PROJECT: the Poller does not scan a fixed repo — it DISCOVERS its projects by
+  # org-membership (`list_org_repos`, WS3). `LCARS_PILOT_POLL_REPO` is therefore NOT required for
+  # the rail to run (the fail-loud boot guard is on FORGE_BASE_URL, cf. Fleet.Pilot.Application).
+  # TRUE STATE: this config is set WITHOUT a runtime reader (no
+  # `get_env(:fleet_pilot, :poll_repo)` in the code; tests inject repo/remote via direct opts).
+  # KEPT deliberately as an ops contract (the env var stays recognized — no surprise no-op if a
+  # deployment sets it). In multi-project prod, repo+remote travel in the `pod.completed` event.
   if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
     config :fleet_pilot, poll_repo: repo
   end
@@ -332,10 +321,10 @@ if config_env() != :test do
       poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end
 
-  # Forge config — résolue par Fleet.Pilot.ForgeClient.resolve_config/1
-  # à l'appel (merge avec opts d'appel). base_url obligatoire ;
-  # token soit inline (FORGE_TOKEN) soit via fichier (FORGE_TOKEN_FILE,
-  # défaut ~/.gitea_token convention v1.5).
+  # Forge config — resolved by Fleet.Pilot.ForgeClient.resolve_config/1
+  # at call time (merged with call opts). base_url mandatory;
+  # token either inline (FORGE_TOKEN) or via file (FORGE_TOKEN_FILE,
+  # default ~/.gitea_token).
   forge_opts =
     [
       base_url: System.get_env("FORGE_BASE_URL"),
@@ -348,55 +337,56 @@ if config_env() != :test do
     config :fleet_pilot, :forge, forge_opts
   end
 
-  # F058/F059/F060 — login du compte SYSTÈME (propriétaire de FORGE_TOKEN). Les marqueurs
-  # forge (route / step_run / result-block) ne font foi QUE s'ils sont écrits par ce login (un user
-  # forge qui en poste un faux est ignoré). Optionnel : si absent, ForgeClient le dérive une fois
-  # via `GET /user` (l'authentifié du token) et le cache. Le surcharger ici évite ce round-trip et
-  # lève toute ambiguïté en déploiement (token partagé, miroir, etc.).
+  # Login of the SYSTEM account (owner of FORGE_TOKEN). The forge markers
+  # (route / step_run / result-block) are only trusted when written by this login (a forge
+  # user posting a fake one is ignored). Optional: if absent, ForgeClient derives it once
+  # via `GET /user` (the token's authenticated user) and caches it. Overriding it here avoids that
+  # round-trip and removes any ambiguity in deployment (shared token, mirror, etc.).
   if bot_login = System.get_env("FORGE_BOT_LOGIN") do
     config :fleet_pilot, forge_bot_login: bot_login
   end
 
-  # Multi-forge par config (une forge par boot, choisie par profil env). Les tokens de RÔLE
-  # (`Fleet.Credentials.RoleToken`) sont lus dans `<role_tokens_dir>/<role>.gitea_token` ;
-  # défaut `/home/private` (forge primaire). Pour cibler une 2e forge (ex. secours :3000), un
-  # profil env distinct pose FORGE_BASE_URL + FORGE_TOKEN_FILE + ce dossier → un jeu de tokens
-  # ISOLÉ par forge (pas de clobber). Le token système, lui, est déjà par-forge via
-  # FORGE_TOKEN_FILE. Absent = défaut (rétro-compat stricte). Pas de multi-forge SIMULTANÉ
-  # (registry/routing par-projet) : hors-scope, ce serait un autre modèle.
+  # Multi-forge by config (one forge per boot, chosen by env profile). The ROLE tokens
+  # (`Fleet.Credentials.RoleToken`) are read from `<role_tokens_dir>/<role>.gitea_token`;
+  # default `/home/private` (primary forge). To target a 2nd forge (e.g. backup :3000), a
+  # distinct env profile sets FORGE_BASE_URL + FORGE_TOKEN_FILE + this dir → a token set
+  # ISOLATED per forge (no clobber). The system token is already per-forge via
+  # FORGE_TOKEN_FILE. Absent = default (strict backward-compat). No SIMULTANEOUS multi-forge
+  # (per-project registry/routing): out-of-scope, that would be another model.
   if role_tokens_dir = System.get_env("FORGE_ROLE_TOKENS_DIR") do
     config :fleet_credentials,
       role_tokens_dir: Fleet.EnvParse.path("FORGE_ROLE_TOKENS_DIR", role_tokens_dir)
   end
 
   # ============================================================
-  # A2/A3 — runtime STEP-MODE (forge = machine à états) + BL-045b auth push
+  # Runtime STEP-MODE (the forge = the state machine) + push auth
   # ============================================================
-  # OFF par défaut. `LCARS_PILOT_STEP=true` démarre Poller(step) + StepRunConsumer
-  # (cf. Fleet.Pilot.Application.step_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
-  # seule garde fail-loud du boot step (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
-  # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
+  # OFF by default. `LCARS_PILOT_STEP=true` starts Poller(step) + StepRunConsumer
+  # (cf. Fleet.Pilot.Application.step_children!). F-037: requires ONLY FORGE_BASE_URL — the
+  # single fail-loud guard of the step boot (org-membership project discovery + per-step-run push).
+  # LCARS_PILOT_POLL_REPO is NOT required (legacy/test override only; the real discovery is by
+  # forge org-membership, not a fixed repo).
   if Fleet.EnvParse.bool("LCARS_PILOT_STEP", System.get_env("LCARS_PILOT_STEP"), false) do
     config :fleet_pilot, step_dispatch?: true
   end
 
-  # #8 coherence: no more label-routing knob (`LCARS_PILOT_STEP_ROUTING` removed). Routing lives in the
+  # No label-routing knob exists. Routing lives in the
   # scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`; delegation workflow_map, default brief-gate). type:* = display.
 
-  # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
-  # il est PER-STEP-RUN, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
-  # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.StepRunConsumer.step_run_state/2`). Auth push inchangée
-  # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, jamais dans l'URL).
+  # No `LCARS_HOP_REMOTE` — the push remote is not a fixed URL (incompatible with multi-project);
+  # it is PER-STEP-RUN, derived from the project's `repo_path` and embedded in the `pod.completed` event (cf.
+  # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.StepRunConsumer.step_run_state/2`). Push auth
+  # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, never in the URL).
 
-  # BL-045b — auth push runtime (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
-  # HORS argv ET HORS .git/config — F087/F095). Token système (lcars-system, write:repository).
-  # FORGE_PUSH_TOKEN prioritaire sur FORGE_TOKEN (le push exige write:repository, ≠ token poller read).
+  # Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
+  # OUTSIDE argv AND OUTSIDE .git/config). System token (lcars-system, write:repository).
+  # FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
   forge_base = System.get_env("FORGE_BASE_URL")
 
-  # Le token push doit venir de la MÊME source que le token poller : var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
-  # PUIS le FICHIER (FORGE_TOKEN_FILE, défaut ~/.gitea_token). Sans ce fallback-fichier, un déploiement
-  # qui ne pose QUE le fichier (cas nominal) avait un push SANS auth → « could not read Username »
-  # (régression latente prouvée live : le poller lisait le fichier, le push ne lisait que la var).
+  # The push token must come from the SAME source as the poller token: var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
+  # THEN the FILE (FORGE_TOKEN_FILE, default ~/.gitea_token). Without this file fallback, a deployment
+  # that only sets the file (the nominal case) would have an auth-less push → "could not read Username"
+  # (the poller would read the file while the push reads only the var).
   default_token_file =
     case System.user_home() do
       home when is_binary(home) -> Path.join(home, ".gitea_token")
@@ -420,30 +410,30 @@ if config_env() != :test do
     config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
-  # NB cap-profiles / workflow_maps : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
-  # :root_dir, plus haut) et `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_workflow :workflow_maps_root). Pas de
-  # knob dupliqué ici (I-CBC, une source par config).
+  # NB cap-profiles / workflow_maps: already covered by `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
+  # :root_dir, above) and `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_workflow :workflow_maps_root). No
+  # duplicated knob here (one source per config).
 
-  # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais
-  #  une config. Décision 2026-06-09 — cf. pod.ex `runtime_user`/`runtime_home`.)
+  # (No `LCARS_POD_HUMAN` knob: the human = the runtime process user, derived in-code, never
+  #  a config. Cf. pod.ex `runtime_user`/`runtime_home`.)
 
-  # State task-queue (défaut home-relatif `~/.lcars/task-queue/state.json` ; HOME irrésoluble =
-  # fail-loud délibéré, raise — cf. task_queue/store.ex `default_path/0` ; aucun fallback).
+  # task-queue state (default home-relative `~/.lcars/task-queue/state.json`; unresolvable HOME =
+  # deliberate fail-loud, raise — cf. task_queue/store.ex `default_path/0`; no fallback).
   if path = System.get_env("LCARS_STATE_PATH") do
     config :fleet_task_queue, state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
   end
 
-  # State FS des pods (session_id/phase, recovery). Défaut `~/.lcars/state` (fleet sous l'humain,
-  # doctrine 2026-06-11 — cf. pod.ex `default_state_fs_root`). Override explicite si déploiement
-  # non-standard ; sinon le state suit le home de l'humain qui lance la fleet.
+  # Pod FS state (session_id/phase, recovery). Default `~/.lcars/state` (fleet under the human
+  # — cf. pod.ex `default_state_fs_root`). Explicit override for a non-standard deployment;
+  # otherwise the state follows the home of the human launching the fleet.
   if path = System.get_env("LCARS_STATE_FS_ROOT") do
     config :fleet_spawner, state_fs_root: Fleet.EnvParse.path("LCARS_STATE_FS_ROOT", path)
   end
 
-  # Launchers pod (N0/N1) : path absolu lu par le spawner (défaut `/usr/local/bin`, pod.ex). Le launcher
-  # `fleet_v2` les pose depuis `$INSTALL_DIR/bin` (BSD : tout sous l'install, rien d'éparpillé ; fini le
-  # `sudo cp` vers /usr/local/bin). Le dir parent est bindé RO dans le sandbox (pod.ex `system_mounts`,
-  # dérivé de `claude_launch_path`). Param d'install → le `v2 → lcars` futur ne touche aucun code.
+  # Pod launchers (N0/N1): absolute path read by the spawner (default `/usr/local/bin`, pod.ex). The
+  # `fleet_v2` launcher sets them from `$INSTALL_DIR/bin` (everything under the install, nothing
+  # scattered). The parent dir is bind-mounted RO in the sandbox (pod.ex `system_mounts`,
+  # derived from `claude_launch_path`). An install param → a future rename touches no code.
   if path = System.get_env("LCARS_BWRAP_LAUNCH_PATH"),
     do:
       config(:fleet_spawner,
@@ -462,11 +452,11 @@ if config_env() != :test do
         claude_launch_path: Fleet.EnvParse.path("LCARS_CLAUDE_LAUNCH_PATH", path)
       )
 
-  # Seed store (round-1 des pods — optimisation de reprise, JAMAIS requis ; vide = auto-peuplant, le pod
-  # spawne fresh). Override env `LCARS_SEED_STORE_ROOT` du défaut code (`~/.lcars/seeds`, aligné dans
-  # seed_store.ex). Le fallback `/var/lib/lcars` ne sert que si HOME est irrésoluble AU BOOT :
-  # évaluer la config ne doit pas crasher le node pour un store optionnel (le défaut code, lui,
-  # est rescué à l'usage).
+  # Seed store (pod round-1 — a resume optimization, NEVER required; empty = self-populating, the pod
+  # spawns fresh). Env override `LCARS_SEED_STORE_ROOT` of the code default (`~/.lcars/seeds`, aligned in
+  # seed_store.ex). The `/var/lib/lcars` fallback only serves if HOME is unresolvable AT BOOT:
+  # evaluating the config must not crash the node for an optional store (the code default, for
+  # its part, is rescued at use).
   seed_store_root =
     case System.get_env("LCARS_SEED_STORE_ROOT") do
       nil -> Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
@@ -475,10 +465,10 @@ if config_env() != :test do
 
   config :fleet_spawner, seed_store_root: seed_store_root
 
-  # Kick d'onboarding du pod (nudge `yop` → claude appelle get_work_item). La fenêtre par défaut
-  # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
-  # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans brief.
-  # Élargir en deploy. Entiers via env.
+  # Pod onboarding kick (the `yop` nudge → claude calls get_work_item). The default window
+  # (first 2s + 12×2.5s ≈ 32s) is too short against the claude cold-start in bwrap on a deployed
+  # service (238MB binary, cold caches) → kick abandoned before the REPL is ready → pod without a
+  # brief. Widen in deploy. Integers via env.
   if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
     do:
       config(:fleet_spawner,
