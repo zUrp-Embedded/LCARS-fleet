@@ -42,7 +42,7 @@ defmodule Fleet.Credentials.ForgeAuth do
 
   @doc """
   The system-side git auth env WITH an explicit result for auth-REQUIRED ops (push, private
-  `ls-remote`, `GitOps.run(auth: true)`): `{:ok, env} | {:error, :forge_auth_malformed}` (DR-024/BND-117).
+  `ls-remote`, `GitOps.run(auth: true)`): `{:ok, env} | {:error, :forge_auth_malformed}` (DR-024).
 
     * `{:ok, [@git_no_prompt | …auth…]}` — `:forge_auth` valid → auth extraheader added.
     * `{:ok, [@git_no_prompt]}` — `:forge_auth` ABSENT (nil): the LEGITIMATE "no auth configured" state
@@ -50,7 +50,7 @@ defmodule Fleet.Credentials.ForgeAuth do
     * `{:error, :forge_auth_malformed}` — `:forge_auth` PRESENT but broken (empty/missing field, or a
       control char in `url_prefix`). An auth-required op MUST fail-loud HERE, never run UNAUTHENTICATED:
       a present-but-broken credential must not be masked as a later 401/403 (or silently succeed on a
-      public remote). This is the DR-024 fix: present-invalid ≠ absent-legit.
+      public remote). Present-invalid ≠ absent-legit.
   """
   @spec git_env_result() :: {:ok, [{String.t(), String.t()}]} | {:error, :forge_auth_malformed}
   def git_env_result do
@@ -69,11 +69,11 @@ defmodule Fleet.Credentials.ForgeAuth do
              {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
            ]}
         else
-          # R1-15: a newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
+          # A newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
           # (never `inspect` the value — it sits next to the token). LOUD, and typed as malformed.
           Logger.error(
             "ForgeAuth: :forge_auth url_prefix carries a newline/control char — REFUSED " <>
-              "(auth-required git ops fail-loud, DR-024). Fix the forge config."
+              "(auth-required git ops fail loud). Fix the forge config."
           )
 
           {:error, :forge_auth_malformed}
@@ -81,10 +81,10 @@ defmodule Fleet.Credentials.ForgeAuth do
 
       _other ->
         # PRESENT but malformed (empty/missing url_prefix or token, wrong shape): typed error, not a silent
-        # UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01 / DR-024).
+        # UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01).
         Logger.error(
           "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or token) — REFUSED " <>
-            "(auth-required git ops fail-loud, DR-024). Fix the forge config."
+            "(auth-required git ops fail loud). Fix the forge config."
         )
 
         {:error, :forge_auth_malformed}
