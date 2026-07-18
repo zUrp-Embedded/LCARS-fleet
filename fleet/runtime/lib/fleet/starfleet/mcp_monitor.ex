@@ -98,8 +98,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
         {:crashed, :ok} ->
           Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")
 
-        # `{same, same}` : la répétition d'une variable dans un pattern impose déjà l'égalité —
-        # l'ancienne épingle `^new_status` + guard redondant obscurcissait l'intention (« statut inchangé »).
+        # `{same, same}`: repeating a variable in a pattern already enforces equality — a
+        # `^new_status` pin + redundant guard would obscure the intent ("status unchanged").
         {same, same} ->
           :ok
 
@@ -135,8 +135,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
     end
   end
 
-  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
-  # protected-emission policy has ONE substrate authority). `:silent`: UnregisteredError = boot-order tolerated
+  # Emission via the protected core `Bus.safe_emit/4` (the protected-emission policy has ONE
+  # substrate authority — never a duplicated local rescue). `:silent`: UnregisteredError = boot-order tolerated
   # (registry not yet populated), not an alarm. A MALFORMED event (construction bug) is
   # logged ERROR by safe_emit then neutralized — otherwise it would mask the "MCP crashed" alert,
   # and this broadcast runs INSIDE the GenServer itself: letting it crash would restart the

@@ -1,8 +1,7 @@
 defmodule Fleet.Starfleet.AuditLog do
   @moduledoc """
   Fail-safe non-bang `File.write/3` wrapper over the Cat 5 audit log
-  (default `~/.lcars/log/fleet-starfleet.jsonl` — fleet under the human, 2026-06-11;
-  the `/var/log/…` root:adm path was the pre-2026-06-11 default, now vestigial — see below).
+  (default `~/.lcars/log/fleet-starfleet.jsonl` — fleet under the human).
 
   NDJSON append format: 1 JSON line per entry. Each entry is merged
   with an ISO8601 UTC `ts`. The file is bounded by a **threshold rotation**
@@ -21,8 +20,7 @@ defmodule Fleet.Starfleet.AuditLog do
       overwritten at the next rotation) and writing starts fresh.
 
   Distinct from the `fleet-audit.jsonl` audit log: specific Cat 5 forensics.
-  (Before 2026-06-11: `/var/log/…` root:adm — vestigial tamper-resistance; the real
-  audit = the multi-author forge.)
+  (The real audit = the multi-author forge; this local file is a forensics convenience.)
 
   **Last revised**: 2026-07-18
   """
@@ -129,9 +127,8 @@ defmodule Fleet.Starfleet.AuditLog do
     Application.get_env(:fleet_starfleet, :audit_log_path, default_audit_path())
   end
 
-  # Doctrine 2026-06-11 (fleet under the human): home-relative default `~/.lcars/log`. The LOCAL audit =
-  # a forensics convenience; the real audit = the forge (multi-author commits, tamper-evident). Before:
-  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable outside root).
+  # Doctrine (fleet under the human): home-relative default `~/.lcars/log`. The LOCAL audit =
+  # a forensics convenience; the real audit = the forge (multi-author commits, tamper-evident).
   # Unresolvable HOME = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
   # path: the .lcars state must not silently scatter.
   defp default_audit_path do
