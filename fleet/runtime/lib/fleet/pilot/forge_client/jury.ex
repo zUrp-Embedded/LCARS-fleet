@@ -96,7 +96,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   # The jury SET = every login with a "jury" review-record: requested (`REQUEST_REVIEW`) OR
   # having voted (`APPROVED`/`REQUEST_CHANGES`). Excludes `COMMENT`/`PENDING` (non-jury noise). STABLE source
   # (the records persist) vs volatile `requested_reviewers` → a judge dropped from the field without voting stays
-  # in the jury → `pending` → spawned, no more merge on a half-jury.
+  # in the jury → `pending` → spawned, never a merge on a half-jury.
   defp jury_reviewers(reviews) do
     reviews
     |> Enum.filter(&(&1["state"] in ["REQUEST_REVIEW", "APPROVED", "REQUEST_CHANGES"]))
@@ -211,9 +211,9 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   This is the STRUCTURAL signal of a human gesture "re-request a judgment" (UI button) that neither the
   review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
   (volatile) reveal. Without it, a re-request is INVISIBLE to the runtime: the judge is never
-  re-dispatched, the merge attempts then fails in a loop on `not enough approvals` (wall observed 2026-07-07).
+  re-dispatched, and the merge attempt fails in a loop on `not enough approvals`.
 
-  **Counting, NOT temporal order** (forge lesson 2026-07-07): Gitea timestamps are at SECOND granularity →
+  **Counting, NOT temporal order**: Gitea timestamps are at SECOND granularity →
   a review and its re-request within the same second make any `>`/`>=` ordering unreliable (missed or
   false-positive). Counting is IMMUNE to it. Prod sequence = `request_review`(1 addition) → review(1) →
   possible re-request(2nd addition). Net−reviews: 0 = up to date (not re-requested); >0 = an unanswered
