@@ -1,8 +1,8 @@
 defmodule Fleet.Starfleet do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
+  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
+  # deliberate API gesture.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -20,7 +20,7 @@ defmodule Fleet.Starfleet do
       Fleet.TaskQueue,
       Fleet.Coord,
       Fleet.MCP,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every reference is declared) —
       Req
     ],
     exports: [Shutdown, CoordBackend]
@@ -52,7 +52,7 @@ defmodule Fleet.Starfleet do
     * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
       (lifecycle + security, log prefix `AUDIT <event.type>`)
     * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
-      Task triggered via `boot_orchestrate/0` by the root AFTER full boot — acte4 A-08;
+      Task triggered via `boot_orchestrate/0` by the root AFTER full boot;
       emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
     * `Fleet.Starfleet.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
       `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
@@ -73,7 +73,7 @@ defmodule Fleet.Starfleet do
   @doc """
   Post-boot trigger of the `BootOrchestrator` (spawn of the permanent pods = REAL claude
   spend) — called by `Fleet.Application` AFTER the root `Supervisor.start_link` returned
-  `{:ok, _}` (acte4 A-08: "post-readiness" made mechanical; an aborted boot spawns nothing).
+  `{:ok, _}` ("post-readiness" made mechanical; an aborted boot spawns nothing).
   THE domain owns its gate (`:start_boot_orchestrator`, strict-boolean via `boot_enabled?/2` —
   `false` in test → hermetic) and its trigger; the root only says "now". `Task.start`
   non-linked: `run/1` never exits abnormally (its "never crashes the daemon" contract), and
