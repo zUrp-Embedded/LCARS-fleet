@@ -38,7 +38,7 @@ defmodule Fleet.Credentials.PlanValidator do
       else: {:error, {:invalid_plan, subscription_type}}
   end
 
-  # Total (R1-37): a non-binary plan (absent slot, `null`, a malformed value) is a REFUSAL, not a
+  # Total: a non-binary plan (absent slot, `null`, a malformed value) is a REFUSAL, not a
   # FunctionClauseError. The @doc notes the caller pre-handles absence, but the validator stands total on
   # its own — no non-paid input reaches a spawn.
   def validate(other), do: {:error, {:invalid_plan, other}}
