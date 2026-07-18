@@ -19,9 +19,9 @@ defmodule Fleet.CapProfile.Invariants do
 
   ## Excluded from `validate/1` (documented at their sites below)
 
-    * Removed checks — the invariant itself no longer holds: `g24_2`
-      (apiVersion), `g24_5` (git_ops_denied), `g24_7` (budget). See the inline
-      notes for why each was dropped.
+    * The numbering GAPS in the registry (`g24_2`, `g24_5`, `g24_7`) are deliberate:
+      those invariants no longer exist, and their codes stay retired — never reused
+      (frozen wire vocab). A one-line note sits at each gap's position below.
     * `g24_13` (mcp_channels non-empty ⟹ `Fleet.MCP.Server` alive) — a runtime
       **liveness** check, hence impure/non-deterministic; it violates the "pure
       data transformer" contract and is a spawn-time concern, not a static
@@ -63,7 +63,7 @@ defmodule Fleet.CapProfile.Invariants do
   """
   @spec violations(CapProfile.t()) :: [atom()]
   def violations(%CapProfile{} = profile) do
-    # No apiVersion check (the former g24_2): the apiVersion field does not exist.
+    # g24_2 retired: no apiVersion field exists (schema versioning is carried by the code).
     [
       {:g24_1, &check_containment/1},
       {:g24_3, &check_kind/1},
@@ -82,9 +82,10 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   @doc """
-  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in `priv/cap_profile/schema/cap-profile-v2.5.json` ... — a
-  physical dedup is impossible (JSON schema can't reference Elixir), so a drift test locks the two copies
-  (R0-CAP-011). Exposed as the code-side SSoT that test reads.
+  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in
+  `priv/cap_profile/schema/cap-profile-v2.5.json` — a physical dedup is impossible (a JSON
+  schema cannot reference Elixir), so a drift test locks the two copies
+  (`cap_profile_v25_conformance_test.exs`). Exposed as the code-side copy that test reads.
   """
   @spec lifetime_scope_enum() :: [String.t()]
   def lifetime_scope_enum, do: @lifetime_scope_enum
@@ -110,14 +111,10 @@ defmodule Fleet.CapProfile.Invariants do
       else: :error
   end
 
-  # No `git_ops_denied` check (the former g24_5): workers MAY push if the
-  # cap-profile allows it via the claude CLI `allowedTools`. The invariant that
-  # required `"push"` in `git_ops_denied` would therefore be obsolete. The
-  # generic catalogue → claude CLI disallowedTools mechanism (via
-  # `with_resolved_disallowed_tools/1` + baseline `_baseline-git-denied.yaml`)
-  # is the successor: it universally forbids the destructive patterns
-  # (`push --force`, `reset --hard`, `--no-verify`, etc.) without forbidding
-  # `push` wholesale.
+  # g24_5 retired: workers MAY push when their cap-profile allows it. The successor is the
+  # disallowedTools mechanism (`with_resolved_disallowed_tools/1` + `_baseline-git-denied.yaml`):
+  # the destructive patterns (`push --force`, `reset --hard`, `--no-verify`, …) are universally
+  # denied without forbidding `push` wholesale.
 
   defp check_modop_incompatible(%CapProfile{spec: spec}) do
     # `modop_set` is a MAP (schema v2.5: default/optional/incompatible), not a
@@ -150,11 +147,9 @@ defmodule Fleet.CapProfile.Invariants do
     if conflict?, do: :error, else: :ok
   end
 
-  # No budget check (the former g24_7): no API = no budget. The response
-  # timeout (once mis-named budget.maxDurationSec) is now a default keyed by
-  # lifetime_scope in `Fleet.Spawner.Pod.monitor_timeout_ms/1`; a per-cap-profile
-  # override (e.g. `spec.timeouts.response_sec`) is accepted as optional but not
-  # required.
+  # g24_7 retired: no API = no budget to enforce. The response timeout is a default keyed by
+  # lifetime_scope in `Fleet.Spawner.Pod.Liveness.monitor_timeout_ms/1`; a per-cap-profile
+  # override (`spec.timeouts.response_sec`) is optional, never required.
 
   defp check_metadata_name(%CapProfile{metadata: meta}) do
     case Map.get(meta, "name") do
