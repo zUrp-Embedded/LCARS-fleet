@@ -16,8 +16,8 @@ defmodule Fleet.CapProfile.DisallowedTools do
   `load`/`compose` core.
 
   I/O: reads the IMMUTABLE priv baseline `priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`
-  (resolved via `:code.priv_dir(:lcars_fleet)`), read+parse cached once in
-  `:persistent_term` (lazy-init; errors not cached — the bang re-raises on the next call).
+  (resolved via `:code.priv_dir(:lcars_fleet)`), read+parse cached once via
+  `Fleet.SchemaCache.cached/2` (lazy-init; errors not cached — the bang re-raises on the next call).
 
   **Last revised**: 2026-07-18
   """
@@ -95,24 +95,14 @@ defmodule Fleet.CapProfile.DisallowedTools do
     |> Enum.map(&"Bash(git #{&1}:*)")
   end
 
-  # IMMUTABLE priv baseline: read+parse once, cached in `:persistent_term`
-  # (lazy-init; an error is not cached — the bang re-raises on the next call).
-  # DELIBERATE local copy of the `Fleet.SchemaCache.cached/2` skeleton (fleet_event_router —
-  # the substrate authority for load-once-cache): fleet_cap_profile sits just as low WITHOUT a dep onto
-  # fleet_event_router, and we do not add an intra-R0 boundary dep (`use Boundary`) for ten lines.
-  # If the edge appears one day for another reason, migrate this site (and `CapProfile.Schema`).
+  # IMMUTABLE priv baseline: read+parse once via the foundation cache authority
+  # (`Fleet.SchemaCache` is a declared dep of the facade boundary). The bang loader
+  # raises on failure, so an error is never cached — the next call retries.
   defp load_baseline_git_ops_denied! do
-    key = {__MODULE__, :baseline_git_ops_denied}
-
-    case :persistent_term.get(key, :miss) do
-      :miss ->
-        entries = read_baseline_git_ops_denied!()
-        :persistent_term.put(key, entries)
-        entries
-
-      entries ->
-        entries
-    end
+    Fleet.SchemaCache.cached(
+      {__MODULE__, :baseline_git_ops_denied},
+      &read_baseline_git_ops_denied!/0
+    )
   end
 
   defp read_baseline_git_ops_denied! do

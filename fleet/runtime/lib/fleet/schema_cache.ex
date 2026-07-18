@@ -29,14 +29,12 @@ defmodule Fleet.SchemaCache do
   artifacts loaded once at boot and re-read by `fetch!/2` (which does not know the
   path).
 
-  ## Foundation note (cap_profile)
+  ## Sanctioned exception
 
-  `fleet_cap_profile` (low in the ladder too, WITHOUT a dep toward `fleet_event_router`)
-  keeps two local copies of the `cached/2` skeleton
-  (`CapProfile.Schema.load_schema_file/1`,
-  `CapProfile.DisallowedTools.load_baseline_git_ops_denied!/0`): we do not add an
-  intra-R0 edge for ten lines. If the edge appears one day for another reason,
-  migrate these two sites.
+  `Fleet.CapProfile.Schema.load_schema_file/1` keeps a MANUAL copy of the `cached/2`
+  skeleton: its soft `{:error, :schema_unavailable}` tuple must stay retryable, and
+  `cached/2` would cache that tuple like any value (see the gotcha on `cached/2`).
+  That is the only sanctioned local copy — every other consumer calls this module.
 
   **Last revised**: 2026-07-18
   """
