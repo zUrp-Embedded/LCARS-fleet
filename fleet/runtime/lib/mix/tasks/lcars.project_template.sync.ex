@@ -75,11 +75,18 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
     end
   end
 
-  # Force-push the priv tree as a single fresh commit (the projection semantics: the forge
-  # copy mirrors priv exactly; git history of the template repo is NOT load-bearing).
+  # Force-push BOTH faces of the priv tree, each as a single fresh commit (projection
+  # semantics: the forge copy mirrors priv exactly; template history is NOT load-bearing).
+  # `main/` → the default branch (served by `generate`); `work-ops/` → the `work/ops`
+  # branch (pure blueprint: `generate` ignores non-default branches — verified live — the
+  # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
+  # forge are the honest blueprint, expansion happens at write time).
   defp push_template(repo, fc) do
     creds_url = authed_url(Keyword.fetch!(fc, :base_url), Keyword.fetch!(fc, :token), repo)
-    push_template_to(creds_url)
+
+    with :ok <- push_face(creds_url, "main", "main") do
+      push_face(creds_url, "work-ops", "work/ops")
+    end
   end
 
   # Token-in-URL for the one-shot push (the URL never leaves this process; same channel
@@ -89,15 +96,17 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
     %{uri | userinfo: "oauth2:#{token}"} |> URI.to_string() |> Kernel.<>("/" <> repo <> ".git")
   end
 
-  defp push_template_to(url) do
-    src = Application.app_dir(:lcars_fleet, @template_dir)
-    tmp = Path.join(System.tmp_dir!(), "lcars-tpl-sync-#{System.unique_integer([:positive])}")
+  # Each face is its own throwaway git repo → the two pushed branches share no ancestor
+  # (work/ops is orphan by construction, exactly like the runtime's add_work_ops).
+  defp push_face(url, face, branch) do
+    src = Application.app_dir(:lcars_fleet, Path.join(@template_dir, face))
+    tmp = Path.join(System.tmp_dir!(), "lcars-tpl-#{face}-#{System.unique_integer([:positive])}")
 
     try do
       File.mkdir_p!(tmp)
       _ = File.cp_r!(src, tmp)
 
-      with {_, 0} <- System.cmd("git", ["init", "-q", "-b", "main"], cd: tmp),
+      with {_, 0} <- System.cmd("git", ["init", "-q", "-b", branch], cd: tmp),
            {_, 0} <- System.cmd("git", ["add", "-A"], cd: tmp),
            {_, 0} <-
              System.cmd(
@@ -110,14 +119,14 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
                  "commit",
                  "-q",
                  "-m",
-                 "chore(template): sync from priv/project_template"
+                 "chore(template): sync #{face} face from priv/project_template"
                ],
                cd: tmp
              ),
-           {_, 0} <- System.cmd("git", ["push", "-q", "--force", url, "main"], cd: tmp) do
+           {_, 0} <- System.cmd("git", ["push", "-q", "--force", url, branch], cd: tmp) do
         :ok
       else
-        {out, rc} -> {:error, {:git, rc, out}}
+        {out, rc} -> {:error, {:git, face, rc, out}}
       end
     after
       _ = File.rm_rf(tmp)

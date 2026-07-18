@@ -911,9 +911,22 @@ defmodule Fleet.Pilot.ForgeClient do
   # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 "Must be an organization
   # owner"). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
   # the human hovering over the label on the forge — a cryptic protocol string means
-  # nothing outside the code). Tolerant: a failure (created concurrently) → `:ok` — it's the re-POST + its verification
-  # that decide (otherwise `add_issue_label`'s fail-loud propagates).
+  # nothing outside the code). TRUE idempotence = check-then-create: Gitea does NOT reject a
+  # duplicate label NAME (no 409 — verified live 2026-07-18: a double template sync left every
+  # label twice, faithfully copied into every generated repo). A failed existence read falls
+  # through to the POST (the label matters more than the dedup); a failed POST stays tolerated
+  # (`:ok` — it's the re-POST + its verification that decide, cf. `add_issue_label`).
   defp ensure_repo_label(config, repo, label_name) do
+    exists? =
+      case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
+        {:ok, labels} when is_list(labels) -> Enum.any?(labels, &(&1["name"] == label_name))
+        _ -> false
+      end
+
+    if exists?, do: :ok, else: create_repo_label(config, repo, label_name)
+  end
+
+  defp create_repo_label(config, repo, label_name) do
     # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
     # Gitea removes the old `scope/*` from the issue when a new one is set (verified forge 1.26.1, org AND
     # repo level, by NAME). This is the mechanism of `stage/*` (workflow_map position = visible state

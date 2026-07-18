@@ -106,11 +106,6 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
         case do_merge(forge, repo, pr_number, gk_opts) do
           :ok ->
-            # Terminal brick milestone on the Bus (best-effort, lossy by doctrine): feeds the
-            # arch activity feed + its single informational wake (ArchFeed). The merge above
-            # stays the authoritative truth — a failed emit never blocks the seal sequence.
-            _ = emit_brick_sealed(repo, issue_n, pr_number)
-
             # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
             # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
             # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
@@ -183,6 +178,15 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
             case close_result do
               :ok ->
+                # Terminal brick milestone on the Bus (arch feed + its single informational
+                # wake) — emitted at the very END of the seal sequence, once the FORGE
+                # REFLECTS the delivery (comment + stage/merged + close all landed). Emitted
+                # any earlier it races the seal's own write-spacing: a diligent arch verifying
+                # the announce reads the intermediate state (issue open, no PR) and calls the
+                # feed a liar — observed live 2026-07-18 on the first typed info-wake.
+                # Best-effort, lossy by doctrine; a failed close skips the announce (the feed
+                # misses one line, the ERROR-loud close path is the visible signal).
+                _ = emit_brick_sealed(repo, issue_n, pr_number)
                 :ok
 
               {:error, reason} ->

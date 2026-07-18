@@ -290,6 +290,13 @@ RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 # source cap-profile est opérateur-de-confiance — la ceinture = anti-tir-dans-le-pied, pas anti-malveillant.
 # =============================================================
 CATALOG_BINDS=()
+# Var pointant le mount work/ops PROJET pour le SP (« lis ${LCARS_PROJECT_OPS}/briefs/… ») :
+# posée par le spawner (launch_env), elle doit FRANCHIR le --clearenv — le bind catalogue est
+# same-path, la valeur host reste vraie in-pod. Absente = pod sans projet (le SP gère l'absence).
+# Constat live 2026-07-18 : var stripée par l'allowlist → l'eng retrouvait le mount à la main.
+PROJECT_OPS_ENV=()
+[[ -n "${LCARS_PROJECT_OPS:-}" ]] && PROJECT_OPS_ENV=(--setenv LCARS_PROJECT_OPS "$LCARS_PROJECT_OPS")
+
 if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
   while IFS= read -r _mount; do
     [[ -z "$_mount" ]] && continue
@@ -368,6 +375,7 @@ exec "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
   ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
+  ${PROJECT_OPS_ENV[@]+"${PROJECT_OPS_ENV[@]}"} \
   ${AUTH_ENV_ARGS[@]+"${AUTH_ENV_ARGS[@]}"} \
   -- /bin/sh -c '
        tmux_bin=$1; sock=$2; name=$3; shift 3

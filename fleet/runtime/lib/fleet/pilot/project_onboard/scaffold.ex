@@ -14,9 +14,11 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
       (REPO_NAME, REPO_DESCRIPTION, YEAR/MONTH/DAY — `${...}` form only) and never
       copies the `.gitea/template` control file — the exact native semantics, one
       source, two vehicles.
-    * `work/3` — `work/ops` branch worktree (orphan — plans, backlog, ops):
-      backlog.md, scratchpad.md, plans/. Single vehicle (the forge template only
-      covers the default branch) → inline generators.
+    * `work/3` — `work/ops` branch worktree (orphan — plans, backlog, ops): SAME
+      mechanic over the `work-ops/` face of the template (the sync task pushes it as
+      the template repo's `work/ops` branch — the WHOLE project blueprint lives in one
+      forge repo; `generate` only copies the default branch, so the runtime writes this
+      face itself, from the same source).
 
   The only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
@@ -31,8 +33,13 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   """
   @spec main(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
-  def main(dir, name, opts) do
-    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "(à compléter)")
+  def main(dir, name, opts), do: write_face(dir, "main", name, opts, "(à compléter)")
+
+  # ONE mechanic per face: read the face's files under priv/project_template/<face>,
+  # expand the Gitea `${VAR}` subset locally, write. The `.gitea/template` control file
+  # (main face) is never copied — native semantics.
+  defp write_face(dir, face, name, opts, pitch_default) do
+    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, pitch_default)
     [year, month, day] = opts |> today() |> String.split("-", parts: 3)
 
     vars = %{
@@ -43,26 +50,25 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
       "DAY" => day
     }
 
+    root = face_root(face)
+
     files =
-      for path <- template_files(), into: %{} do
-        rel = Path.relative_to(path, template_root())
-        {rel, expand(File.read!(path), vars)}
+      for path <- face_files(root), into: %{} do
+        {Path.relative_to(path, root), expand(File.read!(path), vars)}
       end
 
     write_all(dir, files)
   end
 
-  # The template manifest: every file under priv/project_template EXCEPT the
-  # `.gitea/template` control file (native semantics: it is never copied).
-  defp template_files do
-    template_root()
+  defp face_files(root) do
+    root
     |> Path.join("**")
     |> Path.wildcard(match_dot: true)
     |> Enum.filter(&File.regular?/1)
     |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
   end
 
-  defp template_root, do: Application.app_dir(:lcars_fleet, "priv/project_template")
+  defp face_root(face), do: Application.app_dir(:lcars_fleet, "priv/project_template/#{face}")
 
   # Local expansion of the Gitea variable subset — `${VAR}` form ONLY (our template files
   # never use the bare `$VAR` form; expanding it here could corrupt shell-looking content).
@@ -76,17 +82,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   """
   @spec work(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
-  def work(dir, name, opts) do
-    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "")
-
-    with :ok <- ensure_dir(Path.join(dir, "plans")) do
-      write_all(dir, %{
-        "backlog.md" => backlog_md(name, pitch, today(opts)),
-        "scratchpad.md" => "",
-        "plans/.gitkeep" => ""
-      })
-    end
-  end
+  def work(dir, name, opts), do: write_face(dir, "work-ops", name, opts, "")
 
   # F-C087 — the generated files' GO-7 date = the ONBOARD date, not a hard-coded past date. Seam
   # (`:today`) so a test can pin it; default is the real current UTC date.
@@ -122,27 +118,6 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     end
   end
 
-  defp backlog_md(name, pitch, today) do
-    """
-    # #{name} — Backlog
-
-    **Date** : #{today}
-    **Dernière révision** : #{today}
-    **Statut** : actif
-    **Référencé par** : —
-    **Dérivé de** : docs/spec.md
-
-    > #{pitch}
-
-    ## Todo
-
-    - [ ] Cadrer la spec (`docs/spec.md` sur `main`)
-
-    ## Done
-
-    (vide)
-    """
-  end
 
 
 end
