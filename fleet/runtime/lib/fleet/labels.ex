@@ -5,14 +5,12 @@ defmodule Fleet.Labels do
   Label vocabulary of the forge-state-machine **wire-protocol**: the forge IS the state machine,
   these labels are its thread. SINGLE SOURCE.
 
-  RING-0 (DR-011): the vocabulary is a shared SUBSTRATE concern — the forge protocol that BOTH `Fleet.Pilot`
-  (poller/dispatcher/completer/consumer) AND `Fleet.MCP` (the arch's delegation reads `stage/merged` /
-  `lcars-awaits-arch`) must name byte-for-byte. It lived under `Fleet.Pilot` and MCP could not depend upward
-  on Pilot (forbidden compile edge) → MCP re-declared the literals, a silent-drift risk on a rename. Now at
-  Foundation (`deps: []`), a single authority both domains DEPEND ON — the literals are gone from MCP.
+  A foundation boundary (`deps: []`) because BOTH `Fleet.Pilot` (poller/dispatcher/completer/consumer)
+  AND `Fleet.MCP` (the arch's delegation reads `stage/merged` / `lcars-awaits-arch`) must name these
+  labels byte-for-byte — and MCP cannot depend upward on Pilot: the shared vocabulary lives BELOW both.
 
-  These constants ARE NOT config: they ARE the protocol. Re-declaring them as `@attr` per module = silent
-  drift on a rename. Centralized here, consumed everywhere.
+  These constants ARE NOT config: they ARE the protocol. Re-declaring one as a local `@attr` or
+  literal = silent drift on a rename. Centralized here, consumed everywhere.
 
   Compile-time usage (preserves the constant semantics, usable in `cond`/pattern):
 
@@ -21,9 +19,9 @@ defmodule Fleet.Labels do
   or runtime direct (`Fleet.Labels.awaits_arch()`).
 
   Two families: the FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` (concurrency / escalation,
-  unscoped), and the workflow_map POSITION as SCOPED labels `wfmap/<map>` + `stage/<step>` (WS2: the state
-  lives in the label, native Gitea mutex `exclusive:true` — no longer in a route comment). `lcars-dispatched`
-  (a legacy poller's lock) has been removed. Outside these families, a label does not exist.
+  unscoped), and the workflow_map POSITION as SCOPED labels `wfmap/<map>` + `stage/<step>` (the state
+  lives in the label, native Gitea mutex `exclusive:true`). Outside these two families, a label
+  does not exist.
 
   **Last revised**: 2026-07-18
   """
@@ -39,7 +37,7 @@ defmodule Fleet.Labels do
   @spec awaits_arch() :: String.t()
   def awaits_arch, do: @awaits_arch
 
-  # --- workflow_map position (WS2): 2 mutex label scopes (via `exclusive:true`, set PER-REPO by
+  # --- workflow_map position: 2 mutex label scopes (via `exclusive:true`, set PER-REPO by
   # ForgeClient.ensure_repo_label). `wfmap/<map>` = WHICH map (data, per-issue → multi-map);
   # `stage/<step>` = the CURRENT step, mobile. brief-review/build values come from the MAP (data);
   # review/merged = phases of the PR LIFECYCLE (post-map mechanism, human-only: the machine does not re-read
