@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
     * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://10.42.0.118"` (forge NAS).
     * `:token` — Gitea token. Read from `:token_file` if absent.
-    * `:token_file` — file path (default `~/.gitea_token`, v1.5 convention).
+    * `:token_file` — file path (default `~/.gitea_token`).
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
   **Last revised**: 2026-07-18
@@ -136,13 +136,8 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   end
 
   # ============================================================
-  # URL-segment safety — MOVED to `Fleet.Pilot.ForgeClient.UrlSafe` (single authority,
-  # PURE path-traversal security cluster). The domain modules (ForgeClient/Repo/Jury/Files)
-  # import UrlSafe directly — no more encoding defined here.
-  # ============================================================
-
-  # ============================================================
-  # HTTP plumbing
+  # HTTP plumbing — (URL-segment safety lives in `Fleet.Pilot.ForgeClient.UrlSafe`,
+  # the single authority; the domain modules import it directly.)
   # ============================================================
 
   @page_limit 50
@@ -236,8 +231,9 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     elapsed = System.monotonic_time(:millisecond) - started
 
     # INSTRUMENTATION: a call to the LOCAL forge exceeding 1s is abnormal → we trace it (method,
-    # path, duration, issue). It's the instrument that will tell the next run WHY create_issue accumulates
-    # ~30s (3 forge calls: create_issue + add_label[GET+PUT]) — stale connection? hanging endpoint?
+    # path, duration, issue). This is the instrument that shows WHY a slow sequence accumulates
+    # (e.g. create_issue = 3 forge calls: create_issue + add_label[GET+PUT]) — stale connection?
+    # hanging endpoint?
     if elapsed > 1_000 do
       Logger.warning(
         "Transport: #{method} #{path} SLOW #{elapsed}ms → #{forge_result_tag(result)}"
