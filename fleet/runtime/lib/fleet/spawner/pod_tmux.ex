@@ -123,8 +123,8 @@ defmodule Fleet.Spawner.PodTmux do
       #   - bwrap: the pod_id is a STANDALONE ARG of `bwrap_launch.sh` (`… <role> <pod_id> …`) →
       #     prefix (start|space).
       #   - host : `host_launch.sh` sets argv0 `lcars-hold:<role>:<pod_id>` — the pod_id there is
-      #     prefixed by `:`, NOT a space, so token anchoring alone MISSED it (the host holder
-      #     `sleep infinity` was leaking on containment:none, never killed by this pkill) → we add the
+      #     prefixed by `:`, NOT a space, so token anchoring alone MISSES it (the host holder
+      #     `sleep infinity` would leak on containment:none, never killed by this pkill) → we add the
       #     prefix `lcars-hold:<role>:`. This prefix is ultra-specific (nothing else carries it) → zero
       #     risk of self-killing the BEAM; the `:unsafe` guard remains the anti-too-broad-pattern barrier.
       {:ok, "(^| |lcars-hold:[^ ]*:)#{esc}( |$)"}
