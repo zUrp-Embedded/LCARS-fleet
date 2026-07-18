@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
-  # Z4 migration — tâche Mix classifiée dans la boundary de son sujet (Fleet.SPBuilder).
+  # Z4 — Mix task classified into the boundary of its subject (Fleet.SPBuilder).
   use Boundary, classify_to: Fleet.SPBuilder
   @shortdoc "Compose per-role SPs: priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
   @moduledoc """
@@ -15,9 +15,9 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   use Mix.Task
 
   # SOURCE path (compile-time) of `priv/sp_builder/`, robust to the cwd: this file lives under
-  # `lib/mix/tasks/`. Le segment `/sp_builder` post-collapse (Z3 a namespacé les priv par domaine) :
-  # ce Path.expand RELATIF n'était pas un `:code.priv_dir` → raté par le sweep de migration, corrigé
-  # à l'audit macro (la task crashait sur sp-map.yaml introuvable — SEUL outil de régénération des SP).
+  # `lib/mix/tasks/`. The `/sp_builder` segment is required (Z3: priv is namespaced per domain);
+  # this RELATIVE Path.expand is not a `:code.priv_dir`, so no sweep tooling tracks it — without
+  # the segment the task crashes on a missing sp-map.yaml (the ONLY tool that regenerates the SPs).
   @priv Path.expand("../../../priv/sp_builder", __DIR__)
 
   @impl Mix.Task

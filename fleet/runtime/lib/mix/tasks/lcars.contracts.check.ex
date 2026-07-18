@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check do
-  # Z4 migration — tâche Mix classifiée dans la boundary de son sujet (Fleet.Application).
+  # Z4 — Mix task classified into the boundary of its subject (Fleet.Application).
   use Boundary, classify_to: Fleet.Application
 
   @shortdoc "Verifies inter-module contracts at load (refuses the build if a contract is reopened)"
@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_no_root_runtime_guard(root),
         # ── Topology lock ──
         check_boot_order_f8(root),
-        # ── Authority locks (Z7 migration — un fait = une source, cross-langage) ──
+        # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_in_catalogue(root),
         check_mcp_wire_inputschema(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
@@ -140,7 +140,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
 
-    # Anti-hollow-green: matching `~r/normalize|déball/i` over the WHOLE source would turn the rail green as soon as a
+    # Anti-hollow-green: matching `~r/normalize/i` over the WHOLE source would turn the rail green as soon as a
     # mere COMMENT contains "normalize", even without the code. So we match the real CODE CLAUSE
     # that unwraps `spec.steps` (the v2.5 normalization) AND its call, STRIPPING the comment from each
     # line (a commented-out `# defp normalize(...)` does not count).
@@ -900,33 +900,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # MIGRATION Z3 : plus d'umbrella — la tâche tourne toujours à la racine du projet single-app
-  # (Mix pose le cwd à la racine ; l'ancienne détection « pas de dossier `apps/` → remonter de
-  # deux niveaux » servait au lancement depuis une app umbrella, un cas qui n'existe plus et qui,
-  # gardé, renverrait un `../..` HORS projet dès que le leftover `apps/` sera supprimé).
+  # Z3: single-app project — the task always runs at the project root (Mix sets the cwd
+  # there). NO umbrella-style detection ("no `apps/` dir → go up two levels"): that case
+  # does not exist, and such a heuristic would resolve to a `../..` OUTSIDE the project.
   defp project_root, do: File.cwd!()
 
   # ── Topology lock ──────────────────────────────────────────────
-  # MIGRATION Z3 (D-19) — l'ancien `layering.dependency_graph` est RETIRÉ avec sa matière
-  # première : il lisait les edges `in_umbrella:` des apps/*/mix.exs, qui n'existent plus.
-  # Son successeur MÉCANIQUE est boundary (Z4) : chaque domaine déclarera ses deps dans
-  # `use Boundary` et le COMPILATEUR refusera les violations — plus fort que ce grep.
-  # FENÊTRE ASSUMÉE entre Z3 et Z4 : la direction des deps inter-domaines n'est enforcée
-  # nulle part. Ce qui RESTE vérifiable ici, et que l'umbrella ne portait pas, c'est
-  # l'invariant de BOOT : l'ordre des children de Fleet.Application est le SEUL porteur
-  # de F8 (event_router premier ; mcp avant spawner — les contraintes starfleet sont
-  # tombées avec A-08, cf. le commentaire dans la fonction) — le réordonner casse le boot
-  # sans erreur de compile. C'est ce que ce check verrouille, sous un id honnête
-  # (`boot.order_f8`).
+  # Z3 (D-19) — there is NO `layering.dependency_graph` check here: dependency DIRECTION
+  # is enforced by boundary (Z4) — each domain declares its deps in `use Boundary` and the
+  # COMPILER refuses violations, stronger than any grep. What boundary CANNOT see, and what
+  # this check locks, is the BOOT invariant: the children order of Fleet.Application is the
+  # SOLE carrier of F8 (event_router first; mcp before spawner — no starfleet constraint,
+  # cf. A-08 comment in the function) — reordering it breaks the boot WITHOUT a compile
+  # error. Hence the honest check id: `boot.order_f8`.
   defp check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
-    # A-08 (acte4) : les contraintes `mcp < starfleet` / `spawner < starfleet` sont TOMBÉES —
-    # leur seule cause (le BootOrchestrator child mid-boot de starfleet qui spawnait les
-    # permanents) est déplacée en trigger POST-boot racine. Restent : event_router PREMIER
-    # (le Bus est le substrat de tout subscriber) et mcp AVANT spawner (le PublishConsumer de
-    # spawner peut recevoir un admin.spawn.request dès son subscribe → ensure_pod_socket exige
-    # le substrat mcp vivant).
+    # A-08: there is NO `mcp < starfleet` / `spawner < starfleet` constraint — their only
+    # would-be cause (a mid-boot starfleet child spawning the permanents) does not exist:
+    # the BootOrchestrator is a root-level POST-boot trigger. What holds: event_router
+    # FIRST (the Bus is every subscriber's substrate) and mcp BEFORE spawner (spawner's
+    # PublishConsumer can receive an admin.spawn.request as soon as it subscribes →
+    # ensure_pod_socket requires the mcp substrate alive).
     with [block] <- Regex.run(~r/children = \[(.*?)\n    \]/s, app_src, capture: :all_but_first),
          positions = %{
            er: :binary.match(block, "Fleet.EventRouter.Application"),
@@ -935,48 +930,46 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
          },
          false <- Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
       %{er: {er, _}, mcp: {mcp, _}, spw: {spw, _}} = positions
-      # er = MIN des trois (le Bus boote avant tout consommateur potentiel) — PAS er==0 :
-      # le bloc children commence par un COMMENTAIRE, l'offset du module n'est jamais 0.
+      # er = MIN of the three (the Bus boots before any potential consumer) — NOT er==0:
+      # the children block starts with a COMMENT, the module offset is never 0.
       ok? = er < mcp and mcp < spw
 
       %{
         id: "boot.order_f8",
         remediation:
-          "réordonner les children de Fleet.Application : event_router EN TÊTE, " <>
-            "mcp AVANT spawner (cicatrice F8 du moduledoc ; les contraintes starfleet " <>
-            "sont tombées avec A-08 — BootOrchestrator déclenché post-boot racine)",
+          "reorder the children of Fleet.Application: event_router FIRST, " <>
+            "mcp BEFORE spawner (F8 scar in the moduledoc; no starfleet " <>
+            "constraint per A-08 — BootOrchestrator is triggered post-boot by the root)",
         status: if(ok?, do: :pass, else: :fail),
         evidence: [
-          "ordre children (offsets dans le bloc) : event_router=#{er} mcp=#{mcp} " <>
-            "spawner=#{spw} — contraintes : er<mcp, mcp<spw"
+          "children order (offsets in the block): event_router=#{er} mcp=#{mcp} " <>
+            "spawner=#{spw} — constraints: er<mcp, mcp<spw"
         ],
         note:
-          "successeur du verrou topologie umbrella (retiré avec les mix.exs d'apps) ; " <>
-            "l'enforcement de la DIRECTION des deps arrive avec boundary (Z4)"
+          "boot-order lock (the deps DIRECTION is enforced by boundary at compile time, Z4)"
       }
     else
       _ ->
         %{
           id: "boot.order_f8",
           remediation:
-            "children de Fleet.Application introuvables (bloc `children = [...]` ou un " <>
-              "superviseur de domaine attendu manquant) — restaurer la liste + cicatrice F8",
+            "children of Fleet.Application not found (`children = [...]` block or an " <>
+              "expected domain supervisor missing) — restore the list + F8 scar",
           status: :fail,
-          evidence: ["extraction du bloc children impossible — fail-closed"],
-          note: "cf. commentaire MIGRATION Z3 (D-19) ci-dessus"
+          evidence: ["children block extraction impossible — fail-closed"],
+          note: "cf. Z3 (D-19) comment above"
         }
     end
   end
 
-  # Z7 migration (F-C165 / arbitrage D6) — le provisioning de role-tokens porte une 2ᵉ liste
-  # de rôles (etc/provision-role-tokens.sh ROLES=) qui a DÉJÀ divergé du canon une fois
-  # (`vulcan` — l'agent Codex/OpenAI, EXTERNE à la fleet par construction (pas de bridge OpenAI),
-  # donc PAS un rôle-pod — figurait dans le .sh sans exister au canon → exit 2 sur rôle inexistant.
-  # Le « rename starfleet » jadis écrit ici était une confusion agent-externe↔rôle, corrigée 2026-07-13.)
-  # SSOT minimal vérifiable AUJOURD'HUI : tout rôle du .sh EXISTE au catalogue canon.
-  # (Le SSOT complet — flag needs_role_token dérivant la liste — reste à implémenter si
-  # l'user tranche A-03 ; ce check attrape la classe de bug vécue en attendant.)
-  # Boundary ne verra JAMAIS ça : le .sh est hors-BEAM — c'est exactement le rôle de CE checker.
+  # Z7 (F-C165 / D6 arbitration) — role-token provisioning carries a SECOND role list
+  # (etc/provision-role-tokens.sh ROLES=), which CAN diverge from the canon (lived bug
+  # class: a name in the .sh that is not a pod role — e.g. an external agent, which by
+  # construction has no vendor bridge and thus no canon entry → exit 2 on an unknown role).
+  # Minimal verifiable SSOT: every role in the .sh EXISTS in the canon catalogue.
+  # (The full SSOT — a needs_role_token flag deriving the list — is pending the user's
+  # A-03 arbitration; this check catches the lived bug class meanwhile.)
+  # Boundary can NEVER see this: the .sh is outside the BEAM — exactly THIS checker's job.
   defp check_roles_provisioning_in_catalogue(root) do
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
@@ -998,36 +991,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "roles.provisioning_in_catalogue",
       remediation:
-        "retirer du .sh les rôles fantômes (hors catalogue canon) — ou si un rôle neuf est " <>
-          "légitime, son cap-profile canon DOIT exister d'abord (le canon est la source)",
+        "remove phantom roles (absent from the canon catalogue) from the .sh — or if a new " <>
+          "role is legitimate, its canon cap-profile MUST exist first (the canon is the source)",
       status:
         if(is_list(phantoms) and phantoms == [] and catalogue != [], do: :pass, else: :fail),
       evidence:
         cond do
           is_nil(roles) ->
-            ["#{sh_path}: ligne ROLES=\"…\" introuvable — fail-closed"]
+            ["#{sh_path}: ROLES=\"…\" line not found — fail-closed"]
 
           catalogue == [] ->
-            ["catalogue canon vide/introuvable — fail-closed"]
+            ["canon catalogue empty/not found — fail-closed"]
 
           phantoms != [] ->
-            ["rôles fantômes dans le .sh (absents du canon) : #{inspect(phantoms)}"]
+            ["phantom roles in the .sh (absent from the canon): #{inspect(phantoms)}"]
 
           true ->
             []
         end,
       note:
-        "provisioning .sh ⊆ catalogue canon (#{length(catalogue)} rôles) — la 2ᵉ liste ne peut " <>
-          "plus dériver en silence"
+        "provisioning .sh ⊆ canon catalogue (#{length(catalogue)} roles) — the second list " <>
+          "cannot drift silently"
     }
   end
 
-  # Z7 migration (F1 / F-C138-format) — le wire MCP exige inputSchema (camelCase) là où la
-  # forme interne ExMCP est input_schema (snake) : la régression F1 a rendu TOUS les pods
-  # muets (tools silencieusement rejetés par claude). Le fix vit à la frontière socket
-  # (PodSocketAcceptor projette en MCP-wire) + un test de non-régression. CE check verrouille
-  # le CONTRAT au gate : la projection existe dans le code ET le test anti-régression existe
-  # (si quelqu'un supprime le test, le gate le voit — ceinture du filet ExUnit).
+  # Z7 (F1 / F-C138-format) — the MCP wire requires inputSchema (camelCase) where the
+  # ExMCP internal shape is input_schema (snake): missing the projection makes ALL pods
+  # mute (tools silently rejected by the vendor CLI — regression F1). The fix lives at the
+  # socket frontier (PodSocketAcceptor projects to MCP-wire) + a non-regression test. THIS
+  # check locks the CONTRACT at the gate: the projection exists in the code AND the
+  # anti-regression test exists (deleting the test is visible to the gate — belt over
+  # the ExUnit net).
   defp check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
     test = "test/pod_socket_test.exs"
@@ -1047,25 +1041,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "mcp.wire_inputschema",
       remediation:
-        "restaurer la projection MCP-wire (inputSchema camelCase) à la frontière socket " <>
-          "(PodSocketAcceptor) + le test assert/refute de pod_socket_test (régression F1 : " <>
-          "pods muets, tools rejetés en silence)",
+        "restore the MCP-wire projection (inputSchema camelCase) at the socket frontier " <>
+          "(PodSocketAcceptor) + the assert/refute pair of pod_socket_test (regression F1: " <>
+          "mute pods, tools silently rejected)",
       status: if(projection? and asserts?, do: :pass, else: :fail),
       evidence:
         cond do
           not projection? ->
-            ["#{acceptor}: projection \"inputSchema\" absente du code (F1 rouvert)"]
+            ["#{acceptor}: \"inputSchema\" projection absent from the code (F1 reopened)"]
 
           not asserts? ->
             [
-              "#{test}: paire EXÉCUTABLE assert Map.has_key?(inputSchema) / refute Map.has_key?(input_schema) absente (BND-111 : un commentaire ne suffit plus)"
+              "#{test}: EXECUTABLE pair assert Map.has_key?(inputSchema) / refute Map.has_key?(input_schema) absent (BND-111: a comment is not proof)"
             ]
 
           true ->
             []
         end,
       note:
-        "frontière socket = wire (camelCase) ; forme interne ExMCP = snake — F1 verrouillé au gate"
+        "socket frontier = wire (camelCase); ExMCP internal shape = snake — F1 locked at the gate"
     }
   end
 
@@ -1074,8 +1068,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     body =
       Enum.map_join(checks, "\n", fn c ->
-        # Accès par CHAMP (c.evidence/c.note comme c.id/c.status) : chaque producteur pose les
-        # 5 clés — un Map.get à défaut masquerait une forme garantie (et son défaut mort).
+        # FIELD access (c.evidence/c.note like c.id/c.status): every producer sets the
+        # 5 keys — a defaulted Map.get would mask a guaranteed shape (dead default).
         ev =
           case c.evidence do
             [] -> ""
