@@ -58,7 +58,7 @@ if [[ "$HOOK_DATE_FORMAT" == "stardate" ]]; then
     while IFS= read -r file; do
         [[ -z "$file" || ! -f "$file" ]] && continue
         if grep -q "$STARDATE_PATTERN" "$file"; then
-            CURRENT=$(grep -oE "STARDATE: [0-9]{4}\.[0-9]{3}" "$file" | head -1 | cut -d' ' -f2)
+            CURRENT=$(grep -oE "STARDATE: [0-9]{4}\.[0-9]{3}" "$file" | head -1 | cut -d' ' -f2 || true)
             if [[ "$CURRENT" != "$STARDATE" ]]; then
                 sed -i "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/" "$file"
                 git add "$file"
@@ -73,13 +73,13 @@ else
         case "$ext" in
             md)
                 if grep -q '^\*\*Dernière révision\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Dernière révision\*\*' "$file" | sed 's/.*: //' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+                    CURRENT=$(grep '^\*\*Dernière révision\*\*' "$file" | sed 's/.*: //' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
                     if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
                         sed -i "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/" "$file"
                         git add "$file"
                     fi
                 elif grep -q '^\*\*Last revised\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Last revised\*\*' "$file" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+                    CURRENT=$(grep '^\*\*Last revised\*\*' "$file" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
                     if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
                         sed -i "s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/" "$file"
                         git add "$file"
@@ -89,7 +89,7 @@ else
             ex)
                 # Elixir @moduledoc footer stamp (**Last revised**: YYYY-MM-DD)
                 if grep -q '\*\*Last revised\*\*: [0-9]' "$file"; then
-                    CURRENT=$(grep -oE '\*\*Last revised\*\*: [0-9]{4}-[0-9]{2}-[0-9]{2}' "$file" | head -1 | grep -oE '[0-9-]+$')
+                    CURRENT=$(grep -oE '\*\*Last revised\*\*: [0-9]{4}-[0-9]{2}-[0-9]{2}' "$file" | head -1 | grep -oE '[0-9-]+$' || true)
                     if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
                         sed -i "s/\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/" "$file"
                         git add "$file"
@@ -114,6 +114,7 @@ is_ipc_exception() {
     [[ "$1" == *"directives/roles/"* ]] && return 0
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
     [[ "$1" == *"tests/fixtures/"* ]] && return 0
+    [[ "$1" == *"priv/project_template/"* ]] && return 0   # generated-project SEEDS, not LCARS doc lineage
     [[ "$1" == *"/system-prompt/"*.md ]] && return 0   # SP: injected into LLM context, no md header
     [[ "$1" == *"/PoC/"*"/README.md" ]] && return 0    # README under a PoC dir: local context
     return 1

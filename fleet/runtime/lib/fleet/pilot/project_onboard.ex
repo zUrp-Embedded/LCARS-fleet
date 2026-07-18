@@ -91,11 +91,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
-         {:ok, full_name} <- create_repo(name, org, opts),
+         {:ok, full_name, provision} <- create_repo(name, org, opts),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
-         :ok <- Scaffold.main(proj_dir, name, opts),
+         :ok <- maybe_scaffold_main(provision, proj_dir, name, opts),
          # Criticality declaration (intensity.json, ON MAIN — an auditor reads it beside the
          # code): the human's relayed level or the honest undeclared-C0 default. Committed by
          # the scaffold commit below (add -A). Cf. Fleet.Pilot.ProjectIntensity.
@@ -334,10 +334,57 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # ── forge + git ──────────────────────────────────────────────────────────
 
+  # GENERATE-FIRST (native Gitea template, chantier 2026-07-18): the repo is born from the
+  # forge template (`fleet/project-template` — scaffold files with `${VAR}` expansion +
+  # protocol labels copied WITH their tooltips, fresh history). `:generated` → the clone
+  # already carries the scaffold, `maybe_scaffold_main` is a no-op. Template missing on the
+  # forge → LOUD fallback to the bare create + LOCAL scaffold (same files: the SSoT is
+  # priv/project_template, two vehicles) — degraded, never a wall.
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-    result = ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
-    classify_create_repo(result, org, name)
+    template = project_template(opts)
+
+    case ForgeClient.Repo.generate_repo(
+           template,
+           name,
+           Keyword.merge(opts, org: org, description: desc)
+         ) do
+      {:ok, :already_exists} ->
+        {:error, {:repo_already_exists, "#{org}/#{name}"}}
+
+      {:ok, full_name} when is_binary(full_name) ->
+        {:ok, full_name, :generated}
+
+      {:error, :template_missing} ->
+        Logger.warning(
+          "ProjectOnboard: forge template #{template} missing — bare create + local scaffold " <>
+            "(run `mix lcars.project_template.sync` to restore the native path)"
+        )
+
+        result = ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
+
+        with {:ok, full_name} <- classify_create_repo(result, org, name) do
+          {:ok, full_name, :bare}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp maybe_scaffold_main(:generated, _proj_dir, _name, _opts), do: :ok
+  defp maybe_scaffold_main(:bare, proj_dir, name, opts), do: Scaffold.main(proj_dir, name, opts)
+
+  @doc """
+  Full name of the forge TEMPLATE repo new projects are generated from. Opt
+  `:project_template` (test), else config `:fleet_pilot, :project_template`
+  (default `"fleet/project-template"`). The template is the FORGE PROJECTION of
+  `priv/project_template/**` — `mix lcars.project_template.sync` keeps them aligned.
+  """
+  @spec project_template(keyword()) :: String.t()
+  def project_template(opts \\ []) do
+    Keyword.get(opts, :project_template) ||
+      Application.get_env(:fleet_pilot, :project_template, "fleet/project-template")
   end
 
   @doc false

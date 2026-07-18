@@ -17,6 +17,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       resolve_config: 1,
       http_get: 2,
       http_post: 3,
+      http_patch: 3,
       paginate: 3
     ]
 
@@ -57,6 +58,54 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
         {:error, {:http, 409, _}} -> {:ok, :already_exists}
         {:error, _} = err -> err
       end
+    end
+  end
+
+  @doc """
+  Generates a NEW repo from a forge TEMPLATE repo — Gitea `POST /repos/{template}/generate`
+  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with
+  `${VAR}` expansion (files listed in the template's `.gitea/template`; REPO_NAME,
+  REPO_DESCRIPTION, dates…), labels copied WITH their descriptions, own FRESH history
+  (not a fork — no link back). `webhooks`/`protected_branch` deliberately NOT copied:
+  `protect_branch` stays the single branch-protection writer (per-card sizing at onboard).
+
+  `{:ok, full_name}` | `{:ok, :already_exists}` (409) | `{:error, :template_missing}`
+  (404 — the template repo is not on the forge: run `mix lcars.project_template.sync`) |
+  `{:error, term}`.
+  """
+  @spec generate_repo(String.t(), String.t(), keyword()) ::
+          {:ok, String.t() | :already_exists} | {:error, term()}
+  def generate_repo(template_repo, name, opts \\ [])
+      when is_binary(template_repo) and is_binary(name) do
+    with {:ok, config} <- resolve_config(opts) do
+      body = %{
+        owner: Keyword.get(opts, :org, "fleet"),
+        name: name,
+        description: Keyword.get(opts, :description, ""),
+        private: Keyword.get(opts, :private, false),
+        git_content: true,
+        labels: true,
+        topics: true
+      }
+
+      case http_post(config, "/repos/#{encode_repo(template_repo)}/generate", body) do
+        {:ok, %{"full_name" => full_name}} -> {:ok, full_name}
+        {:error, {:http, 404, _}} -> {:error, :template_missing}
+        {:error, {:http, 409, _}} -> {:ok, :already_exists}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Marks (or unmarks) a repo as a TEMPLATE — Gitea `PATCH /repos/{repo}` `{template: bool}`.
+  Used by `mix lcars.project_template.sync` (the priv → forge projection); idempotent.
+  """
+  @spec set_template(String.t(), boolean(), keyword()) :: :ok | {:error, term()}
+  def set_template(repo, template?, opts \\ []) when is_binary(repo) and is_boolean(template?) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <- http_patch(config, "/repos/#{encode_repo(repo)}", %{template: template?}) do
+      :ok
     end
   end
 

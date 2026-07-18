@@ -7,13 +7,18 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   ## The two faces of the dual-dir (replicated LCARS architecture)
 
-    * `main/3` — `main` branch worktree (the deliverable): README, .gitignore,
-      .editorconfig, docs/spec.md.
+    * `main/3` — `main` branch worktree (the deliverable): the FALLBACK writer of
+      `priv/project_template/**` (the SSoT — the same files the forge TEMPLATE repo
+      serves natively via `generate_repo`; run `mix lcars.project_template.sync` to
+      project them onto the forge). Expands the Gitea `${VAR}` subset locally
+      (REPO_NAME, REPO_DESCRIPTION, YEAR/MONTH/DAY — `${...}` form only) and never
+      copies the `.gitea/template` control file — the exact native semantics, one
+      source, two vehicles.
     * `work/3` — `work/ops` branch worktree (orphan — plans, backlog, ops):
-      backlog.md, scratchpad.md, plans/.
+      backlog.md, scratchpad.md, plans/. Single vehicle (the forge template only
+      covers the default branch) → inline generators.
 
-  Templates "standard, state of the art — adjustable": PURE generators (name+pitch →
-  markdown), the only effect is `write_all` (mkdir_p + write, fail-loud per file).
+  The only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
   **Last revised**: 2026-07-18
   """
@@ -28,15 +33,41 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def main(dir, name, opts) do
     pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "(à compléter)")
+    [year, month, day] = opts |> today() |> String.split("-", parts: 3)
 
-    with :ok <- ensure_dir(Path.join(dir, "docs")) do
-      write_all(dir, %{
-        "README.md" => readme(name, pitch),
-        ".gitignore" => gitignore(),
-        ".editorconfig" => editorconfig(),
-        "docs/spec.md" => spec_md(name, pitch, today(opts))
-      })
-    end
+    vars = %{
+      "REPO_NAME" => name,
+      "REPO_DESCRIPTION" => pitch,
+      "YEAR" => year,
+      "MONTH" => month,
+      "DAY" => day
+    }
+
+    files =
+      for path <- template_files(), into: %{} do
+        rel = Path.relative_to(path, template_root())
+        {rel, expand(File.read!(path), vars)}
+      end
+
+    write_all(dir, files)
+  end
+
+  # The template manifest: every file under priv/project_template EXCEPT the
+  # `.gitea/template` control file (native semantics: it is never copied).
+  defp template_files do
+    template_root()
+    |> Path.join("**")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
+  end
+
+  defp template_root, do: Application.app_dir(:lcars_fleet, "priv/project_template")
+
+  # Local expansion of the Gitea variable subset — `${VAR}` form ONLY (our template files
+  # never use the bare `$VAR` form; expanding it here could corrupt shell-looking content).
+  defp expand(content, vars) do
+    Enum.reduce(vars, content, fn {k, v}, acc -> String.replace(acc, "${#{k}}", v) end)
   end
 
   @doc """
@@ -91,42 +122,6 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     end
   end
 
-  defp readme(name, pitch) do
-    """
-    # #{name}
-
-    #{pitch}
-
-    ## Installation
-
-    (à compléter)
-
-    ## Usage
-
-    (à compléter)
-    """
-  end
-
-  defp spec_md(name, pitch, today) do
-    """
-    # #{name} — Spec
-
-    **Date** : #{today}
-    **Dernière révision** : #{today}
-    **Statut** : draft v1
-    **Référencé par** : work/ops:backlog.md
-    **Dérivé de** : —
-
-    ## Pitch
-
-    #{pitch}
-
-    ## Contraintes
-
-    (à compléter)
-    """
-  end
-
   defp backlog_md(name, pitch, today) do
     """
     # #{name} — Backlog
@@ -149,39 +144,5 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     """
   end
 
-  defp gitignore do
-    """
-    # build / artefacts
-    build/
-    dist/
-    *.log
-    *.o
-    *.obj
 
-    # secrets / env
-    .env
-    .env.local
-
-    # langages
-    __pycache__/
-    *.pyc
-    node_modules/
-    _build/
-    deps/
-    """
-  end
-
-  defp editorconfig do
-    """
-    root = true
-
-    [*]
-    charset = utf-8
-    end_of_line = lf
-    insert_final_newline = true
-    indent_style = space
-    indent_size = 4
-    trim_trailing_whitespace = true
-    """
-  end
 end

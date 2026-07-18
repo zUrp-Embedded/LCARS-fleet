@@ -880,6 +880,31 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  Ensures the STATIC protocol labels exist on `repo` (flat locks + the 4 known stages) —
+  colors + tooltips from THIS module's single source (`label_color`/`label_description`).
+  Used by `mix lcars.project_template.sync` to seed the TEMPLATE repo: every generated
+  project then carries them from birth (the lazy per-repo creation stays as the net for
+  dynamic labels — `wfmap/<map>` is per-card, never seeded here). Idempotent (create 409
+  tolerated by `ensure_repo_label`).
+  """
+  @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
+  def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      statics = [
+        "lcars-in-flight",
+        "lcars-awaits-arch",
+        "stage/brief-review",
+        "stage/build",
+        "stage/review",
+        "stage/merged"
+      ]
+
+      Enum.each(statics, &ensure_repo_label(config, repo, &1))
+      :ok
+    end
+  end
+
   # Creates the missing protocol label at the REPO level. The routing labels (`stage/*`/`wfmap/*`) and the
   # flat locks (`lcars-*`) live PER-REPO: the routing state belongs to ITS repo's issues (the
   # forge = state-store, self-contained per project), and the system account creates them via its **repo-write** —

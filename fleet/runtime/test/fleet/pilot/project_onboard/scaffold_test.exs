@@ -12,6 +12,22 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert File.exists?(Path.join(dir, ".editorconfig"))
   end
 
+  test "main/3 mirrors the NATIVE template semantics: ${VAR} fully expanded, control file never copied",
+       %{tmp_dir: dir} do
+    assert :ok = Scaffold.main(dir, "monprojet", pitch: "un pitch", today: "2026-07-18")
+
+    readme = File.read!(Path.join(dir, "README.md"))
+    spec = File.read!(Path.join(dir, "docs/spec.md"))
+    # every variable of the priv template is expanded — none leaks into the output
+    refute readme =~ "${"
+    refute spec =~ "${"
+    assert readme =~ "un pitch"
+    assert spec =~ "2026-07-18"
+    # `.gitea/template` is the template CONTROL file: never copied (native semantics)
+    refute File.exists?(Path.join(dir, ".gitea/template"))
+    refute File.dir?(Path.join(dir, ".gitea"))
+  end
+
   test "work/3: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
     assert :ok = Scaffold.work(dir, "monprojet", [])
     assert File.exists?(Path.join(dir, "backlog.md"))

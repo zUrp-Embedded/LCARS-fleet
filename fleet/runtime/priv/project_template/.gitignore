@@ -1,0 +1,17 @@
+# build / artefacts
+build/
+dist/
+*.log
+*.o
+*.obj
+
+# secrets / env
+.env
+.env.local
+
+# langages
+__pycache__/
+*.pyc
+node_modules/
+_build/
+deps/
