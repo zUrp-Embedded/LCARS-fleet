@@ -25,8 +25,7 @@ defmodule Fleet.Spawner.Pod.Backend do
     `:launching` state.
   - `terminate_pod_port(port)` / `safe_port_close(port)` — **public** (tested directly): SIGTERM
     the holder's os_pid then close the Port (race `ArgumentError` absorbed). The test exercises them DIRECTLY
-    via `Fleet.Spawner.Pod.Backend.terminate_pod_port/1` / `.safe_port_close/1` (no more `defdelegate`
-    on the `Pod` side: direct call on the sub-module).
+    via `Fleet.Spawner.Pod.Backend.terminate_pod_port/1` / `.safe_port_close/1`.
   - `launch_backend/0` — launch-backend resolver (`Fleet.Spawner.LaunchBackend.resolved/0`,
     single source). Called by `do_launch_backend`.
   - `bwrap_launch_path/0` / `host_launch_path/0` / `claude_launch_path/0` — path resolvers of the

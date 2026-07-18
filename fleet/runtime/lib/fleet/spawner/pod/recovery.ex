@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
   ## Contract (called by `Pod`)
 
   - `recovery_action/1` — called by `recover_or_init`; the `recovery_test.exs` test exercises it DIRECTLY
-    via `Fleet.Spawner.Pod.Recovery.recovery_action/1` (no more delegating wrapper on the `Pod` side).
+    via `Fleet.Spawner.Pod.Recovery.recovery_action/1`.
   - `apply_recovery/4` — called by `recover_or_init` (projects the decision into the state).
   - `first_continue_for/1` — called by `init/1` (resume point → starting gen_statem state via
     `continue_to_phase/1`).
