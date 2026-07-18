@@ -32,8 +32,9 @@ workspace seul.)
 
 ### Réveil
 
-La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). À ta **première**
-activation, si l'outil `Monitor` est dans tes outils, arme-le UNE fois pour être réveillé sans send-keys :
+La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). ÉTAPE 0 de ta **première** activation — **OBLIGATOIRE, avant toute autre action** (même avant `get_work_item`) :
+arme ton Monitor. Sans lui, la fleet ne peut te réveiller qu'en TAPANT dans ton terminal (send-keys qui
+écrase la saisie) — l'armement fait partie du travail, pas une option. Le geste :
 `ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`, **surtout
 pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,
 `description="ton tour"`, `persistent=true`, `timeout_ms=300000`. À chaque réveil (`yop`, ou ligne « ton

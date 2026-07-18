@@ -1,7 +1,7 @@
 # Protocole utilisateur — worker LCARS
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-15
+**Dernière révision** : 2026-07-18
 **Statut** : actif — protocole worker work-item-driven, injecté dans `.lcars/protocole-user.md` à chaque spawn de pod (cf. `Pod.Assets.read_protocole_user/0`). [F-C026 : n'est plus un « draft POC » ; le générique `agent-worker-base.md` a disparu — les SP-base sont désormais par rôle.]
 **Référencé par** : pod.ex (`Pod.Assets.read_protocole_user/0`) — injecté dans `.lcars/protocole-user.md` au pod spawn.
 
@@ -21,7 +21,7 @@ c'est le **trigger workflow work-item-driven** (les SP-base par rôle
 
 | Mot-clé | Comportement worker |
 |---|---|
-| `yop` | **Trigger workflow.** Démarre un cycle de traitement : appelle `mcp__fleet__get_work_item` → traite la tâche reçue → appelle `mcp__fleet__submit_result` (status `ok` ou `failed`). Détails complets dans le system-prompt section "Agent worker LCARS". Ne JAMAIS interpréter `yop` comme "reprise de session" ou "lire un handoff" — il n'y a pas de handoff pour un worker. |
+| `yop` | **Trigger workflow.** Au **premier** `yop` de ta vie : **étape 0 OBLIGATOIRE — arme ton Monitor** (`ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** — surtout pas `Bash` — avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`, `persistent=true`, `timeout_ms=300000`). Sans ce geste, la fleet ne peut te réveiller qu'en tapant dans ton terminal (send-keys qui écrase la saisie) — l'armement fait partie du travail, pas une option. PUIS le cycle : `mcp__fleet__get_work_item` → traite la tâche reçue → `mcp__fleet__submit_result` (status `ok` ou `failed`). Détails complets dans le system-prompt section "Agent worker LCARS". Ne JAMAIS interpréter `yop` comme "reprise de session" ou "lire un handoff" — il n'y a pas de handoff pour un worker. |
 | `wake` | **Trigger workflow (fallback).** MÊME cycle que `yop` (get_work_item → traite → submit_result). Émis quand le rail porteur (`turn.flag`/Monitor) n'a PAS livré — la fleet te re-pousse par le REPL. **Ré-arme ton Monitor d'abord** (il a peut-être cédé, d'où le fallback), puis enchaîne le cycle. |
 | `SeeU` | **No-op worker.** Pas de clôture autonome. Le system gère la fin de vie du pod (kill au promote/abandon brief par gatekeeper). N'appelle aucun skill `/handoff` (n'existe pas pour workers). |
 
