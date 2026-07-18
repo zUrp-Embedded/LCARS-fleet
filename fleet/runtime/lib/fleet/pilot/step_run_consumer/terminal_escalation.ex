@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   @moduledoc """
-  TERMINAL escalation to the human (the "human wall"), extracted from
+  TERMINAL escalation to the human (the "human wall") of
   `Fleet.Pilot.StepRunConsumer`: when the end of a step_run CANNOT be resolved by
   the machine (rework exhausted, unreadable budget, human approval required, blocked producer,
   fail-closed verdict), we FREEZE the issue toward the arch and kick it.
@@ -184,8 +184,8 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
       other ->
         Logger.warning(
-          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch unreachable ? the human restarts their " <>
-            "session — the fleet does NOT reboot the arch ; label+comment remain)"
+          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch unreachable? the human restarts their " <>
+            "session — the fleet does NOT reboot the arch; label+comment remain)"
         )
 
         :ok
