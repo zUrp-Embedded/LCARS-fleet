@@ -70,32 +70,29 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc "`base_sha` must be an ancestor of HEAD (no history rewrite)."
   @spec check_base_ancestor(Path.t(), String.t()) :: :ok | {:error, reason()}
   def check_base_ancestor(workspace, base_sha) do
-    case git(workspace, ["merge-base", "--is-ancestor", base_sha, "HEAD"]) do
-      {_out, 0} ->
+    # The rc-typed ancestor mechanic is SHARED with the provenance verifier
+    # (`Fleet.Workflow.Git.ancestor?/3` — one mechanic, two consumers); only the
+    # DIAGNOSTIC shaping is this gate's business.
+    case Fleet.Workflow.Git.ancestor?(workspace, base_sha, "HEAD") do
+      {:ok, true} ->
         :ok
 
-      # GIT RESULT TYPED by rc (rc1/rc128/rc124 distinct): mapping EVERY rc≠0 onto
-      # `{:base_not_ancestor}` would MIS-DIAGNOSE an invalid-sha (rc128, corrupt repo) or a TIMEOUT
-      # (rc124, returned by the `git/2` helper) as "base not ancestor" → hunt in the wrong direction.
-      # ONLY rc1 (the CLEAN answer of `--is-ancestor`: "not ancestor") is `:base_not_ancestor`;
-      # rc128 = `:git_error` (invalid sha / broken repo); rc124 = `:git_timeout`.
-      {_out, 1} ->
+      {:ok, false} ->
         # DIAGNOSTIC message. `merge-base --is-ancestor` outputs NOTHING on the nominal failure case
         # (valid base but not an ancestor of HEAD, e.g. a rebase rewrote over it) → a bare
         # `{:base_not_ancestor, ""}` is untraceable. We embed the `base_sha` (short): a single log
         # says "such base ⊄ HEAD" → the cause (clone-base instead of the rebase target) is obvious.
         {:error, {:base_not_ancestor, "#{String.slice(to_string(base_sha), 0, 12)} ⊄ HEAD"}}
 
-      {_out, 124} ->
-        {:error, {:git_timeout, "merge-base --is-ancestor timeout"}}
+      {:error, {:git_timeout, _} = e} ->
+        {:error, e}
 
-      {out, 128} ->
-        {:error,
-         {:git_error, "merge-base rc128 (invalid sha / corrupt repo): #{String.trim(out)}"}}
+      {:error, {:git_error, _} = e} ->
+        {:error, e}
 
-      # Any other unexpected rc: fail-closed as `:git_error` (never a false `base_not_ancestor`).
-      {out, rc} ->
-        {:error, {:git_error, "merge-base rc#{rc}: #{String.trim(out)}"}}
+      # Any other unexpected shape: fail-closed as `:git_error` (never a false `base_not_ancestor`).
+      {:error, other} ->
+        {:error, {:git_error, "merge-base: #{inspect(other)}"}}
     end
   end
 

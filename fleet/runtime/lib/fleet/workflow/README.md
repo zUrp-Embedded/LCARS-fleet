@@ -30,6 +30,7 @@ is restated, only pointed at.
 - `Fleet.Workflow.OpsObject` — the ONE commit-an-object-into-work/ops mechanic (write → commit → best-effort push)
 - `Fleet.Workflow.BriefTemplate` — calibration-template renderer (`priv/workflow/brief_templates/`, F-23: prose is data)
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
+- `Fleet.Workflow.Provenance.Verifier` — deterministic triplet verifier, the non-LLM wall (+ `mix lcars.provenance.verify`)
 
 Related, NOT this domain: `Fleet.GitRef` (`valid?/1`, git ref-name validation) — a foundation
 boundary at `lib/fleet/git_ref.ex`, reachable from any domain.

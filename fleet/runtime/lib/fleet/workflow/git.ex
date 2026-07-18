@@ -255,6 +255,58 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
+  Does `sha` name a REAL commit of `workspace`? (`git cat-file -e <sha>^{commit}`,
+  **bounded**, hooks-off.) `{:ok, boolean}`; only a timeout/exit is an `{:error, …}` —
+  an unknown sha is a plain `{:ok, false}`, never an error (the caller's question IS
+  "does it exist").
+  """
+  @spec commit_exists?(Path.t(), String.t()) :: {:ok, boolean()} | {:error, term()}
+  def commit_exists?(workspace, sha) do
+    with :ok <- validate_cli_arg(sha, :invalid_sha) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["cat-file", "-e", sha <> "^{commit}"],
+             cd: workspace,
+             timeout_ms: git_local_timeout_ms()
+           ) do
+        {:ok, {_, 0}} -> {:ok, true}
+        {:ok, {_, _rc}} -> {:ok, false}
+        {:error, {:timeout, ms}} -> {:error, {:git_timeout, ms}}
+        {:error, {:exit, reason}} -> {:error, {:git_exit, reason}}
+      end
+    end
+  end
+
+  @doc """
+  Is `ancestor` an ancestor of `descendant` in `workspace`?
+  (`git merge-base --is-ancestor`, **bounded**, hooks-off.) The rc classification is
+  TYPED — the ONE shared mechanic of the deliverable gate and the provenance verifier
+  (`DeliverableGate.check_base_ancestor` maps these onto its diagnostic messages):
+
+  - rc 0 → `{:ok, true}` ; rc 1 (the clean "not an ancestor" answer) → `{:ok, false}`
+  - rc 124 (timeout wrapper) / `{:timeout, _}` → `{:error, {:git_timeout, …}}`
+  - rc 128 (invalid sha / corrupt repo) and any other rc → `{:error, {:git_error, …}}` —
+    NEVER a false `{:ok, false}` (a mis-typed error would misdiagnose a broken repo as
+    "history rewritten").
+  """
+  @spec ancestor?(Path.t(), String.t(), String.t()) :: {:ok, boolean()} | {:error, term()}
+  def ancestor?(workspace, ancestor, descendant) do
+    with :ok <- validate_cli_arg(ancestor, :invalid_sha),
+         :ok <- validate_cli_arg(descendant, :invalid_sha) do
+      case Fleet.Credentials.Shell.git(
+             @hooks_off ++ ["merge-base", "--is-ancestor", ancestor, descendant],
+             cd: workspace,
+             timeout_ms: git_local_timeout_ms()
+           ) do
+        {:ok, {_, 0}} -> {:ok, true}
+        {:ok, {_, 1}} -> {:ok, false}
+        {:ok, {_, 124}} -> {:error, {:git_timeout, "merge-base --is-ancestor timeout"}}
+        {:ok, {out, rc}} -> {:error, {:git_error, "merge-base rc#{rc}: #{String.trim(out)}"}}
+        {:error, {:timeout, ms}} -> {:error, {:git_timeout, ms}}
+        {:error, {:exit, reason}} -> {:error, {:git_exit, reason}}
+      end
+    end
+  end
+
+  @doc """
   Content of `path` at commit `sha` in `workspace` (`git show <sha>:<path>`), **bounded**.
   The pointer can lie, git cannot: an unknown commit or a path absent from that commit is a
   plain `{:error, {:git_show_failed, …}}` — the caller decides (BriefBuilder DEFERS the
