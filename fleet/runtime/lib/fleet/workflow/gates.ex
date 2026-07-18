@@ -29,8 +29,7 @@ defmodule Fleet.Workflow.Gates do
   A BOUNDED retry exists, but it is the **forge-driven rail**
   (`Pilot.StepRunConsumer`) that drives it (bounded rework counter), not the gate;
   the bound rules out the re-spawn-in-a-loop risk. Severity gating lives in `rules`
-  via the `severity_max` operand (evaluated by `Predicate`); the ex-knobs
-  `fallback_invoke_gatekeeper`/`on_*_severity` were removed (F-C110) — there is no
+  via the `severity_max` operand (evaluated by `Predicate`) — there is no
   separate severity-orchestration layer.
 
   Any unknown/malformed gate shape falls onto the fail-closed catch-all
@@ -48,9 +47,9 @@ defmodule Fleet.Workflow.Gates do
   @impl Fleet.Workflow.Gate
   def evaluate(step, outputs, ctx), do: eval_by_type(step, outputs, ctx)
 
-  # 2026-07-04: {:human_approval, _} was missing from this INTERNAL spec (the @callback Gate has it) —
-  # dialyzer propagated the incomplete type and believed the human_approval clauses downstream were DEAD
-  # (step_run_consumer). The spec lies = all downstream typing lies.
+  # This INTERNAL spec must mirror the @callback Gate's full return sum ({:human_approval, _}
+  # included): dialyzer propagates an incomplete spec and would believe the human_approval clauses
+  # downstream (step_run_consumer) are DEAD. A lying spec makes all downstream typing lie.
   @spec eval_by_type(step :: map(), outputs :: map(), ctx :: map()) ::
           :pass
           | {:fail, String.t()}

@@ -93,7 +93,7 @@ defmodule Fleet.Workflow.Loader do
   # fields (`metadata.description`/`applicable_intensity`/`applicable_regime`, the `cycle` block,
   # `selection_priority`) are deliberately discarded — extend this form when a real consumer appears (no
   # speculative porting). All schema-`required` fields (name, steps, max_rework_rounds) are KEPT.
-  # (F-C109: `spec.on_escalation`/`on_failure` are NOT droppable — `spec` is additionalProperties:false, so
+  # (`spec.on_escalation`/`on_failure` are NOT droppable — `spec` is additionalProperties:false, so
   # the schema rejects them upstream; they never reach here.)
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{
@@ -111,8 +111,8 @@ defmodule Fleet.Workflow.Loader do
       Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
   end
 
-  # Resolved schema (read+decode+resolve) via the foundation authority `Fleet.SchemaCache`
-  # (dedup — this pipeline lived copied here), keyed by the RESOLVED path (the tests'
+  # Resolved schema (read+decode+resolve) via the foundation authority `Fleet.SchemaCache`,
+  # keyed by the RESOLVED path (the tests'
   # `:schema_path` overrides have their own entry → no prod↔test pollution). Lazy-init,
   # fail-loud if the schema file is absent/malformed.
   defp resolved_schema(opts) do
