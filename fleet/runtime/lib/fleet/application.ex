@@ -1,8 +1,7 @@
 defmodule Fleet.Application do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED frontier of the root: deps = every domain the root supervises (nothing
+  # else may name it), exports = []. The compiler refuses any violation — no
+  # discipline required.
   use Boundary,
     deps: [
       Fleet.EventRouter,
@@ -18,45 +17,46 @@ defmodule Fleet.Application do
     exports: []
 
   @moduledoc """
-  Racine OTP de l'app unique `:lcars_fleet` — l'UNIQUE callback `Application` du runtime
-  depuis le collapse de l'umbrella (migration Z2, 2026-07-12).
+  OTP root of the single app `:lcars_fleet` — the ONE `Application` callback of the
+  runtime.
 
-  Démarre les superviseurs de domaine (les ex-apps umbrella) dans l'ordre topologique de
-  l'ancien graphe de deps compile. Cinq ex-apps sont des bibliothèques PURES sans arbre de
-  supervision (cap_profile, credentials, sp_builder, workflow, project_bootstrap) — rien à
-  démarrer pour elles (elles n'ont AUCUN processus ; leurs modules sont chargés dans l'app,
-  les fonctions pures marchent sans superviseur). Ne restent dans les children que les
-  9 domaines qui démarrent réellement quelque chose.
+  Starts the domain supervisors in topological order. Five domains are PURE
+  libraries with no supervision tree (cap_profile, credentials, sp_builder,
+  workflow, project_bootstrap) — nothing to start for them (they have NO process;
+  their modules are loaded in the app, the pure functions work without a
+  supervisor). Only the 9 domains that actually start something remain in the
+  children.
 
-  ## L'ordre des children EST l'invariant de boot (cicatrice F8)
+  ## The children ORDER IS the boot invariant (F8 scar)
 
-  Avant le collapse, l'ordre venait du graphe de deps OTP + de la liste `releases:` du
-  mix.exs umbrella. Il ne reste plus que CETTE liste : la réordonner peut casser le boot
-  SANS erreur de compilation. Contraintes portées par l'ordre ci-dessous :
+  Nothing but THIS list carries the order: reordering it can break the boot WITHOUT
+  a compile error (the `boot.order_f8` check of `mix lcars.contracts.check` locks
+  it). Constraints carried by the order below:
 
-    * `event_router` PREMIER — le Bus (Phoenix.PubSub) est le substrat : tout subscriber
-      démarré avant lui crashe à l'init. Sa mort escalade délibérément jusqu'au node
-      (cf. `Bus.EscalatingSupervisor`, max_restarts: 0 — un PubSub ressuscité seul
-      laisserait tous les subscribers sourds à vie).
-    * `mcp` AVANT `spawner` (seam RUNTIME, pas une dep compile) : tout spawn de pod exige
-      `ensure_pod_socket` (`Fleet.MCP.PodSocketSupervisor`) déjà vivant — et le
-      PublishConsumer de spawner peut recevoir un `admin.spawn.request` dès son subscribe.
-    * (Les contraintes historiques `mcp < starfleet` et `spawner < starfleet` sont TOMBÉES
-      avec l'acte4 A-08 : le BootOrchestrator — seule cause de ces contraintes — n'est plus
-      un child mid-boot de starfleet ; il est déclenché ci-dessous APRÈS le start_link OK,
-      quand la fleet ENTIÈRE est prouvée up. « Post-readiness » est devenu mécanique.)
-    * `api` avant-dernier (readiness interroge pilot/mcp/spawner/starfleet),
-      `observation` DERNIER (read-only, rien du core n'en dépend).
+    * `event_router` FIRST — the Bus (Phoenix.PubSub) is the substrate: any
+      subscriber started before it crashes at init. Its death deliberately
+      escalates to the node (cf. `Bus.EscalatingSupervisor`, max_restarts: 0 — a
+      PubSub resurrected alone would leave every subscriber deaf for life).
+    * `mcp` BEFORE `spawner` (a RUNTIME seam, not a compile dep): any pod spawn
+      requires `ensure_pod_socket` (`Fleet.MCP.PodSocketSupervisor`) already
+      alive — and spawner's PublishConsumer can receive an `admin.spawn.request`
+      as soon as it subscribes.
+    * (There is NO `mcp < starfleet` nor `spawner < starfleet` constraint: the
+      BootOrchestrator — the only thing that would create them — is not a
+      mid-boot child of starfleet; it is triggered below AFTER the start_link OK,
+      when the ENTIRE fleet is provably up. "Post-readiness" is mechanical.)
+    * `api` second-to-last (readiness probes pilot/mcp/spawner/starfleet),
+      `observation` LAST (read-only, nothing in the core depends on it).
 
-  ## Sémantique de panne (D-17 chantier — transposition FIDÈLE de l'umbrella)
+  ## Failure semantics (D-17 — faithful umbrella transposition)
 
-  `max_restarts: 0` : chaque domaine porte sa propre intensité de restart (3/60 en
-  général) ; un domaine qui l'épuise MEURT, et sa mort tue le node (`start_permanent`
-  en prod) — exactement le comportement des apps `:permanent` de l'umbrella. On ne
-  redonne PAS une seconde vie au domaine ici : un domaine ressuscité seul (état perdu,
-  subscriptions Bus mortes) serait une panne success-shaped, la classe exacte que
-  l'audit 2026-07-09 a chassée. Adoucissement éventuel (`:rest_for_one` gracieux) =
-  arbitrage user A-01, PAS un défaut.
+  `max_restarts: 0`: each domain carries its own restart intensity (3/60 in
+  general); a domain that exhausts it DIES, and its death kills the node
+  (`start_permanent` in prod) — exactly the behavior of the umbrella's
+  `:permanent` apps. We do NOT give the domain a second life here: a domain
+  resurrected alone (state lost, Bus subscriptions dead) would be a
+  success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
+  arbitration (A-01), NOT a default.
 
   **Last revised**: 2026-07-18
   """
@@ -77,7 +77,7 @@ defmodule Fleet.Application do
       # Coord policies (init_policies! fail-fast in its init/1).
       Fleet.Coord.Application,
       # Starfleet audit + monitors (DriftMonitor/AuditConsumer/Shutdown/MCP*). The BootOrchestrator
-      # n'y est PLUS : déclenché post-boot par la racine (A-08, cf. bas de start/2).
+      # is NOT among them: triggered post-boot by the root (cf. bottom of start/2).
       Fleet.Starfleet.Application,
       # Forge driver (inert without :step_dispatch?).
       Fleet.Pilot.Application,
@@ -91,19 +91,19 @@ defmodule Fleet.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Effet de bord de fin de boot (trace build-info) : APRÈS le start_link OK = fleet
-        # entière up, listener api bindé inclus. Contrat détaillé dans
+        # End-of-boot side effect (build-info trace): AFTER the start_link OK = the whole
+        # fleet up, api listener bound included. Detailed contract in
         # `Fleet.API.Application.post_boot/0`.
         Fleet.API.Application.post_boot()
 
-        # BootOrchestrator (spawn des pods permanents = dépense claude RÉELLE) déclenché ICI,
-        # structurellement POST-boot (acte4 A-08) : avant, child mid-boot de starfleet, son Task
-        # async pouvait spawner AVANT que pilot/api soient up — si un domaine tardif ratait son
-        # start_link (port pris), les permanents étaient déjà lancés dans une fleet à moitié
-        # morte (spend gaspillé, process orphelins). Ici, si le boot avorte, AUCUN spawn n'a eu
-        # lieu. Via la FAÇADE (le domaine possède son gate `:start_boot_orchestrator` — false en
-        # test, hermétique — et son trigger ; la racine dit juste « maintenant ») : boundary a
-        # refusé l'appel direct à Starfleet.Application, à raison — la façade EST la surface.
+        # BootOrchestrator (spawn of the permanent pods = REAL claude spend) triggered HERE,
+        # structurally POST-boot: as a mid-boot child of starfleet, its async Task could spawn
+        # BEFORE pilot/api are up — if a later domain failed its start_link (port taken), the
+        # permanents would already be running in a half-dead fleet (wasted spend, orphaned
+        # processes). Here, if the boot aborts, NO spawn has happened. Via the FAÇADE (the
+        # domain owns its `:start_boot_orchestrator` gate — false in test, hermetic — and its
+        # trigger; the root only says "now"): boundary refuses a direct call to
+        # Starfleet.Application, rightly — the façade IS the surface.
         Fleet.Starfleet.boot_orchestrate()
 
         {:ok, pid}
