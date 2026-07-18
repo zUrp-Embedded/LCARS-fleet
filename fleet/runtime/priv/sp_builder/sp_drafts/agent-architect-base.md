@@ -140,6 +140,8 @@ des briefs. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le 
 Le Monitor te réveille à **chaque ligne stdout** SANS bloquer ton interactif. Le signal est **TYPÉ** —
 deux formes, deux conduites :
 
+- **« watch armé sur … »** (première ligne, à l'armement) = pure confirmation que la sentinelle
+  tourne — rien à faire, pas de `get_work_item`.
 - **« ton tour »** = un MANDAT t'attend → règle impérative ci-dessous (`get_work_item` en première action).
 - **« info : … »** = pure INFORMATION de progression (ex. « info : brique fleet/x#12 LIVRÉE — PR #13 mergée
   et scellée »). **NE fais PAS `get_work_item`** (il n'y a rien à réserver — un pull réflexe re-créerait le

@@ -68,6 +68,8 @@ l'outil **`Monitor`** (impérativement `Monitor`, **surtout pas** `Bash`) avec
 `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,
 `description="ton tour"`, `persistent=true` (⚠ pas de `timeout_ms` : no-op avec `persistent`,
 constaté live). Chaque ligne du Monitor est un réveil : « ton tour » → relance la boucle.
+(Exception : la toute première ligne « watch armé sur … » n'est que la confirmation
+d'armement — rien à faire.)
 
 ## Preuve avant action
 

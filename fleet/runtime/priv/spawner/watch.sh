@@ -13,7 +13,10 @@
 # l'agent ne PULL PAS). L'outil Monitor transforme chaque ligne en réveil de l'agent.
 set -uo pipefail
 FLAG="${1:?usage: watch.sh <flagfile>}"
-last=""
+# Baseline = le contenu ACTUEL du flag : le token résiduel du kick de boot (écrit AVANT
+# l'armement) ne rejoue pas comme un faux réveil — un événement émis = un wake RÉEL
+# post-armement. La ligne « watch arme » ci-dessous reste LA confirmation d'armement.
+last="$([[ -f "$FLAG" ]] && cat "$FLAG" 2>/dev/null || true)"
 echo "watch arme sur $FLAG"
 while :; do
   if [[ -f "$FLAG" ]]; then
