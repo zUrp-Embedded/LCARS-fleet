@@ -6,8 +6,8 @@ defmodule Fleet.TaskQueue.Server do
   SINGLE-SOURCE AXIOM: the **forge** is the truth of the work (issues/routes/PR); the
   broker is only its RAM FRONT. No `WorkItem` field is broker-only-durable (everything is
   re-derivable on forge re-dispatch) → **in prod the broker runs EPHEMERAL** (`persist: false`, cf.
-  `Application`): no `state.json`, hence no stale persisted tasks that survive reboots
-  (the cause of the 1124 "in progress" that accumulated). On restart, the queue re-derives itself from the forge polls (canonical
+  `Application`): no `state.json`, hence no stale persisted tasks that survive reboots.
+  On restart, the queue re-derives itself from the forge polls (canonical
   reconciliation rail). The persistence below stays an **opt-in** mechanism (tested) for a
   future broker-only-durable state — NONE exists to this day.
 
@@ -266,8 +266,8 @@ defmodule Fleet.TaskQueue.Server do
         case result["work_item_id"] || result[:work_item_id] do
           tid when tid != nil and tid != work_item.id ->
             # correlation_id of the deliverable ≠ the pod's active work item → reject, no mutation. This is the 2nd
-            # anti-impersonation lock (the 1st = the capability on the fleet_mcp side): even a proven pod can only close
-            # EXACTLY its active work item, never "the last active one" of another. fleet_mcp makes the
+            # anti-impersonation lock (the 1st = the capability on the MCP side): even a proven pod can only close
+            # EXACTLY its active work item, never "the last active one" of another. The MCP boundary makes the
             # work_item_id MANDATORY on the pod side → this correlator is always present and verified.
             {:reply, {:error, :work_item_id_mismatch}, state}
 
