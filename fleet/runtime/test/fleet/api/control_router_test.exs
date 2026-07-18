@@ -25,6 +25,26 @@ defmodule Fleet.API.ControlRouterTest do
     # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
     defp short_sock, do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
 
+    # Embedded-tree cleanup (F-20): the TEST process is the tree's parent (start_link) — when
+    # ExUnit tears the test down (:shutdown), the tree may ALREADY be dying as this on_exit
+    # runs. An already-dying tree is a clean outcome (that death-by-parent IS the fixed
+    # behavior); we still wait for the DOWN so the ranch ref is free for the next test.
+    defp stop_tree(pid) do
+      ref = Process.monitor(pid)
+
+      try do
+        Supervisor.stop(pid)
+      catch
+        :exit, _ -> :ok
+      end
+
+      receive do
+        {:DOWN, ^ref, :process, _, _} -> :ok
+      after
+        5_000 -> raise "control listener tree did not stop"
+      end
+    end
+
     test "bind + curl --unix-socket POST /api/admin/spawn → 202 (host-side reaches the door)" do
       curl = System.find_executable("curl")
 
@@ -35,7 +55,9 @@ defmodule Fleet.API.ControlRouterTest do
         sock = short_sock()
         on_exit(fn -> File.rm(sock) end)
         {:ok, pid} = ControlRouter.start_control_listener(sock)
-        on_exit(fn -> :ok = :cowboy.stop_listener(ControlRouter.Ref) end)
+        # Embedded tree (F-20): stopped via its OWNER, not `:cowboy.stop_listener` (the ref
+        # is not under the ranch application's supervisor → `{:error, :not_found}` there).
+        on_exit(fn -> stop_tree(pid) end)
 
         # The file exists and is indeed a socket (the pod will not see it: outside its mount ns).
         assert File.exists?(sock)
@@ -77,9 +99,28 @@ defmodule Fleet.API.ControlRouterTest do
       on_exit(fn -> File.rm(sock) end)
 
       # start_control_listener rms the stale file BEFORE the bind (AF_UNIX is not auto-removed).
-      assert {:ok, _pid} = ControlRouter.start_control_listener(sock)
-      on_exit(fn -> :ok = :cowboy.stop_listener(ControlRouter.Ref) end)
+      assert {:ok, pid} = ControlRouter.start_control_listener(sock)
+      on_exit(fn -> stop_tree(pid) end)
       assert File.exists?(sock)
+    end
+
+    test "F-20 — the listener tree is EMBEDDED: linked to the caller, never parked under ranch_sup" do
+      # The old `Plug.Cowboy.http` start parked the listener under the ranch APPLICATION's
+      # supervisor: the pid composed as a child had a FOREIGN parent, its shutdown exit was
+      # ignored, and every graceful stop hung until the launcher's fallback kill. The two
+      # properties below ARE the fix: the tree links to its starting supervisor and its
+      # ancestry stays in OUR tree.
+      sock = short_sock()
+      on_exit(fn -> File.rm(sock) end)
+
+      {:ok, pid} = ControlRouter.start_control_listener(sock)
+      on_exit(fn -> stop_tree(pid) end)
+
+      {:links, links} = Process.info(self(), :links)
+      assert pid in links
+
+      {:dictionary, dict} = :erlang.process_info(pid, :dictionary)
+      refute :ranch_sup in Keyword.get(dict, :"$ancestors", [])
     end
   end
 

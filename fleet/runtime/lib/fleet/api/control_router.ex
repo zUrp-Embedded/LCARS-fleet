@@ -141,14 +141,31 @@ defmodule Fleet.API.ControlRouter do
   BEFORE binding (a previous instance's socket is not auto-removed on close → a restart would
   hit `eaddrinuse`; same reason as the MCP cold-boot sweep) and tightens the file to `0600`
   (defense-in-depth — the real boundary is the pod's mount namespace, which never contains the
-  file). Returns `{:ok, pid}` (the ranch listener supervisor) so it composes as a supervised child.
+  file). Returns `{:ok, pid}` of the EMBEDDED ranch tree, LINKED to the calling supervisor.
+
+  F-20 — the tree MUST be embedded (`Plug.Cowboy.child_spec` start, not `Plug.Cowboy.http`):
+  the old-style `http/3` parks the listener under the ranch APPLICATION's own supervisor, so
+  the pid returned here had a foreign parent — at OTP shutdown, our supervisor's exit signal
+  was IGNORED (a supervisor only obeys its real parent) and the stop hung FOREVER on a 'DOWN'
+  that could never come (`type: :supervisor` → shutdown `:infinity`) → every graceful stop
+  ended in the launcher's 30s fallback kill. Embedded, the ranch sup is a true child: the
+  shutdown drains and the BEAM dies clean. (`Listener.cowboy_child` is not used here on
+  purpose: BindAddress governs NETWORK surfaces — an AF_UNIX path is not one — and the
+  stale-socket rm + chmod must run at every (re)start, hence this MFA.)
   """
   @spec start_control_listener(Path.t()) :: {:ok, pid()} | {:error, term()}
   def start_control_listener(sock) when is_binary(sock) do
     _ = File.mkdir_p(Path.dirname(sock))
     _ = File.rm(sock)
 
-    case Plug.Cowboy.http(__MODULE__, [], ref: __MODULE__.Ref, ip: {:local, sock}, port: 0) do
+    %{start: {m, f, a}} =
+      Plug.Cowboy.child_spec(
+        scheme: :http,
+        plug: __MODULE__,
+        options: [ip: {:local, sock}, port: 0, ref: __MODULE__.Ref]
+      )
+
+    case apply(m, f, a) do
       {:ok, _pid} = ok ->
         _ = File.chmod(sock, 0o600)
         Logger.info("ControlRouter: admin control socket bound at #{sock} (AF_UNIX, host-only)")
