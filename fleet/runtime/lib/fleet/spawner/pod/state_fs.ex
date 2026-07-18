@@ -29,10 +29,9 @@ defmodule Fleet.Spawner.Pod.StateFs do
 
   - `write_state_fs/1` — called at the 4 internal sites of the `Pod`.
   - `clear_terminal_snapshot/3` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`
-    (default value `opts \\ []`) by `Fleet.Spawner.spawn_pod/3` AND the `pod_test.exs` test (no more
-    delegating wrapper on the `Pod` side).
+    (default value `opts \\ []`) by `Fleet.Spawner.spawn_pod/3` AND the `pod_test.exs` test.
   - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
-    by the `PodWarden` (no more defdelegate on the `Pod` side).
+    by the `PodWarden`.
 
   **Last revised**: 2026-07-18
   """
