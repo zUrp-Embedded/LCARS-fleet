@@ -40,16 +40,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
   The judge is **rare by construction**: the engine cannot over-summon it
   (the `soft`/undecidable is a *runtime condition*, not a *step tag*).
   No `role: gatekeeper` step, no `soft⟺gatekeeper` biconditional —
-  all the explicit-step machinery is removed. This module REPLACES the old
-  gatekeeper chaining of the RAM engine `Fleet.Workflow.Executor` (`do_dispatch_gatekeeper`/
-  `handle_gate_decision`), DELETED: it redoes the same decision, but forge-driven.
+  there is no explicit-step machinery: the decision is forge-driven.
 
-  ## Residual `workflow_map_id` guard
+  ## Defensive `workflow_map_id` guard
 
-  The RAM engine `Fleet.Workflow.Executor` (in-memory workflow_map_name↔step correlation)
-  is DELETED — there is no more dual-run: this consumer is the only rail. No
-  pod is spawned with `opts[:workflow_map_id]` anymore (the Executor was the only
-  producer). The `workflow_map_id` present → skip branch (the `{:skip, :workflow_map_pod}` clause below) remains as a
+  This consumer is the ONLY completion rail (no RAM engine, no dual-run). No pod is
+  spawned with `opts[:workflow_map_id]` — nothing produces it. The `workflow_map_id`
+  present → skip branch (the `{:skip, :workflow_map_pod}` clause below) remains as a
   **defensive guard** (a residual workflow_map_name payload would not be processed by
   mistake), never triggered in practice.
 
@@ -58,7 +55,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       source, `Fleet.Spawner.Pod.CompletedPayload`). **This consumer
       processes them.** The event carries all the state → stateless consumer FOR THE HAPPY PATH
       (pass/fail); pending gatekeeper escalations live in RAM (`gate_evals`)
-      as a **fast-path optimization** — but this is no longer a hard dependency:
+      as a **fast-path optimization** — but this is NOT a hard dependency:
       the verdict is **self-descriptive** (the metadata of the eval task
       carries the resume context → a crash of the StepRunConsumer alone, broker alive,
       reconstructs `eval_ctx` from the metadata instead of silently discarding the verdict).
@@ -232,8 +229,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       deliverable: Keyword.get(opts, :deliverable),
       # Producer/judge classification of the PR-native step_run. Default = cap-profile catalogue.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
-      # (The rebound's anti-runaway bound is NO LONGER a hardcoded-default opt: it is DATA from the map
-      # `spec.max_rework_rounds`, read by GateEngine.rebound. End of the hidden global default.)
+      # (The rebound's anti-runaway bound is NOT an opt: it is DATA from the map
+      # `spec.max_rework_rounds`, read by GateEngine.rebound — never a hidden global default.)
       # Gatekeeper escalation seams (defaults = real broker/spawner/registry).
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
@@ -252,7 +249,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     Logger.info(
-      "StepRunConsumer: start (MULTI-PROJECT F-037 : repo/remote per-step-run) " <>
+      "StepRunConsumer: start (MULTI-PROJECT: repo/remote per-step-run) " <>
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
 
@@ -330,7 +327,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         state
       )
       when is_binary(corr) do
-    # ARCH INBOX DRAIN (serialize-via-forge, chantier brief-physique) : the arch RESOLVED an escalation
+    # ARCH INBOX DRAIN (serialize-via-forge): the arch RESOLVED an escalation
     # (its `submit_result`) → remove the `lcars-awaits-arch` label so the poller stops re-offering THIS one
     # and serves the NEXT awaits-arch issue (the forge is the arch's queue, one at a time). Correlated by the
     # work-item `metadata.awaits_arch` (+ repo/number), posted by `Poller.offer_arch_mandate`. Checked FIRST:
@@ -561,12 +558,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # (without repo: test/single-repo legacy) → we keep the config state (fallback). `remote` absent but
   # repo present → fallback remote (rare; a well-onboarded project carries both).
   #
-  # F-C052 (KEEP, D4): the config fallback co-exists with « the event is the source of truth » ON PURPOSE —
+  # F-037 — KEEP: the config fallback co-exists with "the event is the source of truth" ON PURPOSE —
   # it is a BACK-COMPAT valid-default for single-repo-legacy + bare-payload tests, NEVER hit on the prod
   # multi-project path (the enriched event always carries the repo). It does NOT mask a wrong repo: a
   # MALFORMED prod event (no repo) falls back to the multi-project config repo = `nil` → downstream forge
   # calls fail (nil repo), not a SILENT-wrong-repo. Removing it would break the legacy/test path for no
-  # prod gain → kept + documented (same shape as F-C143's valid-default-so-no-required).
+  # prod gain → kept + documented (a valid default, so never a required opt).
   defp step_run_state(payload, state) do
     case payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->
@@ -777,7 +774,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # pushed, or a search for a nonexistent producer PR). A config anomaly must NOT become a DIFFERENT business
   # behavior. We return an EXPLICIT `{:error, :cap_profile_unloadable}` — the producer/judge classification
   # consumes a CLOSED result and FAILS LOUD (the step_run is not completed under an unknown property; the
-  # issue stays locked, an operator sees the FAIL). The valid absent-`deliverable_mode` (F-C143) is `{:ok,
+  # issue stays locked, an operator sees the FAIL). The valid absent-`deliverable_mode` is `{:ok,
   # "payload"}` (a loadable profile that simply does not declare `git_native`) — DISTINCT from unloadable.
   @spec default_deliverable_mode(String.t()) ::
           {:ok, String.t()} | {:error, :cap_profile_unloadable}
@@ -900,7 +897,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # ============================================================
-  # Q2 DRAFT event producers (2026-07-09) — "at least it blinks"
+  # Q2 DRAFT event producers — "at least it blinks"
   #
   # Two dormant Cat-5 rails had a wired consumer (Starfleet.DriftMonitor) but NO producer. These emit a
   # REAL, honest signal from the forge-driven rail so the chain DriftMonitor → Cat5Escalator/CoordBackend →
@@ -919,8 +916,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
            :workflow,
            :"workflow_map.failed",
            [
-             # Traceability (acte3 vague E): correlate to the issue → DriftMonitor forwards this cid to
-             # Cat5 (was nil, breaking the incident↔mandate link on the max-severity rail).
+             # Traceability: correlate to the issue → DriftMonitor forwards this cid to
+             # Cat5 (a nil cid would break the incident↔mandate link on the max-severity rail).
              correlation_id: to_string(n),
              payload: %{
                "workflow_map" => name,
@@ -1007,7 +1004,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # The issue_id format "issue-<n>" has a SINGLE SOURCE (Fleet.Pilot.IssueId) — writer
-  # (StepDispatcher) and parser can no longer drift. `parse_issue_number` remains the public API
+  # (StepDispatcher) and parser cannot drift. `parse_issue_number` remains the public API
   # (called by `maybe_complete` + tested by step_run_consumer_test) but delegates.
   @doc false
   defdelegate parse_issue_number(issue_id), to: Fleet.Pilot.IssueId, as: :parse
@@ -1024,7 +1021,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       {:error, reason} ->
         Logger.warning(
           "StepRunConsumer: forge identity unresolvable (role=#{role}): #{inspect(reason)} — " <>
-            "allowed_emails=[] (F-01 will reject the push, fail-closed)"
+            "allowed_emails=[] (the deliverable identity gate will reject the push, fail-closed)"
         )
 
         []
