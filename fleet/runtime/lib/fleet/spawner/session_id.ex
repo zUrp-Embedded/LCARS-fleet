@@ -16,7 +16,7 @@ defmodule Fleet.Spawner.SessionId do
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
-                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999** (F-C064): `encode/4` REFUSES a
+                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/4` REFUSES a
                       repo outside it (function-clause), and the caller-side mint (`Pod.SessionMint`) refuses
                       it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
                       stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
@@ -46,7 +46,7 @@ defmodule Fleet.Spawner.SessionId do
   RFC4122 v4 UUID — the shape `encode/4` produces and the shape the vendor's `--session-id`/`--resume`
   accept. `{:ok, uuid}` | `{:error, :not_uuid_shaped}`.
 
-  BND-024: an explicit session id is an identity that gets exported to the launcher (`LCARS_POD_SESSION_ID`)
+  An explicit session id is an identity that gets exported to the launcher (`LCARS_POD_SESSION_ID`)
   and persisted for recovery/recall. Accepting ANY binary would make `opts[:session_id]` / a seed JSON an
   ALTERNATE authority for the deterministic-identity property (a non-reconstructible id passed to the
   vendor). The spawn path CASTS the seed through here — a present-but-non-UUID value is a caller/seed

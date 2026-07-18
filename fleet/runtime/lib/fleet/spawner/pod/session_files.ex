@@ -4,10 +4,9 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
 
   One knowledge, one authority: a pod's claude sessions live under
   `<pod_dir>/.claude/projects/<cwd-slug>/<uuid>.jsonl` (one directory per cwd-slug, one
-  append-only file per session — layout laid down by Claude Code, not by the fleet). Three consumers
-  used to glob this path each on their own side (UUID GC at re-spawn, liveness probe, seed-store
-  checkpoint); the glob now lives HERE, each caller keeps its own logic (rm / size /
-  content of the most-recent).
+  append-only file per session — layout laid down by Claude Code, not by the fleet). The three
+  consumers (UUID GC at re-spawn, liveness probe, seed-store checkpoint) share THIS single glob;
+  each keeps its own logic (rm / size / content of the most-recent).
 
   No state, no timer, no FS WRITE: only `Path.wildcard` + `File.stat` (that is what
   distinguishes it from `Pod.Paths`, a PURE-computation island with no FS read — a glob would have no place there).
