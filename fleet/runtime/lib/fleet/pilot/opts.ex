@@ -21,11 +21,10 @@ defmodule Fleet.Pilot.Opts do
   def maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   @doc """
-  Tague une erreur de résolution avec son étape (`{:error, reason}` → `{:error, {tag, reason}}`,
-  `{:ok, _}` passe inchangé). Partagé par les DEUX flux du dispatcher (issue + review) —
-  extrait de StepDispatcher (Z6c migration 2026-07-13 : vivait en capture `err_tagger` dans
-  le Ctx pour éviter un renvoi ReviewLifecycle→core ; ICI les deux flux le prennent à la
-  même source, l'unidirectionnalité tient sans capture).
+  Tags a resolution error with its stage (`{:error, reason}` → `{:error, {tag, reason}}`,
+  `{:ok, _}` passes unchanged). Shared by BOTH dispatcher flows (issue + review) — both
+  take it from this same source; the core→ReviewLifecycle uni-directionality holds
+  without a fn capture in the Ctx.
   """
   @spec tag_err({:ok, term()} | {:error, term()}, atom()) :: {:ok, term()} | {:error, term()}
   def tag_err({:ok, _} = ok, _tag), do: ok

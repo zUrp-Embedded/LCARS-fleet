@@ -3,7 +3,7 @@ defmodule Fleet.Pilot.WriteSpacing do
   Anti-tie gap BETWEEN two forge writes whose DISPLAY ORDER matters (Gitea dashboard/activity).
   Gitea timestamps events to the SECOND and, within a tied second, the feed displays actions in
   INSERTION order (oldest on top) inside an anti-chronological list — so any same-second pair
-  renders inverted ("logically before, displayed after"; observed live on several sequences).
+  renders inverted ("logically before, displayed after").
 
   A SINGLE primitive, shared consumers (all pilot-side, where the forge writes live):
   `StepRunCompleter` (verdict comment → route/stage; target-branch birth → content push) and

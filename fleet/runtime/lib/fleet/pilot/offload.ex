@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.Offload do
   (git push, forge writes) in a `Task.Supervisor` so as NOT to block the singleton's
   mailbox, with a fail-loud spawn failure (never silent).
 
-  The two consumers each carried their own copy of `offload_async/1` (same sequence
+  Without this module each consumer would carry its own copy of `offload_async/1` (same sequence
   `Task.Supervisor.start_child` → `{:ok, :offloaded}` | log error + `{:error, {:offload_failed, _}}`).
   The skeleton is factored here; each consumer KEEPS:
 

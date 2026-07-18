@@ -3,7 +3,7 @@ defmodule Fleet.Pilot.IssueId do
   SINGLE source of the step-mode `issue_id` format `"issue-<n>"`.
 
   `compose/1` and `parse/1` live here → the writer (`Fleet.Pilot.StepDispatcher`) and the parser
-  (`Fleet.Pilot.StepRunConsumer.parse_issue_number`, which delegates) can no longer drift apart from
+  (`Fleet.Pilot.StepRunConsumer.parse_issue_number`, which delegates) cannot drift apart from
   each other. The `issue_id` correlates a pod to its forge issue throughout the step_run (enqueue → end-of-step-run).
 
   **Last revised**: 2026-07-18

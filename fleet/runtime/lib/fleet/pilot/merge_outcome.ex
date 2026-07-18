@@ -1,15 +1,15 @@
 defmodule Fleet.Pilot.MergeOutcome do
   @moduledoc """
   STRUCTURAL classification of a merge failure — pure, from the forge's PR object (never from the
-  error message). A merge can fail for NATURALLY DISTINCT reasons that the code until now handled
-  in a catch-all "conflict" (→ dispatch the eng to rebase, IMPOSSIBLE because forge-blind,
-  → wall observed live 2026-07-07 on a mere policy window). We re-read the source of truth (the
-  PR's `state`/`merged`/`draft`/`mergeable` fields) and decide the REAL class.
+  error message). A merge can fail for NATURALLY DISTINCT reasons that a catch-all
+  "conflict" would conflate (→ dispatch the eng to rebase, IMPOSSIBLE because forge-blind —
+  a mere policy window would masquerade as a conflict and wall the PR). We re-read the source
+  of truth (the PR's `state`/`merged`/`draft`/`mergeable` fields) and decide the REAL class.
 
   Why structural and not by message: the Gitea error labels ("Does not have enough
   approvals", "Work in progress PRs cannot be merged", "Please try again later") are
   version-specific and fragile; the PR object's fields are the fact carried by the forge itself.
-  Verified on forge (2026-07-07): policy → `mergeable: true`; real git conflict → `mergeable: false` +
+  On the forge: policy → `mergeable: true`; real git conflict → `mergeable: false` +
   `draft: false`; draft → `draft: true` (+ `mergeable: false`, hence the test ORDER: draft BEFORE
   mergeable). This is the application of "make the false state unconstructible / read the single source" to the
   merge DECISION: the class is a TOTAL function of the fields, not a string heuristic.
