@@ -61,6 +61,8 @@ defmodule Fleet.TaskQueue.Server do
       call-site (`put_work_item/2`), and the `@active_states` vocabulary is SHARED with
       selection (`find_active`), supersession and the deadline guard — extracting it
       would force either a duplication of that authority, or a dedicated module for 20 LOC.
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

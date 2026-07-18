@@ -16,6 +16,8 @@ defmodule Fleet.Spawner.Pod.SessionMint do
 
   - `mint/2` — called by `initial_state` (via `recover_or_init`) when `opts[:session_id]` (explicit
     seed, e.g. arch recall) is not supplied — the seed ALWAYS PRIMES over the mint.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

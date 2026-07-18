@@ -43,6 +43,8 @@ defmodule Fleet.Workflow.PayloadGuard do
   The single public entry (`apply_files/2`) chains validation then write:
   writing without validating is impossible by construction (validation is not
   an optional exposed step).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

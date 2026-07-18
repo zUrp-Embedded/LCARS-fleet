@@ -66,6 +66,8 @@ defmodule Fleet.Starfleet do
   ## Vendor boundary
 
   N0 (vendor-agnostic, no direct SDK call).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

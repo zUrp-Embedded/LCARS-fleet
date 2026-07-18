@@ -1,9 +1,9 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
-**Date** : 2026-05-10
-**Dernière révision** : 2026-07-12
-**Statut** : modèle humain-lance (systemd retiré 2026-06-16)
-**Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
+**Date**: 2026-05-10
+**Last revised**: 2026-07-18
+**Status**: human-launched model (systemd removed 2026-06-16)
+**Referenced by**: `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
 Substrat de lancement Ring 0. **systemd est retiré** : la fleet ne tourne plus comme un service
 système `User=lcars`. Modèle (ADR-E, doctrine 2026-06-11) : **chaque humain lance SA fleet sous son

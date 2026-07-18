@@ -22,6 +22,8 @@ defmodule Fleet.Workflow.Git do
   Distinct identities: `author_*` reflects the worker (role) identity;
   `committer_*` reflects the system identity. Native git
   (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

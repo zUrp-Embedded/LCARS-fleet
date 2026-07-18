@@ -8,6 +8,8 @@ defmodule Fleet.Pilot.Opts do
   `:repo_id`) to inject an optional seam/parameter only when it is actually
   present. (A coupled MULTI-key set — e.g. `Spawn.maybe_put_route/2`, 2 keys —
   is not this idiom and stays with its authority.)
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

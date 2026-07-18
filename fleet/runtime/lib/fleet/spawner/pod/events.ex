@@ -29,6 +29,8 @@ defmodule Fleet.Spawner.Pod.Events do
   registry — injecting a failure on a lossy broadcast has no observable (the failure is
   swallowed there by contract). `event_bus/0` and `build_spawner_event/2` are internal (called ONLY
   by `required_broadcast/2`).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

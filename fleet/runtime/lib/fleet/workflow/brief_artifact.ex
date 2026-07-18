@@ -24,6 +24,8 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   `sha` = **sha256(contenu)** (pas le blob-sha git : le triplet in-toto est en sha256, et le pod le
   recalcule sur les bytes lus pour vérifier). Le commit git DURABILISE l'objet ; `sha` reste l'autorité.
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

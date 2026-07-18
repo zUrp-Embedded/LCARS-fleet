@@ -10,6 +10,8 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
     * `NoOpDispatcher` — test/fallback default (0 in-flight, immediate drain)
     * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
       aggregates the real in-flight + activates quiescence
+
+  **Last revised**: 2026-07-18
   """
   @callback refuse_new_jobs(opts :: keyword()) :: :ok
   @callback in_flight_count() :: non_neg_integer()

@@ -5,6 +5,8 @@ defmodule Fleet.CapProfile.Loader do
   Exposed to allow mock implementations in tests and a future second
   vendor (alternate schema or transport). The default implementation is
   `Fleet.CapProfile`.
+
+  **Last revised**: 2026-07-18
   """
 
   @callback load(role :: String.t()) ::

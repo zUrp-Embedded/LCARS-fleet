@@ -1,9 +1,9 @@
 # fleet_credentials
 
-**Date** : 2026-07-11
-**Dernière révision** : 2026-07-18
-**Statut** : actif — carte du module
-**Référencé par** : —
+**Date**: 2026-07-11
+**Last revised**: 2026-07-18
+**Status**: active — domain card
+**Referenced by**: —
 
 Pod primitives + vendor boundary. Credential + identity primitives for LCARS
 pods: the auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`,

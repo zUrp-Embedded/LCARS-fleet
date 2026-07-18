@@ -22,6 +22,8 @@ defmodule Fleet.Starfleet.Gatekeeper do
       ...>   Fleet.Starfleet.Gatekeeper.validate(
       ...>     ~s|{"decision":"halt","reason":"poc","details":{},"chain":["test"]}|
       ...>   )
+
+  **Last revised**: 2026-07-18
   """
 
   alias Fleet.Decision

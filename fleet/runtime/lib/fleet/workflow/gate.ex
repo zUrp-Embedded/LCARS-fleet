@@ -8,6 +8,8 @@ defmodule Fleet.Workflow.Gate do
       (`Pilot.StepRunConsumer`)
     * `:terminal` — declarative rules first, `:nontranchable` →
       same `{:dispatch_gatekeeper, info}` (gatekeeper, sole judge)
+
+  **Last revised**: 2026-07-18
   """
 
   @callback evaluate(step :: map(), outputs :: map(), ctx :: map()) ::

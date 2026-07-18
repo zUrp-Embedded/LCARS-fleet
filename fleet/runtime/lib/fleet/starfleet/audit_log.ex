@@ -23,6 +23,8 @@ defmodule Fleet.Starfleet.AuditLog do
   Distinct from the `fleet-audit.jsonl` audit log: specific Cat 5 forensics.
   (Before 2026-06-11: `/var/log/…` root:adm — vestigial tamper-resistance; the real
   audit = the multi-author forge.)
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

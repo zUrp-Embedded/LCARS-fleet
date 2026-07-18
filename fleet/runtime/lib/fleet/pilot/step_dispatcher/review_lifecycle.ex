@@ -42,6 +42,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   d'autorité — plus de captures dans le `Ctx` (l'ancien détour `route_reader`/`err_tagger`
   évitait un renvoi vers `StepDispatcher` ; les prendre à la source garde
   l'unidirectionnalité core→ReviewLifecycle→Spawn sans fn dans un struct, sans fork).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

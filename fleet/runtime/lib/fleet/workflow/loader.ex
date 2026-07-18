@@ -26,6 +26,8 @@ defmodule Fleet.Workflow.Loader do
   Tests use `load!(name, workflow_maps_root: dir)` to stay `async: true` (no
   coupling to the global Application env). `load!/1` remains for the prod call
   sites that can live with the Application env (read at boot).
+
+  **Last revised**: 2026-07-18
   """
 
   # The workflow_map carries a single envelope: `kind: WorkflowMap` / `metadata` / `spec`.

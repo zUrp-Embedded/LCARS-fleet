@@ -30,6 +30,8 @@ defmodule Fleet.Pilot.WorktreeSync do
   and its handling, and heals any previously missed alignment. We don't try to match a precise merge: we
   want "clone == latest `main`". The timing with the merges therefore has no functional importance —
   that's what makes the non-coalescence inconsequential (the lease already spaces out the merges of a same repo).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

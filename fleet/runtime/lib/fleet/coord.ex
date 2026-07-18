@@ -57,6 +57,8 @@ defmodule Fleet.Coord do
   ## Vendor boundary
 
   N0 (vendor-agnostic, no inference — pure declarative rule).
+
+  **Last revised**: 2026-07-18
   """
 
   # Strict canonical arities: the compat shims `handle_decision/1` and `handle_escalation/2` are removed.

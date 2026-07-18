@@ -35,6 +35,8 @@ defmodule Fleet.API.Rest do
 
   **Config writing was removed**: an active directive (cap-profiles, coord-policies,
   workflow_maps) is only modified via git/forge (the traced source of truth), never via a POST.
+
+  **Last revised**: 2026-07-18
   """
 
   use Plug.Router

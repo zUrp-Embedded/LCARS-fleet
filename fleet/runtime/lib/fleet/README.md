@@ -1,6 +1,9 @@
 # Fleet — root map
 
-**Date** : 2026-07-18
+**Date**: 2026-07-18
+**Last revised**: 2026-07-18
+**Status**: active — generated topology map + root pointers
+**Referenced by**: `CLAUDE.md`, `README.md`
 
 Map of the fleet's domains and their layered topology. **This file is a map, not a
 contract**: each domain owns its contract in its facade `@moduledoc` (`h Fleet.<Dom>`)

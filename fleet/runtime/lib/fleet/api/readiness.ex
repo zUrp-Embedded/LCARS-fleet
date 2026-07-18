@@ -29,6 +29,8 @@ defmodule Fleet.API.Readiness do
 
   Each probe is defensive: an exception is folded into `:degraded`
   rather than crashing the endpoint (resilient read-model).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

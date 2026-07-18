@@ -20,6 +20,8 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   Test-seam: `:subscribe` (default true) + `:spawner` backend
   (default `Fleet.Spawner`, overridable for a mock).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

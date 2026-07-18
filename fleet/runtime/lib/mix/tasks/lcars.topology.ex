@@ -18,6 +18,8 @@ defmodule Mix.Tasks.Lcars.Topology do
 
       mix lcars.topology            # regenerate the section in lib/fleet/README.md
       mix lcars.topology --check    # exit 1 if the committed map diverges (gate step)
+
+  **Last revised**: 2026-07-18
   """
 
   use Mix.Task

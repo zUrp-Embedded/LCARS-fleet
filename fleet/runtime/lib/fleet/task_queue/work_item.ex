@@ -22,6 +22,8 @@ defmodule Fleet.TaskQueue.WorkItem do
   `metadata` construites (ordinary-brief vs gate-eval-resume) restent différées comme disproportionnées —
   même arbitrage que `Fleet.CapProfile` : valeur-donnée partagée en lecture par tout le domaine
   pilot/taskqueue, une opacité `@opaque` japperait sur chaque lecteur légitime.
+
+  **Last revised**: 2026-07-18
   """
 
   @type state :: :pending | :assigned | :in_progress | :completed | :failed | :cleared

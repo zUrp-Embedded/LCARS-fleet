@@ -19,6 +19,8 @@ defmodule Fleet.CapProfile.DisallowedTools do
   (resolved via `:code.priv_dir(:lcars_fleet)` — the same file as before the
   extraction), read+parse cached once in `:persistent_term` (lazy-init; errors not
   cached — the bang re-raises on the next call).
+
+  **Last revised**: 2026-07-18
   """
 
   # Source struct (compile-dep): the fns pattern-match `%CapProfile{}` and the

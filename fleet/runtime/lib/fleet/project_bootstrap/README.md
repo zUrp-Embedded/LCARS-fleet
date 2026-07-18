@@ -1,9 +1,9 @@
 # fleet_project_bootstrap
 
-**Date** : 2026-07-13
-**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — provisioning du workspace projet d'un pod
-**Référencé par** : —
+**Date**: 2026-07-13
+**Last revised**: 2026-07-18
+**Status**: active — pod project-workspace provisioning
+**Referenced by**: —
 
 Pod-workspace provisioning (pod composition layer): clone/reset the project repo
 into the pod dir BEFORE spawn, so the agent boots on a vanilla workspace. Pure

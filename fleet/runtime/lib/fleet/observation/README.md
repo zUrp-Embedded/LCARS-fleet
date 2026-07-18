@@ -1,9 +1,9 @@
 # fleet_observation
 
-**Date** : 2026-06-10
-**Dernière révision** : 2026-07-18 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
-**Statut** : actif — observation deck read-only (surface)
-**Référencé par** : —
+**Date**: 2026-06-10
+**Last revised**: 2026-07-18
+**Status**: active — read-only observation deck (surface)
+**Referenced by**: —
 
 Read / observability frontier (surface): serves an LCARS observation deck on a per-human
 port. Read-only, no-auth, intra-release — it observes the fleet, mutates nothing (it depends

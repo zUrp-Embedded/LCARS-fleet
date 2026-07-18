@@ -1,9 +1,9 @@
 # fleet_coord
 
-**Date** : 2026-07-13
-**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — coordination déclarative verdict→action
-**Référencé par** : —
+**Date**: 2026-07-13
+**Last revised**: 2026-07-18
+**Status**: active — declarative verdict→action coordination
+**Referenced by**: —
 
 Declarative coordination (pod primitive): a `{verdict, reason} → {action, escalation_path}`
 routing table, no LLM reasoning.

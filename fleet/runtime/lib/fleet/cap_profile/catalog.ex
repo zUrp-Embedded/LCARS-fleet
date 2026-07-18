@@ -37,6 +37,8 @@ defmodule Fleet.CapProfile.Catalog do
   `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it
   via `Application.put_env/3`), default = the BUNDLED canon resolved by
   `:code.priv_dir(:lcars_fleet)` under `cap_profile/` (resolves in a release as in dev, without env).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

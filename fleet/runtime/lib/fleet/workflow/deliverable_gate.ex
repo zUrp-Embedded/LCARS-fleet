@@ -17,6 +17,8 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   The system-chosen target branch and the forge network isolation are outside this module
   (resp. `Fleet.Workflow.Deliverable.publish` and the bwrap containment).
+
+  **Last revised**: 2026-07-18
   """
 
   @git_timeout_ms 15_000

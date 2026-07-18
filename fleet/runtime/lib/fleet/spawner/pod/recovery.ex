@@ -31,6 +31,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   - `first_continue_for/1` — called by `init/1` (resume point → starting gen_statem state via
     `continue_to_phase/1`).
   - `phase_from_string/1` — called by `recover_or_init` AND `clear_terminal_snapshot`.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

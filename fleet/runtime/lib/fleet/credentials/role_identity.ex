@@ -11,6 +11,8 @@ defmodule Fleet.Credentials.RoleIdentity do
   `RoleToken` stays policy-NEUTRAL (it reports `nil` + a warning); THIS module carries the fail-closed
   policy, shared by both consumers — a single source, no divergence (the former split was pilot fail-OPEN
   vs mcp fail-CLOSED on the very same `nil`).
+
+  **Last revised**: 2026-07-18
   """
   alias Fleet.Credentials.RoleToken
 

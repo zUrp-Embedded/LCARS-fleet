@@ -43,6 +43,8 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   The per-pod dir + the short filename keep the path under the `sun_path` limit
   (108 bytes) even for a long `pod_id` — same structure as the pods' tmux
   socket-dir (`<base>/<pod_id>/pod.sock`).
+
+  **Last revised**: 2026-07-18
   """
 
   use DynamicSupervisor

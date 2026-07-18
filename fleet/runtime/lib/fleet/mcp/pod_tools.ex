@@ -36,6 +36,8 @@ defmodule Fleet.MCP.PodTools do
   The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
   `fleet.events` (consumed by `fleet_spawner`/`fleet_coord`) — this module no longer emits
   a string-topic event (`pod.result_submitted` removed).
+
+  **Last revised**: 2026-07-18
   """
 
   use ExMCP.Server

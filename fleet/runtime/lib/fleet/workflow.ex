@@ -7,6 +7,8 @@ defmodule Fleet.Workflow do
   @moduledoc : `Fleet.Workflow.Loader`, `Fleet.Workflow.Gates`, `Fleet.Workflow.
   Deliverable`, `Fleet.Workflow.DeliverableGate`, `Fleet.Workflow.Gatekeeper`,
   `Fleet.Workflow.GateDecision` (vocabulaire décisions).
+
+  **Last revised**: 2026-07-18
   """
 
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella

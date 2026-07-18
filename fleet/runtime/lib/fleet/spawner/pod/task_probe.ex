@@ -34,6 +34,8 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   - `brief_pulled?/1` — reduced to the boolean passed to `Kick.acked?/3` by the handler.
   - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief` (`Pod.Brief`).
   - `brief_slot/1` — enqueue-by-slot decision (`Pod.Brief`, 3-state `:free|:occupied|:unknown`).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

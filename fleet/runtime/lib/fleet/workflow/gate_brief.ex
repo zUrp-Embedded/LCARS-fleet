@@ -8,6 +8,8 @@ defmodule Fleet.Workflow.GateBrief do
   §"Brief gatekeeper auto-généré" (invocation context + deliverable to judge +
   question to decide + deterministic options + output contract). The structured
   data also go into `task.metadata`; this brief is the human-readable form.
+
+  **Last revised**: 2026-07-18
   """
 
   # Decision vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile time, so

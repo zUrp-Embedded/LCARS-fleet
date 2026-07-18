@@ -16,6 +16,8 @@ defmodule Fleet.Pilot.WakeRecovery do
   system repairs.
 
   Seams (functions) for testing; defaults = the real fns. `wake/3` API unchanged for the callers.
+
+  **Last revised**: 2026-07-18
   """
   require Logger
 

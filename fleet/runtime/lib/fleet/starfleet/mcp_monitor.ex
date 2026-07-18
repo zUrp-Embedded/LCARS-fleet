@@ -40,6 +40,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
     * `:fleet_starfleet, :mcp_monitor_target` — target (default
       `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
       atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

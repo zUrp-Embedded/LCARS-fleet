@@ -19,6 +19,8 @@ defmodule Fleet.EventRouter.Listener do
 
   Zero new edge: `fleet_event_router` already carries the `plug_cowboy` dep (webhook), and the
   two consumer apps (`fleet_api`, `fleet_observation`) already depend on event_router.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

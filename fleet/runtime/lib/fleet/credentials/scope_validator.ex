@@ -26,6 +26,8 @@ defmodule Fleet.Credentials.ScopeValidator do
     * `:ok` — scopes sufficient (`required \\\\ oauth_scopes` empty)
     * `{:error, {:insufficient_scopes, missing}}` — list of the
       missing scopes (order preserved for human reporting)
+
+  **Last revised**: 2026-07-18
   """
 
   @scopes_default ["user:inference", "user:sessions:claude_code"]

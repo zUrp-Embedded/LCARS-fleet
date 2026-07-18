@@ -31,6 +31,8 @@ defmodule Fleet.Spawner.SessionId do
   process, zero IO, zero catalogue): a TOTAL encoder over valid inputs — no role refusal (starfleet, an
   unknown role: those decisions live at the spawn level, not here), no `{:error, _}`. An out-of-bounds
   input = caller bug → function-clause/raise.
+
+  **Last revised**: 2026-07-18
   """
   import Bitwise
 

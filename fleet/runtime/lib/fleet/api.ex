@@ -67,5 +67,7 @@ defmodule Fleet.API do
 
   N0 (vendor-agnostic, no inference — orchestration via the PubSub bus;
   no vendor inference in this layer).
+
+  **Last revised**: 2026-07-18
   """
 end

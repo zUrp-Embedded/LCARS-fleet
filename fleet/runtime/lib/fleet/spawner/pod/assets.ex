@@ -18,6 +18,8 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/0`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
+
+  **Last revised**: 2026-07-18
   """
 
   alias Fleet.Spawner.Pod.Fs

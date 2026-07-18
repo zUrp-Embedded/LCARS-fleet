@@ -21,6 +21,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `sandbox_home/2` — intra-pod home. Public because also passed to `McpProvision` (`:projecting` state).
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
     `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

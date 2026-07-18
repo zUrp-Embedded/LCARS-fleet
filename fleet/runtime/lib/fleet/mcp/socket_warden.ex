@@ -33,6 +33,8 @@ defmodule Fleet.MCP.SocketWarden do
 
   Boot gate: `:fleet_mcp, :start_socket_warden` (default true prod, false test — hermeticity: the
   tests drive it with explicit seams).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

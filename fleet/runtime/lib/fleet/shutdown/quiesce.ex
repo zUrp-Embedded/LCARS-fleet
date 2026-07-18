@@ -31,6 +31,8 @@ defmodule Fleet.Shutdown.Quiesce do
   The **primitive** (the flag) therefore lives here; the **policy** (when to quiesce, the
   in-flight aggregator) stays in `Fleet.Starfleet`. Iron Law: no process, just
   `:persistent_term`.
+
+  **Last revised**: 2026-07-18
   """
 
   @key {__MODULE__, :quiescing}

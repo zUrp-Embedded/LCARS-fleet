@@ -39,6 +39,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` and
   `default_response_timeout_sec/1` are internal (called ONLY by the functions above).
+
+  **Last revised**: 2026-07-18
   """
 
   # ============================================================

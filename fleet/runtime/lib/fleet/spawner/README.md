@@ -1,9 +1,9 @@
 # Fleet.Spawner
 
-**Date** : 2026-07-11
-**Dernière révision** : 2026-07-18
-**Statut** : actif — carte du domaine spawner (contrats dans les `@moduledoc`)
-**Référencé par** : `mix.exs`, `_remediation/` (F-C040)
+**Date**: 2026-07-11
+**Last revised**: 2026-07-18
+**Status**: active — spawner domain card (contracts live in the `@moduledoc`s)
+**Referenced by**: `mix.exs`
 
 Pod lifecycle (pod composition layer): spawns, watches and terminates ephemeral
 agent pods. Each pod is a `gen_statem` (`Fleet.Spawner.Pod`) whose STATES are

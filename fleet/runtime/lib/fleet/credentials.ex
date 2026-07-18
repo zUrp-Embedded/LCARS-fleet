@@ -6,6 +6,8 @@ defmodule Fleet.Credentials do
   @moduledoc des modules : `Fleet.Credentials.Human` (identité OS fail-loud),
   `Fleet.Credentials.ForgeIdentity` (catalogue), `Fleet.Credentials.RoleToken`,
   `Fleet.Credentials.Gate` (validate scope+plan au spawn), `Fleet.Credentials.Shell`.
+
+  **Last revised**: 2026-07-18
   """
 
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella

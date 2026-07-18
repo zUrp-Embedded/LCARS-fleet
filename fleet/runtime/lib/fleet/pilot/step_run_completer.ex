@@ -53,6 +53,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   Intent routing (`route/3` ×5) stays HERE: it calls back the public primitives
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

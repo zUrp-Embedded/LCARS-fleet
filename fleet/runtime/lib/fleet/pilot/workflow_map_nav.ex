@@ -28,6 +28,8 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   `Loader` output: `%{"name" => ..., "steps" => %{name => %{"role", "needs", "gate"?, ...}}}`.
   String keys (the Loader normalizes v1/v2.5 to this form). `WorkflowMapNav` does not load —
   the caller passes the already-loaded workflow_map.
+
+  **Last revised**: 2026-07-18
   """
 
   @type workflow_map :: %{required(String.t()) => any()}

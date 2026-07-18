@@ -27,6 +27,8 @@ defmodule Fleet.Pilot.Application do
   disappeared `auto_dispatcher.ex` / `dispatcher.ex` / `pipeline_invoker.ex`, the legacy `do_poll` mode
   of the `Poller`, and the `guard_no_duplicate_poller!` guard (no more possible collision: a single Poller).
   The RAM engine (`fleet_workflow`) falls downstream (`start_pipeline` orphaned).
+
+  **Last revised**: 2026-07-18
   """
 
   use Supervisor

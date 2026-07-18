@@ -39,6 +39,8 @@ defmodule Fleet.TaskQueue.Broadcast do
   reach of `safe_emit`. The `required/3` path is in any case DELIBERATELY outside
   `safe_emit` (cf. its moduledoc: it flattens every failure into `:ok`, indistinguishable from a
   success) — same exclusion as `Fleet.Spawner.Pod.Events.required_broadcast/2`.
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

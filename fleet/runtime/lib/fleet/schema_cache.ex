@@ -42,6 +42,8 @@ defmodule Fleet.SchemaCache do
   `CapProfile.DisallowedTools.load_baseline_git_ops_denied!/0`): we do not add an
   intra-R0 edge for ten lines. If the edge appears one day for another reason,
   migrate these two sites.
+
+  **Last revised**: 2026-07-18
   """
 
   # Namespaced miss sentinel: a bare `nil` or `:miss` would be legitimate cacheable

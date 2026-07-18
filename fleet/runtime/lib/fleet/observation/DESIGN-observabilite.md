@@ -1,10 +1,10 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
-**Date** : 2026-06-10
-**Dernière révision** : 2026-07-18
-**Statut** : ⚠ HISTORIQUE / exploratoire — PAS l'autorité courante (cf. bannière ci-dessous).
-**Référencé par** : `lib/fleet/observation/README.md`
-**Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
+**Date**: 2026-06-10
+**Last revised**: 2026-07-18
+**Status**: ⚠ HISTORICAL / exploratory — NOT the current authority (see banner below).
+**Referenced by**: `lib/fleet/observation/README.md`
+**Author**: correction agent (post-remediation mission)
 
 ---
 

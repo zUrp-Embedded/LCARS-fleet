@@ -1,9 +1,9 @@
 # fleet_pilot
 
-**Date** : 2026-05-26
-**Dernière révision** : 2026-07-18 (README → carte §2 : index-qui-pointe, contrat aux `@moduledoc` EN)
-**Statut** : actif — driver forge (steering, client du core)
-**Référencé par** : —
+**Date**: 2026-05-26
+**Last revised**: 2026-07-18
+**Status**: active — forge driver (steering, client of the core)
+**Referenced by**: —
 
 Self-orchestration of Gitea issues (forge driver, `:step_dispatch?` off by default).
 A **client of the core**, not the core: the forge IS the state machine (the route label engraved

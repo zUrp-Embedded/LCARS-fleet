@@ -24,6 +24,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   canon list is NOT copied: it is evaluated at compile from the single authority
   `Fleet.Workflow.GateDecision` (this module recompiles if the canon list changes). Fail-closed:
   absent/unknown decision → `"halt_invalid"` (never `"continue"` on a malformed verdict).
+
+  **Last revised**: 2026-07-18
   """
 
   # Canon vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile → literal list,

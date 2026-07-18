@@ -33,5 +33,7 @@ defmodule Fleet.EventRouter do
     * `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP HMAC SHA256
     * `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)
     * `Fleet.EventRouter.Catalog` — loads the events.yaml registry at boot (populates `authorized_event_types`)
+
+  **Last revised**: 2026-07-18
   """
 end

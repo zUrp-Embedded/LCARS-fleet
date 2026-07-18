@@ -9,6 +9,8 @@ defmodule Fleet.MCP do
   (frontière wire — projection MCP-wire `inputSchema`, cicatrice F1), `Fleet.MCP.PodTools`.
   NB : la dep vers Fleet.Spawner régularise l'appel RUNTIME de PodTools.Delegation
   (pod_info — descendant, ex-seam apply désormais déclaré).
+
+  **Last revised**: 2026-07-18
   """
 
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella

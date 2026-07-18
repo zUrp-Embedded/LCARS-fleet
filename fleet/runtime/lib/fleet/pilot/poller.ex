@@ -55,6 +55,8 @@ defmodule Fleet.Pilot.Poller do
   = RAM Executor, via the `AutoDispatcher` state) was **removed** together with the legacy rail
   (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). The `Routing` module itself was removed
   as dead code. Only step mode remains; the RAM engine falls downstream.
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

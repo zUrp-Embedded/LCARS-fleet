@@ -1,9 +1,9 @@
 # fleet_workflow
 
-**Date** : 2026-07-11
-**Dernière révision** : 2026-07-18
-**Statut** : actif — carte du module (les contrats vivent dans les `@moduledoc`)
-**Référencé par** : —
+**Date**: 2026-07-11
+**Last revised**: 2026-07-18
+**Status**: active — domain card (contracts live in the `@moduledoc`s)
+**Referenced by**: —
 
 workflow_map / gate / delivery lib (work layer, near-pure): parse+validate workflow-map
 YAML, evaluate gates, publish deliverables. No RAM engine — the supervisor is empty

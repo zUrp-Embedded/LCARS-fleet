@@ -27,6 +27,8 @@ defmodule Fleet.Coord.Application do
   `String.to_existing_atom` at boot. (Any atom list placed here would be
   dead vocab, disjoint from what is emitted and never broadcast, like the old
   `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` with 0 callers.)
+
+  **Last revised**: 2026-07-18
   """
 
   use Supervisor

@@ -26,6 +26,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
       `ForgeProtocol`).
     * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
       adopt the behaviour (the compiler checks conformance, anti lying-stub).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc "Creates an issue → `{:ok, number}` (author/assignee/token passed in `opts`)."

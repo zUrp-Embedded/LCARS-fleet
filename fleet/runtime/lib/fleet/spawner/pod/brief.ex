@@ -21,6 +21,8 @@ defmodule Fleet.Spawner.Pod.Brief do
 
   - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

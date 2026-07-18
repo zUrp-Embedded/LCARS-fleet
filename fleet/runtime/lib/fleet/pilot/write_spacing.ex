@@ -15,6 +15,8 @@ defmodule Fleet.Pilot.WriteSpacing do
   on both the push and the API channel): the twin tie is accepted everywhere (both lines tell
   the same fact), while the CONTENT push is kept OUT of it via API pre-birth + gap (cf.
   `ForgeClient.create_branch/4`). Same acceptance for the merge transaction's own pair.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

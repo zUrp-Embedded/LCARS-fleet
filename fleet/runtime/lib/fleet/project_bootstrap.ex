@@ -6,6 +6,8 @@ defmodule Fleet.ProjectBootstrap do
   Créée au collapse (Z4, 2026-07-12) comme ANCRE de la boundary ; contrat dans les
   @moduledoc : `Fleet.ProjectBootstrap.Phase` (+`Phase.Clone` : clone_or_skip,
   reset_in_place fail-closed).
+
+  **Last revised**: 2026-07-18
   """
 
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella

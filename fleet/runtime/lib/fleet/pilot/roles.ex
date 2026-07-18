@@ -7,6 +7,8 @@ defmodule Fleet.Pilot.Roles do
   The three roles live HERE: producer (`producer_role/1`), jury (`reviewer_roles/1`) and gatekeeper
   (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
   (no more `engineer`/`gatekeeper` default rewritten at the caller).
+
+  **Last revised**: 2026-07-18
   """
 
   @default_producer_role "engineer"

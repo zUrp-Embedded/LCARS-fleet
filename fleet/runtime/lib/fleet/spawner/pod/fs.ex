@@ -13,6 +13,8 @@ defmodule Fleet.Spawner.Pod.Fs do
   by `Fleet.Spawner.Pod` (transition chain) and its extraction island
   `Fleet.Spawner.Pod.McpProvision` (provisioning of `.mcp-fleet.json`) — one primitive,
   a single site.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

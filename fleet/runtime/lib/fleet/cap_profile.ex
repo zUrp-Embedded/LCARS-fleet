@@ -48,6 +48,8 @@ defmodule Fleet.CapProfile do
   live in `Fleet.CapProfile.CanonicalJson` (`sha256/1` here delegates). The
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
+
+  **Last revised**: 2026-07-18
   """
 
   @behaviour Fleet.CapProfile.Loader

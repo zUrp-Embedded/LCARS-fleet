@@ -14,6 +14,8 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   Templates « standard, state of the art — adjustable »: PURE generators (name+pitch →
   markdown), the only effect is `write_all` (mkdir_p + write, fail-loud per file).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

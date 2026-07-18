@@ -37,6 +37,8 @@ defmodule Fleet.Starfleet.MCPWatcher do
 
   GenServer = justified: recursive timer + minimal shared state (last_check
   + last_status). The check itself is NOT on the hot path (weekly).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

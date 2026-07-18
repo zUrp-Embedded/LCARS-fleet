@@ -10,6 +10,8 @@ defmodule Fleet.SPBuilder.RepoSections do
   human sections with no value for a pod).
 
   **Pure** functions (FS read only for `read/1`, no process).
+
+  **Last revised**: 2026-07-18
   """
 
   # Closed list of the sections carried over into the pod. The `\b` bounds the name on a

@@ -31,6 +31,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     * `{:error, reason, _}` → `result` = `%{"content" => [text], "isError" => true}`
       (MCP convention: a tool error is a result with `isError`, not a protocol
       error — the pod reads it as tool text).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

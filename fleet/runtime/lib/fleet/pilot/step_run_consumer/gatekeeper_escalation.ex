@@ -32,6 +32,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   `dispatch/7 :: {:ok, corr} | {:error, reason}` — `gate_decide` consumes this contract as-is:
   `{:ok, corr}` → legitimate escalation (`{:escalate, corr, eval_ctx}`); `{:error, reason}` →
   fail-loud (`{:error, {:gatekeeper_dispatch, reason}}`, never a silent pass).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

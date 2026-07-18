@@ -49,6 +49,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Labels` (single source of the
   lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id) + the
   injected seams (spawner/task_queue/forge).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

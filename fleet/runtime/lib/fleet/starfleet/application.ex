@@ -39,6 +39,8 @@ defmodule Fleet.Starfleet.Application do
 
   `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` — each child is independent;
   the widened restart window (vs OTP's 3/5) is a deliberate choice for blips.
+
+  **Last revised**: 2026-07-18
   """
 
   use Supervisor

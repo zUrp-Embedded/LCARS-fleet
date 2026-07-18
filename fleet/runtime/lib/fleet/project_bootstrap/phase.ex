@@ -20,6 +20,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
   BindCredentials / PrepareMountBinds — have been REMOVED: dead path never wired in
   prod, the corresponding concerns are handled elsewhere — CLAUDE.md by `do_project`
   on the pod.ex side, mounts/creds by `bwrap_launch.sh`.)
+
+  **Last revised**: 2026-07-18
   """
 
   defmodule Clone do

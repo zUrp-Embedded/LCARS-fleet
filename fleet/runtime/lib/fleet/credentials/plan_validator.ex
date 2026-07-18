@@ -21,6 +21,8 @@ defmodule Fleet.Credentials.PlanValidator do
 
     * `:ok` — recognized paid subscription
     * `{:error, {:invalid_plan, type}}` — non-paid/unknown plan (type kept for reporting)
+
+  **Last revised**: 2026-07-18
   """
 
   # Recognized paid plans (source: Claude Code). MUST stay all-lowercase: `validate/1` downcases the

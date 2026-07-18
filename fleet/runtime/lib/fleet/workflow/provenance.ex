@@ -20,6 +20,8 @@ defmodule Fleet.Workflow.Provenance do
   **Tolérant au dégradé** : si `brief_sha` manque (brief non matérialisé, cf. `BriefArtifact`), le Statement
   omet le digest du configSource mais grave quand même input→output (2/3 vaut mieux que 0). Idempotent par
   content-address (même `livrable_sha` = même fichier = no-op).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

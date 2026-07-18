@@ -12,6 +12,8 @@ defmodule Fleet.Spawner.Supervisor do
   it is effectively inert as long as all children are `:temporary`.
   Resurrection is a **deliberate** act of the boot-orchestrator from the
   desired-state (cap-profile), not an OTP restart: it is the only relaunch path.
+
+  **Last revised**: 2026-07-18
   """
 
   use DynamicSupervisor

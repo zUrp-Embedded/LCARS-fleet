@@ -21,6 +21,8 @@ defmodule Fleet.Spawner.LaunchBackend do
   `hasCompletedOnboarding: true` + the 3 remote-control keys
   (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`) — otherwise the RC dialog blocks
   the pod at boot. The `projects` key must be the agent's real CWD (`LCARS_POD_CWD`).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

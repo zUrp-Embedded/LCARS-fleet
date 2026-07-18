@@ -35,6 +35,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps → compile error).
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
+
+  **Last revised**: 2026-07-18
   """
 
   alias Fleet.Pilot.ForgeClient

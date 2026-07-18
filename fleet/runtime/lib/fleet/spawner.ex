@@ -68,6 +68,8 @@ defmodule Fleet.Spawner do
     * `{:error, {:already_started, pid}}` — pod_id collision
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
+
+  **Last revised**: 2026-07-18
   """
 
   alias Fleet.Spawner.Pod

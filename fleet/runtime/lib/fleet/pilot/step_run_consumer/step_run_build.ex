@@ -29,6 +29,8 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   `Seams` (narrow struct) carries the only 6 authorized reads — not the consumer's
   state. The producer/judge classification delegates to the single authority
   `GateEngine.producer?/2` (same criterion as the gate decision).
+
+  **Last revised**: 2026-07-18
   """
 
   alias Fleet.Pilot.StepRunConsumer.GateEngine

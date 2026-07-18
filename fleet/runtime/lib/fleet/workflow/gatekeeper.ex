@@ -35,6 +35,8 @@ defmodule Fleet.Workflow.Gatekeeper do
   `ensure_booted/1` only boots if `:fleet_workflow, :gatekeeper_autoboot` is
   true (default `true`; `config/test.exs` sets it to `false` for hermeticity —
   workflow tests do not spawn a gatekeeper unless explicitly opted in).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

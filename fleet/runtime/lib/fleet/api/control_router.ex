@@ -28,6 +28,8 @@ defmodule Fleet.API.ControlRouter do
   pod_id, loadable cap-profile, host-native refused, one-shot brief R18). This router only maps
   each verdict to an HTTP status + JSON body. A refusal = NOTHING was broadcast (admission
   precedes emission by construction). Quiescing (shutdown drain) → 503.
+
+  **Last revised**: 2026-07-18
   """
 
   use Plug.Router

@@ -23,6 +23,8 @@ defmodule Fleet.Layout do
   Consumer TEST seams (e.g. `seed_store_root`) stay: their DEFAULT derives from here.
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
+
+  **Last revised**: 2026-07-18
   """
 
   @projects_root "/home/projects"

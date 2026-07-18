@@ -1,9 +1,9 @@
 # fleet_task_queue
 
-**Date** : 2026-07-13
-**Dernière révision** : 2026-07-18 (en-tête déclaratif LCARS ajouté — uniformisation acte3 vague A ; carte co-localisée `lib/fleet/<dom>/` depuis le collapse)
-**Statut** : actif — broker de mandats get_work_item/submit_result
-**Référencé par** : —
+**Date**: 2026-07-13
+**Last revised**: 2026-07-18
+**Status**: active — get_work_item/submit_result work-item broker
+**Referenced by**: —
 
 Cross-pod orchestration broker (pod primitive): a single-writer GenServer that distributes work
 items to pods and collects their results, event-driven completion. Ephemeral in prod — the

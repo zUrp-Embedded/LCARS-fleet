@@ -74,6 +74,8 @@ defmodule Fleet.Credentials.ForgeIdentity do
   the human (the system steps aside too: `author := committer` on `system_email()` commits). The
   rewrite itself lives outside Elixir (`etc/publish-to-github.sh`, `git filter-repo`): this module
   stays the authority for the LOCAL forge identities, not the executor of the publish transformation.
+
+  **Last revised**: 2026-07-18
   """
 
   @role_email_domain "lcars.local"

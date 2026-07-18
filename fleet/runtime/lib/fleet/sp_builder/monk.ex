@@ -21,6 +21,8 @@ defmodule Fleet.SPBuilder.Monk do
   byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent
   `cap-profiles/monks/` and fail — this is the DORMANT-by-design state (kept, documented) until an explicit
   thaw wires the frozen tree back as the registry root. See also the LEGACY banner in `runtime/priv/canon/README.md`.
+
+  **Last revised**: 2026-07-18
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}

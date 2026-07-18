@@ -19,6 +19,8 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     * `:token` — Gitea token. Read from `:token_file` if absent.
     * `:token_file` — file path (default `~/.gitea_token`, v1.5 convention).
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

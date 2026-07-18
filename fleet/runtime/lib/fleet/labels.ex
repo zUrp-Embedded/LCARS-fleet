@@ -24,6 +24,8 @@ defmodule Fleet.Labels do
   unscoped), and the workflow_map POSITION as SCOPED labels `wfmap/<map>` + `stage/<step>` (WS2: the state
   lives in the label, native Gitea mutex `exclusive:true` — no longer in a route comment). `lcars-dispatched`
   (a legacy poller's lock) has been removed. Outside these families, a label does not exist.
+
+  **Last revised**: 2026-07-18
   """
 
   @in_flight "lcars-in-flight"

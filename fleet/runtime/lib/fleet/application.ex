@@ -57,6 +57,8 @@ defmodule Fleet.Application do
   subscriptions Bus mortes) serait une panne success-shaped, la classe exacte que
   l'audit 2026-07-09 a chassée. Adoucissement éventuel (`:rest_for_one` gracieux) =
   arbitrage user A-01, PAS un défaut.
+
+  **Last revised**: 2026-07-18
   """
 
   use Application

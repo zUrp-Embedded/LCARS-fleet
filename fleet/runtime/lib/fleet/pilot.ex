@@ -42,6 +42,8 @@ defmodule Fleet.Pilot do
   rail de complétion. Sortie HTTP forge UNIQUE : `ForgeClient` (+`Transport`).
 
   ## Entrées opérateur (déléguées ici — la façade est le contrat)
+
+  **Last revised**: 2026-07-18
   """
 
   # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella

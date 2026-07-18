@@ -4,6 +4,8 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   `Fleet.Pilot.ForgeClient`. Self-contained concern (neither seam nor coupling to the issues/PR core):
   callers use it directly (`Fleet.Pilot.IncidentRegistry`, which injects them as seams
   `:get_file_fun`/`:put_file_fun`). **The SYSTEM publishes** — forge-blind: the pod never pushes.
+
+  **Last revised**: 2026-07-18
   """
 
   import Fleet.Pilot.ForgeClient.Transport,

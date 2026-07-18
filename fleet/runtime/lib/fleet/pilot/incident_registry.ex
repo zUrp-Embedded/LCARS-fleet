@@ -23,6 +23,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   The sysadmin ESCALATION (opening the `error_system` issue) lives in the sub-module
   `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
   façade (defdelegate) for WakeRecovery and the failure consumers.
+
+  **Last revised**: 2026-07-18
   """
   use GenServer
   require Logger

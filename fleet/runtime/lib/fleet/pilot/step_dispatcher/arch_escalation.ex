@@ -30,6 +30,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   the `_to_arch` suffix is now carried by the module name — `ArchEscalation.escalate_rework`
   reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
   describes the escalation).
+
+  **Last revised**: 2026-07-18
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in

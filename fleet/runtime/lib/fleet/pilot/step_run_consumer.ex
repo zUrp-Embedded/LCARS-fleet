@@ -95,6 +95,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       seams/tests unchanged). Prod (`application.ex`) injects `&offload_async/1` → the completion (git push
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

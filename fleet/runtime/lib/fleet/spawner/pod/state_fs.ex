@@ -33,6 +33,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
     delegating wrapper on the `Pod` side).
   - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
     by the `PodWarden` (no more defdelegate on the `Pod` side).
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

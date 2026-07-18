@@ -14,6 +14,8 @@ defmodule Fleet.Credentials.Gate do
   Pure transformer: file read + delegation, no state, no process. The claudeDir path
   is resolved by the caller (per-human) and passed as an argument — this module does
   ONLY the validation, never the path resolution.
+
+  **Last revised**: 2026-07-18
   """
 
   @doc """

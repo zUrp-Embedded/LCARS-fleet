@@ -24,6 +24,8 @@ defmodule Fleet.MCP.Server do
 
   **GenServer with no business state**: the process exists to be the supervised
   child whose `start_link` runs the guard at boot (idle thereafter).
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

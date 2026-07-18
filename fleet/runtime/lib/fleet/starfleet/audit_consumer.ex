@@ -21,6 +21,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
   → tests instantiate without the global subscribe.
+
+  **Last revised**: 2026-07-18
   """
 
   use GenServer

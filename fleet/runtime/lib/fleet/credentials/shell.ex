@@ -88,6 +88,8 @@ defmodule Fleet.Credentials.Shell do
       {:error, {:exit, reason}}         # binary not found / impossible to launch ({:enoent, cmd})
 
   The caller MUST match: an `{:error, {:timeout, _}}` is not a silent success.
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger
