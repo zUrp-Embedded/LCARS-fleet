@@ -1,11 +1,11 @@
-# fleet_credentials
+# Fleet.Credentials — domain card
 
 **Date**: 2026-07-11
 **Last revised**: 2026-07-18
 **Status**: active — domain card
 **Referenced by**: —
 
-Pod primitives + vendor boundary. Credential + identity primitives for LCARS
+Pod primitives. Credential + identity primitives for LCARS
 pods: the auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`,
 per-human, shared across a UID's pods) gated at the spawn-boundary — LCARS stores and
 refreshes nothing (delegated to the `claude` binary). Also the single source of the
@@ -14,8 +14,10 @@ runtime human, the forge git identity/tokens, and the bounded system-side git wr
 **This file is a map, not the contract.** Each module owns its contract in its own
 `@moduledoc` — read those (`h Fleet.Credentials.Gate` in IEx, or `lib/`). Nothing here is
 restated, only pointed at. The auth-model doctrine (why native claudeDir, the Anthropic
-credential precedence, the `NEVER` invariants) is canonical in `adr-f`/`adr-g`/`adr-e`, the
-reverse OAuth notes, and the spawner's `Fleet.Spawner.Pod.LaunchEnv` — this app does not re-own it.
+credential precedence, the `NEVER` invariants) is canonical in the doc lineage
+(`beyond_#4/01_architecture/adr-f-credentials-anthropic-natif.md` and
+`adr-g-launch-subscription.md`) and applied by the spawner's `Fleet.Spawner.Pod.LaunchEnv`
+— this domain does not re-own it.
 
 ## Modules
 - `Fleet.Credentials.Gate` — the single spawn-boundary entry point (`validate/2` = scope then plan); where the claudeDir read physically lives; consumed by `Fleet.Spawner.Pod` (`LaunchEnv`)
@@ -26,11 +28,12 @@ reverse OAuth notes, and the spawner's `Fleet.Spawner.Pod.LaunchEnv` — this ap
 - `Fleet.Credentials.ForgeIdentity` — deliverable git identity (author = human, role = verified `Co-authored-by` trailer); plus the commit-identity gate's `allowed_emails/2` and the system/role identity accessors
 - `Fleet.Credentials.Human` — the SINGLE source of "the fleet's human" (`id -un`)
 - `Fleet.Credentials.RoleToken` — `token/1`: forge token of a role's account (reports `nil` if absent/empty; policy-neutral, callers fail-closed via `RoleIdentity`)
+- `Fleet.Credentials.RoleIdentity` — smart-constructor "act as role X on the forge": unbuildable without a verified token (the fail-closed policy over `RoleToken`)
 
-Pure library app — no supervisor / `mod:`.
+Pure library domain — no supervisor.
 
 ## Config & deps
-- Knob `:forge_auth` (`%{url_prefix, token}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env.
-- Knob `:role_tokens_dir` — read by `RoleToken` (default `/home/private`), set by `runtime.exs` from `FORGE_ROLE_TOKENS_DIR`.
-- Knob `:forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
-- Deps: see `mix.exs`.
+- Knob `:fleet_credentials, :forge_auth` (`%{url_prefix, token}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env.
+- Knob `:fleet_credentials, :role_tokens_dir` — read by `RoleToken` (default `/home/private`), set by `runtime.exs` from `FORGE_ROLE_TOKENS_DIR`.
+- Knob `:fleet_credentials, :forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/credentials.ex`).
