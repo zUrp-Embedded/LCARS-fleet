@@ -2,9 +2,10 @@ defmodule Fleet.CapProfile.Schema do
   @moduledoc """
   JSON-schema validation of a cap-profile / modop (STRUCTURAL conformance).
 
-  Validation cluster extracted from `Fleet.CapProfile`. Distinct from the G24
-  business invariants (`Fleet.CapProfile.Invariants`, pure over the composed
-  struct): ... against the JSON-schemas pinned in `priv/cap_profile/schema/` —
+  Validation cluster of `Fleet.CapProfile`. Distinct from the G24 business
+  invariants (`Fleet.CapProfile.Invariants`, pure over the composed struct):
+  HERE the RAW map is validated against the JSON-schemas pinned in
+  `priv/cap_profile/schema/` —
 
     * `cap-profile-v2.5.json` — strict schema of the composed profile.
     * `modop-profile.json` — strict schema of the modop fragment (reserved keys
@@ -17,19 +18,20 @@ defmodule Fleet.CapProfile.Schema do
   app). `Fleet.CapProfile.load/1` and `compose/2` call `validate/2`;
   `read_modops/2` (core side) calls `validate_modop_keys/1` then `validate/2`.
 
-  I/O: reads the schema files from the FS. ... default = the bundled `priv/cap_profile/schema`. The
-  read+decode+resolve is cached in `:persistent_term` (keyed by the RESOLVED path
-  → test overrides get their own entry), lazy, errors not cached.
+  I/O: reads the schema files from the FS (`:fleet_cap_profile, :schema_dir` override;
+  default = the bundled `priv/cap_profile/schema`). The read+decode+resolve is cached in
+  `:persistent_term` (keyed by the RESOLVED path → test overrides get their own entry),
+  lazy, errors not cached.
 
   **Last revised**: 2026-07-18
   """
 
   require Logger
 
-  # Fast-path guard for top-level reserved keys. `metadata.containment`
-  # ... enforced by the JSON schema `priv/cap_profile/schema/modop-profile.json` (`not/anyOf` clause). `kind` stays
-  # reserved (it distinguishes cap-profile vs modop at merge time); `apiVersion`
-  # is NOT reserved (no such field — versioning is done by the code).
+  # Fast-path guard for top-level reserved keys. `metadata.containment`/`metadata.name`
+  # are enforced by the JSON schema `priv/cap_profile/schema/modop-profile.json`
+  # (`not/anyOf` clause); `kind` stays reserved HERE (it distinguishes cap-profile vs
+  # modop at merge time).
   @reserved_modop_keys ~w(kind)
 
   @doc """
