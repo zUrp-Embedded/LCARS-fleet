@@ -70,8 +70,8 @@ defmodule Fleet.Spawner.Pod.Events do
         [
           pod_id: Map.get(payload, "pod_id"),
           # Traceability: correlate the pod-lifecycle event to the ISSUE it serves (the end-to-end key
-          # spawn→work→complete→review→merge). Without it every pod.failed/wake.failed went `nil` and no
-          # incident was tie-able to the mandate that caused it (acte3 vague E).
+          # spawn→work→complete→review→merge). Without it every pod.failed/wake.failed leaves with a
+          # nil correlation_id and no incident is tie-able to the mandate that caused it.
           correlation_id: Map.get(payload, "issue_id"),
           payload: payload
         ],

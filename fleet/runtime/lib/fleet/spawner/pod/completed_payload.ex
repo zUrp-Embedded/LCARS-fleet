@@ -79,10 +79,11 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
     end
   end
 
-  # Provenance du brief (chantier brief-physique) : le pointeur content-addressé `{brief_sha, brief_ref}`
-  # injecté au spawn (spawn_opts) voyage JUSQU'ICI, à côté de `base_sha` — les deux entrées de provenance
-  # dispatch-time du triplet SLSA, ensemble. pod.completed → step_run → StepRunCompleter assemble le triplet.
-  # Absent (brief non matérialisé / pod sans dispatch) → payload inchangé, jamais un sha inventé.
+  # Brief provenance: the content-addressed pointer `{brief_sha, brief_ref}` injected at spawn
+  # (spawn_opts) travels ALL THE WAY HERE, next to `base_sha` — the two dispatch-time provenance
+  # inputs of the provenance triplet, together. pod.completed → step_run → StepRunCompleter
+  # assembles the triplet. Absent (brief not materialized / pod without dispatch) → payload
+  # unchanged, never an invented sha.
   defp maybe_put_brief_provenance(payload, opts) do
     case Keyword.get(opts, :brief_sha) do
       sha when is_binary(sha) and sha != "" ->

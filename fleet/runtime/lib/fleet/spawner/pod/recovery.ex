@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
 
   - `recovery_action/1` — the terminal phase (`:succeeded`/`:released`/`:killed`) → `:release` (nothing to
     relaunch); everything else → `:recreate` (from scratch, fresh session). Recovery NEVER attempts
-    `--resume` on a server-side dead session (= zombie pod, proven live).
+    `--resume` on a server-side dead session (claude exits → zombie pod).
   - `apply_recovery/4` — projects this decision into the `state` (`:recreate` leaves the base intact =
     fresh session; `:release` records the terminal phase + the release flag).
   - `first_continue_for/1` — picks the RESUME POINT from the state's `recovery` decision. It is
@@ -47,8 +47,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
                     `:monitoring`/`:extracting`/`:releasing`/ambiguous) → from scratch,
                     fresh session. An in-flight phase on a (re)spawn = dead backend
                     (under `:temporary`): we reroll. We do NOT attempt `--resume` on
-                    a server-side dead session → claude exits → zombie pod (proven
-                    live); the task stays queued and re-drives a fresh REPL.
+                    a server-side dead session → claude exits → zombie pod;
+                    the task stays queued and re-drives a fresh REPL.
   """
   @spec recovery_action(atom()) :: :release | :recreate
   def recovery_action(phase) do
@@ -75,8 +75,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   (`:recreate`/`:release`, first two clauses); no/corrupt snapshot → no `:recovery` key, phase
   left `:pending` (fallback clause → from scratch). A mid-flight resume point (`:launch`,
   `:monitor`, …) cannot exist — `recovery_action/1` collapses every non-terminal phase into
-  `:recreate`; the old per-phase mapping clauses were unreachable AND, had they fired, would have
-  resumed onto a dead backend (the exact move this module forbids).
+  `:recreate`; a per-phase mapping would resume onto a dead backend, the exact move this
+  module forbids.
   """
   @spec first_continue_for(map()) :: :allocate | :release
   def first_continue_for(%{recovery: :recreate}), do: :allocate
@@ -98,8 +98,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   """
   @spec phase_from_string(term()) :: atom() | nil
   def phase_from_string(s) when is_binary(s) do
-    # String.to_existing_atom/1 ALWAYS returns an atom (or raises ArgumentError if the atom does not exist —
-    # caught below → nil). No `case`/fallback: the old `_ -> nil` was dead (never a non-atom).
+    # String.to_existing_atom/1 ALWAYS returns an atom (or raises ArgumentError if the atom does not
+    # exist — caught below → nil). No `case`/fallback: a non-atom branch would be dead code.
     String.to_existing_atom(s)
   rescue
     ArgumentError -> nil
