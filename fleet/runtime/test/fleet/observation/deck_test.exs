@@ -1,7 +1,7 @@
 defmodule Fleet.Observation.DeckTest do
   @moduledoc """
-  Deck `:8091` testé via `Plug.Test` (jamais un vrai socket — invariant
-  hermétique, `start_listener: false` en test). Lecture seule, no-auth.
+  Deck `:8091` tested via `Plug.Test` (never a real socket — hermetic
+  invariant, `start_listener: false` in test). Read-only, no-auth.
   """
   use ExUnit.Case, async: true
   import Plug.Test
@@ -12,17 +12,17 @@ defmodule Fleet.Observation.DeckTest do
     conn(method, path) |> Fleet.Observation.Deck.call(@opts)
   end
 
-  describe "roles_for_display/1 — F-C125 (catalogue illisible ≠ vide)" do
-    test "{:error, reason} → propagé (PAS écrasé en []) — /table surfacera l'erreur, pas un « aucun rôle » menteur" do
-      # `Fleet.CapProfile.list/0` est DÉLIBÉRÉMENT fail-loud (dir absent :enoent / YAML corrompu / collision).
-      # Le deck ne doit PAS collapser ça en [] (mensonge pendant un déploiement cap-profile cassé).
+  describe "roles_for_display/1 — F-C125 (unreadable catalog ≠ empty)" do
+    test "{:error, reason} → propagated (NOT flattened to []) — /table will surface the error, not a lying « aucun rôle »" do
+      # `Fleet.CapProfile.list/0` is DELIBERATELY fail-loud (missing dir :enoent / corrupted YAML / collision).
+      # The deck must NOT collapse that into [] (a lie during a broken cap-profile deployment).
       assert {:error, :enoent} = Fleet.Observation.Deck.roles_for_display({:error, :enoent})
 
       assert {:error, {:invalid_yaml, "x"}} =
                Fleet.Observation.Deck.roles_for_display({:error, {:invalid_yaml, "x"}})
     end
 
-    test "{:ok, names} → {:ok, liste filtrée} (Memory-X exclus, forme typée)" do
+    test "{:ok, names} → {:ok, filtered list} (Memory-X excluded, typed shape)" do
       assert {:ok, []} = Fleet.Observation.Deck.roles_for_display({:ok, []})
       assert {:ok, roles} = Fleet.Observation.Deck.roles_for_display({:ok, ["monk-archivist"]})
       refute "monk-archivist" in roles
@@ -35,17 +35,17 @@ defmodule Fleet.Observation.DeckTest do
     assert %{"status" => "ok", "deck" => "fleet_observation"} = Jason.decode!(conn.resp_body)
   end
 
-  test "GET / → 200 shell LCARS (les 7 decks, no-auth)" do
+  test "GET / → 200 LCARS shell (the 7 decks, no-auth)" do
     conn = call(:get, "/")
     assert %Plug.Conn{status: 200} = conn
     body = conn.resp_body
     assert body =~ "LCARS // OBSERVATION"
-    # les 7 decks présents
+    # the 7 decks present
     for name <- ~w(BRIDGE PODS FLOW GATEKEEPER COORDINATION STREAM DIAGNOSTICS) do
-      assert body =~ name, "deck #{name} absent du shell"
+      assert body =~ name, "deck #{name} missing from the shell"
     end
 
-    # frontière starfleet : pas de panel starfleet (non-négo #2)
+    # starfleet boundary: no starfleet panel (non-negotiable #2)
     refute body =~ "STARFLEET"
   end
 
@@ -57,17 +57,17 @@ defmodule Fleet.Observation.DeckTest do
     assert count == length(pods)
   end
 
-  test "GET /api/projection → 200 JSON (read-model éteint → projection vide + _status:unavailable, pas de crash)" do
+  test "GET /api/projection → 200 JSON (read-model off → empty projection + _status:unavailable, no crash)" do
     conn = call(:get, "/api/projection")
     assert %Plug.Conn{status: 200} = conn
 
-    # F-C124 — read-model éteint ici : le vide est accompagné de `_status:"unavailable"` (DOWN explicite),
-    # pas d'un 200 vide indistinguable d'une fleet calme.
+    # F-C124 — read-model off here: the emptiness comes with `_status:"unavailable"` (explicit DOWN),
+    # not an empty 200 indistinguishable from a quiet fleet.
     assert %{"total" => 0, "stream" => [], "counts" => %{}, "_status" => "unavailable"} =
              Jason.decode!(conn.resp_body)
   end
 
-  test "route inconnue → 404 JSON" do
+  test "unknown route → 404 JSON" do
     conn = call(:get, "/nope")
     assert %Plug.Conn{status: 404} = conn
     assert %{"error" => _} = Jason.decode!(conn.resp_body)

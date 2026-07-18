@@ -1,6 +1,6 @@
 defmodule Fleet.API.RestTest do
-  # async: false — pas d'auth (frontière = isolation réseau/container, cf. rest.ex § Auth), mais le bus
-  # PubSub est global (le test admin.spawn broadcast + assert_receive) → séquentialiser évite le cross-talk.
+  # async: false — no auth (boundary = network/container isolation, cf. rest.ex § Auth), but the
+  # PubSub bus is global (the admin.spawn test broadcasts + assert_receive) → serializing avoids cross-talk.
   use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
@@ -25,7 +25,7 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "GET /api/readiness/deep (P05)" do
-    test "→ 200 + état opérationnel structuré" do
+    test "→ 200 + structured operational state" do
       conn = conn(:get, "/api/readiness/deep") |> Rest.call(@opts)
 
       assert conn.status == 200
@@ -36,11 +36,11 @@ defmodule Fleet.API.RestTest do
     end
   end
 
-  describe "GET endpoints (lecture état)" do
-    # F-C118 — les 3 lectures d'état étaient des empty-200 menteurs (indistinguables d'un état vide) sur
-    # surface publique. Désormais 501 honnête (l'observabilité réelle = fleet_observation), jamais un vide
-    # qui se fait passer pour un succès.
-    test "GET /api/workflow_runs → 501 not_implemented (plus d'empty-200 menteur)" do
+  describe "GET endpoints (state reads)" do
+    # F-C118 — the 3 state reads were lying empty-200s (indistinguishable from an empty state) on a
+    # public surface. Now an honest 501 (real observability = fleet_observation), never an empty
+    # response passing itself off as a success.
+    test "GET /api/workflow_runs → 501 not_implemented (no more lying empty-200)" do
       conn = conn(:get, "/api/workflow_runs") |> Rest.call(@opts)
       assert conn.status == 501
       assert {:ok, %{"error" => "not_implemented"}} = Jason.decode(conn.resp_body)
@@ -51,16 +51,16 @@ defmodule Fleet.API.RestTest do
       assert conn.status == 501
     end
 
-    test "GET /api/pods → 501 not_implemented (observabilité réelle = fleet_observation)" do
+    test "GET /api/pods → 501 not_implemented (real observability = fleet_observation)" do
       conn = conn(:get, "/api/pods") |> Rest.call(@opts)
       assert conn.status == 501
     end
 
-    test "GET /api/version → 200 + JSON version constatable (sha/dirty/ref/source)" do
+    test "GET /api/version → 200 + observable version JSON (sha/dirty/ref/source)" do
       conn = conn(:get, "/api/version") |> Rest.call(@opts)
       assert conn.status == 200
       {:ok, body} = Jason.decode(conn.resp_body)
-      # SHAPE (pas un SHA littéral — non-hermétique) : les 4 clefs du contrat BuildInfo.
+      # SHAPE (not a literal SHA — non-hermetic): the 4 keys of the BuildInfo contract.
       assert %{"sha" => sha, "dirty" => dirty, "source" => source} = body
       assert is_binary(sha) and sha != ""
       assert is_boolean(dirty)
@@ -70,8 +70,8 @@ defmodule Fleet.API.RestTest do
   end
 
 
-  describe "POST /api/admin/spawn — RETIRÉ du TCP (déplacé sur la socket AF_UNIX)" do
-    test "POST /api/admin/spawn sur le TCP → 404 (l'écriture n'est plus sur cette surface, A-21)" do
+  describe "POST /api/admin/spawn — REMOVED from TCP (moved to the AF_UNIX socket)" do
+    test "POST /api/admin/spawn on TCP → 404 (the write is no longer on this surface, A-21)" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "engineer"}))
         |> put_req_header("content-type", "application/json")
@@ -82,7 +82,7 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "match _ (404)" do
-    test "route inexistante → 404" do
+    test "nonexistent route → 404" do
       conn = conn(:get, "/api/nonexistent") |> Rest.call(@opts)
       assert conn.status == 404
     end

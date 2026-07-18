@@ -11,7 +11,7 @@ defmodule Fleet.Coord.PoliciesTest do
   end
 
   describe "handle_decision/2" do
-    test "halt + gatekeeper.refuse → notify_dashboard canon broadcast" do
+    test "halt + gatekeeper.refuse → canonical notify_dashboard broadcast" do
       decision = %Decision{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
       assert :ok = Policies.handle_decision(decision, nil)
@@ -30,27 +30,27 @@ defmodule Fleet.Coord.PoliciesTest do
       assert message[:decision] == "halt" or message["decision"] == "halt"
     end
 
-    test "decision sans match dans table → {:error, {:no_policy_match, {decision, reason}}}" do
+    test "decision without table match → {:error, {:no_policy_match, {decision, reason}}}" do
       decision = %Decision{decision: "allow", reason: "unknown", details: %{}, chain: []}
 
-      # Tuple STRUCTURÉ (D1) : le consommateur peut pattern-matcher le miss ET récupérer la
-      # clé de lookup fautive — l'ancienne string "no policy match for …" ne le permettait pas.
+      # STRUCTURED tuple (D1): the consumer can pattern-match the miss AND recover the
+      # faulty lookup key — a bare "no policy match for …" string would not allow it.
       assert {:error, {:no_policy_match, {"allow", "unknown"}}} =
                Policies.handle_decision(decision, nil)
     end
 
-    test "map brute (pas un %Decision{}) → {:error, {:invalid_decision, _}} (frontière refuse le non-validé)" do
-      # BND-002 : la frontière n'accepte QUE le verdict validé `%Fleet.Decision{}`. Une map à 2 clés
-      # (schema Starfleet court-circuité) est REFUSÉE, typée — jamais routée comme un verdict.
+    test "raw map (not a %Decision{}) → {:error, {:invalid_decision, _}} (boundary refuses the unvalidated)" do
+      # BND-002: the boundary ONLY accepts the validated verdict `%Fleet.Decision{}`. A 2-key map
+      # (Starfleet schema bypassed) is REFUSED, typed — never routed as a verdict.
       raw = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
       assert {:error, {:invalid_decision, ^raw}} = Policies.handle_decision(raw, nil)
     end
 
-    test "escalate + audit_verdict → notify_dashboard (dernier maillon du producteur draft Q2 audit.verdict)" do
-      # Le producteur draft `StepRunConsumer.emit_audit_verdict_draft` émet EXACTEMENT ce decision_json
-      # (decision "escalate", reason "audit_verdict") ; DriftMonitor le route vers handle_decision → clé
-      # "escalate.audit_verdict" (coord-policies.yaml). Ce test verrouille que la chaîne blink jusqu'à coord.
+    test "escalate + audit_verdict → notify_dashboard (last link of the Q2 audit.verdict draft producer)" do
+      # The draft producer `StepRunConsumer.emit_audit_verdict_draft` emits EXACTLY this decision_json
+      # (decision "escalate", reason "audit_verdict"); DriftMonitor routes it to handle_decision → key
+      # "escalate.audit_verdict" (coord-policies.yaml). This test locks that the chain blinks all the way to coord.
       decision = %Decision{
         decision: "escalate",
         reason: "audit_verdict",
@@ -70,7 +70,7 @@ defmodule Fleet.Coord.PoliciesTest do
   end
 
   describe "handle_escalation/3" do
-    test "pod_drift → escalate_human canon broadcast" do
+    test "pod_drift → canonical escalate_human broadcast" do
       assert :ok = Policies.handle_escalation(:pod_drift, %{"pod_id" => "p1"}, nil)
 
       assert_receive %Fleet.Event{
@@ -85,7 +85,7 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "workflow_map_failed → notify_dashboard canon broadcast" do
+    test "workflow_map_failed → canonical notify_dashboard broadcast" do
       assert :ok =
                Policies.handle_escalation(
                  :workflow_map_failed,
@@ -113,7 +113,7 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "source binaire (string) accepté" do
+    test "binary source (string) accepted" do
       assert :ok = Policies.handle_escalation("pod_drift", %{"pod_id" => "p2"}, nil)
 
       assert_receive %Fleet.Event{
@@ -123,8 +123,8 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "source inconnu → {:error, {:no_escalation_policy, source}}" do
-      # Tuple STRUCTURÉ (D1) — source normalisée en string (la clé de lookup).
+    test "unknown source → {:error, {:no_escalation_policy, source}}" do
+      # STRUCTURED tuple (D1) — source normalized as string (the lookup key).
       assert {:error, {:no_escalation_policy, "totally_unknown"}} =
                Policies.handle_escalation(:totally_unknown, %{}, nil)
     end

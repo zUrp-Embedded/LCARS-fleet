@@ -1,7 +1,7 @@
 defmodule Fleet.API.ControlRouterTest do
-  # async: false — le bus PubSub est global (admin.spawn broadcast + assert_receive) → séquentialiser.
-  # ControlRouter sert POST /api/admin/spawn sur la socket AF_UNIX (hors réseau du pod, A-21) ; ici on
-  # teste le ROUTAGE + le mapping d'admission via Plug.Test (le bind socket réel est prouvé ailleurs).
+  # async: false — the PubSub bus is global (admin.spawn broadcast + assert_receive) → serialize.
+  # ControlRouter serves POST /api/admin/spawn on the AF_UNIX socket (outside the pod's network, A-21);
+  # here we test the ROUTING + the admission mapping via Plug.Test (the real socket bind is proven elsewhere).
   use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
@@ -16,28 +16,28 @@ defmodule Fleet.API.ControlRouterTest do
     :ok
   end
 
-  # ── Intégration : la VRAIE socket AF_UNIX (bind + rm-stale + curl --unix-socket → routeur) ──
-  # Verrouille `start_control_listener/1` de bout en bout : c'est ce que le pod ne peut PAS atteindre
-  # (fichier hors de son mount namespace) et ce que `lcars` tape host-side. Plug.Test ci-dessous ne
-  # couvre que le routage ; ce test couvre le transport réel.
-  describe "socket AF_UNIX (bind réel)" do
-    # Chemin COURT sous tmp_dir système (le sun_path AF_UNIX est borné à 108 octets — le tmp_dir
-    # d'ExUnit, avec le nom du test, dépasse ; en prod ~/.lcars/run/api.sock tient large).
+  # ── Integration: the REAL AF_UNIX socket (bind + rm-stale + curl --unix-socket → router) ──
+  # Locks `start_control_listener/1` end to end: this is what the pod can NOT reach
+  # (file outside its mount namespace) and what `lcars` hits host-side. Plug.Test below only
+  # covers the routing; this test covers the real transport.
+  describe "AF_UNIX socket (real bind)" do
+    # SHORT path under the system tmp_dir (the AF_UNIX sun_path is capped at 108 bytes — ExUnit's
+    # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
     defp short_sock, do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
 
-    test "bind + curl --unix-socket POST /api/admin/spawn → 202 (host-side atteint la porte)" do
+    test "bind + curl --unix-socket POST /api/admin/spawn → 202 (host-side reaches the door)" do
       curl = System.find_executable("curl")
 
       if is_nil(curl) do
-        # Pas de faux-vert : on DIT que le bout-en-bout n'a pas été exercé (curl absent).
-        IO.puts("SKIP intégration socket : curl absent — routage couvert par Plug.Test")
+        # No hollow-green: we SAY that the end-to-end was not exercised (curl missing).
+        IO.puts("SKIP socket integration: curl missing — routing covered by Plug.Test")
       else
         sock = short_sock()
         on_exit(fn -> File.rm(sock) end)
         {:ok, pid} = ControlRouter.start_control_listener(sock)
         on_exit(fn -> :ok = :cowboy.stop_listener(ControlRouter.Ref) end)
 
-        # Le fichier existe et est bien une socket (le pod ne le verra pas : hors de son mount ns).
+        # The file exists and is indeed a socket (the pod will not see it: outside its mount ns).
         assert File.exists?(sock)
 
         {out, code} =
@@ -62,21 +62,21 @@ defmodule Fleet.API.ControlRouterTest do
             stderr_to_stdout: true
           )
 
-        assert code == 0, "curl --unix-socket a échoué : #{out}"
+        assert code == 0, "curl --unix-socket failed: #{out}"
         [_body, http] = String.split(String.trim(out), "\n") |> Enum.take(-2)
-        assert http == "202", "attendu 202 via la socket, reçu #{http} (#{out})"
+        assert http == "202", "expected 202 via the socket, got #{http} (#{out})"
         assert is_pid(pid)
 
         assert_receive %Fleet.Event{source: :api, type: :"admin.spawn.request"}, 500
       end
     end
 
-    test "rebind sur une socket RÉSIDUELLE (rm-stale) — pas d'eaddrinuse" do
+    test "rebind on a STALE socket (rm-stale) — no eaddrinuse" do
       sock = short_sock()
-      File.write!(sock, "résidu d'une instance précédente")
+      File.write!(sock, "residue from a previous instance")
       on_exit(fn -> File.rm(sock) end)
 
-      # start_control_listener rm le fichier résiduel AVANT le bind (AF_UNIX n'est pas auto-supprimé).
+      # start_control_listener rms the stale file BEFORE the bind (AF_UNIX is not auto-removed).
       assert {:ok, _pid} = ControlRouter.start_control_listener(sock)
       on_exit(fn -> :ok = :cowboy.stop_listener(ControlRouter.Ref) end)
       assert File.exists?(sock)
@@ -84,7 +84,7 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
-    test "503 quand le daemon quiesce (refuse nouveau pod top-level)" do
+    test "503 when the daemon quiesces (refuses new top-level pod)" do
       Fleet.Shutdown.Quiesce.refuse!()
       on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
 
@@ -98,9 +98,9 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   describe "POST /api/admin/spawn" do
-    # MA-18 : le cap-profile est validé AVANT l'ACK → un cap-profile RÉEL (canon `engineer`) doit
-    # passer (202 + broadcast). Avant, n'importe quel slug rendait 202 (même inexistant).
-    test "cap-profile réel → broadcast admin.spawn.request + 202" do
+    # MA-18: the cap-profile is validated BEFORE the ACK → a REAL cap-profile (canon `engineer`)
+    # must pass (202 + broadcast).
+    test "real cap-profile → broadcast admin.spawn.request + 202" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
         |> put_req_header("content-type", "application/json")
@@ -116,11 +116,11 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # MA-18 — LE finding : un slug bien formé mais SANS cap-profile (ex. `lcars spawn scout`) ne doit
-    # PLUS rendre 202 (qui mentait : le PublishConsumer logguait juste un warning, zéro pod). 422 +
-    # AUCUN broadcast (l'admission est refusée à la frontière, pas déportée dans le consumer async
-    # où l'échec ne serait qu'un warning sans pod).
-    test "MA-18 — cap-profile inexistant → 422, PAS 202, et AUCUN broadcast" do
+    # MA-18 — THE finding: a well-formed slug WITHOUT a cap-profile (e.g. `lcars spawn scout`) must
+    # NOT return 202 (a lie: the PublishConsumer would just log a warning, zero pod). 422 +
+    # NO broadcast (admission is refused at the boundary, not deferred to the async consumer
+    # where the failure would be nothing but a warning without a pod).
+    test "MA-18 — nonexistent cap-profile → 422, NOT 202, and NO broadcast" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout-inexistant-xyz"}))
         |> put_req_header("content-type", "application/json")
@@ -132,8 +132,8 @@ defmodule Fleet.API.ControlRouterTest do
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
-    # MA-18 — ni `cap_profile_name` ni `role` → 400 (requête mal formée), pas un 202 ni un broadcast.
-    test "MA-18 — ni cap_profile_name ni role → 400" do
+    # MA-18 — neither `cap_profile_name` nor `role` → 400 (malformed request), not a 202 nor a broadcast.
+    test "MA-18 — neither cap_profile_name nor role → 400" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{issue_id: "issue-1"}))
         |> put_req_header("content-type", "application/json")
@@ -143,10 +143,10 @@ defmodule Fleet.API.ControlRouterTest do
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
-    # Régression acte4 #32 — en Elixir "" est TRUTHY : `cap_profile_name:"" || role` renvoyait ""
-    # qui tombait dans le fourre-tout `:missing_cap_profile` en IGNORANT le role valide fourni.
-    # Fix presence/1 : "" ≈ absent → le fallback atteint le role.
-    test "acte4 #32 : cap_profile_name vide + role valide → le role est résolu (202)" do
+    # Regression acte4 #32 — in Elixir "" is TRUTHY: `cap_profile_name:"" || role` returns ""
+    # which falls into the `:missing_cap_profile` catch-all while IGNORING the valid role provided.
+    # presence/1 treats "" ≈ absent → the fallback reaches the role.
+    test "acte4 #32: empty cap_profile_name + valid role → the role is resolved (202)" do
       conn =
         conn(
           :post,
@@ -162,16 +162,16 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   # ============================================================
-  # B2b — allowlist DTO d'admission de /api/admin/spawn
+  # B2b — admission DTO allowlist of /api/admin/spawn
   # ============================================================
   #
-  # /api/admin/spawn est no-auth. Le PublishConsumer convertit ENSUITE `payload["opts"]` en opts internes du
-  # spawner — sans filtre, des opts privilégiés deviennent pilotables depuis l'API (racines disque, `human`,
-  # `project` → clone d'un repo attaquant dans le pod, `allow_no_brief`, seams…). L'allowlist REFUSE tout
-  # champ non public AVANT le moindre broadcast : 422, et rien n'atteint le consumer/spawner.
-  describe "POST /api/admin/spawn — allowlist DTO (B2b)" do
-    # Chacun de ces payloads porte un champ interne du spawner via `opts` (ou directement) : doit être 422
-    # AVANT spawn, et AUCUN `admin.spawn.request` ne doit partir sur le bus.
+  # /api/admin/spawn is no-auth. The PublishConsumer THEN converts `payload["opts"]` into internal
+  # spawner opts — without a filter, privileged opts become drivable from the API (disk roots, `human`,
+  # `project` → cloning an attacker repo into the pod, `allow_no_brief`, seams…). The allowlist REFUSES
+  # any non-public field BEFORE any broadcast: 422, and nothing reaches the consumer/spawner.
+  describe "POST /api/admin/spawn — DTO allowlist (B2b)" do
+    # Each of these payloads carries an internal spawner field via `opts` (or directly): must be 422
+    # BEFORE spawn, and NO `admin.spawn.request` may leave on the bus.
     @forbidden_payloads [
       {"opts.pod_dir_root", %{"role" => "engineer", "opts" => %{"pod_dir_root" => "/tmp/evil"}}},
       {"opts.state_fs_root",
@@ -185,25 +185,25 @@ defmodule Fleet.API.ControlRouterTest do
       {"opts.recall_seed_jsonl",
        %{"role" => "engineer", "opts" => %{"recall_seed_jsonl" => "x"}}},
       {"opts.rc_name", %{"role" => "engineer", "opts" => %{"rc_name" => "x"}}},
-      {"opts brut (liste)", %{"role" => "engineer", "opts" => ["module", "fun"]}},
-      {"clé top-level inconnue", %{"role" => "engineer", "evil_seam" => "M.f/1"}}
+      {"raw opts (list)", %{"role" => "engineer", "opts" => ["module", "fun"]}},
+      {"unknown top-level key", %{"role" => "engineer", "evil_seam" => "M.f/1"}}
     ]
 
     for {label, payload} <- @forbidden_payloads do
-      test "REFUSE (#{label}) → 422 AVANT spawn, aucun broadcast" do
+      test "REFUSES (#{label}) → 422 BEFORE spawn, no broadcast" do
         conn =
           conn(:post, "/api/admin/spawn", Jason.encode!(unquote(Macro.escape(payload))))
           |> put_req_header("content-type", "application/json")
           |> ControlRouter.call(@opts)
 
         assert conn.status == 422,
-               "#{unquote(label)} devait être refusé 422, reçu #{conn.status}"
+               "#{unquote(label)} should have been refused with 422, got #{conn.status}"
 
         refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
       end
     end
 
-    test "spawn admin LÉGITIME (role + brief) → 202 + broadcast (brief replacé dans opts)" do
+    test "LEGITIMATE admin spawn (role + brief) → 202 + broadcast (brief placed back into opts)" do
       conn =
         conn(
           :post,
@@ -219,8 +219,8 @@ defmodule Fleet.API.ControlRouterTest do
 
       assert conn.status == 202
 
-      # Le payload diffusé est le DTO CANONIQUE reconstruit par l'API : `brief` est passé dans `opts`
-      # (jamais un `opts` brut du client), `issue_id` conservé.
+      # The broadcast payload is the CANONICAL DTO rebuilt by the API: `brief` is passed inside `opts`
+      # (never a raw client `opts`), `issue_id` preserved.
       assert_receive %Fleet.Event{
                        source: :api,
                        type: :"admin.spawn.request",
@@ -233,8 +233,8 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    test "pod_id path-safe accepté (placé dans opts), pod_id malformé → 422 avant spawn" do
-      # pod_id légitime (charset path-safe) : accepté, replacé dans opts.
+    test "path-safe pod_id accepted (placed into opts), malformed pod_id → 422 before spawn" do
+      # Legitimate pod_id (path-safe charset): accepted, placed back into opts.
       ok =
         conn(
           :post,
@@ -252,7 +252,7 @@ defmodule Fleet.API.ControlRouterTest do
                      },
                      500
 
-      # pod_id avec remontée de chemin (`..`) : refusé AVANT spawn (jamais interpolé dans un path FS).
+      # pod_id with path traversal (`..`): refused BEFORE spawn (never interpolated into an FS path).
       bad =
         conn(
           :post,
@@ -266,10 +266,10 @@ defmodule Fleet.API.ControlRouterTest do
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
-    test "issue_id non-binaire (number JSON) → 422 avant spawn (F-C119, jumeau pod_id)" do
-      # issue_id = corrélation forge/event OPTIONNELLE : présent → doit être une string. Un number/bool/liste
-      # JSON serait `to_string`-é en aval (PublishConsumer) dans la corrélation + les logs (ex `to_string([1,2,3])`
-      # = octets de contrôle). Ingress no-auth → typage strict comme pod_id. (Absent → OK, fallback enveloppe Bus.)
+    test "non-binary issue_id (JSON number) → 422 before spawn (F-C119, pod_id twin)" do
+      # issue_id = OPTIONAL forge/event correlation: when present → must be a string. A JSON number/bool/list
+      # would be `to_string`-ed downstream (PublishConsumer) into the correlation + logs (e.g. `to_string([1,2,3])`
+      # = control bytes). No-auth ingress → strict typing like pod_id. (Absent → OK, Bus envelope fallback.)
       bad =
         conn(
           :post,
@@ -285,28 +285,28 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   # ============================================================
-  # F — host-native interdit via /api/admin/spawn
+  # F — host-native forbidden via /api/admin/spawn
   # ============================================================
   #
-  # Un cap-profile `containment: none` (host-native : starfleet, architecte-interactif) lancé via cette
-  # porte spawn GÉNÉRIQUE no-auth = un pod HORS-SANDBOX tournant sur l'hôte *as* l'humain — le pouvoir le
-  # plus fort de la fleet. Il NE doit PAS être atteignable par ce chemin : refus 422 à l'admission, AVANT
-  # tout broadcast (aucun pod ne naît). Le host-native garde sa voie dédiée hors-bande.
-  describe "POST /api/admin/spawn — host-native interdit (F)" do
-    # PRÉ-CONDITION de la garde : les deux profils canon existent ET diffèrent sur le seul axe testé
-    # (containment). Si `starfleet` redevenait `bwrap` (ou disparaissait), ce test ne prouverait plus rien
-    # → on l'ancre explicitement (le test EST son propre garde anti-bitrot).
-    test "pré-condition : engineer=bwrap, starfleet=none (sinon la garde ne teste rien)" do
+  # A `containment: none` cap-profile (host-native: starfleet, interactive-architect) launched via this
+  # GENERIC no-auth spawn door = an OUT-OF-SANDBOX pod running on the host *as* the human — the strongest
+  # power in the fleet. It must NOT be reachable through this path: 422 refusal at admission, BEFORE
+  # any broadcast (no pod is born). Host-native keeps its dedicated out-of-band path.
+  describe "POST /api/admin/spawn — host-native forbidden (F)" do
+    # PRE-CONDITION of the guard: both canon profiles exist AND differ on the single tested axis
+    # (containment). If `starfleet` became `bwrap` again (or disappeared), this test would prove nothing
+    # → anchor it explicitly (the test IS its own anti-bitrot guard).
+    test "pre-condition: engineer=bwrap, starfleet=none (otherwise the guard tests nothing)" do
       assert {:ok, eng} = Fleet.CapProfile.load("engineer")
       assert Fleet.CapProfile.containment(eng) == "bwrap"
       assert {:ok, sf} = Fleet.CapProfile.load("starfleet")
       assert Fleet.CapProfile.containment(sf) == "none"
     end
 
-    # Le cas nominal (bwrap) PASSE — la garde ne ferme QUE le host-native, pas le spawn légitime. C'est
-    # la moitié « accepté » de la régression : retirer la garde laisserait AUSSI passer le host-native
-    # ci-dessous, qui DOIT échouer ; les deux ensemble prouvent que c'est bien le containment qui tranche.
-    test "containment bwrap (engineer) → 202 + broadcast (chemin nominal intact)" do
+    # The nominal case (bwrap) PASSES — the guard only closes host-native, not legitimate spawn. This is
+    # the "accepted" half of the regression: removing the guard would ALSO let through the host-native
+    # below, which MUST fail; the two together prove that containment is what decides.
+    test "containment bwrap (engineer) → 202 + broadcast (nominal path intact)" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "engineer"}))
         |> put_req_header("content-type", "application/json")
@@ -318,11 +318,11 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # LE finding : un cap-profile host-native (starfleet) via la porte spawn générique → 422, AUCUN
-    # broadcast. Régression prouvée : retirer la branche `containment == "bwrap"` de `validate_cap_profile`
-    # (rest.ex) fait repasser ce cas en 202 + broadcast → un pod hôte naîtrait depuis l'API. La garde EST
-    # ce qui rend ce 422 vrai ; sans elle, le profil charge (`CapProfile.load` OK) et l'admission passait.
-    test "containment none (starfleet, host-native) → 422 AVANT spawn, aucun broadcast" do
+    # THE finding: a host-native cap-profile (starfleet) via the generic spawn door → 422, NO
+    # broadcast. Proven regression: removing the `containment == "bwrap"` branch from `validate_cap_profile`
+    # (rest.ex) turns this case back into 202 + broadcast → a host pod would be born from the API. The guard
+    # IS what makes this 422 true; without it, the profile loads (`CapProfile.load` OK) and admission passed.
+    test "containment none (starfleet, host-native) → 422 BEFORE spawn, no broadcast" do
       for key <- ["role", "cap_profile_name"] do
         conn =
           conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "starfleet"}))
@@ -330,7 +330,7 @@ defmodule Fleet.API.ControlRouterTest do
           |> ControlRouter.call(@opts)
 
         assert conn.status == 422,
-               "#{key}=starfleet (host-native) devait être refusé 422, reçu #{conn.status}"
+               "#{key}=starfleet (host-native) should have been refused with 422, got #{conn.status}"
 
         {:ok, body} = Jason.decode(conn.resp_body)
         assert body["error"] =~ "host-native"
@@ -341,25 +341,25 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   # ============================================================
-  # flow-02 — one-shot sans brief interdit (miroir R18 à l'admission)
+  # flow-02 — one-shot without brief forbidden (R18 mirror at admission)
   # ============================================================
   #
-  # Un cap-profile one-shot (reviewer/qualifier/consultant) lancé SANS `brief` partirait sans
-  # travail → `Fleet.Spawner.brief_guard` le refuse (`brief_required`, ZÉRO pod) APRÈS un 202
-  # « mis en file » = 202 menteur (jumeau du cap-profile menteur MA-18). L'admission le REFUSE
-  # désormais à la frontière (422, aucun broadcast), via l'autorité partagée `brief_required?/1`.
-  describe "POST /api/admin/spawn — one-shot sans brief interdit (flow-02)" do
-    # PRÉ-CONDITION : `reviewer` canon est bien one-shot + bwrap (sinon ce test ne prouve rien).
-    test "pré-condition : reviewer = one-shot + bwrap" do
+  # A one-shot cap-profile (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave with
+  # no work → `Fleet.Spawner.brief_guard` refuses it (`brief_required`, ZERO pod) AFTER a 202
+  # "queued" = lying 202 (twin of the MA-18 lying cap-profile). Admission now REFUSES it
+  # at the boundary (422, no broadcast), via the shared authority `brief_required?/1`.
+  describe "POST /api/admin/spawn — one-shot without brief forbidden (flow-02)" do
+    # PRE-CONDITION: canon `reviewer` is indeed one-shot + bwrap (otherwise this test proves nothing).
+    test "pre-condition: reviewer = one-shot + bwrap" do
       assert {:ok, rev} = Fleet.CapProfile.load("reviewer")
       assert Fleet.CapProfile.lifetime_scope(rev) == "one-shot"
       assert Fleet.CapProfile.containment(rev) == "bwrap"
     end
 
-    # LE finding : one-shot SANS brief → 422 (plus 202 menteur), AUCUN broadcast. Régression
-    # prouvée : retirer la garde `brief_required?` du call-site fait repasser ce cas en 202 +
-    # broadcast, puis le spawner refuse en silence (zéro pod) → 202 menteur.
-    test "reviewer (one-shot) SANS brief → 422 AVANT spawn, aucun broadcast" do
+    # THE finding: one-shot WITHOUT brief → 422 (no more lying 202), NO broadcast. Proven
+    # regression: removing the `brief_required?` guard from the call-site turns this case back into 202 +
+    # broadcast, then the spawner refuses silently (zero pod) → lying 202.
+    test "reviewer (one-shot) WITHOUT brief → 422 BEFORE spawn, no broadcast" do
       for key <- ["role", "cap_profile_name"] do
         conn =
           conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "reviewer"}))
@@ -367,7 +367,7 @@ defmodule Fleet.API.ControlRouterTest do
           |> ControlRouter.call(@opts)
 
         assert conn.status == 422,
-               "#{key}=reviewer (one-shot sans brief) devait être refusé 422, reçu #{conn.status}"
+               "#{key}=reviewer (one-shot without brief) should have been refused with 422, got #{conn.status}"
 
         {:ok, body} = Jason.decode(conn.resp_body)
         assert body["error"] =~ "brief"
@@ -376,9 +376,9 @@ defmodule Fleet.API.ControlRouterTest do
       end
     end
 
-    # La moitié « accepté » : un one-shot LÉGITIME porte son `brief` → passe (202 + broadcast,
-    # brief replacé dans opts). Prouve que la garde ne ferme QUE le one-shot SANS travail.
-    test "reviewer (one-shot) AVEC brief → 202 + broadcast (pas de faux rejet)" do
+    # The "accepted" half: a LEGITIMATE one-shot carries its `brief` → passes (202 + broadcast,
+    # brief placed back into opts). Proves the guard only closes the one-shot WITHOUT work.
+    test "reviewer (one-shot) WITH brief → 202 + broadcast (no false rejection)" do
       conn =
         conn(
           :post,

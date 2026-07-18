@@ -1,10 +1,10 @@
 defmodule Fleet.Observation.BindAddressTest do
   @moduledoc """
-  Contrat de bind du listener observation deck `:8091`.
+  Bind contract of the observation deck listener `:8091`.
 
-  Le deck est read-only no-auth (frontière = isolation réseau, comme fleet_api) :
-  son child-spec Cowboy DOIT porter `ip: {127,0,0,1}` par défaut. Exposition
-  publique = opt-in nommé (`LCARS_BIND_HOST`). Régression de threading attrapée ici.
+  The deck is read-only no-auth (boundary = network isolation, like fleet_api):
+  its Cowboy child-spec MUST carry `ip: {127,0,0,1}` by default. Public
+  exposure = named opt-in (`LCARS_BIND_HOST`). Threading regressions caught here.
   """
   use ExUnit.Case, async: false
 
@@ -29,12 +29,12 @@ defmodule Fleet.Observation.BindAddressTest do
     opts |> Keyword.fetch!(:options) |> Keyword.fetch!(:ip)
   end
 
-  test "bind loopback par défaut (pas d'env d'exposition)" do
+  test "binds loopback by default (no exposure env)" do
     System.delete_env("LCARS_BIND_HOST")
     assert listener_ip() == {127, 0, 0, 1}
   end
 
-  test "override global LCARS_BIND_HOST → ip threadée dans le listener" do
+  test "global LCARS_BIND_HOST override → ip threaded into the listener" do
     System.put_env("LCARS_BIND_HOST", "0.0.0.0")
     assert listener_ip() == {0, 0, 0, 0}
   end

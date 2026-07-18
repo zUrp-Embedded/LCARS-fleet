@@ -4,7 +4,7 @@ defmodule Fleet.API.WSTest do
   alias Fleet.API.WS
 
   describe "topic_matches?/2" do
-    test "topics vide → match all" do
+    test "empty topics → match all" do
       assert WS.topic_matches?("anything", [])
       assert WS.topic_matches?("workflow_map.completed", [])
     end
@@ -39,7 +39,7 @@ defmodule Fleet.API.WSTest do
       assert frame == ~s|{"type":"connected"}|
       assert state == %{topics: []}
 
-      # Heartbeat schedulé via Process.send_after 30s (pas attendu en test).
+      # Heartbeat scheduled via Process.send_after 30s (not awaited in test).
     end
   end
 
@@ -55,9 +55,9 @@ defmodule Fleet.API.WSTest do
       assert new_state.topics == ["workflow_map.*", "pod.*"]
     end
 
-    test "topic non-string ([123]) → rejet à l'admission, error frame, state INCHANGÉ (pas d'ACK)" do
-      # Vecteur non-auth : un topic non-string crasherait topic_matches?/2 en aval. Rejet net,
-      # pas de subscribe → l'état ne doit PAS prendre les topics véreux.
+    test "non-string topic ([123]) → rejected at admission, error frame, state UNCHANGED (no ACK)" do
+      # No-auth vector: a non-string topic would crash topic_matches?/2 downstream. Clean rejection,
+      # no subscribe → the state must NOT take the rotten topics.
       msg = Jason.encode!(%{action: "subscribe", topics: [123]})
 
       assert {[{:text, frame}], state} = WS.websocket_handle({:text, msg}, %{topics: []})
@@ -65,7 +65,7 @@ defmodule Fleet.API.WSTest do
       assert state == %{topics: []}
     end
 
-    test "liste mixte (string + non-string) → rejet à l'admission, state inchangé" do
+    test "mixed list (string + non-string) → rejected at admission, state unchanged" do
       msg = Jason.encode!(%{action: "subscribe", topics: ["workflow_map.*", 5]})
 
       assert {[{:text, frame}], state} = WS.websocket_handle({:text, msg}, %{topics: ["old.*"]})
@@ -73,13 +73,13 @@ defmodule Fleet.API.WSTest do
       assert state == %{topics: ["old.*"]}
     end
 
-    test "JSON malformé → error frame, state inchangé" do
+    test "malformed JSON → error frame, state unchanged" do
       assert {[{:text, frame}], state} = WS.websocket_handle({:text, "not json"}, %{topics: []})
       assert frame =~ "invalid_msg"
       assert state == %{topics: []}
     end
 
-    test "action inconnue → error frame" do
+    test "unknown action → error frame" do
       msg = Jason.encode!(%{action: "weird"})
       assert {[{:text, frame}], _} = WS.websocket_handle({:text, msg}, %{topics: []})
       assert frame =~ "unknown action"
@@ -103,35 +103,35 @@ defmodule Fleet.API.WSTest do
       assert state == %{topics: ["workflow_map.*"]}
     end
 
-    test "event non matching → no frame, state inchangé" do
+    test "non-matching event → no frame, state unchanged" do
       event = Fleet.Event.new(:starfleet, :"audit.log")
 
       assert {[], state} = WS.websocket_info(event, %{topics: ["workflow_map.*"]})
       assert state == %{topics: ["workflow_map.*"]}
     end
 
-    test "topics vide → match all" do
+    test "empty topics → match all" do
       event = Fleet.Event.new(:workflow, :anything)
 
       assert {[{:text, frame}], _} = WS.websocket_info(event, %{topics: []})
       assert frame =~ "anything"
     end
 
-    test "heartbeat → frame de CONTRÔLE ping + reschedule" do
-      # Un vrai ping RFC 6455 (pas un frame texte) : le pong automatique du client nourrit
-      # idle_timeout — un abonné passif (dashboard) n'est plus déconnecté toutes les 60s.
+    test "heartbeat → CONTROL ping frame + reschedule" do
+      # A real RFC 6455 ping (not a text frame): the client's automatic pong feeds
+      # idle_timeout — a passive subscriber (dashboard) is no longer disconnected every 60s.
       assert {[{:ping, <<>>}], state} = WS.websocket_info(:heartbeat, %{topics: []})
 
       assert state == %{topics: []}
 
-      # Reschedule fait via Process.send_after — pas attendu (test sync, 30s
-      # trop long). On vérifie juste que le frame est correct + state préservé.
+      # Reschedule done via Process.send_after — not awaited (sync test, 30s
+      # too long). We only check that the frame is correct + state preserved.
     end
 
-    test "payload non-JSON-encodable (tuple) → frame dégradé _raw, jamais un crash du process" do
-      # Le bord WS est le SEUL consommateur JSON du bus sans filet : un reason tuple d'un
-      # producteur (futur, ou event forgé sur le bus no-auth) crashait chaque connexion Cowboy
-      # précisément sur les events d'incident. Le rescue dégrade en vérité inspectée.
+    test "non-JSON-encodable payload (tuple) → degraded _raw frame, never a process crash" do
+      # The WS edge is the ONLY JSON consumer of the bus without a net: a reason tuple from a
+      # producer (future, or an event forged on the no-auth bus) would crash every Cowboy connection
+      # precisely on incident events. The rescue degrades into inspected truth.
       event =
         Fleet.Event.new(:spawner, :"pod.failed",
           payload: %{"pod_id" => "p1", "reason" => {:no_ack, :wake}}
@@ -145,7 +145,7 @@ defmodule Fleet.API.WSTest do
       assert payload["_raw"] =~ "no_ack"
     end
 
-    test "message inconnu → no frame" do
+    test "unknown message → no frame" do
       assert {[], state} = WS.websocket_info(:other, %{topics: []})
       assert state == %{topics: []}
     end
