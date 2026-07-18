@@ -204,10 +204,13 @@ defmodule Fleet.Pilot.StepDispatcher do
                  route,
                  step_spec
                ) do
-            {:ok, brief} ->
+            {:ok, brief, brief_kind} ->
               spawn_opts =
                 [
                   brief: brief,
+                  # Effective kind (step override resolved) — routes the physical object
+                  # (briefs/ vs gate-briefs/) at the spawn leaf; popped before the pod spawn.
+                  brief_kind: brief_kind,
                   pod_id: pod_id,
                   rc_name: Spawn.rc_name(repo, role),
                   # Speaking LOCAL branch name (sanitized issue title), not

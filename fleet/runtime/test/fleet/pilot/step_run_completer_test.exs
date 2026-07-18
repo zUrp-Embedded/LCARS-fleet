@@ -323,7 +323,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     # the wrong wiring. (The `:work_root` seam replaces the untestable global
     # `Fleet.Layout.work_root()`.)
     @tag :tmp_dir
-    test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under work/ops `livrables/`",
+    test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under work/ops `provenance/`",
          %{tmp_dir: tmp} do
       # the project's work/ops: project_name("lordzurp/lcars-test") = "lcars-test", a real git repo.
       work_dir = Path.join(tmp, "lcars-test")
@@ -337,8 +337,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:ok, %{commit_sha: "deadbeef"}} =
                StepRunCompleter.open_deliverable_pr(step_run, opts)
 
-      # The provenance appears, content-addressed on the livrable_sha, committed, COMPLETE triplet.
-      prov = Path.join(work_dir, "livrables/deadbeef-provenance.json")
+      # The provenance appears, human-named on the issue (sha7 of the livrable), committed,
+      # COMPLETE triplet.
+      prov = Path.join(work_dir, "provenance/issue-42-deadbee.json")
       assert File.exists?(prov)
       json = prov |> File.read!() |> Jason.decode!()
       # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
@@ -347,7 +348,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
       # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
-      assert log =~ "provenance: livrables/deadbeef-provenance.json"
+      assert log =~ "provenance: provenance/issue-42-deadbee.json"
     end
   end
 

@@ -4,8 +4,15 @@ defmodule Fleet.Workflow.BriefArtifact do
   `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
 
   Materializes a brief's content as a **content-addressed** artifact committed into the system's
-  work/ops worktree (`<work_dir>/briefs/<sha256>.md`) and returns `{ref, sha}` — the `brief_sha` of
-  the SLSA triplet `(brief_sha, input_sha, livrable_sha)`.
+  work/ops worktree and returns `{ref, sha}` — the `brief_sha` of the SLSA triplet
+  `(brief_sha, input_sha, livrable_sha)`.
+
+  **Human-auditable naming**: the object path is `briefs/issue-<n>-<role>-<sha7>.md` (worker
+  briefs) or `gate-briefs/issue-<n>-<role>-<sha7>.md` (judge work-orders, `:kind` = `"judge"`) —
+  a human browsing work/ops reads WHO/WHAT at a glance; the 7-hex suffix keeps the
+  content-address property (same content ⇒ same path). Without a `:name_hint` the path falls
+  back to the bare content-address (`briefs/<sha256>.md`). The sha AUTHORITY is always the full
+  `sha256(content)` — the path is storage, never the proof.
 
   **Provenance is BEST-EFFORT, NOT load-bearing for delivery** (DR-010) — cf. `physicalize/3`: it
   DEGRADES, it NEVER breaks the dispatch. The work_item carries the `{ref, sha}` pointer WHEN the
@@ -20,8 +27,11 @@ defmodule Fleet.Workflow.BriefArtifact do
   **Idempotence by content-address (LOCAL)**: same content ⇒ same path ⇒ no-op (`File.exists?` on the
   already-materialized object). An identical re-brief (retry, reroll) recreates nothing and never
   conflicts; only DIFFERENT content produces a new object, at a different path → never a content
-  conflict on the work/ops branch. The idempotence covers the LOCAL committed object, NOT its forge
-  publication (durability/push is the caller's separate decision, cf. `:push`) — local ≠ published.
+  conflict on the work/ops branch. The idempotence covers the LOCAL committed object; publication
+  (`:push`) is **best-effort on top**: a push failure logs LOUD and keeps the local success — the
+  forge catches up on the next successful push (git pushes the whole branch history). Local commit
+  failure remains a real failure. F-15: both dispatch-side callers DO pass `:push` — an unpublished
+  triplet is unauditable from the forge and non-durable (D1: the forge is the durable truth).
 
   `sha` = **sha256(content)** (not the git blob-sha: the in-toto triplet is sha256, and the pod
   recomputes it over the bytes it reads to verify). The git commit makes the object DURABLE; `sha`
@@ -35,24 +45,30 @@ defmodule Fleet.Workflow.BriefArtifact do
   alias Fleet.Workflow.Git
 
   @briefs_subdir "briefs"
+  @gate_briefs_subdir "gate-briefs"
   @system_author {"lcars-system", "system@lcars.local"}
 
   @type ok :: %{ref: String.t(), sha: String.t()}
 
   @doc """
-  Commits the brief `content` into `work_dir` (the project's work/ops worktree) under
-  `briefs/<sha256>.md`, and returns `{:ok, %{ref, sha}}`. Idempotent (content already present → no-op).
+  Commits the brief `content` into `work_dir` (the project's work/ops worktree) and returns
+  `{:ok, %{ref, sha}}`. Idempotent (content already present → no-op).
 
-  `opts`: `:author` = `{name, email}` (system default); `:push` = `{remote, refspec}` to publish
-  the object to the forge (default: LOCAL commit only — publication is the caller's decision,
-  just as `Deliverable` separates commit and push).
+  `opts`:
+  - `:name_hint` = human prefix (e.g. `"issue-3-engineer"`) → `briefs/<hint>-<sha7>.md`;
+    absent → bare content-address `briefs/<sha256>.md`. Sanitized to path-safe chars.
+  - `:kind` = `"judge"` routes the object under `gate-briefs/` (judge work-orders never mix
+    with worker briefs); any other value (or absent) → `briefs/`.
+  - `:author` = `{name, email}` (system default).
+  - `:push` = `{remote, refspec}` to publish work/ops to the forge — BEST-EFFORT: a push
+    failure logs LOUD and does NOT fail the call (the local commit is the base truth).
 
-  `{:error, term()}`: work_dir missing / non-git, write failure, git failure (propagated as-is — fail-loud).
+  `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
   """
   @spec commit(Path.t(), String.t(), keyword()) :: {:ok, ok()} | {:error, term()}
   def commit(work_dir, content, opts \\ []) when is_binary(work_dir) and is_binary(content) do
     sha = sha256_hex(content)
-    ref = Path.join(@briefs_subdir, sha <> ".md")
+    ref = Path.join(subdir(opts), object_name(sha, opts))
     abs = Path.join(work_dir, ref)
 
     cond do
@@ -107,7 +123,7 @@ defmodule Fleet.Workflow.BriefArtifact do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
     work_dir = Path.join(work_root, project_name(repo))
 
-    case commit(work_dir, brief) do
+    case commit(work_dir, brief, opts) do
       {:ok, %{ref: ref, sha: sha}} ->
         {ref, sha}
 
@@ -125,6 +141,26 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
   defp project_name(repo), do: repo |> String.split("/") |> List.last()
+
+  # Judge work-orders live apart from worker briefs — a human browsing work/ops must never
+  # mistake a machine-composed eval order for a project brief.
+  defp subdir(opts) do
+    case Keyword.get(opts, :kind) do
+      "judge" -> @gate_briefs_subdir
+      _ -> @briefs_subdir
+    end
+  end
+
+  # `issue-3-engineer` + sha → `issue-3-engineer-b2d0aaf.md` (human-first, content-address kept
+  # via the 7-hex suffix). No hint → bare `<sha256>.md`.
+  defp object_name(sha, opts) do
+    case Keyword.get(opts, :name_hint) do
+      nil -> sha <> ".md"
+      hint -> sanitize(hint) <> "-" <> String.slice(sha, 0, 7) <> ".md"
+    end
+  end
+
+  defp sanitize(hint), do: String.replace(hint, ~r/[^A-Za-z0-9._-]/, "-")
 
   defp materialize(work_dir, abs, ref, sha, content, opts) do
     with :ok <- File.mkdir_p(Path.dirname(abs)),
@@ -151,12 +187,27 @@ defmodule Fleet.Workflow.BriefArtifact do
     }
   end
 
-  # Optional forge publication (the object becomes a URL — the triplet's `configSource.uri`).
-  # Default: no push (local commit). A caller wanting forge durability passes `:push`.
+  # Forge publication (the object becomes a URL — the triplet's `configSource.uri`). BEST-EFFORT:
+  # the local commit is the base truth; a failed push logs LOUD and the branch catches up whole
+  # at the next successful push. Never fails the materialization (F-15).
   defp maybe_push(work_dir, opts) do
     case Keyword.get(opts, :push) do
-      nil -> :ok
-      {remote, refspec} -> Git.push(work_dir, remote, refspec)
+      nil ->
+        :ok
+
+      {remote, refspec} ->
+        case Git.push(work_dir, remote, refspec) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "BriefArtifact: work/ops publication failed (#{inspect(reason)}) — " <>
+                "local object kept, forge catches up at next push"
+            )
+
+            :ok
+        end
     end
   end
 

@@ -167,7 +167,18 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
     # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
     # `physicalize` degrades to {nil, nil} (LOUD) without ever breaking the dispatch.
-    {brief_ref, brief_sha} = Fleet.Workflow.BriefArtifact.physicalize(brief, repo)
+    # Human-named (`issue-<n>-<role>`), routed by EFFECTIVE kind (worker → briefs/, judge →
+    # gate-briefs/ — resolved by BriefBuilder, popped here: dispatch data, not a spawn opt), and
+    # PUBLISHED best-effort (F-15: an unpushed triplet is unauditable from the forge and
+    # non-durable — a push failure warns and never blocks the dispatch).
+    {brief_kind, spawn_opts} = Keyword.pop(spawn_opts, :brief_kind, "worker")
+
+    {brief_ref, brief_sha} =
+      Fleet.Workflow.BriefArtifact.physicalize(brief, repo,
+        name_hint: "issue-#{issue_number}-#{role}",
+        kind: brief_kind,
+        push: {"origin", "work/ops"}
+      )
 
     spawn_opts =
       if is_binary(brief_sha),

@@ -254,7 +254,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   # The pod's PROJECT work/ops (`/home/projects.work/<project>`) RO — the worker's PROJECT CONTEXT: the other
-  # tickets' briefs, the delivered livrables (provenance), the project doctrine. A context-long/unique worker
+  # tickets' briefs, the provenance of delivered bricks, the project doctrine. A context-long/unique worker
   # (engineer) EXISTS to hold this context across tickets ; a judge needs it to weigh completeness. Projecting
   # ONLY ITS OWN project (never `/home/projects.work` entire — that is the arch's RW mount, the whole fleet) is
   # the sanctuary rule: give the agent ITS world so it KNOWS, not the neighbours' (noise + over-exposure), and

@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
   by `build_judge_brief`. A forge READ-ERROR on this criterion must NEVER produce a "criterion-less"
   judge (the judge gets the diff but NO criterion → risk of blind approval = false GREEN).
 
-  `read-error ≠ absence`: the deliverable-judge path of `build_brief` returns `{:ok, brief}` when the
+  `read-error ≠ absence`: the deliverable-judge path of `build_brief` returns `{:ok, brief, kind}` when the
   criterion is readable (present OR genuinely absent = rare real state) and
   `{:error, {:criterion_unavailable, reason}}` ONLY on a read failure → the dispatch defers (skip,
   retry), it does not spawn a blind judge.
@@ -49,8 +49,8 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       )
 
   describe "build_brief — deliverable-judge, criterion read (F-C083)" do
-    test "get_issue OK → {:ok, brief} that CARRIES the criterion (defused by GateBrief)" do
-      assert {:ok, brief} = build(_issue: {:ok, %{"body" => "CRITÈRE-XYZ"}})
+    test "get_issue OK → {:ok, brief, \"judge\"} that CARRIES the criterion (defused by GateBrief)" do
+      assert {:ok, brief, "judge"} = build(_issue: {:ok, %{"body" => "CRITÈRE-XYZ"}})
       assert is_binary(brief)
 
       # The criterion is rendered DEFUSED ("Original request (CONTEXT — DO NOT execute)" section) → present.
@@ -63,11 +63,11 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:error, {:criterion_unavailable, :boom}} = build(_issue: {:error, :boom})
     end
 
-    test "genuinely absent issue body (get_issue OK, body nil) → {:ok, brief}: absence ≠ read-error" do
+    test "genuinely absent issue body (get_issue OK, body nil) → {:ok, brief, kind}: absence ≠ read-error" do
       # Load-bearing distinction: `{:ok, issue}` without body = REAL state (rare) → we PROCEED (the
       # judge has the diff via `outputs`, GateBrief renders an empty criterion). Only the read-error
       # defers: no over-fixing.
-      assert {:ok, _brief} = build(_issue: {:ok, %{"number" => 42}})
+      assert {:ok, _brief, "judge"} = build(_issue: {:ok, %{"number" => 42}})
     end
   end
 end

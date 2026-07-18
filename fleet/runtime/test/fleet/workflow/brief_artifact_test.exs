@@ -34,6 +34,53 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
   end
 
+  test "name_hint: human-first path briefs/issue-<n>-<role>-<sha7>.md, sha authority unchanged",
+       %{tmp_dir: tmp} do
+    git_init(tmp)
+    content = "Brief: do X.\n"
+    expected = :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
+
+    assert {:ok, %{ref: ref, sha: sha}} =
+             BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
+
+    assert sha == expected
+    assert ref == "briefs/issue-3-engineer-#{String.slice(sha, 0, 7)}.md"
+    assert File.read!(Path.join(tmp, ref)) == content
+    # idempotent under the SAME hint (same content → same path → no new commit).
+    n = commit_count(tmp)
+    assert {:ok, %{ref: ^ref, sha: ^sha}} = BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
+    assert commit_count(tmp) == n
+  end
+
+  test "kind judge → routed under gate-briefs/ (never mixed with worker briefs)", %{tmp_dir: tmp} do
+    git_init(tmp)
+
+    assert {:ok, %{ref: ref}} =
+             BriefArtifact.commit(tmp, "judge order\n", name_hint: "issue-3-consultant", kind: "judge")
+
+    assert ref =~ ~r"\Agate-briefs/issue-3-consultant-[0-9a-f]{7}\.md\z"
+  end
+
+  test "name_hint sanitized: path-unsafe chars never reach the object path", %{tmp_dir: tmp} do
+    git_init(tmp)
+
+    assert {:ok, %{ref: ref}} = BriefArtifact.commit(tmp, "x\n", name_hint: "issue-3-a/b c")
+    assert ref =~ ~r"\Abriefs/issue-3-a-b-c-[0-9a-f]{7}\.md\z"
+  end
+
+  test "push is BEST-EFFORT: unreachable remote → commit still {:ok}, object committed locally",
+       %{tmp_dir: tmp} do
+    git_init(tmp)
+
+    # No such remote in this repo → Git.push fails; the materialization must NOT (F-15:
+    # local commit = base truth, publication degrades LOUD).
+    assert {:ok, %{ref: ref}} =
+             BriefArtifact.commit(tmp, "pushed brief\n", push: {"origin", "work/ops"})
+
+    assert File.exists?(Path.join(tmp, ref))
+    assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
+  end
+
   test "idempotence: same content re-committed → same {ref, sha}, ZERO new commit", %{tmp_dir: tmp} do
     git_init(tmp)
     content = "identical\n"

@@ -342,14 +342,22 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, %WorkItem{brief_ref: "briefs/" <> _}} =
              WorkItem.new("p1", %{brief_ref: "briefs/#{valid_sha}.md"})
 
+    # human-named scheme (BriefArtifact name_hint) — worker AND judge routing both accepted
+    assert {:ok, %WorkItem{brief_ref: "briefs/issue-3-engineer-abc1234.md"}} =
+             WorkItem.new("p1", %{brief_ref: "briefs/issue-3-engineer-abc1234.md"})
+
+    assert {:ok, %WorkItem{brief_ref: "gate-briefs/" <> _}} =
+             WorkItem.new("p1", %{brief_ref: "gate-briefs/issue-3-consultant-abc1234.md"})
+
     # nil stays nil (legitimate degraded/best-effort state, DR-010)
     assert {:ok, %WorkItem{brief_sha: nil, brief_ref: nil}} = WorkItem.new("p1", %{})
     # out-of-shape sha (too short, uppercase, non-hex) → rejected
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: "def"})
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
-    # out-of-shape ref (not briefs/<sha>.md) → rejected
+    # out-of-shape ref (free text, traversal, no sha7 suffix) → rejected
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/inconnu.md"})
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "../escape.md"})
+    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/issue-3-engineer.md"})
   end
 
   test "6g. enqueue propagates the smart-constructor error + casts the ISO deadline", %{

@@ -164,7 +164,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
       issue: Map.get(step_run, :issue_number)
     }
 
-    case Fleet.Workflow.Provenance.emit(work_dir, attrs) do
+    # Published best-effort (F-15): the statement only serves auditors if it is READABLE from the
+    # forge; a push failure warns inside emit and never fails the completion.
+    case Fleet.Workflow.Provenance.emit(work_dir, attrs, push: {"origin", "work/ops"}) do
       {:ok, _} ->
         :ok
 
@@ -303,7 +305,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # PR-opened action (a same-second tie renders inverted in the feed).
          :ok <- space_writes(opts),
          # SLSA triplet: (brief_sha, base_sha=input_sha, livrable_sha=sha) → in-toto provenance
-         # committed under work/ops `livrables/`. HERE = the ONLY point where a real producer git
+         # committed under work/ops `provenance/`. HERE = the ONLY point where a real producer git
          # deliverable is published (PR-native path); `complete/2` carries ONLY verdicts without
          # deliverable_opts (abandon/brief), never a deliverable. BEST-EFFORT (degrades LOUD) — NOT
          # load-bearing: never a blocked PR over a trace file.

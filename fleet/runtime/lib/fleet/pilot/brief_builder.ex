@@ -84,7 +84,9 @@ defmodule Fleet.Pilot.BriefBuilder do
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
   # role name. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
   #
-  # Returns `{:ok, brief}` | `{:error, {:criterion_unavailable, reason}}`. The error is reachable ONLY on
+  # Returns `{:ok, brief, kind}` (`kind` = the EFFECTIVE `"worker" | "judge"` — step override
+  # resolved, so the caller routes the physical object without re-deriving judge-ness) |
+  # `{:error, {:criterion_unavailable, reason}}`. The error is reachable ONLY on
   # the DELIVERABLE-judge path, when the criterion (issue body) can't be READ from the forge (F-C083:
   # read-error ≠ absence → the dispatch DEFERS rather than spawn a criterion-less judge). Out-of-vocab
   # `brief_kind`/`judge_target` still `raise` (structural config bug, fail-loud).
@@ -98,7 +100,7 @@ defmodule Fleet.Pilot.BriefBuilder do
           keyword(),
           {String.t(), String.t()} | term(),
           map()
-        ) :: {:ok, String.t()} | {:error, {:criterion_unavailable, term()}}
+        ) :: {:ok, String.t(), String.t()} | {:error, {:criterion_unavailable, term()}}
   def build_brief(
         profile,
         role,
@@ -125,13 +127,15 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)}
+        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route), "judge"}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
       # (F-C083: a read-error on the criterion DEFERS, it never yields a criterion-less judge).
       {"judge", target} when target in [nil, "deliverable"] ->
-        build_judge_brief(role, forge, repo, number, forge_opts, route)
+        with {:ok, brief} <- build_judge_brief(role, forge, repo, number, forge_opts, route) do
+          {:ok, brief, "judge"}
+        end
 
       # judge_target PRESENT but outside {brief, deliverable} → anomaly: we don't guess the target.
       {"judge", other} ->
@@ -139,7 +143,7 @@ defmodule Fleet.Pilot.BriefBuilder do
               "judge_target #{inspect(other)} out of vocabulary {brief, deliverable} — a judge's target is not inferred"
 
       {"worker", _} ->
-        {:ok, build_worker_brief(role, issue)}
+        {:ok, build_worker_brief(role, issue), "worker"}
 
       # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->

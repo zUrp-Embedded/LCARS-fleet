@@ -4,8 +4,10 @@ defmodule Fleet.Workflow.Provenance do
   `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
 
   Assembles an in-toto Statement `(brief_sha, input_sha, livrable_sha)` — WHAT was asked (the brief),
-  WHAT we started from (the base state), WHAT came out (the deliverable) — and commits it
-  content-addressed into `livrables/<livrable_sha>-provenance.json`. **bash+jq+git on the doctrine
+  WHAT we started from (the base state), WHAT came out (the deliverable) — and commits it into
+  `provenance/issue-<n>-<sha7>.json` (no `:issue` attr → bare `provenance/<livrable_sha>.json`).
+  The directory says what the files ARE: mechanical attestations, NOT deliverables — the
+  deliverable itself is the git commit the statement points at. **bash+jq+git on the doctrine
   side; HERE Jason + Git, ZERO external tooling** (no cosign, no SLSA CLI).
 
   - `livrable_sha` = subject digest + file name (the anchor: the provenance of ONE given deliverable).
@@ -28,7 +30,7 @@ defmodule Fleet.Workflow.Provenance do
 
   alias Fleet.Workflow.Git
 
-  @livrables_subdir "livrables"
+  @provenance_subdir "provenance"
   @system_author {"lcars-system", "system@lcars.local"}
   @build_type "lcars-fleet-pipeline-v2"
 
@@ -47,25 +49,26 @@ defmodule Fleet.Workflow.Provenance do
 
   @doc """
   Records the deliverable's in-toto provenance into `work_dir`
-  (`livrables/<livrable_sha>-provenance.json`), committed. `attrs.livrable_sha` REQUIRED (the anchor);
-  the rest enriches the Statement (degrades when absent).
+  (`provenance/issue-<n>-<sha7>.json`, cf. `statement_name/2`), committed. `attrs.livrable_sha`
+  REQUIRED (the anchor); the rest enriches the Statement (degrades when absent).
 
-  `opts`: `:author` `{name, email}` (system default); `:push` `{remote, refspec}` (default local commit).
+  `opts`: `:author` `{name, email}` (system default); `:push` `{remote, refspec}` — BEST-EFFORT
+  publication (a push failure logs LOUD, never fails the emit).
   `{:error, term()}`: work_dir missing / write failure / git failure — propagated (fail-loud,
   non-fatal caller-side).
   """
   @spec emit(Path.t(), attrs(), keyword()) :: {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
   def emit(work_dir, %{livrable_sha: livrable_sha} = attrs, opts \\ [])
       when is_binary(work_dir) and is_binary(livrable_sha) and livrable_sha != "" do
-    ref = Path.join(@livrables_subdir, livrable_sha <> "-provenance.json")
+    ref = Path.join(@provenance_subdir, statement_name(livrable_sha, attrs))
     abs = Path.join(work_dir, ref)
 
     cond do
       not safe_path_segment?(livrable_sha) ->
-        # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH
-        # (`livrables/<sha>-provenance.json`). A separator/traversal (`/`, `\`, `..`) would escape the
-        # work/ops dir. It IS a git commit digest (hex) in production — a value carrying a path separator
-        # is refused, never trusted as a path segment.
+        # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
+        # separator/traversal (`/`, `\`, `..`) would escape the work/ops dir. It IS a git commit
+        # digest (hex) in production — a value carrying a path separator is refused, never
+        # trusted as a path segment.
         {:error, {:invalid_livrable_sha, livrable_sha}}
 
       not File.dir?(work_dir) ->
@@ -157,10 +160,36 @@ defmodule Fleet.Workflow.Provenance do
     }
   end
 
+  # BEST-EFFORT publication (same contract as BriefArtifact, F-15): local commit = base truth,
+  # a failed push logs LOUD and the branch catches up at the next successful push.
   defp maybe_push(work_dir, opts) do
     case Keyword.get(opts, :push) do
-      nil -> :ok
-      {remote, refspec} -> Git.push(work_dir, remote, refspec)
+      nil ->
+        :ok
+
+      {remote, refspec} ->
+        case Git.push(work_dir, remote, refspec) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "Provenance: work/ops publication failed (#{inspect(reason)}) — " <>
+                "local statement kept, forge catches up at next push"
+            )
+
+            :ok
+        end
+    end
+  end
+
+  # Human-first name: `issue-<n>-<sha7>.json` when the issue number is known (an auditor browses
+  # by issue); bare `<livrable_sha>.json` otherwise. The FULL digest lives INSIDE the statement
+  # (subject digest) — the file name is storage, never the proof.
+  defp statement_name(livrable_sha, attrs) do
+    case Map.get(attrs, :issue) do
+      n when is_integer(n) -> "issue-#{n}-#{String.slice(livrable_sha, 0, 7)}.json"
+      _ -> livrable_sha <> ".json"
     end
   end
 

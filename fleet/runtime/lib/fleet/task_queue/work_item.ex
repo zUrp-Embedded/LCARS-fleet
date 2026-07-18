@@ -35,7 +35,7 @@ defmodule Fleet.TaskQueue.WorkItem do
           role: String.t() | nil,
           brief: String.t() | nil,
           # PHYSICAL brief: the brief committed content-addressed into work/ops.
-          # `brief_ref` = work/ops-relative path (`briefs/<sha>.md`); `brief_sha` = its SHA256 (pod-side check).
+          # `brief_ref` = work/ops-relative path (cf. `cast_brief_ref` scheme); `brief_sha` = its SHA256 (pod-side check).
           # Provenance is BEST-EFFORT (DR-010): the `brief` string COHABITS as the assumed degraded
           # FALLBACK — it does NOT become nil (a non-onboarded project / no work/ops dispatches on the
           # string alone, cf. `BriefArtifact`). `brief_sha` present = verifiable provenance; absent = a
@@ -249,8 +249,10 @@ defmodule Fleet.TaskQueue.WorkItem do
   # BND-123: `brief_sha`/`brief_ref` are the CONTENT-ADDRESS of the physical brief, not free text. An
   # arbitrary string would masquerade as verifiable provenance in the MCP envelope (the pod would then
   # fail its sha-check, but the WorkItem would already CLAIM a physical brief). Validate the SHAPE at
-  # construction: `brief_sha` = sha256 hex (64 lowercase), `brief_ref` = `briefs/<sha>.md`. nil stays nil
-  # (the legit degraded/best-effort state, DR-010). SSoT for BOTH `new/2` (→ {:bad_attr}) and
+  # construction: `brief_sha` = sha256 hex (64 lowercase), `brief_ref` = the BriefArtifact scheme —
+  # `briefs/` (worker) or `gate-briefs/` (judge), human-named `issue-<n>-<role>-<sha7>.md` or the
+  # bare content-address `<sha256>.md` (no-name fallback). nil stays nil (the legit
+  # degraded/best-effort state, DR-010). SSoT for BOTH `new/2` (→ {:bad_attr}) and
   # `rich_from_map` (→ :invalid via its `else`).
   defp cast_brief_sha(nil, _field), do: {:ok, nil}
 
@@ -265,7 +267,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_brief_ref(nil, _field), do: {:ok, nil}
 
   defp cast_brief_ref(s, field) when is_binary(s) do
-    if Regex.match?(~r/\Abriefs\/[0-9a-f]{64}\.md\z/, s),
+    if Regex.match?(~r/\A(briefs|gate-briefs)\/(issue-\d+-[A-Za-z0-9._-]+-[0-9a-f]{7}|[0-9a-f]{64})\.md\z/, s),
       do: {:ok, s},
       else: {:error, {:bad_attr, {field, s}}}
   end

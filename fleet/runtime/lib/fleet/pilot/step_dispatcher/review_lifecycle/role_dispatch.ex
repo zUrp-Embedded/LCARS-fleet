@@ -151,9 +151,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
              route,
              pr_number
            ) do
-        {:ok, brief} ->
+        {:ok, brief, brief_kind} ->
           spawn_opts =
-            [brief: brief, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
+            [brief: brief, brief_kind: brief_kind, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
@@ -214,9 +214,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # PR-judge path — no workflow_map step here (PR-driven judges) → `step_spec = %{}`:
   # build_brief falls back to the profile's `brief_kind` (judge for qualifier/reviewer) AND to the
   # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
-  # `{:ok, brief} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
+  # `{:ok, brief, kind} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
   # deliverable-judge path (a forge read-error on the criterion DEFERS, never a criterion-less
-  # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _}`.
+  # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _, "worker"}` (a rework
+  # brief is EXECUTABLE, addressed to the producer — it lands under `briefs/`, not `gate-briefs/`).
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
       BriefBuilder.build_brief(
@@ -232,5 +233,5 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       )
 
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
-    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route)}
+    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker"}
 end

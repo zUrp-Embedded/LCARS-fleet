@@ -46,13 +46,22 @@ defmodule Fleet.Workflow.ProvenanceTest do
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
   end
 
-  test "emit: writes livrables/<livrable_sha>-provenance.json (valid in-toto) + commits, idempotent",
+  test "emit: issue number known → human-first name provenance/issue-<n>-<sha7>.json",
+       %{tmp_dir: tmp} do
+    git_init(tmp)
+    attrs = %{livrable_sha: "abc123def456", issue: 3, input_sha: "ghi"}
+
+    assert {:ok, %{ref: ref}} = Provenance.emit(tmp, attrs)
+    assert ref == "provenance/issue-3-abc123d.json"
+  end
+
+  test "emit: writes provenance/<livrable_sha>.json (valid in-toto) + commits, idempotent",
        %{tmp_dir: tmp} do
     git_init(tmp)
     attrs = %{livrable_sha: "abc123", brief_sha: "def", input_sha: "ghi", subject_name: "report-engineer.md"}
 
     assert {:ok, %{ref: ref, path: path}} = Provenance.emit(tmp, attrs)
-    assert ref == "livrables/abc123-provenance.json"
+    assert ref == "provenance/abc123.json"
 
     decoded = path |> File.read!() |> Jason.decode!()
     assert decoded["_type"] == "https://in-toto.io/Statement/v0.1"
@@ -72,7 +81,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
 
   test "BND-120 : livrable_sha with a separator/traversal → refused (never interpolated as a path segment)",
        %{tmp_dir: tmp} do
-    # livrable_sha is interpolated into `livrables/<sha>-provenance.json`: a `/` or `..` would escape
+    # livrable_sha is interpolated into `provenance/<sha>.json`: a `/` or `..` would escape
     # the work/ops. It is a git digest (hex) in prod; a value carrying a separator is refused BEFORE
     # any write.
     for hostile <- ["../../etc/passwd", "a/b", "..", "x/../y"] do
