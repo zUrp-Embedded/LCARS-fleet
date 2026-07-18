@@ -1,14 +1,13 @@
 defmodule Fleet.Starfleet.BootOrchestrator do
   @moduledoc """
   Post-readiness orchestrator — a fire-and-forget Task TRIGGERED by `Fleet.Application`
-  AFTER the root `Supervisor.start_link` returned `{:ok, _}` (acte4 A-08): "post-readiness"
+  AFTER the root `Supervisor.start_link` returned `{:ok, _}`: "post-readiness"
   is MECHANICAL (the whole fleet — pilot, api listener included — is provably up before the
   first permanent pod spawns; an aborted boot spawns nothing). It is NOT a supervised child:
   `run/1` never exits abnormally (rescue+catch below), and the resurrection rail for permanent
   pods is `PermanentWarden`, not a restart of this Task.
 
-  Simplified architecture spec (Option (b): direct subscribe via supervised
-  consumer GenServers in their respective apps):
+  Sequence (consumers self-subscribe via their own supervision trees):
 
   1. **Wire consumers** — handled by OTP (AuditConsumer/PublishConsumer
      started via their app's supervision tree, subscribe at `init/1`).
@@ -67,11 +66,9 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     enabled? =
       Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
 
-    # Z2 collapse 2026-07-12 : the old filter keyed on "fleet_" OTP apps — post-collapse
-    # there is ONE app (:lcars_fleet), the filter returned [] forever and the
-    # `boot_complete.started_apps` payload silently LIED (empty fleet at every boot).
-    # Filter on "lcars" = the honest single-app equivalent (the field was already
-    # quasi-constant pre-collapse : the 14 apps were all deps of starfleet).
+    # Single app (:lcars_fleet): a filter keyed on "fleet_" OTP apps would return [] forever
+    # and the `boot_complete.started_apps` payload would silently LIE (empty fleet at every
+    # boot). Filter on "lcars" = the honest single-app equivalent.
     started_apps =
       Application.started_applications()
       |> Enum.map(fn {a, _, _} -> a end)
@@ -110,8 +107,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           Enum.split_with(results, fn
             {:ok, _} -> true
             {:error, _} -> false
-            # Vulcan finding: a malformed element (neither :ok nor :error) used to be counted OK
-            # (`_ -> true`) → false fleet.boot_complete. Now classed as a failure.
+            # A malformed element (neither :ok nor :error) counted OK (`_ -> true`) would make
+            # a false fleet.boot_complete → classed as a failure.
             _ -> false
           end)
 
@@ -121,7 +118,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
         end
 
       # (No `{:ok, list}` clause: `PermanentBoot.boot_permanent_pods/0` yields a BARE list of
-      # per-pod results or `{:error, _}` — never a wrapped list; such a clause was dead code.)
+      # per-pod results or `{:error, _}` — never a wrapped list; such a clause would be dead code.)
       {:error, reason} ->
         {:failed, reason}
 
@@ -168,8 +165,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   end
 
   # Canonical schema broadcast %Fleet.Event{source: :starfleet}, via the protected core
-  # `Bus.safe_emit/4` (local duplicated rescue removed — the protected-emission policy has ONE
-  # substrate authority). `:silent`: this Task emits DURING boot — an UnregisteredError
+  # `Bus.safe_emit/4` (the protected-emission policy has ONE
+  # substrate authority — never a duplicated local rescue). `:silent`: this Task emits DURING boot — an UnregisteredError
   # (registry not yet populated) is the nominal case here, not an alarm. A MALFORMED event
   # (construction bug) is logged ERROR by safe_emit then neutralized — otherwise it would mask a
   # boot_failed/boot_partial silently, and this `:transient` Task must NEVER crash (a
