@@ -493,7 +493,9 @@ defmodule Fleet.Pilot.StepDispatcher do
        do: {:ok, route}
 
   defp ensure_workflow_map_or_onboard(forge, repo, number, nil, workflow_map_loader, forge_opts) do
-    workflow_map_name = default_workflow_map()
+    # THE PROJECT'S declared card (intensity.json, F-29 chain) — legacy/undeclared project →
+    # the delegation default card. The criticality mechanic IS the card choice.
+    workflow_map_name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
 
     with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),
@@ -505,9 +507,6 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
-  # consultant reviews the brief BEFORE the eng). Data-catalogue, not a hardcoded magic name.
-  defp default_workflow_map,
-    do: Fleet.Pilot.Roles.delegation_workflow_map()
 
   # Delegated to the single authority (WorkflowMapNav.safe_load — same tag; the rescue lives there).
   defp load_workflow_map(workflow_map_name, workflow_map_loader),

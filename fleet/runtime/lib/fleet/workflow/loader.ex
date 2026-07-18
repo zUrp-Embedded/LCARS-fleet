@@ -104,7 +104,10 @@ defmodule Fleet.Workflow.Loader do
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds"),
       # PR-deliverable jury (mandatory in the schema): THE card is the single jury source —
       # the engine has NO jury config (`Fleet.Pilot.Roles.jury/2` reads this field).
-      "jury" => Map.fetch!(spec, "jury")
+      "jury" => Map.fetch!(spec, "jury"),
+      # Levels the card claims to suit (metadata, optional) — read by the off-matrix
+      # override warning (ProjectIntensity); [] = the card claims nothing, no basis to warn.
+      "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || []
     }
   end
 

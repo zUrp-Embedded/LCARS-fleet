@@ -133,7 +133,15 @@ defmodule Fleet.MCP.PodTools do
         "Start a NEW project: creates the repo on the forge + the 2 dual-dir folders " <>
           "(`/home/projects/<name>` on `main`, `/home/projects.work/<name>` on `work/ops`) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
-          "`name` = kebab-case slug. Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
+          "`name` = kebab-case slug. RELAY the project's criticality DECLARED BY THE HUMAN " <>
+          "(`intensity_level` L0..L4 + `intensity_justification`): you MAY ask the framing questions " <>
+          "(is there mains voltage? can it cut fingers? how long will it live?) — the stated FACTS make " <>
+          "the level obvious (rubber-duck, not assessor): you RELAY what falls out, you NEVER weigh or " <>
+          "discount criticality yourself; if the human has not declared it, pass nothing " <>
+          "(the project is recorded L0, marked undeclared). Optional: `nature` (domain hint, " <>
+          "e.g. web-gui/hardware), `workflow_map` (EXPLICIT card override — accepted even off-matrix, " <>
+          "logged loud). " <>
+          "Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
           "`create_issue` passing it `project: <the returned repo>` to deliver INTO this project."
       )
     end
@@ -143,7 +151,11 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "name" => %{"type" => "string"},
         "pitch" => %{"type" => "string"},
-        "description" => %{"type" => "string"}
+        "description" => %{"type" => "string"},
+        "intensity_level" => %{"type" => "string", "enum" => ["L0", "L1", "L2", "L3", "L4"]},
+        "intensity_justification" => %{"type" => "string"},
+        "nature" => %{"type" => "string"},
+        "workflow_map" => %{"type" => "string"}
       },
       "required" => ["name"]
     })

@@ -1,59 +1,51 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:lcars:intensity-v1",
-  "title": "LCARS Project Intensity v1",
-  "description": "Structural schema for a per-project intensity.json (template: priv/cap_profile/canon/config/intensity-template.json). Structural only: pipeline_default resolvability and level<->pipeline coherence are project-level concerns, not enforced here. Underscore-prefixed keys are informational (comment/schema marker/levels reference) and ignored by the runtime.",
-  "type": "object",
-  "required": [
-    "level",
-    "declared_at",
-    "declared_by",
-    "criteria",
-    "justification",
-    "pipeline_default"
-  ],
-  "additionalProperties": false,
-  "patternProperties": {
-    "^_": {}
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "urn:lcars:intensity-v1",
+ "title": "LCARS Project Intensity v1",
+ "description": "Structural schema for a per-project intensity.json (template: priv/cap_profile/canon/config/intensity-template.json). The LEVEL is the HUMAN's declaration (elicited by the framing interview — stakes of failure, lifetime; an agent NEVER self-assesses criticality) relayed by the architect; justification carries the WHY in prose. pipeline_default names the validation card. Underscore-prefixed keys are informational and ignored by the runtime.",
+ "type": "object",
+ "required": [
+  "level",
+  "declared_at",
+  "declared_by",
+  "justification",
+  "pipeline_default"
+ ],
+ "additionalProperties": false,
+ "patternProperties": {
+  "^_": {}
+ },
+ "properties": {
+  "level": {
+   "type": "string",
+   "enum": [
+    "L0",
+    "L1",
+    "L2",
+    "L3",
+    "L4"
+   ]
   },
-  "properties": {
-    "level": {
-      "type": "string",
-      "enum": ["L0", "L1", "L2", "L3", "L4"]
-    },
-    "declared_at": {
-      "type": "string",
-      "minLength": 1
-    },
-    "declared_by": {
-      "type": "string",
-      "minLength": 1
-    },
-    "criteria": {
-      "type": "object",
-      "required": [
-        "stakes_failure",
-        "lifetime",
-        "multi_authors",
-        "external_audit_likely",
-        "base_for_other_bricks"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "stakes_failure": { "type": "string", "minLength": 1 },
-        "lifetime": { "type": "string", "minLength": 1 },
-        "multi_authors": { "type": "boolean" },
-        "external_audit_likely": { "type": "boolean" },
-        "base_for_other_bricks": { "type": "boolean" }
-      }
-    },
-    "justification": {
-      "type": "string",
-      "minLength": 1
-    },
-    "pipeline_default": {
-      "type": "string",
-      "minLength": 1
-    }
+  "declared_at": {
+   "type": "string",
+   "minLength": 1
+  },
+  "declared_by": {
+   "type": "string",
+   "minLength": 1
+  },
+  "justification": {
+   "type": "string",
+   "minLength": 1
+  },
+  "pipeline_default": {
+   "type": "string",
+   "minLength": 1
+  },
+  "nature": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Optional project domain hint (e.g. web-gui, hardware, generic) — informs card selection at declaration time; the runtime only reads pipeline_default."
   }
+ }
 }

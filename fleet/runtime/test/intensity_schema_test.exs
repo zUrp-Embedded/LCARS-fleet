@@ -42,8 +42,12 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "rejects — non-boolean criteria.multi_authors", %{schema: schema, canon: canon} do
-    bad = put_in(canon, ["criteria", "multi_authors"], "yes")
+  test "rejects — the DEAD criteria block (user arbitration: fields killed, checklist stays prose)",
+       %{schema: schema, canon: canon} do
+    # The 5 criteria died as structured fields (they informed the HUMAN's level choice — the
+    # framing interview; nothing mechanical ever read them). A declaration still carrying the
+    # block is refused (additionalProperties: false) — no zombie fields.
+    bad = Map.put(canon, "criteria", %{"multi_authors" => true})
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 

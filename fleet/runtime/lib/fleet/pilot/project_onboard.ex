@@ -96,6 +96,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- Scaffold.main(proj_dir, name, opts),
+         # Criticality declaration (intensity.json, ON MAIN — an auditor reads it beside the
+         # code): the human's relayed level or the honest undeclared-L0 default. Committed by
+         # the scaffold commit below (add -A). Cf. Fleet.Pilot.ProjectIntensity.
+         :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),

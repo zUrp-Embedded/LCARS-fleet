@@ -376,6 +376,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
         org: org,
         description: Map.get(args, "description", pitch),
         pitch: pitch,
+        # Criticality declaration RELAYED from the human (nil entries = undeclared → the
+        # onboard records an HONEST L0 default, marked undeclared; never fabricated facts,
+        # never a wall — a blocked declaration teaches the human to lie to the arch).
+        intensity_level: Map.get(args, "intensity_level"),
+        intensity_justification: Map.get(args, "intensity_justification"),
+        intensity_nature: Map.get(args, "nature"),
+        workflow_map: Map.get(args, "workflow_map"),
         allow_unverifiable_human_team?:
           Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
       ]

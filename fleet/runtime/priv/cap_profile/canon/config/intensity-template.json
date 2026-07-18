@@ -1,38 +1,17 @@
 {
-  "_comment": "Per-project intensity.json template — copy to <project_root>/intensity.json and adapt. Schema: ../../schema/intensity-v1.json. 5 levels L0-L4 mapping to a default pipeline.",
+  "_comment": "Per-project intensity.json template — copy to <project_root>/intensity.json and adapt. Schema: ../../schema/intensity-v1.json. THE LEVEL IS THE HUMAN'S DECLARATION: elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
   "_schema": "lcars/intensity-v1",
-  "level": "L3",
-  "declared_at": "2026-05-18",
+  "level": "L0",
+  "declared_at": "2026-07-18",
   "declared_by": "architect",
-  "criteria": {
-    "stakes_failure": "high",
-    "lifetime": "multi-year",
-    "multi_authors": true,
-    "external_audit_likely": true,
-    "base_for_other_bricks": true
-  },
-  "justification": "Composant base infra critique multi-year, audit externe potentiel post-IPO Anthropic 2026-2027",
-  "pipeline_default": "standard-qa",
+  "justification": "NON DÉCLARÉ — défaut système (posture PoC). Remplacer par la déclaration de l'humain.",
+  "nature": "generic",
+  "pipeline_default": "brief-gate",
   "_levels_reference": {
-    "L0": {
-      "description": "Utilitaire trivial single-shot",
-      "pipeline_default": "audit-only"
-    },
-    "L1": {
-      "description": "Utilitaire petit lifecycle court",
-      "pipeline_default": "audit-only"
-    },
-    "L2": {
-      "description": "Composant moyen multi-authors potentiels",
-      "pipeline_default": "standard-qa", "_pipeline_variant": "no-gatekeeper (cap-profile modop strips gatekeeper hooks)"
-    },
-    "L3": {
-      "description": "Base infra critique multi-year",
-      "pipeline_default": "standard-qa"
-    },
-    "L4": {
-      "description": "Système critique compliance/audit externe",
-      "pipeline_default": "standard-qa", "_pipeline_variant": "mandatory-rubber-duck (cap-profile modop forces rubber-duck)"
-    }
+    "L0": "Utilitaire trivial single-shot (PoC led1→led1)",
+    "L1": "Utilitaire petit, lifecycle court",
+    "L2": "Composant moyen, vit et évolue",
+    "L3": "Base infra critique multi-year",
+    "L4": "Système critique — l'enjeu d'un échec est physique/légal/irréversible"
   }
 }
