@@ -1,8 +1,7 @@
 defmodule Fleet.TaskQueue do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -18,9 +17,9 @@ defmodule Fleet.TaskQueue do
   @moduledoc """
   Public API of the LCARS cross-pod orchestration broker.
 
-  `fleet_spawner` enqueues (source), `fleet_task_queue` distributes/collects (broker),
-  `fleet_mcp` serves via the `get_work_item`/`submit_result` tools (vendor boundary),
-  `fleet_pilot` (StepRunConsumer) steers post-result.
+  `Fleet.Spawner` enqueues (source), this domain distributes/collects (broker),
+  `Fleet.MCP` serves via the `get_work_item`/`submit_result` tools,
+  `Fleet.Pilot` (StepRunConsumer) steers post-result.
 
   Every function has a test-seam variant (explicit `server`, e.g. `enqueue/3`,
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
@@ -41,7 +40,7 @@ defmodule Fleet.TaskQueue do
   def enqueue(server, pod_id, task_attrs) when is_binary(pod_id) and is_map(task_attrs),
     do: GenServer.call(server, {:enqueue, pod_id, task_attrs})
 
-  @doc "Retrieves the pod's active work item (served by fleet_mcp `get_work_item`). Idempotent until submit/clear."
+  @doc "Retrieves the pod's active work item (served by the MCP `get_work_item` tool). Idempotent until submit/clear."
   @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_work_item}
   def get_for_pod(pod_id), do: get_for_pod(@server, pod_id)
 
@@ -51,16 +50,16 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:get_for_pod, pod_id})
 
   @doc """
-  Submits the result (served by fleet_mcp `submit_result`). Idempotent (2nd call =
+  Submits the result (served by the MCP `submit_result` tool). Idempotent (2nd call =
   `:double_submit_ignored`). If `result` carries a `work_item_id` ≠ the pod's active work item
   → `:work_item_id_mismatch` (the deliverable's correlation_id does not match), no mutation.
 
-  ## Boundary placement (SOC-STATE-001) — deliberate, not a gap
+  ## Boundary placement — deliberate, not a gap
 
   `work_item_id` is an OPTIONAL correlation lock HERE: this is the GENERIC broker, and `submit_result`
   completes the pod's active work item (`find_active`) whether or not the correlator is supplied — it is
   only *verified* when present (mismatch → reject). The MANDATORY-`work_item_id` policy is a
-  POD-INTERACTION concern, enforced ONE level up at the fleet_mcp boundary (`Fleet.MCP.PodTools.WorkItems`
+  POD-INTERACTION concern, enforced ONE level up at the MCP boundary (`Fleet.MCP.PodTools.WorkItems`
   always stamps `work_item_id` before calling here) — the only surface where pods actually submit.
   Keeping the broker policy-light while the pod-facing mandatory lives at the interaction edge is the
   intended layering: raising the requirement into the broker would break its generic contract (internal
