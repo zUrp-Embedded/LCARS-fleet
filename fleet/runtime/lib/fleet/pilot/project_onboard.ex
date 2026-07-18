@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.ProjectOnboard do
   @moduledoc """
-  Onboarding of a project (Rail 1 firmware-as-a-service, 2026-06-14): « idea → the project exists ».
+  Onboarding of a project: "idea → the project exists".
 
   Replicates the dual-dir architecture of LCARS itself (one repo, **two worktrees**):
 
@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   It is a **mechanical rail** (structural compliance): the arch *triggers* via the MCP
   tool `create_project`, the SYSTEM *executes* this deterministic sequence — the arch never types git.
 
-  Sequence (F-C084: FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
+  Sequence (FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
   scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
   clearly if the local folder already exists):
 
@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     6. scaffold `work/ops` (backlog.md, scratchpad.md, plans/)
     7. commit + push `-u work/ops`
 
-  Identity (decision 2026-06-14 — onboarding is an act of system INFRA, not creative work):
+  Identity (onboarding is an act of system INFRA, not creative work):
   `author=lcars-system` (the SYSTEM generates the scaffold from templates; the arch writes no file,
   it **relays** `name`+`pitch` — it is transparent in the git attribution, its trace lives in the request),
   `committer`=the human (git config runtime = **the user who initiated the project → traced**),
@@ -49,13 +49,13 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   require Logger
 
-  # H1/H3: derived from the single authority of the container layout (Fleet.Layout, R0).
+  # Derived from the single authority of the container layout (Fleet.Layout).
   @projects_root Fleet.Layout.projects_root()
   @work_root Fleet.Layout.work_root()
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
-  # (wrote nothing). committer = the human (git config) traces who initiated (2026-06-14).
+  # (wrote nothing). committer = the human (git config) traces who initiated.
   # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
-  # (H2 2026-07-04: the name/email was retyped here hardcoded — a divergence in the making with the gate).
+  # (a name/email retyped here would be a divergence in the making with the gate).
   defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @type result :: %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}
@@ -80,8 +80,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
     # Anti-tie gaps (Fleet.Pilot.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
     # LOCALLY (git), near-instantaneous — without a gap, create_repo/push main/push work/ops fall in the
-    # SAME Gitea second and the activity feed displays them in an ARBITRARY order (observed live:
-    # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
+    # SAME Gitea second and the activity feed displays them in an ARBITRARY order
+    # ("push main" can appear BEFORE "repo created"). A gap after create_repo (the repo IS created before any
     # push) and one after push main (main IS pushed before work/ops) orders the writes BETWEEN calls.
     # The work/ops birth itself is a twin same-second pair — structural to Gitea, both channels
     # measured (cf. `publish_work_ops`). Accepted: the twins tell the same fact.
@@ -213,20 +213,19 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 
-  # F2 (Z7c migration, débrief architecte 2026-07-12) — preflight fail-loud AVANT toute
-  # création : un humain OS sans compte forge ou hors team `humans` produisait des 422
-  # OPAQUES en aval (« Assignee does not exist » au premier create_issue — vécu e2e,
-  # débloqué à la main). On échoue ICI avec les gestes admin EXACTS dans l'erreur.
-  # DOCTRINE CONSERVÉE : l'admission org/team est gérée EN AMONT par l'humain admin
-  # (cf. ForgeClient.Repo « managed UPSTREAM ») — le runtime VÉRIFIE (lecture seule),
-  # il ne provisionne PAS (auto-provision = capability admin que le runtime n'a pas ;
-  # arbitrage A-04 du chantier migration si l'user la veut un jour).
-  # États : absent PROUVÉ (404) → gestes admin ; forge en PANNE → :forge_preflight_failed
-  # SANS instructions (ne jamais envoyer l'opérateur créer un compte sur une panne réseau) ;
-  # NON-VÉRIFIABLE (403 sur la lecture team, token non org-admin) → DR-018 : REFUS par défaut
-  # (`:human_team_unverifiable` + gestes exacts) — une admission load-bearing non-prouvable ≠ « vérifiée » ;
-  # le dégradé reste possible mais comme MODE EXPLICITE (`allow_unverifiable_human_team?: true`), plus un
-  # succès muet. Seam `:forge_users` (défaut ForgeClient.Repo) : stub en test, pas de flip de config.
+  # F2 — fail-loud preflight BEFORE any creation: an OS human without a forge account, or outside
+  # the `humans` team, otherwise surfaces as an OPAQUE downstream 422 ("Assignee does not exist"
+  # on the first create_issue). We fail HERE with the EXACT admin gestures in the error.
+  # DOCTRINE KEPT: org/team admission is managed UPSTREAM by the human admin
+  # (cf. ForgeClient.Repo "managed UPSTREAM") — the runtime VERIFIES (read-only), it does NOT
+  # provision (auto-provision would be an admin capability the runtime does not have).
+  # States: PROVEN absent (404) → admin gestures; forge DOWN → :forge_preflight_failed WITHOUT
+  # instructions (never send the operator to create an account over a network outage);
+  # NOT VERIFIABLE (403 on the team read, non org-admin token) → REFUSED by default
+  # (`:human_team_unverifiable` + exact gestures) — a load-bearing admission that cannot be proven
+  # ≠ "verified"; the degraded path stays possible but as an EXPLICIT MODE
+  # (`allow_unverifiable_human_team?: true`), never a mute success. Seam `:forge_users`
+  # (default ForgeClient.Repo): stubbed in tests, no global config flip.
   defp ensure_human_provisioned(org, opts) do
     users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
     human = Keyword.get(opts, :human) || Fleet.Credentials.Human.current!()
@@ -247,22 +246,23 @@ defmodule Fleet.Pilot.ProjectOnboard do
           {:ok, false} ->
             {:error, {:human_not_provisioned, human, provisioning_gestures(:team, human, org)}}
 
-          # QUATRIÈME état (≠ le tri-état ci-dessus) : 403 = le token runtime n'a pas le DROIT de LIRE
-          # l'appartenance team (compte de service = simple membre d'org, ni owner ni membre de `humans`
-          # → Gitea refuse GET /teams/<id>/members/<u>). « Ne PEUT PAS vérifier » ≠ « humain ABSENT » (404).
-          # DR-018 : cet état N'EST PLUS mappé à un `:ok` muet indistinguable d'une admission PROUVÉE. Une
-          # propriété d'admission LOAD-BEARING non-prouvable n'équivaut pas à « vérifiée ». Par DÉFAUT on
-          # REFUSE, avec les gestes admin EXACTS dans l'erreur (donner au token le droit de lecture team, ou
-          # ajouter l'humain à `humans`, ou opter pour le mode dégradé explicite). Le dégradé reste possible
-          # mais comme MODE CONSCIENT (`allow_unverifiable_human_team?: true`), pas comme succès silencieux —
-          # là create_issue en aval reste le filet, mais l'opérateur l'a CHOISI et la trace est LOUD.
+          # FOURTH state (≠ the tri-state above): 403 = the runtime token has no RIGHT to READ the
+          # team membership (service account = plain org member, neither owner nor member of `humans`
+          # → Gitea refuses GET /teams/<id>/members/<u>). "CANNOT verify" ≠ "human ABSENT" (404).
+          # DR-018: this state is NEVER mapped to a mute `:ok` indistinguishable from a PROVEN
+          # admission. A LOAD-BEARING admission property that cannot be proven does not equal
+          # "verified". By DEFAULT we REFUSE, with the EXACT admin gestures in the error (grant the
+          # token team-read, or add the human to `humans`, or opt into the explicit degraded mode).
+          # The degraded path stays possible but as a CONSCIOUS MODE
+          # (`allow_unverifiable_human_team?: true`), not a silent success — there, downstream
+          # create_issue remains the net, but the operator CHOSE it and the trace is LOUD.
           {:error, {:http, 403, _}} ->
             if Keyword.get(opts, :allow_unverifiable_human_team?, false) do
               Logger.warning(
-                "ProjectOnboard: preflight team-check `humans` NON VÉRIFIABLE pour #{human} (403 — le " <>
-                  "token runtime ne peut pas lire l'appartenance team) → onboarding en MODE DÉGRADÉ " <>
-                  "EXPLICITE (allow_unverifiable_human_team?: true). L'admission humaine n'est PAS prouvée ; " <>
-                  "create_issue en aval reste le filet."
+                "ProjectOnboard: preflight team-check `humans` NOT VERIFIABLE for #{human} (403 — the " <>
+                  "runtime token cannot read team membership) → onboarding in EXPLICIT DEGRADED MODE " <>
+                  "(allow_unverifiable_human_team?: true). Human admission is NOT proven; downstream " <>
+                  "create_issue remains the net."
               )
 
               :ok
@@ -276,37 +276,37 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # Les gestes admin exacts, dans l'erreur elle-même : l'opérateur (ou l'architecte qui
-  # relaie) n'a RIEN à chercher. Formulés API Gitea — la forme stable, UI/CLI équivalents.
+  # The exact admin gestures, in the error itself: the operator (or the relaying architect) has
+  # NOTHING to look up. Phrased as Gitea API calls — the stable form; UI/CLI equivalents exist.
   defp provisioning_gestures(:account, human, org) do
-    "le compte forge '#{human}' n'existe pas — gestes admin (token admin requis) : " <>
+    "forge account '#{human}' does not exist — admin gestures (admin token required): " <>
       "1) POST /api/v1/admin/users {\"username\":\"#{human}\",\"email\":\"#{human}@lcars.local\"," <>
-      "\"password\":\"<initial>\",\"must_change_password\":true} ; " <>
-      "2) l'ajouter à la team 'humans' de l'org '#{org}' (cf. geste :team). " <>
-      "Puis relancer l'onboarding."
+      "\"password\":\"<initial>\",\"must_change_password\":true}; " <>
+      "2) add it to the 'humans' team of org '#{org}' (cf. the :team gesture). " <>
+      "Then re-run the onboarding."
   end
 
   defp provisioning_gestures(:team, human, org) do
-    "le compte '#{human}' existe mais n'est PAS membre de la team 'humans' de l'org '#{org}' — " <>
-      "geste admin : GET /api/v1/orgs/#{org}/teams → id de 'humans', puis " <>
-      "PUT /api/v1/teams/<id>/members/#{human}. Puis relancer l'onboarding."
+    "account '#{human}' exists but is NOT a member of the 'humans' team of org '#{org}' — " <>
+      "admin gesture: GET /api/v1/orgs/#{org}/teams → id of 'humans', then " <>
+      "PUT /api/v1/teams/<id>/members/#{human}. Then re-run the onboarding."
   end
 
-  # DR-018 — 403 sur la lecture team : l'admission humaine ne PEUT PAS être prouvée (token runtime non
-  # org-admin). Trois issues, toutes explicites (pas de dégradé silencieux) : réparer le droit, prouver
-  # l'appartenance, ou assumer le dégradé comme mode conscient.
+  # 403 on the team read: human admission CANNOT be proven (runtime token not org-admin).
+  # Three ways out, all explicit (no silent degradation): repair the read right, prove the
+  # membership, or assume the degraded mode consciously.
   defp provisioning_gestures(:team_read, human, org) do
-    "l'appartenance de '#{human}' à la team 'humans' de l'org '#{org}' est NON VÉRIFIABLE " <>
-      "(403 — le token runtime n'a pas le droit de lire GET /api/v1/teams/<id>/members/<u>). " <>
-      "Options : 1) donner au token runtime le droit de lecture team (owner d'org, ou membre de 'humans') ; " <>
-      "2) prouver l'appartenance en ajoutant '#{human}' à 'humans' (cf. geste :team) ; " <>
-      "3) onboarder en MODE DÉGRADÉ EXPLICITE avec `allow_unverifiable_human_team?: true` (l'admission " <>
-      "humaine ne sera PAS prouvée — create_issue en aval reste le filet)."
+    "membership of '#{human}' in the 'humans' team of org '#{org}' is NOT VERIFIABLE " <>
+      "(403 — the runtime token has no right to read GET /api/v1/teams/<id>/members/<u>). " <>
+      "Options: 1) grant the runtime token team-read (org owner, or member of 'humans'); " <>
+      "2) prove the membership by adding '#{human}' to 'humans' (cf. the :team gesture); " <>
+      "3) onboard in EXPLICIT DEGRADED MODE with `allow_unverifiable_human_team?: true` (human " <>
+      "admission will NOT be proven — downstream create_issue remains the net)."
   end
 
   # ── slug / preconditions ─────────────────────────────────────────────────
 
-  # Path-safe slug (kebab-case, ≥2 char, no border dash) — same contract as skill v1 /new-project.
+  # Path-safe slug (kebab-case, ≥2 char, no border dash).
   defp validate_name(name) do
     if Regex.match?(~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, name),
       do: :ok,
@@ -369,10 +369,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   # Publishes `work/ops`. Its BIRTH is two same-second feed actions ("branch created" + the
-  # birth snapshot) — STRUCTURAL to Gitea, measured on BOTH channels (direct `push -u` round 3,
-  # API create-from-staged-sha round 5, 2026-07-17/18): every branch birth emits the twin pair,
-  # so the API detour bought nothing here and was removed. The twins tell the same fact ("work/ops
-  # is born"); only Gitea's feed sort (insertion order within a tied second) can invert them.
+  # birth snapshot) — STRUCTURAL to Gitea: every branch birth emits the twin pair regardless of
+  # the publish channel (direct `push -u` and API create-from-staged-sha both measured), so an
+  # API detour buys nothing here. The twins tell the same fact ("work/ops is born"); only Gitea's
+  # feed sort (insertion order within a tied second) can invert them.
   defp publish_work_ops(_full_name, work_dir, _opts) do
     push(work_dir, "work/ops", true)
   end

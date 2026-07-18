@@ -99,7 +99,7 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
     assert {:error, {:human_team_unverifiable, "ghost-human", gestures}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, ForbiddenTeamUsers))
 
-    assert gestures =~ "NON VÉRIFIABLE"
+    assert gestures =~ "NOT VERIFIABLE"
     assert gestures =~ "allow_unverifiable_human_team?"
     # une admission non-prouvable ne crée RIEN (le garde court AVANT tout mkdir/clone)
     refute File.exists?(Path.join([tmp, "projects", "poc-f2"]))
@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.ProjectOnboardF2Test do
         assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
       end)
 
-    assert log =~ "MODE DÉGRADÉ EXPLICITE"
+    assert log =~ "EXPLICIT DEGRADED MODE"
     assert log =~ "403"
   end
 
