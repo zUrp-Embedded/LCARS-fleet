@@ -13,13 +13,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
   Workspace-side invariant (the "positive SP": the agent sees only its work, never
   the machinery): the workspace this builds must show NO trace of LCARS beyond the
-  vanilla repo + its plugins. ⚠ open loose-end: this is NOT hermetically tested on the
-  prod path (it depends on the bwrap sandbox view) — it wants a sandbox integration test.
+  vanilla repo + its plugins.
 
-  (The `prepare/3` orchestrator and the 4 non-Clone phases — Allocate / InitMimic /
-  BindCredentials / PrepareMountBinds — have been REMOVED: dead path never wired in
-  prod, the corresponding concerns are handled elsewhere — CLAUDE.md by `do_project`
-  on the pod.ex side, mounts/creds by `bwrap_launch.sh`.)
+  Clone is the ONLY bootstrap phase: the other pod-provisioning concerns live
+  elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
+  mounts/credentials by `bwrap_launch.sh`.
 
   **Last revised**: 2026-07-18
   """
@@ -30,11 +28,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
     `git clone --reference <local bare mirror>` (local objects + incremental fetch, no
     per-pod network) if `spec.project.repo_path`, otherwise workspace = empty directory (branch nil).
 
-    ⚠ `--reference` is DORMANT — UNUSED (2026-07-07): `project["reference_repo_path"]` (the mirror
+    ⚠ `--reference` is DORMANT — UNUSED: `project["reference_repo_path"]` (the mirror
     path) is READ below but NEVER SET by any caller → `ref` is always `nil` → clone WITHOUT
-    `--reference`, no workspace has `alternates`. A clone-accelerator hook wired but never activated
-    (pod-side counterpart = the `$GIT_MIRROR` bind in `bin/bwrap_launch.sh`, also dormant; provisioning
-    lost in the home migration). User decision: KEEP, do not purge.
+    `--reference`, no workspace has `alternates`. A clone-accelerator hook wired but never
+    activated (pod-side counterpart = the `$GIT_MIRROR` bind in `bin/bwrap_launch.sh`, also
+    dormant). User decision: KEEP, do not purge.
     """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
