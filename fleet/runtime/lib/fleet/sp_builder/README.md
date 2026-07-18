@@ -1,4 +1,4 @@
-# fleet_sp_builder
+# Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
 **Last revised**: 2026-07-18
@@ -16,13 +16,14 @@ there, not restated here.
 
 ## Modules
 - `Fleet.SPBuilder` — the facade + `Composer` impl (`compose/3`, `compose_claude_md/3`, `filter_skills/2`, `resolve_monk_injection/2` defdelegate); EEx templating (`priv/sp_builder/templates/*.eex`) + role-SP / modop reads + path resolution
-- `Fleet.SPBuilder.Monk` — monk-injection resolution (`resolve/2`, `resolve_or_empty/2`, `persona_section/1`); the composer's only YAML-registry I/O
+- `Fleet.SPBuilder.Blocks` — block-based composition of the per-role SPs (`priv/sp_builder/sp_blocks/` + `sp-map.yaml`; `mix lcars.sp.gen` writes the flat drafts that `Fleet.Spawner.Pod.Assets` reads, N2); fail-loud no-fallback (no SP → no pod)
+- `Fleet.SPBuilder.Monk` — monk-injection resolution (`resolve/2`, `resolve_or_empty/2`, `persona_section/1`); the composer's only YAML-registry I/O. NB: the monks are FROZEN — dormant by design, empty injection everywhere (its `@moduledoc`)
 - `Fleet.SPBuilder.RepoSections` — markdown mini-parser lifting the target repo `CLAUDE.md` named sections into the pod `CLAUDE.md`
 - `Fleet.SPBuilder.Composer` — the behaviour (test mock + future 2nd vendor)
 
 ## Config & deps
 - Knob `:fleet_sp_builder, :sp_role_root` — read by the facade; default = bundled cap-profiles canon (rationale on `sp_role_root/0`).
-- Knob `:fleet_sp_builder, :modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`). (rationale on `modop_root/0`).
+- Knob `:fleet_sp_builder, :modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`).
 - Knob `:fleet_sp_builder, :monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
 - None set in `config/*.exs` or via env var — inline defaults only (tests override via `put_env`/opt).
-- Deps: see `mix.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/sp_builder.ex`).
