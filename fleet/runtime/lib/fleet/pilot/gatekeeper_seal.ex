@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   gatekeeper_role())`) is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`
   and signs itself — there is only ONE writer of the `as_role(_, gatekeeper_role())` idiom
   in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
-  `as_gatekeeper/1`). A caller can no longer forget the signature nor fork it. `as_role` remains
+  `as_gatekeeper/1`). A caller cannot forget the signature nor fork it. `as_role` remains
   the single source of the credential→wire adapter (`Fleet.Pilot.ForgeClient.as_role/2` — not
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
@@ -44,8 +44,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   @doc """
   Seals the PR: **merge FIRST** (gatekeeper token), THEN posts the closing comment
   "✅ delivered and merged" (gatekeeper), THEN `stage/merged` (system, WS1), THEN closes the issue
-  EXPLICITLY — **gatekeeper too** (last act — coherent chronology, no more `Closes #N`/
-  Gitea auto-close that closed BEFORE the comment; same identity as the merge+comment, a single
+  EXPLICITLY — **gatekeeper too** (last act — coherent chronology, never `Closes #N`/
+  Gitea auto-close, which would close BEFORE the comment; same identity as the merge+comment, a single
   sealing ceremony, no attribution break). The comment is ONLY posted if the
   merge succeeded (the merge is the authoritative act; comment/stage/close are POST-merge trace and
   can never un-merge anything). We NEVER claim "merged" before having
@@ -130,23 +130,23 @@ defmodule Fleet.Pilot.GatekeeperSeal do
                 )
             end
 
-            # EXPLICIT close, as the LAST visible act on the issue (chronology QoL, 2026-07-07): no more
-            # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
+            # EXPLICIT close, as the LAST visible act on the issue (coherent chronology): never a
+            # `Closes #N` in the PR body (Gitea would auto-close AT MERGE, before even this comment — a
             # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
-            # AFTER the comment AND the stage/merged, for a coherent chronology: nothing else posts
-            # on the issue once closed. Since `Closes #N` was REMOVED (2026-07-07), THIS close is the gesture that
+            # AFTER the comment AND the stage/merged: nothing else posts
+            # on the issue once closed. Without `Closes #N`, THIS close is the gesture that
             # takes the merged brick out of `list_open_issues` — a FAILED close is NOT harmless: the merged brick
             # re-appears as an OPEN issue and `decide/1` re-engages it every tick (churn / double-delivery). So we
             # LOG LOUD on failure (the merge is authoritative + done; the stuck-open issue must be visible).
             #
-            # SIGNED GATEKEEPER (`gk_opts`), NOT system (QoL regression 2026-07-07, observed live): the merge
+            # SIGNED GATEKEEPER (`gk_opts`), NOT system: the merge
             # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
             # in the SAME sealing ceremony ("who finished this brick?" two different answers
             # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
             # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
             # else in the pipeline) — not concerned by this inconsistency.
             # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
-            # the close action (observed tied and inverted — feed ids 4780/4792, 2026-07-17).
+            # the close action (a same-second tie renders inverted in the feed).
             Fleet.Pilot.WriteSpacing.gap(opts)
 
             close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
