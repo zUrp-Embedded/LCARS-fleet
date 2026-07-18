@@ -1,8 +1,7 @@
 defmodule Fleet.SPBuilder do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -37,15 +36,12 @@ defmodule Fleet.SPBuilder do
 
   Vendor boundary: this module stays vendor-agnostic — it COMPOSES the content, it
   injects nothing. INJECTING the SP into the pod is done by the **N1 boundary**
-  (`bin/claude_launch.sh`), which reads the composed SP from
-  `<pod_dir>/.lcars/system-prompt.md` and passes it to `claude` via **`--system-prompt-file`**
-  (OUT of argv: the SP in argv leaked via `/proc/<pid>/cmdline` and grazed ARG_MAX, hence the
-  switch to file mode on 2026-06-14 — `.lcars/` is readable in-sandbox, unlike
-  `.claude/` masked by the creds bind). Interactive REPL (Remote Control), never headless.
-
-  The N1 boundary IS the `bin/` script: there is NO claude-bridge app and NO module
-  `Fleet.Claude.SPInjection`, and NO metered mode (`claude -p`) — do not reintroduce these
-  refs into the moduledoc.
+  (`bin/claude_launch.sh` — the N1 boundary IS the `bin/` script), which reads the
+  composed SP from `<pod_dir>/.lcars/system-prompt.md` and passes it to `claude` via
+  **`--system-prompt-file`** (OUT of argv: an SP on the argv would leak via
+  `/proc/<pid>/cmdline` and graze ARG_MAX; `.lcars/` is readable in-sandbox, unlike
+  `.claude/` masked by the creds bind). The launch is an interactive REPL
+  (Remote Control), never headless/metered.
 
   sha256 determinism: 2 runs on the same input produce an
   identical `stable_sha256` (stable parts only, excludes
@@ -135,9 +131,9 @@ defmodule Fleet.SPBuilder do
       preloaded_paths =
         Keyword.get(opts, :preloaded_paths, []) ++ monk_inj.corpus_paths
 
-      # F-C147/PORT — the cap-profile's `invocation.subagent_template` fragment (e.g. reviewer →
-      # code-quality-reviewer, qualifier → spec-reviewer) is injected here, next to the modop fragments
-      # (both are SP overlays keyed on the cap-profile). Was declared-but-never-composed before.
+      # The cap-profile's `invocation.subagent_template` fragment (e.g. reviewer →
+      # code-quality-reviewer, qualifier → spec-reviewer) is injected here, next to the modop
+      # fragments (both are SP overlays keyed on the cap-profile).
       modop_concat =
         modop_fragments_concat(modop_fragments) <>
           subagent_fragment <> Monk.persona_section(monk_inj)
@@ -359,7 +355,7 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  # F-C147/PORT — reads the SINGLE `subagent_template` SP fragment the cap-profile declares
+  # Reads the SINGLE `subagent_template` SP fragment the cap-profile declares
   # (`invocation.subagent_template` → `subagent-<name>.md`). Pattern-match (no `get_in`) so a malformed
   # `invocation` never crashes the spawn. Non-null → the fragment (prefixed with a newline for separation);
   # null/absent → "". A DECLARED-but-missing/unsafe template → fail-loud (the pod does not launch on a
@@ -370,8 +366,7 @@ defmodule Fleet.SPBuilder do
        when is_binary(name) and name != "" do
     # `Slug.valid?` guards `name` as a safe slug (kebab, no `.`/`..`/`/`) — the question here is
     # ONLY "is the name safe as a path fragment?" (the real leaf is `subagent-<name>.md`, built
-    # below). The old `confined_join` computed a joined path just to DISCARD it — an indirection
-    # the reader had to decode; `valid?` states the intent directly (same gesture as filter_skills).
+    # below); `valid?` states that intent directly (same gesture as filter_skills).
     if Fleet.Slug.valid?(name) do
       path = Path.join(subagent_template_root(), "subagent-#{name}.md")
 
@@ -433,8 +428,8 @@ defmodule Fleet.SPBuilder do
   # SAME source as `Fleet.CapProfile.root_dir/0`'s DEFAULT — true of the defaults ONLY:
   # `LCARS_CAPPROFILES_ROOT` repoints the YAML catalogue (`:fleet_cap_profile, :root_dir`) but NOT
   # this root nor its siblings (modop, subagent_template, monk_registry), which stay on the bundled
-  # priv) → resolves in RELEASE as in dev WITHOUT env.
-  # The old relative default `"cap-profiles"` (relative to CWD) gave `:enoent` in release. Config override (test).
+  # priv) → resolves in RELEASE as in dev WITHOUT env (a CWD-relative default would not).
+  # Config override (test).
   defp sp_role_root do
     Application.get_env(:fleet_sp_builder, :sp_role_root) ||
       Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
@@ -442,9 +437,8 @@ defmodule Fleet.SPBuilder do
 
   # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). Config-overridable, with a
   # BUNDLED DEFAULT = `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")` — the
-  # SAME source as `sp_role_root` (the modop-bundles canon was MOVED to the cap_profile priv from the
-  # ex-fleet_workflow one, F-C146/PORT — the old path would not resolve in an isolated sp_builder test).
-  # The prod spawn chain now passes the cap-profile's
+  # SAME source as `sp_role_root` (the modop-bundles canon is co-located with the cap-profiles
+  # under the cap_profile priv, F-C146). The prod spawn chain passes the cap-profile's
   # `modop_set.default` (`compose(cap, modops, …)`) → this root IS required and resolves.
   defp modop_root do
     Application.get_env(:fleet_sp_builder, :modop_root) ||
