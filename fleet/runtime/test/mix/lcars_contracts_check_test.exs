@@ -1,40 +1,41 @@
 defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   @moduledoc """
-  Smoke/regression du gate `mix lcars.contracts.check` : `run_checks/0` tourne contre le VRAI repo
-  (app unique `:lcars_fleet` post-collapse — plus d'umbrella, BND-112) et doit passer, tous les checks
-  verts. Verrouille que les gardes anti-hollow-green (R0-EVT-012/014 : residue-target absente = fail,
-  events.yaml absent = fail, seam malformé = fail) n'ont pas introduit de faux-rouge, et qu'une
-  régression future d'un contrat casse ce test. Le `code_match?/4` doc-immune (BND-111) est verrouillé
-  par le describe dédié ci-dessous.
+  Smoke/regression of the `mix lcars.contracts.check` gate: `run_checks/0` runs against the REAL repo
+  (single app `:lcars_fleet` post-collapse — no more umbrella, BND-112) and must pass, all checks
+  green. Locks that the anti-hollow-green guards (R0-EVT-012/014: absent residue-target = fail,
+  absent events.yaml = fail, malformed seam = fail) introduced no false-red, and that a future
+  contract regression breaks this test. The doc-immune `code_match?/4` (BND-111) is locked by the
+  dedicated describe below.
 
-  NB : tester les CHEMINS fail-on-absent directement (fixture sans events.yaml, seam malformé) demanderait
-  un `run_checks(root)` root-injectable — refactor de test-infra séparé, non fait ici.
+  NB: testing the fail-on-absent PATHS directly (fixture without events.yaml, malformed seam) would
+  require a root-injectable `run_checks(root)` — a separate test-infra refactor, not done here.
   """
   use ExUnit.Case, async: true
 
-  test "run_checks passe sur le vrai repo + tous les checks verts (gardes hollow-green sans faux-rouge)" do
+  test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 
     ids = Enum.map(checks, & &1.id)
-    # les deux checks durcis R0-EVT-012/014 tournent
+    # the two hardened R0-EVT-012/014 checks run
     assert "events.handlers.exist" in ids
-    # MIGRATION Z3 (D-19) : layering.dependency_graph est RETIRÉ avec sa matière première
-    # (edges in_umbrella des mix.exs d'apps) — successeur mécanique = boundary (Z4).
-    # Son remplaçant vérifiable aujourd'hui : boot.order_f8 (ordre des children racine).
+    # MIGRATION Z3 (D-19): layering.dependency_graph is REMOVED along with its raw material
+    # (in_umbrella edges of the app mix.exs files) — mechanical successor = boundary (Z4).
+    # Its verifiable replacement today: boot.order_f8 (order of the root children).
     assert "boot.order_f8" in ids
 
     fails = Enum.filter(checks, &(&1.status != :pass))
-    assert fails == [], "checks non-verts : #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
+    assert fails == [], "non-green checks: #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
   end
 
-  describe "code_match?/4 — anti-hollow-green : un marqueur en PROSE ne compte pas (BND-111)" do
+  describe "code_match?/4 — anti-hollow-green: a marker in PROSE does not count (BND-111)" do
     @tag :tmp_dir
-    test "un marqueur présent SEULEMENT dans un @moduledoc/@doc → false (pas de faux-vert)", %{
+    test "a marker present ONLY in a @moduledoc/@doc → false (no false-green)", %{
       tmp_dir: tmp
     } do
-      # Le piège BND-111 : la doc de valeur-de-retour NOMME le tuple `{:error, :brief_required}` ; si le
-      # check greppe le tuple sans exclure les blocs @doc, une régression du guard EXÉCUTABLE resterait
-      # verte tant que la doc reste. On prouve ici que le tuple en prose SEULE ne satisfait PAS le check.
+      # The BND-111 trap: the return-value doc NAMES the `{:error, :brief_required}` tuple; if the
+      # check greps the tuple without excluding @doc blocks, a regression of the EXECUTABLE guard
+      # would stay green as long as the doc remains. We prove here that the tuple in prose ALONE does
+      # NOT satisfy the check.
       File.write!(Path.join(tmp, "prose_only.ex"), """
       defmodule ProseOnly do
         @moduledoc \"\"\"
@@ -53,11 +54,11 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
                ~r/:brief_required/,
                ~r/^\s*\{:error, :brief_required\}/
              ]),
-             "un tuple présent uniquement dans @moduledoc/@doc ne doit PAS compter comme code"
+             "a tuple present only in @moduledoc/@doc must NOT count as code"
     end
 
     @tag :tmp_dir
-    test "le MÊME marqueur sur une ligne EXÉCUTABLE → true (le guard réel compte)", %{tmp_dir: tmp} do
+    test "the SAME marker on an EXECUTABLE line → true (the real guard counts)", %{tmp_dir: tmp} do
       File.write!(Path.join(tmp, "real_guard.ex"), """
       defmodule RealGuard.Doc do
         @moduledoc \"\"\"
@@ -76,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
                ~r/:brief_required/,
                ~r/^\s*.*\{:error, :brief_required\}/
              ]),
-             "le tuple sur la ligne exécutable du guard doit compter"
+             "the tuple on the guard's executable line must count"
     end
   end
 end

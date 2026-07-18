@@ -1,27 +1,27 @@
 defmodule Fleet.MCP.SupervisorTest do
   @moduledoc """
-  Smoke d'intégration du superviseur racine `fleet_mcp` : l'umbrella a booté
-  `Fleet.MCP.Supervisor` + ses enfants permanents — `Fleet.MCP.Server` (garde de
-  boot), le `Registry` `Fleet.MCP.PodSocketRegistry`, et le DynamicSupervisor
-  d'accepteurs de socket `Fleet.MCP.PodSocketSupervisor` (démarré host-side
-  inconditionnellement, sans aucune socket tant qu'aucun pod n'est provisionné).
+  Integration smoke of the `fleet_mcp` root supervisor: the umbrella booted
+  `Fleet.MCP.Supervisor` + its permanent children — `Fleet.MCP.Server` (boot
+  guard), the `Fleet.MCP.PodSocketRegistry` `Registry`, and the socket-acceptor
+  DynamicSupervisor `Fleet.MCP.PodSocketSupervisor` (started host-side
+  unconditionally, with no socket at all as long as no pod is provisioned).
   """
   use ExUnit.Case, async: false
 
-  test "Supervisor umbrella : Server + substrat socket pod-facing vivants, plus de Bridge" do
+  test "umbrella Supervisor: Server + pod-facing socket substrate alive, no more Bridge" do
     assert is_pid(Process.whereis(Fleet.MCP.Supervisor))
     assert is_pid(Process.whereis(Fleet.MCP.Server))
     assert is_pid(Process.whereis(Fleet.MCP.PodSocketRegistry))
     assert is_pid(Process.whereis(Fleet.MCP.PodSocketSupervisor))
-    # Bridge retiré (husk mort) — ne doit plus être dans l'arbre.
+    # Bridge removed (dead husk) — must no longer be in the tree.
     assert Process.whereis(Fleet.MCP.Bridge) == nil
   end
 
-  describe "pod_facing_status/0 — sonde le PROCESS (le DynamicSupervisor d'accepteurs), pas un knob" do
-    test ":operational quand le DynamicSupervisor d'accepteurs tourne (host-side)" do
+  describe "pod_facing_status/0 — probes the PROCESS (the acceptor DynamicSupervisor), not a knob" do
+    test ":operational when the acceptor DynamicSupervisor runs (host-side)" do
       assert {:operational, detail} = Fleet.MCP.Supervisor.pod_facing_status()
       assert detail.acceptor_supervisor == true
-      # Aucun pod provisionné dans l'ambient test → zéro accepteur/socket actif.
+      # No pod provisioned in the ambient test env → zero active acceptor/socket.
       assert detail.sockets == 0
     end
   end

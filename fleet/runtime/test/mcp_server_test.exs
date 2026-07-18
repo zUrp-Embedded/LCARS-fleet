@@ -1,13 +1,13 @@
 defmodule Fleet.MCP.ServerTest do
   @moduledoc """
-  `Fleet.MCP.Server` = garde de boot ADR-C (DN D7-bis : JAMAIS démarré côté pod).
-  Instances **nommées uniques** par test (test-seam `:name`) → aucun couplage au
-  singleton umbrella (elixir-thinking : fix the global coupling). `async: false`
-  (Fleet.PubSub partagé umbrella).
+  `Fleet.MCP.Server` = ADR-C boot guard (DN D7-bis: NEVER started pod-side).
+  **Uniquely named** instances per test (test-seam `:name`) → no coupling to the
+  umbrella singleton (elixir-thinking: fix the global coupling). `async: false`
+  (shared umbrella Fleet.PubSub).
 
-  L'API husk `register_channel`/`list_channels`/`stop` a été retirée (F049 — push
-  channel mort chantier 7, 0 appelant prod) ; ne restent que la garde de containment
-  + `boot_environment/1`.
+  The husk API `register_channel`/`list_channels`/`stop` was removed (F049 —
+  dead push channel, 0 prod callers); only the containment guard +
+  `boot_environment/1` remain.
   """
   use ExUnit.Case, async: false
 
@@ -15,22 +15,22 @@ defmodule Fleet.MCP.ServerTest do
 
   defp uniq, do: :"srv_#{System.unique_integer([:positive])}"
 
-  test "conformance ADR-C : start_link refusé côté pod (boot_environment :pod)" do
+  test "ADR-C conformance: start_link refused pod-side (boot_environment :pod)" do
     name = uniq()
     assert {:error, :forbidden_in_pod} = Server.start_link(boot_environment: :pod, name: name)
-    # Ce nom unique n'a jamais été enregistré → la garde a bien court-circuité
-    # AVANT tout démarrage de process (conformance prouvée sans couplage global).
+    # This unique name was never registered → the guard did short-circuit
+    # BEFORE any process start (conformance proven without global coupling).
     assert Process.whereis(name) == nil
   end
 
-  test "start_link démarre côté host (défaut) sous nom isolé" do
+  test "start_link starts host-side (default) under an isolated name" do
     name = uniq()
     assert {:ok, pid} = Server.start_link(name: name)
     assert is_pid(pid) and Process.alive?(pid)
     GenServer.stop(pid)
   end
 
-  test "boot_environment/1 : opts > app env > défaut" do
+  test "boot_environment/1: opts > app env > default" do
     assert Server.boot_environment(boot_environment: :pod) == :pod
 
     Fleet.MCP.TestEnv.put_env_restoring(:fleet_mcp, :boot_environment, :ci)
@@ -38,11 +38,11 @@ defmodule Fleet.MCP.ServerTest do
     assert Server.boot_environment(boot_environment: :host) == :host
   end
 
-  test "boot_environment/1 : défaut FAIL-CLOSED :pod (ni opts ni app env → refuse, jamais :host permissif)" do
-    # Repli mou #6 : le défaut était `:host` (permissif) — un boot qui n'injecte PAS `:pod` (config drift)
-    # démarrait le serveur MCP système. Fail-closed : l'ABSENCE de déclaration → `:pod` (refuse). Le host se
-    # déclare POSITIVEMENT (runtime.exs sur le daemon, config/test.exs en test) ; un boot qui ne le fait pas
-    # est refusé, jamais démarré par omission.
+  test "boot_environment/1: FAIL-CLOSED default :pod (neither opts nor app env → refuses, never permissive :host)" do
+    # Soft-fallback #6: the default used to be `:host` (permissive) — a boot that does NOT inject `:pod`
+    # (config drift) started the system MCP server. Fail-closed: the ABSENCE of declaration → `:pod`
+    # (refuses). The host declares itself POSITIVELY (runtime.exs on the daemon, config/test.exs in test);
+    # a boot that does not is refused, never started by omission.
     saved = Application.fetch_env(:fleet_mcp, :boot_environment)
     Application.delete_env(:fleet_mcp, :boot_environment)
 

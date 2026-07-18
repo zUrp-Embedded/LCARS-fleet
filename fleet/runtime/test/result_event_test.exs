@@ -1,12 +1,12 @@
 defmodule Fleet.MCP.ResultEventTest do
   @moduledoc """
-  Completion event-driven — sur `submit_result`, le **broker** `fleet_task_queue`
-  broadcast `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` sur `fleet.events`.
+  Event-driven completion — on `submit_result`, the `fleet_task_queue` **broker**
+  broadcasts `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` on `fleet.events`.
 
-  `pod.ex` (spawner) y souscrit pour déclencher sa complétion SANS lire fleet_mcp
-  en direct. Ici on prouve l'émission via le tool `submit_result` (PUR, pas de claude).
-  L'identité du pod vient du `state` (`%{pod_id: pod}`) — porté par l'accepteur de socket
-  en prod, jamais des arguments.
+  `pod.ex` (spawner) subscribes to it to trigger its completion WITHOUT reading fleet_mcp
+  directly. Here we prove the emission via the `submit_result` tool (PURE, no claude).
+  The pod identity comes from the `state` (`%{pod_id: pod}`) — carried by the socket acceptor
+  in prod, never by the arguments.
   """
   use ExUnit.Case, async: false
 
@@ -15,7 +15,7 @@ defmodule Fleet.MCP.ResultEventTest do
 
   defp pod_state(pod), do: %{pod_id: pod}
 
-  test "submit_result → broker broadcast %Fleet.Event{work_item.completed} (pod_id + correlation_id)" do
+  test "submit_result → broker broadcasts %Fleet.Event{work_item.completed} (pod_id + correlation_id)" do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
@@ -30,8 +30,8 @@ defmodule Fleet.MCP.ResultEventTest do
                pod_state(pod)
              )
 
-    # Le livrable broadcasté = le `payload` métier EXACT (le work_item_id, corrélateur de transport, est retiré
-    # du result stocké par le broker → pas de pollution du livrable).
+    # The broadcast deliverable = the EXACT business `payload` (the work_item_id, a transport
+    # correlator, is removed from the result stored by the broker → no deliverable pollution).
     assert_receive %Fleet.Event{
                      source: :task_queue,
                      type: :"work_item.completed",
@@ -42,7 +42,7 @@ defmodule Fleet.MCP.ResultEventTest do
                    2_000
   end
 
-  test "submit_result sans pod_id dans le state → erreur (pas de broadcast)" do
+  test "submit_result without pod_id in the state → error (no broadcast)" do
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
     payload = %{"answer" => "anon-#{System.unique_integer([:positive])}"}
 
@@ -52,17 +52,19 @@ defmodule Fleet.MCP.ResultEventTest do
     refute_receive %Fleet.Event{source: :task_queue, type: :"work_item.completed"}, 200
   end
 
-  test "submit_result avec work_item_id NICHÉ dans le payload (pas top-level) → accepté + clôt le brief" do
-    # Régression live (e2e) : un agent juge range son work_item_id DANS le payload de verdict au lieu du
-    # paramètre top-level. Le broker corrèle pod_id ↔ work_item_id quel que soit l'emplacement → le livrable
-    # NE DOIT PAS être perdu (sinon le step_run review timeout → escalade → pipeline gelé, observé sur le
-    # qualifier qui tâtonnait `payload:{decision, work_item_id}` à l'infini contre `:work_item_id_required`).
+  test "submit_result with work_item_id NESTED in the payload (not top-level) → accepted + closes the brief" do
+    # Live (e2e) regression: a judge agent puts its work_item_id INSIDE the verdict payload instead of
+    # the top-level parameter. The broker correlates pod_id ↔ work_item_id wherever it sits → the
+    # deliverable must NOT be lost (otherwise the review step_run times out → escalation → frozen
+    # pipeline, observed on a qualifier endlessly retrying `payload:{decision, work_item_id}` against
+    # `:work_item_id_required`).
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
-    # work_item_id ABSENT du top-level, présent DANS le payload — la forme exacte produite par le juge en e2e.
+    # work_item_id ABSENT from the top level, present INSIDE the payload — the exact shape produced by
+    # the judge in e2e.
     verdict = %{"decision" => "continue", "reason" => "ok", "work_item_id" => tid}
 
     assert {:ok, %{content: [%{"type" => "text"}]}, _} =
@@ -72,7 +74,8 @@ defmodule Fleet.MCP.ResultEventTest do
                pod_state(pod)
              )
 
-    # Le corrélateur de transport est retiré du livrable STOCKÉ, même rangé dans le payload (pas de pollution).
+    # The transport correlator is removed from the STORED deliverable, even when nested in the payload
+    # (no pollution).
     assert_receive %Fleet.Event{
                      source: :task_queue,
                      type: :"work_item.completed",
@@ -85,9 +88,10 @@ defmodule Fleet.MCP.ResultEventTest do
     assert result == %{"decision" => "continue", "reason" => "ok"}
   end
 
-  test "submit_result sans work_item_id NI au top-level NI dans le payload → :work_item_id_required (garde tenue)" do
-    # La tolérance d'emplacement ne rouvre PAS le fallback supprimé : work_item_id absent des DEUX = refus net
-    # (sinon le broker retomberait sur « la dernière active du pod » — le levier d'impersonation).
+  test "submit_result with work_item_id NEITHER top-level NOR in the payload → :work_item_id_required (guard held)" do
+    # The placement tolerance does NOT reopen the removed fallback: work_item_id absent from BOTH =
+    # clean refusal (otherwise the broker would fall back on "the pod's latest active" — the
+    # impersonation lever).
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, _task} = TaskQueue.enqueue(pod, %{brief: "x"})
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")

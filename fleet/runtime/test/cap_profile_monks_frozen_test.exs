@@ -1,12 +1,12 @@
 defmodule Fleet.CapProfile.MonksFrozenTest do
-  # async: false — mute la config globale :root_dir.
+  # async: false — mutates the global :root_dir config.
   use ExUnit.Case, async: false
 
-  # GELÉ (BL — Memory-X frozen 2026-06-19) : teste que `list/load` scannent `cap-profiles/monks/`,
-  # désormais ARCHIVÉ (`priv/canon/_frozen-monks/`, hors boucle de boot). Ré-activer au re-home de
-  # Memory-X (per-project + system-wide sous lcars). cf. work/backlog.md.
+  # FROZEN (BL — Memory-X frozen): tests that `list/load` scan `cap-profiles/monks/`,
+  # now ARCHIVED (`priv/canon/_frozen-monks/`, out of the boot loop). Re-enable when Memory-X
+  # is re-homed (per-project + system-wide under lcars). cf. work/backlog.md.
   @moduletag skip:
-               "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
+               "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at per-project re-home"
 
   alias Fleet.CapProfile
 
@@ -26,15 +26,15 @@ defmodule Fleet.CapProfile.MonksFrozenTest do
     :ok
   end
 
-  # F-041 : avant le fix, `name_index/1` scannait `*.yaml` + `archivistes/*.yaml` mais PAS `monks/*.yaml`.
-  # Les profils Memory-X canon (archivist, monk-alpha-*, monk-beta-*) étaient donc invisibles de
-  # `list/1`/`load/1` → `PermanentBoot` (qui énumère via `list/1`) ne les bootait jamais. Memory-X VA
-  # vivre → le scan doit les inclure.
-  test "load(\"archivist\") résout le profil monk (scan monks/)" do
+  # F-041: `name_index/1` must scan `monks/*.yaml` in addition to `*.yaml` + `archivistes/*.yaml`.
+  # Otherwise the canon Memory-X profiles (archivist, monk-alpha-*, monk-beta-*) are invisible to
+  # `list/1`/`load/1` → `PermanentBoot` (which enumerates via `list/1`) never boots them. Memory-X
+  # WILL live → the scan must include them.
+  test "load(\"archivist\") resolves the monk profile (monks/ scan)" do
     assert {:ok, _cap} = CapProfile.load("archivist")
   end
 
-  test "list/1 inclut les profils monks (archivist + un monk-beta)" do
+  test "list/1 includes the monk profiles (archivist + one monk-beta)" do
     assert {:ok, names} = CapProfile.list(@canon_dir)
     assert "archivist" in names
     assert "monk-beta-findings-recent" in names

@@ -1,25 +1,26 @@
 defmodule Fleet.MCP.PodSocketTest.RaisingTools do
   @moduledoc false
-  # Handler de tool qui CRASHE — injecté via `:fleet_mcp, :tool_handler` pour prouver le rescue
-  # SOC-RES-001 (un outil qui lève → isError result, PAS une connexion droppée).
+  # Tool handler that CRASHES — injected via `:fleet_mcp, :tool_handler` to prove the SOC-RES-001
+  # rescue (a raising tool → isError result, NOT a dropped connection).
   def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
 end
 
 defmodule Fleet.MCP.PodSocketTest do
   @moduledoc """
-  Transport pod-facing AF_UNIX per-pod (`Fleet.MCP.PodSocketAcceptor` /
-  `Fleet.MCP.PodSocketSupervisor`) round-trip contre le **vrai broker**
+  Pod-facing per-pod AF_UNIX transport (`Fleet.MCP.PodSocketAcceptor` /
+  `Fleet.MCP.PodSocketSupervisor`) round-trip against the **real broker**
   `Fleet.TaskQueue`.
 
-  Un client `:gen_tcp {:local}` (à la place du pont stdio + claude) parle à la
-  socket du pod en JSON-RPC newline-framed. PUR Elixir (client + serveur BEAM).
+  A `:gen_tcp {:local}` client (instead of the stdio bridge + claude) talks to
+  the pod's socket in newline-framed JSON-RPC. PURE Elixir (BEAM client + server).
 
-  Le cœur de R9 : l'identité EST le canal. Le `pod_id` vient du nom du socket
-  (porté par l'accepteur), JAMAIS du wire — un faux `_lcars_pod_id` dans les
-  arguments est ignoré. La capability a disparu (plus rien à présenter).
+  The heart of R9: the identity IS the channel. The `pod_id` comes from the
+  socket name (carried by the acceptor), NEVER from the wire — a fake
+  `_lcars_pod_id` in the arguments is ignored. The capability is gone (nothing
+  left to present).
 
-  `:sock_base` est posé sur un dir tmp COURT (le chemin AF_UNIX est borné à 108
-  octets — `sun_path` ; le dir per-pod + `sock` tient large).
+  `:sock_base` is set on a SHORT tmp dir (the AF_UNIX path is bounded to 108
+  bytes — `sun_path`; the per-pod dir + `sock` fits with room to spare).
   """
   use ExUnit.Case, async: false
 
@@ -34,23 +35,23 @@ defmodule Fleet.MCP.PodSocketTest do
     %{base: base}
   end
 
-  test "round-trip get_work_item/submit_result via la socket per-pod" do
+  test "get_work_item/submit_result round-trip via the per-pod socket" do
     pod = uniq("p")
     nonce = "sock-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
 
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
-    # Le fichier DOIT exister au retour (le bind bwrap échouerait sinon).
+    # The file MUST exist on return (the bwrap bind would fail otherwise).
     assert File.exists?(path)
 
-    # Canal IN sur le fil socket.
+    # IN channel over the socket wire.
     assert {:ok, %{"done" => false, "work_item" => %{"brief" => ^nonce, "work_item_id" => tid}}} =
              content(call(path, 1, "get_work_item", %{}))
 
     assert is_binary(tid)
 
-    # Canal OUT sur le fil socket (work_item_id REQUIS = celui rendu).
+    # OUT channel over the socket wire (work_item_id REQUIRED = the one handed out).
     assert %{"result" => %{"content" => [%{"type" => "text"}]}} =
              call(path, 2, "submit_result", %{
                "payload" => %{"answer" => nonce},
@@ -59,12 +60,12 @@ defmodule Fleet.MCP.PodSocketTest do
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # Plus de brief actif → done.
+    # No more active brief → done.
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
-  test "F-C138 : tools/list servi par la socket = base + tools rôle threadés (schémas depuis les deftool)" do
-    # rôle-délégateur : le spawner thread create_issue + import_project (dérivés de allowedTools canon).
+  test "F-C138: tools/list served by the socket = base + threaded role tools (schemas from the deftools)" do
+    # delegator role: the spawner threads create_issue + import_project (derived from canon allowedTools).
     pod = uniq("arch")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["create_issue", "import_project"])
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -72,30 +73,30 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"result" => %{"tools" => tools}} = rpc(path, 10, "tools/list")
     names = tools |> Enum.map(& &1["name"]) |> Enum.sort()
 
-    # base universelle TOUJOURS + les tools rôle threadés ; schémas depuis les deftool (single source),
-    # import_project INCLUS (invisible avant F-C138). Un tool non-threadé (create_project) N'est PAS servi.
+    # universal base ALWAYS + the threaded role tools; schemas from the deftools (single source),
+    # import_project INCLUDED (invisible before F-C138). A non-threaded tool (create_project) is NOT served.
     assert "get_work_item" in names and "submit_result" in names
     assert "create_issue" in names and "import_project" in names
     refute "create_project" in names
 
-    # objets-tool réels venant des deftool (single source `PodTools.get_tools`) — pas des noms nus.
+    # real tool objects coming from the deftools (single source `PodTools.get_tools`) — not bare names.
     assert Enum.all?(tools, &(is_map(&1) and Map.has_key?(&1, "name")))
 
-    # F1 — CE `tools/list` EST le wire MCP (le pont stdio le forwarde VERBATIM à claude) → il DOIT porter
-    # `inputSchema` (camel MCP), JAMAIS `input_schema` (snake, la forme INTERNE d'ExMCP). Un `input_schema`
-    # snake = claude ne parse pas le schéma → tool REJETÉ (« No such tool available »). Régression F-C138
-    # (forward du catalogue central au lieu du catalogue camelCase local du pont), attrapée en e2e alors que
-    # le gate ne couvrait que les NOMS — gardée ICI.
+    # F1 — THIS `tools/list` IS the MCP wire (the stdio bridge forwards it VERBATIM to claude) → it MUST
+    # carry `inputSchema` (MCP camel), NEVER `input_schema` (snake, ExMCP's INTERNAL shape). A snake
+    # `input_schema` = claude does not parse the schema → tool REJECTED ("No such tool available").
+    # F-C138 regression (forwarding the central catalogue instead of the bridge's local camelCase
+    # catalogue), caught in e2e while the gate only covered the NAMES — locked HERE.
     ci = Enum.find(tools, &(&1["name"] == "create_issue"))
-    assert Map.has_key?(ci, "inputSchema"), "tools/list wire DOIT porter inputSchema (camel MCP)"
+    assert Map.has_key?(ci, "inputSchema"), "tools/list wire MUST carry inputSchema (MCP camel)"
 
     refute Map.has_key?(ci, "input_schema"),
-           "tools/list wire ne DOIT PAS porter input_schema (snake interne ExMCP)"
+           "tools/list wire must NOT carry input_schema (ExMCP internal snake)"
 
     assert %{"type" => "object", "properties" => _, "required" => _} = ci["inputSchema"]
   end
 
-  test "F-C138 : rôle-juge (aucun tool threadé) → tools/list = base seule (presence=authorization)" do
+  test "F-C138: judge role (no threaded tool) → tools/list = base only (presence=authorization)" do
     pod = uniq("judge")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -104,20 +105,20 @@ defmodule Fleet.MCP.PodSocketTest do
     assert Enum.map(tools, & &1["name"]) |> Enum.sort() == ["get_work_item", "submit_result"]
   end
 
-  test "ensure_pod_socket refuse un pod_id non-path-safe (frontière FS mcp), zéro acceptor" do
+  test "ensure_pod_socket refuses a non-path-safe pod_id (mcp FS frontier), zero acceptor" do
     for bad <- ["../escape", "a/b", "..", ".", "z\0y", String.duplicate("q", 200)] do
       assert {:error, {:unsafe_pod_id, _}} = PodSocketSupervisor.ensure_pod_socket(bad),
-             "pod_id #{inspect(bad)} devrait être refusé à la frontière socket"
+             "pod_id #{inspect(bad)} should be refused at the socket frontier"
 
       assert Registry.lookup(Fleet.MCP.PodSocketRegistry, bad) == []
     end
   end
 
-  test "release_pod_socket sur un pod_id évadant (..) n'efface RIEN hors base (anti-escape FS)",
+  test "release_pod_socket on an escaping pod_id (..) erases NOTHING outside base (FS anti-escape)",
        %{
          base: base
        } do
-    # base DOIT exister pour que la traversée `..` résolve (sinon ENOENT masque la vuln = faux vert).
+    # base MUST exist for the `..` traversal to resolve (otherwise ENOENT masks the vuln = false green).
     File.mkdir_p!(base)
     evil_pod = "../" <> Path.basename(base) <> "-evil"
     victim = Path.join([Path.dirname(base), Path.basename(base) <> "-evil", "sock"])
@@ -126,33 +127,34 @@ defmodule Fleet.MCP.PodSocketTest do
     on_exit(fn -> File.rm_rf(Path.dirname(victim)) end)
 
     assert :ok = PodSocketSupervisor.release_pod_socket(evil_pod)
-    assert File.exists?(victim), "release ne doit PAS effacer un fichier hors base via `..`"
+    assert File.exists?(victim), "release must NOT erase a file outside base via `..`"
   end
 
-  test "accepteur CONCURRENT : une connexion ouverte-muette ne bloque pas les autres (anti-gel du pod)" do
+  test "CONCURRENT acceptor: an open-mute connection does not block the others (anti pod-freeze)" do
     pod = uniq("concurrent")
     nonce = "live-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Connexion A : ouverte et MUETTE — l'accepteur entre en `recv` dessus. En mode SÉQUENTIEL (l'ancien
-    # `serve` inline), il y resterait coincé et ne re-`accept`erait JAMAIS. On ne ferme A qu'à la fin du
-    # test (on_exit), sinon on ne prouve rien.
+    # Connection A: open and MUTE — the acceptor enters `recv` on it. In SEQUENTIAL mode (the old
+    # inline `serve`), it would stay stuck there and NEVER re-`accept`. We only close A at the end of
+    # the test (on_exit), otherwise we prove nothing.
     {:ok, mute} =
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
 
     on_exit(fn -> :gen_tcp.close(mute) end)
 
-    # Connexion B : appel normal PENDANT que A est ouverte-muette. Séquentiel → B reste dans le backlog
-    # kernel, jamais servie → `recv` timeout (le helper `call` lèverait à 5 s). Concurrent → B est servie
-    # dans sa propre Task et répond. C'est la preuve directe du fix (le `serial.py` du forensics, en ExUnit) :
-    # ce test ÉCHOUE si l'accepteur redevient inline, il PASSE avec une Task par connexion.
+    # Connection B: normal call WHILE A is open-mute. Sequential → B stays in the kernel backlog,
+    # never served → `recv` timeout (the `call` helper would raise at 5 s). Concurrent → B is served
+    # in its own Task and answers. This is the direct proof of the fix (the forensics `serial.py`, in
+    # ExUnit): this test FAILS if the acceptor becomes inline again, it PASSES with one Task per
+    # connection.
     assert {:ok, %{"work_item" => %{"brief" => ^nonce}}} =
              content(call(path, 1, "get_work_item", %{}))
   end
 
-  test "l'identité EST le canal : un faux `_lcars_pod_id` dans les args est IGNORÉ" do
+  test "the identity IS the channel: a fake `_lcars_pod_id` in the args is IGNORED" do
     victim = uniq("victim")
     attacker = uniq("attacker")
     {:ok, _} = TaskQueue.enqueue(victim, %{brief: "secret-de-victim"})
@@ -165,13 +167,13 @@ defmodule Fleet.MCP.PodSocketTest do
       PodSocketSupervisor.release_pod_socket(victim)
     end)
 
-    # L'attaquant POST le pod_id de la victime dans les arguments — mais sa socket reste SA socket. Le
-    # central ne lit JAMAIS le pod_id du wire → il sert le brief de l'accepteur (attacker), pas victim.
+    # The attacker POSTs the victim's pod_id in the arguments — but its socket remains ITS socket. The
+    # central NEVER reads the pod_id from the wire → it serves the acceptor's brief (attacker), not victim's.
     assert {:ok, %{"done" => false, "work_item" => %{"brief" => "le-brief-de-attacker"}}} =
              content(call(apath, 1, "get_work_item", %{"_lcars_pod_id" => victim}))
   end
 
-  test "2 pods → chaque socket ne sert QUE son pod (séparation par canal)" do
+  test "2 pods → each socket serves ONLY its pod (separation by channel)" do
     pa = uniq("pa")
     pb = uniq("pb")
     {:ok, _} = TaskQueue.enqueue(pa, %{brief: "for-A"})
@@ -192,7 +194,7 @@ defmodule Fleet.MCP.PodSocketTest do
              content(call(path_b, 1, "get_work_item", %{}))
   end
 
-  test "ensure_pod_socket idempotent (même chemin) ; release ferme ET retire le fichier" do
+  test "ensure_pod_socket idempotent (same path); release closes AND removes the file" do
     pod = uniq("idem")
     {:ok, path1} = PodSocketSupervisor.ensure_pod_socket(pod)
     {:ok, path2} = PodSocketSupervisor.ensure_pod_socket(pod)
@@ -200,21 +202,21 @@ defmodule Fleet.MCP.PodSocketTest do
     assert File.exists?(path1)
 
     assert :ok = PodSocketSupervisor.release_pod_socket(pod)
-    # Le close libère le FD, le release retire le FICHIER (sinon fuite).
+    # The close frees the FD, the release removes the FILE (leak otherwise).
     refute File.exists?(path1)
 
-    # Idempotent : re-release sur un pod déjà libéré ne casse rien.
+    # Idempotent: re-releasing an already released pod breaks nothing.
     assert :ok = PodSocketSupervisor.release_pod_socket(pod)
   end
 
-  test "erreur d'outil → result avec isError:true (convention MCP, pas erreur protocole)" do
+  test "tool error → result with isError:true (MCP convention, not a protocol error)" do
     pod = uniq("err")
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "x"})
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Active le brief puis submit SANS work_item_id → :work_item_id_required → frame `result` avec isError:true
-    # (une erreur d'outil est un résultat MCP, pas une erreur de protocole).
+    # Activate the brief then submit WITHOUT work_item_id → :work_item_id_required → `result` frame with
+    # isError:true (a tool error is an MCP result, not a protocol error).
     _ = call(path, 1, "get_work_item", %{})
 
     assert %{"result" => %{"isError" => true, "content" => [%{"text" => txt}]}} =
@@ -223,23 +225,23 @@ defmodule Fleet.MCP.PodSocketTest do
     assert txt =~ "work_item_id_required"
   end
 
-  test "ligne JSON-RPC > buffer inet par defaut (~1460 o) : servie, pas de hang (F-RUN-1)" do
+  test "JSON-RPC line > default inet buffer (~1460 B): served, no hang (F-RUN-1)" do
     pod = uniq("bigline")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Payload ~8 Ko : sans `{:buffer, _}` dans @socket_opts, `packet: :line` livrait la
-    # ligne TRONQUEE en fragments JSON invalides, avales en silence -> hang jusqu'au
-    # timeout du pont (vu live 2026-07-04 : briefs/summaries > 1,4 Ko tous perdus).
-    # L'outil est inconnu EXPRES : on teste le FRAMING (une grosse ligne -> une reponse),
-    # pas le metier — `isError:true` suffit a prouver le round-trip.
+    # ~8 KB payload: without `{:buffer, _}` in @socket_opts, `packet: :line` delivered the line
+    # TRUNCATED as invalid JSON fragments, swallowed silently -> hang until the bridge timeout
+    # (briefs/summaries > 1.4 KB all lost). The tool is unknown ON PURPOSE: we test the FRAMING
+    # (one big line -> one response), not the business — `isError:true` is enough to prove the
+    # round-trip.
     blob = String.duplicate("x", 8_000)
 
     assert %{"id" => 42, "result" => %{"isError" => true}} =
-             call(path, 42, "outil_inconnu_test_framing", %{"blob" => blob})
+             call(path, 42, "unknown_tool_test_framing", %{"blob" => blob})
   end
 
-  test "ligne indecodable -> -32700 fail-loud, pas un silence-timeout (F-RUN-1)" do
+  test "undecodable line -> -32700 fail-loud, not a silence-timeout (F-RUN-1)" do
     pod = uniq("badline")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -247,17 +249,18 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, sock} =
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
 
-    :ok = :gen_tcp.send(sock, "{json casse, pas decodable\n")
-    # L'ancien `_ -> nil` avalait la ligne sans repondre : ce recv restait muet 5 s.
+    :ok = :gen_tcp.send(sock, "{broken json, not decodable\n")
+    # The old `_ -> nil` swallowed the line without answering: this recv stayed mute for 5 s.
     {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
     :gen_tcp.close(sock)
 
     assert %{"error" => %{"code" => -32_700}} = Jason.decode!(line)
   end
 
-  test "SOC-RES-001 : un tool qui CRASHE → isError result, la connexion N'est PAS droppée (pod pas hang)" do
-    # handler de tool raisant injecté → sans le rescue de l'acceptor, la Task connexion mourrait → socket
-    # fermée → le `call` ci-dessous verrait recv `{:error, :closed}` (le pod attendrait son timeout).
+  test "SOC-RES-001: a CRASHING tool → isError result, the connection is NOT dropped (pod not hung)" do
+    # raising tool handler injected → without the acceptor's rescue, the connection Task would die →
+    # socket closed → the `call` below would see recv `{:error, :closed}` (the pod would wait out its
+    # timeout).
     Fleet.MCP.TestEnv.put_env_restoring(
       :fleet_mcp,
       :tool_handler,
@@ -272,34 +275,35 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"id" => 1, "result" => %{"isError" => true}} = resp
   end
 
-  test "SOC-EFF-005 : readiness compte les `*/sock`, pas les dirs — un dir stray ne fausse pas 'orphaned'",
+  test "SOC-EFF-005: readiness counts the `*/sock`, not the dirs — a stray dir does not fake 'orphaned'",
        %{base: base} do
     pod = uniq("ready")
     {:ok, _path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # dir résiduel SANS sock (provisioning à moitié / release ayant retiré le sock pas le dir) : ne doit
-    # PAS être compté comme un socket-fichier (sinon socket_files > acceptors → faux 'orphaned/deaf').
+    # residual dir WITHOUT sock (half-done provisioning / release that removed the sock but not the
+    # dir): must NOT be counted as a socket-file (otherwise socket_files > acceptors → false
+    # 'orphaned/deaf').
     File.mkdir_p!(Path.join(base, "stray-no-sock"))
 
     assert {:operational, _} = Fleet.MCP.Supervisor.pod_facing_status()
   end
 
-  test "SOC-CONTRACT-001 : PodSocketSupervisor exporte le contrat du seam mcp_socket_provisioner (duck-typed)" do
-    # Le seam est DUCK-TYPED : fleet_mcp ne peut pas adopter le `@behaviour` de fleet_spawner (edge compile
-    # MONTANT interdit) → le compilateur ne vérifie PAS la conformité. Ce test verrouille le côté IMPL :
-    # PodSocketSupervisor DOIT exporter les callbacks que le consumer (Pod.McpProvision, garde R1-23)
-    # appelle. Une signature qui dérive casse CE test, pas un pod en prod. Contrat = Fleet.Spawner.McpSocketProvisioner.
+  test "SOC-CONTRACT-001: PodSocketSupervisor exports the mcp_socket_provisioner seam contract (duck-typed)" do
+    # The seam is DUCK-TYPED: fleet_mcp cannot adopt fleet_spawner's `@behaviour` (UPWARD compile edge
+    # forbidden) → the compiler does NOT check conformance. This test locks the IMPL side:
+    # PodSocketSupervisor MUST export the callbacks the consumer (Pod.McpProvision, R1-23 guard) calls.
+    # A drifting signature breaks THIS test, not a pod in prod. Contract = Fleet.Spawner.McpSocketProvisioner.
     assert function_exported?(Fleet.MCP.PodSocketSupervisor, :ensure_pod_socket, 1)
     assert function_exported?(Fleet.MCP.PodSocketSupervisor, :release_pod_socket, 1)
   end
 
-  test "un pod qui ouvre des connexions MUETTES n'asphyxie PAS la flotte (plafond per-pod + timeout idle)" do
-    # Le pod est adversarial par doctrine partout ailleurs. Le pool de Tasks qui SERT les
-    # connexions est FLEET-WIDE (max_children du Task.Supervisor partagé) : sans plafond
-    # per-pod, un seul pod ouvrant assez de connexions muettes épuisait le pool → les tools
-    # de TOUS les autres pods (get_work_item/submit_result) morts tant que le fautif vivait.
-    # Ici : le pod fautif se heurte à SON plafond ; un autre pod continue d'être servi.
+  test "a pod opening MUTE connections does NOT starve the fleet (per-pod cap + idle timeout)" do
+    # The pod is adversarial by doctrine everywhere else. The Task pool that SERVES the connections is
+    # FLEET-WIDE (max_children of the shared Task.Supervisor): without a per-pod cap, a single pod
+    # opening enough mute connections exhausted the pool → the tools of ALL the other pods
+    # (get_work_item/submit_result) dead as long as the offender lived.
+    # Here: the offending pod hits ITS cap; another pod keeps being served.
     noisy = uniq("noisy")
     victim = uniq("victim")
 
@@ -311,9 +315,9 @@ defmodule Fleet.MCP.PodSocketTest do
       PodSocketSupervisor.release_pod_socket(victim)
     end)
 
-    # Le fautif ouvre BEAUCOUP plus de connexions que son plafond (8) et n'envoie JAMAIS de
-    # ligne — chacune resterait bloquée en recv sans deadline. Les connexions au-delà du
-    # plafond sont refusées (fermées par l'acceptor) : le pool partagé n'est pas consommé.
+    # The offender opens MANY more connections than its cap (8) and NEVER sends a line — each would
+    # stay stuck in recv without a deadline. Connections beyond the cap are refused (closed by the
+    # acceptor): the shared pool is not consumed.
     mutes =
       for _ <- 1..40 do
         {:ok, sock} =
@@ -324,20 +328,19 @@ defmodule Fleet.MCP.PodSocketTest do
 
     on_exit(fn -> Enum.each(mutes, &:gen_tcp.close/1) end)
 
-    # La victime est servie normalement — c'est TOUT l'invariant : la faute d'un pod lui coûte
-    # à LUI, jamais à la flotte.
+    # The victim is served normally — that is THE invariant: a pod's fault costs IT,
+    # never the fleet.
     {:ok, _} = TaskQueue.enqueue(victim, %{brief: "still served"})
     resp = call(victim_path, 1, "get_work_item", %{})
     assert {:ok, %{"work_item" => %{"brief" => "still served"}}} = content(resp)
   end
 
-  test "SOC-LEAK-001 : ouvrir/FERMER en série AU-DELÀ du plafond ne verrouille pas le pod (slot libéré)" do
-    # Chaque `call` = une connexion SERVIE PUIS FERMÉE. Le slot per-pod DOIT se libérer à la
-    # fermeture, sinon un pod à LONGUE VIE (permanent-architect) atteint le plafond (8) sur des
-    # connexions déjà MORTES et se fait refuser À VIE (constaté e2e 2026-07-13 : 0 connexion
-    # réelle, 8 comptées, arch verrouillé). Cause : la boucle {:continue,:accept} affamait
-    # handle_info({:DOWN}) → le compteur ne décroissait jamais. Ici on enchaîne 3× le plafond ;
-    # sans la libération (reap_down), les connexions ≥ 9 se font refuser et `call` casse.
+  test "SOC-LEAK-001: opening/CLOSING serially BEYOND the cap does not lock the pod (slot freed)" do
+    # Each `call` = one connection SERVED THEN CLOSED. The per-pod slot MUST be freed on close,
+    # otherwise a LONG-LIVED pod (permanent-architect) reaches the cap (8) on already DEAD connections
+    # and gets refused FOR LIFE (seen e2e: 0 real connections, 8 counted, arch locked). Cause: the
+    # {:continue,:accept} loop starved handle_info({:DOWN}) → the counter never decreased. Here we
+    # chain 3× the cap; without the release (reap_down), connections ≥ 9 get refused and `call` breaks.
     pod = uniq("longlived")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -346,13 +349,13 @@ defmodule Fleet.MCP.PodSocketTest do
       resp = call(path, i, "get_work_item", %{})
 
       assert {:ok, _} = content(resp),
-             "connexion ##{i} : slot non libéré (le plafond compte des connexions mortes)"
+             "connection ##{i}: slot not freed (the cap counts dead connections)"
     end
   end
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
-  # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.
+  # One JSON-RPC tools/call on the socket: connect, send one line, read the response, close.
   defp call(path, id, tool, args) do
     {:ok, sock} =
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
@@ -371,10 +374,9 @@ defmodule Fleet.MCP.PodSocketTest do
     Jason.decode!(line)
   end
 
-  # Décode le JSON du premier bloc text d'un résultat tool (le payload métier get_work_item/submit_result).
-  # Envoie une méthode JSON-RPC BRUTE (sans wrapper tools/call) — pour tools/list (F-C138). Buffer 1 MiB
-  # côté client : la réponse tools/list (N schémas) dépasse le défaut inet ~1460 B → tronquée sinon
-  # (`{:packet, :line}`), même symptôme que la garde buffer côté acceptor.
+  # Sends a RAW JSON-RPC method (without the tools/call wrapper) — for tools/list (F-C138). 1 MiB
+  # buffer client-side: the tools/list response (N schemas) exceeds the inet default ~1460 B →
+  # truncated otherwise (`{:packet, :line}`), same symptom as the acceptor-side buffer guard.
   defp rpc(path, id, method) do
     {:ok, sock} =
       :gen_tcp.connect({:local, path}, 0, [
@@ -391,23 +393,25 @@ defmodule Fleet.MCP.PodSocketTest do
     Jason.decode!(line)
   end
 
+  # Decodes the JSON of the first text block of a tool result (the get_work_item/submit_result payload).
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
 
-  describe "sweep_stale_sockets/0 (cold-boot — résidu kill -9)" do
-    test "efface le résidu d'un pod one-shot → plus de faux deaf-pod degraded", %{base: base} do
-      # Résidu d'une instance antérieure tuée par kill -9 (terminate/3 sauté) : le fichier socket
-      # survit sur le tmpfs, aucun acceptor derrière lui.
+  describe "sweep_stale_sockets/0 (cold-boot — kill -9 residue)" do
+    test "erases a one-shot pod's residue → no more false deaf-pod degraded", %{base: base} do
+      # Residue of a previous instance killed by kill -9 (terminate/3 skipped): the socket file
+      # survives on the tmpfs, no acceptor behind it.
       leaked = Path.join([base, "pod-oneshot-#{System.unique_integer([:positive])}", "sock"])
       File.mkdir_p!(Path.dirname(leaked))
       File.write!(leaked, "")
 
-      # AVANT le sweep : le résidu se lit deaf-pod degraded (le faux-vert INVERSÉ — degraded à vie).
+      # BEFORE the sweep: the residue reads as deaf-pod degraded (the INVERTED false-green — degraded
+      # for life).
       assert {:degraded, %{note: note}} = Fleet.MCP.Supervisor.pod_facing_status()
       assert note =~ "deaf"
 
       assert :ok = PodSocketSupervisor.sweep_stale_sockets()
 
-      # APRÈS : fichier + dir per-pod effacés, statut opérationnel.
+      # AFTER: file + per-pod dir erased, operational status.
       refute File.exists?(leaked)
       refute File.dir?(Path.dirname(leaked))
       assert {:operational, %{sockets: 0}} = Fleet.MCP.Supervisor.pod_facing_status()

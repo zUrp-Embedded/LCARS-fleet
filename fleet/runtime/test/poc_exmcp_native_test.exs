@@ -1,22 +1,21 @@
 defmodule Fleet.MCP.PoCExMCPNativeTest do
   @moduledoc """
-  Lot 1 PoC (plan-implementation.md §Lot 1 trigger 1 ; DN ring4/fleet_mcp.md
-  §"Choix SDK — critère validation empirique").
+  PoC (DN ring4/fleet_mcp.md §"SDK choice — empirical validation criterion").
 
-  Critère décisif DN : round-trip MCP fonctionnel + latence < 100 ms via
-  transport native BEAM. Valide le choix ExMCP (azmaveth) AVANT impl complète
-  `apps/fleet_mcp/`. Si KO → bascule Hermes (le wrap SDK vit dans
-  `Fleet.MCP.PodTools` `use ExMCP.Server`, tools `get_work_item`/`submit_result`
-  inchangés ; F049 — `Fleet.MCP.Server` n'est plus qu'une garde de boot).
+  Decisive DN criterion: functional MCP round-trip + latency < 100 ms via the
+  native BEAM transport. Validates the ExMCP (azmaveth) choice; if KO → switch
+  to Hermes (the SDK wrap lives in `Fleet.MCP.PodTools` `use ExMCP.Server`,
+  tools `get_work_item`/`submit_result` unchanged; F049 — `Fleet.MCP.Server`
+  is only a boot guard now).
 
-  Pattern canonique natif (deps/ex_mcp/lib/ex_mcp/service.ex §Usage) :
-  `use ExMCP.Service, name: <atom>` — auto-register `ExMCP.Native` en init/1,
-  génère `handle_call({:mcp_request, %{"method"=>_,"params"=>_}}, ...)` qui
-  route vers le callback `handle_mcp_request/3`. `use ExMCP.Server` était le
-  mauvais mixin (transport HTTP/stdio, DSL deftool → `{:handle_tool_call,...}`,
-  jamais `{:mcp_request,...}` → GenServer.call sans clause → timeout 5 s).
-  Mesure round-trip `call/4` + `notify/3` via `:timer.tc`. Preuve D-LS-6
-  (mesure e2e réelle, pas claim).
+  Canonical native pattern (deps/ex_mcp/lib/ex_mcp/service.ex §Usage):
+  `use ExMCP.Service, name: <atom>` — auto-registers `ExMCP.Native` in init/1,
+  generates `handle_call({:mcp_request, %{"method"=>_,"params"=>_}}, ...)` which
+  routes to the `handle_mcp_request/3` callback. `use ExMCP.Server` was the
+  wrong mixin (HTTP/stdio transport, deftool DSL → `{:handle_tool_call,...}`,
+  never `{:mcp_request,...}` → GenServer.call without a clause → 5 s timeout).
+  Round-trip measured with `call/4` + `notify/3` via `:timer.tc`. D-LS-6 proof
+  (real e2e measurement, not a claim).
   """
   use ExUnit.Case, async: false
 
@@ -57,17 +56,17 @@ defmodule Fleet.MCP.PoCExMCPNativeTest do
 
   setup_all do
     {:ok, _} = Application.ensure_all_started(:ex_mcp)
-    # use ExMCP.Service : register_service appelé dans init/1 (synchrone) ;
-    # start_supervised! ne retourne qu'après init → service déjà enregistré.
+    # use ExMCP.Service: register_service is called in init/1 (synchronous);
+    # start_supervised! only returns after init → service already registered.
     start_supervised!(PoCService)
     :ok
   end
 
-  test "service native BEAM enregistré et disponible" do
+  test "native BEAM service registered and available" do
     assert ExMCP.Native.service_available?(@service)
   end
 
-  test "round-trip call/4 latence < 100 ms (critère décisif DN)" do
+  test "call/4 round-trip latency < 100 ms (decisive DN criterion)" do
     {us, result} =
       :timer.tc(fn ->
         ExMCP.Native.call(@service, "tools/call", %{
@@ -77,16 +76,16 @@ defmodule Fleet.MCP.PoCExMCPNativeTest do
       end)
 
     assert {:ok, %{"content" => [%{"text" => "pong:lot1"}]}} = result
-    assert us < @threshold_us, "latence call #{us}µs ≥ seuil #{@threshold_us}µs (100 ms)"
+    assert us < @threshold_us, "call latency #{us}µs ≥ threshold #{@threshold_us}µs (100 ms)"
   end
 
-  test "push notify/3 (fire-and-forget) latence < 100 ms" do
+  test "push notify/3 (fire-and-forget) latency < 100 ms" do
     {us, result} =
       :timer.tc(fn ->
         ExMCP.Native.notify(@service, "notifications/message", %{"data" => "push-lot1"})
       end)
 
     assert :ok = result
-    assert us < @threshold_us, "latence notify #{us}µs ≥ seuil #{@threshold_us}µs (100 ms)"
+    assert us < @threshold_us, "notify latency #{us}µs ≥ threshold #{@threshold_us}µs (100 ms)"
   end
 end

@@ -1,13 +1,13 @@
 defmodule Fleet.MCP.PodToolsTest do
   @moduledoc """
-  Couche tool MCP pod-facing (`Fleet.MCP.PodTools`) round-trip avec le **vrai broker**
+  Pod-facing MCP tool layer (`Fleet.MCP.PodTools`) round-trip with the **real broker**
   `Fleet.TaskQueue`.
 
-  PUR Elixir : appelle `handle_tool_call/3` en direct (pas de transport, pas de claude).
-  L'identité du pod vient du `state` (`%{pod_id: pod}`) — porté par l'accepteur de socket
-  en prod (un pod = une socket, l'identité EST le canal), JAMAIS des arguments. Les tools
-  privilégiés (`create_issue`/`create_project`/`get_issue_status`) résolvent le RÔLE
-  depuis le pod_id via le seam `:pod_resolver` (modélise le registre du Spawner).
+  PURE Elixir: calls `handle_tool_call/3` directly (no transport, no claude).
+  The pod identity comes from the `state` (`%{pod_id: pod}`) — carried by the socket
+  acceptor in prod (one pod = one socket, the identity IS the channel), NEVER from the
+  arguments. The privileged tools (`create_issue`/`create_project`/`get_issue_status`)
+  resolve the ROLE from the pod_id via the `:pod_resolver` seam (models the Spawner registry).
   """
   use ExUnit.Case, async: false
 
@@ -17,15 +17,15 @@ defmodule Fleet.MCP.PodToolsTest do
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
-  # State porté par l'accepteur de socket : l'identité = le canal, pas un champ du wire.
+  # State carried by the socket acceptor: the identity = the channel, not a wire field.
   defp pod_state(pod), do: %{pod_id: pod}
 
-  test "round-trip get_work_item/submit_result d'un brief enqueué pour le pod" do
+  test "get_work_item/submit_result round-trip of a brief enqueued for the pod" do
     pod = uniq("pod-rt")
     nonce = "rt-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce, role: "engineer"})
 
-    # Canal IN : get_work_item renvoie le brief (brief = nonce) + work_item_id (correlation).
+    # IN channel: get_work_item returns the brief (brief = nonce) + work_item_id (correlation).
     assert {:ok, %{content: [%{"type" => "text", "text" => t1}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
@@ -35,7 +35,7 @@ defmodule Fleet.MCP.PodToolsTest do
     tid = task["work_item_id"]
     refute Map.has_key?(task, "_lcars_pod_id")
 
-    # Canal OUT : submit_result encaisse le livrable → brief :completed (work_item_id REQUIS = celui rendu).
+    # OUT channel: submit_result cashes the deliverable → brief :completed (work_item_id REQUIRED = the one handed out).
     assert {:ok, %{content: [%{"type" => "text"}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
@@ -45,28 +45,29 @@ defmodule Fleet.MCP.PodToolsTest do
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # Plus de brief actif → get_work_item suivant = done (le pod s'arrête).
+    # No more active brief → next get_work_item = done (the pod stops).
     assert {:ok, %{content: [%{"text" => t2}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
     assert {:ok, %{"done" => true}} = Jason.decode(t2)
   end
 
-  test "get_work_item sans pod_id dans le state (anomalie accepteur) → erreur typée" do
-    # Un pod_id absent du state = anomalie de l'accepteur (il DOIT toujours le porter), pas une fin de
-    # brief. Ne JAMAIS masquer en done:true — sinon le pod s'arrête en croyant avoir fini.
+  test "get_work_item without pod_id in the state (acceptor anomaly) → typed error" do
+    # A pod_id absent from the state = an acceptor anomaly (it MUST always carry it), not an end of
+    # brief. NEVER mask it as done:true — otherwise the pod stops believing it is finished.
     assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("get_work_item", %{}, %{})
   end
 
-  test "submit_result sans pod_id dans le state → erreur (le pod doit être identifié)" do
+  test "submit_result without pod_id in the state → error (the pod must be identified)" do
     assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("submit_result", %{"payload" => %{"x" => 1}}, %{})
   end
 
-  test "submit_result sans work_item_id → REFUS :work_item_id_required (plus de « dernière active » devinée)" do
-    # work_item_id OBLIGATOIRE : le pod DOIT nommer la tâche qu'il clôt. Sans lui, le broker tomberait sur la
-    # dernière active du pod_id. Le pod est identifié (state.pod_id) mais le corrélateur manque → refus net.
+  test "submit_result without work_item_id → REFUSAL :work_item_id_required (no more guessed \"latest active\")" do
+    # work_item_id MANDATORY: the pod MUST name the task it closes. Without it, the broker would fall
+    # back on the pod_id's latest active. The pod is identified (state.pod_id) but the correlator is
+    # missing → clean refusal.
     pod = uniq("pod-notid")
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "x"})
     assert {:ok, _, _} = PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
@@ -79,10 +80,10 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "submit_result sans brief actif → erreur :no_active_work_item (le drop n'est pas masqué)" do
-    # Un pod qui submit sans brief actif (jamais assigné, ou clos/réassigné depuis) → son livrable n'a
-    # NULLE PART où aller = DROP. Doit ressortir isError, PAS {:ok "ok"} — sinon le pod croit son livrable
-    # accepté. Symétrie avec :work_item_id_mismatch / :pod_id_required.
+  test "submit_result without an active brief → error :no_active_work_item (the drop is not masked)" do
+    # A pod that submits without an active brief (never assigned, or closed/reassigned since) → its
+    # deliverable has NOWHERE to go = DROP. Must surface as isError, NOT {:ok "ok"} — otherwise the pod
+    # believes its deliverable was accepted. Symmetric with :work_item_id_mismatch / :pod_id_required.
     pod = uniq("pod-no-task")
 
     assert {:error, :no_active_work_item, %{pod_id: ^pod}} =
@@ -93,9 +94,9 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "submit_result en double (brief déjà clos) → {:ok ignoré}, PAS une erreur (idempotent)" do
-    # Un re-submit après une tâche close n'est PAS un livrable perdu (le 1er submit EST encaissé) →
-    # :ok "déjà reçu", idempotent. À NE PAS confondre avec :no_active_work_item.
+  test "duplicate submit_result (brief already closed) → {:ok ignored}, NOT an error (idempotent)" do
+    # A re-submit after a closed task is NOT a lost deliverable (the 1st submit IS cashed) →
+    # :ok "already received", idempotent. NOT to be confused with :no_active_work_item.
     pod = uniq("pod-dbl")
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "once"})
 
@@ -111,7 +112,7 @@ defmodule Fleet.MCP.PodToolsTest do
                pod_state(pod)
              )
 
-    # 2e submit → idempotent ignoré, toujours :ok (livrable déjà encaissé, rien perdu).
+    # 2nd submit → idempotently ignored, still :ok (deliverable already cashed, nothing lost).
     assert {:ok, %{content: [%{"type" => "text"}]}, _} =
              PodTools.handle_tool_call(
                "submit_result",
@@ -120,15 +121,15 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "tool inconnu / mauvais args → erreurs propres" do
+  test "unknown tool / bad args → clean errors" do
     assert {:error, :unknown_tool, %{}} = PodTools.handle_tool_call("nope", %{}, %{})
 
     assert {:error, :invalid_arguments, _} =
              PodTools.handle_tool_call("submit_result", %{}, pod_state("p"))
   end
 
-  describe "routage par pod (multi-pod pipeline)" do
-    test "chaque pod ne voit QUE son propre brief (séparation structurelle par canal)" do
+  describe "routing by pod (multi-pod pipeline)" do
+    test "each pod only sees its OWN brief (structural separation by channel)" do
       pod_a = uniq("pod-A")
       pod_b = uniq("pod-B")
       {:ok, _} = TaskQueue.enqueue(pod_a, %{brief: "for-A"})
@@ -146,8 +147,8 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Stub forge (seam `:forge_client`) : enregistre create_issue + add_label, retourne le n°.
-  # Adopte le behaviour-contrat du seam → le compilateur vérifie la conformité (anti stub-menteur).
+  # Forge stub (`:forge_client` seam): records create_issue + add_label, returns the number.
+  # Adopts the seam's behaviour-contract → the compiler checks conformance (anti lying-stub).
   defmodule StubForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
@@ -163,24 +164,25 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok, :added}
     end
 
-    # Lecture (get_issue_status) : issue fictive ouverte, aucune PR — suffit à prouver que la GATE a
-    # laissé passer (le contenu importe peu, on teste l'autorisation, pas la forge).
+    # Read side (get_issue_status): fictitious open issue, no PR — enough to prove the GATE let it
+    # through (the content matters little, we test the authorization, not the forge).
     @impl true
     def get_issue(_repo, _number, _opts), do: {:ok, %{"state" => "open"}}
     @impl true
     def list_open_pulls(_repo, _opts), do: {:ok, []}
 
-    # Finding D1 (stub incomplet) : ces deux callbacks du contrat manquaient — un test dont
-    # `list_open_pulls` rendrait une PR aurait crashé UndefinedFunctionError au lieu d'un
-    # comportement de stub. Complétés minimal-honnêtes : pas de feature-branch fleet, pas de verdicts.
+    # Finding D1 (incomplete stub): these two contract callbacks were missing — a test whose
+    # `list_open_pulls` returned a PR would have crashed UndefinedFunctionError instead of showing
+    # stub behavior. Completed minimal-honest: no fleet feature-branch, no verdicts.
     @impl true
     def parse_feature_branch(_head), do: :error
     @impl true
     def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
   end
 
-  # Stub d'onboarding (seam `:project_onboard`) : ne touche NI forge NI disque — rend un repo fictif. Sert
-  # à prouver que la gate architecte laisse passer `create_project` sans exécuter la vraie séquence.
+  # Onboarding stub (`:project_onboard` seam): touches NEITHER forge NOR disk — returns a fictitious
+  # repo. Serves to prove that the architect gate lets `create_project` through without executing the
+  # real sequence.
   defmodule StubOnboard do
     @behaviour Fleet.MCP.PodTools.Delegation.ProjectOnboard
 
@@ -207,10 +209,10 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Stub forge qui CAPTURE le repo interrogé par get_issue_status (preuve que le repo vient du `project`
-  # passé en argument, pas d'une mémoire globale). L'état d'issue rendu est réglable par `:test_issue_state`.
-  # Lecture SEULE par design : les callbacks d'écriture du contrat raisent fail-loud — un test qui
-  # écrirait sur la forge via ce stub doit exploser, pas passer en silence.
+  # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
+  # `project` passed as argument, not from a global memory). The issue state returned is tunable via
+  # `:test_issue_state`. Read-ONLY by design: the contract's write callbacks raise fail-loud — a test
+  # writing to the forge through this stub must blow up, not pass silently.
   defmodule RecordingForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
@@ -218,8 +220,9 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
 
-      # F-C047 — labels pilotables (`:test_issue_labels`, liste de noms) : `delivered` exige `stage/merged`,
-      # plus `closed` seul. Défaut [] → une issue fermée SANS preuve de merge = non-livrée.
+      # F-C047 — tunable labels (`:test_issue_labels`, list of names): `delivered` requires
+      # `stage/merged`, no longer `closed` alone. Default [] → a closed issue WITHOUT merge proof =
+      # not delivered.
       labels =
         Application.get_env(:fleet_mcp, :test_issue_labels, [])
         |> Enum.map(&%{"name" => &1})
@@ -242,32 +245,33 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @impl true
     def create_issue(_repo, _title, _body, _opts),
-      do: raise("RecordingForge est lecture seule — create_issue inattendu dans ces tests")
+      do: raise("RecordingForge is read-only — unexpected create_issue in these tests")
 
     @impl true
     def add_label(_repo, _n, _label, _opts),
-      do: raise("RecordingForge est lecture seule — add_label inattendu dans ces tests")
+      do: raise("RecordingForge is read-only — unexpected add_label in these tests")
   end
 
-  describe "get_issue_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do
+  describe "get_issue_status (arch tracking — repo PASSED as `project`, no more mutable global)" do
     setup do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForge)
 
-      # Suivre un issue est un acte d'ARCHITECTE : le resolver grave le rôle architect sur le pod du canal.
+      # Tracking an issue is an ARCHITECT act: the resolver engraves the architect role on the
+      # channel's pod.
       TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect"}}
       end)
 
-      # :test_issue_state / :test_issue_labels sont posés par certains tests (RecordingForge) — restauration seule.
+      # :test_issue_state / :test_issue_labels are set by some tests (RecordingForge) — restore only.
       TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_state)
       TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_labels)
 
       :ok
     end
 
-    test "R2-05 : forge_client MISCONFIGURÉ → {:error, {:seam_misconfigured, _, _}} (pas de crash apply/3)" do
-      # Enum n'exporte AUCUN callback forge → la garde conforming_forge le détecte au lieu de laisser
-      # `apply(forge, :get_issue, …)` lever un UndefinedFunctionError. Seam duck-typed = 0 check compilo.
+    test "R2-05: MISCONFIGURED forge_client → {:error, {:seam_misconfigured, _, _}} (no apply/3 crash)" do
+      # Enum exports NO forge callback → the conforming_forge guard detects it instead of letting
+      # `apply(forge, :get_issue, …)` raise an UndefinedFunctionError. Duck-typed seam = 0 compiler check.
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Enum)
       pod = uniq("pod-arch")
 
@@ -281,7 +285,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:get_issue, 3} in missing
     end
 
-    test "lit l'état du repo PASSÉ dans `project` (pas d'un projet courant globalisé)" do
+    test "reads the state of the repo PASSED in `project` (not of a globalized current project)" do
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -291,15 +295,15 @@ defmodule Fleet.MCP.PodToolsTest do
                  pod_state(pod)
                )
 
-      # Le repo interrogé côté forge EST le `project` passé — pas un « dernier projet onboardé ». Deux projets
-      # suivis en parallèle ne se contaminent plus via un global réécrit.
+      # The repo queried forge-side IS the passed `project` — not a "last onboarded project". Two
+      # projects tracked in parallel no longer contaminate each other via a rewritten global.
       assert_received {:get_issue, "fleet/specific", 42}
       assert {:ok, result} = Jason.decode(txt)
       assert result["repo"] == "fleet/specific"
       assert result["issue"] == 42
     end
 
-    test "F-C047 : `delivered: true` quand l'issue est fermée ET porte `stage/merged` (preuve de merge)" do
+    test "F-C047: `delivered: true` when the issue is closed AND carries `stage/merged` (merge proof)" do
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
       Application.put_env(:fleet_mcp, :test_issue_labels, ["stage/merged"])
       pod = uniq("pod-arch")
@@ -316,10 +320,10 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["delivered"] == true
     end
 
-    test "F-C047 : issue FERMÉE SANS `stage/merged` (fermeture non-livraison : onboarding/manuelle) → `delivered: false`" do
-      # Le cœur du finding : `closed` seul confondait livraison-par-merge et fermeture-sans-livraison
-      # (marqueur d'onboarding / close manuel) → faux `delivered:true` → l'arch chaînait N+1 sur une
-      # brique ABANDONNÉE. Fermée mais sans preuve de merge = NON livrée (l'arch attend, direction sûre).
+    test "F-C047: issue CLOSED WITHOUT `stage/merged` (non-delivery close: onboarding/manual) → `delivered: false`" do
+      # The heart of the finding: `closed` alone conflated delivery-by-merge and close-without-delivery
+      # (onboarding marker / manual close) → false `delivered:true` → the arch chained N+1 on an
+      # ABANDONED brick. Closed but without merge proof = NOT delivered (the arch waits, safe direction).
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
       Application.put_env(:fleet_mcp, :test_issue_labels, ["lcars-onboarded"])
       pod = uniq("pod-arch")
@@ -336,9 +340,9 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["delivered"] == false
     end
 
-    test "REFUSE si `project` omis — pas de routage par défaut (miroir create_issue)" do
-      # Le pod est légitime (architecte) — c'est le `project` manquant qui refuse. Sans repo explicite,
-      # get_issue_status lirait l'état du mauvais projet (le trou qu'on ferme).
+    test "REFUSES if `project` is omitted — no default routing (mirror of create_issue)" do
+      # The pod is legitimate (architect) — it is the missing `project` that refuses. Without an
+      # explicit repo, get_issue_status would read the state of the wrong project (the hole we close).
       pod = uniq("pod-arch")
 
       assert {:error, {:project_required, msg}, _} =
@@ -352,7 +356,7 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:get_issue, _, _}
     end
 
-    test "REFUSE si `project` vide" do
+    test "REFUSES if `project` is empty" do
       pod = uniq("pod-arch")
 
       assert {:error, {:project_required, _}, _} =
@@ -366,15 +370,15 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "create_issue (délégation arch → issue forge prêt pour le poller)" do
+  describe "create_issue (arch delegation → forge issue ready for the poller)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
 
-      # Déléguer est un acte d'ARCHITECTE : le `:pod_resolver` doit rendre le rôle `architect` (sinon
-      # `require_architect` refuse `:forbidden_not_architect`). Le token du compte architect doit aussi être
-      # sur disque, sinon create_issue REFUSE (`:role_token_unavailable`, fail-closed).
+      # Delegating is an ARCHITECT act: the `:pod_resolver` must return the `architect` role (otherwise
+      # `require_architect` refuses `:forbidden_not_architect`). The architect account's token must also
+      # be on disk, otherwise create_issue REFUSES (`:role_token_unavailable`, fail-closed).
       TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect"}}
       end)
@@ -385,7 +389,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "pose l'issue (assignee humain) + label visu, SANS graver de route (découplage)" do
+    test "creates the issue (human assignee) + visual label, WITHOUT engraving a route (decoupling)" do
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -395,14 +399,14 @@ defmodule Fleet.MCP.PodToolsTest do
                  pod_state(pod)
                )
 
-      # assignee = l'humain owner (point fixe). Pas de labels DANS create_issue (Gitea veut des IDs).
+      # assignee = the human owner (fixed point). No labels INSIDE create_issue (Gitea wants IDs).
       assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
       human = Fleet.Credentials.Human.current!()
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
 
-      # type:feature = étiquette de VISU, JAMAIS du routing : rien de mécanique ne la lit, son
-      # résultat est jeté et son absence est directement visible sur l'issue dans l'UI forge.
+      # type:feature = a VISUAL label, NEVER routing: nothing mechanical reads it, its result is
+      # discarded and its absence is directly visible on the issue in the forge UI.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
       assert {:ok, result} = Jason.decode(txt)
@@ -411,7 +415,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["assignee"] == human
     end
 
-    test "`project` EXPLICITE → l'issue est posée DANS ce repo" do
+    test "EXPLICIT `project` → the issue is created IN that repo" do
       pod = uniq("pod-arch")
 
       assert {:ok, _, _} =
@@ -424,9 +428,9 @@ defmodule Fleet.MCP.PodToolsTest do
       assert_received {:create_issue, "fleet/explicit", "T", "fais X", _opts}
     end
 
-    test "REFUSE si `project` omis — pas de routage par défaut" do
-      # La bonne volonté ne s'impose pas : sans `project`, on REFUSE. Le pod est légitime (architecte) —
-      # c'est le `project` manquant qui refuse, pas l'identité.
+    test "REFUSES if `project` is omitted — no default routing" do
+      # Good will is not imposed: without `project`, we REFUSE. The pod is legitimate (architect) —
+      # it is the missing `project` that refuses, not the identity.
       pod = uniq("pod-arch")
 
       assert {:error, {:project_required, msg}, _} =
@@ -440,7 +444,7 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "REFUSE si `project` vide" do
+    test "REFUSES if `project` is empty" do
       pod = uniq("pod-arch")
 
       assert {:error, {:project_required, _}, _} =
@@ -453,10 +457,10 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "R2-03 : `project` non-vide mais mal formé (pas owner/name) → {:invalid_project_ref} au bord" do
+    test "R2-03: non-empty but malformed `project` (not owner/name) → {:invalid_project_ref} at the edge" do
       pod = uniq("pod-arch")
 
-      # sans slash, 3 composants, partie vide, ou espace → rejetés AVANT tout appel forge/gate
+      # no slash, 3 components, empty part, or a space → rejected BEFORE any forge/gate call
       for bad <- ["justname", "a/b/c", "owner/", "/name", "own er/name"] do
         assert {:error, {:invalid_project_ref, _}, _} =
                  PodTools.handle_tool_call(
@@ -464,36 +468,36 @@ defmodule Fleet.MCP.PodToolsTest do
                    %{"title" => "T", "brief" => "X", "project" => bad},
                    pod_state(pod)
                  ),
-               "project #{inspect(bad)} devrait être rejeté"
+               "project #{inspect(bad)} should be rejected"
       end
     end
   end
 
   # ============================================================
-  # Le rôle vient du SPAWN (résolu par pod_id du canal), jamais d'un champ du wire
+  # The role comes from the SPAWN (resolved by the channel's pod_id), never from a wire field
   # ============================================================
 
-  describe "rôle lié au spawn (résolu par pod_id) — seul architect délègue" do
+  describe "role bound to the spawn (resolved by pod_id) — only architect delegates" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
 
-      # :pod_resolver est posé PAR CHAQUE TEST (c'est le binding testé) — restauration seule.
+      # :pod_resolver is set BY EACH TEST (it is the binding under test) — restore only.
       TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
 
-      # Token `architect` sur disque (cas légitime). Les tests qui veulent prouver un REFUS le font sur le
-      # RÔLE (resolver ≠ architect ou pod inconnu), AVANT même que le token n'entre en jeu.
+      # `architect` token on disk (legitimate case). Tests that want to prove a REFUSAL do it on the
+      # ROLE (resolver ≠ architect or unknown pod), BEFORE the token even comes into play.
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
       :ok
     end
 
-    test "le spawn (résolu par pod_id) dit engineer → REFUS :forbidden_not_architect" do
-      # Binding serveur `pod_id → role` : le pod p1 a été SPAWNÉ comme engineer. Le résolveur stub MODÉLISE
-      # ce binding ET CAPTURE qu'on l'interroge bien par pod_id (du canal, jamais d'un champ du wire).
-      # Déléguer est réservé à l'architecte → REFUS, AUCUNE issue.
+    test "the spawn (resolved by pod_id) says engineer → REFUSAL :forbidden_not_architect" do
+      # Server-side `pod_id → role` binding: pod p1 was SPAWNED as engineer. The stub resolver MODELS
+      # that binding AND CAPTURES that it is indeed queried by pod_id (from the channel, never from a
+      # wire field). Delegating is reserved to the architect → REFUSAL, NO issue.
       test_pid = self()
 
       Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
@@ -511,14 +515,14 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{pod_id: "p1"}
                )
 
-      # Le résolveur a été interrogé avec le POD_ID du canal.
+      # The resolver was queried with the channel's POD_ID.
       assert_received {:resolved_from, "p1"}
 
-      # Aucune issue créée par un engineer.
+      # No issue created by an engineer.
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "le spawn dit architect → délégation acceptée, token ARCHITECT (rôle du spawn)" do
+    test "the spawn says architect → delegation accepted, ARCHITECT token (spawn role)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
 
       assert {:ok, _, _} =
@@ -532,9 +536,10 @@ defmodule Fleet.MCP.PodToolsTest do
       assert opts[:token] == "ARCH_TOKEN"
     end
 
-    test "pod inconnu du Registry (resolver → :pod_unknown) → REFUS, PLUS de fallback token système" do
-      # Un pod inconnu ne doit JAMAIS poster sous le compte système. Token architect PRÉSENT sur disque :
-      # si le code repliait en système, il créerait l'issue. Le pod est irrésoluble → REFUS net, AUCUNE issue.
+    test "pod unknown to the Registry (resolver → :pod_unknown) → REFUSAL, NO MORE system-token fallback" do
+      # An unknown pod must NEVER post under the system account. Architect token PRESENT on disk:
+      # if the code fell back to system, it would create the issue. The pod is unresolvable → clean
+      # REFUSAL, NO issue.
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:error, :pod_unknown} end)
 
       assert {:error, :pod_unknown, _} =
@@ -547,9 +552,9 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "pod prouvé architect mais token absent sur disque → REFUS :role_token_unavailable (fail-closed)" do
-      # Le rôle est architect (autorisé) mais son compte n'a pas de token provisionné. On REFUSE plutôt que
-      # poster en système. On efface le token architect posé par le setup pour ce cas.
+    test "pod proven architect but token absent on disk → REFUSAL :role_token_unavailable (fail-closed)" do
+      # The role is architect (authorized) but its account has no provisioned token. We REFUSE rather
+      # than post as system. We erase the architect token set by the setup for this case.
       File.rm(
         Path.join(
           Application.get_env(:fleet_credentials, :role_tokens_dir),
@@ -571,16 +576,16 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # ============================================================
-  # Gate architecte serveur-side des tools privilégiés
+  # Server-side architect gate of the privileged tools
   # ============================================================
   #
-  # `create_project`, `import_project`, `create_issue`, `get_issue_status` exigent le rôle `architect`
-  # résolu depuis le pod_id du canal. Tout rôle non architecte (engineer, reviewer, rôle nil/inconnu), un
-  # pod inconnu, ou un state sans pod_id → REFUS sur les 4 tools ; architect → passe.
-  describe "gate architecte (refus de tout rôle non architecte sur les tools privilégiés)" do
+  # `create_project`, `import_project`, `create_issue`, `get_issue_status` require the `architect`
+  # role resolved from the channel's pod_id. Any non-architect role (engineer, reviewer, nil/unknown
+  # role), an unknown pod, or a state without pod_id → REFUSAL on all 4 tools; architect → passes.
+  describe "architect gate (refusal of any non-architect role on the privileged tools)" do
     @describetag :tmp_dir
 
-    # Les 4 tools privilégiés avec un jeu d'arguments métier VALIDE (pour que seul le rôle décide du refus).
+    # The 4 privileged tools with a VALID business argument set (so that only the role decides the refusal).
     @privileged_tools [
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
@@ -588,15 +593,15 @@ defmodule Fleet.MCP.PodToolsTest do
       {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
     ]
 
-    # Rôles non autorisés à déléguer/onboarder/suivre. `nil` modélise un pod sans rôle gravé (binding
-    # incomplet) — doit AUSSI être refusé (fail-closed, jamais d'accès par rôle absent).
+    # Roles not authorized to delegate/onboard/track. `nil` models a pod without an engraved role
+    # (incomplete binding) — must ALSO be refused (fail-closed, never access through an absent role).
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
 
     setup %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
       TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, StubOnboard)
 
-      # :pod_resolver est posé PAR CHAQUE TEST (rôle sous test) — restauration seule.
+      # :pod_resolver is set BY EACH TEST (role under test) — restore only.
       TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
 
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
@@ -605,7 +610,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "tout rôle NON architecte est REFUSÉ sur les 4 tools — sans aucun effet de bord" do
+    test "every NON-architect role is REFUSED on the 4 tools — with no side effect" do
       for role <- @non_architect_roles do
         Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
 
@@ -614,14 +619,14 @@ defmodule Fleet.MCP.PodToolsTest do
 
           assert {:error, :forbidden_not_architect, _} =
                    PodTools.handle_tool_call(tool, biz_args, pod_state(pod)),
-                 "tool=#{tool} role=#{inspect(role)} aurait dû être REFUSÉ"
+                 "tool=#{tool} role=#{inspect(role)} should have been REFUSED"
         end
 
         refute_received {:create_issue, _, _, _, _}
       end
     end
 
-    test "pod inconnu (resolver → :pod_unknown) REFUSÉ sur les 4 tools (identité non résolue)" do
+    test "unknown pod (resolver → :pod_unknown) REFUSED on the 4 tools (unresolved identity)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:error, :pod_unknown} end)
 
       for {tool, biz_args} <- @privileged_tools do
@@ -629,36 +634,37 @@ defmodule Fleet.MCP.PodToolsTest do
 
         assert {:error, :pod_unknown, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(pod)),
-               "tool=#{tool} pod inconnu aurait dû être REFUSÉ"
+               "tool=#{tool} unknown pod should have been REFUSED"
       end
     end
 
-    test "state sans pod_id (anomalie accepteur) REFUSÉ sur les 4 tools → :pod_id_required" do
-      # Le pod_id est porté par l'accepteur ; absent du state = anomalie → refus typé, jamais d'accès.
+    test "state without pod_id (acceptor anomaly) REFUSED on the 4 tools → :pod_id_required" do
+      # The pod_id is carried by the acceptor; absent from the state = anomaly → typed refusal, never
+      # access.
       for {tool, biz_args} <- @privileged_tools do
         assert {:error, :pod_id_required, _} =
                  PodTools.handle_tool_call(tool, biz_args, %{}),
-               "tool=#{tool} sans pod_id aurait dû être REFUSÉ"
+               "tool=#{tool} without pod_id should have been REFUSED"
       end
     end
 
-    test "architect → les 4 tools PASSENT la gate (pas de :forbidden / :pod_unknown)" do
+    test "architect → the 4 tools PASS the gate (no :forbidden / :pod_unknown)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
 
       for {tool, biz_args} <- @privileged_tools do
         pod = uniq("pod-arch")
         result = PodTools.handle_tool_call(tool, biz_args, pod_state(pod))
 
-        # architect → la gate laisse passer : résultat métier :ok (stubs forge/onboard).
+        # architect → the gate lets it through: business :ok result (forge/onboard stubs).
         assert match?({:ok, _, _}, result),
-               "tool=#{tool} : architect devrait passer la gate et obtenir un :ok métier (#{inspect(result)})"
+               "tool=#{tool}: architect should pass the gate and get a business :ok (#{inspect(result)})"
       end
     end
   end
 
-  # Forge stub RICHE pour le canal retour : 2 repos, un awaits-arch (#4 + commentaire verdict) + une
-  # issue normale (#5, à ignorer). DR-012 : le contrat escalation est désormais un behaviour DÉCLARÉ
-  # (`Delegation.EscalationForge`) → le stub l'ADOPTE (checké au compile, anti lying-stub, comme StubForge).
+  # RICH forge stub for the return channel: 2 repos, one awaits-arch (#4 + verdict comment) + a
+  # normal issue (#5, to be ignored). DR-012: the escalation contract is now a DECLARED behaviour
+  # (`Delegation.EscalationForge`) → the stub ADOPTS it (compile-checked, anti lying-stub, like StubForge).
   defmodule EscalationForge do
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
@@ -695,7 +701,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "canal retour arch (list_escalations lit / comment_issue répond)" do
+  describe "arch return channel (list_escalations reads / comment_issue replies)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
@@ -706,7 +712,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "list_escalations : énumère les awaits-arch (verdict = dernier commentaire), ignore le reste" do
+    test "list_escalations: enumerates the awaits-arch (verdict = last comment), ignores the rest" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
 
@@ -719,14 +725,14 @@ defmodule Fleet.MCP.PodToolsTest do
       assert v =~ "PING-RETOUR-OK"
     end
 
-    test "list_escalations : gate architecte (rôle non-architecte → refusé, aucune lecture)" do
+    test "list_escalations: architect gate (non-architect role → refused, no read)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-eng")))
     end
 
-    test "comment_issue : poste sur le project passé, AU NOM du rôle architecte (token de rôle)" do
+    test "comment_issue: posts on the passed project, IN THE NAME of the architect role (role token)" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "comment_issue",
@@ -739,7 +745,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{"status" => "commented", "repo" => "fleet/alpha", "number" => 4}} = Jason.decode(txt)
     end
 
-    test "comment_issue : gate architecte (rôle non-architecte → refusé, rien posté)" do
+    test "comment_issue: architect gate (non-architect role → refused, nothing posted)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
@@ -752,7 +758,7 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:post_comment, _, _, _, _}
     end
 
-    test "comment_issue : REFUSE sans project (miroir create_issue, pas de routage par défaut)" do
+    test "comment_issue: REFUSES without project (mirror of create_issue, no default routing)" do
       assert {:error, {:project_required, msg}, _} =
                PodTools.handle_tool_call(
                  "comment_issue",
