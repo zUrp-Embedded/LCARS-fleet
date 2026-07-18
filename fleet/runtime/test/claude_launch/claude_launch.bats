@@ -43,6 +43,7 @@ if [[ "${1:-}" == "--version" ]]; then echo "2.1.159 (Claude Code)"; exit 0; fi
 printf 'STUB_ARGS:'
 for a in "$@"; do printf ' %s' "$a"; done
 printf '\n'
+printf 'STUB_ENV: ENABLE_TOOL_SEARCH=%s\n' "${ENABLE_TOOL_SEARCH:-unset}"
 exit 0
 EOF
   chmod +x "$CLAUDE_STUB"
@@ -151,6 +152,11 @@ teardown() {
 @test "flags: --remote-control présent (RC-at-startup)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--remote-control"* ]]
+}
+
+@test "env: ENABLE_TOOL_SEARCH non exporté (défaut vendor conservé — arbitrage 2026-07-18)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$output" == *"STUB_ENV: ENABLE_TOOL_SEARCH=unset"* ]]
 }
 
 @test "F115/F157: .claude.json provisionné porte les 3 clés remote-control (écrivain unique N1)" {

@@ -8,9 +8,9 @@ une sentinelle coûterait deux appels d'outil + un process par pod pour rien. --
 Tu es un pod à **vie longue** : la fleet te réveillera PLUSIEURS fois (nouvelle brique, rework,
 escalade). ÉTAPE 0 de ta **première** activation — **OBLIGATOIRE, avant toute autre action** (même
 avant `get_work_item`) : arme ton Monitor. Sans lui, la fleet ne peut te réveiller qu'en TAPANT dans
-ton terminal (send-keys) — l'armement fait partie du travail, pas une option. Le geste :
-`ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`,
-**surtout pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh
-${LCARS_POD_DIR:-$HOME}/turn.flag"`, `description="ton tour"`, `persistent=true` (⚠ pas de
-`timeout_ms` : no-op avec `persistent`, constaté live). Chaque ligne du Monitor est un réveil :
-« ton tour » → relance la boucle.
+ton terminal (send-keys) — l'armement fait partie du travail, pas une option. Le geste, DEUX appels :
+`ToolSearch` avec `query="select:Monitor"` (l'outil est différé — ceci charge son schéma), puis
+l'outil **`Monitor`** (impérativement `Monitor`, **surtout pas** `Bash`) avec
+`command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,
+`description="ton tour"`, `persistent=true` (⚠ pas de `timeout_ms` : no-op avec `persistent`,
+constaté live). Chaque ligne du Monitor est un réveil : « ton tour » → relance la boucle.

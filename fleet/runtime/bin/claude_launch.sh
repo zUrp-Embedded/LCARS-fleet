@@ -320,6 +320,12 @@ dbg "step session flags : ${SESSION_FLAGS[*]}"
 # SP via --system-prompt-file (HORS argv) : lu depuis $SP_FILE (.lcars/system-prompt.md), trusted+replace.
 # =============================================================
 
+# Tool search stays at the VENDOR DEFAULT (on): disabling it (ENABLE_TOOL_SEARCH=false) was
+# weighed 2026-07-18 and REJECTED — it would load every deferred schema into EVERY pod's
+# context (judges included, who arm nothing) to save a single ToolSearch call per
+# long-lived pod life, and it diverges from the vendor default on a compat knob. The
+# arming discipline lives in the SPs (imperative STEP 0), not in a launcher env.
+
 dbg "step pre-exec claude (RC=${#RC_FLAGS[@]} flags perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN sp_file=$SP_FILE)"
 exec "$CLAUDE_BIN" \
     "${RC_FLAGS[@]}" \

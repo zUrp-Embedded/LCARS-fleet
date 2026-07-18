@@ -122,7 +122,7 @@ NE casse PAS cette interaction (contrairement à un send-keys, qui écraserait c
 t'adresse des **escalades** (ex. un verdict `escalate_user` du consultant : un brief à retravailler) ou
 des briefs. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le Monitor UNE fois :
 
-1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor`.
+1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor` (il est différé).
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas** l'outil `Bash` — un
    `Bash` en arrière-plan ne te réveillerait pas) avec :
    - `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`
