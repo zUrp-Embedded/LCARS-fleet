@@ -1,4 +1,4 @@
-# fleet_api
+# Fleet.API — domain card
 
 **Date**: 2026-05-10
 **Last revised**: 2026-07-18
@@ -21,12 +21,12 @@ only pointed at.
 - `Fleet.API.SpawnAdmission` — the `POST /api/admin/spawn` admission pipeline (DTO allowlist → path-safe `pod_id` → cap-profile → host-native fail-closed → brief-required, mirror of R18); pure functions
 - `Fleet.API.Readiness` — LIVE operational state (anti-hollow-green); `deep/0` → `operational|degraded` + subsystems
 - `Fleet.API.BuildInfo` — observable build stamp (`current/0` → `sha`/`dirty`/`ref`/`source`); total, memoized
-- `Fleet.API.Application` — `:one_for_one` supervisor; starts the Cowboy listener; `post_boot/0` = build-info trace (sd_notify retired, acte4 A-14)
+- `Fleet.API.Application` — `:one_for_one` supervisor; starts the Cowboy listener; `post_boot/0` = build-info trace (no sd_notify: no systemd deployment)
 
 ## Config & deps
 
-- Knob `:fleet_api, :http_port` — Cowboy port, `fetch_env!` fail-loud (A7); set by `runtime.exs` from `FLEET_API_PORT` (per-human, `bin/fleet_v2`); `0` in `:test`.
+- Knob `:fleet_api, :http_port` — Cowboy port, `fetch_env!` fail-loud; set by `runtime.exs` from `FLEET_API_PORT` (per-human, `bin/fleet_v2`); `0` in `:test`.
 - Knob `:fleet_api, :start_listener` (default `true`; `false` in `:test` — REST via `Plug.Test`, WS via direct callbacks).
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — listener bind IP; local-only by default (frontier = network isolation).
 - Deps (all descending — see `use Boundary`): `fleet_event_router` (Bus + listener), `fleet_pilot` (readiness step probe), `fleet_mcp` (readiness pod-facing probe), `fleet_spawner` (admission + backend), `fleet_starfleet` (shutdown dispatcher), `fleet_cap_profile` (cap-profile validation), + `plug`/`plug_cowboy`/`jason`.
-- Vendor frontier: N0 (vendor-agnostic). Split (D1): deferred — see design note `fleet_api.md`.
+- Vendor frontier: N0 (vendor-agnostic). REST/WS split: deferred (criterion in the façade `@moduledoc`).

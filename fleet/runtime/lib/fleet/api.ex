@@ -1,8 +1,8 @@
 defmodule Fleet.API do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
+  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
+  # deliberate API gesture.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -18,7 +18,7 @@ defmodule Fleet.API do
       Fleet.Pilot,
       Fleet.Spawner,
       Fleet.Starfleet,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every reference is declared) —
       Plug,
       Plug.Builder,
       Plug.Conn,
@@ -29,7 +29,7 @@ defmodule Fleet.API do
       Plug.Router.Utils,
       Plug.Static,
       # api binds its OWN AF_UNIX control socket (ControlRouter → Plug.Cowboy.http, off the
-      # network the pod shares — A-21) ; jusqu'ici le TCP passait par EventRouter.Listener.
+      # network the pod shares — A-21); the TCP listener goes through EventRouter.Listener.
       Plug.Cowboy
     ],
     exports: [Application]
@@ -44,8 +44,8 @@ defmodule Fleet.API do
 
     * `Fleet.API.Rest` — Plug.Router HTTP REST endpoints (per-human port, laid down by bin/fleet_v2)
       (GET workflow_runs/issues/pods/health + POST admin/spawn) — no-auth
-      reads, guarded writes (the `X-Auth-Token` HMAC was REMOVED;
-      boundary = network/container isolation, cf. `Fleet.API.Rest` §Auth)
+      reads, guarded writes (no `X-Auth-Token` HMAC:
+      the boundary = network/container isolation, cf. `Fleet.API.Rest` §Auth)
     * `Fleet.API.WS` — Cowboy WebSocket handler `:<port>/ws` (per-human port, bin/fleet_v2) subscribes
       the Phoenix.PubSub bus + per-client topic filter + 30s heartbeat
 
