@@ -1,4 +1,4 @@
-# fleet_project_bootstrap
+# Fleet.ProjectBootstrap — domain card
 
 **Date**: 2026-07-13
 **Last revised**: 2026-07-18
@@ -19,4 +19,4 @@ Nothing here is restated, only pointed at.
 
 ## Config & deps
 - No app-env knob. The only calibration is the `:git_timeout_ms` opt of `clone_or_skip/3` (default = the `Fleet.Credentials.Shell.git/2` wrapper's 30s).
-- Deps: see `mix.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/project_bootstrap.ex`).
