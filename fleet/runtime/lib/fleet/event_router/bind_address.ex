@@ -15,8 +15,8 @@ defmodule Fleet.EventRouter.BindAddress do
   Cowboy listens on `0.0.0.0` (all interfaces) and the boundary is no longer
   guaranteed by the runtime but delegated to an external firewall/network —
   implicit, hence fragile. This function is that single point of computation;
-  a 5th listener that forgets it is the only way to regress (and it is caught
-  by each surface's bind tests).
+  a new listener that bypasses it is the only way to regress — caught by the
+  `listener.no_cowboy_bypass` contract check and each surface's bind tests.
 
   ## Exposure override (named opt-in)
 
