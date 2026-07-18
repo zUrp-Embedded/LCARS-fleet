@@ -6,7 +6,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   **The level is the HUMAN's declaration** (elicited by the framing interview — what
   happens if this deliverable is wrong? how long will it live? — and RELAYED by the
   architect; an agent never self-assesses criticality). Undeclared is a LEGITIMATE state:
-  the file is still written, complete and schema-valid, as an HONEST L0 default explicitly
+  the file is still written, complete and schema-valid, as an HONEST C0 default explicitly
   marked undeclared — absence is recorded, never fabricated into facts, and never a wall
   (a blocked declaration teaches the human to lie to the arch).
 
@@ -32,7 +32,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   @doc """
   Composes, validates and writes `<proj_dir>/intensity.json` from the onboarding opts
   (`:intensity_level`, `:intensity_justification`, `:intensity_nature`, `:workflow_map` —
-  all optional: nothing declared → the honest L0 default, marked undeclared).
+  all optional: nothing declared → the honest C0 default, marked undeclared).
 
   `{:error, {:invalid_declaration, errors}}` on a schema-invalid composition (malformed
   FORM is returned to the caller — fixing a format is not lying); `{:error, term}` on a
@@ -83,9 +83,9 @@ defmodule Fleet.Pilot.ProjectIntensity do
     card = Keyword.get(opts, :workflow_map)
 
     # Naming a card IS a declaration (the card choice is the criticality mechanic — the
-    # doctrine above, applied): the L0 system-default applies ONLY when the human declared
+    # doctrine above, applied): the C0 system-default applies ONLY when the human declared
     # NOTHING at all. An explicit card without a level records the level as ABSENT (never
-    # fabricated into an L0 the human did not say) — `declared_by` stays truthful.
+    # fabricated into an C0 the human did not say) — `declared_by` stays truthful.
     declared? = is_binary(level) or is_binary(card)
 
     base = %{
@@ -102,8 +102,8 @@ defmodule Fleet.Pilot.ProjectIntensity do
         is_binary(level) -> Map.put(base, "level", level)
         # Card chosen without a level → the level is honestly ABSENT (schema allows it).
         is_binary(card) -> base
-        # Nothing declared → the honest L0 default posture, explicitly marked.
-        true -> Map.put(base, "level", "L0")
+        # Nothing declared → the honest C0 default posture, explicitly marked.
+        true -> Map.put(base, "level", "C0")
       end
 
     case Keyword.get(opts, :intensity_nature) do
@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
         "Niveau non déclaré — carte choisie explicitement par l'humain : #{card}."
 
       true ->
-        "NON DÉCLARÉ — défaut système (posture PoC L0). L'humain n'a pas déclaré la criticité."
+        "NON DÉCLARÉ — défaut système (posture PoC C0). L'humain n'a pas déclaré la criticité."
     end
   end
 

@@ -1,17 +1,17 @@
 {
   "_comment": "Per-project intensity.json template — copy to <project_root>/intensity.json and adapt. Schema: ../../schema/intensity-v1.json. THE LEVEL IS THE HUMAN'S DECLARATION: elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
   "_schema": "lcars/intensity-v1",
-  "level": "L0",
+  "level": "C0",
   "declared_at": "2026-07-18",
   "declared_by": "architect",
   "justification": "NON DÉCLARÉ — défaut système (posture PoC). Remplacer par la déclaration de l'humain.",
   "nature": "generic",
   "pipeline_default": "brief-gate",
   "_levels_reference": {
-    "L0": "Utilitaire trivial single-shot (PoC led1→led1)",
-    "L1": "Utilitaire petit, lifecycle court",
-    "L2": "Composant moyen, vit et évolue",
-    "L3": "Base infra critique multi-year",
-    "L4": "Système critique — l'enjeu d'un échec est physique/légal/irréversible"
+    "C0": "Utilitaire trivial single-shot (PoC led1→led1)",
+    "C1": "Utilitaire petit, lifecycle court",
+    "C2": "Composant moyen, vit et évolue",
+    "C3": "Base infra critique multi-year",
+    "C4": "Système critique — l'enjeu d'un échec est physique/légal/irréversible"
   }
 }

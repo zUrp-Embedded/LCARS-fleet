@@ -1,7 +1,7 @@
-# Carte type — l0-poc (2026-07-18)
+# Carte type — c0-poc (2026-07-18)
 #
 # Date: 2026-07-18
-# Statut: actif — carte de production L0 (PoC jetable), la plus légère du catalogue.
+# Statut: actif — carte de production C0 (PoC jetable), la plus légère du catalogue.
 # Dérivé de: programme carte-driven 2026-07-18 (la mécanique de criticité EST le choix de la carte).
 # Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Pilot.Roles.project_jury.
 #
@@ -12,10 +12,10 @@
 
 kind: WorkflowMap
 metadata:
-  name: l0-poc
-  description: "PoC L0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
-  presentation: "L0 — PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
-  applicable_intensity: [L0]
+  name: c0-poc
+  description: "PoC C0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
+  presentation: "C0 — PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
+  applicable_intensity: [C0]
   applicable_regime: [R1, R2]
 
 spec:

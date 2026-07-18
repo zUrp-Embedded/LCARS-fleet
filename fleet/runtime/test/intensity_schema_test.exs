@@ -37,8 +37,8 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert :ok = ExJsonSchema.Validator.validate(schema, canon)
   end
 
-  test "rejects — level outside enum L0-L4", %{schema: schema, canon: canon} do
-    bad = Map.put(canon, "level", "L9")
+  test "rejects — level outside enum C0-C4", %{schema: schema, canon: canon} do
+    bad = Map.put(canon, "level", "C9")
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 

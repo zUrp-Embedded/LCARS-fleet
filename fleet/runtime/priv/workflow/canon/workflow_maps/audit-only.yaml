@@ -20,12 +20,12 @@ kind: WorkflowMap
 metadata:
   name: audit-only
   description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 step, gate terminal). Escalade gatekeeper sur échec de règle (dispatch_gatekeeper)."
-  presentation: "L0→L4 — AUDIT PUR : un consultant lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
-  applicable_intensity: [L0, L1, L2, L3, L4]
+  presentation: "C0→C4 — AUDIT PUR : un consultant lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
+  applicable_intensity: [C0, C1, C2, C3, C4]
   applicable_regime: [R1, R2]
 
 spec:
-  # Jury VIDE délibéré (fast-track L0/L1) : pas de juges de PR — le plancher mécanique
+  # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique
   # (identité, secrets, ancêtre, sceau) tient seul ; le consultant audite post-hoc.
   jury: []
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.

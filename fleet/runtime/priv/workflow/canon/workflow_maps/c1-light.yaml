@@ -1,7 +1,7 @@
-# Carte type — l1-light (2026-07-18)
+# Carte type — c1-light (2026-07-18)
 #
 # Date: 2026-07-18
-# Statut: actif — carte de production L1 légère : un seul juge (qualifier).
+# Statut: actif — carte de production C1 légère : un seul juge (qualifier).
 # Dérivé de: programme carte-driven 2026-07-18 (la mécanique de criticité EST le choix de la carte).
 # Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Pilot.Roles.project_jury.
 #
@@ -13,10 +13,10 @@
 
 kind: WorkflowMap
 metadata:
-  name: l1-light
-  description: "Light L1 : engineer + qualifier seul juge (plancher : le code compile ; tests runner à venir)."
-  presentation: "L1 — LÉGÈRE : l'engineer livre, UN seul juge (qualifier) dont le plancher est « le code compile ». Pour un outil qui doit tenir debout sans mériter le pipeline complet."
-  applicable_intensity: [L1]
+  name: c1-light
+  description: "Light C1 : engineer + qualifier seul juge (plancher : le code compile ; tests runner à venir)."
+  presentation: "C1 — LÉGÈRE : l'engineer livre, UN seul juge (qualifier) dont le plancher est « le code compile ». Pour un outil qui doit tenir debout sans mériter le pipeline complet."
+  applicable_intensity: [C1]
   applicable_regime: [R1, R2]
 
 spec:

@@ -97,7 +97,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- clone_main(url, proj_dir),
          :ok <- Scaffold.main(proj_dir, name, opts),
          # Criticality declaration (intensity.json, ON MAIN — an auditor reads it beside the
-         # code): the human's relayed level or the honest undeclared-L0 default. Committed by
+         # code): the human's relayed level or the honest undeclared-C0 default. Committed by
          # the scaffold commit below (add -A). Cf. Fleet.Pilot.ProjectIntensity.
          :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
@@ -208,7 +208,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       rule_name: "main",
       # Sized by the project's CARD jury: the declaration was written (or imported) into
       # `<proj_dir>/intensity.json` BEFORE this lock → `project_jury` reads THAT card.
-      # A zero-judge card (l0-poc) sizes the rule to 0 — the forge gate then only enforces
+      # A zero-judge card (c0-poc) sizes the rule to 0 — the forge gate then only enforces
       # no-direct-push; the judgment layer IS the card's choice.
       required_approvals: length(Roles.project_jury(repo, opts)),
       dismiss_stale_approvals: true,

@@ -46,7 +46,7 @@ une carte, c'est déclarer. À chaque `create_project` :
    place**, et tu n'évalues JAMAIS un niveau toi-même (un agent rationalise ; l'humain paie l'erreur,
    c'est lui qui tranche).
 2. **Relaie le choix** : passe la carte choisie en `workflow_map`. Si l'humain énonce aussi un niveau
-   (L0-L4), passe `intensity_level` + `intensity_justification` (ses mots) — propose-le comme trace du
+   (C0-C4), passe `intensity_level` + `intensity_justification` (ses mots) — propose-le comme trace du
    cadrage, ne l'exige pas : une carte sans niveau est une déclaration complète et honnête.
 3. **Hors matrice = son droit** : une carte hors de son `applicable_intensity` déclaré est ACCEPTÉE —
    tu relaies, le système trace LOUD, le désaccord reste visible. Tu peux le signaler UNE fois,

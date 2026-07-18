@@ -36,9 +36,9 @@ defmodule Fleet.Pilot.RolesTest do
 
       :ok =
         Fleet.Pilot.ProjectIntensity.write(proj,
-          intensity_level: "L1",
+          intensity_level: "C1",
           intensity_justification: "light card",
-          workflow_map: "l1-light"
+          workflow_map: "c1-light"
         )
 
       assert ["qualifier"] == Roles.project_jury("fleet/demo", projects_root: tmp)
@@ -48,9 +48,9 @@ defmodule Fleet.Pilot.RolesTest do
 
       :ok =
         Fleet.Pilot.ProjectIntensity.write(poc,
-          intensity_level: "L0",
+          intensity_level: "C0",
           intensity_justification: "throwaway",
-          workflow_map: "l0-poc"
+          workflow_map: "c0-poc"
         )
 
       assert [] == Roles.project_jury("fleet/poc", projects_root: tmp)
@@ -81,7 +81,7 @@ defmodule Fleet.Pilot.RolesTest do
       capture_log(fn ->
         :ok =
           Fleet.Pilot.ProjectIntensity.write(proj,
-            intensity_level: "L1",
+            intensity_level: "C1",
             intensity_justification: "typo'd card",
             workflow_map: "ghost-card"
           )

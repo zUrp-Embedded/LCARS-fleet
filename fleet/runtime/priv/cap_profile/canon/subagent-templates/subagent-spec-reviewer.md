@@ -9,7 +9,7 @@
 
 ## Position
 
-Fragment SP injecté dans cap-profile `qualifier.yaml` (lifetime_scope: one-shot) — au stage `spec-review` du pipeline `standard-qa`, et comme JUGE de PR partout où la carte met `qualifier` au jury (`brief-gate`, `l1-light`, `standard-qa`).
+Fragment SP injecté dans cap-profile `qualifier.yaml` (lifetime_scope: one-shot) — au stage `spec-review` du pipeline `standard-qa`, et comme JUGE de PR partout où la carte met `qualifier` au jury (`brief-gate`, `c1-light`, `standard-qa`).
 
 Composé par `Fleet.SPBuilder` avec le cap-profile `qualifier` et ses modops (ce fragment est ajouté quand `spec.invocation.subagent_template = spec-reviewer`).
 

@@ -17,11 +17,15 @@ defmodule Fleet.Workflow.LoaderV25Test do
   # R0.8-brick6: canon pipelines reabsorbed in-repo.
   @canon_pipelines Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
-  test "canon standard-qa.yaml (V2.5) normalized → name + steps top-level" do
+  test "canon standard-qa.yaml (V2.5) normalized → DISPATCHABLE steps only (brief-review gate + build)" do
+    # rev3 rehabilitation: the old architect/starfleet steps were NOT servable by the
+    # dispatch (live runaway 2026-07-18) — the card now carries only what the engine runs.
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
-    assert is_map(pipe["steps"])
-    assert is_map(pipe["steps"]["brainstorm"])
+    assert is_map(pipe["steps"]["brief-review"])
+    assert pipe["steps"]["brief-review"]["brief_kind"] == "judge"
+    assert pipe["steps"]["build"]["needs"] == ["brief-review"]
+    assert pipe["jury"] == ["qualifier", "reviewer"]
     refute Map.has_key?(pipe, "spec")
   end
 
@@ -48,9 +52,9 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
   # The two production TYPE cards of the criticality catalogue: the card IS the judgment-layer
   # choice — the engine reads `jury` as data (`Roles.project_jury`), never hardcodes a panel.
-  test "canon l0-poc.yaml (V2.5) normalized → single build step + DELIBERATE zero-judge jury" do
-    pipe = Loader.load!("l0-poc", workflow_maps_root: @canon_pipelines)
-    assert pipe["name"] == "l0-poc"
+  test "canon c0-poc.yaml (V2.5) normalized → single build step + DELIBERATE zero-judge jury" do
+    pipe = Loader.load!("c0-poc", workflow_maps_root: @canon_pipelines)
+    assert pipe["name"] == "c0-poc"
     assert pipe["jury"] == []
     assert Map.keys(pipe["steps"]) == ["build"]
     assert pipe["steps"]["build"]["role"] == "engineer"
@@ -59,9 +63,9 @@ defmodule Fleet.Workflow.LoaderV25Test do
     assert is_binary(pipe["description"]) and pipe["description"] != ""
   end
 
-  test "canon l1-light.yaml (V2.5) normalized → single build step + qualifier-only jury" do
-    pipe = Loader.load!("l1-light", workflow_maps_root: @canon_pipelines)
-    assert pipe["name"] == "l1-light"
+  test "canon c1-light.yaml (V2.5) normalized → single build step + qualifier-only jury" do
+    pipe = Loader.load!("c1-light", workflow_maps_root: @canon_pipelines)
+    assert pipe["name"] == "c1-light"
     assert pipe["jury"] == ["qualifier"]
     assert Map.keys(pipe["steps"]) == ["build"]
     assert pipe["steps"]["build"]["role"] == "engineer"

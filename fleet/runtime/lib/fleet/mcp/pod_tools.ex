@@ -136,12 +136,12 @@ defmodule Fleet.MCP.PodTools do
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
           "catalogue first (`list_workflow_cards`) and pass the human's chosen card as `workflow_map` " <>
           "(accepted even off-matrix — logged loud, the human has the last word). A declared level " <>
-          "(`intensity_level` L0..L4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
+          "(`intensity_level` C0..C4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
           "verbatim when the human states one: you MAY ask the framing questions (mains voltage? cuts " <>
           "fingers? how long will it live?) — rubber-duck, not assessor: you NEVER weigh criticality " <>
           "yourself, and a card without a level is a complete declaration (level recorded ABSENT, never " <>
           "fabricated). If the human declares NOTHING (no card, no level), pass nothing: the project is " <>
-          "recorded L0 undeclared on the default card. Optional: `nature` (domain hint, e.g. " <>
+          "recorded C0 undeclared on the default card. Optional: `nature` (domain hint, e.g. " <>
           "web-gui/hardware). " <>
           "Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
           "`create_issue` passing it `project: <the returned repo>` to deliver INTO this project."
@@ -154,7 +154,7 @@ defmodule Fleet.MCP.PodTools do
         "name" => %{"type" => "string"},
         "pitch" => %{"type" => "string"},
         "description" => %{"type" => "string"},
-        "intensity_level" => %{"type" => "string", "enum" => ["L0", "L1", "L2", "L3", "L4"]},
+        "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
         "intensity_justification" => %{"type" => "string"},
         "nature" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}

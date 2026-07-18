@@ -13,7 +13,7 @@ kind: WorkflowMap
 metadata:
   name: poc-helloworld
   description: "PoC délégation : engineer implémente hello_world (1 step, no human-gate)"
-  presentation: "Carte TECHNIQUE — démo de la chaîne de délégation minimale : un engineer reçoit le brief, implémente, rend son livrable (1 step, aucune gate, jury qualifier + reviewer hérité). Sert à prouver la mécanique de bout en bout ; pour un vrai PoC, prendre l0-poc."
+  presentation: "Carte TECHNIQUE — démo de la chaîne de délégation minimale : un engineer reçoit le brief, implémente, rend son livrable (1 step, aucune gate, jury qualifier + reviewer hérité). Sert à prouver la mécanique de bout en bout ; pour un vrai PoC, prendre c0-poc."
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
