@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   @moduledoc """
   Project resolution: pinning the git base (`base_sha` / `gate_base_sha`) via `git ls-remote`,
-  OUT-OF-POD. ISOLATED I/O cluster extracted from `Fleet.Pilot.StepDispatcher`.
+  OUT-OF-POD. ISOLATED I/O cluster of `Fleet.Pilot.StepDispatcher`.
 
   **Quasi-pure** boundary: this module touches NO seam module (no forge_client / spawner /
   task_queue / loader); it reads `opts` / `forge_opts` and calls `Fleet.Credentials.Shell` /
