@@ -129,7 +129,7 @@ defmodule Fleet.Spawner.Pod do
           port: port() | nil,
           # Result received via the Bus event task_queue.work_item.completed (%Fleet.Event{}, completion).
           submitted_result: map() | nil,
-          # Bounded retry counter for the pod.completed re-fire (acte3 vague C).
+          # Bounded retry counter for the pod.completed re-fire.
           extract_retries: non_neg_integer(),
           last_result: map() | nil,
           # Name of the pod's tmux session (`lcars-pod-<id>` on the PER-POD sock, set by
@@ -270,9 +270,9 @@ defmodule Fleet.Spawner.Pod do
     with {:ok, sp_compose} <-
            SPBuilder.compose(
              data.cap_profile,
-             # F-C146/PORT : les overlays modop du rôle (`spec.modop_set.default`) sont enfin composés dans
-             # le system-prompt du pod (ex-`[]` = feature déclarée jamais appliquée). Un modop déclaré sans
-             # bundle → `{:error, {:modop_bundle_missing, _}}` remonte ici (fail-loud : le pod ne se lance pas).
+             # The role's modop overlays (`spec.modop_set.default`) are composed into the pod's
+             # system prompt (F-C146). A modop declared without a bundle →
+             # `{:error, {:modop_bundle_missing, _}}` surfaces here (fail-loud: the pod does not launch).
              Fleet.CapProfile.default_modops(data.cap_profile),
              pod_id: data.pod_id,
              job_id: data.issue_id
@@ -374,15 +374,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # EXTRACT — the result comes from the Bus event (data.submitted_result), not from a file.
-  # RELAIS EN DEUX BONDS, PAS UNE REDONDANCE (Z6f 2026-07-13, requalifié après lecture) :
-  # `work_item.completed` (broker→pod) est le signal de fin de MANDAT — c'est le réveil
-  # événementiel de CE pod hors de :monitoring (remplaçant délibéré du polling fichier) ;
-  # `pod.completed` (pod→pilot) est la fin d'ÉTAPE, enrichie ICI (workspace/base_sha/repo
-  # via CompletedPayload — le pod est le SEUL à les connaître). Unifier les deux exigerait
-  # soit que le pod consomme son propre event, soit de ré-introduire du state partagé :
-  # les deux bonds sont irréductibles. (Cf. chantier migration, arbitrage A-02.)
-  # Bounded re-fire of pod.completed after a failed broadcast (acte3 vague C). The 1000ms delay is NOT
-  # cosmetic: it keeps the pod ALIVE in :monitoring between retries (invariant MA-04: never release/kill
+  # A TWO-HOP RELAY, NOT A REDUNDANCY: `work_item.completed` (broker→pod) is the end-of-MANDATE
+  # signal — the event-driven wake of THIS pod out of :monitoring (the deliberate replacement of
+  # file polling); `pod.completed` (pod→pilot) is the end-of-STEP, enriched HERE
+  # (workspace/base_sha/repo via CompletedPayload — the pod is the ONLY one that knows them).
+  # Unifying the two would require either the pod consuming its own event, or re-introducing
+  # shared state: the two hops are irreducible. Do NOT "simplify" this relay.
+  # Bounded re-fire of pod.completed after a failed broadcast. The 1000ms delay is NOT
+  # cosmetic: it keeps the pod ALIVE in :monitoring between retries (never release/kill
   # on an orphan completion) and spaces them; @extract_retry_max caps them before transition_failed.
   @extract_retry_max 5
   @extract_retry_delay_ms 1_000
@@ -622,7 +621,7 @@ defmodule Fleet.Spawner.Pod do
         phase = if bootstrap?, do: :bootstrap, else: :wake
 
         Logger.warning(
-          "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalation #5.2"
+          "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalating"
         )
 
         # JSON-safe payload (the WS edge encodes it raw) WITHOUT losing the dedup bucket:
@@ -632,9 +631,9 @@ defmodule Fleet.Spawner.Pod do
 
         Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
-          # issue_id nourrit correlation_id (Events.lossy_broadcast le dérive du payload) : sans
-          # lui, chaque wake.failed partait correlation_id=nil et l'issue d'escalade :sp_suspect
-          # sortait sans bloc « Mandat lié » (vague E cassée sur ce producteur).
+          # issue_id feeds correlation_id (Events.lossy_broadcast derives it from the payload):
+          # without it every wake.failed leaves with correlation_id=nil and the :sp_suspect
+          # escalation issue comes out without its linked-mandate block.
           "issue_id" => data.issue_id,
           "reason" => reason,
           "reason_detail" => reason_detail,
@@ -655,7 +654,7 @@ defmodule Fleet.Spawner.Pod do
   # No tmux_session (StubBackend, or vanished session/kill race) → no kick.
   def handle_event({:timeout, :kick}, {:attempt, _n}, _state, _data), do: :keep_state_and_data
 
-  # BOUNDED extract-retry timer (acte3 vague C) — the ONLY re-fire of pod.completed after a failed
+  # BOUNDED extract-retry timer — the ONLY re-fire of pod.completed after a failed
   # broadcast. Guarded on :monitoring + a non-nil submitted_result: a no-op if a long-lived cycle has
   # meanwhile reset the result (the extract already succeeded or the pod moved on).
   def handle_event({:timeout, :extract_retry}, :fire, :monitoring, %{submitted_result: r} = data)
@@ -744,11 +743,11 @@ defmodule Fleet.Spawner.Pod do
 
       Logger.warning("pod #{data.pod_id} exited before submitting result (exit=#{exit_code})")
 
-      # TOMBSTONE (acte3 vague C) : graver state.json phase=:failed AVANT le stop. Sans ça le
-      # state.json restait à :monitoring (posé au launch) → ni clear_terminal_snapshot ni le
-      # PodWarden (qui ne GC que les @terminal_phases) ne réclament jamais le pod_dir (clone git
-      # complet) = fuite monotone, exactement ce que le warden existe pour tuer. Parité avec
-      # transition_failed (le twin), payload pod.failed INCHANGÉ (exit_code conservé).
+      # TOMBSTONE: record state.json phase=:failed BEFORE the stop. Without it the state.json
+      # stays at :monitoring (set at launch) → neither clear_terminal_snapshot nor the
+      # PodWarden (which only GCs the @terminal_phases) ever reclaims the pod_dir (a full git
+      # clone) = a monotonic leak, exactly what the warden exists to kill. Parity with
+      # transition_failed (its twin), pod.failed payload unchanged (exit_code kept).
       data = Map.put(data, :last_error, {:exited_before_result, exit_code})
       StateFs.write_state_fs(put_phase(data, :failed))
       {:stop, {:shutdown, {:exited_before_result, exit_code}}, data}
@@ -758,7 +757,7 @@ defmodule Fleet.Spawner.Pod do
   # Silent catch-all: other info messages (down, monitor, exit_status of a foreign port, etc.).
   def handle_event(:info, _msg, _state, _data), do: :keep_state_and_data
 
-  # 3-STATE decision at the :result_deadline fire (F-C037), split out (grouped OUTSIDE the handle_event/4
+  # 3-STATE decision at the :result_deadline fire, split out (grouped OUTSIDE the handle_event/4
   # clauses) to be testable without a live-vs-unreachable TaskQueue. `:active` = real response timeout →
   # kill; `:idle` = between tasks → lapse (no idle-kill); `:unknown` = broker unverifiable → no-kill
   # (preserved) BUT re-arm, never lapse (a bare lapse orphans a hung pod whose broker blipped at the fire —
@@ -983,7 +982,7 @@ defmodule Fleet.Spawner.Pod do
       # Session UUID PRE-ALLOCATED at spawn: `--session-id <uuid>` on the 1st creation. Recovery
       # from state.json does NOT reuse this sid (recreate = fresh session). The explicit seed
       # (`opts[:session_id]`, e.g. arch recall / permanent boot-from-base) TAKES PRECEDENCE over the
-      # mint (`Pod.SessionMint`) — but is CAST as a valid UUID first (BND-024).
+      # mint (`Pod.SessionMint`) — but is CAST as a valid UUID first (see resolve_session_id/1).
       session_id: resolve_session_id(args),
       # ISO8601 timestamp frozen at creation, persisted as-is in state.json.
       started_at: DateTime.utc_now(),
@@ -1005,7 +1004,7 @@ defmodule Fleet.Spawner.Pod do
     }
   end
 
-  # BND-024: the explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
+  # The explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
   # recall / permanent boot-from-base resume a real vendor session, and the value is exported to the
   # launcher + persisted for recovery. A present-but-non-UUID seed is a caller/seed corruption: we REFUSE
   # it loud (raise → `init/1` rescue → `{:error, _}` at start_link, no launch), never accept an arbitrary
@@ -1023,7 +1022,7 @@ defmodule Fleet.Spawner.Pod do
 
           {:error, :not_uuid_shaped} ->
             raise ArgumentError,
-                  "Pod: explicit session_id #{inspect(seed)} is not a valid UUID (BND-024) — a recall/" <>
+                  "Pod: explicit session_id #{inspect(seed)} is not a valid UUID — a recall/" <>
                     "boot seed must resume a real vendor session; refusing rather than posing a " <>
                     "non-reconstructible identity."
         end
