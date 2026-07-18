@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   @moduledoc """
-  Scaffold of a new project, extracted from `Fleet.Pilot.ProjectOnboard`: the CONTENT of
+  Scaffold of a new project, for `Fleet.Pilot.ProjectOnboard`: the CONTENT of
   the initial files (pure templates) + their writing to disk. No dependency on the
   orchestration (forge, git, worktrees) — onboard calls `main/3` and `work/3` at the
   right moments of its sequence, this module knows nothing of the rest.
@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     * `work/3` — `work/ops` branch worktree (orphan — plans, backlog, ops):
       backlog.md, scratchpad.md, plans/.
 
-  Templates « standard, state of the art — adjustable »: PURE generators (name+pitch →
+  Templates "standard, state of the art — adjustable": PURE generators (name+pitch →
   markdown), the only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
   **Last revised**: 2026-07-18
