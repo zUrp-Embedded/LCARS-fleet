@@ -102,7 +102,7 @@ defmodule Fleet.Pilot.WakeRecovery do
       {:error, e} ->
         Logger.error(
           "WakeRecovery: #{pod_id} : escalation (#{kind}) FAILED — NO sysadmin issue created " <>
-            "(forge down ?) : #{inspect(e)} ; the incident is NOT escalated"
+            "(forge down?): #{inspect(e)}; the incident is NOT escalated"
         )
 
         {:error, {:escalation_failed, e}}
