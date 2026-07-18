@@ -14,20 +14,17 @@ defmodule Fleet.MCP.Supervisor do
       as long as no pod is provisioned).
 
   The drive is PULL-only: the pod calls the MCP tools (`get_work_item`/`submit_result`)
-  and is kicked via send-keys. A PUSH-channel model was tried (Anthropic Channel PoC,
-  4 iterations) and abandoned — do NOT reintroduce push channels. (Scar moved here from
-  the deleted `Fleet.MCP.Application` wrapper at the Z2 collapse, 2026-07-12 — this
-  module is now the mcp DOMAIN supervisor, started directly by `Fleet.Application`.)
+  and is kicked via send-keys. Do NOT introduce push channels (a push-channel model
+  was tried and abandoned). This module is the mcp DOMAIN supervisor, started
+  directly by `Fleet.Application`.
 
   Pod-facing transport = one **AF_UNIX socket per pod** (the identity IS the channel,
-  cf. `Fleet.MCP.PodSocketAcceptor`). The former shared HTTP loopback transport
-  (`PodTools` in `transport: :http`, Plug.Cowboy/Ranch, `:pod_facing_port`) is
-  REMOVED: it was shared by all pods, so the `pod_id` was guessable there
-  (hence the old capability). The per-pod socket closes that hole by construction.
+  cf. `Fleet.MCP.PodSocketAcceptor`). A SHARED transport (HTTP loopback) would make
+  the `pod_id` guessable across pods — the per-pod socket closes that hole by
+  construction; never reintroduce a shared pod-facing transport.
 
-  `Fleet.MCP.Bridge` (PubSub↔channels bridge) stays REMOVED (dead husk). ⚠ "bridge"
-  is a homonym: the **stdio→socket** bridge (`bin/fleet_mcp_stdio_bridge.py`) is
-  ALIVE (transport drive), nothing to do with this dead `Fleet.MCP.Bridge` PubSub.
+  ⚠ "bridge" here means the **stdio→socket** bridge (`bin/fleet_mcp_stdio_bridge.py`),
+  ALIVE (the transport drive) — there is NO PubSub bridge module in this domain.
 
   Containment: if `boot_environment == :pod`, `Fleet.MCP.Server.start_link/1`
   returns `{:error, :forbidden_in_pod}` → the child fails → this supervisor fails

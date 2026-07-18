@@ -2,10 +2,10 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   @moduledoc """
   Escalation-inbox behaviour — the CONTRACT of the forge ops the arch's escalation channel
   (`list_escalations` / `comment_issue`) needs, DISTINCT from the DELEGATION `ForgeClient`
-  behaviour (create_issue/…). DR-012: a seam contract must be inspectable in ONE place — these
-  four ops used to live as an ad-hoc `function_exported?` list HIDDEN inside `Delegation`, a
-  SECOND contract next to the official behaviour. Declared here as a behaviour, `conforming_escalation_forge/0`
-  now checks against `behaviour_info(:callbacks)`, same mechanical guard as `conforming_forge/0`.
+  behaviour (create_issue/…). DR-012: a seam contract must be inspectable in ONE place —
+  an ad-hoc `function_exported?` list hidden inside `Delegation` would be a SECOND contract
+  next to the official behaviour. Declared here, `conforming_escalation_forge/0`
+  checks against `behaviour_info(:callbacks)`, the same mechanical guard as `conforming_forge/0`.
 
   Why a SEPARATE behaviour (not extending `ForgeClient`): adding these to `ForgeClient` would cascade
   onto every DELEGATION stub (StubForge/RecordingForge) that adopts it — their create_issue-only tests

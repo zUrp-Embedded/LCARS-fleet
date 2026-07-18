@@ -108,12 +108,10 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   defp present_work_item_id(_), do: nil
 
   # JSON envelope of the brief exposed to the pod — work_item_id = correlation_id.
-  # (No `retry_count`: removed with the vestigial WorkItem field, acte4 A-15 — it was always 0,
-  # no SP/pod ever read it.)
-  # `brief_ref`/`brief_sha` (chantier brief-physique) = the CONTENT-ADDRESS of the brief (`briefs/<sha>.md`
+  # `brief_ref`/`brief_sha` = the CONTENT-ADDRESS of the physical brief (`briefs/<sha>.md`
   # committed in work/ops). Exposed so the pod can VERIFY `sha256(brief) == brief_sha` before acting — the
   # brief is delivered HERE (MCP, the pod's minimal world), the sha makes it an authenticated object with no
-  # extra mount (« le ref peut mentir, l'objet non »). nil when the brief was not physicalized (degraded /
+  # extra mount (the ref can lie, the object cannot). nil when the brief was not physicalized (degraded /
   # non-producer mandate) → the pod simply skips the check.
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{

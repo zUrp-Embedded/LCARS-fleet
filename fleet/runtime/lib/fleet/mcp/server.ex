@@ -14,13 +14,12 @@ defmodule Fleet.MCP.Server do
   pods run a `claude` REPL + `bridge.py`, NOT the BEAM, so this is latent — a per-boot host signal from
   `bin/fleet_v2` would harden it further.)
 
-  ## Why this process exists (and is NOT removed)
+  ## Why this process exists
 
-  Its former `register_channel`/`list_channels` API (push-channel registry) is
-  **removed** here (0 prod callers; the push channel is dead — Anthropic Channel PoC
-  failed). BUT the containment guard above is **load-bearing** (tested by the
-  conformance): we drop the husk, we KEEP the guard. The pod-facing drive
-  (`get_work_item`/`submit_result`) lives in `Fleet.MCP.PodTools`, not here.
+  The containment guard above is **load-bearing** (tested by the conformance):
+  this GenServer is its carrier, nothing more. The pod-facing drive
+  (`get_work_item`/`submit_result`) lives in `Fleet.MCP.PodTools`, not here;
+  there is NO push channel (the fleet is PULL-only by doctrine).
 
   **GenServer with no business state**: the process exists to be the supervised
   child whose `start_link` runs the guard at boot (idle thereafter).
