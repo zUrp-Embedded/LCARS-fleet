@@ -1,19 +1,26 @@
 defmodule Fleet.Workflow.GateBrief do
   @moduledoc """
-  Builds the **eval brief** (the brief text) sent to the gatekeeper to
-  decide a workflow gate. The gatekeeper pulls it via MCP `get_work_item`, judges
-  (rubber-duck modop), and returns a strict JSON decision `gate-decision-v1.json`.
+  Builds the **eval brief** (the brief text) sent to a judge to decide a workflow gate.
+  The judge pulls it via MCP `get_work_item`, judges (rubber-duck modop), and returns a
+  strict JSON decision `gate-decision-v1.json`.
 
-  Pure function. Template derived from `orchestration/gatekeeper-exception.md`
-  §"Brief gatekeeper auto-généré" (invocation context + deliverable to judge +
-  question to decide + deterministic options + output contract). The structured
-  data also go into `task.metadata`; this brief is the human-readable form.
+  The PROSE lives in `priv/workflow/brief_templates/gate-brief-{deliverable,brief}.md`
+  (F-23: wording is calibration DATA — cf. `Fleet.Workflow.BriefTemplate`); this module
+  only fills the mechanical slots (context values, JSON renderings, decision vocab) and
+  DEFUSES the quoted material (blockquotes — the executable state is unrepresentable).
+
+  Pure function over its inputs + the template files (fail-loud on a missing/miswired
+  template — a judge never receives a half-rendered order).
 
   **Last revised**: 2026-07-18
   """
 
+  alias Fleet.Workflow.BriefTemplate
+
   # Decision vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile time, so
-  # this brief recompiles if the canonical list changes — a local vocabulary could not drift from the validator).
+  # this brief recompiles if the canonical list changes — a local vocabulary could not drift from the
+  # validator). The per-decision explanation LINES are template prose: a vocab change must be
+  # mirrored there (the leftover-token belt catches a renamed slot, not a stale bullet).
   @decisions Fleet.Workflow.GateDecision.decisions()
 
   @doc """
@@ -22,112 +29,57 @@ defmodule Fleet.Workflow.GateBrief do
   `ctx`: `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :brief}`.
 
-  `:subject` parametrizes WHAT is judged — `:deliverable` (default, the deliverable
-  produced by a step: gatekeeper, PR judges) or `:brief` (the BRIEF written
-  by the architect, judged BEFORE any production: brief-review/consultant). The
-  verdict contract (`gate-decision-v1`) and the mechanics are identical — only the
-  framing of the "thing to judge" changes (otherwise a brief judge would hunt a
-  nonexistent deliverable). Default `:deliverable`.
+  `:subject` parametrizes WHAT is judged — `:deliverable` (default: step outputs, rendered
+  as JSON in a fence) or `:brief` (the BRIEF written by the architect, judged BEFORE any
+  production — rendered as a readable markdown BLOCKQUOTE, never a JSON-escaped blob). The
+  verdict contract (`gate-decision-v1`) and the mechanics are identical — each subject has
+  its own template file carrying its own framing.
   """
   @spec build(map()) :: String.t()
   def build(%{step: step, workflow_map_id: pid} = ctx) do
-    gate = Map.get(ctx, :gate)
+    subject = Map.get(ctx, :subject, :deliverable)
     outputs = Map.get(ctx, :outputs, %{})
-    s = subject_phrases(Map.get(ctx, :subject, :deliverable), step)
 
-    """
-    # #{s.title}
-
-    ⚠ YOUR ROLE IS TO **JUDGE**, NOT TO PRODUCE. Create NO file, commit
-    NOTHING, run NO build task. #{s.intro} Your only output is a **decision** returned via `submit_result`.
-
-    ## Context
-    - Pipeline: #{inspect(pid)}
-    - Judged step: #{step}
-    - Gate: type #{gate_type(gate)}
-    #{render_request(Map.get(ctx, :request))}
-    ## Question to decide
-    #{s.question}
-
-    ## #{s.heading}
-    ```
-    #{render(outputs)}
-    ```
-
-    ## Gate rules (reference)
-    ```
-    #{render(gate)}
-    ```
-
-    ## Expected decision — strict JSON (`gate-decision-v1.json`)
-    `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
-
-    `decision` ∈ #{Enum.join(@decisions, " | ")}
-    - `continue`: #{s.continue} → advance to the next step
-    - `redirect`: send back to the architect (e.g. brief too big → ask for a split)
-    - `abandon`: abandon the issue (not recoverable)
-    - `escalate_user`: beyond the gatekeeper → the user decides
-    - `halt_wait_input`: missing information → halt and wait
-
-    ## How to return your decision
-    Call `mcp__fleet__submit_result` with, as the **result**, the JSON object
-    gate-decision-v1.json above. The `decision` field is MANDATORY and must
-    be one of the listed values — without it, the runtime escalates to a human
-    (fail-closed). Minimal example: `{"decision": "continue", "reason": "..."}`.
-    """
+    BriefTemplate.render(template_name(subject), %{
+      "pipeline" => inspect(pid),
+      "step" => step,
+      "gate_type" => gate_type(Map.get(ctx, :gate)),
+      "request_section" => request_section(Map.get(ctx, :request)),
+      "subject_body" => subject_body(subject, outputs),
+      "gate_rules" => render_json(Map.get(ctx, :gate)),
+      "decisions" => Enum.join(@decisions, " | ")
+    })
   end
 
-  # Framing of the "thing to judge", parametrized by `:subject`. `:deliverable` = the produced-deliverable
-  # case (gatekeeper/PR-judges); `:brief` frames the brief review (the brief is written by
-  # the arch, NOT yet executed → the judge does not look for a deliverable).
-  defp subject_phrases(:brief, step) do
-    %{
-      # ROLE-NEUTRAL title: this brief goes to N judges (consultant in brief-review, qualifier/reviewer/
-      # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge makes a non-gatekeeper
-      # judge adopt the wrong persona. The judged subject carries the title.
-      title: "Brief eval — judge decision",
-      intro: "The BRIEF to validate (written by the architect) is quoted below.",
-      question:
-        "The brief `#{step}` was written by the architect and has NOT been executed yet. Given the " <>
-          "brief below, is it EXECUTABLE as-is (clear, complete, coherent, actionable by an " <>
-          "engineer without further questions) — `continue` — or must it be sent back / escalated / abandoned?",
-      heading: "Brief to judge (written by the architect — to validate BEFORE any execution)",
-      continue: "the brief is executable as-is (clear, complete, actionable)"
-    }
-  end
+  defp template_name(:brief), do: "gate-brief-brief"
+  defp template_name(_deliverable), do: "gate-brief-deliverable"
 
-  defp subject_phrases(_deliverable, step) do
-    %{
-      title: "Deliverable eval — judge decision",
-      intro: "The deliverable already exists (it is quoted below).",
-      question:
-        "The step `#{step}` delivered its result. Given the deliverable below and the\n" <>
-          "gate rules, should the gate be crossed (`continue`) — or abandon /\nsend back / escalate?",
-      heading: "Deliverable to judge (step outputs — ALREADY produced, to evaluate)",
-      continue: "the deliverable satisfies the gate"
-    }
-  end
+  # :brief → the judged brief as a READABLE defused blockquote (E2 — a JSON-escaped one-line
+  # blob is unreadable at scale). :deliverable → step outputs as pretty JSON (structured data).
+  defp subject_body(:brief, %{"brief" => brief}) when is_binary(brief), do: blockquote(brief)
+  defp subject_body(:brief, outputs), do: blockquote(render_json(outputs))
+  defp subject_body(_deliverable, outputs), do: render_json(outputs)
 
   defp gate_type(%{"type" => t}), do: t
   defp gate_type(_), do: "—"
 
-  # Origin request = judgment CONTEXT, never an instruction to execute
-  # (otherwise the gatekeeper redoes the previous step's task instead of judging).
-  # Explicitly framed and defused.
-  defp render_request(req) when is_binary(req) and req != "" do
-    """
-
-    ## Original request (CONTEXT — already handled, DO NOT execute)
-    > #{String.replace(req, "\n", "\n> ")}
-    """
+  # Origin request = judgment CONTEXT, never an instruction to execute (otherwise the judge
+  # redoes the previous step's task instead of judging). Blockquoted (defused) into the
+  # request-section template; absent → empty slot.
+  defp request_section(req) when is_binary(req) and req != "" do
+    BriefTemplate.render("gate-brief-request-section", %{"request_quoted" => blockquote_tail(req)})
   end
 
-  defp render_request(_), do: ""
+  defp request_section(_), do: ""
+
+  # The template carries the leading `> `; continuation lines get theirs here.
+  defp blockquote_tail(text), do: String.replace(text, "\n", "\n> ")
+  defp blockquote(text), do: "> " <> blockquote_tail(text)
 
   # Human-readable JSON rendering; fallback to inspect if non-encodable (defensive).
-  defp render(nil), do: "(none)"
+  defp render_json(nil), do: "(none)"
 
-  defp render(term) do
+  defp render_json(term) do
     case Jason.encode(term, pretty: true) do
       {:ok, json} -> json
       {:error, _} -> inspect(term, pretty: true)

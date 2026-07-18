@@ -26,7 +26,9 @@ is restated, only pointed at.
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push
 - `Fleet.Workflow.Git` — system-side git publication mechanism (add → commit → [push]), fail-closed
-- `Fleet.Workflow.BriefArtifact` — content-addressed physical brief (`briefs/` worker / `gate-briefs/` judge, human-named, in work/ops)
+- `Fleet.Workflow.BriefArtifact` — physical brief in work/ops (`briefs/` worker / `gate-briefs/` judge, plain names, identity = introducing commit)
+- `Fleet.Workflow.OpsObject` — the ONE commit-an-object-into-work/ops mechanic (write → commit → best-effort push)
+- `Fleet.Workflow.BriefTemplate` — calibration-template renderer (`priv/workflow/brief_templates/`, F-23: prose is data)
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
 
 Related, NOT this domain: `Fleet.GitRef` (`valid?/1`, git ref-name validation) — a foundation

@@ -28,40 +28,14 @@ defmodule Fleet.Pilot.BriefBuilder do
   # (the runtime, not the pod: forge boundary preserved) and inject it. If the read fails / no body,
   # we fall back to the generic instruction (the pod still has the cloned PR + its code).
   def rework_brief(role, forge, repo, pr, forge_opts, _route) do
-    [
-      "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
-        "feedback de la review ci-dessous.",
-      render_rework_feedback(forge, repo, pr, forge_opts),
-      "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
-        "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` clôt la tâche : le " <>
-        "LIVRABLE = ton COMMIT (ne RE-mets PAS les fichiers dans le payload). Le payload porte ta voix ↓.",
-      eng_voice_instruction(:rework),
-      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
-    ]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join("\n\n")
-  end
-
-  # ENG VOICE (OUTGOING info, twin of the incoming info starvation): the `summary` rendered in
-  # `submit_result` is POSTED on the PR by the system (forge-blind, `as_role` engineer) → the eng
-  # has a voice for the human. Without it it is mute on the forge (even an excellent diagnosis would
-  # never be seen); verbose, descriptive, traceable feedback.
-  defp eng_voice_instruction(:build) do
-    "**Ta voix — le `payload` de `submit_result` DOIT contenir un champ `summary`** " <>
-      "(ex. `submit_result` avec `payload = {\"summary\": \"Implémenté X ; choisi Y parce que Z\"}`). Le " <>
-      "`summary` (markdown COURT) = ce que tu as réalisé + décisions/hypothèses notables. ⚠ ce N'EST PAS du " <>
-      "contenu de fichier (ça, c'est ton COMMIT) — c'est ta NARRATION. Le SYSTÈME la poste en commentaire sur " <>
-      "la PR : c'est ta SEULE voix pour l'humain qui review. **Si tu es BLOQUÉ** (dépendance/info manquante) " <>
-      "et ne peux PAS livrer : NE devine PAS — ajoute `\"blocked\": true` au payload (à côté de `summary` = le " <>
-      "motif PRÉCIS, ce qui te manque). Le système ESCALADE à l'humain (aucun commit attendu de toi), jamais un " <>
-      "wedge silencieux. Ex. `payload = {\"blocked\": true, \"summary\": \"Manque la spec du protocole X — ...\"}`."
-  end
-
-  defp eng_voice_instruction(:rework) do
-    "**Ta voix — le `payload` de `submit_result` DOIT contenir un champ `summary`** " <>
-      "(ex. `payload = {\"summary\": \"Corrigé le point A en faisant B ; pour le point C, ...\"}`). Le " <>
-      "`summary` = COMMENT tu as répondu à CHAQUE point de la review (ce que tu as corrigé). C'est ta " <>
-      "NARRATION (pas le code — déjà committé). Le SYSTÈME le poste sur la PR : ta réponse traçable au reviewer."
+    # The eng-voice prose (OUTGOING info, twin of the incoming info starvation) lives IN the
+    # template (F-23): the summary posted on the PR is the producer's only voice for the human.
+    Fleet.Workflow.BriefTemplate.render("work-order-rework", %{
+      "role" => role,
+      "pr" => to_string(pr),
+      "feedback_section" => render_rework_feedback(forge, repo, pr, forge_opts),
+      "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+    })
   end
 
   # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable block.
@@ -152,23 +126,20 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # Producer brief = the issue's brief + the git-native DELIVERY instruction. Without it,
-  # the pod "submits the contents" instead of
-  # COMMITTING → the git_native publish finds no commit (`:no_deliverable_commit`).
-  # The pod commits LOCALLY; the SYSTEM pushes + opens the PR (forge-blind). The trailer
-  # is mandatory (push gate, single source `ForgeIdentity.coauthor_instruction`).
+  # Producer brief = a structured WORK ORDER document (template `work-order-build`, F-23/E1:
+  # same visual family as the gate-briefs — the prose lives in priv, the code fills slots):
+  # the issue's brief + the git-native DELIVERY instruction. Without the delivery contract,
+  # the pod "submits the contents" instead of COMMITTING → the git_native publish finds no
+  # commit (`:no_deliverable_commit`). The pod commits LOCALLY; the SYSTEM pushes + opens the
+  # PR (forge-blind). The trailer is mandatory (push gate, single source
+  # `ForgeIdentity.coauthor_instruction` — the {{signature}} slot).
   defp build_worker_brief(role, issue) do
-    [
-      issue["body"] || "",
-      "---",
-      "**Livraison (git-native)** : réalise le travail dans ton workspace, puis `git add` + `git commit`. " <>
-        "Le SYSTÈME pousse ton commit et ouvre la PR — toi tu ne push pas (forge-aveugle). `submit_result` " <>
-        "clôt la tâche : le LIVRABLE = ton COMMIT (ne RE-mets PAS le code/les fichiers dans le payload, ils " <>
-        "sont déjà committés). Le payload, lui, N'EST PAS vide : il porte ta voix ↓.",
-      eng_voice_instruction(:build),
-      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
-    ]
-    |> Enum.join("\n\n")
+    Fleet.Workflow.BriefTemplate.render("work-order-build", %{
+      "role" => role,
+      "issue" => to_string(issue["number"] || "?"),
+      "brief_body" => issue["body"] || "",
+      "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+    })
   end
 
   # A **judge** pod must know WHAT
