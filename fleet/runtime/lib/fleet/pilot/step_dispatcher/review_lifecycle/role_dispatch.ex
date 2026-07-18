@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   @moduledoc """
-  EXECUTION leaf of the review flow, extracted from `ReviewLifecycle`: prepares and spawns
+  EXECUTION leaf of the review flow (`ReviewLifecycle`): prepares and spawns
   ONE role on a PR — judge (`:judge`) or producer in rework (`:rework`).
 
   ## Why this cut (and not one per declared cluster)
@@ -40,11 +40,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
   alias Fleet.Pilot.Opts
 
-  # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation).
+  # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation); its naming
+  # helpers (rc_name / maybe_put_route / resolve_repo_id) are shared with the issue flow.
   alias Fleet.Pilot.StepDispatcher.Spawn
-
-  # Spawn opts builders / naming (rc_name / maybe_put_route / resolve_repo_id) — shared
-  # with the issue flow (StepDispatcher), a single copy.
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
@@ -104,16 +102,16 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
     # the rework resumes ITS own work. Read-only on the code via the workspace provisioned by the
     # system (the pod has no forge token). `base_branch: head` → the pod CLONES and starts from the
-    # feature-branch tip. (No rebase-resolution role anymore — merge conflicts are ESCALATED to the
-    # architect since 2026-07-07, the pod is forge-blind and cannot rebase; cf. `ArchEscalation`.)
+    # feature-branch tip. (There is NO rebase-resolution role — merge conflicts are ESCALATED to
+    # the architect; the pod is forge-blind and cannot rebase; cf. `ArchEscalation`.)
     review_opts = Keyword.put(opts, :base_branch, head)
 
-    # Read-only pre-lock phase, CHEAP GATES FIRST (acte4 A-09 — SAME rule/order as dispatch_issue,
+    # Read-only pre-lock phase, CHEAP GATES FIRST (SAME rule/order as dispatch_issue,
     # lockstep): route (light forge GET on the issue) → pod identity → LOCAL scope gate → project
     # resolver (the heavy network call, 1-2× ls-remote) on the passing path only → reprovision
     # action. The forge LOCK (spawn_step) still comes after everything — no orphan lock on a
     # transient failure (invariant unchanged).
-    # Z6c : plus de captures — Spawn.route_for/Opts.tag_err pris à la source (partagés avec le flux issue).
+    # No captures — Spawn.route_for/Opts.tag_err taken at the source (shared with the issue flow).
     with {:ok, route} <-
            Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution),
          # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
@@ -185,15 +183,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             log_ctx
           )
 
-        # F-C083 — the DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
+        # The DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
         # (transient/unreachable). We REFUSE to spawn a criterion-less judge (the diff without a
-        # criterion → blind approval = false GREEN) → we DEFER. The judge is instance-scoped
-        # (the scope gate returned `:proceed` WITHOUT taking a lock) → nothing to release; the
-        # poller re-dispatches on the next tick (read-error ≠ absence).
+        # criterion → blind approval = false GREEN) → we DEFER; the lock lives in `BriefBuilder`.
+        # The judge is instance-scoped (the scope gate returned `:proceed` WITHOUT taking a lock)
+        # → nothing to release; the poller re-dispatches on the next tick (read-error ≠ absence).
         {:error, {:criterion_unavailable, reason}} ->
           Logger.warning(
             "StepDispatcher: judge criterion unavailable role=#{role} pr=#{repo}##{pr_number} → " <>
-              "#{inspect(reason)} (skip, retry — refuse criterion-less judge, F-C083)"
+              "#{inspect(reason)} (skip, retry — refuse criterion-less judge)"
           )
 
           {:skipped, :criterion_unavailable}
@@ -217,7 +215,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # build_brief falls back to the profile's `brief_kind` (judge for qualifier/reviewer) AND to the
   # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
   # `{:ok, brief} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
-  # deliverable-judge path (F-C083: a forge read-error on the criterion DEFERS, never a criterion-less
+  # deliverable-judge path (a forge read-error on the criterion DEFERS, never a criterion-less
   # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _}`.
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
