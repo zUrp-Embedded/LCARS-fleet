@@ -66,6 +66,21 @@ defmodule Fleet.Workflow.BriefArtifact do
   end
 
   @doc """
+  The SHORT pointer work-order (FR, agent-facing payload): sent as the work_item `brief`
+  when the order WAS materialized — the pod READS the committed doc in its RO-mounted
+  work/ops instead of receiving the full text (single source; a non-nil sha proves
+  work/ops exists, so the mount will be projected for a project pod).
+  """
+  @spec pointer_brief(String.t(), String.t()) :: String.t()
+  def pointer_brief(ref, sha) when is_binary(ref) and is_binary(sha) do
+    short = String.slice(sha, 0, 7)
+
+    "Ton ordre de mission COMPLET est le doc commité `#{ref}` @ `#{short}` — LIS-le EN PREMIER " <>
+      "dans `${LCARS_PROJECT_OPS}/#{ref}` (le work/ops de ton projet, monté en lecture seule chez toi), " <>
+      "puis exécute-le. CITE `#{short}` dans ton résultat/verdict."
+  end
+
+  @doc """
   Augments enqueue attrs (`%{brief: content, ...}`) with the physical artifact: commits the brief
   into project `repo`'s work/ops worktree (`<work_root>/<name>`) and adds `:brief_ref`/`:brief_sha`.
   The same-code funnel both enqueue sites share.

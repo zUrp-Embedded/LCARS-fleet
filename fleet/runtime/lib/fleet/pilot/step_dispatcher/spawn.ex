@@ -280,12 +280,20 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
   defp enqueue_brief(task_queue, pod_id, role, number, brief, brief_ref, brief_sha) do
     # The brief is already materialized ONCE at the leaf → `{brief_ref, brief_sha}` (`{nil, nil}` degraded).
-    # The work_item carries the content-addressed POINTER IN ADDITION to the string (the string
-    # cohabits as long as the pod does not yet read the object). Same `brief_sha` as in the spawn_opts.
+    # Materialized → the payload is the POINTER order (the committed doc is the SINGLE source;
+    # the pod reads it in its RO work/ops mount — the SP instructs it, and a non-nil sha proves
+    # work/ops exists so the mount is projected). Degraded → the full text keeps the pod
+    # autonomous (legacy path; physicalize already warned LOUD). Ends the transitional
+    # pavé+pointer cohabitation (user arbitration 2026-07-18).
+    payload =
+      if is_binary(brief_ref) and is_binary(brief_sha),
+        do: Fleet.Workflow.BriefArtifact.pointer_brief(brief_ref, brief_sha),
+        else: brief
+
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
-      brief: brief,
+      brief: payload,
       brief_ref: brief_ref,
       brief_sha: brief_sha,
       metadata: %{"issue" => number}

@@ -29,6 +29,10 @@ defmodule Fleet.MCP do
       Fleet.EventRouter,
       Fleet.TaskQueue,
       Fleet.Spawner,
+      # Deliberate API widening 2026-07-18: create_issue MATERIALIZES the authored brief
+      # (BriefArtifact.physicalize) — the ticket carries summary + pinned pointer, the doc
+      # is the single source. Downward edge (Workflow never depends on MCP), no cycle.
+      Fleet.Workflow,
       # — external wire surface (lib fencing: every ExMCP reference is declared) —
       ExMCP.ContentHelpers,
       ExMCP.DSL.Meta,

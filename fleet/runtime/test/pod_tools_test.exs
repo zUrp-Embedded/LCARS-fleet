@@ -389,6 +389,80 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
+    test "inline brief is ALWAYS materialized: doc committed in work/ops, ticket = dedicated summary + pinned pointer",
+         %{tmp_dir: tmp} do
+      # Seam: work_root → tmp; the project's work/ops is a real git dir (physicalize commits there).
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+
+      long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1} du brief complet")
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{
+                   "title" => "Un vrai ticket",
+                   "brief" => long_brief,
+                   "summary" => "Résumé dédié : livrer X, fini quand Y.",
+                   "project" => "fleet/demo"
+                 },
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, "fleet/demo", "Un vrai ticket", body, _opts}
+      # The ticket carries the SUMMARY (not the full brief) + the canonical pinned pointer.
+      assert body =~ "Résumé dédié : livrer X, fini quand Y."
+      refute body =~ "ligne 20 du brief complet"
+      assert {:ok, {ref, sha}} = Fleet.Layout.parse_brief_pointer(body)
+      # The committed doc IS the full brief, at the pinned introducing commit.
+      {shown, 0} = System.cmd("git", ["show", "#{sha}:#{ref}"], cd: work_dir)
+      assert shown =~ "ligne 20 du brief complet"
+    end
+
+    test "inline brief WITHOUT summary → honest excerpt (marked) + pointer", %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+
+      long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1}")
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{"title" => "Sans résumé", "brief" => long_brief, "project" => "fleet/demo"},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, _, _, body, _}
+      assert body =~ "ligne 6"
+      refute body =~ "ligne 7\n"
+      assert body =~ "extrait"
+      assert {:ok, _} = Fleet.Layout.parse_brief_pointer(body)
+    end
+
+    test "degraded materialization (no work/ops) → full inline body, the legacy behavior", %{tmp_dir: tmp} do
+      # work_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _, _} =
+                   PodTools.handle_tool_call(
+                     "create_issue",
+                     %{"title" => "T", "brief" => "tout le brief inline", "project" => "fleet/ghost"},
+                     pod_state(uniq("pod-arch"))
+                   )
+        end)
+
+      assert log != ""
+      assert_received {:create_issue, _, _, body, _}
+      assert body == "tout le brief inline"
+      assert :none = Fleet.Layout.parse_brief_pointer(body)
+    end
+
     test "creates the issue (human assignee) + visual label, WITHOUT engraving a route (decoupling)" do
       pod = uniq("pod-arch")
 

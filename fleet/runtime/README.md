@@ -68,6 +68,7 @@ flowchart TB
     Fleet_MCP --> Fleet_EventRouter
     Fleet_MCP --> Fleet_Spawner
     Fleet_MCP --> Fleet_TaskQueue
+    Fleet_MCP --> Fleet_Workflow
     Fleet_Observation --> Fleet_CapProfile
     Fleet_Observation --> Fleet_EventRouter
     Fleet_Observation --> Fleet_Spawner

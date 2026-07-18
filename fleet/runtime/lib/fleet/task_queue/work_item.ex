@@ -35,11 +35,13 @@ defmodule Fleet.TaskQueue.WorkItem do
           role: String.t() | nil,
           brief: String.t() | nil,
           # PHYSICAL brief: the brief committed into work/ops (version = introducing commit).
-          # `brief_ref` = work/ops-relative path (cf. `cast_brief_ref` scheme); `brief_sha` = its SHA256 (pod-side check).
-          # Provenance is BEST-EFFORT (DR-010): the `brief` string COHABITS as the assumed degraded
-          # FALLBACK — it does NOT become nil (a non-onboarded project / no work/ops dispatches on the
-          # string alone, cf. `BriefArtifact`). `brief_sha` present = verifiable provenance; absent = a
-          # VISIBLE degraded mode.
+          # `brief_ref` = work/ops-relative path (cf. `cast_brief_ref` scheme); `brief_sha` = the
+          # introducing GIT COMMIT sha (identity = commit, brief-identity chantier — NOT a content
+          # SHA256; the pod cites its 7-hex prefix, any third party verifies it on the forge).
+          # Provenance is BEST-EFFORT (DR-010): materialized → `brief` carries the SHORT pointer
+          # order (`BriefArtifact.pointer_brief`, the doc is the single source); degraded (no
+          # work/ops) → `brief` carries the FULL text (the pod stays autonomous). `brief_sha`
+          # present = verifiable provenance; absent = a VISIBLE degraded mode.
           brief_ref: String.t() | nil,
           brief_sha: String.t() | nil,
           deadline: DateTime.t() | nil,

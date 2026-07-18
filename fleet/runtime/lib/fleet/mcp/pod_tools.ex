@@ -101,13 +101,15 @@ defmodule Fleet.MCP.PodTools do
         "Delegate an implementation brick to the LCARS fleet: creates a forge issue ready " <>
           "for forge-native delivery (engineer → PR → review → merge). Use it to DELEGATE " <>
           "rather than code yourself (the fleet delivers better and preserves your context). " <>
-          "`brief` = the clear brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
+          "`brief` = the FULL brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
           "the repo returned by `create_project`, or the project designated by the human. The fleet does NOT route by " <>
           "default — without `project`, the issue is REFUSED (never a silent misroute to another project). " <>
-          "For a CONSEQUENTIAL brief (multi-page/multi-doc): author it as doc(s) in the project's work/ops, " <>
-          "commit it, then pass `brief_ref` (the entry doc, e.g. `briefs/<slug>.md`) + `brief_sha` (the " <>
-          "introducing COMMIT sha) — `brief` then carries the human SUMMARY and the fleet reads the pinned doc. " <>
-          "Trivial brief: inline `brief` alone, as before. " <>
+          "The system ALWAYS commits your `brief` as the authored doc in the project's work/ops and the " <>
+          "ticket carries `summary` + the pinned pointer (`Brief: <ref> @ <commit>`) — so ALSO pass " <>
+          "`summary`: 2-6 lines, human-facing, what/why/done-when (without it the ticket shows a raw " <>
+          "excerpt). If you ALREADY authored+committed the doc yourself (multi-doc brief), pass " <>
+          "`brief_ref` (entry doc, e.g. `briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and " <>
+          "`brief` then carries the human summary, unchanged. " <>
           "Returns {\"status\":\"issue_created\",\"repo\":...}."
       )
     end
@@ -117,6 +119,7 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "title" => %{"type" => "string"},
         "brief" => %{"type" => "string"},
+        "summary" => %{"type" => "string"},
         "project" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"}
@@ -340,7 +343,13 @@ defmodule Fleet.MCP.PodTools do
             "(e.g. `briefs/<slug>.md`), sha = the introducing 40-hex COMMIT sha"}, state}
 
       true ->
-        case Delegation.create_issue(repo, title, brief, state, brief_pointer(args)) do
+        summary =
+          case args["summary"] do
+            s when is_binary(s) and s != "" -> s
+            _ -> nil
+          end
+
+        case Delegation.create_issue(repo, title, brief, state, brief_pointer(args), summary) do
           {:ok, result} -> {:ok, %{content: [json(result)]}, state}
           {:error, reason} -> {:error, reason, state}
         end

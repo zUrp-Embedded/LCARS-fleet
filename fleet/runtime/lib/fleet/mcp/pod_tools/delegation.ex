@@ -69,7 +69,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec create_issue(String.t(), String.t(), String.t(), map(), {String.t(), String.t()} | nil) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(repo, title, brief, state, brief_pointer \\ nil)
+  def create_issue(repo, title, brief, state, brief_pointer \\ nil, summary \\ nil)
       when is_binary(repo) and is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The arch then
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
@@ -78,10 +78,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # summary + the canonical pointer line (Layout notation) — the pinned work/ops doc IS the
     # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
     # dispatch-time work/ops push (F-15) — no separate publication rail.
+    # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
+    # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
+    # committed doc carries the detail; degraded → inline legacy, never a wall).
     with {:ok, forge} <- conforming_forge(),
          {:ok, role} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
-      do_create_issue(forge, repo, title, with_pointer(brief, brief_pointer), token: identity.token)
+      {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
+      do_create_issue(forge, repo, title, with_pointer(body, pointer), token: identity.token)
     else
       {:error, :role_token_unavailable} = err ->
         # Pod proven but role token not found on disk = provisioning hole (the role account has no
@@ -487,6 +491,41 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # summary + pointer line, or the inline brief untouched (both channels honest, same downstream).
+  # Pointer resolution for the ticket body. Manual path (the arch authored+committed the
+  # doc itself): `brief` IS the human summary, unchanged. Inline path: the brief is
+  # materialized into work/ops (`briefs/<sanitized-title>.md` — same doc re-titled =
+  # same ref, git history IS the version ledger) and the ticket carries the dedicated
+  # `summary` (or an honest excerpt) + the pinned pointer. Degraded materialization
+  # (no work/ops yet, git failure — physicalize logged LOUD) → full inline body, the
+  # exact legacy behavior: absence recorded, never a wall.
+  # `:brief_work_root` app-env = test seam (threads physicalize's `:work_root`).
+  defp ensure_pointer(_repo, _title, brief, {_ref, _sha} = pointer, summary),
+    do: {summary || brief, pointer}
+
+  defp ensure_pointer(repo, title, brief, nil, summary) do
+    opts =
+      case Application.get_env(:fleet_mcp, :brief_work_root) do
+        nil -> [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops]
+        root -> [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops, work_root: root]
+      end
+
+    case Fleet.Workflow.BriefArtifact.physicalize(brief, repo, opts) do
+      {ref, sha} when is_binary(sha) -> {summary || excerpt(brief), {ref, sha}}
+      _ -> {brief, nil}
+    end
+  end
+
+  # Fallback when no dedicated summary was given: the first lines, honestly marked as an
+  # excerpt (FR: rendered to the human on the forge).
+  defp excerpt(brief) do
+    lines = String.split(brief, "\n")
+    head = lines |> Enum.take(6) |> Enum.join("\n") |> String.trim_trailing()
+
+    if length(lines) > 6,
+      do: head <> "\n\n_(extrait — le brief complet est le doc pointé ci-dessous)_",
+      else: head
+  end
+
   defp with_pointer(brief, nil), do: brief
 
   defp with_pointer(brief, {ref, sha}),

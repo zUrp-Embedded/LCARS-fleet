@@ -159,6 +159,18 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert BriefArtifact.physicalize_attrs(%{brief: ""}, "fleet/demo") == %{brief: ""}
   end
 
+  test "pointer_brief: the SHORT payload order — names the doc, the sha7, and commands READ-first" do
+    sha = String.duplicate("a1b2c3d", 5) <> "a1b2c" |> String.slice(0, 40)
+    order = BriefArtifact.pointer_brief("briefs/issue-9-engineer.md", sha)
+
+    assert order =~ "briefs/issue-9-engineer.md"
+    assert order =~ String.slice(sha, 0, 7)
+    assert order =~ "LIS-le EN PREMIER"
+    assert order =~ "${LCARS_PROJECT_OPS}/briefs/issue-9-engineer.md"
+    # SHORT is the point: a pointer, not a pavé.
+    assert String.length(order) < 400
+  end
+
   test "commit inside an orphan git WORKTREE (the REAL work/ops: `.git` is a FILE, not a dir)",
        %{tmp_dir: tmp} do
     # Live regression: `git init` (`.git` = dir) passed, but the real work/ops is an orphan git
