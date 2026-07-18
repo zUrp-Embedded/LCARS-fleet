@@ -1,8 +1,4 @@
 defmodule Fleet.EventRouter do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -11,7 +7,7 @@ defmodule Fleet.EventRouter do
       Fleet.Layout,
       Fleet.Event,
       Fleet.SchemaCache,
-      # — surface wire externe (fencing Z4b : chaque référence est déclarée) —
+      # — external wire surface (lib fencing: every reference declared, cf. CLAUDE.md) —
       Phoenix.PubSub,
       Plug,
       Plug.Builder,
@@ -25,14 +21,16 @@ defmodule Fleet.EventRouter do
     exports: [Bus, Listener]
 
   @moduledoc """
-  LCARS v2 event bus + event registry (substrate: PubSub `fleet.events`, 0 deps,
-  ~12 apps depend on it; consumption = direct PubSub subscribers, no dispatch table).
-  See the sub-modules:
+  LCARS event bus + event registry (substrate: PubSub `fleet.events` — most domains
+  depend on it; consumption = direct PubSub subscribers, no dispatch table).
 
-    * `Fleet.EventRouter.Bus` — Phoenix.PubSub instance + broadcast/subscribe
-    * `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP HMAC SHA256
+    * `Fleet.EventRouter.Bus` — the Phoenix.PubSub instance + broadcast/subscribe (exported)
+    * `Fleet.EventRouter.Listener` — HTTP listener hosting the webhook router (exported)
+    * `Fleet.EventRouter.WebhooksGitea` — Plug.Router, Gitea webhooks, HMAC SHA256
+    * `Fleet.EventRouter.Catalog` — loads the events.yaml registry at boot (`authorized_event_types`)
+    * `Fleet.EventRouter.BindAddress` — listener bind-address resolution
     * `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)
-    * `Fleet.EventRouter.Catalog` — loads the events.yaml registry at boot (populates `authorized_event_types`)
+    * `Fleet.EventRouter.Application` — domain supervisor
 
   **Last revised**: 2026-07-18
   """
