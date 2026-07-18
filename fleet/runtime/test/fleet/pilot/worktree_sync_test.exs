@@ -1,9 +1,10 @@
 defmodule Fleet.Pilot.WorktreeSyncTest do
   @moduledoc """
-  `WorktreeSync` aligne RÉELLEMENT le clone local sur `origin/main` — git réel (origin bare local +
-  clone + avancement), pas un stub. C'est l'anti-vert-creux du fix : sans alignement, le fichier livré
-  n'apparaît jamais sur le disque (le bug d'origine). `origin` est un path local → pas de réseau, pas
-  de token (le `fetch auth:true` traverse `ForgeAuth.git_env() == []` en test, inerte sur un remote local).
+  `WorktreeSync` REALLY aligns the local clone on `origin/main` — real git (local bare origin +
+  clone + advancement), not a stub. This is the anti-hollow-green of the fix: without alignment, the
+  delivered file never appears on disk (the original bug). `origin` is a local path → no network, no
+  token (the `fetch auth:true` goes through `ForgeAuth.git_env() == []` in test, inert on a local
+  remote).
   """
   use ExUnit.Case, async: true
 
@@ -12,7 +13,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    # origin bare + un seed clone qui pose le 1er commit sur main (le « projet » de départ).
+    # bare origin + a seed clone that lands the 1st commit on main (the starting "project").
     origin = Path.join(tmp, "origin.git")
     seed = Path.join(tmp, "seed")
     git!(["init", "--bare", "-b", "main", origin])
@@ -21,38 +22,38 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     git_in!(seed, ["config", "user.name", "t"])
     commit_push!(seed, "README.md", "v0\n", "init")
 
-    # le clone local = la vitrine `/home/projects/<name>`, figée au départ (comme à l'onboarding).
+    # the local clone = the `/home/projects/<name>` showcase, frozen at start (as at onboarding).
     root = Path.join(tmp, "projects")
     File.mkdir_p!(root)
     proj = Path.join(root, "myproj")
     git!(["clone", origin, proj])
 
-    # nom unique → tests async sans collision sur le nom global du GenServer.
+    # unique name → async tests without collision on the GenServer's global name.
     name = :"wt_#{System.unique_integer([:positive])}"
     start_supervised!({WorktreeSync, name: name, projects_root: root})
 
     %{seed: seed, proj: proj, sync: name}
   end
 
-  test "aligne le clone local sur origin/main après un avancement (le livrable arrive sur le disque)",
+  test "aligns the local clone on origin/main after an advancement (the deliverable lands on disk)",
        %{seed: seed, proj: proj, sync: sync} do
-    # origin avance (le « merge ») ; le clone local n'a encore RIEN (le bug : il reste figé).
+    # origin advances (the "merge"); the local clone has NOTHING yet (the bug: it stays frozen).
     commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
     refute File.exists?(Path.join(proj, "hello.sh"))
 
     assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj")
 
-    # APRÈS : le disque reflète origin/main — même SHA, fichier livré présent.
+    # AFTER: the disk reflects origin/main — same SHA, delivered file present.
     assert File.exists?(Path.join(proj, "hello.sh"))
     assert head(proj) == head(seed)
   end
 
-  test "clone local absent → :ok (rien à aligner : le clone est un MIROIR, la vérité = main mergée sur la forge ; skip loggué debug)",
+  test "local clone absent → :ok (nothing to align: the clone is a MIRROR, the truth = main merged on the forge; skip logged debug)",
        %{sync: sync} do
     assert :ok = WorktreeSync.sync_now(sync, "fleet/jamais-clone")
   end
 
-  test "syncs concurrents sur le même worktree : sérialisés, tous :ok et clone aligné (pas d'index.lock)",
+  test "concurrent syncs on the same worktree: serialized, all :ok and clone aligned (no index.lock)",
        %{seed: seed, proj: proj, sync: sync} do
     commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
 
@@ -61,7 +62,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
       |> Enum.map(fn _ -> Task.async(fn -> WorktreeSync.sync_now(sync, "fleet/myproj") end) end)
       |> Task.await_many(30_000)
 
-    # Le GenServer sérialise (un git à la fois) → six alignements concurrents ne se marchent pas dessus.
+    # The GenServer serializes (one git at a time) → six concurrent alignments don't trample each other.
     assert Enum.all?(results, &(&1 == :ok))
     assert head(proj) == head(seed)
   end

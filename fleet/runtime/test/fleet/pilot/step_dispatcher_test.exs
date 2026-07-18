@@ -14,82 +14,82 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     }
   end
 
-  # Issue-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner. Le rôle
-  # producteur est un INVARIANT côté poller (`:producer_role`, défaut engineer), pas un marqueur
-  # par-issue. `fields` override (labels, body…).
+  # Producer issue of the forge-state-machine model (DN §1): assignee = the owning HUMAN. The
+  # producer role is a poller-side INVARIANT (`:producer_role`, default engineer), not a per-issue
+  # marker. `fields` overrides (labels, body…).
   defp eng_issue(fields \\ %{}) do
     issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
 
-  # #5.2 D2 — decide = PORTE pure : verrou → skip, sinon :engage. Pas d'ownership (scoping forge-side amont),
-  # pas de rôle (vient de la route via workflow_map_role), pas de load (workflow_map_role charge).
-  describe "decide/1 (porte pure)" do
-    test "issue non verrouillée → :engage (rôle ET action spawn/onboard décidés en aval)" do
+  # #5.2 D2 — decide = pure GATE: lock → skip, otherwise :engage. No ownership (forge-side scoping
+  # upstream), no role (comes from the route via workflow_map_role), no load (workflow_map_role loads).
+  describe "decide/1 (pure gate)" do
+    test "unlocked issue → :engage (role AND spawn/onboard action decided downstream)" do
       assert :engage = StepDispatcher.decide(eng_issue())
     end
 
-    test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
+    test "lcars-in-flight lock present → {:skip, :in_flight}" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
       assert {:skip, :in_flight} = StepDispatcher.decide(payload)
     end
 
-    test "verrou HUMAIN lcars-awaits-arch → {:skip, :awaits_arch} (A2.3b, pas de re-dispatch)" do
+    test "HUMAN lock lcars-awaits-arch → {:skip, :awaits_arch} (A2.3b, no re-dispatch)" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-arch"}]})
       assert {:skip, :awaits_arch} = StepDispatcher.decide(payload)
     end
 
-    test "F-C066 : label stage/merged → {:skip, :merged} (brique fusionnée TERMINALE, jamais re-engagée)" do
-      # Une brique fusionnée dont le close explicite a échoué (issue restée OPEN, verrou éventuellement
-      # réclamé par la réconciliation) NE doit PAS être re-dispatchée → sinon double-livraison. Le label
-      # `stage/merged` (posé AVANT le close) est la garde DURABLE, indépendante du verrou lcars-in-flight.
+    test "F-C066: stage/merged label → {:skip, :merged} (TERMINAL merged brick, never re-engaged)" do
+      # A merged brick whose explicit close failed (issue left OPEN, lock possibly reclaimed by the
+      # reconciliation) must NOT be re-dispatched → otherwise double-delivery. The `stage/merged`
+      # label (set BEFORE the close) is the DURABLE guard, independent of the lcars-in-flight lock.
       payload = eng_issue(%{"labels" => [%{"name" => "stage/merged"}]})
       assert {:skip, :merged} = StepDispatcher.decide(payload)
     end
   end
 
-  # Seams stubs pour dispatch_issue/2
+  # Stub seams for dispatch_issue/2
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def start_stopwatch(_repo, _n, _opts), do: :ok
 
-    # QoL 2026-07-07 (régression) : signale `n` — prouve que `promote_pr` (merge poller-driven,
-    # no-workflow_map) lève DÉSORMAIS le verrou ISSUE en plus du verrou PR (jamais fait avant ce fix).
+    # Regression guard: signals `n` — proves that `promote_pr` (poller-driven merge,
+    # no-workflow_map) NOW lifts the ISSUE lock in addition to the PR lock.
     def stop_stopwatch(_repo, n, _opts) do
       send(self(), {:stopped_watch, n})
       :ok
     end
 
-    # Adoption : pose des juges sur une PR orpheline (humaine/fork). Capture pour assertion.
+    # Adoption: sets judges on an orphan PR (human/fork). Captured for assertion.
     def request_review(_repo, index, reviewers, _opts) do
       send(self(), {:requested_review, index, reviewers})
       :ok
     end
 
-    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-workflow_map / 1-step).
+    # A2.1: route read from forge_opts[:_test_route] (default :none = out-of-workflow_map / 1-step).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
 
-    # #5.2 D2 — onboarding : grave la route initiale de la workflow_map par défaut. Capture pour assertion.
+    # #5.2 D2 — onboarding: records the default workflow_map's initial route. Captured for assertion.
     def post_route(_repo, n, workflow_map, step, _opts) do
       send(self(), {:routed, n, workflow_map, step})
       {:ok, :posted}
     end
 
-    # F077 : le brief juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
+    # F077: the judge brief reads the predecessor's result (option B). Stub: forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
 
-    # Fix famine-d'info : build_judge_brief lit le critère (body de l'issue) via get_issue.
-    # Stub : forge_opts[:_test_issue_body] (défaut un body non-vide).
+    # Info-starvation fix: build_judge_brief reads the criterion (issue body) via get_issue.
+    # Stub: forge_opts[:_test_issue_body] (default a non-empty body).
     def get_issue(_repo, n, opts),
       do: {:ok, %{"number" => n, "body" => Keyword.get(opts, :_test_issue_body, "critère stub")}}
 
-    # ②.1d : verdicts par juge (reviews-driven). Stub : forge_opts[:_test_verdicts] (map login↓→verdict,
-    # defaut %{} = aucun juge n'a encore de verdict décisif).
+    # ②.1d: per-judge verdicts (reviews-driven). Stub: forge_opts[:_test_verdicts] (map
+    # login↓→verdict, default %{} = no judge has a decisive verdict yet).
     def pr_review_verdicts(_repo, _index, opts),
       do: {:ok, Keyword.get(opts, :_test_verdicts, %{})}
 
-    # F-E8 : état de jury combiné (verdicts + SET du jury depuis les review-records). `:_test_reviewers`
-    # (défaut [] → `requested` = le seul `requested_reviewers` du PR, comportement legacy des tests).
+    # F-E8: combined jury state (verdicts + jury SET from the review-records). `:_test_reviewers`
+    # (default [] → `requested` = only the PR's `requested_reviewers`, legacy test behavior).
     def pr_review_state(_repo, _index, opts),
       do:
         {:ok,
@@ -98,27 +98,27 @@ defmodule Fleet.Pilot.StepDispatcherTest do
            reviewers: Keyword.get(opts, :_test_reviewers, [])
          }}
 
-    # Fix famine-d'info (rework) : feedback REQUEST_CHANGES injecté au brief de rework. Stub :
-    # forge_opts[:_test_feedback] (liste %{"login","body"}, défaut un body non-vide).
+    # Info-starvation fix (rework): REQUEST_CHANGES feedback injected into the rework brief. Stub:
+    # forge_opts[:_test_feedback] (list of %{"login","body"}, default a non-empty body).
     def change_request_feedback(_repo, _index, opts),
       do:
         {:ok,
          Keyword.get(opts, :_test_feedback, [%{"login" => "reviewer", "body" => "feedback stub"}])}
 
-    # MA-06 : compteur forge-natif des rounds de rework (nb REQUEST_CHANGES). Stub :
-    # forge_opts[:_test_rework_rounds] (défaut 0 = pas de round → re-spawn normal, tests legacy inchangés).
+    # MA-06: forge-native counter of rework rounds (nb of REQUEST_CHANGES). Stub:
+    # forge_opts[:_test_rework_rounds] (default 0 = no round → normal re-spawn, legacy tests unchanged).
     def count_change_request_rounds(_repo, _index, opts),
       do: Keyword.get(opts, :_test_rework_rounds, {:ok, 0})
 
-    # F181 : compensation — retrait du verrou sur échec post-verrou.
+    # F181: compensation — lock removal on a post-lock failure.
     def remove_label(_repo, _n, label, _opts) do
       send(self(), {:removed_label, label})
       {:ok, :removed}
     end
 
-    # ②.1d : merge FF (promote PR-state-driven, tous les juges OK). Signale pour assertion.
-    # `_test_merge_result` (seam) force un échec (ex. conflit `{:error, {:http, 409, _}}`) → teste la
-    # résolution F-PARALLEL-PR-CONFLICT ; absent → succès `:ok`.
+    # ②.1d: FF merge (PR-state-driven promote, all judges OK). Signals for assertion.
+    # `_test_merge_result` (seam) forces a failure (e.g. conflict `{:error, {:http, 409, _}}`) →
+    # tests the F-PARALLEL-PR-CONFLICT resolution; absent → success `:ok`.
     def merge_pr(_repo, index, opts) do
       case Keyword.get(opts, :_test_merge_result) do
         nil ->
@@ -133,8 +133,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
 
-    # Objet PR relu par `route_merge_failure` pour CLASSIFIER un échec de merge (MergeOutcome). Seam
-    # `_test_pull` (map de champs mergeable/draft/state) ; défaut = vrai conflit git (mergeable:false).
+    # PR object re-read by `route_merge_failure` to CLASSIFY a merge failure (MergeOutcome). Seam
+    # `_test_pull` (map of mergeable/draft/state fields); default = real git conflict (mergeable:false).
     def get_pull(_repo, n, opts) do
       {:ok,
        Keyword.get(opts, :_test_pull, %{
@@ -145,7 +145,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
        })}
     end
 
-    # Juges re-demandés (timeline) — seam `_test_rerequested` (défaut aucun).
+    # Re-requested judges (timeline) — `_test_rerequested` seam (default none).
     def pr_rerequested_reviewers(_repo, _n, opts),
       do: {:ok, Keyword.get(opts, :_test_rerequested, [])}
   end
@@ -160,7 +160,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
            spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
-    # F077 : un rôle juge déclare `brief_kind: judge` dans son cap-profile (pas un nom magique).
+    # F077: a judge role declares `brief_kind: judge` in its cap-profile (not a magic name).
     def load("gatekeeper"),
       do:
         {:ok,
@@ -170,7 +170,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
            spec: %{"brief_kind" => "judge", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
-    # Corr.3 : un juge de PR (qualifier/reviewer) declare aussi brief_kind: judge.
+    # A PR judge (qualifier/reviewer) also declares brief_kind: judge.
     def load(role) when role in ["qualifier", "reviewer"],
       do:
         {:ok,
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
            spec: %{"brief_kind" => "judge"}
          }}
 
-    # #8 : le consultant relit le BRIEF (juge) → brief_kind: judge.
+    # #8: the consultant re-reads the BRIEF (judge) → brief_kind: judge.
     def load("consultant"),
       do:
         {:ok,
@@ -194,8 +194,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   end
 
   defmodule StubSpawner do
-    # Fidèle au contrat réel `Spawner.spawn_pod/3` : retourne `{:ok, pid()}`, PAS une string
-    # (un retour string masquait le bug d'interpolation PID attrapé par le dogfood PASSE-9).
+    # Faithful to the real `Spawner.spawn_pod/3` contract: returns `{:ok, pid()}`, NOT a string
+    # (a string return masked the PID interpolation bug caught by the PASSE-9 dogfood).
     def spawn_pod(_profile, issue_id, opts) do
       send(self(), {:spawned, issue_id, opts})
       {:ok, self()}
@@ -206,18 +206,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       :ok
     end
 
-    # F181 : compensation — `safe_kill` du pod avant retrait du verrou. Un kill raté n'est pas
-    # retenté : le verrou retiré → re-dispatch au tick suivant, qui RE-BRIEF le pod encore vivant
-    # (dispatch idempotent) ; le substrat orphelin est balayé par le PodWarden du Spawner.
+    # F181: compensation — `safe_kill` of the pod before lock removal. A failed kill is not
+    # retried: lock removed → re-dispatch next tick, which RE-BRIEFS the still-alive pod
+    # (idempotent dispatch); the orphan substrate is swept by the Spawner's PodWarden.
     def kill_pod(pod_id) do
       send(self(), {:killed, pod_id})
       :ok
     end
   end
 
-  # Spawner dont le pod est DÉJÀ VIVANT (`pod_info` → `{:ok, _}`). Sert à tester le GATE de
-  # sérialisation : un rôle project-scoped déjà vivant → le dispatcher DÉFÈRE (`:role_busy`), il ne
-  # spawn ni ne rebrief un pod occupé. (Le rebrief-sur-vivant reste possible pour les `instance`.)
+  # Spawner whose pod is ALREADY ALIVE (`pod_info` → `{:ok, _}`). Used to test the serialization
+  # GATE: a project-scoped role already alive → the dispatcher DEFERS (`:role_busy`), it neither
+  # spawns nor rebriefs a busy pod. (Rebrief-on-alive stays possible for `instance` scoped ones.)
   defmodule StubSpawnerAlive do
     def spawn_pod(_profile, issue_id, opts) do
       send(self(), {:spawned, issue_id, opts})
@@ -240,12 +240,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
   end
 
-  # F181 : broker qui échoue tout enqueue → simule un échec POST-verrou (pod déjà spawné).
+  # F181: broker failing every enqueue → simulates a POST-lock failure (pod already spawned).
   defmodule FailTaskQueue do
     def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
   end
 
-  # SLOT-FREEZE : engineer en PIPE (lifetime_scope: pipe) → le gate prend la voie pipe-aware (vs one-shot).
+  # SLOT-FREEZE: engineer as PIPE (lifetime_scope: pipe) → the gate takes the pipe-aware path (vs one-shot).
   defmodule StubLoaderPipe do
     def load("engineer"),
       do:
@@ -259,8 +259,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def load(_), do: {:error, :not_found}
   end
 
-  # Spawner pipe CONFIGURABLE via le process dict (`:pipe_state`) — un seul stub pour les 4 etats du gate.
-  # pod_info expose conditions + has_active_task (comme le vrai pod) ; reprovision_pipe_workspace trace.
+  # Pipe spawner CONFIGURABLE via the process dict (`:pipe_state`) — one stub for the gate's 4 states.
+  # pod_info exposes conditions + has_active_task (like the real pod); reprovision_pipe_workspace traces.
   defmodule StubSpawnerPipe do
     def spawn_pod(_p, t, o) do
       send(self(), {:spawned, t, o})
@@ -290,13 +290,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         :ready -> {:ok, %{conditions: [], has_active_task: false}}
         :busy_active -> {:ok, %{conditions: [], has_active_task: true}}
         :publishing -> {:ok, %{conditions: [:publishing], has_active_task: false}}
-        # F-C059 : sonde qui RAISE (échec transitoire sur un pipe VIVANT-mais-lent) → état INCONNU.
+        # F-C059: probe that RAISES (transient failure on a LIVE-but-slow pipe) → UNKNOWN state.
         :raise -> raise "F-C059: pod_info RAISED (transient probe failure on a LIVE pipe)"
       end
     end
   end
 
-  # F075 : loader qui SIGNALE chaque load(role) → permet d'asserter UN SEUL load par dispatch.
+  # F075: loader that SIGNALS every load(role) → allows asserting a SINGLE load per dispatch.
   defmodule CountingLoader do
     def load(role) do
       send(self(), {:f075_loaded, role})
@@ -318,14 +318,14 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         loader: StubLoader,
         spawner: StubSpawner,
         task_queue: StubTaskQueue,
-        # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
+        # default stub resolver: no project (ordering tests clone nothing).
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
-        # #5.2 D2 — route par défaut (step build=engineer) : depuis le découplage, une issue ROUTELESS
-        # est ONBOARDÉE (skip) au lieu de spawner. Les tests d'effet veulent un spawn → ils partent d'une
-        # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`workflow_map_loader`.
+        # #5.2 D2 — default route (step build=engineer): since the decoupling, a ROUTELESS issue is
+        # ONBOARDED (skip) instead of spawning. Effect tests want a spawn → they start from an
+        # already-routed issue. Routed/onboard tests override `forge_opts`/`workflow_map_loader`.
         forge_opts: [_test_route: {:ok, {"g", "build"}}],
-        # Loader générique (tout nom de map) : porte `max_rework_rounds` (budget rework lu comme donnée
-        # côté rework PR ET issue). Les tests routés spécifiques overrident au besoin.
+        # Generic loader (any map name): carries `max_rework_rounds` (rework budget read as data on
+        # the PR AND issue rework paths). Specific routed tests override as needed.
         workflow_map_loader: fn _name ->
           %{
             "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
@@ -337,75 +337,77 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     )
   end
 
-  describe "dispatch_issue/2 (effets, seams stubés)" do
-    test "F075 : un seul load(role) par dispatch (fin du double-load sonde+spawn)" do
+  describe "dispatch_issue/2 (effects, stubbed seams)" do
+    test "F075: a single load(role) per dispatch (end of the probe+spawn double-load)" do
       payload = eng_issue()
 
       assert {:ok, {:spawned, _, "engineer"}} =
                StepDispatcher.dispatch_issue(payload, dispatch_opts(loader: CountingLoader))
 
-      # decide charge le profil et le threade ; dispatch le réutilise → load appelé EXACTEMENT une fois.
+      # decide loads the profile and threads it; dispatch reuses it → load called EXACTLY once.
       assert_received {:f075_loaded, "engineer"}
       refute_received {:f075_loaded, _}
     end
 
-    test "spawn : ordre label-verrou → pod (plus de comment-lock), retourne {:ok, {:spawned, pod, role}}" do
+    test "spawn: order lock-label → pod (no more comment-lock), returns {:ok, {:spawned, pod, role}}" do
       payload = eng_issue()
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StepDispatcher.dispatch_issue(payload, dispatch_opts())
 
-      # le brief = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
-      # sinon le pod « submit les contenus » au lieu de committer → :no_deliverable_commit.
+      # the brief = issue.body + the git-native DELIVERY instruction (local commit + trailer),
+      # otherwise the pod "submits the contents" instead of committing → :no_deliverable_commit.
       assert_received {:spawned, "issue-42", opts}
       assert opts[:brief] =~ "fais le hello"
 
-      # #chantier pod-seed : nom RC Desktop = <projet>_<role> (projet = segment final du repo
-      # "lordzurp/lcars-test" → "lcars-test"). Label exact, distinct du pod_id technique.
+      # pod-seed: RC Desktop name = <project>_<role> (project = final segment of the repo
+      # "lordzurp/lcars-test" → "lcars-test"). Exact label, distinct from the technical pod_id.
       assert opts[:rc_name] == "lcars-test_engineer"
       assert opts[:brief] =~ "git commit"
       assert opts[:brief] =~ "Co-authored-by: LCARS-engineer"
 
-      # Voix de l'eng (info sortante) : le brief demande un `summary` posté sur la PR par le système.
+      # The eng's voice (outgoing info): the brief asks for a `summary` posted on the PR by the system.
       assert opts[:brief] =~ "summary"
       assert opts[:brief] =~ "Ta voix"
-      # Blocked_dep : le brief dit à l'eng de marquer `blocked: true` plutôt que deviner/wedge.
+      # Blocked_dep: the brief tells the eng to mark `blocked: true` rather than guess/wedge.
       assert opts[:brief] =~ "blocked"
 
-      # le brief est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
+      # the brief is ENQUEUED in the TaskQueue (otherwise the pod thinks it's bootstrap → idle;
+      # PASSE-9 bug)
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
-      # F071 : verrouille le 2ᵉ site `IssueId.compose` (enqueue_brief) — sinon un retour au littéral
-      # "issue-#{number}" pour `issue_id` ne serait pas attrapé (le pod_id ≠ issue_id).
+      # F071: locks the 2nd `IssueId.compose` site (enqueue_brief) — otherwise a return to the
+      # literal "issue-#{number}" for `issue_id` would not be caught (pod_id ≠ issue_id).
       assert attrs.issue_id == "issue-42"
-      # kick émis — un wake raté ne serait pas muet : spawn_step remonte
-      # `{:error, {:wake_unreached, …}}` (compté en errors par le poller, re-wake au tick suivant).
+      # kick emitted — a failed wake would not be silent: spawn_step returns
+      # `{:error, {:wake_unreached, …}}` (counted as errors by the poller, re-wake next tick).
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE slot_scope: engineer (project) déjà vivant → DÉFÈRE :role_busy (sérialisé, pas de rebrief)" do
+    test "GATE slot_scope: engineer (project) already alive → DEFERS :role_busy (serialized, no rebrief)" do
       payload = eng_issue()
 
-      # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` est DÉJÀ vivant (un autre
-      # issue du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne rebrief
-      # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ brief). Le poller
-      # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
+      # StubSpawnerAlive: pod_info → {:ok,_} = the project pod `<repo>-engineer` is ALREADY alive
+      # (another issue of the repo in progress). The gate serializes project-scoped roles: we DEFER,
+      # we do NOT rebrief a busy pod (that would wedge — a one-shot mid-task does not pull a 2nd
+      # brief). The poller re-dispatches next tick; the pod dies at end of task → fresh spawn for
+      # the next one.
       assert {:skipped, :role_busy} =
                StepDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
 
-      # Le gate a CONSULTÉ pod_info (avec l'id PROJET) pour voir le pod vivant...
+      # The gate CONSULTED pod_info (with the PROJECT id) to see the live pod...
       assert_received {:pod_info, "lordzurp-lcars-test-engineer"}
-      # ...puis a DÉFÉRÉ sans AUCUN effet de bord : pas de spawn, pas d'enqueue, pas de wake.
+      # ...then DEFERRED without ANY side effect: no spawn, no enqueue, no wake.
       refute_received {:spawned, _, _}
       refute_received {:enqueued, _, _}
       refute_received {:woke, _}
     end
 
-    test "GATE slot_scope: engineer (project) vivant → défère AVANT verrou/enqueue (rien à compenser)" do
-      # Le gate défère AVANT de poser le verrou ou d'enqueuer → le task_queue défaillant n'est JAMAIS
-      # atteint. Donc aucun verrou à retirer, aucun pod à tuer : la défère est sans effet de bord.
+    test "GATE slot_scope: engineer (project) alive → defers BEFORE lock/enqueue (nothing to compensate)" do
+      # The gate defers BEFORE setting the lock or enqueueing → the failing task_queue is NEVER
+      # reached. So no lock to remove, no pod to kill: the deferral is side-effect free.
       assert {:skipped, :role_busy} =
                StepDispatcher.dispatch_issue(
                  eng_issue(),
@@ -417,29 +419,30 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:enqueued, _, _}
     end
 
-    test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do
+    test "F181: POST-lock failure (enqueue KO) → lock removed + pod killed (no stuck)" do
       payload = eng_issue()
       opts = dispatch_opts(task_queue: FailTaskQueue)
 
       assert {:error, {:enqueue_failed, :broker_down}} =
                StepDispatcher.dispatch_issue(payload, opts)
 
-      # le pod avait spawné → tué (sinon orphelin) ; le verrou lcars-in-flight → retiré (sinon le
-      # poller skipperait l'issue à jamais).
+      # the pod had spawned → killed (otherwise orphan); the lcars-in-flight lock → removed
+      # (otherwise the poller would skip the issue forever).
       assert_received {:spawned, "issue-42", _}
       assert_received {:killed, "lordzurp-lcars-test-engineer"}
       assert_received {:removed_label, "lcars-in-flight"}
     end
 
-    # MA-17 — wake escalade (pod injoignable, re-wake KO → {:error,{:escalated,_}}). AVANT : le retour de
-    # WakeRecovery.wake était jeté (`_ = wake(...)`) → dispatch_issue rendait {:ok,{:spawned}} → le poller
-    # comptait `dispatched:1/errors:0` MENTEUR (pod jamais réveillé). Le seam `wake_recovery` simule
-    # l'escalade ; on assert que le dispatch N'est PAS un succès silencieux mais `{:error,{:wake_unreached,_}}`.
-    test "MA-17 : wake escaladé (pod injoignable) → dispatch {:error,{:wake_unreached}}, PAS {:ok,{:spawned}}" do
+    # MA-17 — escalated wake (unreachable pod, re-wake KO → {:error,{:escalated,_}}). A discarded
+    # WakeRecovery.wake return (`_ = wake(...)`) → dispatch_issue returned {:ok,{:spawned}} → the
+    # poller counted a LYING `dispatched:1/errors:0` (pod never woken). The `wake_recovery` seam
+    # simulates the escalation; we assert the dispatch is NOT a silent success but
+    # `{:error,{:wake_unreached,_}}`.
+    test "MA-17: escalated wake (unreachable pod) → dispatch {:error,{:wake_unreached}}, NOT {:ok,{:spawned}}" do
       payload = eng_issue()
 
-      # Seam : le recovery de wake ESCALADE (équivalent re-wake KO → starfleet). Pas de hit
-      # IncidentRegistry/forge réels — on injecte directement le verdict d'injoignabilité.
+      # Seam: the wake recovery ESCALATES (equivalent to re-wake KO → starfleet). No real
+      # IncidentRegistry/forge hits — we inject the unreachability verdict directly.
       escalating_wake = fn _pod_id, _respawn, _opts -> {:error, {:escalated, :dead}} end
 
       result =
@@ -448,24 +451,24 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           dispatch_opts(wake_recovery: escalating_wake)
         )
 
-      # LE finding : surtout PAS un succès dispatch silencieux (le poller le comptait dispatched:1).
+      # THE finding: above all NOT a silent dispatch success (the poller counted it dispatched:1).
       refute match?({:ok, {:spawned, _, _}}, result)
 
       assert {:error,
               {:wake_unreached, "lordzurp-lcars-test-engineer", "engineer", {:escalated, :dead}}} =
                result
 
-      # Le pod ET le brief RESTENT en place (brief enqueué, le re-wake/escalade couvre) : PAS de
-      # compensation (ce n'est pas un échec POST-verrou, c'est un wake injoignable). Le verrou tient.
+      # The pod AND the brief STAY in place (brief enqueued, re-wake/escalation covers): NO
+      # compensation (this is not a post-lock failure, it is an unreachable wake). The lock holds.
       assert_received {:spawned, "issue-42", _}
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
       refute_received {:removed_label, _}
       refute_received {:killed, _}
     end
 
-    # MA-17 — contre-épreuve : un wake PROPRE (:ok) garde le dispatch en succès `{:ok,{:spawned}}` (le
-    # tally `dispatched` reste juste quand le pod EST réellement réveillé).
-    test "MA-17 : wake OK → dispatch reste {:ok,{:spawned}} (tally dispatched honnête)" do
+    # MA-17 — counter-proof: a CLEAN wake (:ok) keeps the dispatch a `{:ok,{:spawned}}` success
+    # (the `dispatched` tally stays honest when the pod IS really woken).
+    test "MA-17: wake OK → dispatch stays {:ok,{:spawned}} (honest dispatched tally)" do
       payload = eng_issue()
       clean_wake = fn _pod_id, _respawn, _opts -> :ok end
 
@@ -476,14 +479,14 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:killed, _}
     end
 
-    test "skip in_flight : pas de spawn" do
+    test "skip in_flight: no spawn" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
 
       assert {:skipped, :in_flight} = StepDispatcher.dispatch_issue(payload, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
-    test "projet résolu → injecté dans spawn_opts (:project, F-03 base_sha pinné)" do
+    test "resolved project → injected into spawn_opts (:project, F-03 pinned base_sha)" do
       payload = eng_issue()
 
       project = %{
@@ -502,11 +505,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert spawn_opts[:brief] =~ "fais le hello"
     end
 
-    test "route gravée → rôle dérivé de la workflow_map (step build=engineer) + pipeline/step injectés (A2.1, #8)" do
+    test "recorded route → role derived from the workflow_map (step build=engineer) + pipeline/step injected (A2.1, #8)" do
       payload = eng_issue()
 
-      # #8 : le rôle vient DÉSORMAIS de la workflow_map (WorkflowMapNav.step_role), pas de producer_role en dur.
-      # Ici le step courant "build" porte role=engineer → rôle engineer (et route injectée, A2.1).
+      # #8: the role NOW comes from the workflow_map (WorkflowMapNav.step_role), not a hardcoded
+      # producer_role. Here the current step "build" carries role=engineer → engineer role (and
+      # route injected, A2.1).
       workflow_map = %{
         "name" => "poc-cycle",
         "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
@@ -525,11 +529,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert spawn_opts[:step] == "build"
     end
 
-    test "#8 : route sur un step AMONT (brief-review/consultant) → spawn le CONSULTANT, pas l'eng" do
+    test "#8: route on an UPSTREAM step (brief-review/consultant) → spawns the CONSULTANT, not the eng" do
       payload = eng_issue()
 
-      # La workflow_map EST la machine à états : le 1er step (racine `needs:[]`) est brief-review/consultant.
-      # decide() rendait "engineer" (DN §1) ; workflow_map_role override avec le rôle du step courant → consultant.
+      # The workflow_map IS the state machine: the 1st step (root `needs:[]`) is
+      # brief-review/consultant. decide() returned "engineer" (DN §1); workflow_map_role overrides
+      # with the current step's role → consultant.
       workflow_map = %{
         "name" => "brief-gate",
         "steps" => %{
@@ -548,11 +553,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_issue(payload, opts)
     end
 
-    test "#8.B : brief_kind:judge AU STEP override un profil worker (engineer) → brief JUGE" do
+    test "#8.B: brief_kind:judge AT THE STEP overrides a worker profile (engineer) → JUDGE brief" do
       payload = eng_issue()
 
-      # Le step déclare brief_kind:judge ; le rôle engineer a un profil WORKER. L'override per-step
-      # doit produire un brief JUGE (désamorcé), PAS le brief worker (issue body + "Livraison git-native").
+      # The step declares brief_kind:judge; the engineer role has a WORKER profile. The per-step
+      # override must produce a JUDGE brief (defused), NOT the worker brief (issue body +
+      # "Livraison git-native").
       workflow_map = %{
         "name" => "g",
         "steps" => %{
@@ -571,7 +577,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "#8.B : sans brief_kind au step → défaut du profil (engineer=worker → brief worker)" do
+    test "#8.B: without brief_kind at the step → profile default (engineer=worker → worker brief)" do
       payload = eng_issue()
 
       workflow_map = %{
@@ -587,15 +593,16 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
       assert_received {:spawned, "issue-42", spawn_opts}
+      # "Livraison (git-native)" pins the FR user-facing brief section heading.
       assert spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "SÉCU : brief_kind hors-vocab au step → raise (jamais retombé sur worker en silence)" do
+    test "SECURITY: out-of-vocab brief_kind at the step → raise (never silently falls back to worker)" do
       payload = eng_issue()
 
-      # `reviewer` n'est PAS du vocabulaire {worker, judge}. AVANT le fix, ce hors-vocab tombait sur la
-      # clause `_worker` → brief EXÉCUTABLE pour un rôle qui aurait dû être désamorcé. La judge-ness est
-      # une propriété de sécurité : elle ne s'infère pas par omission → fail-loud.
+      # `reviewer` is NOT part of the {worker, judge} vocabulary. Falling back to the `_worker`
+      # clause would produce an EXECUTABLE brief for a role that should have been defused.
+      # Judge-ness is a security property: it is not inferred by omission → fail-loud.
       workflow_map = %{
         "name" => "g",
         "steps" => %{
@@ -614,7 +621,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       end
     end
 
-    test "SÉCU : judge_target hors-vocab (kind=judge) → raise (la cible d'un juge ne s'infère pas)" do
+    test "SECURITY: out-of-vocab judge_target (kind=judge) → raise (a judge's target is not inferred)" do
       payload = eng_issue()
 
       workflow_map = %{
@@ -640,8 +647,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       end
     end
 
-    test "#8.E : judge_target:brief → brief en cadrage BRIEF (juge le issue.body, pas un livrable)" do
-      # F-S2-1 : le brief = body de l'ISSUE en main (payload), PAS un get_issue redondant.
+    test "#8.E: judge_target:brief → brief in BRIEF framing (judges the issue.body, not a deliverable)" do
+      # F-S2-1: the brief = the ISSUE body at hand (payload), NOT a redundant get_issue.
       payload = eng_issue(%{"body" => "MON BRIEF A JUGER"})
 
       workflow_map = %{
@@ -667,17 +674,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert_received {:spawned, "issue-42", spawn_opts}
       brief = spawn_opts[:brief]
-      # cadrage BRIEF (subject:brief) + le brief à juger, PAS le cadrage livrable.
+      # BRIEF framing (subject:brief) + the brief to judge, NOT the deliverable framing.
       assert brief =~ "Brief to judge"
       assert brief =~ "MON BRIEF A JUGER"
       refute brief =~ "Deliverable to judge (step outputs"
       refute brief =~ "Livraison (git-native)"
     end
 
-    test "#5.2 D2 — issue ROUTELESS → onboardée sur la workflow_map par défaut (skip), PAS de spawn eng" do
+    test "#5.2 D2 — ROUTELESS issue → onboarded onto the default workflow_map (skip), NO eng spawn" do
       payload = eng_issue()
 
-      # route :none (override de la route par défaut) + workflow_map par défaut brief-gate (1er step brief-review).
+      # route :none (overrides the default route) + default workflow_map brief-gate (1st step
+      # brief-review).
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
@@ -688,12 +696,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
 
-      # la workflow_map par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
+      # the default workflow_map was RECORDED (next tick will dispatch the consultant); NO eng spawn.
       assert_received {:routed, 42, "brief-gate", "brief-review"}
       refute_received {:spawned, _, _}
     end
 
-    test "échec lecture route → {:error, {:route_resolution, _}}, AUCUN verrou ni spawn" do
+    test "route read failure → {:error, {:route_resolution, _}}, NO lock nor spawn" do
       payload = eng_issue()
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
 
@@ -703,7 +711,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "échec résolution projet → {:error}, AUCUN verrou posé ni spawn" do
+    test "project resolution failure → {:error}, NO lock set nor spawn" do
       payload = eng_issue()
 
       opts =
@@ -712,16 +720,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:error, {:project_resolution, :ls_remote_timeout}} =
                StepDispatcher.dispatch_issue(payload, opts)
 
-      # résolution AVANT toute écriture forge : pas de spawn, pas de verrou orphelin
+      # resolution BEFORE any forge write: no spawn, no orphan lock
       refute_received {:spawned, _, _}
     end
 
     # ====================================================================
-    # SLOT-FREEZE — gate PIPE-aware : un engineer PIPE (resident) est re-brief selon son etat.
-    #   dead  -> spawn frais ; busy (tache active OU :publishing) -> DEFERE ; ready -> reprovision COLD +
-    #   rebrief. (project["base_sha"] est passe au reset ; le slug = la branche feature du issue.)
+    # SLOT-FREEZE — PIPE-aware gate: a PIPE engineer (resident) is re-briefed by its state.
+    #   dead  -> fresh spawn; busy (active task OR :publishing) -> DEFERS; ready -> COLD
+    #   reprovision + rebrief. (project["base_sha"] is passed at reset; the slug = the issue's
+    #   feature branch.)
     # ====================================================================
-    test "GATE pipe DEAD (1er issue) : spawn frais, PAS de reprovision" do
+    test "GATE pipe DEAD (1st issue): fresh spawn, NO reprovision" do
       Process.put(:pipe_state, :dead)
 
       opts =
@@ -738,7 +747,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:reprovisioned, _, _, _}
     end
 
-    test "GATE pipe BUSY (tache active) : DEFERE :role_busy, ni reprovision ni spawn (pod en plein travail)" do
+    test "GATE pipe BUSY (active task): DEFERS :role_busy, neither reprovision nor spawn (pod mid-work)" do
       Process.put(:pipe_state, :busy_active)
 
       opts =
@@ -754,7 +763,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "GATE pipe PUBLISHING (livrable en vol) : DEFERE :role_busy (pas de reset pendant le push)" do
+    test "GATE pipe PUBLISHING (deliverable in flight): DEFERS :role_busy (no reset during the push)" do
       Process.put(:pipe_state, :publishing)
 
       opts =
@@ -770,7 +779,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "GATE pipe READY (idle + livrable confirme) : reprovision COLD (base_sha + slug) PUIS re-brief" do
+    test "GATE pipe READY (idle + deliverable confirmed): COLD reprovision (base_sha + slug) THEN re-brief" do
       Process.put(:pipe_state, :ready)
 
       opts =
@@ -783,17 +792,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StepDispatcher.dispatch_issue(eng_issue(), opts)
 
-      # reset cold appele AVANT le rebrief, avec le projet (base_sha) + le slug du issue.
+      # cold reset called BEFORE the rebrief, with the project (base_sha) + the issue's slug.
       assert_received {:reprovisioned, "lordzurp-lcars-test-engineer",
                        %{"base_sha" => "basesha1"}, [slug: _slug]}
 
-      # re-brief (pod vivant) -> enqueue + wake, PAS de re-spawn frais.
+      # re-brief (live pod) -> enqueue + wake, NO fresh re-spawn.
       refute_received {:spawned, _, _}
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE pipe READY mais reset KO -> DEFERE :role_busy (pas de rebrief sur workspace sale)" do
+    test "GATE pipe READY but reset KO -> DEFERS :role_busy (no rebrief on a dirty workspace)" do
       Process.put(:pipe_state, :ready)
       Process.put(:reprovision_result, {:error, {:reset_failed, :git_exit}})
 
@@ -811,10 +820,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "GATE pipe pod_info RAISE (sonde transitoire échoue sur pipe VIVANT) : DEFERE :role_busy, PAS de spawn destructif (F-C059)" do
-      # F-C059 : un raise de pod_info laissait l'état INCONNU → :error → :dead → serialize `:ok` → spawn
-      # frais qui REAP/kill le pipe eng VIVANT + son contexte (le danger exact que `pod_alive?` garde en
-      # « assume ALIVE »). Fail-closed : incertitude (raise) → DEFERE (miroir de pod_alive?), jamais reset/kill.
+    test "GATE pipe pod_info RAISES (transient probe failure on a LIVE pipe): DEFERS :role_busy, NO destructive spawn (F-C059)" do
+      # F-C059: a pod_info raise left the state UNKNOWN → :error → :dead → serialize `:ok` → fresh
+      # spawn that REAPS/kills the LIVE eng pipe + its context (the exact danger `pod_alive?`
+      # guards with "assume ALIVE"). Fail-closed: uncertainty (raise) → DEFERS (mirror of
+      # pod_alive?), never reset/kill.
       Process.put(:pipe_state, :raise)
 
       opts =
@@ -831,7 +841,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
   end
 
-  describe "dispatch_review/2 (juge PR-driven, Corr.3 4-C)" do
+  describe "dispatch_review/2 (PR-driven judge)" do
     defp pr(fields \\ %{}) do
       Map.merge(
         %{
@@ -844,7 +854,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       )
     end
 
-    test "PR avec review demandee -> spawn le juge (issue=ISSUE, verrou sur la PR)" do
+    test "PR with review requested -> spawns the judge (issue=ISSUE, lock on the PR)" do
       opts =
         dispatch_opts(
           forge_opts: [
@@ -856,38 +866,40 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
                StepDispatcher.dispatch_review(pr(), opts)
 
-      # issue_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
+      # issue_id = the ISSUE (derived from head.ref lcars/issue-42-engineer), NOT the PR
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:workflow_map] == "poc" and spawn_opts[:step] == "spec-review"
-      # brief juge desamorce (brief_kind: judge) — pas un corps executable
+      # defused judge brief (brief_kind: judge) — not an executable body
       assert spawn_opts[:brief] =~ "JUDGE"
 
-      # Fix famine-d'info (juge) : predecessor vide (git-native) → le juge est POINTÉ sur son
-      # workspace ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).
-      # La base du diff est `origin/main` (clone mono-branche : le ref local `main` n'existe pas —
-      # bug live morse : `git diff main..HEAD` → fatal unknown revision → halt_wait_input intermittent).
+      # Info-starvation fix (judge): empty predecessor (git-native) → the judge is POINTED at its
+      # workspace AND receives the CRITERION (issue body, defused in context).
+      # The diff base is `origin/main` (single-branch clone: the local ref `main` does not exist —
+      # live morse bug: `git diff main..HEAD` → fatal unknown revision → intermittent
+      # halt_wait_input).
       assert spawn_opts[:brief] =~ "git diff origin/main...HEAD"
       assert spawn_opts[:brief] =~ "implémente le décodeur morse"
 
-      # enqueue cible le pod_id pr-... ; issue_id = l'issue
+      # enqueue targets the pr-... pod_id; issue_id = the issue
       assert_received {:enqueued, "lordzurp-lcars-test-pr-6-qualifier", attrs}
       assert attrs.issue_id == "issue-42"
       assert attrs.role == "qualifier"
       assert_received {:woke, "lordzurp-lcars-test-pr-6-qualifier"}
     end
 
-    test "PR verrouillee (lcars-in-flight) -> skip, pas de spawn" do
+    test "locked PR (lcars-in-flight) -> skip, no spawn" do
       pr = pr(%{"labels" => [%{"name" => "lcars-in-flight"}]})
       assert {:skipped, :in_flight} = StepDispatcher.dispatch_review(pr, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
-    test "PR sans juge (orpheline/humaine) -> ADOPTION : pose les juges, review au tick suivant" do
+    test "PR without judge (orphan/human) -> ADOPTION: sets the judges, review next tick" do
       pr = pr(%{"requested_reviewers" => []})
 
-      # requested == [] (ni requested_reviewers, ni jury) = PR NON mise en place par le pipeline (typ.
-      # humaine/fork découverte par le poller). Gate agent-agnostique → on POSE les juges au lieu de skip
-      # `:no_verdict`. Ils spawnent au tick SUIVANT (pas ici → `refute_received {:spawned}`).
+      # requested == [] (neither requested_reviewers nor jury) = PR NOT set up by the pipeline
+      # (typically human/fork discovered by the poller). Agent-agnostic gate → we SET the judges
+      # instead of skipping `:no_verdict`. They spawn on the NEXT tick (not here →
+      # `refute_received {:spawned}`).
       assert {:ok, {:adopted, _pr_number, reviewers}} =
                StepDispatcher.dispatch_review(pr, dispatch_opts())
 
@@ -896,8 +908,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "②.1d : tous les juges demandés ont APPROUVÉ -> PROMOTE (comment de fin + merge FF, gatekeeper)" do
-      # les 2 juges demandés ont chacun un verdict décisif APPROVED → pending vide → tous verts → merge.
+    test "②.1d: all requested judges APPROVED -> PROMOTE (closing comment + FF merge, gatekeeper)" do
+      # both requested judges each have a decisive APPROVED verdict → empty pending → all green → merge.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -911,28 +923,29 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
 
-      # le merge FF a bien ete declenche sur la PR (close explicite via seal_and_merge, plus de Closes #N)
+      # the FF merge was triggered on the PR (explicit close via seal_and_merge, no more Closes #N)
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
-      # Die-on-promote : le kill-site cible `for_issue` (id `...-issue-42-engineer`). Pour l'eng
-      # one-shot project-scoped c'est un pod_id PHANTÔME → no-op SÛR (cf. step_dispatcher : utiliser
-      # for_repo ici tuerait l'eng s'il code une AUTRE issue). On asserte l'APPEL au kill avec l'id
-      # issue-keyé (même s'il no-op), inconditionnel côté dispatcher.
+      # Die-on-promote: the kill-site targets `for_issue` (id `...-issue-42-engineer`). For the
+      # one-shot project-scoped eng this is a PHANTOM pod_id → SAFE no-op (cf. step_dispatcher:
+      # using for_repo here would kill the eng if it were coding ANOTHER issue). We assert the kill
+      # CALL with the issue-keyed id (even if it no-ops), unconditional on the dispatcher side.
       assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
 
-      # RÉGRESSION QoL 2026-07-07 : ce chemin (merge poller-driven, no-workflow_map) ne levait JAMAIS
-      # le verrou ISSUE — seul le verrou PR se levait (via route(:reviewed) de chaque juge, hors-scope
-      # ici). `promote_pr` doit désormais lever aussi l'ISSUE (42), la brique entière est finie au merge.
+      # REGRESSION guard: this path (poller-driven merge, no-workflow_map) NEVER lifted the ISSUE
+      # lock — only the PR lock lifted (via each judge's route(:reviewed), out-of-scope here).
+      # `promote_pr` must now also lift the ISSUE (42): the entire brick is done at merge.
       assert_received {:stopped_watch, 42}
     end
 
-    test "F-C061 : un login NON-jury (humain) dans les reviewers est filtré (n'affame pas le jury) + LOUD" do
-      # Un humain (`Lordzurp`) reviewe/est-requesté sur la PR (read suffit — vérifié live, la forge ne
-      # l'empêche PAS). SANS filtre : il n'a pas de verdict → `hd(pending)` = lordzurp →
-      # `RoleDispatch.load_role_or_skip` échoue → `{:skipped, :no_role}` SILENCIEUX → le jury (qualifier +
-      # reviewer, tous APPROVED) est AFFAMÉ, pas de merge. AVEC le filtre `reviewer_roles` : lordzurp exclu
-      # du jury → tous les juges approved → merge, et le reviewer non-jury est signalé LOUD (pas avalé).
+    test "F-C061: a NON-jury login (human) among the reviewers is filtered (does not starve the jury) + LOUD" do
+      # A human (`Lordzurp`) reviews/is-requested on the PR (read suffices — verified live, the
+      # forge does NOT prevent it). WITHOUT the filter: they have no verdict → `hd(pending)` =
+      # lordzurp → `RoleDispatch.load_role_or_skip` fails → SILENT `{:skipped, :no_role}` → the
+      # jury (qualifier + reviewer, all APPROVED) is STARVED, no merge. WITH the `reviewer_roles`
+      # filter: lordzurp excluded from the jury → all judges approved → merge, and the non-jury
+      # reviewer is signaled LOUD (not swallowed).
       pr =
         pr(%{
           "requested_reviewers" => [
@@ -950,22 +963,23 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          # comportement : le login humain non-jury n'affame pas le merge.
+          # behavior: the non-jury human login does not starve the merge.
           assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
         end)
 
-      # LOUD : le reviewer non-jury est signalé (F-C061), pas absorbé en silence.
+      # LOUD: the non-jury reviewer is signaled (F-C061), not silently absorbed.
       assert log =~ "F-C061" and log =~ "lordzurp"
-      # jamais dispatché comme un rôle.
+      # never dispatched as a role.
       refute_received {:spawned, _, "lordzurp"}
     end
 
-    test "F-C061 : un REQUEST_CHANGES d'un login NON-jury (humain) ne déclenche PAS de rework parasite" do
-      # 2e vecteur du même trou : un humain POSTE un verdict (pas juste requested) → il entre dans `verdicts`
-      # ET le jury (review-record REQUEST_CHANGES). SANS filtre : `Map.take(verdicts, requested)` inclut
-      # lordzurp → `dispatch_rework` PARASITE (cycle de rework déclenché par un humain). AVEC le filtre
-      # `reviewer_roles` : lordzurp exclu de `requested` → sa voix ne compte pas → le jury (qualifier +
-      # reviewer, approved) → merge. Login humain signalé LOUD.
+    test "F-C061: a REQUEST_CHANGES from a NON-jury login (human) does NOT trigger a stray rework" do
+      # 2nd vector of the same hole: a human POSTS a verdict (not just requested) → they enter
+      # `verdicts` AND the jury (REQUEST_CHANGES review-record). WITHOUT the filter:
+      # `Map.take(verdicts, requested)` includes lordzurp → STRAY `dispatch_rework` (rework cycle
+      # triggered by a human). WITH the `reviewer_roles` filter: lordzurp excluded from `requested`
+      # → their voice does not count → the jury (qualifier + reviewer, approved) → merge. Human
+      # login signaled LOUD.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -986,7 +1000,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          # le REQUEST_CHANGES humain est IGNORÉ (pas de rework) → jury tout-approved → merge.
+          # the human REQUEST_CHANGES is IGNORED (no rework) → all-approved jury → merge.
           assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
         end)
 
@@ -994,11 +1008,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, "reviewer"}
     end
 
-    # ── Angle « la machine lit l'état-forge complet » : échec de merge CLASSIFIÉ (2026-07-07) ──
-    # Remplace l'ancien fourre-tout « tout échec = conflit → eng rebase » (impossible car forge-aveugle →
-    # mur live). L'échec est relu de l'objet PR (MergeOutcome) et aiguillé sur sa cause RÉELLE.
+    # ── The "machine reads the full forge state" angle: merge failure CLASSIFIED ──
+    # Replaces the old catch-all "any failure = conflict → eng rebase" (impossible because
+    # forge-blind → live dead end). The failure is re-read from the PR object (MergeOutcome) and
+    # routed to its REAL cause.
 
-    test "échec merge + PR mergeable:false (VRAI conflit git) → escalade HONNÊTE arch (pas d'eng-rebase impossible)" do
+    test "merge failure + PR mergeable:false (REAL git conflict) → HONEST arch escalation (no impossible eng-rebase)" do
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1019,17 +1034,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           ]
         )
 
-      # vrai conflit → escalade arch honnête (le système ne rebase PAS — barrière forge-aveugle) ;
-      # AUCUN spawn d'eng, AUCUN merge. Forme `{:skipped, _}` gérée par le poller.
+      # real conflict → honest arch escalation (the system does NOT rebase — forge-blind barrier);
+      # NO eng spawn, NO merge. `{:skipped, _}` shape handled by the poller.
       assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
       refute_received {:spawned, _, _}
       refute_received {:merged, _}
     end
 
-    test "échec merge + PR mergeable:true (POLICY : re-request humaine) → re-dispatch le juge re-demandé" do
-      # LE cas hello-kitty : git mergeable, mais la branch-protection refuse (un juge re-demandé à la main
-      # a reset le compteur d'approbations). On re-dispatche ce juge (le bouton fait enfin son job), PAS
-      # d'escalade, PAS de traitement conflit.
+    test "merge failure + PR mergeable:true (POLICY: human re-request) → re-dispatches the re-requested judge" do
+      # THE hello-kitty case: git-mergeable, but branch-protection refuses (a judge manually
+      # re-requested reset the approvals counter). We re-dispatch that judge (the button finally
+      # does its job), NO escalation, NO conflict treatment.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1051,7 +1066,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:merged, _}
     end
 
-    test "échec merge + PR mergeable:true SANS re-request → escalade honnête (policy non levable, pas de wedge muet)" do
+    test "merge failure + PR mergeable:true WITHOUT re-request → honest escalation (unliftable policy, no silent wedge)" do
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1071,7 +1086,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
     end
 
-    test "PR repassée en DRAFT (garde dispatch-juge) → skip, pas de review ni de merge" do
+    test "PR flipped back to DRAFT (judge-dispatch guard) → skip, no review nor merge" do
       pr =
         pr(%{
           "number" => 6,
@@ -1084,8 +1099,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:merged, _}
     end
 
-    test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
-      # tous les juges demandés ont un verdict (pending vide), mais un :changes_requested → rework.
+    test "②.1d: one judge requested changes (the others approve) -> re-spawns the PRODUCER" do
+      # all requested judges have a verdict (empty pending), but one :changes_requested → rework.
       pr =
         pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]})
 
@@ -1100,26 +1115,28 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           ]
         )
 
-      # producteur = role git_native de head (lcars/issue-42-engineer) = engineer ; verrou sur la PR.
+      # producer = git_native role of head (lcars/issue-42-engineer) = engineer; lock on the PR.
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StepDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:brief] =~ "REWORK"
 
-      # Fix famine-d'info (rework) : le BODY de la review REQUEST_CHANGES est injecté (sinon « corrige
-      # selon la review » est creux → l'eng devine à l'aveugle → blocked_dep/wedge, prouvé live morse).
+      # Info-starvation fix (rework): the REQUEST_CHANGES review BODY is injected (otherwise
+      # "fix according to the review" is hollow → the eng guesses blindly → blocked_dep/wedge,
+      # proven live morse).
       assert spawn_opts[:brief] =~ "le timing des points/traits est faux"
       assert spawn_opts[:brief] =~ "reviewer"
 
-      # Voix de l'eng (rework) : le brief demande un `summary` = réponse au reviewer, posté sur la PR.
+      # The eng's voice (rework): the brief asks for a `summary` = answer to the reviewer, posted
+      # on the PR.
       assert spawn_opts[:brief] =~ "summary"
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.role == "engineer"
     end
 
-    test "MA-06 : rework SOUS le budget (rounds <= max) -> re-spawn producteur (pas d'escalade)" do
-      # Garde-fou de borne basse : tant que le budget n'est pas épuisé, le rework continue normalement.
+    test "MA-06: rework UNDER budget (rounds <= max) -> producer re-spawn (no escalation)" do
+      # Lower-bound guard: as long as the budget is not exhausted, rework continues normally.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
 
       opts =
@@ -1135,19 +1152,21 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(pr, opts)
     end
 
-    test "MA-06 : N rounds de rework PR (rounds > budget) -> ESCALADE ARCH (borné, pas de churn infini)" do
-      # État illégal AVANT MA-06 : `dispatch_rework` re-spawnait le producteur SANS compteur → si l'eng ne
-      # satisfait jamais le juge, rework INFINI (le frein workflow_map `rebound` n'est pas appelé sur ce chemin). Le
-      # fix borne par un compteur forge-natif (nb REQUEST_CHANGES) : > budget (2) → escalade arch (pas de
-      # re-spawn). On vérifie le retour {:skipped, {:rework_exhausted_escalated, _}} + le label awaits-arch posé.
+    test "MA-06: N PR rework rounds (rounds > budget) -> ARCH ESCALATION (bounded, no infinite churn)" do
+      # Illegal state before MA-06: `dispatch_rework` re-spawned the producer with NO counter → if
+      # the eng never satisfies the judge, INFINITE rework (the workflow_map `rebound` brake is not
+      # called on this path). The fix bounds by a forge-native counter (nb REQUEST_CHANGES):
+      # > budget (2) → arch escalation (no re-spawn). We verify the return
+      # {:skipped, {:rework_exhausted_escalated, _}} + the awaits-arch label set.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
 
       opts =
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :changes_requested},
-            # Route présente → le budget (= max_rework_rounds:2 du loader générique) est LISIBLE : on teste
-            # bien « rounds(3) > budget(2) → escalade », pas un budget illisible (couvert par le test suivant).
+            # Route present → the budget (= max_rework_rounds:2 of the generic loader) is READABLE:
+            # we truly test "rounds(3) > budget(2) → escalation", not an unreadable budget
+            # (covered by the next test).
             _test_route: {:ok, {"g", "build"}},
             _test_rework_rounds: {:ok, 3}
           ]
@@ -1156,19 +1175,20 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:skipped, {:rework_exhausted_escalated, 6}} =
                StepDispatcher.dispatch_review(pr, opts)
 
-      # PAS de re-spawn du producteur (fin du churn) ; le verrou humain awaits-arch est posé sur l'ISSUE.
+      # NO producer re-spawn (end of churn); the human awaits-arch lock is set on the ISSUE.
       refute_received {:spawned, _, _}
     end
 
-    test "MA-06 : budget illisible (forge {:error}) -> escalade (pas de re-spawn aveugle)" do
-      # Symétrique de `rebound` : un budget non vérifiable ne doit PAS faire boucler → on remonte à l'arch.
+    test "MA-06: unreadable budget (forge {:error}) -> escalation (no blind re-spawn)" do
+      # Symmetric of `rebound`: an unverifiable budget must NOT loop → we escalate to the arch.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
 
       opts =
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :changes_requested},
-            # Route présente → budget lisible : on teste bien le COMPTEUR illisible (count {:error}), pas la route.
+            # Route present → readable budget: we truly test the unreadable COUNTER (count
+            # {:error}), not the route.
             _test_route: {:ok, {"g", "build"}},
             _test_rework_rounds: {:error, {:http, 500, "boom"}}
           ]
@@ -1180,9 +1200,10 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "budget PR map-level HONORÉ : max_rework_rounds:5 rebondit à 4 rounds (le défaut 2 escaladerait)" do
-      # Preuve que le budget PR vient de la DONNÉE du map (spec.max_rework_rounds), pas d'un défaut codé :
-      # un map à 5 laisse rebondir à 4 rounds (4 ≤ 5) là où l'ancien défaut 2 aurait escaladé.
+    test "map-level PR budget HONORED: max_rework_rounds:5 bounces at 4 rounds (the default 2 would escalate)" do
+      # Proof that the PR budget comes from the map's DATA (spec.max_rework_rounds), not a coded
+      # default: a map at 5 lets 4 rounds bounce (4 ≤ 5) where the old default of 2 would have
+      # escalated.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
 
       opts =
@@ -1204,12 +1225,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(pr, opts)
     end
 
-    test "F-E8 : juge tombé de requested_reviewers (mais dans les review-records) reste au jury -> spawn, PAS merge" do
-      # BUG live PoC-7 : Gitea a fait DISPARAÎTRE le reviewer de `requested_reviewers` SANS qu'il vote
-      # (review-record encore REQUEST_REVIEW). Le champ volatil ne montre que le qualifier (qui a approuvé).
-      # SANS le fix : requested=[qualifier], pending=[] → MERGE prématuré sur 1 juge (demi-jury). AVEC : le
-      # jury vient des review-records (`pr_review_state.reviewers` = [qualifier, reviewer]) → union →
-      # pending=[reviewer] → on spawn le reviewer, JAMAIS de merge.
+    test "F-E8: judge dropped from requested_reviewers (but in the review-records) stays in the jury -> spawn, NO merge" do
+      # Live bug PoC-7: Gitea made the reviewer VANISH from `requested_reviewers` WITHOUT them
+      # voting (review-record still REQUEST_REVIEW). The volatile field only shows the qualifier
+      # (who approved). WITHOUT the fix: requested=[qualifier], pending=[] → premature MERGE on 1
+      # judge (half-jury). WITH it: the jury comes from the review-records
+      # (`pr_review_state.reviewers` = [qualifier, reviewer]) → union → pending=[reviewer] → we
+      # spawn the reviewer, NEVER a merge.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6})
 
       opts =
@@ -1228,16 +1250,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:merged, _}
     end
 
-    test "PR sur branche non-fleet -> skip (jamais misroutee)" do
+    test "PR on a non-fleet branch -> skip (never misrouted)" do
       pr = pr(%{"head" => %{"ref" => "refs/pull/6/head"}})
       assert {:skipped, :not_fleet_branch} = StepDispatcher.dispatch_review(pr, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
-    test "F-C061 : reviewer = login non-jury (humain/inconnu) SEUL → filtré + LOUD, PAS de skip muet" do
-      # Ancien contrat (bug F-C061) : un login inconnu → `{:skipped, :no_role}` SILENCIEUX. Nouveau : un
-      # login non-jury (ici `lordzurp`, humain) est FILTRÉ du jury → la PR se retrouve sans juge → ADOPTION
-      # (on pose le jury, review au tick suivant), et le login foreign est signalé LOUD (jamais avalé).
+    test "F-C061: reviewer = non-jury login (human/unknown) ALONE → filtered + LOUD, NO silent skip" do
+      # Old contract (F-C061 bug): an unknown login → SILENT `{:skipped, :no_role}`. New: a
+      # non-jury login (here `lordzurp`, human) is FILTERED from the jury → the PR ends up without
+      # a judge → ADOPTION (we set the jury, review next tick), and the foreign login is signaled
+      # LOUD (never swallowed).
       pr = pr(%{"requested_reviewers" => [%{"login" => "lordzurp"}]})
 
       log =
@@ -1252,7 +1275,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, "lordzurp"}
     end
 
-    test "F181 : echec POST-verrou (enqueue KO) -> verrou PR retire + pod tue" do
+    test "F181: POST-lock failure (enqueue KO) -> PR lock removed + pod killed" do
       opts = dispatch_opts(task_queue: FailTaskQueue, forge_opts: [_test_route: :none])
 
       assert {:error, {:enqueue_failed, :broker_down}} =
@@ -1262,10 +1285,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:removed_label, "lcars-in-flight"}
     end
 
-    test "MA-01 (bug B) : l'issue parente porte awaits-arch -> skip :awaits_arch, PAS de re-dispatch juge" do
-      # La PR head=lcars/issue-42-engineer (issue 42) a un reviewer demandé → SANS le fix, le juge serait
-      # re-spawné à chaque tick. Mais l'issue 42 est dans le SET `:awaits_arch_ids` (escalade en cours) →
-      # `dispatch_review` skippe (symétrique de `decide/1` côté issue) → fin du churn.
+    test "MA-01 (bug B): the parent issue carries awaits-arch -> skip :awaits_arch, NO judge re-dispatch" do
+      # The PR head=lcars/issue-42-engineer (issue 42) has a requested reviewer → WITHOUT the fix,
+      # the judge would be re-spawned every tick. But issue 42 is in the `:awaits_arch_ids` SET
+      # (escalation in progress) → `dispatch_review` skips (symmetric of `decide/1` on the issue
+      # side) → end of churn.
       opts = dispatch_opts(awaits_arch_ids: MapSet.new([42]))
 
       assert {:skipped, :awaits_arch} = StepDispatcher.dispatch_review(pr(), opts)
@@ -1273,9 +1297,10 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:enqueued, _, _}
     end
 
-    test "MA-01 (bug B) : awaits_arch_ids ne contient PAS l'issue -> dispatch normal (back-compat)" do
-      # Garde-fou : le skip ne se déclenche QUE pour l'issue concernée. Issue 42 (PR head) absente du SET
-      # (ici {99}) → dispatch normal du juge. Et défaut MapSet vide (autres callers) → inchangé.
+    test "MA-01 (bug B): awaits_arch_ids does NOT contain the issue -> normal dispatch (back-compat)" do
+      # Guard: the skip only triggers for the concerned issue. Issue 42 (PR head) absent from the
+      # SET (here {99}) → normal judge dispatch. And default empty MapSet (other callers) →
+      # unchanged.
       opts =
         dispatch_opts(
           awaits_arch_ids: MapSet.new([99]),
@@ -1287,10 +1312,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
   end
 
-  # F-PARALLEL-PR-CONFLICT — DÉCONFLATION clone-base / gate-base. Pour une résolution par rebase, le pod
-  # part de la feature (clone-base) mais son livrable doit DESCENDRE de `main` (gate-base) → le resolver
-  # pinne les DEUX séparément quand `:gate_base_branch` est posé. Fixture : un bare repo local = la « forge ».
-  describe "default_project_resolver/2 — gate_base_sha déconflé" do
+  # F-PARALLEL-PR-CONFLICT — DECONFLATION of clone-base / gate-base. For a rebase resolution, the
+  # pod starts from the feature (clone-base) but its deliverable must DESCEND from `main`
+  # (gate-base) → the resolver pins BOTH separately when `:gate_base_branch` is set. Fixture: a
+  # local bare repo = the "forge".
+  describe "default_project_resolver/2 — deconflated gate_base_sha" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
@@ -1306,21 +1332,21 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       gg.(["add", "."])
       gg.(["commit", "-q", "-m", "c0"])
 
-      # feature-branch (le travail du producteur, depuis C0)
+      # feature-branch (the producer's work, from C0)
       gg.(["checkout", "-q", "-b", "lcars/issue-3-engineer"])
       File.write!(Path.join(src, "feat.txt"), "feat")
       gg.(["add", "."])
       gg.(["commit", "-q", "-m", "feat"])
       {ft, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"], stderr_to_stdout: true)
 
-      # `main` avance (issue parallèle fusionné) → C1
+      # `main` advances (parallel issue merged) → C1
       gg.(["checkout", "-q", "main"])
       File.write!(Path.join(src, "para.txt"), "para")
       gg.(["add", "."])
       gg.(["commit", "-q", "-m", "c1"])
       {m1, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"], stderr_to_stdout: true)
 
-      # publie les deux branches dans le bare = `<forge>/owner/proj.git` (base_url = `<forge>`)
+      # publish both branches into the bare = `<forge>/owner/proj.git` (base_url = `<forge>`)
       bare = Path.join(forge, "owner/proj.git")
       File.mkdir_p!(Path.dirname(bare))
       {_, 0} = System.cmd("git", ["clone", "-q", "--bare", src, bare], stderr_to_stdout: true)
@@ -1328,7 +1354,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       %{base_url: forge, feature_tip: String.trim(ft), main_c1: String.trim(m1)}
     end
 
-    test "resolve (gate_base_branch=main) : base_sha=feature_tip (clone) MAIS gate_base_sha=main",
+    test "resolve (gate_base_branch=main): base_sha=feature_tip (clone) BUT gate_base_sha=main",
          ctx do
       assert {:ok, proj} =
                StepDispatcher.default_project_resolver("owner/proj",
@@ -1337,13 +1363,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                  forge_opts: [base_url: ctx.base_url]
                )
 
-      # clone-base = tip de la feature (le pod part de SON travail) ; gate-base = main (cible du rebase).
+      # clone-base = feature tip (the pod starts from ITS work); gate-base = main (rebase target).
       assert proj["base_sha"] == ctx.feature_tip
       assert proj["gate_base_sha"] == ctx.main_c1
       refute proj["base_sha"] == proj["gate_base_sha"]
     end
 
-    test "forward (sans gate_base_branch) : gate_base_sha == base_sha (clone-base, inchangé)",
+    test "forward (without gate_base_branch): gate_base_sha == base_sha (clone-base, unchanged)",
          ctx do
       assert {:ok, proj} =
                StepDispatcher.default_project_resolver("owner/proj",

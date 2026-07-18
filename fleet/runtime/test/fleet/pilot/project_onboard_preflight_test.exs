@@ -1,10 +1,9 @@
 defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   @moduledoc """
-  F2 (Z7c migration — débrief architecte 2026-07-12) : preflight `ensure_human_provisioned`
-  AVANT toute création. Contrats testés : absence PROUVÉE de compte/team → erreur avec les
-  gestes admin EXACTS ; forge en PANNE → :forge_preflight_failed SANS instructions (on
-  n'envoie jamais l'opérateur créer un compte sur une panne) ; humain provisionné → le
-  preflight est transparent (la séquence continue). Seam :forge_users — aucun réseau.
+  F2: preflight `ensure_human_provisioned` BEFORE any creation. Contracts tested: PROVEN absence of
+  account/team → error with the EXACT admin gestures; forge DOWN → :forge_preflight_failed WITHOUT
+  instructions (we never send the operator to create an account on an outage); provisioned human →
+  the preflight is transparent (the sequence continues). :forge_users seam — no network.
   """
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
@@ -18,7 +17,7 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
 
   defmodule NoAccountUsers do
     def user_exists?(_u, _fc), do: {:ok, false}
-    def team_member?(_org, _t, _u, _fc), do: raise("ne doit pas être atteint")
+    def team_member?(_org, _t, _u, _fc), do: raise("must not be reached")
   end
 
   defmodule NoTeamUsers do
@@ -32,9 +31,9 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   end
 
   defmodule ForbiddenTeamUsers do
-    # Compte OK, mais le token runtime ne peut PAS lire l'appartenance team (403) : cas réel
-    # forge — le compte de service est un simple membre d'org (ni owner, ni membre de `humans`),
-    # Gitea refuse GET /teams/<id>/members/<u>. « Ne peut pas vérifier » ≠ « humain absent ».
+    # Account OK, but the runtime token can NOT read team membership (403): real forge case —
+    # the service account is a plain org member (neither owner nor member of `humans`),
+    # Gitea refuses GET /teams/<id>/members/<u>. "Cannot verify" ≠ "human absent".
     def user_exists?(_u, _fc), do: {:ok, true}
 
     def team_member?(_org, "humans", _u, _fc),
@@ -50,7 +49,7 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
     ]
 
   @tag :tmp_dir
-  test "compte forge absent → human_not_provisioned + gestes admin exacts (compte)", %{
+  test "forge account absent → human_not_provisioned + exact admin gestures (account)", %{
     tmp_dir: tmp
   } do
     assert {:error, {:human_not_provisioned, "ghost-human", gestures}} =
@@ -58,12 +57,12 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
 
     assert gestures =~ "admin/users"
     assert gestures =~ "ghost-human"
-    # rien n'a été créé : le preflight court AVANT tout mkdir/clone
+    # nothing was created: the preflight runs BEFORE any mkdir/clone
     refute File.exists?(Path.join([tmp, "projects", "poc-f2"]))
   end
 
   @tag :tmp_dir
-  test "compte présent mais hors team humans → gestes admin exacts (team)", %{tmp_dir: tmp} do
+  test "account present but outside the humans team → exact admin gestures (team)", %{tmp_dir: tmp} do
     assert {:error, {:human_not_provisioned, "ghost-human", gestures}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, NoTeamUsers))
 
@@ -72,7 +71,7 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   end
 
   @tag :tmp_dir
-  test "forge en PANNE → forge_preflight_failed, JAMAIS d'instructions de création", %{
+  test "forge DOWN → forge_preflight_failed, NEVER creation instructions", %{
     tmp_dir: tmp
   } do
     assert {:error, {:forge_preflight_failed, {:transport, :econnrefused}}} =
@@ -80,44 +79,47 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   end
 
   @tag :tmp_dir
-  test "humain provisionné → preflight transparent (la séquence continue jusqu'au conflit suivant)",
+  test "provisioned human → transparent preflight (the sequence continues to the next conflict)",
        %{tmp_dir: tmp} do
     o = opts(tmp, OkUsers)
     proj = Path.join([tmp, "projects", "poc-f2"])
     File.mkdir_p!(proj)
 
-    # le preflight PASSE (sinon on aurait human_not_provisioned) ; l'étape suivante
-    # (refute_existing) attrape le dossier pré-existant → preuve d'ordre et de passage.
+    # the preflight PASSES (otherwise we'd get human_not_provisioned); the next step
+    # (refute_existing) catches the pre-existing folder → proof of order and of passage.
     assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
   end
 
   @tag :tmp_dir
-  test "DR-018 : team NON VÉRIFIABLE (403) → REFUS par défaut (:human_team_unverifiable + gestes), rien créé",
+  test "DR-018: team NOT VERIFIABLE (403) → REFUSED by default (:human_team_unverifiable + gestures), nothing created",
        %{tmp_dir: tmp} do
-    # DR-018 : le 4ᵉ état (non-vérifiable) n'est PLUS un :ok muet. Une admission load-bearing non-prouvable
-    # ≠ « vérifiée » → refus par défaut, avec les gestes admin exacts (droit de lecture / prouver / dégradé).
+    # DR-018: the 4th state (unverifiable) is NOT a silent :ok. A load-bearing admission that cannot
+    # be proven ≠ "verified" → refused by default, with the exact admin gestures (read right /
+    # prove / degraded).
     assert {:error, {:human_team_unverifiable, "ghost-human", gestures}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, ForbiddenTeamUsers))
 
     assert gestures =~ "NOT VERIFIABLE"
     assert gestures =~ "allow_unverifiable_human_team?"
-    # une admission non-prouvable ne crée RIEN (le garde court AVANT tout mkdir/clone)
+    # an unprovable admission creates NOTHING (the guard runs BEFORE any mkdir/clone)
     refute File.exists?(Path.join([tmp, "projects", "poc-f2"]))
   end
 
   @tag :tmp_dir
-  test "DR-018 : team 403 + allow_unverifiable_human_team?: true → MODE DÉGRADÉ EXPLICITE (procède, warning LOUD)",
+  test "DR-018: team 403 + allow_unverifiable_human_team?: true → EXPLICIT DEGRADED MODE (proceeds, LOUD warning)",
        %{tmp_dir: tmp} do
-    # Le dégradé RESTE possible (forge où le token n'est pas org-admin) mais comme MODE CONSCIENT opt-in,
-    # pas comme succès indistinguable : l'opérateur le pose, la trace est LOUD, create_issue reste le filet.
+    # Degraded mode REMAINS possible (forge where the token is not org-admin) but as a CONSCIOUS
+    # opt-in mode, not an indistinguishable success: the operator sets it, the trace is LOUD,
+    # create_issue remains the safety net.
     o = Keyword.put(opts(tmp, ForbiddenTeamUsers), :allow_unverifiable_human_team?, true)
     proj = Path.join([tmp, "projects", "poc-f2"])
     File.mkdir_p!(proj)
 
     log =
       capture_log(fn ->
-        # dégradé EXPLICITE : le preflight procède malgré le 403 → la séquence continue et attrape le
-        # dossier pré-existant (preuve de passage), au lieu de bloquer un humain PROVISIONNÉ sans droit de lecture.
+        # EXPLICIT degraded: the preflight proceeds despite the 403 → the sequence continues and
+        # catches the pre-existing folder (proof of passage), instead of blocking a PROVISIONED
+        # human for lack of read rights.
         assert {:error, {:already_exists, ^proj}} = ProjectOnboard.onboard("poc-f2", o)
       end)
 
@@ -126,7 +128,7 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   end
 
   @tag :tmp_dir
-  test "import/2 porte le MÊME preflight", %{tmp_dir: tmp} do
+  test "import/2 carries the SAME preflight", %{tmp_dir: tmp} do
     assert {:error, {:human_not_provisioned, "ghost-human", _}} =
              ProjectOnboard.import("fleet/poc-f2", opts(tmp, NoAccountUsers))
   end

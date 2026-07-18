@@ -1,13 +1,14 @@
 defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
-  # async: false — mute la config globale `:role_tokens_dir` (cf. Fleet.Credentials.RoleTokenTest).
+  # async: false — mutates the global `:role_tokens_dir` config (cf. Fleet.Credentials.RoleTokenTest).
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepRunCompleter
 
   @moduletag :tmp_dir
 
-  # F-E6 — capture le `token` des forge_opts passés à `post_comment` : le commentaire de VERDICT doit
-  # être AU NOM DU JUGE (token de rôle), pas du compte système. Les labels restent système (non capturés).
+  # F-E6 — captures the `token` of the forge_opts passed to `post_comment`: the VERDICT comment must
+  # be IN THE JUDGE'S NAME (role token), not the system account's. Labels stay system-signed (not
+  # captured).
   defmodule TokenCaptureForge do
     def post_comment(_repo, _n, _body, opts) do
       send(self(), {:comment_token, opts[:token]})
@@ -18,10 +19,10 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
     def start_stopwatch(_repo, _n, _opts), do: :ok
 
-    # QoL 2026-07-07 : capture (n, token) — prouve que le stop du verrou ISSUE (démarré par le
-    # PRODUCTEUR, persistant toute la review) est signé PRODUCTEUR même quand c'est un JUGE qui
-    # termine la brique (route(:promote)), tandis que le stop du verrou PR reste signé JUGE (son
-    # propre tour). Deux stops, deux identités distinctes, jamais confondues.
+    # Captures (n, token) — proves that the stop of the ISSUE stopwatch (started by the PRODUCER,
+    # persistent through the whole review) is PRODUCER-signed even when a JUDGE finishes the brick
+    # (route(:promote)), while the stop of the PR stopwatch stays JUDGE-signed (its own review
+    # turn). Two stops, two distinct identities, never conflated.
     def stop_stopwatch(_repo, n, opts) do
       send(self(), {:stop_stopwatch, n, opts[:token]})
       :ok
@@ -41,19 +42,20 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   end
 
   setup %{tmp_dir: tmp} do
-    # token de rôle consultant résoluble → `as_role("consultant")` doit l'injecter.
+    # resolvable consultant role token → `as_role("consultant")` must inject it.
     File.write!(Path.join(tmp, "consultant.gitea_token"), "tok-consultant")
     File.write!(Path.join(tmp, "reviewer.gitea_token"), "tok-reviewer")
     File.write!(Path.join(tmp, "engineer.gitea_token"), "tok-engineer")
 
-    # :promote passe par `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) → token gatekeeper requis.
+    # :promote goes through `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) →
+    # gatekeeper token required.
     File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
     Fleet.Pilot.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     :ok
   end
 
-  test "await_arch poste le verdict AU NOM DU JUGE (token de rôle écrase le système)" do
+  test "await_arch posts the verdict IN THE JUDGE'S NAME (role token overwrites the system)" do
     step_run = %{
       repo: "fleet/poc",
       issue_number: 3,
@@ -68,11 +70,11 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    # le token système de base est ÉCRASÉ par le token du rôle → auteur forge = Consultant (anti-masking).
+    # the base system token is OVERWRITTEN by the role token → forge author = Consultant (anti-masking).
     assert_received {:comment_token, "tok-consultant"}
   end
 
-  test "complete : le comment signé du step_run est AU NOM DU RÔLE qui finit" do
+  test "complete: the step_run's signed comment is IN THE NAME OF THE finishing ROLE" do
     step_run = %{
       repo: "fleet/poc",
       issue_number: 1,
@@ -92,7 +94,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     assert_received {:comment_token, "tok-consultant"}
   end
 
-  test "juge :promote (terminal) → stop du verrou PR signé JUGE, stop du verrou ISSUE signé PRODUCTEUR" do
+  test "judge :promote (terminal) → PR stopwatch stop signed JUDGE, ISSUE stopwatch stop signed PRODUCER" do
     step_run = %{
       repo: "fleet/proj",
       issue_number: 42,
@@ -109,13 +111,13 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    # verrou PR (7) : le JUGE (reviewer) qui vient de fermer la brique a démarré ce stopwatch
-    # lui-même (son propre tour de review) → stop signé DE SON PROPRE token.
+    # PR stopwatch (7): the JUDGE (reviewer) who just closed the brick started this stopwatch
+    # itself (its own review turn) → stop signed WITH ITS OWN token.
     assert_received {:stop_stopwatch, 7, "tok-reviewer"}
 
-    # verrou ISSUE (42) : démarré par le PRODUCTEUR à `dispatch_issue`, persistant toute la review —
-    # le stop DOIT rester signé PRODUCTEUR (engineer), JAMAIS le rôle du juge qui termine (sinon Gitea
-    # refuse le stop — per-utilisateur — et le stopwatch de l'engineer fuit indéfiniment).
+    # ISSUE stopwatch (42): started by the PRODUCER at `dispatch_issue`, persistent through the
+    # whole review — the stop MUST stay PRODUCER-signed (engineer), NEVER the finishing judge's role
+    # (otherwise Gitea refuses the stop — per-user — and the engineer's stopwatch leaks forever).
     assert_received {:stop_stopwatch, 42, "tok-engineer"}
   end
 end

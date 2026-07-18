@@ -1,30 +1,30 @@
 defmodule Fleet.Pilot.ForgeProtocolTest do
   use ExUnit.Case, async: true
 
-  # Vocabulaire PUR du wire-protocol (aucun I/O) : build+parse co-localisés. Chaque describe prouve
-  # l'invariant `parse ∘ build == identité` (un changement de format casse le test ici, pas en prod).
+  # PURE wire-protocol vocabulary (no I/O): build+parse co-located. Each describe proves the
+  # invariant `parse ∘ build == identity` (a format change breaks the test here, not in prod).
   alias Fleet.Pilot.ForgeProtocol
 
-  # Exemples exécutables des @doc (step_run_marker/2 + step_run_marker?/1) : la doc reste vraie
-  # ou la suite casse.
+  # Executable examples of the @doc (step_run_marker/2 + step_run_marker?/1): the doc stays true
+  # or the suite breaks.
   doctest Fleet.Pilot.ForgeProtocol
 
-  describe "feature_branch/2 + parse_feature_branch/1 (build+parse co-localisés)" do
-    test "parse_feature_branch extrait {issue, role} d'une branche systeme" do
+  describe "feature_branch/2 + parse_feature_branch/1 (build+parse co-located)" do
+    test "parse_feature_branch extracts {issue, role} from a system branch" do
       assert {:ok, {42, "engineer"}} =
                ForgeProtocol.parse_feature_branch("lcars/issue-42-engineer")
 
       assert {:ok, {7, "reviewer"}} = ForgeProtocol.parse_feature_branch("lcars/issue-7-reviewer")
     end
 
-    test "parse_feature_branch :error sur une branche non-fleet" do
+    test "parse_feature_branch :error on a non-fleet branch" do
       assert :error = ForgeProtocol.parse_feature_branch("refs/pull/55/head")
       assert :error = ForgeProtocol.parse_feature_branch("main")
       assert :error = ForgeProtocol.parse_feature_branch("feature/manual")
       assert :error = ForgeProtocol.parse_feature_branch(nil)
     end
 
-    test "feature_branch/2 construit le format ET parse∘build == identité" do
+    test "feature_branch/2 builds the format AND parse∘build == identity" do
       assert "lcars/issue-42-engineer" = ForgeProtocol.feature_branch(42, "engineer")
 
       for {n, role} <- [{1, "engineer"}, {12, "reviewer"}, {999, "qualifier"}] do
@@ -34,22 +34,24 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
     end
   end
 
-  # (Les tests route_marker/parse_route_marker sont retirés : la position workflow_map vit dans le label
-  # SCOPÉ stage/* de l'issue, plus dans un marqueur-commentaire — cf. ForgeClient.get_route/post_route.)
+  # (The route_marker/parse_route_marker tests are removed: the workflow_map position lives in the
+  # SCOPED stage/* label of the issue, no longer in a marker-comment — cf.
+  # ForgeClient.get_route/post_route.)
 
-  describe "step_run_marker/2 + step_run_marker?/1 (build+parse co-localisés)" do
-    test "step_run_marker? reconnaît un marqueur produit par step_run_marker" do
+  describe "step_run_marker/2 + step_run_marker?/1 (build+parse co-located)" do
+    test "step_run_marker? recognizes a marker produced by step_run_marker" do
       assert ForgeProtocol.step_run_marker?(ForgeProtocol.step_run_marker("engineer", "deadbeef"))
     end
 
-    test "step_run_marker? false sur un body sans marqueur / non-binaire" do
-      refute ForgeProtocol.step_run_marker?("juste un commentaire")
+    test "step_run_marker? false on a body without marker / non-binary" do
+      refute ForgeProtocol.step_run_marker?("just a comment")
       refute ForgeProtocol.step_run_marker?(nil)
     end
   end
 
   describe "result_block/1 + parse_result_block/1 (round-trip)" do
-    test "extrait le map du bloc ```result (round-trip avec le format StepRunCompleter N-04)" do
+    test "extracts the map from the ```result block (round-trip with the StepRunCompleter N-04 format)" do
+      # "Livrable …" mirrors the real FR forge comment body posted by the completer.
       body =
         "Livrable de architect.\n\n```result\n" <>
           ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[step_run:architect:abc]"
@@ -58,46 +60,47 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
                ForgeProtocol.parse_result_block(body)
     end
 
-    test "pas de bloc result → nil ; JSON invalide → nil ; nil → nil" do
-      assert nil == ForgeProtocol.parse_result_block("juste un commentaire\n[step_run:x:y]")
-      assert nil == ForgeProtocol.parse_result_block("```result\npas du json\n```")
+    test "no result block → nil; invalid JSON → nil; nil → nil" do
+      assert nil == ForgeProtocol.parse_result_block("just a comment\n[step_run:x:y]")
+      assert nil == ForgeProtocol.parse_result_block("```result\nnot json\n```")
       assert nil == ForgeProtocol.parse_result_block(nil)
     end
 
-    test "result_block/1 round-trip avec parse_result_block/1" do
+    test "result_block/1 round-trip with parse_result_block/1" do
       outputs = %{"severity_max" => "ok", "findings" => 3}
       body = "Livrable.\n" <> ForgeProtocol.result_block(outputs)
 
       assert {:ok, ^outputs} = ForgeProtocol.parse_result_block(body)
     end
 
-    test "result_block/1 : map vide → \"\" (pas de bloc, donc rien à parser)" do
+    test "result_block/1: empty map → \"\" (no block, so nothing to parse)" do
       assert "" == ForgeProtocol.result_block(%{})
       assert "" == ForgeProtocol.result_block(nil)
       assert nil == ForgeProtocol.parse_result_block("Livrable sans result.")
     end
 
-    test "result_block/1 : payload > 8 KB → note, pas de JSON tronqué" do
+    test "result_block/1: payload > 8 KB → note, no truncated JSON" do
       big = %{"blob" => String.duplicate("x", 9000)}
       block = ForgeProtocol.result_block(big)
 
       refute block =~ "```result"
+      # "trop volumineux" pins the FR user-facing note rendered in the forge comment.
       assert block =~ "trop volumineux"
-      # la note n'est pas un bloc result valide → parse renvoie nil (jamais de JSON tronqué).
+      # the note is not a valid result block → parse returns nil (never truncated JSON).
       assert nil == ForgeProtocol.parse_result_block(block)
     end
   end
 
-  describe "system_authored?/2 (primitif de confiance)" do
-    test "true ssi le login de l'auteur == bot" do
+  describe "system_authored?/2 (trust primitive)" do
+    test "true iff the author's login == bot" do
       assert ForgeProtocol.system_authored?(%{"user" => %{"login" => "lcars-bot"}}, "lcars-bot")
       refute ForgeProtocol.system_authored?(%{"user" => %{"login" => "attacker"}}, "lcars-bot")
     end
 
-    test "false sur structure absente / bot vide / non-map" do
+    test "false on missing structure / empty bot / non-map" do
       refute ForgeProtocol.system_authored?(%{"body" => "no user"}, "lcars-bot")
       refute ForgeProtocol.system_authored?(%{"user" => %{"login" => "lcars-bot"}}, "")
-      refute ForgeProtocol.system_authored?("pas un comment", "lcars-bot")
+      refute ForgeProtocol.system_authored?("not a comment", "lcars-bot")
     end
   end
 end

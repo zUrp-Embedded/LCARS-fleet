@@ -1,22 +1,22 @@
 defmodule Fleet.Pilot.ForgeStubs do
   @moduledoc """
-  Stubs ForgeClient partagés entre fichiers de test de fleet_pilot (dédup B6) : les deux tests du
-  sceau gatekeeper (`gatekeeper_seal_test` / `gatekeeper_seal_worktree_test`) et le completer
-  (`step_run_completer_test`) redéfinissaient chacun leur OkForge / MergeFailForge.
+  Shared ForgeClient stubs for pilot test files (B6 dedup): the two gatekeeper seal
+  tests (`gatekeeper_seal_test` / `gatekeeper_seal_worktree_test`) and the completer
+  (`step_run_completer_test`) each need the same OkForge / MergeFailForge.
 
-  Espions : les write-ops forge `send(self(), …)`. L'appelant (`seal_and_merge`, `complete_pr`)
-  tourne DANS le process du test (appels directs, pas de GenServer) → les messages arrivent à la
-  mailbox du test. Un test qui n'asserte pas ces messages les ignore sans coût.
+  Spies: forge write-ops `send(self(), …)`. The caller (`seal_and_merge`, `complete_pr`)
+  runs IN the test process (direct calls, no GenServer) → messages land in the test
+  mailbox. A test that does not assert them ignores them at no cost.
   """
 
   defmodule OkForge do
     @moduledoc """
-    Forge où tout réussit. `post_comment` / `merge_pr` signalent (`{:comment, repo, n, body, opts}`
-    / `{:merge, repo, pr, opts}`) pour prouver l'ORDRE des écritures du sceau et leur SIGNATURE
-    (le token de rôle dans `opts`).
+    Forge where everything succeeds. `post_comment` / `merge_pr` signal
+    (`{:comment, repo, n, body, opts}` / `{:merge, repo, pr, opts}`) to prove the ORDER
+    of the seal's writes and their SIGNATURE (the role token in `opts`).
     """
-    # Forme réelle `ForgeClient.post_comment/4` = {:ok, :posted | :already}, PAS {:ok, 1}
-    # (un id numérique n'est jamais rendu — stub aligné, lot 5 audit).
+    # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}
+    # (a numeric id is never returned — stub aligned).
     def post_comment(repo, n, body, opts) do
       send(self(), {:comment, repo, n, body, opts})
       {:ok, :posted}
@@ -27,14 +27,15 @@ defmodule Fleet.Pilot.ForgeStubs do
       :ok
     end
 
-    # WS2 : le sceau pose stage/merged post-merge — trace système dont l'échec est jeté SANS log par
-    # seal_and_merge (aucun rail ne le re-pose ; cf. gatekeeper_seal.ex). No-op (le stub prouve
-    # l'ordre merge↔comment).
+    # WS2: the seal sets stage/merged post-merge — a system trace whose failure is dropped
+    # WITHOUT a log by seal_and_merge (no rail re-sets it; cf. gatekeeper_seal.ex). No-op
+    # (the stub proves the merge↔comment order).
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
-    # Close explicite (QoL 2026-07-07) : dernier acte de seal_and_merge. SIGNALE (opts inclus) : un test
-    # (GatekeeperSealTest) prouve que le close est signé GATEKEEPER, même identité que merge_pr/comment
-    # (régression QoL 2026-07-07 : le close partait signé système, rupture d'identité dans le sceau).
+    # Explicit close: last act of seal_and_merge. SIGNALS (opts included): a test
+    # (GatekeeperSealTest) proves the close is signed GATEKEEPER, same identity as
+    # merge_pr/comment (regression class: a close signed by the system would break the
+    # identity of the seal).
     def close_issue(repo, n, opts) do
       send(self(), {:close_issue, repo, n, opts})
       {:ok, :closed}
@@ -42,7 +43,7 @@ defmodule Fleet.Pilot.ForgeStubs do
   end
 
   defmodule CloseFailForge do
-    @moduledoc "Merge OK mais `close_issue` ÉCHOUE — prouve que le sceau LOG LOUD (brique mergée reste OUVERTE)."
+    @moduledoc "Merge OK but `close_issue` FAILS — proves the seal LOGS LOUD (merged brick stays OPEN)."
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def merge_pr(_repo, _pr, _opts), do: :ok
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
@@ -51,11 +52,12 @@ defmodule Fleet.Pilot.ForgeStubs do
 
   defmodule MergeFailForge do
     @moduledoc """
-    Forge dont le merge échoue (`{:http, 409, "not fast-forward"}`). `post_comment` SIGNALE
-    (`{:comment, repo, n, body, opts}`) → un test prouve qu'AUCUN « fusionnée » n'est posté quand
-    le merge est KO (F-MERGE-CLAIM-BEFORE-REALITY) via `refute_received`. `open_pr` réussit
-    (`{:ok, 7}`) : le chemin completer `:promote` ouvre la PR PUIS échoue au merge — les tests du
-    sceau, eux, n'appellent jamais `open_pr` (fonction surnuméraire inoffensive).
+    Forge whose merge fails (`{:http, 409, "not fast-forward"}`). `post_comment` SIGNALS
+    (`{:comment, repo, n, body, opts}`) → a test proves that NO « fusionnée » comment (the
+    FR user-facing seal wording) is posted when the merge is KO
+    (F-MERGE-CLAIM-BEFORE-REALITY) via `refute_received`. `open_pr` succeeds (`{:ok, 7}`):
+    the completer `:promote` path opens the PR THEN fails at merge — the seal tests never
+    call `open_pr` (harmless extra function).
     """
     def open_pr(_repo, _head, _base, _title, _opts), do: {:ok, 7}
 

@@ -1,11 +1,12 @@
 defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
-  # async: false — mute la config globale `:forge_write_spacing_ms` (cf. Fleet.Credentials.RoleTokenTest).
+  # async: false — mutates the global `:forge_write_spacing_ms` config (cf. Fleet.Credentials.RoleTokenTest).
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepRunCompleter
 
-  # F-E7 — stub forge qui MARQUE l'ordre de chaque écriture ; le seam `:sleeper` marque le gap. On vérifie
-  # que le gap est INSÉRÉ entre le commentaire de verdict et la route (sinon même seconde → tie dashboard).
+  # F-E7 — forge stub that MARKS the order of every write; the `:sleeper` seam marks the gap. We
+  # verify the gap is INSERTED between the verdict comment and the route (otherwise same second →
+  # dashboard tie).
   defmodule SeqForge do
     def post_comment(_r, _n, _b, _o), do: tag(:comment)
     def post_route(_r, _n, _p, _s, _o), do: tag(:route)
@@ -40,7 +41,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
   defp set_spacing(ms),
     do: Fleet.Pilot.TestEnv.put_env_restoring(:fleet_pilot, :forge_write_spacing_ms, ms)
 
-  test "complete : le gap configuré est INSÉRÉ entre le comment de verdict et la route" do
+  test "complete: the configured gap is INSERTED between the verdict comment and the route" do
     set_spacing(2000)
 
     step_run = %{
@@ -55,7 +56,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
       comment_body: "Verdict du consultant — continue"
     }
 
-    # seam `:sleeper` → on ne dort PAS réellement, on capture la durée demandée (déterministe).
+    # `:sleeper` seam → we do NOT actually sleep, we capture the requested duration (deterministic).
     sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
 
     assert {:ok, :reassigned} =
@@ -65,11 +66,11 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
                sleeper: sleeper
              )
 
-    # ordre : comment AVANT le gap (2s) AVANT la route → plus de tie même-seconde à l'affichage.
+    # order: comment BEFORE the gap (2s) BEFORE the route → no more same-second tie on display.
     assert [:comment, {:slept, 2000}, :route | _] = drain()
   end
 
-  test "spacing 0 (défaut test) → AUCUN gap (pas de sleep parasite dans la suite)" do
+  test "spacing 0 (test default) → NO gap (no stray sleep in the suite)" do
     set_spacing(0)
 
     step_run = %{
@@ -91,16 +92,17 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
                sleeper: sleeper
              )
 
-    # terminal (next_assignee nil → close) : comment puis close, et SURTOUT aucun {:slept, _}.
+    # terminal (next_assignee nil → close): comment then close, and ABOVE ALL no {:slept, _}.
     seq = drain()
     assert :comment in seq
     refute Enum.any?(seq, &match?({:slept, _}, &1))
   end
 
-  # F-QoL (2026-07-07) — flux producteur : la NOTE COMPLÈTE (issue) doit être POSTÉE AVANT la transition
-  # de stage (mutex `stage/build`→`stage/review`) — même doctrine « comment PUIS stage », même gap, que
-  # `complete/2` (consultant). Sans lui : l'ordre observé sur le dashboard forge était INVERSÉ (stage posé
-  # avant le comment, alors que le code posait déjà le comment logiquement en premier — tie même-seconde).
+  # F-QoL — producer flow: the FULL NOTE (issue) must be POSTED BEFORE the stage transition
+  # (mutex `stage/build`→`stage/review`) — same "comment THEN stage" doctrine, same gap, as
+  # `complete/2` (consultant). Without it: the order observed on the forge dashboard was INVERTED
+  # (stage set before the comment, even though the code already posted the comment logically first
+  # — same-second tie).
   defmodule ProducerSeqForge do
     def open_pr(_repo, _head, _base, _title, _opts),
       do:
@@ -151,7 +153,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     def publish(_opts), do: {:ok, %{commit_sha: "deadbeef", pushed?: true, mode: :git_native}}
   end
 
-  test "complete_pr producteur :advance — le gap est INSÉRÉ entre le comment (note eng) et la transition de stage" do
+  test "complete_pr producer :advance — the gap is INSERTED between the comment (eng note) and the stage transition" do
     set_spacing(2000)
 
     step_run = %{
@@ -181,10 +183,10 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
                sleeper: sleeper
              )
 
-    # Every forge write of the producer sequence lands in its OWN second (2026-07-17: push/PR/
-    # comment observed tied and inverted in the activity feed): gap after the publish push, gap
-    # before the eng-note comment, gap before the stage transition. The stub forge does NOT
-    # export create_branch/4 → the API branch pre-create is skipped silently (fallback contract).
+    # Every forge write of the producer sequence lands in its OWN second (push/PR/comment were
+    # observed tied and inverted in the activity feed): gap after the publish push, gap before
+    # the eng-note comment, gap before the stage transition. The stub forge does NOT export
+    # create_branch/4 → the API branch pre-create is skipped silently (fallback contract).
     assert [
              {:slept, 2000},
              :open_pr,
@@ -214,7 +216,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     defdelegate stop_stopwatch(repo, n, opts), to: ProducerSeqForge
   end
 
-  test "complete_pr producteur — la branche cible naît par l'API (une action feed) puis gap avant le push" do
+  test "complete_pr producer — the target branch is born via the API (one feed action) then gap before the push" do
     set_spacing(2000)
 
     step_run = %{
@@ -258,10 +260,10 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
            ] = drain()
   end
 
-  # F-QoL (2026-07-07) — flux PROMOTE (merge, déclenché par le DERNIER juge) : le sceau (merge + comment
-  # + `stage/merged`) doit être VISIBLEMENT antérieur à l'unlock (`lcars-in-flight` retiré, sur la PR —
-  # verrou juge) — même risque de tie même-seconde que ci-dessus, cette fois entre deux écritures de
-  # LABEL de familles distinctes (cf. `Fleet.Labels`).
+  # F-QoL — PROMOTE flow (merge, triggered by the LAST judge): the seal (merge + comment +
+  # `stage/merged`) must be VISIBLY prior to the unlock (`lcars-in-flight` removed, on the PR —
+  # judge lock) — same same-second tie risk as above, this time between two LABEL writes of
+  # distinct families (cf. `Fleet.Labels`).
   defmodule PromoteSeqForge do
     def get_pr_for_branch(_repo, _head, _base, _opts),
       do:
@@ -310,7 +312,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     def stop_stopwatch(_repo, _n, _opts), do: :ok
   end
 
-  test "complete_pr juge :promote — le gap est INSÉRÉ entre le sceau (merge+stage) et l'unlock" do
+  test "complete_pr judge :promote — the gap is INSERTED between the seal (merge+stage) and the unlock" do
     set_spacing(2000)
 
     step_run = %{

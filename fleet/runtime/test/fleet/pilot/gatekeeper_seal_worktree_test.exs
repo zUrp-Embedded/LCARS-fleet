@@ -1,9 +1,10 @@
 defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   @moduledoc """
-  Câblage : `seal_and_merge` DÉCLENCHE la projection du livrable sur le clone local après un merge
-  réussi, et JAMAIS après un merge KO (rien n'a été fusionné → rien à projeter). Le seam `:worktree_sync`
-  pointe un espion ; `seal_and_merge` tourne dans CE process (appel direct, pas de GenServer) → l'espion
-  `send(self(), …)` arrive bien au test. async: false (les seams sont des configs globales, posées/restaurées).
+  Wiring: `seal_and_merge` TRIGGERS the deliverable projection onto the local clone after a
+  successful merge, and NEVER after a failed merge (nothing was merged → nothing to project). The
+  `:worktree_sync` seam points to a spy; `seal_and_merge` runs in THIS process (direct call, no
+  GenServer) → the spy's `send(self(), …)` does reach the test. async: false (seams are global
+  configs, set/restored).
   """
   use ExUnit.Case, async: false
 
@@ -14,39 +15,40 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   @moduletag :tmp_dir
 
   defmodule SpySync do
-    # Appelé synchrone depuis seal_and_merge (même process que le test) → self() = le test.
+    # Called synchronously from seal_and_merge (same process as the test) → self() = the test.
     def sync(repo), do: send(self(), {:worktree_sync, repo})
   end
 
   setup %{tmp_dir: tmp} do
     TestEnv.put_env_restoring(:fleet_pilot, :worktree_sync, SpySync)
 
-    # `seal_and_merge` signe EN INTERNE (`as_gatekeeper` → RoleToken) et est FAIL-CLOSED (soft-default #3 :
-    # plus de fallback système). On pose un token gatekeeper résoluble dans un tmp hermétique (jamais le vrai
-    # `/home/private` du runner) → le sceau procède ; ce test vérifie la projection worktree, pas le token.
+    # `seal_and_merge` signs INTERNALLY (`as_gatekeeper` → RoleToken) and is FAIL-CLOSED
+    # (soft-default #3: no system fallback). We place a resolvable gatekeeper token in a hermetic tmp
+    # (never the runner's real `/home/private`) → the seal proceeds; this test verifies the worktree
+    # projection, not the token.
     File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     :ok
   end
 
-  test "merge OK → projection déclenchée sur le bon repo" do
+  test "merge OK → projection triggered on the right repo" do
     assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [])
     assert_received {:worktree_sync, "fleet/myproj"}
   end
 
-  test "merge KO → AUCUNE projection (le merge n'a pas eu lieu, rien à aligner)" do
+  test "merge KO → NO projection (the merge did not happen, nothing to align)" do
     assert {:error, {:merge, _}} =
              GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/myproj", 7, 42, "engineer", [])
 
     refute_received {:worktree_sync, _}
   end
 
-  test "soft-default #3 — token gatekeeper ABSENT → seal REFUSE (pas de merge sous le système, pas de projection)" do
-    # Fail-closed : sans token de rôle gatekeeper, le sceau NE merge/close PAS sous le compte SYSTÈME
-    # (escalade de privilège + mensonge de traçabilité). Il refuse via le smart-ctor `RoleIdentity` → le
-    # merge n'a pas lieu, rien à projeter. (Le repli #3 : `as_role` renvoyait `forge_opts` inchangé = token
-    # système gardé → merge sous lcars-system.)
+  test "soft-default #3 — gatekeeper token ABSENT → seal REFUSES (no merge as system, no projection)" do
+    # Fail-closed: without a gatekeeper role token, the seal does NOT merge/close under the SYSTEM
+    # account (privilege escalation + traceability lie). It refuses via the `RoleIdentity` smart-ctor
+    # → the merge does not happen, nothing to project. (Fallback #3: an `as_role` returning
+    # `forge_opts` unchanged = system token kept → merge as lcars-system.)
     empty = Path.join(System.tmp_dir!(), "no-gk-token-#{System.unique_integer([:positive])}")
     File.mkdir_p!(empty)
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, empty)
@@ -57,11 +59,12 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     refute_received {:worktree_sync, _}
   end
 
-  test "F-C066 — merge OK mais close ÉCHOUE (persistant) → seal {:error, {:close_after_merge, _}} + log LOUD, projection quand même" do
-    # AVANT (repli B-#4) : `_ = close_issue` jeté → close raté → seal renvoyait `:ok` → brique MERGÉE
-    # restait OUVERTE → re-dispatchée chaque tick, en SILENCE (le RETOUR mentait). F-C066 : retour HONNÊTE
-    # (le merge a réussi mais le close non) après retry borné + log LOUD. L'appelant skippe alors l'unlock
-    # (issue garde lcars-in-flight) et `decide/1` skip `stage/merged` → jamais re-dispatchée. Token posé par le setup.
+  test "F-C066 — merge OK but close FAILS (persistent) → seal {:error, {:close_after_merge, _}} + LOUD log, projection anyway" do
+    # A discarded `_ = close_issue` → failed close → seal returning `:ok` → MERGED brick stays OPEN →
+    # re-dispatched every tick, in SILENCE (the RETURN lied). F-C066: HONEST return (the merge
+    # succeeded but the close did not) after bounded retry + LOUD log. The caller then skips the
+    # unlock (issue keeps lcars-in-flight) and `decide/1` skips `stage/merged` → never re-dispatched.
+    # Token placed by the setup.
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:error, {:close_after_merge, _}} =
@@ -77,7 +80,8 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
 
     assert log =~ "close FAILED"
 
-    # Le merge a eu lieu → la projection worktree EST déclenchée (le close raté n'invalide pas le merge).
+    # The merge did happen → the worktree projection IS triggered (the failed close does not
+    # invalidate the merge).
     assert_received {:worktree_sync, "fleet/myproj"}
   end
 end

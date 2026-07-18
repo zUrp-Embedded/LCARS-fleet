@@ -1,11 +1,11 @@
 defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   @moduledoc """
-  Régression acte4 A-11 — gate capacité PRE-FLIGHT (avant le lock forge). À saturation
-  (`max_pods`), l'ancien flux prenait le lock, découvrait `:max_children` au spawn, puis
-  compensait (unlock) À CHAQUE tick : ~4 écritures forge/issue/30s polluant le timeline, et
-  « plein » comptabilisé en ERREUR (backoff du poller comme si la forge lâchait). Le gate
-  pre-flight défère SANS écriture (`{:skipped, :at_capacity}`) ; le TOCTOU résiduel reste
-  couvert par `max_children` + la compensation (désormais l'exception rare).
+  Regression acte4 A-11 — PRE-FLIGHT capacity gate (before the forge lock). At saturation
+  (`max_pods`), taking the lock first would discover `:max_children` at spawn, then compensate
+  (unlock) EVERY tick: ~4 forge writes/issue/30s polluting the timeline, and "full" tallied as an
+  ERROR (poller backoff as if the forge were failing). The pre-flight gate defers WITHOUT any
+  write (`{:skipped, :at_capacity}`); the residual TOCTOU stays covered by `max_children` + the
+  compensation (now the rare exception).
   """
   use ExUnit.Case, async: true
 
@@ -40,25 +40,25 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
          }}
   end
 
-  # Saturé + pod frais : has_capacity? false, pod_info :error (pod pas vivant).
+  # Saturated + fresh pod: has_capacity? false, pod_info :error (pod not alive).
   defmodule FullFreshSpawner do
     def has_capacity?, do: false
     def pod_info(_pod_id), do: {:error, :not_found}
-    def spawn_pod(_p, _i, _o), do: raise("spawn_pod ne doit JAMAIS être atteint à saturation")
+    def spawn_pod(_p, _i, _o), do: raise("spawn_pod must NEVER be reached at saturation")
     def wake_pod(_pod_id), do: :ok
     def kill_pod(_pod_id), do: :ok
   end
 
-  # Saturé + pod VIVANT : le re-brief ne crée aucun child → ne doit PAS être gaté.
+  # Saturated + ALIVE pod: the re-brief creates no child → must NOT be gated.
   defmodule FullAliveSpawner do
     def has_capacity?, do: false
     def pod_info(_pod_id), do: {:ok, %{phase: :monitoring}}
-    def spawn_pod(_p, _i, _o), do: raise("un pod vivant se re-brief, pas de spawn")
+    def spawn_pod(_p, _i, _o), do: raise("a live pod gets re-briefed, no spawn")
     def wake_pod(_pod_id), do: :ok
     def kill_pod(_pod_id), do: :ok
   end
 
-  # TOCTOU : la place libre au check est volée avant le spawn → :max_children au spawn réel.
+  # TOCTOU: the free slot at check time is stolen before the spawn → :max_children at real spawn.
   defmodule ToctouSpawner do
     def has_capacity?, do: true
     def pod_info(_pod_id), do: {:error, :not_found}
@@ -83,7 +83,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     }
   end
 
-  test "saturé + spawn FRAIS → {:skipped, :at_capacity}, AUCUNE écriture forge (pas de lock)" do
+  test "saturated + FRESH spawn → {:skipped, :at_capacity}, NO forge write (no lock)" do
     assert {:skipped, :at_capacity} =
              Spawn.spawn_step(
                seams(FullFreshSpawner),
@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     refute_received {:remove_label, _}
   end
 
-  test "saturé + pod VIVANT → le re-brief PROCÈDE (un pipe vivant ne crée pas de child : pas affamé)" do
+  test "saturated + ALIVE pod → the re-brief PROCEEDS (a live pipe creates no child: not starved)" do
     assert {:ok, {:spawned, "pod-alive", "engineer"}} =
              Spawn.spawn_step(
                seams(FullAliveSpawner),
@@ -115,12 +115,12 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                "ctx"
              )
 
-    # le lock EST pris (le pod travaille l'issue), aucun kill/compensation
+    # the lock IS taken (the pod is working the issue), no kill/compensation
     assert_received {:add_label, "lcars-in-flight"}
     refute_received {:remove_label, _}
   end
 
-  test "TOCTOU (place volée entre check et spawn) → :max_children au spawn + compensation intacte" do
+  test "TOCTOU (slot stolen between check and spawn) → :max_children at spawn + compensation intact" do
     assert {:error, :max_children} =
              Spawn.spawn_step(
                seams(ToctouSpawner),
@@ -134,12 +134,12 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                "ctx"
              )
 
-    # le lock a été pris PUIS compensé (remove_label) — le filet TOCTOU tient
+    # the lock was taken THEN compensated (remove_label) — the TOCTOU net holds
     assert_received {:add_label, "lcars-in-flight"}
     assert_received {:remove_label, "lcars-in-flight"}
   end
 
-  test "propagation bout-en-bout : dispatch_issue rend {:skipped, :at_capacity} (tally skip, pas erreur)" do
+  test "end-to-end propagation: dispatch_issue returns {:skipped, :at_capacity} (tally skip, not error)" do
     payload = %{
       "issue" => %{
         "number" => 42,

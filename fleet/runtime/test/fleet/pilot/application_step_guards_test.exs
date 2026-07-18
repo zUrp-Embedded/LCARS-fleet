@@ -1,23 +1,23 @@
 defmodule Fleet.Pilot.ApplicationStepGuardsTest do
-  # async: false — mute la config globale :fleet_pilot (step_dispatch?/poll_repo/...).
+  # async: false — mutates the global :fleet_pilot config (step_dispatch?/poll_repo/...).
   use ExUnit.Case, async: false
 
   @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge, :reviewer_roles]
 
   setup do
-    # Les tests posent ces clés eux-mêmes ; on n'enregistre ici que leur restauration.
+    # Tests set these keys themselves; we only register their restoration here.
     Enum.each(@keys, &Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
     :ok
   end
 
-  # F-027 + F-037 : avant, `step_dispatch?: true` + config incomplète → `step_children` rendait `[]` en
-  # SILENCE → l'app pilot démarrait « verte » sans Poller/StepRunConsumer (rail forge mort, zéro log). Désormais :
-  # l'opérateur a DEMANDÉ le mode step → config incomplète = deploy cassé → raise au boot. F-037 a re-pointé
-  # la garde : ce n'est plus `:poll_repo` (le poller DÉCOUVRE par appartenance-org, WS3) ni un remote figé
-  # (per-step-run), mais la forge `base_url` — sans elle, ni découverte (`list_org_repos`) ni push
-  # (remote per-step-run) ne marchent.
+  # F-027 + F-037: with `step_dispatch?: true` + incomplete config, a `step_children` returning `[]`
+  # in SILENCE would boot the pilot app "green" without Poller/StepRunConsumer (forge rail dead, zero
+  # log). Instead: the operator ASKED for step mode → incomplete config = broken deploy → raise at
+  # boot. F-037 re-targeted the guard: it is not `:poll_repo` (the poller DISCOVERS via
+  # org-membership, WS3) nor a frozen remote (per-step-run), but the forge `base_url` — without it,
+  # neither discovery (`list_org_repos`) nor push (per-step-run remote) work.
 
-  test "F-037 : step_dispatch? true sans forge base_url (:forge absent) → raise (rail mort évité)" do
+  test "F-037: step_dispatch? true without forge base_url (:forge absent) → raise (dead rail avoided)" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.delete_env(:fleet_pilot, :forge)
 
@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     end
   end
 
-  test "F-037 : step_dispatch? true mais :forge sans :base_url → raise" do
+  test "F-037: step_dispatch? true but :forge without :base_url → raise" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, token: "x")
 
@@ -35,24 +35,24 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     end
   end
 
-  test "F-037 : :poll_repo n'est PLUS requis (découverte par appartenance-org) — pas de raise sur son absence seule" do
-    # La garde ne dépend plus de :poll_repo. Avec une forge base_url présente, l'absence de :poll_repo ne
-    # déclenche RIEN (on vérifie via step_children! qu'aucune RuntimeError « base_url » n'est levée).
+  test "F-037: :poll_repo is NOT required anymore (org-membership discovery) — no raise on its absence alone" do
+    # The guard no longer depends on :poll_repo. With a forge base_url present, a missing :poll_repo
+    # triggers NOTHING (we verify via step_children! that no "base_url" RuntimeError is raised).
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
     Application.delete_env(:fleet_pilot, :poll_repo)
 
-    # On exerce la résolution des child-specs (sans démarrer le superviseur, qui enregistrerait les
-    # singletons sous leurs noms globaux et entrerait en conflit). `:poll_repo` absent → pas de raise.
+    # We exercise child-spec resolution (without starting the supervisor, which would register the
+    # singletons under their global names and conflict). `:poll_repo` absent → no raise.
     children = Fleet.Pilot.Application.step_children_for_test()
     assert Enum.any?(children, &match?({Fleet.Pilot.Poller, _}, &1))
     assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
   end
 
-  # F-C061 Vecteur 2 (own-goal config) : `:reviewer_roles` est fail-loud sur l'ABSENCE mais pas sur un
-  # contenu absurde. Un login non-rôle y serait posé sur les PR + bumperait required_approvals, puis
-  # wedgerait en silence au dispatch. La garde boot valide que chaque juré résout en cap-profile judge.
-  test "F-C061 V2 : :reviewer_roles avec un login NON-rôle (humain) → raise au boot" do
+  # F-C061 Vector 2 (config own-goal): `:reviewer_roles` is fail-loud on ABSENCE but not on absurd
+  # content. A non-role login would be set on PRs + bump required_approvals, then wedge silently at
+  # dispatch. The boot guard validates that each juror resolves to a judge cap-profile.
+  test "F-C061 V2: :reviewer_roles with a NON-role login (human) → raise at boot" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
     Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "lordzurp"])
@@ -62,10 +62,10 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     end
   end
 
-  test "F-C061 V2 : :reviewer_roles avec un rôle NON-juge (worker) → raise au boot" do
+  test "F-C061 V2: :reviewer_roles with a NON-judge role (worker) → raise at boot" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
-    # engineer résout (cap-profile) mais brief_kind: worker → pas un juré valide.
+    # engineer resolves (cap-profile) but brief_kind: worker → not a valid juror.
     Application.put_env(:fleet_pilot, :reviewer_roles, ["qualifier", "engineer"])
 
     assert_raise RuntimeError, ~r/NOT a judge/, fn ->

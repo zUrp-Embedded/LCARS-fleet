@@ -1,20 +1,20 @@
 defmodule Fleet.Pilot.StepRunConsumerGateTest do
   @moduledoc """
-  A2.3 / B (L441) — la gate du step FINI decide la fin-de-step-run. Corr.3 engineer-first : le step
-  producteur (engineer, git_native) finit, sa gate decide, et le step_run est PR-natif :
+  A2.3 / B (L441) — the FINISHED step's gate decides the end-of-step-run. Engineer-first: the
+  producer step (engineer, git_native) finishes, its gate decides, and the step_run is PR-native:
 
-    * gate :pass               -> avance (request_review du juge suivant + pont set_assignee)
-    * gate {:fail}             -> rebond producteur (re-dispatch, PAS de PR), BORNE (budget step_runs)
-    * budget epuise            -> {:error, {:rework_exhausted, _}} (aucune ecriture forge)
-    * gate soft/non-tranchable -> ESCALADE gatekeeper (inchange) ; le verdict revient async :
-      resume_gate continue->avance(PR), abandon->close(5), humain->await_arch(5).
+    * gate :pass               -> advance (request_review of the next judge + set_assignee bridge)
+    * gate {:fail}             -> producer bounce (re-dispatch, NO PR), BOUNDED (step_run budget)
+    * budget exhausted         -> {:error, {:rework_exhausted, _}} (no forge write)
+    * soft/undecidable gate    -> gatekeeper ESCALATION (unchanged); the verdict comes back async:
+      resume_gate continue->advance(PR), abandon->close(§5), human->await_arch(§5).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.StepRunConsumer
   alias Fleet.Pilot.StubTaskQueue
 
-  # Sim forge : §5 (abandon/await) + primitives PR (Corr.3). Compteur de step_runs via forge_opts[:_step_runs].
+  # Forge sim: §5 (abandon/await) + PR primitives. Step_run counter via forge_opts[:_step_runs].
   defmodule StubForge do
     def post_comment(_r, _n, body, _o), do: send(self(), {:comment, body}) && {:ok, :posted}
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       do: send(self(), {:open_pr, head, base, o[:body]}) && {:ok, 7}
 
     def get_pr_for_branch(_r, head, base, _o), do: send(self(), {:get_pr, head, base}) && {:ok, 7}
-    # #8.E : un juge de BRIEF (brief-review) est PRÉ-PR → aucune PR producteur ouverte.
+    # #8.E: a BRIEF judge (brief-review) is PRE-PR → no producer PR open.
     def list_open_pulls(_r, _o), do: {:ok, []}
     def request_review(_r, pr, revs, _o), do: send(self(), {:request_review, pr, revs}) && :ok
     def post_review(_r, pr, ev, body, _o), do: send(self(), {:review, pr, ev, body}) && :ok
@@ -48,8 +48,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
   end
 
-  # WorkflowMaps engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
-  # `gated` : hard gate sur build. `soft` : soft gate sur build (B -> escalade). `plain` : aucune.
+  # Engineer-first 2-step WorkflowMaps: build(engineer, producer) -> review(reviewer, judge).
+  # `gated`: hard gate on build. `soft`: soft gate on build (B -> escalation). `plain`: none.
   defmodule WorkflowMap do
     def load!("gated") do
       %{
@@ -66,7 +66,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # Preuve « budget = DONNÉE du map » : même forme que "gated" mais budget déclaré 4 (→ total 2×5=10).
+    # Proof "budget = map DATA": same shape as "gated" but declared budget 4 (→ total 2×5=10).
     def load!("gated4") do
       %{
         "name" => "gated4",
@@ -104,7 +104,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # #8.E : workflow_map brief-gate — step racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
+    # #8.E: brief-gate workflow_map — root step brief-review (the consultant JUDGES the BRIEF,
+    # pre-PR) -> build.
     def load!("mandgate") do
       %{
         "name" => "mandgate",
@@ -121,9 +122,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # MA-12 : workflow_map 1-step `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
-    # Le verdict gatekeeper « continue » sur ce terminal producteur devait :promote (merge SANS juges,
-    # régression #8.F) ; le fix route par tag_advance(_, producer?) → :review (PR + juges).
+    # MA-12: 1-step workflow_map `build`(engineer, PRODUCER) TERMINAL with a SOFT gate → gatekeeper
+    # escalation. A gatekeeper "continue" verdict on this producer terminal used to :promote (merge
+    # WITHOUT judges, regression #8.F); the fix routes via tag_advance(_, producer?) → :review
+    # (PR + judges).
     def load!("softterm") do
       %{
         "name" => "softterm",
@@ -134,8 +136,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # D2/G3 : workflow_map 1-step avec gate terminal `human_approval_required` (comme standard-qa
-    # brainstorm/plan/spec). L'aval humain → escalade DIRECTE arch (pas un rework).
+    # D2/G3: 1-step workflow_map with terminal gate `human_approval_required` (like standard-qa
+    # brainstorm/plan/spec). Human approval → DIRECT arch escalation (not a rework).
     def load!("humanapp") do
       %{
         "name" => "humanapp",
@@ -171,13 +173,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       task_queue: StubTaskQueue,
       spawner: StubSpawner,
       gatekeeper_pod_id_fun: Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper" end),
-      # MA-17 — seam du recovery de wake (défaut = la vraie fn ; un test l'injecte pour simuler l'escalade).
+      # MA-17 — wake recovery seam (default = the real fn; a test injects it to simulate escalation).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{}
     }
   end
 
-  # pod.completed du step producteur `build` (engineer) qui vient de finir, avec son result.
+  # pod.completed of the producer step `build` (engineer) that just finished, with its result.
   defp build_done(workflow_map_name, result) do
     %{
       "issue_id" => "issue-1",
@@ -190,7 +192,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     }
   end
 
-  # contexte de reprise tel que le construit gate_decide a l'escalade (workflow_map "soft").
+  # resume context as gate_decide builds it at escalation ("soft" workflow_map).
   defp soft_ctx do
     %{
       n: 1,
@@ -201,24 +203,24 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     }
   end
 
-  # ── Happy path : pass / fail / budget ────────────────────────────────────────
+  # ── Happy path: pass / fail / budget ────────────────────────────────────────
 
-  test "gate :pass -> producteur :advance : ouvre la PR, request_review(reviewer), grave la route" do
+  test "gate :pass -> producer :advance: opens the PR, request_review(reviewer), records the route" do
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(build_done("gated", %{"ok" => true}), hc())
 
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
 
-    # plus de set_assignee (PR-driven) : la position workflow_map est gravee (route), le trigger = la review
+    # no more set_assignee (PR-driven): the workflow_map position is recorded (route), the trigger = the review
     refute_received {:assignee, _}
     assert_received {:route, "gated", "review"}
 
-    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    # The ISSUE lock is NOT lifted at advance anymore — persists until the final :promote.
     refute_received :unlocked
   end
 
-  test "pas de gate sur le step -> avance (comportement inchange)" do
+  test "no gate on the step -> advance (unchanged behavior)" do
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(build_done("plain", %{}), hc())
 
@@ -228,24 +230,24 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:route, "plain", "review"}
   end
 
-  test "gate {:fail} sous budget -> rebond producteur (engineer), PAS de PR" do
+  test "gate {:fail} under budget -> producer bounce (engineer), NO PR" do
     payload = build_done("gated", %{})
 
     assert {:ok, :rework_requested} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 0]))
 
-    # producteur rework : pas de set_assignee (l'engineer reste assigne par Entry) ; route rebondie
+    # producer rework: no set_assignee (the engineer stays assigned by Entry); route bounced
     refute_received {:assignee, _}
     assert_received {:route, "gated", "build"}
     assert_received :unlocked
     refute_received {:open_pr, _, _, _}
   end
 
-  test "gate {:fail} + budget epuise -> ESCALADE await_arch (fin du churn G2), plus de {:error} log-only" do
-    # budget = nb_steps(2) * (max_rework_rounds(2) + 1) = 6 ; step_runs deja a 6 => epuise.
-    # AVANT (bug G2) : {:error, {:rework_exhausted}} remontait en {:noreply} log-only -> le reaper
-    # re-dispatchait -> re-fail -> churn infini sans notif humaine. MAINTENANT : escalade vers l'arch
-    # (comment + lcars-awaits-arch + unlock) -> le poller skip l'issue -> l'humain tranche.
+  test "gate {:fail} + budget exhausted -> ESCALATION await_arch (end of G2 churn), no more log-only {:error}" do
+    # budget = nb_steps(2) * (max_rework_rounds(2) + 1) = 6; step_runs already at 6 => exhausted.
+    # G2 bug: {:error, {:rework_exhausted}} bubbled up as a log-only {:noreply} -> the reaper
+    # re-dispatched -> re-fail -> infinite churn without human notification. NOW: escalation to the
+    # arch (comment + lcars-awaits-arch + unlock) -> the poller skips the issue -> the human decides.
     payload = build_done("gated", %{})
 
     assert {:ok, :awaiting_arch} =
@@ -253,49 +255,51 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     assert_received {:label, "lcars-awaits-arch"}
 
-    # unlock LOAD-BEARING : retire lcars-in-flight -> le poller ne re-dispatche plus (fin du churn).
+    # LOAD-BEARING unlock: removes lcars-in-flight -> the poller stops re-dispatching (end of churn).
     assert_received :unlocked
     assert_received {:comment, body}
+    # "Architecte" pins the FR user-facing escalation comment.
     assert body =~ "Rework"
     assert body =~ "Architecte"
-    # KICK actif de l'arch (sas unique vers l'humain).
+    # active KICK of the arch (the single airlock to the human).
     assert_received {:wake, "permanent-architect"}
-    # escalade humaine, PAS un rebond (PR) ni un abandon (close).
+    # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
   end
 
-  test "gate terminal human_approval -> ESCALADE DIRECTE await_arch (D2, pas 6 rounds de rework gaspilles)" do
-    # human_approval n'est PAS un echec de gate : escalade humaine DIRECTE (await_arch), sans passer par
-    # le rework (qui gaspillerait `budget` spawns producteur avant d'escalader de toute facon).
+  test "terminal human_approval gate -> DIRECT ESCALATION await_arch (D2, no 6 wasted rework rounds)" do
+    # human_approval is NOT a gate failure: DIRECT human escalation (await_arch), without going
+    # through rework (which would waste `budget` producer spawns before escalating anyway).
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(build_done("humanapp", %{}), hc())
 
     assert_received {:label, "lcars-awaits-arch"}
     assert_received :unlocked
     assert_received {:comment, body}
+    # "Aval humain" / "Architecte" pin the FR user-facing escalation comment.
     assert body =~ "Aval humain"
     assert body =~ "Architecte"
     assert_received {:wake, "permanent-architect"}
-    # escalade, PAS un rebond (rework) ni une PR.
+    # escalation, NOT a bounce (rework) nor a PR.
     refute_received {:open_pr, _, _, _}
   end
 
-  test "budget : juste sous la limite rebondit, pile a la limite ESCALADE (await_arch, plus de churn)" do
+  test "budget: just under the limit bounces, right at the limit ESCALATES (await_arch, no more churn)" do
     payload = build_done("gated", %{})
 
     assert {:ok, :rework_requested} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 5]))
 
-    # pile a la limite : budget epuise -> escalade humaine (await_arch), plus le {:error} avale (G2).
+    # right at the limit: budget exhausted -> human escalation (await_arch), no more swallowed {:error} (G2).
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
   end
 
-  test "budget map-level HONORÉ : gated4(max_rework_rounds:4) rebondit là où gated(2) escalade" do
-    # Preuve que le budget vient de la DONNÉE du map, pas d'un défaut codé : gated4 déclare
-    # max_rework_rounds:4 → budget = nb_steps(2) × (4+1) = 10. À 6 step_runs, gated(budget 6) ESCALADE
-    # (test ci-dessus) mais gated4(budget 10) REBONDIT encore ; à 10, gated4 escalade à son tour.
+  test "map-level budget HONORED: gated4(max_rework_rounds:4) bounces where gated(2) escalates" do
+    # Proof that the budget comes from the map's DATA, not a coded default: gated4 declares
+    # max_rework_rounds:4 → budget = nb_steps(2) × (4+1) = 10. At 6 step_runs, gated(budget 6)
+    # ESCALATES (test above) but gated4(budget 10) still BOUNCES; at 10, gated4 escalates in turn.
     payload = build_done("gated4", %{})
 
     assert {:ok, :rework_requested} =
@@ -305,7 +309,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 10]))
   end
 
-  test "step_run producteur ordinaire -> livrable git_native (le pod a commite) pousse a l'ouverture PR" do
+  test "ordinary producer step_run -> git_native deliverable (the pod committed) pushed at PR opening" do
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(build_done("plain", %{}), hc())
 
@@ -314,9 +318,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(d, :files)
   end
 
-  # ── B (L441) : escalade gatekeeper (gate soft sur le step producteur) ────────
+  # ── B (L441): gatekeeper escalation (soft gate on the producer step) ────────
 
-  test "gate soft -> ESCALADE : brief enqueue, AUCUNE avance/ecriture forge" do
+  test "soft gate -> ESCALATION: brief enqueued, NO advance/forge write" do
     assert {:escalate, "corr-1", ctx} =
              StepRunConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
 
@@ -336,11 +340,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received :unlocked
   end
 
-  # MA-17 — le retour du kick gatekeeper est LOAD-BEARING. AVANT : `_ = kick_gatekeeper(...)` jetait le
-  # retour de WakeRecovery.wake → un gatekeeper jamais réveillé restait INVISIBLE (le verdict ne reviendrait
-  # jamais, gate stallée en silence). Le brief d'éval EST enqueué → l'escalade reste légitime
-  # ({:escalate, corr, _}), mais le kick injoignable est SURFACÉ (telemetry), pas confondu avec un kick OK.
-  test "MA-17 : kick gatekeeper INJOIGNABLE → escalade quand même MAIS surfacé en telemetry (pas avalé)" do
+  # MA-17 — the gatekeeper kick's return is LOAD-BEARING. A `_ = kick_gatekeeper(...)` discarding
+  # WakeRecovery.wake's return → a never-woken gatekeeper stayed INVISIBLE (the verdict would never
+  # come back, gate silently stalled). The eval brief IS enqueued → the escalation stays legitimate
+  # ({:escalate, corr, _}), but the unreachable kick is SURFACED (telemetry), not conflated with an
+  # OK kick.
+  test "MA-17: gatekeeper kick UNREACHABLE → escalates anyway BUT surfaced via telemetry (not swallowed)" do
     ref =
       :telemetry_test.attach_event_handlers(self(), [
         [:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached]
@@ -348,10 +353,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     on_exit(fn -> :telemetry.detach(ref) end)
 
-    # Seam : le recovery de wake ESCALADE (gatekeeper injoignable, re-wake KO → starfleet).
+    # Seam: the wake recovery ESCALATES (gatekeeper unreachable, re-wake KO → starfleet).
     escalating = fn _pod, _respawn, _opts -> {:error, {:escalated, :dead}} end
 
-    # L'escalade reste légitime : le brief est enqueué, corr retourné (le verdict reviendra au re-wake).
+    # The escalation stays legitimate: the brief is enqueued, corr returned (the verdict will come
+    # back at re-wake).
     assert {:escalate, "corr-1", _ctx} =
              StepRunConsumer.maybe_complete(
                build_done("soft", %{"sev" => "high"}),
@@ -360,12 +366,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     assert_received {:enqueued, "gatekeeper", _attrs}
 
-    # LE finding : le kick injoignable est SURFACÉ (telemetry émise), pas avalé silencieusement.
+    # THE finding: the unreachable kick is SURFACED (telemetry emitted), not silently swallowed.
     assert_received {[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached], ^ref,
                      %{count: 1}, %{pod_id: "gatekeeper", reason: {:escalated, :dead}}}
   end
 
-  test "escalade : outputs ENVELOPPES %{status,result} -> deplies avant le brief (#2)" do
+  test "escalation: ENVELOPED outputs %{status,result} -> unwrapped before the brief (#2)" do
     enveloped = %{"status" => "ok", "result" => %{"sev" => "low"}}
 
     assert {:escalate, "corr-1", _ctx} =
@@ -375,7 +381,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert attrs.metadata["outputs"] == %{"sev" => "low"}
   end
 
-  test "escalade : pas de gatekeeper boote -> fail-loud (jamais un pass silencieux)" do
+  test "escalation: no gatekeeper booted -> fail-loud (never a silent pass)" do
     state = hc(gatekeeper_pod_id_fun: fn -> nil end)
 
     assert {:error, {:gatekeeper_dispatch, :no_gatekeeper}} =
@@ -385,15 +391,15 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received :unlocked
   end
 
-  # ── B : reprise sur le verdict du gatekeeper (resume_gate/3) ──────────────────
-  # NB Corr.3 : continue passe par complete_pr (PR-natif). La trace verdict n'est PAS encore
-  # materialisee sur la PR (gap transitionnel) ; abandon/await gardent la sequence §5 (trace ok).
+  # ── B: resume on the gatekeeper's verdict (resume_gate/3) ──────────────────
+  # NB: continue goes through complete_pr (PR-native). The verdict trace is NOT yet materialized on
+  # the PR (transitional gap); abandon/await keep the §5 sequence (trace ok).
 
-  test "verdict continue -> producteur :advance (ouvre PR + request_review + route)" do
+  test "continue verdict -> producer :advance (opens PR + request_review + route)" do
     assert {:ok, :review_requested} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
+               %{"result" => %{"decision" => "continue", "reason" => "all clear"}},
                hc()
              )
 
@@ -404,15 +410,15 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:publish, d}
     assert d.mode == :git_native
 
-    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    # The ISSUE lock is NOT lifted at advance anymore — persists until the final :promote.
     refute_received :unlocked
   end
 
-  test "verdict continue ENVELOPPE %{status,result} -> deplie (gate_result), avance" do
+  test "ENVELOPED continue verdict %{status,result} -> unwrapped (gate_result), advances" do
     raw = %{
       result: %{
         "status" => "ok",
-        "result" => %{"decision" => "continue", "reason" => "critère satisfait"}
+        "result" => %{"decision" => "continue", "reason" => "criterion satisfied"}
       }
     }
 
@@ -420,11 +426,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:route, "soft", "review"}
   end
 
-  test "verdict abandon -> close (terminal §5), PAS de push business (travail rejete)" do
+  test "abandon verdict -> close (terminal §5), NO business push (work rejected)" do
     assert {:ok, :completed} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "abandon", "reason" => "travail non récupérable"}},
+               %{"result" => %{"decision" => "abandon", "reason" => "unrecoverable work"}},
                hc()
              )
 
@@ -432,18 +438,18 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:publish, _}
     refute_received {:assignee, _}
 
-    # #5.2 — abandon NOTIFIE l'arch (sas user) : kick + commentaire adressé-arch (pas d'enterrement muet).
+    # #5.2 — abandon NOTIFIES the arch (user airlock): kick + arch-addressed comment (no silent burial).
     assert_received {:wake, "permanent-architect"}
     assert_received {:comment, abody}
     assert abody =~ "Architecte"
   end
 
-  test "verdict escalate_user -> await_arch (lcars-awaits-arch + unlock, pas close/reassign) + KICK arch" do
+  test "escalate_user verdict -> await_arch (lcars-awaits-arch + unlock, no close/reassign) + arch KICK" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
                %{
-                 "result" => %{"decision" => "escalate_user", "reason" => "au-delà du gatekeeper"}
+                 "result" => %{"decision" => "escalate_user", "reason" => "beyond the gatekeeper"}
                },
                hc()
              )
@@ -456,30 +462,32 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert body =~ "gatekeeper"
     assert body =~ "escalate_user"
 
-    # #5.2 — commentaire ADRESSÉ à l'arch (sas unique) + KICK actif (l'arch arme son monitor au spawn).
+    # #5.2 — comment ADDRESSED to the arch (single airlock) + active KICK (the arch arms its
+    # monitor at spawn).
     assert body =~ "Architecte"
     assert_received {:wake, "permanent-architect"}
   end
 
-  test "verdict halt_wait_input -> await_arch" do
+  test "halt_wait_input verdict -> await_arch" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
-               %{"result" => %{"decision" => "halt_wait_input", "reason" => "info manquante"}},
+               %{"result" => %{"decision" => "halt_wait_input", "reason" => "missing info"}},
                hc()
              )
 
     assert_received {:label, "lcars-awaits-arch"}
   end
 
-  test "F-C161 : verdict valide SANS reason non-vide → halt_invalid (fail-closed, pas d'approbation sans justification)" do
-    # gate-decision-v1.json exige `reason` (minLength 1) ; le décodeur l'ENFORCE désormais (plus seulement
-    # l'enum decision). Un `continue` sans motif = approbation sans trace durable (ce qui a coulé v1) →
-    # refusé : halt_invalid → escalade humaine. La décision reste valide, mais le verdict est malformé.
+  test "F-C161: valid verdict WITHOUT a non-empty reason → halt_invalid (fail-closed, no approval without justification)" do
+    # gate-decision-v1.json requires `reason` (minLength 1); the decoder now ENFORCES it (not just
+    # the decision enum). A `continue` without a motive = approval without a durable trace (what
+    # sank v1) → refused: halt_invalid → human escalation. The decision stays valid, but the
+    # verdict is malformed.
     assert "continue" ==
              Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
                "decision" => "continue",
-               "reason" => "critère ok"
+               "reason" => "criterion ok"
              })
 
     assert "halt_invalid" ==
@@ -491,7 +499,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                "reason" => ""
              })
 
-    # Bout-en-bout : un `continue` sans reason ne PROMEUT/AVANCE pas — il escalade (await_arch), jamais un merge.
+    # End-to-end: a `continue` without reason does NOT promote/advance — it escalates (await_arch),
+    # never a merge.
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
@@ -502,7 +511,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:label, "lcars-awaits-arch"}
   end
 
-  test "verdict redirect -> await_arch (differe A2.x, pas de routage hors-DAG)" do
+  test "redirect verdict -> await_arch (deferred A2.x, no off-DAG routing)" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
                soft_ctx(),
@@ -514,7 +523,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:assignee, _}
   end
 
-  test "verdict absent/invalide -> await_arch (fail-closed, jamais continue silencieux)" do
+  test "absent/invalid verdict -> await_arch (fail-closed, never a silent continue)" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(soft_ctx(), %{"result" => %{}}, hc())
 
@@ -522,17 +531,19 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:assignee, _}
     refute_received :closed
     assert_received {:comment, body}
+    # "illisible ou absent" pins the FR user-facing escalation comment.
     assert body =~ "illisible ou absent"
   end
 
-  # ── MA-12 : verdict « continue » sur PRODUCTEUR TERMINAL → :review (PR + juges), JAMAIS :promote ──
-  # Le bug : `apply_verdict` "continue" hardcodait `intent = if is_nil(next_assignee), do: :promote` →
-  # sur un terminal, TOUJOURS :promote, ignorant le rôle qui finit → un PRODUCTEUR jugé continue mergeait
-  # SANS juges (réouverture #8.F). Le fix route par tag_advance(advance(...), producer?(role)) — même split
-  # que le chemin gate :pass. NB : ce chemin (verdict gatekeeper "continue") est DISTINCT du test
-  # `gate :pass producteur terminal` plus haut (qui passe par gate_decide, pas apply_verdict).
+  # ── MA-12: "continue" verdict on a TERMINAL PRODUCER → :review (PR + judges), NEVER :promote ──
+  # The bug: `apply_verdict` "continue" hardcoded `intent = if is_nil(next_assignee), do: :promote`
+  # → on a terminal, ALWAYS :promote, ignoring the finishing role → a PRODUCER judged continue
+  # merged WITHOUT judges (#8.F reopening). The fix routes via
+  # tag_advance(advance(...), producer?(role)) — same split as the gate :pass path. NB: this path
+  # (gatekeeper "continue" verdict) is DISTINCT from the `gate :pass terminal producer` test above
+  # (which goes through gate_decide, not apply_verdict).
 
-  # ctx de reprise pour une workflow_map softterm (build engineer = producteur TERMINAL, gate soft).
+  # resume ctx for a softterm workflow_map (build engineer = TERMINAL producer, soft gate).
   defp softterm_ctx do
     %{
       n: 1,
@@ -551,26 +562,26 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     }
   end
 
-  test "MA-12 : verdict continue sur producteur TERMINAL → :review (ouvre PR + request_review), JAMAIS merge" do
+  test "MA-12: continue verdict on a TERMINAL producer → :review (opens PR + request_review), NEVER merge" do
     assert {:ok, :review_requested} =
              StepRunConsumer.resume_gate(
                softterm_ctx(),
-               %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
+               %{"result" => %{"decision" => "continue", "reason" => "all clear"}},
                hc()
              )
 
-    # le producteur terminal OUVRE la PR + demande le(s) juge(s) — il ne merge JAMAIS seul.
+    # the terminal producer OPENS the PR + requests the judge(s) — it NEVER merges alone.
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, _revs}
-    # LE finding : AUCUN merge direct (le bug :promote aurait mergé sans juges).
+    # THE finding: NO direct merge (the :promote bug would have merged without judges).
     refute_received {:merge, _}
   end
 
-  # ── #8.E : verdict d'un juge de BRIEF (brief-review/consultant) via pod.completed ──────────
-  # MÊME apply_verdict que le gatekeeper (factorisé) ; le consultant est PRÉ-PR → avance ISSUE-LEVEL
-  # (grave route, pas de PR) et trace attribuée au CONSULTANT (pas "gatekeeper").
+  # ── #8.E: verdict of a BRIEF judge (brief-review/consultant) via pod.completed ──────────
+  # SAME apply_verdict as the gatekeeper (factored); the consultant is PRE-PR → ISSUE-LEVEL advance
+  # (records the route, no PR) and trace attributed to the CONSULTANT (not "gatekeeper").
 
-  # pod.completed du step brief-review (consultant) qui vient de rendre son verdict.
+  # pod.completed of the brief-review step (consultant) that just returned its verdict.
   defp brief_done(result),
     do: %{
       "issue_id" => "issue-1",
@@ -582,28 +593,28 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       "result" => result
     }
 
-  test "#8.E brief-review continue -> AVANCE issue-level vers build (route+commentaire, PAS de PR, assignee intact)" do
+  test "#8.E brief-review continue -> ISSUE-LEVEL advance to build (route+comment, NO PR, assignee intact)" do
     assert {:ok, :reassigned} =
              StepRunConsumer.maybe_complete(
-               brief_done(%{"decision" => "continue", "reason" => "brief clair"}),
+               brief_done(%{"decision" => "continue", "reason" => "clear brief"}),
                hc()
              )
 
-    # avance ISSUE-LEVEL : grave la route vers build ; AUCUNE PR ouverte (le consultant juge pré-PR).
+    # ISSUE-LEVEL advance: records the route to build; NO PR opened (the consultant judges pre-PR).
     assert_received {:route, "mandgate", "build"}
     refute_received {:open_pr, _, _, _}
     refute_received {:assignee, _}
     assert_received :unlocked
-    # trace attribuée au CONSULTANT (honnête), pas au gatekeeper.
+    # trace attributed to the CONSULTANT (honest), not the gatekeeper.
     assert_received {:comment, body}
     assert body =~ "consultant"
     assert body =~ "continue"
   end
 
-  test "#8.E brief-review escalate_user -> await_arch (arch) ; trace CONSULTANT, pas gatekeeper" do
+  test "#8.E brief-review escalate_user -> await_arch (arch); CONSULTANT trace, not gatekeeper" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(
-               brief_done(%{"decision" => "escalate_user", "reason" => "brief ambigu"}),
+               brief_done(%{"decision" => "escalate_user", "reason" => "ambiguous brief"}),
                hc()
              )
 
@@ -616,10 +627,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute body =~ "gatekeeper"
   end
 
-  test "#8.E brief-review abandon -> close (brief jeté), PAS de PR ni de push" do
+  test "#8.E brief-review abandon -> close (brief discarded), NO PR nor push" do
     assert {:ok, :completed} =
              StepRunConsumer.maybe_complete(
-               brief_done(%{"decision" => "abandon", "reason" => "brief jeté"}),
+               brief_done(%{"decision" => "abandon", "reason" => "brief discarded"}),
                hc()
              )
 
@@ -628,11 +639,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:publish, _}
   end
 
-  # ── #8-fix « un producteur ne merge JAMAIS seul » ───────────────────────────────────────
-  test "producteur terminal (build, dernier step de la workflow_map) -> :review (PR + juges), JAMAIS :promote/merge" do
-    # mandgate = brief-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
-    # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
-    # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
+  # ── #8-fix "a producer NEVER merges alone" ───────────────────────────────────────
+  test "terminal producer (build, last step of the workflow_map) -> :review (PR + judges), NEVER :promote/merge" do
+    # mandgate = brief-review -> build; build (engineer, producer) is TERMINAL. Before the fix it
+    # did :promote (merge without judges = #8.F regression). With it: :review -> opens the PR +
+    # requests [qualifier, reviewer]; the proven PR-driven path (dispatch_by_verdicts) then seals
+    # at the gatekeeper.
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(build_done("mandgate", %{}), hc())
 
@@ -641,14 +653,15 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:merge, _}
   end
 
-  # ── B : cablage async (GenServer) — store gate_evals a l'escalade, pop a la reprise ──
+  # ── B: async wiring (GenServer) — stores gate_evals at escalation, pops at resume ──
 
-  test "GenServer : pod.completed soft -> gate_evals stocke ; work_item.completed correle -> pop" do
+  test "GenServer: soft pod.completed -> gate_evals stores; correlated work_item.completed -> pop" do
     {:ok, pid} =
       StepRunConsumer.start_link(
-        # Nom UNIQUE par test : ce fichier est `async: true` et `start_link` sans `:name` retombe sur le nom
-        # global `Fleet.Pilot.StepRunConsumer` → deux tests GenServer co-schedulés se heurtent à `{:already_started}`.
-        # Un nom unique isole chaque instance (le test pilote `pid`, pas le nom).
+        # UNIQUE name per test: this file is `async: true` and `start_link` without `:name` falls
+        # back to the global name `Fleet.Pilot.StepRunConsumer` → two co-scheduled GenServer tests
+        # collide with `{:already_started}`. A unique name isolates each instance (the test drives
+        # `pid`, not the name).
         name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
@@ -681,12 +694,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(evals, "corr-1")
   end
 
-  test "GenServer : work_item.cleared correle -> contexte d'eval LIBERE (fin de la fuite RAM du singleton)" do
-    # gate_evals ne rétrécissait QUE sur la complétion corrélée : une éval supersédée (nouvel
-    # enqueue sur le gatekeeper) ou clearée (mort du pod) laissait son contexte — payload +
-    # workflow_map ENTIÈRE — en RAM à vie dans ce singleton (croissance monotone du daemon).
-    # Sans verdict il n'y a RIEN à reprendre ; et un verdict tardif se reconstruirait depuis
-    # les metadata self-describing du broker.
+  test "GenServer: correlated work_item.cleared -> eval context RELEASED (end of the singleton RAM leak)" do
+    # gate_evals only shrank on the correlated completion: a superseded eval (new enqueue on the
+    # gatekeeper) or a cleared one (pod death) left its context — payload + ENTIRE workflow_map —
+    # in RAM for life in this singleton (monotonic daemon growth). Without a verdict there is
+    # NOTHING to resume; and a late verdict would rebuild itself from the broker's self-describing
+    # metadata.
     {:ok, pid} =
       StepRunConsumer.start_link(
         name: :"step_run_gate_#{System.unique_integer([:positive])}",
@@ -718,11 +731,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(evals, "corr-1")
   end
 
-  test "GenServer : sweep TTL -> un contexte d'eval sans verdict expire (backstop du rail lossy)" do
-    # Le rail work_item.cleared est LOSSY (doctrine D1) et un gatekeeper qui meurt en pleine éval
-    # n'émet RIEN : le TTL est la bretelle qui ne dépend d'aucun message. Seams ttl/sweep à ~0 pour
-    # exercer la mécanique sans attendre 2 h (un TTL qu'on ne peut tester qu'en attendant n'est
-    # pas testé).
+  test "GenServer: TTL sweep -> an eval context without verdict expires (backstop of the lossy rail)" do
+    # The work_item.cleared rail is LOSSY (doctrine D1) and a gatekeeper dying mid-eval emits
+    # NOTHING: the TTL is the ramp that depends on no message. ttl/sweep seams at ~0 to exercise
+    # the mechanics without waiting 2h (a TTL only testable by waiting is not tested).
     {:ok, pid} =
       StepRunConsumer.start_link(
         name: :"step_run_gate_#{System.unique_integer([:positive])}",
@@ -738,9 +750,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end,
         gate_eval_ttl_ms: 0,
-        # Cadence LONGUE : on ne veut PAS courir après le tick automatique (sous charge il
-        # arriverait quand il veut → test flaky). On PILOTE le sweep en envoyant son message,
-        # puis on synchronise par la barrière FIFO :sys.get_state. Déterministe, zéro sleep.
+        # LONG cadence: we do NOT want to race the automatic tick (under load it would arrive
+        # whenever it pleases → flaky test). We DRIVE the sweep by sending its message, then
+        # synchronize with the :sys.get_state FIFO barrier. Deterministic, zero sleep.
         gate_eval_sweep_ms: 60_000
       )
 
@@ -753,11 +765,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(evals, "corr-1")
   end
 
-  test "GenServer : work_item.completed d'un corr inconnu -> ignore (pas de crash)" do
+  test "GenServer: work_item.completed of an unknown corr -> ignored (no crash)" do
     {:ok, pid} =
       StepRunConsumer.start_link(
-        # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
-        # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
+        # Unique name: `async: true` + `start_link` without `:name` → `{:already_started}` collision
+        # on the global name between co-scheduled GenServer tests. Isolation by unique name (the
+        # test drives `pid`).
         name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
@@ -769,7 +782,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       pid,
       Fleet.Event.new(:task_queue, :"work_item.completed",
         correlation_id: "inconnu",
-        # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod step-dispatch ordinaire) → ignoré.
+        # MA-03: payload WITHOUT gate_eval metadata (the NORMAL case — an ordinary step-dispatch
+        # pod) → ignored.
         payload: %{result: %{"decision" => "continue"}}
       )
     )
@@ -778,14 +792,14 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert evals == %{}
   end
 
-  # ── MA-03 : le verdict gatekeeper SURVIT au restart du StepRunConsumer (verdict auto-descriptif) ──
-  # Le wedge fermé : crash du StepRunConsumer SEUL (broker vivant). Le contexte de reprise n'est plus en RAM
-  # (`gate_evals` vide au restart) ; il VOYAGE dans le metadata de la TÂCHE d'éval (qui survit dans le broker)
-  # → ramené par `work_item.completed` → reconstruction → resume. Avant MA-03 : `{nil,_} -> {:noreply}` silencieux
-  # (verdict jeté, issue verrouillée à vie).
+  # ── MA-03: the gatekeeper verdict SURVIVES a StepRunConsumer restart (self-describing verdict) ──
+  # The closed wedge: crash of the StepRunConsumer ALONE (broker alive). The resume context is no
+  # longer in RAM (`gate_evals` empty at restart); it TRAVELS in the eval TASK's metadata (which
+  # survives in the broker) → brought back by `work_item.completed` → reconstruction → resume.
+  # Before MA-03: silent `{nil,_} -> {:noreply}` (verdict discarded, issue locked forever).
 
-  # Le metadata de la tâche d'éval, tel que `dispatch_gatekeeper` l'embarque + tel que `task_queue/server.ex`
-  # le pose dans le payload de `work_item.completed`. Porte le contexte de reprise (resume_payload/n/role).
+  # The eval task's metadata, as `dispatch_gatekeeper` embeds it + as `task_queue/server.ex` puts
+  # it in the `work_item.completed` payload. Carries the resume context (resume_payload/n/role).
   defp gate_eval_meta do
     %{
       "gate_eval" => true,
@@ -799,10 +813,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     }
   end
 
-  # Stubs forge/deliverable qui RELAIENT vers le pid de test porté dans `forge_opts[:test_pid]`. Nécessaire
-  # pour les tests GenServer : les effets forge tournent DANS le process du StepRunConsumer (`self()` ≠ test) →
-  # un `send(self(), …)` n'atteindrait pas le test. Le pid est threadé via `forge_opts` (déjà passé au
-  # forge_client par `StepRunCompleter`). DelivStub n'a pas d'opts → on relaie via le pid stocké à l'init du test.
+  # Forge/deliverable stubs that RELAY to the test pid carried in `forge_opts[:test_pid]`. Needed
+  # for the GenServer tests: the forge effects run INSIDE the StepRunConsumer's process
+  # (`self()` ≠ test) → a `send(self(), …)` would not reach the test. The pid is threaded via
+  # `forge_opts` (already passed to the forge_client by `StepRunCompleter`). DelivStub has no opts
+  # → relayed via the pid stored at test init.
   defmodule RelayForge do
     defp relay(opts, msg), do: send(Keyword.fetch!(opts, :test_pid), msg)
     def post_comment(_r, _n, body, o), do: relay(o, {:comment, body}) && {:ok, :posted}
@@ -823,12 +838,14 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   defp fresh_step_run_consumer do
-    # `deliverable: DelivStub` → son `{:publish, _}` part vers le GenServer (`self()` côté pod) ; on n'assert
-    # PAS dessus (les effets observables passent par RelayForge/forge_opts). Le push réussit (mode git_native).
+    # `deliverable: DelivStub` → its `{:publish, _}` goes to the GenServer (`self()` on the pod
+    # side); we do NOT assert on it (observable effects go through RelayForge/forge_opts). The push
+    # succeeds (git_native mode).
     {:ok, pid} =
       StepRunConsumer.start_link(
-        # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
-        # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
+        # Unique name: `async: true` + `start_link` without `:name` → `{:already_started}` collision
+        # on the global name between co-scheduled GenServer tests. Isolation by unique name (the
+        # test drives `pid`).
         name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
@@ -847,8 +864,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     pid
   end
 
-  test "MA-03 : verdict gatekeeper RECONSTRUIT après restart (gate_evals VIDE) -> complétion, PAS de drop silencieux" do
-    # 1. escalade sur un 1er StepRunConsumer → gate_evals peuplé.
+  test "MA-03: gatekeeper verdict REBUILT after restart (EMPTY gate_evals) -> completion, NO silent drop" do
+    # 1. escalation on a 1st StepRunConsumer → gate_evals populated.
     pid1 = fresh_step_run_consumer()
 
     send(
@@ -858,36 +875,38 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     assert Map.has_key?(:sys.get_state(pid1).gate_evals, "corr-1")
 
-    # 2. CRASH du StepRunConsumer SEUL (broker resterait vivant en prod) → on le stoppe + on en démarre un NEUF.
-    #    Le neuf a gate_evals VIDE — exactement l'état post-crash où l'ancien code jetait le verdict.
+    # 2. CRASH of the StepRunConsumer ALONE (the broker would stay alive in prod) → we stop it +
+    #    start a FRESH one. The fresh one has EMPTY gate_evals — exactly the post-crash state where
+    #    the old code discarded the verdict.
     :ok = GenServer.stop(pid1)
     pid2 = fresh_step_run_consumer()
     assert :sys.get_state(pid2).gate_evals == %{}
 
-    # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans work_item.completed).
+    # 3. The verdict comes back (the task's metadata survived in the broker → put in work_item.completed).
     send(
       pid2,
       Fleet.Event.new(:task_queue, :"work_item.completed",
         correlation_id: "corr-1",
         payload: %{
-          result: %{"decision" => "continue", "reason" => "RAS"},
+          result: %{"decision" => "continue", "reason" => "all clear"},
           metadata: gate_eval_meta()
         }
       )
     )
 
-    # 4. RECONSTRUCTION + COMPLÉTION : le verdict `continue` ouvre la PR + request_review + route — PAS un
-    #    {:noreply} silencieux. (`:sys.get_state` après le send sérialise le handle_info → l'effet a eu lieu.)
+    # 4. RECONSTRUCTION + COMPLETION: the `continue` verdict opens the PR + request_review + route
+    #    — NOT a silent {:noreply}. (`:sys.get_state` after the send serializes the handle_info →
+    #    the effect has happened.)
     _ = :sys.get_state(pid2)
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
     assert_received {:route, "soft", "review"}
 
-    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    # The ISSUE lock is NOT lifted at advance anymore — persists until the final :promote.
     refute_received :unlocked
   end
 
-  test "MA-03 : restart + verdict abandon RECONSTRUIT -> close (terminal), pas de drop" do
+  test "MA-03: restart + REBUILT abandon verdict -> close (terminal), no drop" do
     :ok = GenServer.stop(fresh_step_run_consumer())
     pid = fresh_step_run_consumer()
     assert :sys.get_state(pid).gate_evals == %{}
@@ -897,7 +916,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       Fleet.Event.new(:task_queue, :"work_item.completed",
         correlation_id: "corr-1",
         payload: %{
-          result: %{"decision" => "abandon", "reason" => "reconstruit"},
+          result: %{"decision" => "abandon", "reason" => "rebuilt"},
           metadata: gate_eval_meta()
         }
       )
@@ -908,7 +927,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:publish, _}
   end
 
-  test "MA-03 : work_item.completed gate_eval mais metadata TRONQUÉ (resume_payload absent) -> pas de resume (fail-loud), pas de crash" do
+  test "MA-03: gate_eval work_item.completed but TRUNCATED metadata (resume_payload absent) -> no resume (fail-loud), no crash" do
     pid = fresh_step_run_consumer()
 
     bad_meta = gate_eval_meta() |> Map.delete("resume_payload")
@@ -921,7 +940,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
     )
 
-    # Le singleton ne crashe pas, et n'agit PAS sur un contexte tronqué (pas de PR ouverte à l'aveugle).
+    # The singleton does not crash, and does NOT act on a truncated context (no PR opened blindly).
     assert Process.alive?(pid)
     assert :sys.get_state(pid).gate_evals == %{}
     refute_received {:open_pr, _, _, _}

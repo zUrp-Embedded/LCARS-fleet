@@ -1,10 +1,10 @@
 defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   @moduledoc """
-  Attribution du stopwatch (QoL 2026-07-07, observation user « c'est lcars-system qui est
-  comptabilisé, pas le worker ») : `Spawn.spawn_step` doit démarrer le stopwatch AU NOM DU RÔLE
-  dispatché (`as_role`), pas du compte système — sinon Gitea attribue tout le temps tracké à
-  `lcars-system`, jamais au worker réel. Le label reste système (protocole), seul le stopwatch
-  (données attribuables) est signé rôle. async: false (mute la config globale `:role_tokens_dir`).
+  Stopwatch attribution: `Spawn.spawn_step` must start the stopwatch IN THE NAME OF THE dispatched
+  ROLE (`as_role`), not the system account — otherwise Gitea attributes all tracked time to
+  `lcars-system`, never to the real worker. The label stays system-signed (protocol), only the
+  stopwatch (attributable data) is role-signed. async: false (mutates the global `:role_tokens_dir`
+  config).
   """
   use ExUnit.Case, async: false
 
@@ -70,7 +70,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
     ]
   end
 
-  test "spawn_step (dispatch_issue) : start_stopwatch signé AU NOM DE L'ENGINEER, pas du système" do
+  test "spawn_step (dispatch_issue): start_stopwatch signed AS THE ENGINEER, not the system" do
     payload = %{
       "issue" => %{
         "number" => 42,
@@ -83,10 +83,10 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
     assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
              StepDispatcher.dispatch_issue(payload, dispatch_opts())
 
-    # Le label reste système (protocole d'état, doctrine établie) : token INCHANGÉ.
+    # The label stays system-signed (state protocol, established doctrine): token UNCHANGED.
     assert_received {:add_label, "lcars-in-flight"}
 
-    # Le stopwatch, lui, est signé rôle : le token système est ÉCRASÉ par le token engineer.
+    # The stopwatch, however, is role-signed: the system token is OVERWRITTEN by the engineer token.
     assert_received {:start_stopwatch, "lordzurp/lcars-test", 42, sw_opts}
     assert sw_opts[:token] == "ENG-TOKEN"
   end

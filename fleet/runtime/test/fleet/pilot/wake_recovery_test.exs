@@ -5,25 +5,25 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
   alias Fleet.Pilot.WakeRecovery
 
-  test "wake :ok → :ok, ni re-roll ni note ni escalade" do
+  test "wake :ok → :ok, no re-roll, no note, no escalation" do
     pid = self()
 
     opts = [
       wake_fun: fn p -> send(pid, {:wake, p}) && :ok end,
-      seen_before_fun: fn _ -> flunk("seen_before interdit sur :ok") end,
-      note_fun: fn _, _ -> flunk("note interdit sur :ok") end
+      seen_before_fun: fn _ -> flunk("seen_before forbidden on :ok") end,
+      note_fun: fn _, _ -> flunk("note forbidden on :ok") end
     ]
 
-    assert :ok = WakeRecovery.wake("pod-1", fn -> flunk("respawn interdit sur :ok") end, opts)
+    assert :ok = WakeRecovery.wake("pod-1", fn -> flunk("respawn forbidden on :ok") end, opts)
     assert_received {:wake, "pod-1"}
   end
 
-  test "fail + jamais vu + re-roll RÉCUPÈRE → grave l'incident (bonne signature) + :ok" do
+  test "fail + never seen + re-roll RECOVERS → records the incident (right signature) + :ok" do
     pid = self()
     ctr = :counters.new(1, [])
 
     opts = [
-      # 1er wake → {:error} ; re-wake (après re-roll) → :ok
+      # 1st wake → {:error}; re-wake (after re-roll) → :ok
       wake_fun: fn p ->
         send(pid, {:wake, p})
         n = :counters.get(ctr, 1)
@@ -39,11 +39,11 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert_received {:wake, "issue-7-engineer"}
     assert_received :respawn
     assert_received {:wake, "issue-7-engineer"}
-    # signature : chiffres normalisés → N
+    # signature: digits normalized → N
     assert_received {:note, "wake:issue-N-engineer:dead", :dead}
   end
 
-  test "re-roll RÉCUPÈRE mais note ÉCHOUE → :ok MAIS log LOUD (l'ancre incident PAS enregistrée, plus de mensonge « recorded »)" do
+  test "re-roll RECOVERS but note FAILS → :ok BUT LOUD log (incident anchor NOT recorded, no more \"recorded\" lie)" do
     pid = self()
     ctr = :counters.new(1, [])
 
@@ -55,8 +55,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
         if n == 0, do: {:error, :dead}, else: :ok
       end,
       seen_before_fun: fn _ -> false end,
-      # Registry indisponible : la note échoue → l'ancre n'est PAS posée → la prochaine récurrence ne
-      # sera pas vue comme telle (pas d'escalade). Le fix : log LOUD, pas de « recorded » menteur.
+      # Registry unavailable: the note fails → the anchor is NOT set → the next recurrence will not
+      # be seen as one (no escalation). The fix: LOUD log, no lying "recorded".
       note_fun: fn _, _ -> {:error, :registry_unavailable} end
     ]
 
@@ -69,13 +69,13 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     refute log =~ "→ incident recorded"
   end
 
-  test "fail + jamais vu + re-roll ÉCHOUE → escalade :reroll_failed + {:error,{:escalated,_}}" do
+  test "fail + never seen + re-roll FAILS → escalation :reroll_failed + {:error,{:escalated,_}}" do
     pid = self()
 
     opts = [
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> false end,
-      note_fun: fn _, _ -> flunk("pas de note si le re-roll échoue") end,
+      note_fun: fn _, _ -> flunk("no note when the re-roll fails") end,
       create_issue_fun: fn repo, title, _body, iopts ->
         send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
       end,
@@ -89,16 +89,17 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     assert_received :respawn
     assert_received {:issue, "fleet/lcars", title, iopts}
+    # "re-roll échoué" pins the FR user-facing sysadmin issue title (Escalation).
     assert title =~ "re-roll échoué"
 
-    # fix F-RUN-2 : create_issue SANS label (le POST Gitea exige des IDs int, pas des noms → 422) ;
-    # le label error_system est posé APRÈS par NOM via add_label.
+    # fix F-RUN-2: create_issue WITHOUT label (the Gitea POST requires int IDs, not names → 422);
+    # the error_system label is set AFTERWARDS by NAME via add_label.
     refute Keyword.has_key?(iopts, :labels)
     assert iopts[:assignees] == ["starfleet"]
     assert_received {:label, "fleet/lcars", 1, "error_system"}
   end
 
-  test "fail + DÉJÀ VU → escalade :recurrence DIRECTE (pas de re-roll)" do
+  test "fail + ALREADY SEEN → DIRECT :recurrence escalation (no re-roll)" do
     pid = self()
 
     opts = [
@@ -111,33 +112,34 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     ]
 
     assert {:error, {:escalated, :dead}} =
-             WakeRecovery.wake("pod-y", fn -> flunk("pas de re-roll si déjà vu") end, opts)
+             WakeRecovery.wake("pod-y", fn -> flunk("no re-roll when already seen") end, opts)
 
     assert_received {:issue, "fleet/lcars", title, _iopts}
+    # "récurrence" pins the FR user-facing sysadmin issue title (Escalation).
     assert title =~ "récurrence"
   end
 
-  test "fail + DÉJÀ VU + forge DOWN → {:error,{:escalation_failed,_}} (PAS escalated) + log LOUD" do
+  test "fail + ALREADY SEEN + forge DOWN → {:error,{:escalation_failed,_}} (NOT escalated) + LOUD log" do
     opts = [
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> true end,
-      # échec aux DEUX tentatives (avec assignee + fallback label-only) = forge réellement down
+      # failure on BOTH attempts (with assignee + label-only fallback) = forge really down
       create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
     ]
 
     log =
       capture_log(fn ->
-        # AUCUN issue ouvert → le retour DIT l'échec, pas un `:escalated` rassurant ; l'appelant ne croit
-        # pas qu'un sysadmin a été prévenu alors que l'alarme n'est pas passée.
+        # NO issue opened → the return SAYS the failure, not a reassuring `:escalated`; the caller
+        # does not believe a sysadmin was notified when the alarm never went through.
         assert {:error, {:escalation_failed, :forge_down}} =
-                 WakeRecovery.wake("pod-down", fn -> flunk("pas de re-roll si déjà vu") end, opts)
+                 WakeRecovery.wake("pod-down", fn -> flunk("no re-roll when already seen") end, opts)
       end)
 
     assert log =~ "escalation"
     assert log =~ "NO sysadmin issue"
   end
 
-  test "escalade : create_issue échoue avec assignee → fallback label-only" do
+  test "escalation: create_issue fails with assignee → label-only fallback" do
     pid = self()
 
     opts = [
@@ -159,8 +161,9 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     assert_received :with_assignee
 
-    # fix F-RUN-2 : le fallback (assignee absent) crée SANS assignee NI label ; le label error_system
-    # est posé APRÈS par NOM via add_label — sur l'issue 7 réellement créée par le fallback.
+    # fix F-RUN-2: the fallback (assignee absent) creates WITHOUT assignee NOR label; the
+    # error_system label is set AFTERWARDS by NAME via add_label — on issue 7 actually created by
+    # the fallback.
     assert_received {:fallback, "fleet/lcars", fb_opts}
     refute Keyword.has_key?(fb_opts, :labels)
     refute fb_opts[:assignees]

@@ -1,12 +1,12 @@
 defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
   @moduledoc """
-  Régression acte4 A-09 — ordre des gates de dispatch : les gates LOCAUX bon marché
-  (route/rôle/busy) court-circuitent AVANT le ProjectResolver (le seul appel RÉSEAU du chemin,
-  1-2× `git ls-remote` ~15-30s). Avant le fix, un tick `:role_busy` récurrent re-payait le
-  resolver à chaque tick pour jeter le résultat — et sous forge dégradée bloquait tout le tick
-  de poll séquentiel. La scission décision/action (`project_scope_decision` pré-resolver,
-  `maybe_reprovision` post-resolver) préserve le gate fail-closed F-C059 (pipe incertain → défère,
-  jamais reset destructif).
+  Regression acte4 A-09 — dispatch gate ordering: the cheap LOCAL gates (route/role/busy)
+  short-circuit BEFORE the ProjectResolver (the only NETWORK call on the path, 1-2×
+  `git ls-remote` ~15-30s). Without the fix, a recurring `:role_busy` tick re-paid the resolver
+  every tick just to discard the result — and under a degraded forge blocked the whole sequential
+  poll tick. The decision/action split (`project_scope_decision` pre-resolver,
+  `maybe_reprovision` post-resolver) preserves the F-C059 fail-closed gate (uncertain pipe →
+  defer, never a destructive reset).
   """
   use ExUnit.Case, async: true
 
@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
   end
 
-  # slot_scope PROJECT + lifetime one-shot (défaut sans invocation) → la règle busy s'applique.
+  # slot_scope PROJECT + one-shot lifetime (default without invocation) → the busy rule applies.
   defmodule ProjectScopedLoader do
     def load("engineer"),
       do:
@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
          }}
   end
 
-  # slot_scope INSTANCE → jamais gaté.
+  # slot_scope INSTANCE → never gated.
   defmodule InstanceScopedLoader do
     def load("engineer"),
       do:
@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     ]
   end
 
-  test "A-09 (1) : :role_busy court-circuite SANS appeler le resolver (zéro réseau sur tick busy)" do
+  test "A-09 (1): :role_busy short-circuits WITHOUT calling the resolver (zero network on a busy tick)" do
     me = self()
 
     resolver = fn _repo, _opts ->
@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
       {:ok, nil}
     end
 
-    # project-scoped one-shot + pod VIVANT → busy AVANT le resolver.
+    # project-scoped one-shot + ALIVE pod → busy BEFORE the resolver.
     assert {:skipped, :role_busy} =
              StepDispatcher.dispatch_issue(
                payload(),
@@ -112,21 +112,21 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     refute_received {:add_label, _}
   end
 
-  test "A-09 (3) : erreur :project_resolution toujours fail-loud sur le chemin PASSANT" do
+  test "A-09 (3): :project_resolution error still fail-loud on the PASSING path" do
     resolver = fn _repo, _opts -> {:error, :ls_remote_timeout} end
 
-    # pod mort → la décision passe → le resolver tire → son erreur reste taguée et loggée.
+    # dead pod → the decision passes → the resolver fires → its error stays tagged and logged.
     assert {:error, {:project_resolution, :ls_remote_timeout}} =
              StepDispatcher.dispatch_issue(
                payload(),
                opts(ProjectScopedLoader, DeadSpawner, resolver)
              )
 
-    # et surtout : AUCUN lock orphelin (l'échec est pré-lock).
+    # and above all: NO orphan lock (the failure is pre-lock).
     refute_received {:add_label, _}
   end
 
-  test "A-09 (4) : instance → jamais gaté, le resolver tire, le dispatch aboutit" do
+  test "A-09 (4): instance → never gated, the resolver fires, the dispatch succeeds" do
     me = self()
 
     resolver = fn _repo, _opts ->
@@ -143,12 +143,12 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     assert_received :resolver_called
   end
 
-  # (2) chemin :ready → le project est résolu PUIS le reprovision consomme project["base_sha"].
-  # Testé au niveau du gate Spawn (le pipe :ready exige la machinerie conditions/publishing
-  # du pod_info — stub dédié) : décision pré-resolver, action post-resolver.
-  test "A-09 (2) : pipe :ready → décision SANS project, reprovision AVEC project (ordre décision→resolver→action)" do
+  # (2) :ready path → the project is resolved THEN the reprovision consumes project["base_sha"].
+  # Tested at the Spawn gate level (the :ready pipe requires the pod_info conditions/publishing
+  # machinery — dedicated stub): decision pre-resolver, action post-resolver.
+  test "A-09 (2): :ready pipe → decision WITHOUT project, reprovision WITH project (decision→resolver→action order)" do
     defmodule ReadyPipeSpawner do
-      # Forme réelle `Pod` :info : conditions = LISTE (MapSet.to_list dans pod_info), pas un MapSet.
+      # Real `Pod` :info shape: conditions = LIST (MapSet.to_list in pod_info), not a MapSet.
       def pod_info(_pod_id), do: {:ok, %{conditions: [], has_active_task: false}}
 
       def reprovision_pipe_workspace(pod_id, project, slug: slug) do
@@ -157,11 +157,11 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
       end
     end
 
-    # 1. la DÉCISION ne demande aucun project (elle est prise avant le resolver)
+    # 1. the DECISION requires no project (it is taken before the resolver)
     assert :ready_needs_reprovision =
              Spawn.project_scope_decision("pipe", ReadyPipeSpawner, "pod-pipe")
 
-    # 2. l'ACTION consomme le project résolu (base_sha) — post-resolver
+    # 2. the ACTION consumes the resolved project (base_sha) — post-resolver
     assert :ok =
              Spawn.maybe_reprovision(
                :ready_needs_reprovision,
@@ -174,9 +174,9 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     assert_received {:reprovisioned, "pod-pipe", "abc123", "slug-x"}
   end
 
-  # (5) lockstep des DEUX sites : le flux review (RoleDispatch) gate AUSSI avant son resolver.
-  # F-C059 : un pipe d'état INCONNU (pod_info raise) → :role_busy (défère), jamais un reset destructif.
-  test "A-09 (5) : F-C059 préservé — pipe incertain (pod_info RAISE) → :role_busy, pas de reset" do
+  # (5) lockstep of BOTH sites: the review flow (RoleDispatch) ALSO gates before its resolver.
+  # F-C059: a pipe of UNKNOWN state (pod_info raises) → :role_busy (defers), never a destructive reset.
+  test "A-09 (5): F-C059 preserved — uncertain pipe (pod_info RAISES) → :role_busy, no reset" do
     defmodule RaisingSpawnerA09 do
       def pod_info(_pod_id), do: raise("broker down")
     end
@@ -187,7 +187,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
                  Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x")
       end)
 
-    # fail-closed VISIBLE (le warning de safe_pod_info), jamais :proceed (reset destructif).
+    # VISIBLE fail-closed (safe_pod_info's warning), never :proceed (destructive reset).
     assert log != "" or true
   end
 end

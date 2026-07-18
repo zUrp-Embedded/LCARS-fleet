@@ -1,23 +1,23 @@
 defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   @moduledoc """
-  Q2 DRAFT producers (2026-07-09) — `StepRunConsumer` alimente 2 rails Cat-5 dormants qui avaient un
-  consommateur (`Starfleet.DriftMonitor`) mais AUCUN producteur :
+  Q2 DRAFT producers — `StepRunConsumer` feeds 2 dormant Cat-5 rails that had a consumer
+  (`Starfleet.DriftMonitor`) but NO producer:
 
-  - `workflow_map.failed` — émis sur un échec de LOAD workflow_map (`:workflow_map_load_failed`).
-  - `audit.verdict` — émis sur un verdict de juge escalade-digne (branche `other` de `apply_verdict`).
+  - `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`).
+  - `audit.verdict` — emitted on an escalation-worthy judge verdict (`other` branch of `apply_verdict`).
 
-  Les deux sont émis source `:workflow` (invariant anti-spoof DriftMonitor) via `safe_emit` :
-  un échec d'émission est loggué warning par le producteur et ne bloque jamais l'escalade porteuse
-  (le Bus est le fast-path lossy ; la vérité durable reste le rail forge).
-  On subscribe au Bus RÉEL (c'est l'objet du test : prouver l'émission) → `async: false` (état global
-  Bus partagé) + noms/issues uniques pour l'hermétisme.
+  Both are emitted with source `:workflow` (DriftMonitor anti-spoof invariant) via `safe_emit`:
+  an emission failure is logged warning by the producer and never blocks the carrying escalation
+  (the Bus is the lossy fast-path; durable truth stays on the forge rail).
+  We subscribe to the REAL Bus (that is the point of the test: prove the emission) → `async: false`
+  (shared global Bus state) + unique names/issues for hermeticity.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Pilot.StepRunConsumer
 
-  # Loader : "bad-q2" raise (introuvable → :workflow_map_load_failed) ; "judgemap-q2" = 1 step JUGE.
+  # Loader: "bad-q2" raises (not found → :workflow_map_load_failed); "judgemap-q2" = 1 JUDGE step.
   defmodule Loader do
     def load!("judgemap-q2") do
       %{
@@ -33,10 +33,10 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       }
     end
 
-    def load!(_), do: raise("workflow_map introuvable")
+    def load!(_), do: raise("workflow_map not found")
   end
 
-  # Completer : capture complete_pr + await_arch (freeze_to_arch → await_arch).
+  # Completer: captures complete_pr + await_arch (freeze_to_arch → await_arch).
   defmodule CaptureCompleter do
     def complete_pr(step_run, opts),
       do: send(self(), {:step_run, step_run, opts}) && {:ok, :captured}
@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   end
 
   describe "workflow_map.failed draft producer" do
-    test "échec de LOAD workflow_map → émet workflow_map.failed (source :workflow), PAS d'audit.verdict" do
+    test "workflow_map LOAD failure → emits workflow_map.failed (source :workflow), NO audit.verdict" do
       payload = %{
         "issue_id" => "issue-42",
         "workspace" => "/ws",
@@ -101,13 +101,13 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
                      },
                      500
 
-      # Rail ciblé : un échec de load n'est PAS un verdict → pas d'audit.verdict.
+      # Targeted rail: a load failure is NOT a verdict → no audit.verdict.
       refute_received %Fleet.Event{type: :"audit.verdict"}
     end
   end
 
   describe "audit.verdict draft producer" do
-    test "verdict juge escalade-digne → émet audit.verdict (decision escalate, vrai verdict en details) + freeze arch" do
+    test "escalation-worthy judge verdict → emits audit.verdict (decision escalate, real verdict in details) + arch freeze" do
       payload = %{
         "issue_id" => "issue-42",
         "workspace" => "/ws",
@@ -115,7 +115,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
         "role" => "consultant",
         "workflow_map" => "judgemap-q2",
         "step" => "gate",
-        "result" => %{"decision" => "halt_wait_input", "reason" => "info manquante"}
+        "result" => %{"decision" => "halt_wait_input", "reason" => "missing info"}
       }
 
       StepRunConsumer.maybe_complete(payload, state())
@@ -127,8 +127,8 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
                      },
                      500
 
-      # decision-v1 : decision "escalate" (matche la policy coord escalate.audit_verdict) + reason ;
-      # le VRAI verdict juge est préservé dans details (rien perdu par la traduction draft).
+      # decision-v1: decision "escalate" (matches the coord policy escalate.audit_verdict) + reason;
+      # the REAL judge verdict is preserved in details (nothing lost by the draft translation).
       decoded = Jason.decode!(json)
       assert decoded["decision"] == "escalate"
       assert decoded["reason"] == "audit_verdict"
@@ -136,20 +136,21 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       assert decoded["details"]["issue"] == 42
       assert decoded["details"]["role"] == "consultant"
 
-      # L'escalade humaine (freeze_to_arch) a bien eu lieu APRÈS l'émission (le draft ne remplace rien).
+      # The human escalation (freeze_to_arch) did happen AFTER the emission (the draft replaces nothing).
       assert_received {:await_arch, _step_run, _opts}
 
-      # Rail ciblé : un verdict n'est pas un échec de load → pas de workflow_map.failed.
+      # Targeted rail: a verdict is not a load failure → no workflow_map.failed.
       refute_received %Fleet.Event{type: :"workflow_map.failed"}
     end
   end
 
-  describe "DR-013 — cap-profile illisible au completion → escalation, jamais un juge silencieux" do
-    test "deliverable_mode_fun {:error, :cap_profile_unloadable} → freeze arch (await_arch), PAS de complétion silencieuse" do
-      # Un rôle dont le cap-profile a disparu/corrompu depuis le spawn : le mode producteur/juge est
-      # INCONNU. Avant DR-013 : fallback "payload" → producer? false → reclassé SILENCIEUSEMENT en juge
-      # (un vrai producteur, son code jamais poussé). Désormais : {:error} → fail-loud + escalade à l'arch
-      # (freeze_to_arch : jamais bubble → le reaper re-dispatcherait un profil cassé à l'infini, G2 churn).
+  describe "DR-013 — unreadable cap-profile at completion → escalation, never a silent judge" do
+    test "deliverable_mode_fun {:error, :cap_profile_unloadable} → arch freeze (await_arch), NO silent completion" do
+      # A role whose cap-profile has vanished/corrupted since the spawn: the producer/judge mode is
+      # UNKNOWN. A "payload" fallback → producer? false → SILENTLY reclassified as a judge
+      # (a real producer, its code never pushed). DR-013 instead: {:error} → fail-loud + escalate to
+      # the arch (freeze_to_arch: never bubble → the reaper would re-dispatch a broken profile
+      # forever, G2 churn).
       st = %{state() | deliverable_mode_fun: fn _role -> {:error, :cap_profile_unloadable} end}
 
       payload = %{
@@ -164,7 +165,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
       StepRunConsumer.maybe_complete(payload, st)
 
-      # Escalade humaine (freeze_to_arch → await_arch), JAMAIS une complétion silencieuse en juge.
+      # Human escalation (freeze_to_arch → await_arch), NEVER a silent completion as a judge.
       assert_receive {:await_arch, _step_run, _opts}, 500
       refute_received {:step_run, _, _}
     end

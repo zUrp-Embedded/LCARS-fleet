@@ -1,20 +1,20 @@
 defmodule Fleet.Pilot.ChainIntegrationTest do
   @moduledoc """
-  Integration Corr.3 4-C (switch review-request) : la chaine multi-step de bout en bout, modules
-  REELS (Entry, StepDispatcher, StepRunConsumer, StepRunCompleter, WorkflowMapNav) contre un sim forge stateful
-  PR-aware, en synchrone. Prouve le CABLAGE PR-driven engineer-first :
-    entree -> spawn engineer (issue-assignee) -> engineer ouvre la PR + request_review ->
-    spawn juge via dispatch_review (PR) -> merge terminal -> issue close (Closes #N).
+  Integration (review-request switch): the end-to-end multi-step chain, REAL modules
+  (Entry, StepDispatcher, StepRunConsumer, StepRunCompleter, WorkflowMapNav) against a stateful
+  PR-aware forge sim, synchronously. Proves the PR-driven engineer-first WIRING:
+    entry -> spawn engineer (issue-assignee) -> engineer opens the PR + request_review ->
+    spawn judge via dispatch_review (PR) -> terminal merge -> issue close (Closes #N).
 
-  Le producteur (engineer) reste issue-assignee-driven ; les JUGES sont dispatches via les
-  requested_reviewers de la PR. Le verrou lcars-in-flight du juge est pose sur la PR (pas l'issue).
+  The producer (engineer) stays issue-assignee-driven; the JUDGES are dispatched via the PR's
+  requested_reviewers. The judge's lcars-in-flight lock is set on the PR (not the issue).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.{StepDispatcher, StepRunConsumer}
   alias Fleet.Pilot.StubTaskQueue
 
-  # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
+  # ── Stateful forge sim: 1 issue + N PRs (separate objects, own labels/requested_reviewers) ──
   defmodule Sim do
     use Agent
 
@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     defp pr?(pid, n), do: Agent.get(pid, fn s -> Map.has_key?(s.prs, n) end)
 
-    # Labels : routes vers la PR si `n` est un numero de PR connu, sinon l'issue (espace partage Gitea).
+    # Labels: routed to the PR if `n` is a known PR number, otherwise the issue (Gitea shared space).
     def add_label(pid, _r, n, l, _o) do
       if pr?(pid, n), do: upd_pr(pid, n, &add_lbl(&1, l)), else: upd_issue(pid, &add_lbl(&1, l))
       {:ok, :added}
@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       {:ok, :removed}
     end
 
-    # Time-tracking (no-op sim, pas d'état à simuler ici) : requis par spawn_step/unlock.
+    # Time-tracking (no-op sim, no state to simulate here): required by spawn_step/unlock.
     def start_stopwatch(_pid, _r, _n, _o), do: :ok
     def stop_stopwatch(_pid, _r, _n, _o), do: :ok
 
@@ -54,13 +54,13 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp rm_lbl(m, l),
       do: Map.put(m, "labels", Enum.reject(m["labels"] || [], &(&1["name"] == l)))
 
-    # assignee/comments/route : sur l'ISSUE (le pipeline-state y reste).
+    # assignee/comments/route: on the ISSUE (the pipeline-state stays there).
     def set_assignee(pid, _r, _n, login, _o) do
       upd_issue(pid, &Map.put(&1, "assignees", [%{"login" => login}]))
       {:ok, :set}
     end
 
-    # comment sur l'issue ; sur une PR (lock comment du juge) -> ignore (osef pour le test).
+    # comment on the issue; on a PR (judge lock comment) -> ignored (irrelevant for the test).
     def post_comment(pid, _r, n, body, _o) do
       unless pr?(pid, n) do
         upd_issue(pid, fn i -> Map.put(i, "comments", (i["comments"] || []) ++ [body]) end)
@@ -69,8 +69,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       {:ok, :posted}
     end
 
-    # Position = 2 labels scopés (wfmap/<map> + stage/<step>), mutex : on retire les anciens stage/*|wfmap/*
-    # puis on re-pose (émule l'exclusive Gitea). Plus de commentaire route (bruit).
+    # Position = 2 scoped labels (wfmap/<map> + stage/<step>), mutex: remove the old stage/*|wfmap/*
+    # then re-set (emulates Gitea's exclusive). No route comment anymore (noise).
     def post_route(pid, _r, _n, p, s, _o) do
       upd_issue(pid, fn i ->
         kept =
@@ -102,7 +102,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       end
     end
 
-    # Étape seule (lifecycle PR : review/merged), mutex : retire stage/* existant, garde wfmap/*.
+    # Stage alone (PR lifecycle: review/merged), mutex: removes the existing stage/*, keeps wfmap/*.
     def set_stage(pid, _r, _n, stage, _o) do
       upd_issue(pid, fn i ->
         kept = Enum.reject(i["labels"] || [], &String.starts_with?(&1["name"], "stage/"))
@@ -119,7 +119,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     def get_predecessor_result(_pid, _r, _n, _o), do: :none
 
-    # Fix famine-d'info : build_judge_brief lit le critère (body de l'issue) via get_issue.
+    # Info-starvation fix: build_judge_brief reads the criterion (issue body) via get_issue.
     def get_issue(pid, _r, _n, _o), do: {:ok, get(pid)}
 
     # ── PR ──
@@ -134,8 +134,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
             pr = %{
               "number" => num,
-              # #5.2 D1 — fidèle au réel : le fleet assigne TOUJOURS l'humain à la PR (assign_human_step,
-              # step_run_completer:560). Sinon dispatch_review skip :foreign (scoping PR client-side).
+              # #5.2 D1 — faithful to the real thing: the fleet ALWAYS assigns the human to the PR
+              # (assign_human_step, step_run_completer:560). Otherwise dispatch_review skips
+              # :foreign (client-side PR scoping).
               "assignees" => [%{"login" => "human"}],
               "head" => %{"ref" => head},
               "base" => %{"ref" => base},
@@ -171,8 +172,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       :ok
     end
 
-    # review soumise -> Gitea retire le reviewer de requested (ici on vide : 1 reviewer a la fois) ET
-    # enregistre le verdict courant (②.1d : dispatch_review lit pr_review_state pour merge/rework).
+    # review submitted -> Gitea removes the reviewer from requested (here we empty: 1 reviewer at
+    # a time) AND records the current verdict (②.1d: dispatch_review reads pr_review_state for
+    # merge/rework).
     def post_review(pid, _r, pr, ev, _body, _o) do
       upd_pr(pid, pr, fn p ->
         p
@@ -187,18 +189,20 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp review_state_of(:request_changes), do: :changes_requested
     defp review_state_of(_), do: :none
 
-    # ②.1d : verdicts par juge (reviews-driven). Le chemin WORKFLOW_MAP merge via complete_judge :promote,
-    # pas via dispatch_review → dispatch_review n'est appelé qu'AVANT toute review ici → {} suffit.
+    # ②.1d: per-judge verdicts (reviews-driven). The WORKFLOW_MAP path merges via complete_judge
+    # :promote, not via dispatch_review → dispatch_review is only called BEFORE any review here →
+    # {} suffices.
     def pr_review_verdicts(_pid, _r, _pr, _o), do: {:ok, %{}}
 
-    # F-E8 : état de jury combiné. Le chemin WORKFLOW_MAP merge via complete_judge :promote (pas dispatch_review)
-    # → dispatch_review n'est appelé qu'AVANT review → verdicts {} + jury [] (requested = requested_reviewers).
+    # F-E8: combined jury state. The WORKFLOW_MAP path merges via complete_judge :promote (not
+    # dispatch_review) → dispatch_review is only called BEFORE review → verdicts {} + jury []
+    # (requested = requested_reviewers).
     def pr_review_state(_pid, _r, _pr, _o), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
-    # merge FF : PR merged + issue close. QoL 2026-07-07 : plus de `Closes #N` réel (le vrai
-    # GatekeeperSeal ferme l'issue EXPLICITEMENT, séparément, après le commentaire) — ce sim ferme les
-    # deux dans le même appel par simplicité ; le `close_issue` explicite (ligne ~124) re-pose le même
-    # état ensuite, idempotent, sans changer l'assertion finale (`state == "closed"`).
+    # FF merge: PR merged + issue close. The real GatekeeperSeal closes the issue EXPLICITLY,
+    # separately, after the comment — this sim closes both in the same call for simplicity; the
+    # explicit `close_issue` (line ~124) re-sets the same state afterwards, idempotent, without
+    # changing the final assertion (`state == "closed"`).
     def merge_pr(pid, _r, pr, _o) do
       Agent.update(pid, fn s ->
         %{
@@ -212,7 +216,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     end
   end
 
-  # Wrapper (les modules appellent ForgeClient.f/arity ; le pid sim vit en pdict).
+  # Wrapper (modules call ForgeClient.f/arity; the sim pid lives in the pdict).
   defmodule SimForge do
     def put(pid), do: Process.put(:sim, pid)
     defp p, do: Process.get(:sim)
@@ -239,7 +243,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule WorkflowMapLoader do
-    # engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
+    # engineer-first 2 steps: build(engineer, producer) -> review(reviewer, judge).
     def load!("poc-mini") do
       %{
         "name" => "poc-mini",
@@ -250,7 +254,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       }
     end
 
-    # B (L441) : escalade gatekeeper sur le step juge `review` (gate soft).
+    # B (L441): gatekeeper escalation on the judge step `review` (soft gate).
     def load!("gkchain") do
       %{
         "name" => "gkchain",
@@ -267,7 +271,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule CapLoader do
-    # engineer = worker (brief = body) ; reviewer/qualifier = juge (brief_kind judge).
+    # engineer = worker (brief = body); reviewer/qualifier = judge (brief_kind judge).
     def load("engineer"),
       do:
         {:ok,
@@ -283,7 +287,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => role},
-           # slot DÉRIVE de lifetime (collapse) : gk/arch = context-long → project ; autres juges = one-shot → instance.
+           # slot DERIVES from lifetime (collapse): gk/arch = context-long → project; other judges
+           # = one-shot → instance.
            spec: %{
              "brief_kind" => "judge",
              "invocation" => %{
@@ -339,13 +344,14 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp dispatch_opts do
     [
       repo: "o/r",
-      # #5.2 D1 — scoping multi-user : l'humain de cette fleet = l'assignee des fixtures ("human").
+      # #5.2 D1 — multi-user scoping: this fleet's human = the fixtures' assignee ("human").
       human: "human",
       forge_client: SimForge,
       loader: CapLoader,
-      # #8 (piece 1) : workflow_map_role dérive le rôle de la POSITION workflow_map → il faut le loader de WORKFLOW_MAP
-      # (load!/1), distinct du loader de cap-profiles (`loader`, load/1). Sans lui, workflow_map_role tombe
-      # sur le vrai Loader (priv) → "poc-mini"/"gkchain" introuvables → dispatch échoue.
+      # #8 (piece 1): workflow_map_role derives the role from the workflow_map POSITION → it needs
+      # the WORKFLOW_MAP loader (load!/1), distinct from the cap-profile loader (`loader`, load/1).
+      # Without it, workflow_map_role falls back to the real Loader (priv) → "poc-mini"/"gkchain"
+      # not found → dispatch fails.
       workflow_map_loader: &WorkflowMapLoader.load!/1,
       spawner: SpawnStub,
       task_queue: StubTaskQueue,
@@ -378,9 +384,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       Sim.start_link(%{
         "number" => 1,
         "state" => "open",
-        # `type:poc` = trigger d'entrée workflow_map (legacy Entry, FALL ②.3). #8.A : l'assignee = l'HUMAIN
-        # (posé à la création par l'arch) ; il reste inchangé tout au long de la chaîne (Entry/advance ne
-        # l'écrasent plus). `decide` spawn tant qu'il y a un assignee — l'état/position vit dans la route.
+        # `type:poc` = workflow_map entry trigger (legacy Entry, FALL ②.3). #8.A: the assignee =
+        # the HUMAN (set at creation by the arch); it stays unchanged through the whole chain
+        # (Entry/advance no longer overwrite it). `decide` spawns as long as there is an assignee —
+        # the state/position lives in the route.
         "labels" => [%{"name" => "type:poc"}],
         "assignees" => [%{"login" => "human"}],
         "comments" => []
@@ -395,24 +402,25 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     {pr, pr["number"]}
   end
 
-  test "chaine engineer-first PR-driven : build(engineer) ouvre PR -> review(reviewer) -> merge close" do
+  test "engineer-first PR-driven chain: build(engineer) opens PR -> review(reviewer) -> merge close" do
     pid = new_issue()
 
-    # 1. ENTREE : #8 cohérence — le routing vit dans les LABELS scopés (wfmap/<map> + stage/<step>, posés
-    #    par create_issue). Ici on les pose directement (workflow_map poc-mini, 1er step build). L'assignee reste
-    #    l'HUMAIN (jamais touché ; le rôle du step est dérivé de la route au dispatch via workflow_map_role).
+    # 1. ENTRY: #8 coherence — the routing lives in the SCOPED LABELS (wfmap/<map> + stage/<step>,
+    #    set by create_issue). Here we set them directly (workflow_map poc-mini, 1st step build).
+    #    The assignee stays the HUMAN (never touched; the step's role is derived from the route at
+    #    dispatch via workflow_map_role).
     SimForge.post_route("o/r", 1, "poc-mini", "build", [])
     assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
 
-    # 2. DISPATCH build -> spawn engineer (route-driven : workflow_map_role lit la route, pas l'assignee)
+    # 2. DISPATCH build -> spawn engineer (route-driven: workflow_map_role reads the route, not the assignee)
     assert {:ok, {:spawned, _, "engineer"}} =
              StepDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o1}
 
-    # 3. engineer finit -> :advance : ouvre la PR + request_review(reviewer) + route review.
-    #    L'assignee de l'issue reste l'HUMAIN (#8.A : plus de set_assignee), la suite est PR-driven.
+    # 3. engineer finishes -> :advance: opens the PR + request_review(reviewer) + route review.
+    #    The issue's assignee stays the HUMAN (#8.A: no more set_assignee), the rest is PR-driven.
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(completed(o1, "engineer"), hc())
 
@@ -422,7 +430,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     {pr_payload, pr_n} = single_open_pr()
     assert [%{"login" => "reviewer"}] = pr_payload["requested_reviewers"]
 
-    # 4. DISPATCH review via la PR (chemin PR-driven) -> spawn reviewer ; verrou sur la PR
+    # 4. DISPATCH review via the PR (PR-driven path) -> spawn reviewer; lock on the PR
     assert {:ok, {:spawned, _, "reviewer"}} =
              StepDispatcher.dispatch_review(pr_payload, dispatch_opts())
 
@@ -430,25 +438,26 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert o2[:step] == "review"
     assert Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
 
-    # 5. reviewer finit -> :promote : review APPROVED + merge -> issue close (Closes #N)
+    # 5. reviewer finishes -> :promote: review APPROVED + merge -> issue close (Closes #N)
     assert {:ok, :promoted} = StepRunConsumer.maybe_complete(completed(o2, "reviewer"), hc())
     assert Sim.get(pid)["state"] == "closed"
 
-    # WS2 inc2 : le sceau pose l'étape terminale VISIBLE `stage/merged` sur l'issue (fermée) ; le mutex
-    # scopé retire l'ancien `stage/*` (ici `stage/review`). Preuve que `set_stage(merged)` s'exécute.
+    # WS2 inc2: the seal sets the VISIBLE terminal stage `stage/merged` on the (closed) issue; the
+    # scoped mutex removes the old `stage/*` (here `stage/review`). Proof that `set_stage(merged)`
+    # runs.
     issue_labels = Enum.map(Sim.get(pid)["labels"], & &1["name"])
     assert "stage/merged" in issue_labels
     refute "stage/review" in issue_labels
 
-    # verrou de la PR leve
+    # PR lock lifted
     refute Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
   end
 
-  # ── B (L441) : escalade gatekeeper (gate soft sur le step juge review) ───────
+  # ── B (L441): gatekeeper escalation (soft gate on the judge step review) ───────
   defp drive_to_review do
     pid = new_issue()
 
-    # Route posée directement via labels wfmap/stage (workflow_map gkchain, 1er step build) — comme create_issue.
+    # Route set directly via wfmap/stage labels (workflow_map gkchain, 1st step build) — like create_issue.
     SimForge.post_route("o/r", 1, "gkchain", "build", [])
 
     assert {:ok, {:spawned, _, "engineer"}} =
@@ -456,7 +465,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     assert_received {:spawned, "issue-1", o1}
 
-    # build (pas de gate) finit -> avance review(reviewer) : ouvre la PR + request_review.
+    # build (no gate) finishes -> advances review(reviewer): opens the PR + request_review.
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(completed(o1, "engineer"), hc())
 
@@ -464,15 +473,15 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
     {pr_payload, _pr_n} = single_open_pr()
 
-    # dispatch review via la PR -> spawn reviewer
+    # dispatch review via the PR -> spawn reviewer
     assert {:ok, {:spawned, _, "reviewer"}} =
              StepDispatcher.dispatch_review(pr_payload, dispatch_opts())
 
     assert_received {:spawned, "issue-1", o2}
     assert o2[:step] == "review"
 
-    # review finit AVEC gate soft -> escalade gatekeeper (brief enqueue, PAS d'avance).
-    # "corr-1" = l'id fixe rendu par Fleet.Pilot.StubTaskQueue.enqueue/2 (support partagé).
+    # review finishes WITH a soft gate -> gatekeeper escalation (brief enqueued, NO advance).
+    # "corr-1" = the fixed id returned by Fleet.Pilot.StubTaskQueue.enqueue/2 (shared support).
     assert {:escalate, "corr-1", eval_ctx} =
              StepRunConsumer.maybe_complete(
                completed(o2, "reviewer", %{"severity_max" => "ok"}),
@@ -486,21 +495,21 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     {pid, eval_ctx}
   end
 
-  test "B escalade continue : review(soft->escalade) -> verdict continue -> merge terminal close" do
+  test "B escalation continue: review(soft->escalation) -> continue verdict -> terminal merge close" do
     {pid, eval_ctx} = drive_to_review()
 
-    # verdict continue : review est le dernier step -> :promote -> juge merge la PR du producteur.
+    # continue verdict: review is the last step -> :promote -> the judge merges the producer's PR.
     assert {:ok, :promoted} =
              StepRunConsumer.resume_gate(
                eval_ctx,
-               %{"result" => %{"decision" => "continue", "reason" => "critère satisfait"}},
+               %{"result" => %{"decision" => "continue", "reason" => "criterion satisfied"}},
                hc()
              )
 
     assert Sim.get(pid)["state"] == "closed"
   end
 
-  test "B escalade escalate_user : lcars-awaits-arch + unlock + reste ouvert (boucle fermee)" do
+  test "B escalation escalate_user: lcars-awaits-arch + unlock + stays open (closed loop)" do
     {pid, eval_ctx} = drive_to_review()
 
     assert {:ok, :awaiting_arch} =

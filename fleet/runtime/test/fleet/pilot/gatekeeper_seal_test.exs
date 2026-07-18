@@ -1,10 +1,10 @@
 defmodule Fleet.Pilot.GatekeeperSealTest do
   @moduledoc """
-  Sceau de fusion UNIQUE (F-arch-MCP) : merge signé PUIS comment gatekeeper signé. Le merge fait
-  foi — JAMAIS de « fusionnée » avant la réalité (F-MERGE-CLAIM-BEFORE-REALITY). La signature
-  gatekeeper est posée EN INTERNE par `seal_and_merge` (`as_gatekeeper` → RoleToken) : le token du
-  compte gatekeeper vient d'un tmp_dir contrôlé (jamais le vrai `/home/private` du runner).
-  async: false (mute la config globale `:role_tokens_dir`).
+  SINGLE merge seal (F-arch-MCP): signed merge THEN signed gatekeeper comment. The merge is the
+  source of truth — NEVER a "merged" claim before reality (F-MERGE-CLAIM-BEFORE-REALITY). The
+  gatekeeper signature is applied INTERNALLY by `seal_and_merge` (`as_gatekeeper` → RoleToken): the
+  gatekeeper account token comes from a controlled tmp_dir (never the runner's real
+  `/home/private`). async: false (mutates the global `:role_tokens_dir` config).
   """
   use ExUnit.Case, async: false
 
@@ -15,7 +15,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    # Token de rôle gatekeeper résoluble → `seal_and_merge` doit signer merge ET comment avec.
+    # Resolvable gatekeeper role token → `seal_and_merge` must sign merge AND comment with it.
     File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "GK-TOKEN")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     def close_issue(_r, _n, _o), do: {:ok, :closed}
   end
 
-  # F-C066 — merge/comment/stage OK, close TOUJOURS en échec : prouve le retour honnête (pas de :ok menteur).
+  # F-C066 — merge/comment/stage OK, close ALWAYS failing: proves the honest return (no lying :ok).
   defmodule CloseFailForge do
     def merge_pr(_r, _pr, _o), do: :ok
     def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     end
   end
 
-  # F-C066 — close FLAKY : échoue 2×, réussit la 3e (compteur process-dict) → prouve l'auto-heal par retry.
+  # F-C066 — FLAKY close: fails 2×, succeeds the 3rd (process-dict counter) → proves self-heal via retry.
   defmodule CloseFlakyForge do
     def merge_pr(_r, _pr, _o), do: :ok
     def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
@@ -60,9 +60,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     end
   end
 
-  test "merge signé PUIS comment gatekeeper (signature interne as_gatekeeper) + dédup → :ok" do
-    # forge_opts BRUTS (token système) : la signature gatekeeper doit être posée EN INTERNE par
-    # `seal_and_merge` (writer unique `as_gatekeeper`) — le token de rôle ÉCRASE le système.
+  test "signed merge THEN gatekeeper comment (internal as_gatekeeper signature) + dedup → :ok" do
+    # RAW forge_opts (system token): the gatekeeper signature must be applied INTERNALLY by
+    # `seal_and_merge` (single writer `as_gatekeeper`) — the role token OVERWRITES the system's.
     forge_opts = [token: "system-token"]
     assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", forge_opts)
 
@@ -74,49 +74,51 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert body =~ "`engineer`"
     assert body =~ "[merge:pr-7]"
 
-    # signé gatekeeper (token de rôle, posé en interne) + dédup author-agnostic (sinon double-post au retry).
+    # gatekeeper-signed (role token, applied internally) + author-agnostic dedup (otherwise
+    # double-post on retry).
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
     assert c_opts[:dedup_any_author] == true
 
-    # Close explicite SIGNÉ GATEKEEPER (régression QoL 2026-07-07 : partait signé système — rupture
-    # d'identité dans le sceau alors que merge+comment sont DÉJÀ gatekeeper, cf. ci-dessus).
+    # Explicit close SIGNED GATEKEEPER (regression: it went out system-signed — identity break
+    # inside the seal while merge+comment are ALREADY gatekeeper, cf. above).
     assert_received {:close_issue, "fleet/p", 42, close_opts}
     assert close_opts[:token] == "GK-TOKEN"
   end
 
-  test "merge KO → {:error, {:merge, _}} ET AUCUN « fusionnée » posté (pas de mensonge avant la réalité)" do
+  test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do
     assert {:error, {:merge, {:http, 409, _}}} =
              GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/p", 7, 42, "engineer", [])
 
-    # LE point crucial (F-MERGE-CLAIM-BEFORE-REALITY) : merge échoué → on n'a PAS prétendu « livrée et fusionnée ».
+    # THE crucial point (F-MERGE-CLAIM-BEFORE-REALITY): failed merge → we did NOT claim "delivered
+    # and merged".
     refute_received {:comment, _, _, _, _}
   end
 
-  # Le merge est l'acte qui fait foi ; le comment est une trace post-merge JETÉE SANS LOG par
-  # seal_and_merge — la trace lisible manque alors sur l'issue et rien ne la re-poste (le dedup ne
-  # garde que contre les replays). Seule la trace humaine est perdue, jamais le merge.
-  test "comment KO APRÈS merge → :ok quand même (le merge fait foi, la trace est perdue en silence)" do
+  # The merge is the act that counts; the comment is a post-merge trace DISCARDED WITHOUT LOG by
+  # seal_and_merge — the readable trace is then missing on the issue and nothing re-posts it (the
+  # dedup only guards against replays). Only the human trace is lost, never the merge.
+  test "comment KO AFTER merge → :ok anyway (the merge counts, the trace is lost silently)" do
     assert :ok = GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
 
     assert_received :merged
   end
 
-  test "F-C066 : merge OK mais close échoué (persistant) → {:error, {:close_after_merge, _}}, JAMAIS un :ok menteur" do
-    # Le cœur du finding : la fonction retournait `:ok` même quand `close_issue` échouait (log-loud puis
-    # `:ok`) → l'appelant croyait la brique scellée alors que l'issue restait OPEN → re-dispatch →
-    # double-livraison. Désormais : retour HONNÊTE typé (le merge a réussi, mais le close non).
+  test "F-C066: merge OK but close failed (persistent) → {:error, {:close_after_merge, _}}, NEVER a lying :ok" do
+    # Core of the finding: returning `:ok` even when `close_issue` fails (log-loud then `:ok`) →
+    # the caller believed the brick sealed while the issue stayed OPEN → re-dispatch →
+    # double-delivery. Instead: HONEST typed return (the merge succeeded, but the close did not).
     assert {:error, {:close_after_merge, {:http, 500, "close boom"}}} =
              GatekeeperSeal.seal_and_merge(CloseFailForge, "fleet/p", 7, 42, "engineer", [])
 
-    # Retry BORNÉ : 3 tentatives de close avant d'abandonner (puis retour honnête).
+    # BOUNDED retry: 3 close attempts before giving up (then honest return).
     assert_received {:close_attempt, 42}
     assert_received {:close_attempt, 42}
     assert_received {:close_attempt, 42}
     refute_received {:close_attempt, 42}
   end
 
-  test "F-C066 : close flaky (échoue 2×, réussit la 3e) → retry → :ok (auto-heal d'un blip transitoire)" do
+  test "F-C066: flaky close (fails 2×, succeeds the 3rd) → retry → :ok (self-heal of a transient blip)" do
     assert :ok = GatekeeperSeal.seal_and_merge(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [])
 
     assert_received {:close_attempt, 42, 1}

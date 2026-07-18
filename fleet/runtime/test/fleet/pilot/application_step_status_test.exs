@@ -1,11 +1,11 @@
 defmodule Fleet.Pilot.ApplicationStepStatusTest do
-  # async: false — mute :step_dispatch? global + enregistre des process sous les noms singletons.
+  # async: false — mutates the global :step_dispatch? + registers processes under the singleton names.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.Application, as: PilotApp
 
   setup do
-    # Les tests posent :step_dispatch? eux-mêmes ; capture-restauration seule.
+    # Tests set :step_dispatch? themselves; capture-and-restore only.
     Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, :step_dispatch?)
     :ok
   end
@@ -17,15 +17,15 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     pid
   end
 
-  # F-010 : la readiness sonde le rail step via cette fonction. Avant, sa mort runtime passait en
-  # vert-creux (aucun health-check). Maintenant : inactive (off) / operational (vivants) / degraded.
+  # F-010: readiness probes the step rail through this function. Without a health-check, a runtime
+  # death would pass as hollow-green. Now: inactive (off) / operational (alive) / degraded.
 
-  test "inactive quand :step_dispatch? off" do
+  test "inactive when :step_dispatch? off" do
     Application.put_env(:fleet_pilot, :step_dispatch?, false)
     assert {:inactive, _} = PilotApp.step_status()
   end
 
-  test "operational quand step on + Poller & StepRunConsumer vivants" do
+  test "operational when step on + Poller & StepRunConsumer alive" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     spawn_named(Fleet.Pilot.Poller)
     spawn_named(Fleet.Pilot.StepRunConsumer)
@@ -33,10 +33,10 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     assert {:operational, %{poller: true, step_run_consumer: true}} = PilotApp.step_status()
   end
 
-  test "degraded quand step on mais un singleton mort (vert-creux attrapé)" do
+  test "degraded when step on but a singleton dead (hollow-green caught)" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
     spawn_named(Fleet.Pilot.Poller)
-    # StepRunConsumer non enregistré → considéré mort
+    # StepRunConsumer not registered → considered dead
 
     assert {:degraded, %{poller: true, step_run_consumer: false}} = PilotApp.step_status()
   end

@@ -3,7 +3,7 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
 
   alias Fleet.Pilot.WorkflowMapNav
 
-  # WorkflowMap linéaire type poc-cycle (format Loader : steps map keyed-by-name, clés string)
+  # Linear poc-cycle-style WorkflowMap (Loader format: steps map keyed-by-name, string keys)
   defp poc_cycle do
     %{
       "name" => "poc-cycle",
@@ -18,11 +18,11 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
   end
 
   describe "first_step/1" do
-    test "racine unique (needs: []) → {:ok, {name, role}}" do
+    test "single root (needs: []) → {:ok, {name, role}}" do
       assert {:ok, {"triage", "architect"}} = WorkflowMapNav.first_step(poc_cycle())
     end
 
-    test "aucune racine → {:error, :no_root}" do
+    test "no root → {:error, :no_root}" do
       workflow_map = %{
         "steps" => %{
           "a" => %{"role" => "x", "needs" => ["b"]},
@@ -33,7 +33,7 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
       assert {:error, :no_root} = WorkflowMapNav.first_step(workflow_map)
     end
 
-    test "≥2 racines (entrée parallèle) → {:error, :multiple_roots}" do
+    test "≥2 roots (parallel entry) → {:error, :multiple_roots}" do
       workflow_map = %{
         "steps" => %{
           "a" => %{"role" => "x", "needs" => []},
@@ -45,23 +45,23 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
     end
   end
 
-  describe "next_step/2 — chaîne linéaire" do
-    test "milieu de chaîne → successeur" do
+  describe "next_step/2 — linear chain" do
+    test "middle of chain → successor" do
       assert {:ok, {"refine", "consultant"}} = WorkflowMapNav.next_step(poc_cycle(), "triage")
       assert {:ok, {"build", "engineer"}} = WorkflowMapNav.next_step(poc_cycle(), "refine")
       assert {:ok, {"review", "reviewer"}} = WorkflowMapNav.next_step(poc_cycle(), "build")
       assert {:ok, {"seal", "starfleet"}} = WorkflowMapNav.next_step(poc_cycle(), "review")
     end
 
-    test "dernier step → :terminal" do
+    test "last step → :terminal" do
       assert :terminal = WorkflowMapNav.next_step(poc_cycle(), "seal")
     end
 
-    test "step inconnu → {:error, :unknown_step}" do
+    test "unknown step → {:error, :unknown_step}" do
       assert {:error, :unknown_step} = WorkflowMapNav.next_step(poc_cycle(), "nope")
     end
 
-    test "≥2 successeurs (DAG, hors-scope) → {:error, :dag_not_supported}" do
+    test "≥2 successors (DAG, out of scope) → {:error, :dag_not_supported}" do
       workflow_map = %{
         "steps" => %{
           "root" => %{"role" => "a", "needs" => []},
@@ -75,15 +75,15 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
   end
 
   describe "step_role/2 + step_spec/2" do
-    test "rôle + spec d'un step connu" do
+    test "role + spec of a known step" do
       assert {:ok, "engineer"} = WorkflowMapNav.step_role(poc_cycle(), "build")
 
       assert {:ok, %{"gate" => %{"type" => "hard"}}} =
                WorkflowMapNav.step_spec(poc_cycle(), "build")
     end
 
-    test "rôle d'un même rôle sur 2 steps — le NOM désambiguïse (le wrinkle DN §8)" do
-      # standard-qa : architect sur brainstorm ET plan
+    test "same role on 2 steps — the NAME disambiguates (the DN §8 wrinkle)" do
+      # standard-qa: architect on brainstorm AND plan
       workflow_map = %{
         "steps" => %{
           "brainstorm" => %{"role" => "architect", "needs" => []},
@@ -91,18 +91,18 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
         }
       }
 
-      # par nom : sans ambiguïté
+      # by name: unambiguous
       assert {:ok, {"plan", "architect"}} = WorkflowMapNav.next_step(workflow_map, "brainstorm")
       assert :terminal = WorkflowMapNav.next_step(workflow_map, "plan")
     end
 
-    test "step inconnu → :error" do
+    test "unknown step → :error" do
       assert :error = WorkflowMapNav.step_role(poc_cycle(), "nope")
       assert :error = WorkflowMapNav.step_spec(poc_cycle(), "nope")
     end
   end
 
-  # B (§L441) — les tests de `validate_explicit_step/1` (biconditionnelle soft⟺gatekeeper,
-  # A2.3b) sont RETIRÉS avec la fonction : une gate soft sur un step métier est légitime
-  # (escalade gatekeeper), pas une workflow_map malformée. cf. step_run_consumer_gate_test (escalade B).
+  # B (§L441) — the `validate_explicit_step/1` tests are REMOVED with the function: a soft gate on
+  # a business step is legitimate (gatekeeper escalation), not a malformed workflow_map.
+  # cf. step_run_consumer_gate_test (escalation B).
 end

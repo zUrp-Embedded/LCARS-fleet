@@ -3,12 +3,12 @@ defmodule Fleet.Pilot.IssueIdTest do
 
   alias Fleet.Pilot.IssueId
 
-  test "compose/1 produit issue-<n>" do
+  test "compose/1 produces issue-<n>" do
     assert "issue-42" = IssueId.compose(42)
     assert "issue-1" = IssueId.compose(1)
   end
 
-  test "parse/1 inverse strict de compose/1" do
+  test "parse/1 strict inverse of compose/1" do
     assert {:ok, 7} = IssueId.parse("issue-7")
     assert :error = IssueId.parse("issue-7x")
     assert :error = IssueId.parse("issue-")
@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.IssueIdTest do
     assert :error = IssueId.parse("nope")
   end
 
-  test "round-trip compose→parse pour tout entier (verrou anti-drift F071)" do
+  test "round-trip compose→parse for any integer (anti-drift lock F071)" do
     for n <- [0, 1, 7, 42, 1000, 999_999] do
       assert {:ok, ^n} = IssueId.parse(IssueId.compose(n))
     end

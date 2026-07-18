@@ -4,8 +4,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   alias Fleet.Pilot.ForgeStubs.MergeFailForge
   alias Fleet.Pilot.StepRunCompleter
 
-  # Forge stub qui ENREGISTRE l'ordre des appels (send au test) pour vérifier
-  # la séquence canonique §5 : comment → state → (close|assignee) → unlock.
+  # Forge stub that RECORDS the call order (send to the test) to verify the
+  # canonical §5 sequence: comment → state → (close|assignee) → unlock.
   defmodule OrderForge do
     def post_comment(_repo, _n, body, opts) do
       send(self(), {:call, :comment, body, opts[:dedup_signature]})
@@ -46,8 +46,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
-  # Forge stub PR-natif (Corr.3) : enregistre les appels PR (send au test). Rend le contrat REEL
-  # de `ForgeClient` : `post_review`/`merge_pr`/`request_review` → `:ok` (pas `{:ok, _}`).
+  # PR-native forge stub: records the PR calls (send to the test). Returns the REAL
+  # `ForgeClient` contract: `post_review`/`merge_pr`/`request_review` → `:ok` (not `{:ok, _}`).
   defmodule PrForge do
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
@@ -59,8 +59,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       :ok
     end
 
-    # Sceau gatekeeper (F-arch-MCP) : promote poste le commentaire de fin avant le merge.
-    # Forme réelle `ForgeClient.post_comment/4` = {:ok, :posted | :already}, PAS {:ok, 1}.
+    # Gatekeeper seal (F-arch-MCP): promote posts the closing comment before the merge.
+    # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}.
     def post_comment(_repo, n, body, opts) do
       send(self(), {:comment, n, body, opts})
       {:ok, :posted}
@@ -79,9 +79,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
 
-    # SIGNALE le commentaire : le sceau est MERGE-FIRST (ne commente QUE si le merge réussit) → sur le
-    # merge 409, post_comment ne DOIT jamais être appelé. On signale pour qu'un `refute_received {:comment}`
-    # au site d'appel soit PROBANT (s'il l'était par régression comment-before-merge, le test le verrait).
+    # SIGNALS the comment: the seal is MERGE-FIRST (only comments if the merge succeeds) → on the
+    # 409 merge, post_comment must NEVER be called. We signal so that a `refute_received {:comment}`
+    # at the call site is PROBATIVE (if it were called by a comment-before-merge regression, the
+    # test would see it).
     def post_comment(_r, n, body, opts) do
       send(self(), {:comment, n, body, opts})
       {:ok, :posted}
@@ -90,7 +91,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
-  # Forge stub COMPLET pour l'orchestrateur `complete_pr/2` (toutes les primitives PR + pont issue).
+  # COMPLETE forge stub for the `complete_pr/2` orchestrator (all PR primitives + issue bridge).
   defmodule OrchForge do
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
@@ -129,7 +130,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
     def stop_stopwatch(_repo, n, _opts), do: send(self(), {:stopwatch_stopped, n}) && :ok
 
-    # Voix de l'eng (info sortante) : le summary du producteur posté en commentaire PR.
+    # The eng's voice (outgoing info): the producer's summary posted as a PR comment.
     def post_comment(_repo, pr, body, _opts) do
       send(self(), {:comment, pr, body})
       {:ok, :posted}
@@ -139,7 +140,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
-  # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).
+  # PR not found (the judge falls before any review); FF merge impossible (open ok, merge 409).
   defmodule NoPrForge do
     def get_pr_for_branch(_r, _h, _b, _o), do: {:error, :pr_not_found}
   end
@@ -177,13 +178,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   describe "complete/2 — 1-step terminal (next_assignee nil)" do
-    test "publie, comment signé, CLOSE, unlock — dans l'ordre §5" do
+    test "publishes, signed comment, CLOSE, unlock — in the §5 order" do
       assert {:ok, :completed} = StepRunCompleter.complete(base_step_run(), seams())
 
-      # Étape 1 : publish appelé avec les opts du livrable
+      # Step 1: publish called with the deliverable's opts
       assert_received {:published, %{mode: :git_native, base_sha: "cafe"}}
 
-      # Étapes 2→4 dans l'ordre canonique (mailbox FIFO ; étape 3 state:* retirée — #5.2 D4)
+      # Steps 2→4 in the canonical order (FIFO mailbox; step 3 state:* removed — #5.2 D4)
       assert_received {:call, :comment, body, sig}
       assert sig == "[step_run:engineer:deadbeef]"
       assert body =~ "[step_run:engineer:deadbeef]"
@@ -191,31 +192,32 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:call, :close}
       assert_received {:call, :unlock, "lcars-in-flight"}
 
-      # Pas de réassignation en terminal
+      # No reassignment in terminal
       refute_received {:call, :assignee, _}
     end
 
-    test "comment signé porte la signature en dedup_signature (replay-safe)" do
+    test "signed comment carries the signature as dedup_signature (replay-safe)" do
       StepRunCompleter.complete(base_step_run(), seams())
       assert_received {:call, :comment, _body, "[step_run:engineer:deadbeef]"}
     end
   end
 
-  describe "complete/2 — multi-step (next_assignee présent, branche A2)" do
-    test "publie, comment, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
+  describe "complete/2 — multi-step (next_assignee present, A2 branch)" do
+    test "publishes, comment, ADVANCES (no close nor set_assignee, #8.A), unlock" do
       step_run = base_step_run(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
       assert_received {:call, :comment, _, _}
 
-      # #8.A : l'avance N'écrase PLUS l'assignee (= humain) ; le next-rôle est dérivé de la route au
-      # dispatch. (Ici pas de contexte workflow_map → pas de route non plus, cf. cas défensif ci-dessous.)
+      # #8.A: the advance NO LONGER overwrites the assignee (= human); the next-role is derived from
+      # the route at dispatch. (Here no workflow_map context → no route either, cf. defensive case
+      # below.)
       refute_received {:call, :assignee, _}
       assert_received {:call, :unlock, "lcars-in-flight"}
       refute_received {:call, :close}
     end
 
-    test "avance avec contexte workflow_map → grave la ROUTE du step suivant (sans set_assignee, #8.A)" do
+    test "advance with workflow_map context → records the next step's ROUTE (without set_assignee, #8.A)" do
       step_run =
         base_step_run(%{
           next_assignee: "qualifier",
@@ -225,20 +227,20 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
-      # #8.A : l'avance grave la ROUTE du step suivant ; l'assignee (humain) N'est PLUS touché.
+      # #8.A: the advance records the next step's ROUTE; the assignee (human) is NO LONGER touched.
       assert_received {:call, :route, "poc-cycle", "spec-review"}
       refute_received {:call, :assignee, _}
     end
 
-    test "reassign sans contexte workflow_map → pas de post_route (defensif)" do
+    test "reassign without workflow_map context → no post_route (defensive)" do
       step_run = base_step_run(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
       refute_received {:call, :route, _, _}
     end
   end
 
-  describe "complete/2 — sans livrable git (juge en payload, step_run_sha fourni)" do
-    test "utilise step_run_sha comme signature, pas d'appel publish" do
+  describe "complete/2 — without git deliverable (payload judge, step_run_sha provided)" do
+    test "uses step_run_sha as signature, no publish call" do
       step_run =
         base_step_run(%{deliverable_opts: nil, step_run_sha: "verdict-001"})
 
@@ -247,7 +249,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:call, :comment, _body, "[step_run:engineer:verdict-001]"}
     end
 
-    test "erreur si ni livrable ni step_run_sha" do
+    test "error when neither deliverable nor step_run_sha" do
       step_run = base_step_run(%{deliverable_opts: nil})
 
       assert {:error, {:publish, :no_deliverable_no_step_run_sha}} =
@@ -255,8 +257,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  describe "complete/2 — propagation d'erreur (arrêt avant les étapes suivantes)" do
-    test "publish échoue → {:error, {:publish, _}}, aucune écriture forge" do
+  describe "complete/2 — error propagation (stop before the next steps)" do
+    test "publish fails → {:error, {:publish, _}}, no forge write" do
       opts = Keyword.put(seams(), :deliverable, FailDeliverable)
 
       assert {:error, {:publish, :base_not_ancestor}} =
@@ -266,7 +268,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:call, :unlock, _}
     end
 
-    test "comment échoue → {:error, {:comment, _}}, pas de state/close/unlock" do
+    test "comment fails → {:error, {:comment, _}}, no state/close/unlock" do
       defmodule CommentFailForge do
         def post_comment(_r, _n, _b, _o), do: {:error, {:http, 500, "boom"}}
       end
@@ -278,8 +280,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  describe "open_deliverable_pr/2 — engineer → PR (Corr.3 PR-natif)" do
-    test "push la feature-branch + ouvre la PR feature→base — SANS Closes #N (close explicite au merge, QoL chronologie)" do
+  describe "open_deliverable_pr/2 — engineer → PR (PR-native)" do
+    test "pushes the feature-branch + opens the PR feature→base — WITHOUT Closes #N (explicit close at merge, chronology QoL)" do
       opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:ok, %{commit_sha: "deadbeef", pr_number: 7}} =
@@ -299,7 +301,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:open_pr, "feature/issue-42", "develop", _}
     end
 
-    test "publish échoue → {:error, {:publish, _}}, PAS de PR ouverte" do
+    test "publish fails → {:error, {:publish, _}}, NO PR opened" do
       opts = [deliverable: FailDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:error, {:publish, :base_not_ancestor}} =
@@ -308,21 +310,22 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:open_pr, _, _, _}
     end
 
-    test "open_pr échoue → {:error, {:open_pr, _}}" do
+    test "open_pr fails → {:error, {:open_pr, _}}" do
       opts = [deliverable: StubDeliverable, forge_client: PrFailForge, forge_opts: []]
 
       assert {:error, {:open_pr, {:http, 422, _}}} =
                StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
     end
 
-    # Régression 2026-07-13 : la provenance était accrochée à `complete/2` (verdicts SANS livrable) →
-    # jamais émise sur le VRAI chemin producteur (`open_deliverable_pr` est le seul point de publication
-    # d'un livrable git). Ce test walk ce chemin et exige le triplet complet — il rougirait sur le mauvais
-    # wiring d'origine. (Le `:work_root` seam remplace le `Fleet.Layout.work_root()` global non testable.)
+    # Regression: provenance hooked onto `complete/2` (verdicts WITHOUT deliverable) is never
+    # emitted on the REAL producer path (`open_deliverable_pr` is the only publication point of a
+    # git deliverable). This test walks that path and demands the full triplet — it would go red on
+    # the wrong wiring. (The `:work_root` seam replaces the untestable global
+    # `Fleet.Layout.work_root()`.)
     @tag :tmp_dir
-    test "émet la provenance triplet (brief_sha, input_sha, livrable_sha) sous work/ops `livrables/`",
+    test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under work/ops `livrables/`",
          %{tmp_dir: tmp} do
-      # work/ops du projet : project_name("lordzurp/lcars-test") = "lcars-test", un vrai repo git.
+      # the project's work/ops: project_name("lordzurp/lcars-test") = "lcars-test", a real git repo.
       work_dir = Path.join(tmp, "lcars-test")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -334,22 +337,22 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:ok, %{commit_sha: "deadbeef"}} =
                StepRunCompleter.open_deliverable_pr(step_run, opts)
 
-      # La provenance apparaît, content-addressée sur le livrable_sha, committée, triplet COMPLET.
+      # The provenance appears, content-addressed on the livrable_sha, committed, COMPLETE triplet.
       prov = Path.join(work_dir, "livrables/deadbeef-provenance.json")
       assert File.exists?(prov)
       json = prov |> File.read!() |> Jason.decode!()
-      # (livrable, brief, input) = les 3 sommets du triplet, chacun à sa place in-toto.
+      # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
       assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
       assert get_in(json, ["predicate", "invocation", "configSource", "digest", "sha256"]) == brief_sha
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
-      # committé, pas juste écrit sur disque.
+      # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
       assert log =~ "provenance: livrables/deadbeef-provenance.json"
     end
   end
 
-  describe "record_review/2 + promote/2 (Corr.3 PR-natif)" do
-    test "verdict :approve → review native APPROVED (corps généré du rôle)" do
+  describe "record_review/2 + promote/2 (PR-native)" do
+    test "verdict :approve → native APPROVED review (role-generated body)" do
       step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
 
       assert {:ok, :reviewed} =
@@ -357,10 +360,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
+      # "APPROUVÉ" pins the FR user-facing review body.
       assert body =~ "APPROUVÉ"
     end
 
-    test "verdict :request_changes avec corps explicite" do
+    test "verdict :request_changes with explicit body" do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
@@ -375,14 +379,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
     end
 
-    test "record_review propage l'erreur forge" do
+    test "record_review propagates the forge error" do
       step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
 
       assert {:error, {:review, {:http, 500, _}}} =
                StepRunCompleter.record_review(step_run, forge_client: PrFailForge, forge_opts: [])
     end
 
-    test "promote → comment gatekeeper + merge FF, {:ok, :promoted}" do
+    test "promote → gatekeeper comment + FF merge, {:ok, :promoted}" do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
@@ -393,12 +397,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:ok, :promoted} =
                StepRunCompleter.promote(step_run, forge_client: PrForge, forge_opts: [])
 
-      # Sceau (F-arch-MCP) : commentaire gatekeeper sur l'issue PUIS merge.
+      # Seal (F-arch-MCP): gatekeeper comment on the issue THEN merge.
       assert_received {:comment, 42, _body, _opts}
       assert_received {:merge, 7}
     end
 
-    test "promote : FF impossible (409) = invariant serial violé → {:merge, _} fail-loud" do
+    test "promote: FF impossible (409) = serial invariant violated → {:merge, _} fail-loud" do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
@@ -409,15 +413,15 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:error, {:merge, {:http, 409, _}}} =
                StepRunCompleter.promote(step_run, forge_client: PrFailForge, forge_opts: [])
 
-      # Invariant F-MERGE-CLAIM-BEFORE-REALITY : le sceau est MERGE-FIRST → un merge 409 ne DOIT laisser
-      # AUCUN commentaire « scellé/fusionné » sur l'issue (commenter avant confirmation gèlerait un succès
-      # non advenu). PrFailForge SIGNALE ses commentaires → ce refute est probant (il casserait sur une
-      # régression comment-before-merge, le bug exact que gatekeeper_seal évite).
+      # Invariant F-MERGE-CLAIM-BEFORE-REALITY: the seal is MERGE-FIRST → a 409 merge must leave NO
+      # "sealed/merged" comment on the issue (commenting before confirmation would freeze a success
+      # that never happened). PrFailForge SIGNALS its comments → this refute is probative (it would
+      # break on a comment-before-merge regression, the exact bug gatekeeper_seal avoids).
       refute_received {:comment, _, _, _}
     end
   end
 
-  describe "complete_pr/2 — orchestrateur PR-natif (Corr.3)" do
+  describe "complete_pr/2 — PR-native orchestrator" do
     defp producer_step_run(intent, extra \\ %{}) do
       Map.merge(
         %{
@@ -461,7 +465,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       )
     end
 
-    test "producteur :advance → ouvre la PR, request_review(next), PAS de set_assignee, PAS d'unlock (verrou ISSUE persiste jusqu'au promote)" do
+    test "producer :advance → opens the PR, request_review(next), NO set_assignee, NO unlock (ISSUE lock persists until promote)" do
       step_run = producer_step_run(:advance, %{next_assignee: "qualifier"})
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
@@ -469,19 +473,19 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       refute body =~ "Closes"
       assert_received {:request_review, 7, ["qualifier"]}
-      # producteur : le verrou est sur l'ISSUE (dispatch_issue) ; plus de set_assignee (PR-driven)
+      # producer: the lock is on the ISSUE (dispatch_issue); no more set_assignee (PR-driven)
       refute_received {:assignee, _, _}
 
-      # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — il persiste jusqu'au :promote
-      # final (la brique reste in-flight pendant toute la review, pas juste le codage).
+      # The ISSUE lock is NOT lifted at advance anymore — it persists until the final :promote
+      # (the brick stays in-flight through the whole review, not just the coding).
       refute_received {:unlock, _, _}
 
-      # MAIS le CHRONO de build de l'eng, LUI, se ferme au hand-off (sur l'ISSUE 42) — découplé du verrou :
-      # sinon le temps de l'eng engloberait toute la review (temps de cycle ≠ temps de travail).
+      # BUT the eng's build STOPWATCH closes at hand-off (on ISSUE 42) — decoupled from the lock:
+      # otherwise the eng's time would span the whole review (cycle time ≠ work time).
       assert_received {:stopwatch_stopped, 42}
     end
 
-    test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR PLIÉ dans l'ouverture de la PR (QoL, un seul post PR)" do
+    test "producer with :eng_summary → FULL note on the TICKET, FOLDED POINTER in the PR opening (QoL, a single PR post)" do
       step_run =
         producer_step_run(:advance, %{
           next_assignee: "qualifier",
@@ -490,21 +494,22 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
-      # la NOTE COMPLÈTE (la prose) vit UNE seule fois, sur le ISSUE (42).
+      # the FULL NOTE (the prose) lives ONCE, on the ISSUE (42).
+      # "Note de l'engineer" pins the FR user-facing comment heading.
       assert_received {:comment, 42, issue_body}
       assert issue_body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
       assert issue_body =~ "Note de l'engineer"
 
-      # le POINTEUR est PLIÉ dans le corps d'OUVERTURE de la PR (7) — pas un 2e comment séparé.
+      # the POINTER is FOLDED into the PR's OPENING body (7) — not a 2nd separate comment.
       assert_received {:open_pr, _head, _base, pr_body}
       assert pr_body =~ "ticket #42"
       refute pr_body =~ "j'ai implémenté le décodeur"
 
-      # zéro comment sur la PR : un seul post « en tant qu'engineer » côté PR (l'ouverture elle-même).
+      # zero comments on the PR: a single "as engineer" post on the PR side (the opening itself).
       refute_received {:comment, 7, _}
     end
 
-    test "producteur SANS :eng_summary → AUCUN commentaire (pas de voix vide)" do
+    test "producer WITHOUT :eng_summary → NO comment (no empty voice)" do
       assert {:ok, :review_requested} =
                StepRunCompleter.complete_pr(
                  producer_step_run(:advance, %{next_assignee: "qualifier"}),
@@ -514,7 +519,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:comment, _, _}
     end
 
-    test "producteur :promote (terminal 1-step) → ouvre la PR, merge FF, unlock, pas de reassign" do
+    test "producer :promote (1-step terminal) → opens the PR, FF merge, unlock, no reassign" do
       assert {:ok, :promoted} =
                StepRunCompleter.complete_pr(producer_step_run(:promote), orch_opts())
 
@@ -524,19 +529,19 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:assignee, _, _}
     end
 
-    test "producteur :rework (son propre gate fail) → PAS de PR, unlock l'ISSUE (re-spawn via assignee)" do
+    test "producer :rework (its own gate fail) → NO PR, unlocks the ISSUE (re-spawn via assignee)" do
       step_run = producer_step_run(:rework, %{next_assignee: "engineer"})
 
       assert {:ok, :rework_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
       refute_received {:open_pr, _, _, _}
 
-      # pas de PR encore -> l'engineer reste assigne (Entry) et re-spawn au prochain tick ; unlock l'issue
+      # no PR yet -> the engineer stays assigned (Entry) and re-spawns next tick; unlock the issue
       refute_received {:assignee, _, _}
       assert_received {:unlock, 42, _}
     end
 
-    test "juge :advance → retrouve la PR, review APPROVED, request_review(next), unlock la PR" do
+    test "judge :advance → finds the PR, APPROVED review, request_review(next), unlocks the PR" do
       step_run = judge_step_run(:advance, %{role: "qualifier", next_assignee: "reviewer"})
 
       assert {:ok, :review_requested} =
@@ -546,11 +551,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, _}
       assert_received {:request_review, 7, ["reviewer"]}
       refute_received {:assignee, _, _}
-      # juge : le verrou est sur la PR (dispatch_review), pas l'issue
+      # judge: the lock is on the PR (dispatch_review), not the issue
       assert_received {:unlock, 7, "lcars-in-flight"}
     end
 
-    test "juge :promote (terminal) → review APPROVED puis merge FF, unlock DES DEUX (PR + ISSUE)" do
+    test "judge :promote (terminal) → APPROVED review then FF merge, unlock BOTH (PR + ISSUE)" do
       step_run = judge_step_run(:promote, %{role: "reviewer"})
 
       assert {:ok, :promoted} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
@@ -559,13 +564,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, _}
       assert_received {:merge, 7}
 
-      # QoL 2026-07-07 : le verrou ISSUE (jamais levé depuis l':advance du producteur, persisté toute
-      # la review) se lève ICI, EN MÊME TEMPS que le verrou PR du juge — la brique entière est finie.
+      # The ISSUE lock (never lifted since the producer's :advance, persisted through the whole
+      # review) lifts HERE, AT THE SAME TIME as the judge's PR lock — the entire brick is done.
       assert_received {:unlock, 7, _}
       assert_received {:unlock, 42, _}
     end
 
-    test "juge :rework (gate fail) → review REQUEST_CHANGES, unlock la PR, PAS de merge" do
+    test "judge :rework (gate fail) → REQUEST_CHANGES review, unlocks the PR, NO merge" do
       step_run = judge_step_run(:rework, %{role: "reviewer", next_assignee: "engineer"})
 
       assert {:ok, :rework_requested} =
@@ -578,11 +583,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "juge intent inattendu sans :review_event → review FAIL-CLOSED (REQUEST_CHANGES, jamais approve par omission)" do
-      # Dérivation par intent (`:review_event` absent) : un intent qui n'est PAS un gate-pass explicite
-      # (`:advance`/`:promote`) ne doit JAMAIS s'auto-approuver. Ici `:reviewed` (un juge no-workflow_map qui
-      # aurait perdu son verdict) tombe sur le catch-all fail-closed → REQUEST_CHANGES, pas APPROVED.
-      # Sous l'ancien `_ -> :approve`, ce step_run validait par omission (le pire défaut pour un verdict).
+    test "judge with unexpected intent and no :review_event → FAIL-CLOSED review (REQUEST_CHANGES, never approve by omission)" do
+      # Derivation by intent (`:review_event` absent): an intent that is NOT an explicit gate-pass
+      # (`:advance`/`:promote`) must NEVER self-approve. Here `:reviewed` (a no-workflow_map judge
+      # that lost its verdict) falls on the fail-closed catch-all → REQUEST_CHANGES, not APPROVED.
+      # Under an `_ -> :approve` catch-all, this step_run validated by omission (the worst default
+      # for a verdict).
       step_run = judge_step_run(:reviewed, %{role: "qualifier"})
 
       assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
@@ -591,7 +597,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "②.1d producteur :review (no-workflow_map) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock PR SEUL (issue persiste), PAS de merge" do
+    test "②.1d producer :review (no-workflow_map) → opens PR, request_review(qualifier+reviewer), assigns the human, unlocks PR ONLY (issue persists), NO merge" do
       step_run = producer_step_run(:review)
 
       assert {:ok, :review_requested} =
@@ -602,36 +608,36 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       refute body =~ "Closes"
-      # DN §1.4 : qualifier + reviewer demandés d'un coup
+      # DN §1.4: qualifier + reviewer requested at once
       assert_received {:request_review, 7, ["qualifier", "reviewer"]}
-      # ②.1e : l'humain commanditaire (id -un) est assigné à la PR (#7)
+      # ②.1e: the commissioning human (id -un) is assigned to the PR (#7)
       assert_received {:assignee, 7, _human}
 
-      # unlock PR seul (re-livraison rework, verrou dispatch_review) — l'ISSUE (1re livraison, verrou
-      # dispatch_issue) NE se lève PLUS ici (QoL 2026-07-07) : elle persiste jusqu'au :promote final.
+      # unlock PR only (rework re-delivery, dispatch_review lock) — the ISSUE (1st delivery,
+      # dispatch_issue lock) is NOT lifted here anymore: it persists until the final :promote.
       assert_received {:unlock, 7, "lcars-in-flight"}
       refute_received {:unlock, 42, _}
-      # pas de merge ici : le merge est piloté par l'état-PR (dispatch_review)
+      # no merge here: the merge is driven by the PR-state (dispatch_review)
       refute_received {:merge, _}
     end
 
-    test "②.1d juge :reviewed (no-workflow_map) → review native (event explicite :approve), unlock la PR, PAS de merge ni request_review" do
+    test "②.1d judge :reviewed (no-workflow_map) → native review (explicit :approve event), unlocks the PR, NO merge nor request_review" do
       step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :approve})
 
       assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
-      # juge : verrou sur la PR (dispatch_review)
+      # judge: lock on the PR (dispatch_review)
       assert_received {:unlock, 7, "lcars-in-flight"}
 
-      # le juge ne merge pas et ne re-demande pas de review : c'est le poller (reviews-driven) qui décide.
-      # Pas d'action sur requested_reviewers (Gitea ne vide pas ; on lit la liste des reviews).
+      # the judge does not merge and does not re-request a review: the poller (reviews-driven)
+      # decides. No action on requested_reviewers (Gitea does not empty it; we read the reviews list).
       refute_received {:merge, _}
       refute_received {:request_review, _, _}
     end
 
-    test "②.1d juge :reviewed REQUEST_CHANGES → review request_changes, unlock la PR, pas de merge" do
+    test "②.1d judge :reviewed REQUEST_CHANGES → request_changes review, unlocks the PR, no merge" do
       step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :request_changes})
 
       assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
@@ -641,7 +647,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "producteur : open_pr echoue → {:open_pr, _}, pas de route" do
+    test "producer: open_pr fails → {:open_pr, _}, no route" do
       assert {:error, {:open_pr, {:http, 422, _}}} =
                StepRunCompleter.complete_pr(
                  producer_step_run(:promote),
@@ -652,19 +658,19 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "juge : PR introuvable → {:pr_lookup, :pr_not_found} fail-loud" do
+    test "judge: PR not found → {:pr_lookup, :pr_not_found} fail-loud" do
       assert {:error, {:pr_lookup, :pr_not_found}} =
                StepRunCompleter.complete_pr(judge_step_run(:promote), forge_client: NoPrForge)
     end
 
-    test "juge : producer_branch absent → {:pr_lookup, :no_producer_branch}" do
+    test "judge: producer_branch absent → {:pr_lookup, :no_producer_branch}" do
       step_run = judge_step_run(:promote, %{producer_branch: nil})
 
       assert {:error, {:pr_lookup, :no_producer_branch}} =
                StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
     end
 
-    test "producteur :promote : merge FF impossible (409) → {:merge, _} fail-loud" do
+    test "producer :promote: FF merge impossible (409) → {:merge, _} fail-loud" do
       assert {:error, {:merge, {:http, 409, _}}} =
                StepRunCompleter.complete_pr(
                  producer_step_run(:promote),

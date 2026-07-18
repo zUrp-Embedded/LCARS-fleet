@@ -3,9 +3,10 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   alias Fleet.Pilot.IncidentConsumer
 
-  # subscribe: false (pas de Bus parasite) + runner défaut (nil → SYNC, déterministe) + record_fun
-  # injecté (zéro forge) qui renvoie l'appel au test. On vérifie le ROUTAGE event → contrat
-  # `record_or_escalate(op, subject, reason, opts)`, pas la politique d'escalade (testée côté registre).
+  # subscribe: false (no stray Bus) + default runner (nil → SYNC, deterministic) + injected
+  # record_fun (zero forge) that echoes the call back to the test. We verify the ROUTING event →
+  # contract `record_or_escalate(op, subject, reason, opts)`, not the escalation policy (tested on
+  # the registry side).
   defp start(record_fun) do
     start_supervised!({IncidentConsumer, subscribe: false, record_fun: record_fun})
   end
@@ -22,7 +23,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   defp failed_event(type, payload),
     do: Fleet.Event.new(:spawner, type, payload: payload)
 
-  test "pod.failed → record_or_escalate(\"pod\", pod_id, reason, reason_detail threadé)" do
+  test "pod.failed → record_or_escalate(\"pod\", pod_id, reason, reason_detail threaded)" do
     pid = start(echo_fun())
 
     send(
@@ -34,8 +35,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       })
     )
 
-    # `reason` = catégorie stable (clé de la signature de dedup) ; le détail complet voyage en
-    # opt jusqu'au corps d'issue (Escalation.detail_block) sans polluer la signature.
+    # `reason` = stable category (key of the dedup signature); the full detail travels as an opt
+    # down to the issue body (Escalation.detail_block) without polluting the signature.
     assert_receive {:rec, "pod", "pod_1", "result_timeout", opts}
     assert Keyword.get(opts, :reason_detail) == "{:result_timeout, \"pod_1\"}"
   end
@@ -55,11 +56,11 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert_receive {:rec, "wake", "pod_2", "no_ack", opts}
     assert Keyword.get(opts, :escalate_kind) == :sp_suspect
     assert Keyword.get(opts, :pane) == "sess:1.2"
-    # Payload sans reason_detail (producteur pré-normalisation ou event forgé) → nil, jamais un crash.
+    # Payload without reason_detail (pre-normalization producer or forged event) → nil, never a crash.
     assert Keyword.get(opts, :reason_detail) == nil
   end
 
-  test "event d'échec sans pod_id → ignoré (pas de record)" do
+  test "failure event without pod_id → ignored (no record)" do
     me = self()
     pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
 
@@ -68,7 +69,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     refute_receive :rec, 100
   end
 
-  test "event hors-scope (autre type) → ignoré" do
+  test "out-of-scope event (other type) → ignored" do
     me = self()
     pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
 
@@ -78,10 +79,10 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   end
 
   test "spawn.failed → record_or_escalate(\"spawn\", cap_profile_name, reason, opts)" do
-    # Le rail était ORPHELIN (produit par PublishConsumer, jamais consommé) : le 202 de
-    # POST /api/admin/spawn mentait en silence quand le dispatch droppait le spawn. Sujet =
-    # cap_profile_name (le rôle) : la récurrence groupe « ce rôle échoue à spawner » (issue_id
-    # est per-requête → ne récurrerait jamais).
+    # The rail was ORPHANED (produced by PublishConsumer, never consumed): the 202 of
+    # POST /api/admin/spawn lied silently when the dispatch dropped the spawn. Subject =
+    # cap_profile_name (the role): recurrence groups "this role fails to spawn" (issue_id is
+    # per-request → would never recur).
     pid = start(echo_fun())
 
     send(
@@ -97,7 +98,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert Keyword.get(opts, :reason_detail) == nil
   end
 
-  test "spawn.failed sans cap_profile_name → ignoré (garde)" do
+  test "spawn.failed without cap_profile_name → ignored (guard)" do
     me = self()
     pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
 
@@ -106,13 +107,12 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     refute_receive :rec, 100
   end
 
-  # ── Régression acte4 A-06 — Cat-5 durable ────────────────────────────────
-  # AVANT : l'escalade Cat-5 (sévérité MAX — seed permanent corrompu, workflow_map illisible)
-  # ne laissait qu'un NDJSON local + 2 broadcasts Bus lossy → ÉVAPORÉE si personne ne tail,
-  # pendant que le rail incident basse-sévérité ouvrait, lui, une issue forge durable
-  # (inversion sévérité/durabilité). APRÈS : consumer → IncidentRegistry.escalate/5 DIRECT
-  # (issue dès la 1re occurrence, label error_cat5 — pas de gate de récurrence), le
-  # correlation_id (vague E) reliant l'issue au mandat causant.
+  # ── Regression acte4 A-06 — durable Cat-5 ────────────────────────────────
+  # A Cat-5 escalation (MAX severity — corrupted permanent seed, unreadable workflow_map) leaving
+  # only a local NDJSON + 2 lossy Bus broadcasts EVAPORATES if nobody tails, while the
+  # low-severity incident rail does open a durable forge issue (severity/durability inversion).
+  # Instead: consumer → IncidentRegistry.escalate/5 DIRECT (issue from the 1st occurrence, label
+  # error_cat5 — no recurrence gate), the correlation_id linking the issue to the causing mandate.
 
   defp start_cat5(escalate_fun) do
     start_supervised!(
@@ -130,7 +130,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     end
   end
 
-  test "A-06 : cat5 pod_drift → escalate(:cat5) DIRECT, label error_cat5, correlation_id lié" do
+  test "A-06: cat5 pod_drift → escalate(:cat5) DIRECT, label error_cat5, correlation_id linked" do
     pid = start_cat5(cat5_echo())
 
     send(
@@ -138,17 +138,17 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_pod_drift",
         pod_id: "permanent-architect",
         correlation_id: "issue-42",
-        payload: %{"pod_id" => "permanent-architect", "reason" => "seed corrompu"}
+        payload: %{"pod_id" => "permanent-architect", "reason" => "corrupted seed"}
       )
     )
 
-    assert_receive {:esc, :cat5, "permanent-architect", "seed corrompu", sig, opts}
+    assert_receive {:esc, :cat5, "permanent-architect", "corrupted seed", sig, opts}
     assert sig == "cat5:pod_drift:permanent-architect"
     assert Keyword.get(opts, :label) == "error_cat5"
     assert Keyword.get(opts, :correlation_id) == "issue-42"
   end
 
-  test "A-06 : cat5 workflow_map_failed sans pod_id → subject = la source (jamais un crash)" do
+  test "A-06: cat5 workflow_map_failed without pod_id → subject = the source (never a crash)" do
     pid = start_cat5(cat5_echo())
 
     send(
@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert sig == "cat5:workflow_map_failed:workflow_map_failed"
   end
 
-  test "A-06 : échec d'escalade cat5 → LOUD (Logger.error), le consumer survit" do
+  test "A-06: cat5 escalation failure → LOUD (Logger.error), the consumer survives" do
     pid = start_cat5(fn _, _, _, _, _ -> {:error, :forge_down} end)
 
     log =
@@ -175,7 +175,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
           )
         )
 
-        # synchronise : le handle_info est traité avant le retour du call
+        # synchronize: the handle_info is processed before the call returns
         _ = :sys.get_state(pid)
       end)
 

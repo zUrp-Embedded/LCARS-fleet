@@ -1,68 +1,68 @@
 defmodule Fleet.Pilot.IssueIdPropertyTest do
   @moduledoc """
-  Preuve property-based du couple `compose/parse` de l'`issue_id`. `issue_id_test.exs`
-  énumère 6 entiers câblés ; la property couvre le domaine entier, NÉGATIFS COMPRIS.
+  Property-based proof of the `issue_id` `compose/parse` pair. `issue_id_test.exs`
+  enumerates 6 hardwired integers; the property covers the whole domain, NEGATIVES INCLUDED.
 
-  L'`issue_id` corrèle un pod à son issue de forge pendant tout le step_run (enqueue →
-  fin de step_run). Un round-trip qui casse, c'est un pod qu'on ne sait plus rattacher à
-  son issue : le résultat n'est jamais recollé, et le step_run reste en vol.
+  The `issue_id` correlates a pod to its forge issue for the whole step_run (enqueue →
+  end of step_run). A broken round-trip is a pod we can no longer attach to its issue:
+  the result is never stitched back, and the step_run stays in flight.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
 
   alias Fleet.Pilot.IssueId
 
-  # ORACLE — la forme que `parse/1` accepte RÉELLEMENT (constatée, pas postulée). Voir la note
-  # d'audit sous P2 : `Integer.parse/1` tolère les zéros de tête et le signe explicite, donc
-  # l'oracle n'est PAS `\Aissue-(0|-?[1-9][0-9]*)\z` (la forme canonique de `compose/1`).
+  # ORACLE — the shape `parse/1` ACTUALLY accepts (observed, not postulated). See the audit note
+  # under P2: `Integer.parse/1` tolerates leading zeros and an explicit sign, so the oracle is NOT
+  # `\Aissue-(0|-?[1-9][0-9]*)\z` (the canonical shape of `compose/1`).
   @accepted ~r/\Aissue-[+-]?[0-9]+\z/
 
   # ── P1 — ROUND-TRIP ──
 
-  # INVARIANT : ∀ n entier, `parse(compose(n)) == {:ok, n}` — y compris n < 0 (`"issue--5"`).
-  # POURQUOI : `StepDispatcher` écrit, `StepRunConsumer` relit. C'est le SEUL fil qui relie le
-  # pod à son issue. Les négatifs ne sont pas théoriques : ils sont ce que le format produit si
-  # une forge (ou un stub) renvoie un `issue["number"]` aberrant — le parseur doit rendre
-  # exactement ce que le composeur a écrit, ou rendre `:error`, jamais un AUTRE entier.
-  property "P1 ROUND-TRIP — parse(compose(n)) == {:ok, n} pour TOUT entier (négatifs inclus)" do
+  # INVARIANT: ∀ integer n, `parse(compose(n)) == {:ok, n}` — including n < 0 (`"issue--5"`).
+  # WHY: `StepDispatcher` writes, `StepRunConsumer` reads back. This is the ONLY thread linking the
+  # pod to its issue. Negatives are not theoretical: they are what the format produces if a forge
+  # (or a stub) returns an aberrant `issue["number"]` — the parser must return exactly what the
+  # composer wrote, or return `:error`, never a DIFFERENT integer.
+  property "P1 ROUND-TRIP — parse(compose(n)) == {:ok, n} for ANY integer (negatives included)" do
     check all(n <- integer()) do
       assert {:ok, ^n} = IssueId.parse(IssueId.compose(n))
     end
   end
 
-  # ── P2 — REJET (comportement RÉEL figé) ──
+  # ── P2 — REJECTION (REAL behavior, frozen) ──
 
-  # INVARIANT : `parse/1` accepte une string SSI elle matche `#{inspect(@accepted)}` — tout le
-  # reste rend `:error`. Le préfixe doit être exactement `issue-`, le suffixe doit être un entier
-  # COMPLET (pas de queue résiduelle : `"issue-7x"`, `"issue-7 "`, `"issue-"` → `:error`).
-  # POURQUOI : un `issue_id` mal formé qui parserait quand même corrélerait le pod à la MAUVAISE
-  # issue — le résultat d'un step serait posté sur l'issue d'un autre. Le fail-closed (`:error`)
-  # est la seule sortie sûre.
+  # INVARIANT: `parse/1` accepts a string IFF it matches `#{inspect(@accepted)}` — everything else
+  # returns `:error`. The prefix must be exactly `issue-`, the suffix must be a COMPLETE integer
+  # (no residual tail: `"issue-7x"`, `"issue-7 "`, `"issue-"` → `:error`).
+  # WHY: a malformed `issue_id` that still parsed would correlate the pod to the WRONG issue — a
+  # step's result would be posted on someone else's issue. Fail-closed (`:error`) is the only safe
+  # exit.
   #
-  # ⚠ NOTE D'AUDIT (lot 8) — ÉCART @doc / comportement, figé ici tel qu'il est, NON corrigé :
-  # le `@doc` de `parse/1` promet un « STRICT inverse of compose/1 ». Ce n'est pas le cas.
-  # `Integer.parse/1` accepte les zéros de tête et le signe explicite :
-  #     parse("issue-007") == {:ok, 7}   et   compose(7) == "issue-7"   ≠ "issue-007"
-  #     parse("issue-+7")  == {:ok, 7}   et   compose(7) == "issue-7"   ≠ "issue-+7"
-  # `parse ∘ compose == id` tient (P1), mais `compose ∘ parse ≠ id` : plusieurs issue_id
-  # DISTINCTS désignent la même issue. Bénin tant que l'issue_id n'est qu'un corrélateur lu ;
-  # dangereux le jour où il sert de CLÉ (dedup, mutex, lookup) — deux clés pour une issue.
-  property "P2 REJET — parse/1 accepte exactement la forme `issue-<entier>`, rien d'autre" do
+  # ⚠ AUDIT NOTE — @doc / behavior GAP, frozen here as-is, NOT corrected:
+  # the `@doc` of `parse/1` promises a "STRICT inverse of compose/1". That is not the case.
+  # `Integer.parse/1` accepts leading zeros and an explicit sign:
+  #     parse("issue-007") == {:ok, 7}   and   compose(7) == "issue-7"   ≠ "issue-007"
+  #     parse("issue-+7")  == {:ok, 7}   and   compose(7) == "issue-7"   ≠ "issue-+7"
+  # `parse ∘ compose == id` holds (P1), but `compose ∘ parse ≠ id`: several DISTINCT issue_ids
+  # denote the same issue. Benign as long as the issue_id is only a correlator that gets read;
+  # dangerous the day it serves as a KEY (dedup, mutex, lookup) — two keys for one issue.
+  property "P2 REJECTION — parse/1 accepts exactly the `issue-<integer>` shape, nothing else" do
     check all(s <- candidate_gen(), max_runs: 300) do
       if Regex.match?(@accepted, s) do
         "issue-" <> rest = s
         assert IssueId.parse(s) == {:ok, String.to_integer(rest)}
       else
         assert IssueId.parse(s) == :error,
-               "parse(#{inspect(s)}) devrait être :error (hors forme canonique)"
+               "parse(#{inspect(s)}) should be :error (outside the canonical shape)"
       end
     end
   end
 
-  # INVARIANT : `parse/1` est TOTAL sur les non-strings → `:error`, jamais un FunctionClauseError.
-  # POURQUOI : `parse_issue_number` du StepRunConsumer délègue ici sur un champ de payload venu
-  # du bus — un `nil`/entier/map y arrive sans cérémonie.
-  property "totalité — un terme non-string rend :error (jamais de raise)" do
+  # INVARIANT: `parse/1` is TOTAL on non-strings → `:error`, never a FunctionClauseError.
+  # WHY: the StepRunConsumer's `parse_issue_number` delegates here on a payload field coming from
+  # the bus — a `nil`/integer/map arrives there without ceremony.
+  property "totality — a non-string term returns :error (never a raise)" do
     check all(
             term <-
               one_of([constant(nil), integer(), boolean(), atom(:alphanumeric), list_of(integer())])
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.IssueIdPropertyTest do
     end
   end
 
-  # Candidats : formes canoniques, quasi-canoniques (les pièges du parseur), et bruit printable.
+  # Candidates: canonical shapes, near-canonical ones (the parser's traps), and printable noise.
   defp candidate_gen do
     one_of([
       map(integer(), &IssueId.compose/1),
