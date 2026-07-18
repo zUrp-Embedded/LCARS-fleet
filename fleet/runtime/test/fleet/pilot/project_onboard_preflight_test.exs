@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboardF2Test do
+defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   @moduledoc """
   F2 (Z7c migration — débrief architecte 2026-07-12) : preflight `ensure_human_provisioned`
   AVANT toute création. Contrats testés : absence PROUVÉE de compte/team → erreur avec les

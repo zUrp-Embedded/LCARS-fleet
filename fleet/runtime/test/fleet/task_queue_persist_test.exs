@@ -1,4 +1,4 @@
-defmodule Fleet.TaskQueue.PersistF007Test do
+defmodule Fleet.TaskQueue.PersistTest do
   # async: false — capture_log global (swap backend logger) : isolation hors des tests concurrents.
   use ExUnit.Case, async: false
   @moduletag :tmp_dir

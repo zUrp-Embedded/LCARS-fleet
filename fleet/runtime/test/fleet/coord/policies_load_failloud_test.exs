@@ -1,4 +1,4 @@
-defmodule Fleet.Coord.PoliciesF051Test do
+defmodule Fleet.Coord.PoliciesLoadFailloudTest do
   # async: false — mute la config globale :policies_path.
   use ExUnit.Case, async: false
 

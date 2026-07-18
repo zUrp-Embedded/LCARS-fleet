@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ApplicationF027Test do
+defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   # async: false — mute la config globale :fleet_pilot (step_dispatch?/poll_repo/...).
   use ExUnit.Case, async: false
 

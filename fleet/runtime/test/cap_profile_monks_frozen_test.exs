@@ -1,4 +1,4 @@
-defmodule Fleet.CapProfile.MonksF041Test do
+defmodule Fleet.CapProfile.MonksFrozenTest do
   # async: false — mute la config globale :root_dir.
   use ExUnit.Case, async: false
 
