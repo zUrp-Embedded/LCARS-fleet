@@ -1,14 +1,14 @@
 defmodule Fleet.Starfleet.CoordBackendStub do
   @moduledoc """
-  Stub `CoordBackend` pour tests.
+  `CoordBackend` stub for tests.
 
-  Enregistre les invocations dans `Application.put_env(:fleet_starfleet,
-  :coord_invocations, [...])` pour assertion side-effect.
+  Records invocations in `Application.put_env(:fleet_starfleet,
+  :coord_invocations, [...])` for side-effect assertions.
 
   Reset via `Application.put_env(:fleet_starfleet, :coord_invocations, [])`.
 
-  BL-021 chantier 9 (B) — compat shims `/1` et `/2` retirés. Seules les
-  arités canon sont conservées (DN 9 C2.3).
+  BL-021 (B) — the `/1` and `/2` compat shims are removed. Only the
+  canonical arities are kept (DN 9 C2.3).
   """
 
   @behaviour Fleet.Starfleet.CoordBackend

@@ -1,16 +1,16 @@
 defmodule Fleet.Starfleet.MCPMonitorTest do
   @moduledoc """
-  Tests MCPMonitor (health check liveness ; défaut = drive supervisé
+  MCPMonitor tests (liveness health check; default = supervised drive
   `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`, cf. F049).
 
-  BL-021 chantier 8 — DN 13 Extensions V2. Le timer Process.send_after
-  n'est pas observé directement (interval >> durée test). On exerce
-  `handle_call(:check_now, ...)` qui rejoue le code path complet du timer.
+  BL-021 — DN 13 Extensions V2. The Process.send_after timer is not
+  observed directly (interval >> test duration). We exercise
+  `handle_call(:check_now, ...)` which replays the timer's full code path.
 
-  Cible : module name configurable (`:target` opt) — les tests utilisent
-  des cibles factices (cible atome `Process.whereis` OU cible `{:supervised, sup,
-  child_id}` avec un superviseur de test) pour éviter de dépendre du drive réel
-  `Fleet.MCP.PodTools` qui n'est pas démarré en test.
+  Target: configurable module name (`:target` opt) — tests use fake
+  targets (atom target via `Process.whereis` OR `{:supervised, sup,
+  child_id}` target with a test supervisor) to avoid depending on the real
+  `Fleet.MCP.PodTools` drive, which is not started in test.
   """
 
   use ExUnit.Case, async: false
@@ -32,8 +32,8 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
     :ok
   end
 
-  describe "check_now (sync trigger du code path timer)" do
-    test "target absent (whereis nil) → status :crashed, pas de broadcast (transition unknown→crashed)" do
+  describe "check_now (sync trigger of the timer code path)" do
+    test "absent target (whereis nil) → status :crashed, no broadcast (unknown→crashed transition)" do
       {:ok, pid} =
         MCPMonitor.start_link(
           name: :mcp_monitor_absent,
@@ -42,12 +42,12 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
         )
 
       assert {:ok, :crashed} = GenServer.call(pid, :check_now)
-      # Pas de broadcast : transition est unknown → crashed (pas :ok → :crashed).
+      # No broadcast: the transition is unknown → crashed (not :ok → :crashed).
       refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
       GenServer.stop(pid)
     end
 
-    test "target present puis tué → transition :ok → :crashed broadcast" do
+    test "target present then killed → :ok → :crashed transition broadcast" do
       target_name = :fake_mcp_server_kill_test
       {:ok, target_pid} = FakeTarget.start_link(target_name)
 
@@ -58,11 +58,11 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
           interval_ms: 60_000
         )
 
-      # 1er check : target vivant → :ok (transition unknown → :ok, no broadcast).
+      # 1st check: target alive → :ok (unknown → :ok transition, no broadcast).
       assert {:ok, :ok} = GenServer.call(monitor_pid, :check_now)
       refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
-      # Tue le target → next check doit broadcast.
+      # Kill the target → next check must broadcast.
       ref = Process.monitor(target_pid)
       GenServer.stop(target_pid)
       assert_receive {:DOWN, ^ref, :process, ^target_pid, _}, 1_000
@@ -92,15 +92,15 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
           interval_ms: 60_000
         )
 
-      # 2 checks consécutifs sur cible absente : aucun ne déclenche broadcast
-      # (transitions unknown → :crashed puis :crashed → :crashed).
+      # 2 consecutive checks on an absent target: neither triggers a broadcast
+      # (transitions unknown → :crashed then :crashed → :crashed).
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
       refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
       GenServer.stop(monitor_pid)
     end
 
-    test "recovery :crashed → :ok log + pas d'event dédié (DN MVP)" do
+    test "recovery :crashed → :ok log + no dedicated event (DN MVP)" do
       target_name = :fake_mcp_server_recovery_test
 
       {:ok, monitor_pid} =
@@ -110,13 +110,13 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
           interval_ms: 60_000
         )
 
-      # 1er check : target absent → :crashed
+      # 1st check: target absent → :crashed
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
 
-      # Démarre le target
+      # Start the target
       {:ok, _target_pid} = FakeTarget.start_link(target_name)
 
-      # 2e check : :crashed → :ok (recovery, log info, pas de broadcast)
+      # 2nd check: :crashed → :ok (recovery, info log, no broadcast)
       assert {:ok, :ok} = GenServer.call(monitor_pid, :check_now)
       refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
@@ -124,7 +124,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
       GenServer.stop(monitor_pid)
     end
 
-    test "last_check timestamp est setté" do
+    test "last_check timestamp is set" do
       {:ok, monitor_pid} =
         MCPMonitor.start_link(
           name: :mcp_monitor_ts,
@@ -142,8 +142,8 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
     end
   end
 
-  describe "cible supervisée {:supervised, sup, child_id} (F049)" do
-    test "enfant vivant → :ok ; terminé (reste mort) → :ok → :crashed broadcast" do
+  describe "supervised target {:supervised, sup, child_id} (F049)" do
+    test "child alive → :ok; terminated (stays dead) → :ok → :crashed broadcast" do
       child_id = :fake_drive
       child = %{id: child_id, start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
       {:ok, sup} = Supervisor.start_link([child], strategy: :one_for_one)
@@ -155,13 +155,13 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
           interval_ms: 60_000
         )
 
-      # enfant vivant → :ok (transition unknown → :ok, pas de broadcast)
+      # child alive → :ok (unknown → :ok transition, no broadcast)
       assert {:ok, :ok} = GenServer.call(mon, :check_now)
       refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
-      # termine l'enfant `:temporary` → il DISPARAÎT de which_children (`[]`, vérifié ;
-      # un enfant :permanent/:transient terminé resterait en `:undefined`). Les deux cas
-      # tombent dans la branche `_ -> :crashed` (keyfind → nil OU pid non-vivant).
+      # terminate the `:temporary` child → it DISAPPEARS from which_children (`[]`, verified;
+      # a terminated :permanent/:transient child would remain as `:undefined`). Both cases
+      # fall into the `_ -> :crashed` branch (keyfind → nil OR non-alive pid).
       :ok = Supervisor.terminate_child(sup, child_id)
       assert {:ok, :crashed} = GenServer.call(mon, :check_now)
 
@@ -176,13 +176,13 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
       Supervisor.stop(sup)
     end
 
-    test "superviseur sans cet enfant → :crashed sans broadcast (unknown → crashed)" do
+    test "supervisor without this child → :crashed without broadcast (unknown → crashed)" do
       {:ok, sup} = Supervisor.start_link([], strategy: :one_for_one)
 
       {:ok, mon} =
         MCPMonitor.start_link(
           name: :mcp_monitor_sup_absent,
-          target: {:supervised, sup, :inexistant},
+          target: {:supervised, sup, :nonexistent},
           interval_ms: 60_000
         )
 
@@ -193,11 +193,11 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
       Supervisor.stop(sup)
     end
 
-    test "superviseur non démarré → :crashed (rescue, pas de crash du moniteur)" do
+    test "supervisor not started → :crashed (rescue, no monitor crash)" do
       {:ok, mon} =
         MCPMonitor.start_link(
           name: :mcp_monitor_sup_nosup,
-          target: {:supervised, :superviseur_inexistant, :child},
+          target: {:supervised, :nonexistent_supervisor, :child},
           interval_ms: 60_000
         )
 

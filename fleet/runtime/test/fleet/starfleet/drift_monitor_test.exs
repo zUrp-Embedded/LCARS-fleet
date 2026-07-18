@@ -1,13 +1,13 @@
 defmodule Fleet.Starfleet.DriftMonitorTest do
   @moduledoc """
-  Tests intégration DriftMonitor → events Bus → Cat5Escalator → coord stub.
+  Integration tests DriftMonitor → Bus events → Cat5Escalator → coord stub.
 
-  Bus PubSub partagé entre tests : on filtre par marqueurs spécifiques
-  (`:coord_invocations` reset en setup, `:audit_log_path` per-test).
+  PubSub Bus shared across tests: we filter by test-specific markers
+  (`:coord_invocations` reset in setup, `:audit_log_path` per-test).
 
-  BL-021 chantier 3 : les events sont émis au schema canon `%Fleet.Event{}` via
-  `Bus.broadcast/2` (le legacy tuple format `Bus.broadcast/3` n'est plus consommé
-  par DriftMonitor — handlers tuple retirés).
+  BL-021: events are emitted with the canonical `%Fleet.Event{}` schema via
+  `Bus.broadcast/2` (the legacy tuple format `Bus.broadcast/3` is no longer
+  consumed by DriftMonitor — tuple handlers removed).
   """
 
   use ExUnit.Case, async: false
@@ -16,8 +16,8 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.DriftMonitor
 
-  # Nom LOCAL de l'instance de test (≠ __MODULE__ du module lib : plus aucune dépendance à une
-  # instance globale app-bootée).
+  # LOCAL name for the test instance (≠ the lib module's __MODULE__: no dependency left on an
+  # app-booted global instance).
   @monitor __MODULE__.Monitor
 
   setup %{tmp_dir: tmp_dir} do
@@ -32,9 +32,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
     Application.put_env(:fleet_starfleet, :coord_invocations, [])
 
-    # Conformité 2026-07-04 : plus d'instance app-bootée (start_drift_monitor: false en test —
-    # hermétisme de la suite). Ce test d'INTÉGRATION démarre la sienne, subscribe RÉEL (l'entrée
-    # passe par le Bus, c'est l'objet du test) ; nom local fixe (async: false justifié : put_env).
+    # No app-booted instance (start_drift_monitor: false in test — suite hermeticity). This
+    # INTEGRATION test starts its own, with a REAL subscribe (input goes through the Bus, that is
+    # the point of the test); fixed local name (async: false justified: put_env).
     monitor = start_supervised!({DriftMonitor, name: @monitor})
 
     Bus.subscribe()
@@ -49,8 +49,8 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   defp wait_drift_monitor_drain do
-    # Sync GenServer flush — assure que tous les handle_info précédents
-    # sont consommés avant l'assertion.
+    # Sync GenServer flush — ensures all previous handle_info messages
+    # are consumed before the assertion.
     _ = :sys.get_state(@monitor)
     :ok
   end
@@ -59,9 +59,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Application.get_env(:fleet_starfleet, :coord_invocations, [])
   end
 
-  # `source` défaut `:event_router`. Les producteurs WIRÉS exigent leur source (anti-spoof DriftMonitor) :
-  # workflow_map.failed / audit.verdict → `:workflow` ; pod.drift → `:spawner` (F-C043). Seul
-  # oauth.refresh.failed reste type-only (dormant, pas de producteur).
+  # `source` defaults to `:event_router`. WIRED producers require their source (DriftMonitor
+  # anti-spoof): workflow_map.failed / audit.verdict → `:workflow`; pod.drift → `:spawner` (F-C043).
+  # Only oauth.refresh.failed remains type-only (dormant, no producer).
   defp emit_canon(type, payload, opts \\ []) do
     Bus.broadcast(
       "fleet.events",
@@ -74,7 +74,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "pod.drift event (source :spawner, F-C043)" do
-    test "source :spawner + drift_count >= 3 → Cat5 escalade" do
+    test "source :spawner + drift_count >= 3 → Cat5 escalation" do
       :ok =
         emit_canon(:"pod.drift", %{"pod_id" => "drifty", "drift_count" => 3},
           cid: "cid-1",
@@ -97,7 +97,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "source :spawner + drift_count < 3 → no escalade" do
+    test "source :spawner + drift_count < 3 → no escalation" do
       :ok =
         emit_canon(:"pod.drift", %{"pod_id" => "early", "drift_count" => 2}, source: :spawner)
 
@@ -109,9 +109,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "anti-spoof : pod.drift drift_count 3 mais source ≠ :spawner (spoof) → PAS d'escalade" do
-      # F-C043 : le handler exige `source: :spawner` (le producteur = PermanentBoot). Un pod.drift
-      # broadcasté sur une autre source (spoof) NE PEUT PLUS déclencher la Cat 5.
+    test "anti-spoof: pod.drift with drift_count 3 but source ≠ :spawner (spoof) → NO escalation" do
+      # F-C043: the handler requires `source: :spawner` (the producer = PermanentBoot). A pod.drift
+      # broadcast under another source (spoof) CANNOT trigger the Cat 5.
       :ok =
         emit_canon(:"pod.drift", %{"pod_id" => "spoof", "drift_count" => 3},
           source: :event_router
@@ -127,7 +127,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "workflow_map.failed event" do
-    test "source :workflow → Cat5 escalade workflow_map_failed" do
+    test "source :workflow → Cat5 escalation workflow_map_failed" do
       :ok =
         emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "pl1", "reason" => "gate fail"},
           source: :workflow
@@ -148,9 +148,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "ANTI-SPOOF : même type mais source ≠ :workflow → IGNORÉ (pas d'escalade)" do
-      # Invariant DriftMonitor : un event de type workflow_map.failed émis par une source USURPÉE
-      # (ici :event_router, p.ex. un pod malveillant) ne DOIT pas déclencher l'escalade Cat-5.
+    test "ANTI-SPOOF: same type but source ≠ :workflow → IGNORED (no escalation)" do
+      # DriftMonitor invariant: a workflow_map.failed event emitted by a SPOOFED source
+      # (here :event_router, e.g. a malicious pod) MUST NOT trigger the Cat-5 escalation.
       :ok =
         emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "spoof"}, source: :event_router)
 
@@ -164,7 +164,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "oauth.refresh.failed event" do
-    test "broadcast → Cat5 escalade oauth_refresh_failed" do
+    test "broadcast → Cat5 escalation oauth_refresh_failed" do
       :ok =
         emit_canon(:"oauth.refresh.failed", %{
           "account" => "u@x.com",
@@ -188,7 +188,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "audit.verdict event" do
-    test "source :workflow + decision_json valide → CoordBackend.handle_decision invoqué" do
+    test "source :workflow + valid decision_json → CoordBackend.handle_decision invoked" do
       json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
 
       :ok = emit_canon(:"audit.verdict", %{"decision_json" => json}, source: :workflow)
@@ -201,7 +201,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "ANTI-SPOOF : audit.verdict source ≠ :workflow → IGNORÉ (pas de handle_decision)" do
+    test "ANTI-SPOOF: audit.verdict with source ≠ :workflow → IGNORED (no handle_decision)" do
       json = ~s|{"decision":"halt","reason":"spoofed","details":{}}|
 
       :ok = emit_canon(:"audit.verdict", %{"decision_json" => json}, source: :event_router)
@@ -214,7 +214,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "source :workflow + decision_json invalide → AuditLog write + pas de handle_decision",
+    test "source :workflow + invalid decision_json → AuditLog write + no handle_decision",
          %{tmp_dir: tmp_dir} do
       :ok = emit_canon(:"audit.verdict", %{"decision_json" => ~s|{not json}|}, source: :workflow)
 
@@ -230,12 +230,12 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     end
   end
 
-  describe "events non-pertinents" do
-    test "event inconnu → ignoré (no crash)" do
+  describe "irrelevant events" do
+    test "unknown event → ignored (no crash)" do
       :ok = emit_canon(:"pod.allocate", %{"pod_id" => "p1"})
       wait_drift_monitor_drain()
 
-      # DriftMonitor toujours vivant
+      # DriftMonitor still alive
       assert Process.alive?(Process.whereis(@monitor))
     end
   end

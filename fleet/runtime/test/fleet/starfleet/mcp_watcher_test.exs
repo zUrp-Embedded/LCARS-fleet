@@ -1,12 +1,12 @@
 defmodule Fleet.Starfleet.MCPWatcherTest do
   @moduledoc """
-  Tests MCPWatcher (cron hebdo SDK MCP upstream).
+  MCPWatcher tests (weekly cron for the upstream MCP SDK).
 
-  BL-021 chantier 8 — DN 13 Extensions V2.
+  BL-021 — DN 13 Extensions V2.
 
-  Le timer Process.send_after n'est pas observé directement (interval >>
-  durée test). On exerce `handle_call(:check_now, ...)` qui rejoue le code
-  path complet du timer.
+  The Process.send_after timer is not observed directly (interval >>
+  test duration). We exercise `handle_call(:check_now, ...)` which replays
+  the timer's full code path.
   """
 
   use ExUnit.Case, async: false
@@ -19,7 +19,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
     :ok
   end
 
-  describe "check_now (sync trigger du code path timer)" do
+  describe "check_now (sync trigger of the timer code path)" do
     test "mismatch current vs upstream → broadcast %Fleet.Event{sdk.upstream_alert}" do
       fetcher = fn "ex_mcp" -> {:ok, "9.9.9-fake-upstream"} end
 
@@ -43,10 +43,10 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
                      },
                      500
 
-      # Le contrat de l'alerte : `current` = la version ex_mcp RÉELLEMENT résolue localement (via
-      # Application.spec, ou nil si absente), PAS une valeur arbitraire. `is_binary or is_nil` était
-      # vacue (toujours vrai). On calcule l'attendu DANS ce process → robuste que ex_mcp soit chargé
-      # (→ "0.9.1") ou non (→ nil) : si le watcher rapportait un current bidon/codé en dur, ça casse.
+      # The alert's contract: `current` = the ex_mcp version ACTUALLY resolved locally (via
+      # Application.spec, or nil if absent), NOT an arbitrary value. `is_binary or is_nil` would be
+      # vacuous (always true). We compute the expected value IN this process → robust whether ex_mcp
+      # is loaded (→ "0.9.1") or not (→ nil): a bogus/hard-coded current from the watcher breaks it.
       expected_current =
         case Application.spec(:ex_mcp, :vsn) do
           nil -> nil

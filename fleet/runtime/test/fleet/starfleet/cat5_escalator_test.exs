@@ -31,7 +31,7 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
   end
 
   describe "escalate/3" do
-    test "pod_drift : log + broadcast canon + coord backend invoqué", %{log_path: log_path} do
+    test "pod_drift: log + canonical broadcast + coord backend invoked", %{log_path: log_path} do
       payload = %{"pod_id" => "p1", "drift_count" => 3}
       cid = "corr-1"
 
@@ -60,7 +60,7 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert content =~ "pod_drift"
     end
 
-    test "chain préexistant étendu" do
+    test "pre-existing chain is extended" do
       payload = %{"chain" => ["pod.refuse", "ipc_filter.drift"], "n" => 1}
       :ok = Cat5Escalator.escalate(:workflow_map_failed, payload, nil)
 
@@ -74,7 +74,7 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert chain == ["pod.refuse", "ipc_filter.drift", "starfleet.cat5.workflow_map_failed"]
     end
 
-    test "oauth_refresh_failed : source string serialisé" do
+    test "oauth_refresh_failed: source serialized as string" do
       :ok = Cat5Escalator.escalate(:oauth_refresh_failed, %{"reason" => "401"}, nil)
 
       assert_receive %Fleet.Event{
@@ -85,12 +85,12 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
                      500
     end
 
-    test "R2-15 : source HORS l'enum Cat 5 → REFUS loud (error) + :ok, PAS de broadcast/effet" do
-      # `:bogus_cat5_src` n'est pas une des 3 sources câblées (DriftMonitor + events.yaml). AVANT R2-15,
-      # `escalate` acceptait tout atom → procédait jusqu'à un broadcast d'un `audit_cat5_<src>` non
-      # enregistré (bug de construction d'event, loud au niveau broadcast). Désormais borné au source-enum :
-      # refus AU BORD (aucun effet de bord bogus : ni AuditLog.write, ni broadcast, ni coord). `escalate/3`
-      # reste :ok (contrat fail-safe), mais LOUD (Logger.error) — jamais un :ok muet.
+    test "R2-15: source OUTSIDE the Cat 5 enum → loud REFUSAL (error) + :ok, NO broadcast/effect" do
+      # `:bogus_cat5_src` is not one of the 3 wired sources (DriftMonitor + events.yaml). R2-15 bounds
+      # `escalate` to the source-enum: an unknown atom must not proceed to broadcasting an unregistered
+      # `audit_cat5_<src>` (event-construction bug, loud only at broadcast level). Refusal happens AT
+      # THE EDGE (no bogus side effect: no AuditLog.write, no broadcast, no coord). `escalate/3` stays
+      # :ok (fail-safe contract), but LOUD (Logger.error) — never a mute :ok.
       log =
         capture_log(fn ->
           assert :ok = Cat5Escalator.escalate(:bogus_cat5_src, %{"pod_id" => "p1"}, "cid-x")

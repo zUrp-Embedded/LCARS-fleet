@@ -1,23 +1,23 @@
 defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
   @moduledoc """
-  Contrat re-subscribe au Bus après restart : un consommateur d'events tué redémarre et SE RÉ-ABONNE,
-  donc reçoit les events SUIVANTS. La garantie tient par construction (le subscribe vit dans `init/1`,
-  qu'OTP rappelle à CHAQUE restart), mais elle DOIT être prouvée de bout en bout — sinon une régression
-  (subscribe déplacé hors init, ou subscribe one-shot au boot du superviseur) rendrait un consommateur
-  redémarré SOURD en silence : vivant, supervisé vert, mais ne consommant plus rien. C'est le pire mode
-  de panne d'un bus pub/sub, et il est invisible sans ce test.
+  Bus re-subscribe contract after restart: a killed event consumer restarts and RE-SUBSCRIBES,
+  so it receives the NEXT events. The guarantee holds by construction (the subscribe lives in
+  `init/1`, which OTP calls again on EVERY restart), but it MUST be proven end to end — otherwise
+  a regression (subscribe moved out of init, or a one-shot subscribe at supervisor boot) would
+  leave a restarted consumer silently DEAF: alive, supervised green, but consuming nothing.
+  That is the worst failure mode of a pub/sub bus, and it is invisible without this test.
 
-  Non-async + topic DÉDIÉ : on broadcast réellement sur le Bus global ; un topic propre à ce test
-  (`@topic`) isole le compteur de tout autre broadcast `fleet.events` parasite → assertion exacte,
-  pas de flake.
+  Non-async + DEDICATED topic: we really broadcast on the global Bus; a topic owned by this test
+  (`@topic`) isolates the counter from any other stray `fleet.events` broadcast → exact assertion,
+  no flake.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
 
-  # Consommateur minimal qui subscribe DANS init (le contrat sous test) et compte ce qu'il reçoit.
-  # Topic dédié passé en opt → isolé des autres broadcasts. Modèle EXACT du pattern réel
-  # (AuditConsumer/StepRunConsumer/ReadModel/… : tous subscribent dans init/1).
+  # Minimal consumer that subscribes IN init (the contract under test) and counts what it receives.
+  # Dedicated topic passed as an opt → isolated from other broadcasts. EXACT model of the real
+  # pattern (AuditConsumer/StepRunConsumer/ReadModel/…: all subscribe in init/1).
   defmodule Counter do
     use GenServer
 
@@ -26,7 +26,7 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
 
     @impl true
     def init(opts) do
-      # LE contrat : abonnement DANS init → rejoué à chaque (ré)init par OTP.
+      # THE contract: subscription IN init → replayed on every (re)init by OTP.
       :ok = Bus.subscribe(Keyword.fetch!(opts, :topic))
       {:ok, %{count: 0}}
     end
@@ -41,11 +41,11 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
   defp ev, do: Fleet.Event.new(:spawner, :"pod.completed")
 
   @tag :resubscribe
-  test "consommateur tué → redémarré par le superviseur → reçoit les events POST-restart" do
+  test "killed consumer → restarted by the supervisor → receives POST-restart events" do
     name = :"resub_counter_#{System.unique_integer([:positive])}"
 
-    # restart: :permanent (défaut GenServer) → OTP relance au crash. Le superviseur lui-même ne
-    # subscribe RIEN : tout passe par init/1 de l'enfant (le seul endroit légitime).
+    # restart: :permanent (GenServer default) → OTP restarts on crash. The supervisor itself
+    # subscribes to NOTHING: everything goes through the child's init/1 (the only legitimate place).
     {:ok, sup} =
       Supervisor.start_link(
         [Supervisor.child_spec({Counter, name: name, topic: @topic}, id: :resub)],
@@ -55,30 +55,30 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
     pid1 = Process.whereis(name)
     assert is_pid(pid1)
 
-    # 1) Abonnement initial OK : l'event est consommé.
+    # 1) Initial subscription OK: the event is consumed.
     Bus.broadcast(@topic, ev())
     assert %{count: 1} = :sys.get_state(name)
 
-    # 2) Kill brutal → OTP redémarre → nouvel init/1 → nouveau Bus.subscribe.
+    # 2) Brutal kill → OTP restarts → new init/1 → new Bus.subscribe.
     ref = Process.monitor(pid1)
     Process.exit(pid1, :kill)
     assert_receive {:DOWN, ^ref, :process, ^pid1, :killed}
 
     pid2 = wait_for_restart(name, pid1)
-    assert pid2 != pid1, "le superviseur doit avoir redémarré une NOUVELLE instance"
+    assert pid2 != pid1, "the supervisor must have restarted a NEW instance"
 
-    # 3) PREUVE : un event POST-restart est reçu par la NOUVELLE instance. Son count repart de 0
-    # (instance fraîche), donc le 1 atteste que c'est bien CETTE instance-ci qui s'est ré-abonnée et a
-    # consommé — pas un résidu de l'ancienne. Sans re-subscribe, on resterait à 0 (consommateur sourd).
+    # 3) PROOF: a POST-restart event is received by the NEW instance. Its count restarts at 0
+    # (fresh instance), so the 1 attests that THIS instance re-subscribed and consumed — not a
+    # leftover of the old one. Without re-subscribe we would stay at 0 (deaf consumer).
     Bus.broadcast(@topic, ev())
     assert %{count: 1} = :sys.get_state(name)
 
     Supervisor.stop(sup)
   end
 
-  # Attend (borné) qu'un NOUVEAU pid (≠ ancien) soit enregistré sous `name` = le restart OTP effectif.
+  # Waits (bounded) for a NEW pid (≠ old one) registered under `name` = the effective OTP restart.
   defp wait_for_restart(name, old_pid, tries \\ 200)
-  defp wait_for_restart(_name, _old, 0), do: flunk("consommateur jamais redémarré sous son nom")
+  defp wait_for_restart(_name, _old, 0), do: flunk("consumer never restarted under its name")
 
   defp wait_for_restart(name, old_pid, tries) do
     case Process.whereis(name) do

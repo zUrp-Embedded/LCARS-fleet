@@ -16,7 +16,7 @@ defmodule Fleet.Starfleet.AuditLogTest do
   end
 
   describe "write/1" do
-    test "write minimal → :ok + ligne NDJSON sur disque", %{log_path: log_path} do
+    test "minimal write → :ok + NDJSON line on disk", %{log_path: log_path} do
       assert :ok = AuditLog.write(%{"source" => "test", "k" => "v"})
 
       content = File.read!(log_path)
@@ -27,7 +27,7 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert parsed["ts"] =~ ~r/^\d{4}-\d{2}-\d{2}T/
     end
 
-    test "write append cumule les lignes", %{log_path: log_path} do
+    test "write appends and accumulates lines", %{log_path: log_path} do
       :ok = AuditLog.write(%{"n" => 1})
       :ok = AuditLog.write(%{"n" => 2})
 
@@ -35,12 +35,12 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert length(lines) == 2
     end
 
-    test "SOC-EFF-004 : parent absent mais CRÉABLE → mkdir_p + entrée écrite (Cat 5 pas perdue :enoent)",
+    test "SOC-EFF-004: parent absent but CREATABLE → mkdir_p + entry written (Cat 5 not lost to :enoent)",
          %{
            tmp_dir: tmp_dir
          } do
-      # Avant SOC-EFF-004, ce path (parent absent) rendait {:error, :enoent} → l'entrée audit était PERDUE.
-      # Le write doit maintenant créer le parent (mkdir_p) et graver l'entrée.
+      # SOC-EFF-004: an absent-but-creatable parent must not yield {:error, :enoent} (audit entry
+      # LOST). The write must create the parent (mkdir_p) and persist the entry.
       nested = Path.join([tmp_dir, "does", "not", "exist", "audit.jsonl"])
       Application.put_env(:fleet_starfleet, :audit_log_path, nested)
 
@@ -48,37 +48,38 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert File.read!(nested) =~ ~s("k":"v")
     end
 
-    test "write fail-safe : path VRAIMENT inaccessible (parent = un fichier) → {:error, _} pas crash",
+    test "fail-safe write: path TRULY inaccessible (parent = a file) → {:error, _} not a crash",
          %{
            tmp_dir: tmp_dir
          } do
-      # Un FICHIER bloque la création du parent (mkdir_p → :enotdir) → File.write échoue aussi → {:error}
-      # fail-safe, pas de crash. (Un simple dir absent est désormais CRÉABLE — cf. SOC-EFF-004 ci-dessus.)
+      # A FILE blocks parent creation (mkdir_p → :enotdir) → File.write fails too → {:error}
+      # fail-safe, no crash. (A merely absent dir is CREATABLE — cf. SOC-EFF-004 above.)
       blocker = Path.join(tmp_dir, "blocker")
-      File.write!(blocker, "je suis un fichier, pas un dir")
+      File.write!(blocker, "I am a file, not a dir")
       bad_path = Path.join([blocker, "log.jsonl"])
       Application.put_env(:fleet_starfleet, :audit_log_path, bad_path)
 
       assert {:error, _reason} = AuditLog.write(%{"k" => "v"})
     end
 
-    test "F-C098 fail-safe : entrée non-encodable (tuple/PID) → {:error, {:encode_failed, _}}, pas de crash" do
-      # AuditLog se documente « fail-safe non-bang wrapper … no crash » (@spec :ok | {:error, term()}).
-      # Un payload portant un terme non JSON-encodable (tuple/PID/ref — pas de Jason.Encoder →
-      # Protocol.UndefinedError) faisait RAISE `Jason.encode!` AVANT F-C098, violant le contrat propre
-      # du module sur le chemin Cat-5 load-bearing (les callers font `_ = write(...)`, n'attrapent pas un
-      # raise). Le wrapper doit rescue → {:error, {:encode_failed, _}}, symétrique du non-bang File.write.
+    test "F-C098 fail-safe: non-encodable entry (tuple/PID) → {:error, {:encode_failed, _}}, no crash" do
+      # AuditLog documents itself as a "fail-safe non-bang wrapper … no crash" (@spec :ok | {:error, term()}).
+      # A payload carrying a non-JSON-encodable term (tuple/PID/ref — no Jason.Encoder →
+      # Protocol.UndefinedError) must NOT make `Jason.encode!` RAISE (F-C098): that would violate the
+      # module's own contract on the load-bearing Cat-5 path (callers do `_ = write(...)`, they do not
+      # catch a raise). The wrapper must rescue → {:error, {:encode_failed, _}}, symmetric with the
+      # non-bang File.write.
       assert {:error, {:encode_failed, _}} =
                AuditLog.write(%{"source" => "x", "bad" => {:a, :tuple}})
 
       assert {:error, {:encode_failed, _}} = AuditLog.write(%{"pid" => self()})
     end
 
-    test "ts auto-mergé si absent" do
+    test "ts auto-merged when absent" do
       assert :ok = AuditLog.write(%{"k" => "v"})
     end
 
-    test "ts préservé si fourni", %{log_path: log_path} do
+    test "ts preserved when provided", %{log_path: log_path} do
       :ok = AuditLog.write(%{"ts" => "2026-01-01T00:00:00Z", "k" => "v"})
       [line] = File.read!(log_path) |> String.split("\n", trim: true)
       {:ok, parsed} = Jason.decode(line)
@@ -87,16 +88,16 @@ defmodule Fleet.Starfleet.AuditLogTest do
   end
 
   describe "rotation" do
-    test "au seuil : backup .1 créé, fichier courant repassé sous le seuil, aucune ligne perdue",
+    test "at threshold: .1 backup created, current file back under threshold, no line lost",
          %{log_path: log_path} do
-      # Seuil > une ligne mais bas → la rotation se déclenche après quelques écritures.
+      # Threshold > one line but low → rotation triggers after a few writes.
       threshold = 300
       Application.put_env(:fleet_starfleet, :audit_log_max_bytes, threshold)
       on_exit(fn -> Application.delete_env(:fleet_starfleet, :audit_log_max_bytes) end)
 
-      # On écrit jusqu'à la 1re apparition du backup .1 (cap large anti-boucle) : s'arrêter à la
-      # PREMIÈRE rotation garantit qu'une seule a eu lieu → le test ne dépend pas du nb d'octets/ligne
-      # et ne tombe pas dans le cas (assumé) où un 2e cycle écrase le .1.
+      # Write until the .1 backup first appears (large anti-loop cap): stopping at the FIRST
+      # rotation guarantees exactly one happened → the test does not depend on bytes-per-line
+      # and never hits the (accepted) case where a 2nd cycle overwrites the .1.
       written =
         Enum.reduce_while(1..1000, [], fn n, acc ->
           :ok = AuditLog.write(%{"n" => n})
@@ -104,14 +105,14 @@ defmodule Fleet.Starfleet.AuditLogTest do
         end)
         |> Enum.reverse()
 
-      # Rotation effectuée.
+      # Rotation happened.
       assert File.exists?(log_path <> ".1")
 
-      # Le fichier courant a redémarré neuf (la ligne qui a déclenché la rotation) → sous le seuil.
+      # The current file restarted fresh (the line that triggered the rotation) → under the threshold.
       assert %File.Stat{size: size} = File.stat!(log_path)
       assert size < threshold
 
-      # Aucune ligne perdue entre les deux fichiers : leur union = exactement toutes les écritures.
+      # No line lost between the two files: their union = exactly all writes.
       ns =
         [log_path <> ".1", log_path]
         |> Enum.flat_map(fn p -> p |> File.read!() |> String.split("\n", trim: true) end)
