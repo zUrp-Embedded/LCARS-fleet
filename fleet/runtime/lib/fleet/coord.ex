@@ -59,7 +59,7 @@ defmodule Fleet.Coord do
   **Last revised**: 2026-07-18
   """
 
-  # Strict canonical arities — the correlation_id is always explicit, no compat shim.
+  # Strict canonical arities — the correlation_id is always explicit.
   defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
 end
