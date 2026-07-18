@@ -1,8 +1,7 @@
 defmodule Fleet.TaskQueue.Application do
-  # Superviseur de domaine (ex-callback Application de l'app umbrella — collapse Z2
-  # migration 2026-07-12 ; nom conservé pour zéro churn de références).
-  # @moduledoc false RESTAURÉ : module interne délibérément caché (le contrat public
-  # du domaine vit dans la façade Fleet.TaskQueue) — la conversion ne change pas ça.
+  # Domain supervisor ("Application" is a historical name, kept to avoid reference churn —
+  # this is a plain Supervisor, not an OTP app callback). @moduledoc false: internal module
+  # deliberately hidden (the domain's public contract lives in the Fleet.TaskQueue facade).
   @moduledoc false
   use Supervisor
 
@@ -15,7 +14,7 @@ defmodule Fleet.TaskQueue.Application do
     # Single-source AXIOM: the FORGE is the truth of work (issues/routes/PR). The broker is its
     # RAM FRONT, not a 2nd store of record. Nothing in the work item is broker-only-durable (everything is
     # re-derivable on forge re-dispatch) → the broker runs EPHEMERAL (`persist: false`): zero `state.json`
-    # → no way to accumulate persisted stale tasks (the cause of the accumulated "in-progress" ones cross-reboot). On
+    # → no way to accumulate persisted stale tasks across reboots. On
     # restart, the queue re-derives itself from forge polls (the canonical reconciliation rail). Persistence
     # stays opt-in (tested mechanism) for a future broker-only-durable state — NONE exists to date.
     children = [{Fleet.TaskQueue.Server, persist: false}]
