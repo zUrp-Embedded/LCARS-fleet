@@ -1,8 +1,8 @@
 defmodule Fleet.Pilot.ForgeClient.UrlSafe do
   @moduledoc """
-  SAFE encoding of forge URL segments, extracted from `ForgeClient.Transport`: the client's
+  SAFE encoding of forge URL segments — the forge client's
   path-traversal lock. PURE cluster (binary → binary), zero config, zero I/O —
-  hence its extraction from the HTTP engine (Transport keeps the plumbing: config/token, Req,
+  distinct from the HTTP engine (Transport keeps the plumbing: config/token, Req,
   pagination, system login).
 
   ## Why (security)

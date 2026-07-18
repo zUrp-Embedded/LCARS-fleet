@@ -48,8 +48,8 @@ defmodule Fleet.Pilot.ForgeClient.Files do
       case http_put(config, "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
         # 2xx WITHOUT the commit envelope = unexpected shape → fail-loud, domain doctrine (same
-        # stance as paginate :unexpected_page_shape). The old `{:ok, :written}` was a success of
-        # UNDECLARED type (neither in @spec nor @doc) that hid a shape drift as a hollow green.
+        # stance as paginate :unexpected_page_shape). An undeclared success type (outside
+        # @spec/@doc) would hide a shape drift as a hollow green.
         {:ok, other} -> {:error, {:unexpected_put_shape, other}}
         {:error, _} = err -> err
       end
