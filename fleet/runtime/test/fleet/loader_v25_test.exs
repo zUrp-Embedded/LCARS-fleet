@@ -54,6 +54,9 @@ defmodule Fleet.Workflow.LoaderV25Test do
     assert pipe["jury"] == []
     assert Map.keys(pipe["steps"]) == ["build"]
     assert pipe["steps"]["build"]["role"] == "engineer"
+    # The card's short description travels through normalize: it is the SSoT of the
+    # `wfmap/<map>` forge-label tooltip (the card explains itself to the human).
+    assert is_binary(pipe["description"]) and pipe["description"] != ""
   end
 
   test "canon l1-light.yaml (V2.5) normalized → single build step + qualifier-only jury" do

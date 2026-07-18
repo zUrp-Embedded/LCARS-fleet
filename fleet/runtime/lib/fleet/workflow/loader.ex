@@ -107,7 +107,11 @@ defmodule Fleet.Workflow.Loader do
       "jury" => Map.fetch!(spec, "jury"),
       # Levels the card claims to suit (metadata, optional) — read by the off-matrix
       # override warning (ProjectIntensity); [] = the card claims nothing, no basis to warn.
-      "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || []
+      "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],
+      # Short self-description of the card (metadata, optional) — the forge tooltip of the
+      # `wfmap/<map>` label reads it (the card explains ITSELF to the human; nothing per-map
+      # hardcoded in the label layer). nil = the generic tooltip.
+      "description" => get_in(yaml, ["metadata", "description"])
     }
   end
 

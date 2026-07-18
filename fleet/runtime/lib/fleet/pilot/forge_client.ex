@@ -931,12 +931,30 @@ defmodule Fleet.Pilot.ForgeClient do
     do:
       "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
 
-  defp label_description("wfmap/" <> _map),
-    do:
-      "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
+  # The card explains ITSELF: the tooltip is the card's own short `description` (SSoT — a new
+  # card brings its tooltip with it, nothing per-map hardcoded here). Unknown/broken card →
+  # the generic text. Sliced defensively (Gitea caps label descriptions).
+  defp label_description("wfmap/" <> map) do
+    case card_description(map) do
+      {:ok, desc} ->
+        String.slice("Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc, 0, 240)
+
+      :error ->
+        "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
+    end
+  end
 
   defp label_description(_),
     do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
+
+  defp card_description(map) do
+    case Fleet.Workflow.Loader.load!(map)["description"] do
+      desc when is_binary(desc) and desc != "" -> {:ok, desc}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
 
   # ============================================================
   # Forge identity — credential -> wire adapter (role token)
