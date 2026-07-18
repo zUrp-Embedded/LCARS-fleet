@@ -25,17 +25,17 @@ defmodule Fleet.Pilot.IncidentConsumer do
       (no pod created → no pod_id). Subject = `cap_profile_name` (the role: recurrence = "this role keeps
       failing to spawn"; issue_id is per-request → never recurs). op="spawn", default recurrence escalation.
 
-  ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (acte4 A-06)
+  ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (A-06)
 
   `starfleet.audit_cat5_<pod_drift|workflow_map_failed|oauth_refresh_failed>` — the max-severity
-  rail (`Cat5Escalator`). Before this consumer it only left a LOCAL NDJSON line + two lossy Bus
-  broadcasts: the LOW-severity incident rail opened a durable forge issue while the MAX-severity
-  one evaporated if nobody tailed the file (severity/durability inversion). Routed here to the
-  SAME durable forge sink — via `IncidentRegistry.escalate_gated/5` (issue on FIRST
+  rail (`Cat5Escalator`). Without this route it would only leave a LOCAL NDJSON line + two lossy
+  Bus broadcasts: the LOW-severity incident rail opens a durable forge issue while the
+  MAX-severity one evaporates if nobody tails the file (severity/durability inversion). Routed
+  here to the SAME durable forge sink — via `IncidentRegistry.escalate_gated/5` (issue on FIRST
   occurrence, label `error_cat5`): max severity is not sampled by a recurrence gate — only the
   REPEATS of the same signature under the registry cooldown are suppressed (the open issue
-  carries the alarm; a permanent drift no longer re-creates one issue per event). The event's
-  `correlation_id` (wave E) links the issue back to the causing mandate. No new compile dep:
+  carries the alarm; a permanent drift does not re-create one issue per event). The event's
+  `correlation_id` links the issue back to the causing mandate. No new compile dep:
   the event is plain data on the Bus, its 3 atoms are registry-declared.
 
   ## Offload (`:runner`)
@@ -115,9 +115,9 @@ defmodule Fleet.Pilot.IncidentConsumer do
         state
       )
       when is_binary(pod_id) do
-    # `reason` = stable category (producer-normalized, keys the dedup signature) ;
-    # `reason_detail` rides as an opt → engraved in the issue body by Escalation (human diag) ;
-    # `correlation_id` (vague E) → bloc « Mandat lié » de l'issue de récurrence.
+    # `reason` = stable category (producer-normalized, keys the dedup signature);
+    # `reason_detail` rides as an opt → engraved in the issue body by Escalation (human diag);
+    # `correlation_id` → the "Mandat lié" block of the recurrence issue.
     record(state, "pod", pod_id, p["reason"],
       reason_detail: p["reason_detail"],
       correlation_id: ev.correlation_id
@@ -155,7 +155,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
     # spawn.failed (twin of pod.failed): admin.spawn.request dispatch DROPPED the spawn AFTER the API
     # already answered 202 (no pod was ever created — hence no pod_id). Subject = cap_profile_name (the
     # role): recurrence = "this role keeps failing to spawn" (issue_id is per-request → never recurs).
-    # op="spawn", default :recurrence escalation. Was ORPHANED: produced, never consumed → the 202 lied silently.
+    # op="spawn", default :recurrence escalation. Without this handler the event would be orphaned
+    # (produced, never consumed) and the 202 would lie silently.
     record(state, "spawn", name, p["reason"],
       reason_detail: p["reason_detail"],
       correlation_id: ev.correlation_id
@@ -215,25 +216,25 @@ defmodule Fleet.Pilot.IncidentConsumer do
         {:escalation_failed, e} ->
           Logger.error(
             "IncidentConsumer: #{op}.failed #{pod_id} RECURRENT but escalation FAILED — NO sysadmin " <>
-              "issue created (forge down ?) : #{inspect(e)}"
+              "issue created (forge down?): #{inspect(e)}"
           )
 
         {:recorded_volatile, e} ->
           Logger.error(
-            "IncidentConsumer: #{op}.failed #{pod_id} : incident en MÉMOIRE seule — write WAL ÉCHOUÉ " <>
-              "(#{inspect(e)}) : PAS durable cross-session tant que la sync forge async n'a pas absorbé " <>
-              "(BND-055 : un crash avant la sync perdrait la récurrence)"
+            "IncidentConsumer: #{op}.failed #{pod_id}: incident in MEMORY only — WAL write FAILED " <>
+              "(#{inspect(e)}): NOT durable cross-session until the async forge sync absorbs it " <>
+              "(a crash before the sync would lose the recurrence)"
           )
 
         {:record_failed, e} ->
           Logger.error(
-            "IncidentConsumer: #{op}.failed #{pod_id} : incident NOT recorded (registry unavailable) : #{inspect(e)}"
+            "IncidentConsumer: #{op}.failed #{pod_id}: incident NOT recorded (registry unavailable): #{inspect(e)}"
           )
 
         {:escalation_suppressed, issue} ->
-          # Récurrence sous cooldown : notée au registre (count/last_seen), l'issue existante
-          # porte l'alarme — :debug (une panne durable récurre à CHAQUE tick, un warning par
-          # tick noierait la trace que l'issue ouverte couvre déjà).
+          # Recurrence under cooldown: noted at the registry (count/last_seen), the existing issue
+          # carries the alarm — :debug (a durable failure recurs at EVERY tick, one warning per
+          # tick would drown the trace the open issue already covers).
           Logger.debug(
             "IncidentConsumer: #{op}.failed #{pod_id} recurrent under cooldown — noted, " <>
               "existing issue #{inspect(issue)} carries the alarm"
@@ -251,13 +252,13 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  # Cat-5 → issue forge durable dès la PREMIÈRE occurrence via `IncidentRegistry.escalate_gated/5`
-  # (label `error_cat5`, triage sysadmin distinct des crashs pod) — pas de gate de récurrence
-  # sur la 1re alarme (sévérité max, doctrine A-06) ; seules les RÉPÉTITIONS de la même
-  # signature sous le cooldown du registre sont supprimées (l'issue ouverte porte l'alarme —
-  # sans ça, un drift permanent re-créait une issue par event). Offloadée comme `record/5`
-  # (touche la forge). L'échec d'escalade est LOUD : perdre l'alarme re-silencierait exactement
-  # l'évaporation que ce rail vient de fermer (l'inversion sévérité/durabilité, acte4 A-06).
+  # Cat-5 → durable forge issue from the FIRST occurrence via `IncidentRegistry.escalate_gated/5`
+  # (label `error_cat5`, sysadmin triage distinct from pod crashes) — no recurrence gate
+  # on the 1st alarm (max severity, doctrine A-06); only the REPEATS of the same
+  # signature under the registry cooldown are suppressed (the open issue carries the alarm —
+  # without it, a permanent drift would re-create one issue per event). Offloaded like `record/5`
+  # (touches the forge). A failed escalation is LOUD: losing the alarm would re-silence exactly
+  # the evaporation this rail closes (the severity/durability inversion).
   defp escalate_cat5(state, source, %Fleet.Event{} = ev) do
     subject = ev.pod_id || source
     reason = extract_cat5_reason(ev.payload)
@@ -283,7 +284,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
         {:error, e} ->
           Logger.error(
             "IncidentConsumer: Cat-5 #{source} #{subject} escalation FAILED — NO durable issue " <>
-              "(forge down ?) : #{inspect(e)} — the max-severity alarm is NOT engraved"
+              "(forge down?): #{inspect(e)} — the max-severity alarm is NOT engraved"
           )
       end
     end
