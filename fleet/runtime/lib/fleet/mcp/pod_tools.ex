@@ -102,7 +102,7 @@ defmodule Fleet.MCP.PodTools do
           "for forge-native delivery (engineer → PR → review → merge). Use it to DELEGATE " <>
           "rather than code yourself (the fleet delivers better and preserves your context). " <>
           "`brief` = the clear brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
-          "the repo returned by `create_project`, or the project designated by the human. The fleet NO LONGER routes by " <>
+          "the repo returned by `create_project`, or the project designated by the human. The fleet does NOT route by " <>
           "default — without `project`, the issue is REFUSED (never a silent misroute to another project). " <>
           "Returns {\"status\":\"issue_created\",\"repo\":...}."
       )
@@ -175,7 +175,7 @@ defmodule Fleet.MCP.PodTools do
           "or not, review verdicts. Use it to TRACK an issue before chaining — e.g. validate " <>
           "the delivery (issue closed by the merge) of issue N BEFORE posting issue N+1. " <>
           "`number` = the issue number. `project` = the issue's `owner/name` repo, **REQUIRED**: the repo " <>
-          "returned by `create_project` (or the one passed to `create_issue`). The fleet NO LONGER routes by " <>
+          "returned by `create_project` (or the one passed to `create_issue`). The fleet does NOT route by " <>
           "default — without `project`, the read is REFUSED (never state read on the wrong project). " <>
           "Returns {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
       )

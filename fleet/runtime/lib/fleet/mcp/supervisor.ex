@@ -8,7 +8,7 @@ defmodule Fleet.MCP.Supervisor do
     - `Fleet.MCP.Server` (boot guard: refuses pod-side);
     - `Fleet.MCP.PodSocketRegistry` (single Registry, key = `pod_id` → acceptor);
     - `Fleet.MCP.ConnectionTaskSupervisor` (Task.Supervisor: one worker per accepted
-      connection, so that `serve` no longer runs inline in the acceptor);
+      connection, so that `serve` runs in its own Task, never inline in the acceptor);
     - `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor of the per-pod AF_UNIX
       socket acceptors) — started unconditionally host-side (nothing is created
       as long as no pod is provisioned).
@@ -65,7 +65,7 @@ defmodule Fleet.MCP.Supervisor do
       # (later connections never served → readline timeout). One Task per connection = a slow handler affects
       # only its connection. `restart: :temporary` (Task.Supervisor default): a connection that crashes dies
       # alone, without a restart.
-      # max_children: FLEET-WIDE ceiling on the connection Tasks. A single pod can no longer
+      # max_children: FLEET-WIDE ceiling on the connection Tasks. A single pod CANNOT
       # consume it (the acceptor caps its own connections per-pod, cf. `PodSocketAcceptor`): this
       # bound is the last resort against a fleet-wide leak, not the per-pod policy.
       {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor, max_children: 32},

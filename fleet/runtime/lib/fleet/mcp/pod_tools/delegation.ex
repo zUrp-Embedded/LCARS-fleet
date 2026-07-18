@@ -433,7 +433,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         case forge.create_issue(repo, title, brief, issue_opts) do
           {:ok, number} ->
             # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
-            # (burning the workflow_map) is NO LONGER here: it is the responsibility of the SYSTEM — the POLLER burns
+            # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
             # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
             # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
             # onboarded the same way.) type:feature = a visual LABEL (human) — NEVER routing: the
