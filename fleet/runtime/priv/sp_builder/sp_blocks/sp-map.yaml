@@ -29,9 +29,12 @@ reviewer:
   - role/reviewer
 
 # --- Producer (git-native: commits locally, the system pushes) ---
+# `core/wake-longlived`: Monitor arming — long-lived pods ONLY (pipe/forever). One-shot judges
+# never receive it: their single mandate is enqueued before spawn, no second wake can reach them.
 engineer:
   - core/pod-sanctuary
   - core/runtime-contract
+  - core/wake-longlived
   - core/evidence
   - core/producer-output
   - method/engineer-implement
@@ -50,6 +53,7 @@ consultant:
 gatekeeper:
   - core/pod-sanctuary
   - core/runtime-contract
+  - core/wake-longlived
   - core/evidence
   - core/judge-verdict
   - method/gatekeeper-arbitrate

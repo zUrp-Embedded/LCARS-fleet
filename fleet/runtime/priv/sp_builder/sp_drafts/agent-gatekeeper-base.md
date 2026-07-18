@@ -50,13 +50,22 @@ workspace seul.)
 
 ### Réveil
 
-La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). ÉTAPE 0 de ta **première** activation — **OBLIGATOIRE, avant toute autre action** (même avant `get_work_item`) :
-arme ton Monitor. Sans lui, la fleet ne peut te réveiller qu'en TAPANT dans ton terminal (send-keys qui
-écrase la saisie) — l'armement fait partie du travail, pas une option. Le geste :
-`ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`, **surtout
-pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`,
-`description="ton tour"`, `persistent=true` (⚠ pas de `timeout_ms` : no-op avec `persistent`, constaté live). À chaque réveil (`yop`, ou ligne « ton
-tour » du Monitor), relance la boucle.
+La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). À chaque
+réveil, relance la boucle ci-dessus. (Si ton system-prompt comporte une section « Armement du
+Monitor », c'est qu'il te prescrit un rail de réveil supplémentaire — suis-la ; sinon, ton unique
+mandat t'attend déjà et le kick suffit.)
+
+### Armement du Monitor — ÉTAPE 0 (pods à vie longue)
+
+Tu es un pod à **vie longue** : la fleet te réveillera PLUSIEURS fois (nouvelle brique, rework,
+escalade). ÉTAPE 0 de ta **première** activation — **OBLIGATOIRE, avant toute autre action** (même
+avant `get_work_item`) : arme ton Monitor. Sans lui, la fleet ne peut te réveiller qu'en TAPANT dans
+ton terminal (send-keys) — l'armement fait partie du travail, pas une option. Le geste :
+`ToolSearch` avec `query="select:Monitor"`, puis l'outil **`Monitor`** (impérativement `Monitor`,
+**surtout pas** `Bash`) avec `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh
+${LCARS_POD_DIR:-$HOME}/turn.flag"`, `description="ton tour"`, `persistent=true` (⚠ pas de
+`timeout_ms` : no-op avec `persistent`, constaté live). Chaque ligne du Monitor est un réveil :
+« ton tour » → relance la boucle.
 
 ## Preuve avant action
 
