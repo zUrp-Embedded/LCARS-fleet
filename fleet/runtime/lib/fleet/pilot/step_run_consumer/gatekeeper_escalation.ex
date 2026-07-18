@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   @moduledoc """
-  IMPURE "gatekeeper escalation" cluster (async-out) extracted from `Fleet.Pilot.StepRunConsumer`.
+  IMPURE "gatekeeper escalation" cluster (async-out) of `Fleet.Pilot.StepRunConsumer`.
 
   When a `:soft`/undecidable-terminal gate escalates (`{:dispatch_gatekeeper, _}`), this
   module SUMMONS the permanent gatekeeper:
@@ -150,7 +150,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
                 Logger.warning(
                   "StepRunConsumer: gatekeeper #{pod_id} kicked BUT UNREACHABLE (#{inspect(reason)}) — " <>
-                    "eval brief enqueued (corr=#{inspect(corr)}), WakeRecovery escalation active ; the verdict " <>
+                    "eval brief enqueued (corr=#{inspect(corr)}), WakeRecovery escalation active; the verdict " <>
                     "will only return on re-wake/repair (not a silent kick that lies)"
                 )
 
