@@ -93,6 +93,18 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
   end
 
+  test "default author = the SYSTEM identity SSoT (forge-linkable email, never a retyped literal)",
+       %{tmp_dir: tmp} do
+    git_init(tmp)
+    {:ok, %{sha: sha}} = BriefArtifact.commit(tmp, "attributed\n")
+
+    {out, 0} = System.cmd("git", ["show", "-s", "--format=%an <%ae>", sha], cd: tmp)
+    expected = Fleet.Credentials.ForgeIdentity.system_identity()
+    # Gitea links a commit to a profile by EMAIL match — a divergent literal here renders
+    # every work-order/provenance commit as plain text (no link, no avatar) on the forge.
+    assert String.trim(out) == "#{expected.name} <#{expected.email}>"
+  end
+
   test "idempotence: same content re-committed → same {ref, sha}, ZERO new commit", %{tmp_dir: tmp} do
     git_init(tmp)
     content = "identical\n"

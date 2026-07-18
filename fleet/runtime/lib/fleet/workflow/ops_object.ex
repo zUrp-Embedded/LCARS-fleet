@@ -23,7 +23,6 @@ defmodule Fleet.Workflow.OpsObject do
 
   alias Fleet.Workflow.Git
 
-  @system_author {"lcars-system", "system@lcars.local"}
   # The ONLY site that knows where work/ops publishes (F-15). Callers say `push: :work_ops`.
   @work_ops_push {"origin", "work/ops"}
 
@@ -82,7 +81,13 @@ defmodule Fleet.Workflow.OpsObject do
   end
 
   defp commit_opts(work_dir, ref, opts) do
-    {name, email} = Keyword.get(opts, :author, @system_author)
+    # Default author = the SYSTEM identity from its SINGLE AUTHORITY
+    # (`ForgeIdentity.system_identity/0`) — a name/email literal retyped here WAS the
+    # divergence: `system@lcars.local` matched no forge account, so every work-order and
+    # provenance commit rendered as plain text (no profile link, no avatar) on Gitea,
+    # while onboard commits (already on the SSoT) rendered linked.
+    %{name: sys_name, email: sys_email} = Fleet.Credentials.ForgeIdentity.system_identity()
+    {name, email} = Keyword.get(opts, :author, {sys_name, sys_email})
     label = Keyword.fetch!(opts, :label)
 
     %{
