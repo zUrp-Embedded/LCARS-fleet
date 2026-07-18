@@ -2,10 +2,9 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
   @moduledoc """
   Dispatcher backend behaviour consumed by `Fleet.Starfleet.Shutdown`.
 
-  **This behaviour IS the drain abstraction** (user decision 2026-06-05, ring0
-  design-note amended): the design-note sketch named a global `Fleet.Dispatcher`
-  — it does not and must NOT exist. The `:shutdown_dispatcher` seam replaces that
-  contract. Two implementations:
+  **This behaviour IS the drain abstraction** (user decision): a global
+  `Fleet.Dispatcher` god-module does not and must NOT exist. The
+  `:shutdown_dispatcher` seam replaces that contract. Two implementations:
 
     * `NoOpDispatcher` — test/fallback default (0 in-flight, immediate drain)
     * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
@@ -36,9 +35,8 @@ end
 defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   @moduledoc """
   **Real** backend of the `:shutdown_dispatcher` seam — aggregates the in-flight
-  and activates quiescence. User decision (2026-06-05): **no** `Fleet.Dispatcher`
-  god-module; the `:shutdown_dispatcher` seam IS the abstraction (ring0
-  design-note amended, upward field feedback).
+  and activates quiescence. User decision: **no** `Fleet.Dispatcher`
+  god-module; the `:shutdown_dispatcher` seam IS the abstraction.
 
   ## `refuse_new_jobs/1`
 
@@ -64,17 +62,17 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   work items are excluded from it and are represented by their live pod
   (counted in `list_pods`). Neither double-counting nor under-counting.
 
-  ⚠ Permanents EXCLUDED (DrDree fix, 2026-07-05): permanent pods (Type 1/3 "forever":
-  gatekeeper, archivist…) live continuously, so counting them kept `in_flight_count > 0`
-  forever ⇒ EVERY graceful stop consumed its full grace then concluded "timeout" instead
-  of "drained". They are now filtered out (`list_pods` |> reject `permanent?`), so the
+  ⚠ Permanents EXCLUDED: permanent pods (Type 1/3 "forever":
+  gatekeeper, archivist…) live continuously — counting them would keep `in_flight_count > 0`
+  forever ⇒ every graceful stop would consume its full grace then conclude "timeout" instead
+  of "drained". They are filtered out (`list_pods` |> reject `permanent?`), so the
   drain can actually reach empty on the real forge work.
 
   **Fail-CLOSED when counting fails**: if a component (Spawner / task_queue
   broker) is PRESENT but unreachable — typically a restart RIGHT IN THE MIDDLE OF
   quiesce — its count returns a sentinel > 0 (never `0`) → the drain never
   concludes "empty" on an unknown, it waits out its timeout (the safeguard).
-  The old `0` was fail-OPEN: under-counting ⇒ drain wrongly declared complete ⇒
+  A `0` there would be fail-OPEN: under-counting ⇒ drain wrongly declared complete ⇒
   stop WHILE work is in flight. A task_queue app GENUINELY absent from the
   build stays `0` (there really is nothing to drain) — we decide on the
   actually-running broker PROCESS (`Process.whereis(Fleet.TaskQueue.Server)`),
@@ -113,17 +111,17 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     # In-flight = live NON-PERMANENT pods + queued work not yet pulled — counted from the pods
     # and the queue, NEVER from an in-memory run table: RAM state can lie (it drifts on a
     # crash/restart), the pods and the forge stay true (one live pod = one step_run in progress).
-    # The PERMANENTS (arch, gatekeeper) are RESIDENTS, not work: they live continuously, so counting
-    # them keeps the drain unreachable → every graceful stop burned its full grace and concluded
-    # "timeout" instead of "drained". Hence excluded.
+    # The PERMANENTS (arch, gatekeeper) are RESIDENTS, not work: they live continuously — counting
+    # them would keep the drain unreachable → every graceful stop would burn its full grace and
+    # conclude "timeout" instead of "drained". Hence excluded.
     spawner_pods() + tasks_pending()
   end
 
   # Live pods. fleet_spawner is a HARD compile-time dep (always present in prod): a
   # `list_pods` that raises/exits = the Spawner is unreachable, ABNORMAL — typically a restart RIGHT
-  # IN THE MIDDLE OF quiesce. We NO LONGER mask as `0` (the `0` under-counted the in-flight → drain declared
-  # complete wrongly → stop WHILE work is in flight, fail-open). Instead: Logger.error + sentinel "not
-  # empty" → the drain does not conclude, it waits out its timeout (safeguard).
+  # IN THE MIDDLE OF quiesce. NEVER masked as `0` (a `0` would under-count the in-flight → drain
+  # declared complete wrongly → stop WHILE work is in flight, fail-open). Instead: Logger.error +
+  # sentinel "not empty" → the drain does not conclude, it waits out its timeout (safeguard).
   defp spawner_pods do
     # Filter by the prefix AUTHORITY (PermanentBoot.permanent?/1) — residents do not count.
     spawner_mod().list_pods()
@@ -150,16 +148,16 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   defp spawner_mod, do: Application.get_env(:fleet_starfleet, :spawner_mod, @spawner_default)
 
   # Unassigned queued mandates via a DIRECT call to `Fleet.TaskQueue.list_pending()`
-  # (dep declared, downward — Z5). Two regimes NOT to confuse:
+  # (dep declared, downward). Two regimes NOT to confuse:
   #   * task_queue app ABSENT from this build/env (legitimate: isolated starfleet test, deployment without the
   #     broker) → there really is NO queue to drain → HONEST `0` (not a failure mask).
   #   * app PRESENT but the call raises/exits (broker restarting during the quiesce) → ABNORMAL: we do NOT
   #     mask as `0` (under-counting ⇒ drain would conclude "empty" wrongly) → sentinel "not empty".
   # All modules are loadable in the single app, so "module loaded" does not distinguish absent
   # from crashed: we decide on the ACTUALLY-running broker PROCESS (`Process.whereis`), not the
-  # code path. (Z2 collapse 2026-07-12 : the old check keyed on the `:fleet_task_queue` OTP app
-  # in `started_applications` — that app no longer exists, the check would be `false` FOREVER
-  # → drain short-circuited to 0 with tasks still queued. The live process is the real fact.)
+  # code path. (An OTP-app check in `started_applications` would be `false` FOREVER in the
+  # single app — no `:fleet_task_queue` app exists — → drain short-circuited to 0 with tasks
+  # still queued. The live process is the real fact.)
   defp tasks_pending do
     if task_queue_running?() do
       case safe_count_pending() do
@@ -184,14 +182,14 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   end
 
   # DIRECT call — the dep is DECLARED (boundary Fleet.Starfleet → Fleet.TaskQueue,
-  # downward; Z5 migration 2026-07-13). The old module-in-a-variable idiom dodged the
-  # umbrella compile order, which no longer exists — the boundary compiler now carries
-  # what the hack hid. The try/rescue around the call (broker restarting mid-quiesce)
+  # downward). A module-in-a-variable detour would only dodge a compile order that
+  # does not exist — the boundary compiler carries the dep. The try/rescue around
+  # the call (broker restarting mid-quiesce)
   # keeps its role: never mask as `0`, return :error → sentinel "not empty".
   defp safe_count_pending do
-    # Le retour nominal EST une liste (spec de list_pending/0 — prouvé dialyzer : la
-    # clause défensive `_ -> :error` était morte-par-spec, retirée au gate final Z7).
-    # La protection réelle « broker down mid-quiesce » = rescue/catch (noproc → :error).
+    # The nominal return IS a list (list_pending/0 spec — a defensive `_ -> :error`
+    # clause would be dead-by-spec, dialyzer-provable).
+    # The real "broker down mid-quiesce" protection = rescue/catch (noproc → :error).
     {:ok, length(Fleet.TaskQueue.list_pending())}
   rescue
     _ -> :error
@@ -202,8 +200,7 @@ end
 
 defmodule Fleet.Starfleet.Shutdown do
   @moduledoc """
-  Coordinated grace shutdown. The historical systemd `ExecStop`/`lcars-fleet-restart`
-  trigger was removed (systemd gone 2026-06-16) and RE-WIRED onto `fleet_v2 stop`:
+  Coordinated grace shutdown. The trigger is `fleet_v2 stop` (no systemd):
   `bin/fleet_v2` cmd_stop RPCs `Fleet.Starfleet.Shutdown.begin(grace_ms: …)` then
   `:init.stop()`. The GenServer serves that RPC; the drain is LIVE.
 
@@ -217,8 +214,8 @@ defmodule Fleet.Starfleet.Shutdown do
 
   Configurable backend `:fleet_starfleet, :shutdown_dispatcher` (default
   `NoOpDispatcher` test/fallback; prod = `AggregateDispatcher` wired in
-  `runtime.exs`). The seam IS the drain abstraction (user decision 2026-06-05,
-  no `Fleet.Dispatcher` god-module — ring0 design-note amended).
+  `runtime.exs`). The seam IS the drain abstraction (user decision:
+  no `Fleet.Dispatcher` god-module).
 
   No cosmetic Goodhart: `wait_drain` polls a real `in_flight_count`
   until 0 or deadline (not an arbitrary `sleep`).
@@ -231,8 +228,8 @@ defmodule Fleet.Starfleet.Shutdown do
   drain is finished before stopping the umbrella. An async reply
   (`handle_continue`/`Task`) would stop the node DURING the drain → guarantee
   broken. During a shutdown there is no legitimate concurrent call to this
-  GenServer; the block is bounded by `grace_ms` (+ a final SIGKILL as last
-  resort, formerly systemd `TimeoutStopSec` — also gone with systemd).
+  GenServer; the block is bounded by `grace_ms` (no automatic SIGKILL backstop
+  exists — systemd is gone; the operator is the last resort).
   """
 
   use GenServer
