@@ -100,7 +100,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
          # code): the human's relayed level or the honest undeclared-C0 default. Committed by
          # the scaffold commit below (add -A). Cf. Fleet.Pilot.ProjectIntensity.
          :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts),
-         :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
+         # Honest message per path: generated → the template already carried the scaffold,
+         # this commit only adds the criticality declaration; bare → the local scaffold too.
+         :ok <- commit(proj_dir, onboard_commit_msg(provision)),
          :ok <- push(proj_dir, "main", false),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          :ok <- add_work_ops(work_dir, url),
@@ -374,6 +376,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp maybe_scaffold_main(:generated, _proj_dir, _name, _opts), do: :ok
   defp maybe_scaffold_main(:bare, proj_dir, name, opts), do: Scaffold.main(proj_dir, name, opts)
+
+  defp onboard_commit_msg(:generated), do: "chore(onboard): déclaration de criticité (intensity.json)"
+  defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 
   @doc """
   Full name of the forge TEMPLATE repo new projects are generated from. Opt

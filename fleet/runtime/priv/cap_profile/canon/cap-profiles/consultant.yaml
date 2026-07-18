@@ -67,6 +67,7 @@ spec:
     max_alive_sec: 7200
     heartbeat_keepalive: false
     bridge_enabled: false
+    remote_control: false  # invisible to Claude Desktop (ephemeral, churny brief-judge) — no --remote-control
     policy: hide
     rubber_duck_enabled: false
     long_session_protocol: false

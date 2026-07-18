@@ -235,13 +235,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # `StepRunCompleter.route(:promote)` — never reached on this path. `producer`
           # (parsed from the `lcars/issue-N-<role>` branch) IS the identity that started this stopwatch —
           # same `StepRunCompleter.unlock/5` authority as the workflow_map path (no fork).
+          # `:delivered` — THE terminal unlock of this path (issue lock, post-seal): types the
+          # feed line "brique LIVRÉE" and triggers the arch's single informational wake.
+          # (Missed on the first live round 2026-07-18: only the completer's promote carried
+          # it — the poller promote, the path real rounds actually take, said "étape franchie".)
           _ =
             Fleet.Pilot.StepRunCompleter.unlock(
               ctx.forge,
               ctx.repo,
               issue_n,
               ctx.forge_opts,
-              producer
+              producer,
+              :delivered
             )
 
           Logger.info(

@@ -70,6 +70,7 @@ spec:
     max_alive_sec: 3600
     heartbeat_keepalive: false
     bridge_enabled: false
+    remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control
     policy: hide
     rubber_duck_enabled: true
     long_session_protocol: false
