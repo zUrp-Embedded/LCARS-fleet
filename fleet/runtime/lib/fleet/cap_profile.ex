@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -309,6 +309,20 @@ defmodule Fleet.CapProfile do
   """
   @spec default_containment() :: String.t()
   def default_containment, do: @default_containment
+
+  @doc """
+  Is the send-keys wake FALLBACK authorized for this pod? (`spec.invocation.wake_send_keys`,
+  default `true`.) `false` = flag-only pod: the kick loop NEVER types into its terminal — set
+  on the ARCHITECT, whose terminal is the HUMAN's interactive session (a fallback `wake` lands
+  in the human's prompt and costs a spurious turn, live 2026-07-19); the no-ACK `wake.failed`
+  escalation remains that pod's terminal net. Tolerates `nil`/non-profile input (`true` — test
+  stubs build pod data without a cap_profile).
+  """
+  @spec wake_send_keys?(t() | nil | term()) :: boolean()
+  def wake_send_keys?(%__MODULE__{spec: spec}) when is_map(spec),
+    do: get_in(spec, ["invocation", "wake_send_keys"]) != false
+
+  def wake_send_keys?(_), do: true
 
   @doc """
   Is the profile in sandboxed bwrap containment (the default)? `false` = host-native (`"none"`, the

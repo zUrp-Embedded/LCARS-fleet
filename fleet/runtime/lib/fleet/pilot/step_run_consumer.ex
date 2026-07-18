@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use GenServer
@@ -659,6 +659,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       step_run_completer: state.step_run_completer,
       completer_opts: completer_opts(state),
       spawner: state.spawner,
+      task_queue: state.task_queue,
       run_completion: fn label, fun -> run_completion(state, label, fun) end
     }
   end

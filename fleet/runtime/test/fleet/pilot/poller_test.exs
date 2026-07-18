@@ -69,22 +69,36 @@ defmodule Fleet.Pilot.PollerTest do
     def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
   end
 
-  describe "G4 — awaits_rekick?/2 (arch re-kick throttle)" do
-    test "at least 1 issue waits AND throttle-multiple tick → re-kick" do
-      assert Poller.awaits_rekick?(1, 0)
-      assert Poller.awaits_rekick?(3, 10)
-      assert Poller.awaits_rekick?(1, 20)
+  defmodule ArchPendingTQ do
+    def list_active, do: []
+    def pod_active_issue_id(_pod_id), do: {:ok, nil}
+    def pod_status(_pod_id), do: {:ok, :pending}
+    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+  end
+
+  describe "G4 — awaits_rekick?/3 (arch net cooldown)" do
+    # Design 2026-07-19: the net fires on the FIRST eligible tick (nil = never kicked) and
+    # then caps itself by a cooldown SINCE THE LAST SENT KICK — never a sampling grid (a grid
+    # made even a fresh escalation draw a 0-5 min latency lottery).
+    test "issue waits AND never kicked (nil) → fire on the first tick" do
+      assert Poller.awaits_rekick?(1, nil, 0)
+      assert Poller.awaits_rekick?(3, nil, 999)
     end
 
-    test "no waiting issue → NEVER a re-kick (even on a multiple tick)" do
-      refute Poller.awaits_rekick?(0, 0)
-      refute Poller.awaits_rekick?(0, 10)
+    test "issue waits AND cooldown elapsed → fire" do
+      assert Poller.awaits_rekick?(1, 0, 300_000)
+      assert Poller.awaits_rekick?(2, 1_000, 400_000)
     end
 
-    test "issue waits BUT non-multiple tick → no re-kick (bounded spend, not every 30s)" do
-      refute Poller.awaits_rekick?(1, 1)
-      refute Poller.awaits_rekick?(2, 9)
-      refute Poller.awaits_rekick?(1, 15)
+    test "no waiting issue → NEVER a kick (even with cooldown elapsed)" do
+      refute Poller.awaits_rekick?(0, nil, 0)
+      refute Poller.awaits_rekick?(0, 0, 999_999)
+    end
+
+    test "issue waits BUT cooldown NOT elapsed → no kick (protection BEHIND the first kick)" do
+      refute Poller.awaits_rekick?(1, 0, 1)
+      refute Poller.awaits_rekick?(2, 0, 299_999)
+      refute Poller.awaits_rekick?(1, 100_000, 350_000)
     end
 
     test "PROD WIRING (spawner nil): the re-kick runs with the REAL default Fleet.Spawner" do
@@ -103,17 +117,17 @@ defmodule Fleet.Pilot.PollerTest do
       # under test is the nil-spawner path, exercised on the path that still wakes.
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil, task_queue: ArchFreeTQ)
 
-      # The re-kick only arms on a tick multiple of @awaits_rekick_every (10); do_poll increments
-      # poll_count by 1/tick (list_org_repos returns 1 repo). 10 polls → the 10th arms.
+      # Cooldown semantics: the net fires on the FIRST tick (last_arch_rekick_at nil).
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          for _ <- 1..10, do: Poller.force_poll(name)
+          for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      # Before the fix: nil → no-op clause → no re-kick line. After: the real
-      # Fleet.Spawner.wake_pod(arch) is called (returns {:error,:not_found}, tick not crashed).
+      # Before the fix: nil → no-op clause → no net line. After: the real
+      # Fleet.Spawner.wake_pod(arch) is called (returns {:error,:not_found}, tick not crashed —
+      # ArchWake logs the UNREACHED warning).
       assert log =~ "awaits-arch"
-      assert log =~ "re-kick"
+      assert log =~ "ArchWake: [net]"
 
       GenServer.stop(pid)
     end
@@ -144,16 +158,18 @@ defmodule Fleet.Pilot.PollerTest do
           ]
         )
 
+      # 10 polls: the 1st fires (nil stamp), the cooldown blocks the other 9 → EXACTLY 1
+      # fleet-global net line (the per-repo regression would have produced 2 on the 1st tick).
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           for _ <- 1..10, do: Poller.force_poll(name)
         end)
 
-      rekick_lines =
-        log |> String.split("\n") |> Enum.count(&String.contains?(&1, "re-kick"))
+      net_lines =
+        log |> String.split("\n") |> Enum.count(&String.contains?(&1, "(fleet-wide) → net"))
 
-      assert rekick_lines == 1,
-             "expected EXACTLY 1 re-kick line (fleet-global), saw #{rekick_lines}:\n#{log}"
+      assert net_lines == 1,
+             "expected EXACTLY 1 net line (fleet-global, cooldown-capped), saw #{net_lines}:\n#{log}"
 
       # and the logged count is the fleet-wide backlog (2 issues: one per repo)
       assert log =~ "2 issue(s) awaits-arch (fleet-wide)"
@@ -176,10 +192,34 @@ defmodule Fleet.Pilot.PollerTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          for _ <- 1..10, do: Poller.force_poll(name)
+          for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      assert log =~ "arch mandate enqueued lordzurp/lcars-test#42"
+      assert log =~ "mandate lordzurp/lcars-test#42 enqueued (arch was free)"
+
+      GenServer.stop(pid)
+    end
+
+    # NEW state (2026-07-19): a PENDING mandate (offered but never fetched — the immediate
+    # kick's wake was lost) → the net RE-WAKES without re-offering (re-enqueue would churn the
+    # pending item). Closes the lost-wake liveness hole: pending no longer silences the net.
+    test "PENDING arch mandate (never fetched) → re-wake ONLY, no new enqueue" do
+      issue = %{
+        "number" => 42,
+        "body" => "x",
+        "labels" => [%{"name" => "lcars-awaits-arch"}],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchPendingTQ)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..2, do: Poller.force_poll(name)
+        end)
+
+      assert log =~ "pending mandate never fetched → re-wake only"
+      refute log =~ "enqueued (arch was free)"
 
       GenServer.stop(pid)
     end
@@ -203,8 +243,8 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..10, do: Poller.force_poll(name)
         end)
 
-      refute log =~ "arch mandate enqueued"
-      refute log =~ "re-kick"
+      refute log =~ "ArchWake"
+      refute log =~ "(fleet-wide) → net"
 
       GenServer.stop(pid)
     end

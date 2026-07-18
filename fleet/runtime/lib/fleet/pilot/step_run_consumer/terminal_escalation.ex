@@ -37,7 +37,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   transient / self-healing errors (`:no_gatekeeper` → the permanent gatekeeper
   reboots; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -51,7 +51,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     the event, multi-project). `run_completion` = the consumer's `(label, fun) -> outcome`
     closure (sync/offload discipline, single source consumer-side).
     """
-    @enforce_keys [:repo, :step_run_completer, :completer_opts, :spawner, :run_completion]
+    @enforce_keys [:repo, :step_run_completer, :completer_opts, :spawner, :task_queue, :run_completion]
     defstruct [
       # Repo "owner/name" of the step_run (per-step-run, derived from the event).
       :repo,
@@ -61,6 +61,9 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       :completer_opts,
       # Spawner for the arch kick (seam, consumer-side default = Fleet.Spawner).
       :spawner,
+      # Broker for the arch's arbitration mandate (seam, consumer-side default = Fleet.TaskQueue) —
+      # the IMMEDIATE offer-then-wake of freeze_to_arch enqueues BEFORE it wakes (ArchWake).
+      :task_queue,
       # Closure (label :: String.t(), fun :: (-> outcome)) -> outcome — sync/offload execution.
       :run_completion
     ]
@@ -70,6 +73,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
             step_run_completer: module(),
             completer_opts: keyword(),
             spawner: module(),
+            task_queue: module(),
             run_completion: (String.t(), (-> term()) -> term())
           }
   end
@@ -137,9 +141,9 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   @doc """
   THE single freeze-to-arch gesture: `await_arch` (comment + `lcars-awaits-arch` +
-  unlock) via `run_completion`, THEN kick of the arch (latency only: the durable truth is the
-  forge state — label + comment — and a failed kick, logged warning, is retried by the Poller's
-  G4 awaits-arch re-kick every tick). Returns the completion's
+  unlock) via `run_completion`, THEN the IMMEDIATE offer-then-wake of the arch (`ArchWake`,
+  latency only: the durable truth is the forge state — label + comment — and a failed kick,
+  logged warning, is retried by the Poller's cooldown-capped awaits-arch net). Returns the completion's
   outcome (the kick never alters the result). Also called by the consumer for
   the fail-closed verdicts (redirect/escalate_user/halt_*) — net parity.
   """
@@ -158,12 +162,42 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
         seams.step_run_completer.await_arch(step_run, seams.completer_opts)
       end)
 
-    # NO immediate kick here (signal-before-content race, live 2026-07-18): the arch's
-    # MANDATE is enqueued by the Poller's G4 pass (offer THEN wake, ordered) — a kick fired
-    # now wakes the arch BEFORE any mandate exists, and its doctrine-first `get_work_item`
-    # reads `{done:true}`: the wake is classified spurious and the escalation goes unseen.
-    # The label+comment above are the durable truth; the Poller offers + wakes next tick.
+    # IMMEDIATE first kick (design 2026-07-19: "first kick immediate, protection BEHIND").
+    # The 2026-07-18 signal-before-content race (kick woke the arch BEFORE any mandate existed
+    # → doctrine-first `get_work_item` read `{done:true}`, wake classified spurious) is killed
+    # by ORDERING — ArchWake enqueues the mandate THEN wakes — not by waiting for the Poller:
+    # deferring the whole pair to the throttled poll grid turned "5 min max" into 0-5 min
+    # NOMINAL latency (scar 2026-07-19). The label+comment above stay the durable truth; the
+    # Poller net (cooldown-capped) re-derives a wake if this one is lost. Best-effort by
+    # construction: NEVER alters the completion's outcome.
+    safe_offer_then_wake(seams, n)
     result
+  end
+
+  # The immediate kick must never take the completion down with it (the escalation is GRAVED
+  # on the forge at this point): any raise is demoted to a loud warning — the Poller net
+  # covers the latency.
+  defp safe_offer_then_wake(%Seams{} = seams, n) do
+    _ = Fleet.Pilot.ArchWake.offer_then_wake(seams.task_queue, seams.spawner, {seams.repo, n}, "immediate")
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "StepRunConsumer: immediate arch offer-then-wake raised #{inspect(e)} (non-blocking — " <>
+          "label intact, Poller net retries)"
+      )
+
+      :ok
+  catch
+    # A GenServer.call on a dead/absent broker EXITS (it does not raise) — same demotion:
+    # the escalation is already graved on the forge, the net covers the latency.
+    :exit, reason ->
+      Logger.warning(
+        "StepRunConsumer: immediate arch offer-then-wake exited #{inspect(reason)} (non-blocking — " <>
+          "label intact, Poller net retries)"
+      )
+
+      :ok
   end
 
   @doc """

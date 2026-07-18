@@ -264,8 +264,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:comment, body}
     assert body =~ "Rework"
     assert body =~ "Architecte"
-    # NO immediate kick (signal-before-content race): the Poller offers the mandate THEN wakes.
-    refute_received {:wake, "permanent-architect"}
+    # IMMEDIATE offer-then-wake (design 2026-07-19) — order proven in the escalate_user test.
+    assert_received {:enqueued, "permanent-architect", _}
+    assert_received {:wake, "permanent-architect"}
     # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
@@ -283,8 +284,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # "Aval humain" / "Architecte" pin the FR user-facing escalation comment.
     assert body =~ "Aval humain"
     assert body =~ "Architecte"
-    # NO immediate kick (signal-before-content race): the Poller offers the mandate THEN wakes.
-    refute_received {:wake, "permanent-architect"}
+    # IMMEDIATE offer-then-wake (design 2026-07-19) — order proven in the escalate_user test.
+    assert_received {:enqueued, "permanent-architect", _}
+    assert_received {:wake, "permanent-architect"}
     # escalation, NOT a bounce (rework) nor a PR.
     refute_received {:open_pr, _, _, _}
   end
@@ -466,10 +468,26 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert body =~ "gatekeeper"
     assert body =~ "escalate_user"
 
-    # #5.2 — comment ADDRESSED to the arch (single airlock). NO immediate kick anymore
-    # (signal-before-content race): the Poller offers the mandate THEN wakes, ordered.
+    # #5.2 — comment ADDRESSED to the arch (single airlock).
     assert body =~ "Architecte"
-    refute_received {:wake, "permanent-architect"}
+
+    # Design 2026-07-19 ("first kick immediate, protection BEHIND"): freeze_to_arch fires the
+    # IMMEDIATE offer-then-wake — and the ORDER is the invariant (mandate enqueued BEFORE the
+    # wake, killing the 2026-07-18 signal-before-content race where the woken arch read
+    # `{done:true}`). The mailbox preserves arrival order: prove enqueue < wake positionally.
+    {:messages, msgs} = Process.info(self(), :messages)
+
+    enqueue_idx =
+      Enum.find_index(msgs, &match?({:enqueued, "permanent-architect", _}, &1))
+
+    wake_idx = Enum.find_index(msgs, &match?({:wake, "permanent-architect"}, &1))
+
+    assert enqueue_idx, "expected the arch arbitration mandate to be enqueued (immediate rail)"
+    assert wake_idx, "expected the immediate arch wake after the mandate enqueue"
+    assert enqueue_idx < wake_idx, "offer must PRECEDE wake (signal-before-content race)"
+
+    assert_received {:enqueued, "permanent-architect", attrs}
+    assert attrs.brief =~ "Arbitrage requis"
   end
 
   test "halt_wait_input verdict -> await_arch" do

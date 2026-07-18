@@ -104,6 +104,7 @@
             "heartbeat_keepalive": { "type": "boolean" },
             "bridge_enabled": { "type": "boolean" },
             "remote_control": { "type": "boolean", "description": "Claude Desktop visibility: false makes the launcher omit --remote-control (pod functional but invisible). Default (absent) = true. Set false on ephemeral judges (qualifier/reviewer)." },
+            "wake_send_keys": { "type": "boolean", "description": "Send-keys wake fallback authorized for this pod. Default (absent) = true. false = flag-only: the kick loop never types into the pod's terminal (set on the architect - interactive human session); the no-ACK wake.failed escalation remains the terminal net." },
             "policy": { "type": "string" },
             "rubber_duck_enabled": { "type": "boolean" },
             "long_session_protocol": { "type": "boolean" },

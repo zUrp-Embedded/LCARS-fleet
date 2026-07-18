@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -543,9 +543,11 @@ defmodule Fleet.Spawner.Pod do
   # `wake_pod` arms the ack-driven loop. The carrier (flag) has just been poked; the loop is the
   # FALLBACK — it only send-keys `"wake"` IF the pull does not arrive, then escalates at the cap. The
   # :kick generic timeout has the same name → (re-)arming it RESTARTS the timer (a wake during bootstrap
-  # does not create a 2nd loop). 1st tick after kick_first_delay_ms (we let the flag deliver first).
+  # does not create a 2nd loop). 1st tick after wake_first_delay_ms — NOT the 2s bootstrap delay:
+  # the net must OUTWAIT the carrier's nominal delivery (flag→Monitor→turn→get_work_item takes
+  # seconds; at 2s the fallback double-fired on a WORKING rail, live 2026-07-19).
   def handle_event(:cast, :arm_kick, _state, _data) do
-    {:keep_state_and_data, [schedule_kick_action(0, Kick.kick_first_delay_ms())]}
+    {:keep_state_and_data, [schedule_kick_action(0, Kick.wake_first_delay_ms())]}
   end
 
   # ============================================================
@@ -614,7 +616,16 @@ defmodule Fleet.Spawner.Pod do
     # for the keyword choice (not polled yet = bootstrap-arm "yop"; already polled = running pod → "wake").
     polled = TaskProbe.polled?(data)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
-    retry = if bootstrap?, do: Kick.kick_bootstrap_retry_ms(), else: Kick.kick_retry_ms()
+
+    # Three cadences, one per situation: bootstrap probe (spaced), worker startup yop-until-pull
+    # (frequent — nobody types in a fresh worker tmux), wake FALLBACK on a RUNNING pod (slow —
+    # it paces itself BEHIND the carrier, cf. Kick.wake_retry_ms/0).
+    retry =
+      cond do
+        bootstrap? -> Kick.kick_bootstrap_retry_ms()
+        polled -> Kick.wake_retry_ms()
+        true -> Kick.kick_retry_ms()
+      end
 
     cond do
       # ACK = the agent reached out → we STOP the loop (cancel the :kick generic timeout).

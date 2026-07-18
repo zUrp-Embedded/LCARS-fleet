@@ -89,6 +89,10 @@ spec:
     max_alive_sec: null  # forever — permanent pod until fleet shutdown
     heartbeat_keepalive: false
     bridge_enabled: true
+    # The arch terminal IS the human's interactive session: the send-keys wake fallback would
+    # type "wake" into the human's prompt (costs a spurious turn — seen live 2026-07-19, fired
+    # DURING nominal Monitor delivery). Flag-only for this pod; wake.failed stays the net.
+    wake_send_keys: false
     policy: hide
     rubber_duck_enabled: false
     long_session_protocol: true

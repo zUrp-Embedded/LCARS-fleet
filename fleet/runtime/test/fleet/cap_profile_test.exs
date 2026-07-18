@@ -592,6 +592,35 @@ defmodule Fleet.CapProfileTest do
   # Catalogue→claude CLI mechanism (face 1 of the git architecture decision)
   # ============================================================
 
+  describe "wake_send_keys?/1" do
+    # 2026-07-19: false = flag-only pod (the kick loop never types into its terminal — set on
+    # the architect, interactive human session). Absent/nil-tolerant: default is TRUE.
+    test "false in spec.invocation → fallback denied" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "architect"},
+        spec: %{"invocation" => %{"wake_send_keys" => false}}
+      }
+
+      refute Fleet.CapProfile.wake_send_keys?(profile)
+    end
+
+    test "absent → authorized (default true)" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{"invocation" => %{"lifetime_scope" => "pipe"}}
+      }
+
+      assert Fleet.CapProfile.wake_send_keys?(profile)
+    end
+
+    test "nil / non-profile input (test-stub pod data) → authorized" do
+      assert Fleet.CapProfile.wake_send_keys?(nil)
+      assert Fleet.CapProfile.wake_send_keys?(%{})
+    end
+  end
+
   describe "git_ops_denied_patterns/1" do
     test "translates each semantic entry into Bash(git X:*)" do
       profile = %Fleet.CapProfile{
