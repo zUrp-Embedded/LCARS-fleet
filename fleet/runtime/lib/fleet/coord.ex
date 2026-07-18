@@ -1,8 +1,7 @@
 defmodule Fleet.Coord do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
+  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
+  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
+  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -10,8 +9,9 @@ defmodule Fleet.Coord do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      # Validated verdict, foundation value: `Policies.handle_decision/2` l'EXIGE (map brute refusée). Ce
-      # type ne pouvait vivre dans Starfleet (Starfleet dépend de Coord → cycle) — hence its descent to the foundation layer.
+      # Validated verdict, a foundation value: `Policies.handle_decision/2` REQUIRES it (raw map
+      # refused). The type lives at the foundation layer because it cannot live in Starfleet
+      # (Starfleet depends on Coord — that edge would close a cycle).
       Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.EventRouter
@@ -38,14 +38,12 @@ defmodule Fleet.Coord do
     * `handle_escalation/3` — consumes a Cat 5 escalation
       (`Fleet.Starfleet.Cat5Escalator`) → broadcast canonical event
 
-  ## Soft gate / hook — superseded
+  ## Gate judgment lives elsewhere
 
-  The old `invoke_soft_gate/4` + `invoke_hook/2` (coord-delegated LLM pod
-  spawn) are **removed**: the LLM judgment of the gates is
-  consolidated onto the **permanent gatekeeper** (single judge), booted by
-  `Fleet.Workflow.Gatekeeper.ensure_booted/1` and engaged via an enqueued
-  eval brief (`StepRunConsumer` rail, non-decidable gate → gatekeeper).
-  `Fleet.Coord` no longer carries any spawn — only the declarative policies.
+  The LLM judgment of the gates is consolidated onto the **permanent
+  gatekeeper** (single judge), booted by `Fleet.Workflow.Gatekeeper.ensure_booted/1`
+  and engaged via an enqueued eval brief (`StepRunConsumer` rail, non-decidable
+  gate → gatekeeper). `Fleet.Coord` carries NO spawn — only the declarative policies.
 
   ## Backend implementation
 
@@ -61,7 +59,7 @@ defmodule Fleet.Coord do
   **Last revised**: 2026-07-18
   """
 
-  # Strict canonical arities: the compat shims `handle_decision/1` and `handle_escalation/2` are removed.
+  # Strict canonical arities — the correlation_id is always explicit, no compat shim.
   defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
 end
