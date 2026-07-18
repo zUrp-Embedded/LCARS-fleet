@@ -1,4 +1,4 @@
-# fleet_task_queue
+# Fleet.TaskQueue — domain card
 
 **Date**: 2026-07-13
 **Last revised**: 2026-07-18
@@ -24,4 +24,4 @@ only pointed at.
 ## Config & deps
 - Knob `:fleet_task_queue, :retention_terminal_max` — read by `Server` (default 500; per-instance override via `Server.start_link/1`).
 - Knob `:fleet_task_queue, :state_path` — read by `Store`/`Server`, set by `runtime.exs` from `LCARS_STATE_PATH` (no effect while the broker boots `persist: false`).
-- Deps: see `mix.exs`.
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/task_queue.ex`).
