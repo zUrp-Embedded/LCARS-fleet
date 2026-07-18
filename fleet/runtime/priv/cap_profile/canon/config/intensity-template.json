@@ -1,5 +1,5 @@
 {
-  "_comment": "Template intensity.json par projet — copier dans <project_root>/intensity.json et adapter. Schema : schema/intensity-v1.json. 5 niveaux L0-L4 mapping pipeline default.",
+  "_comment": "Per-project intensity.json template — copy to <project_root>/intensity.json and adapt. Schema: ../../schema/intensity-v1.json. 5 levels L0-L4 mapping to a default pipeline.",
   "_schema": "lcars/intensity-v1",
   "level": "L3",
   "declared_at": "2026-05-18",

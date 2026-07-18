@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LCARS Modop Profile (fragment, v2.5)",
-  "description": "Modop OVERLAY fragment, deep-merged into a base cap-profile then re-validated against cap-profile-v2.5.json. This schema guards the FRAGMENT: reserved keys forbidden (kind, metadata.containment, metadata.name — no containment/name/kind override, PoC-11) + additionalProperties:false at the TOP level (only metadata/spec are mergeable, an unknown top-level key like `spce` is caught early). DEEP unknown-field strictness (a typo inside spec.*) is enforced on the COMPOSED result by cap-profile-v2.5.json (SSoT — NOT duplicated here). R0.8-brick3 : apiVersion retiré (versioning par le code, pas champ embarqué).",
+  "description": "Modop OVERLAY fragment, deep-merged into a base cap-profile then re-validated against cap-profile-v2.5.json. This schema guards the FRAGMENT: reserved keys forbidden (kind, metadata.containment, metadata.name — no containment/name/kind override) + additionalProperties:false at the TOP level (only metadata/spec are mergeable, an unknown top-level key like `spce` is caught early). DEEP unknown-field strictness (a typo inside spec.*) is enforced on the COMPOSED result by cap-profile-v2.5.json (SSoT — NOT duplicated here). No apiVersion field: schema versioning is carried by the code.",
   "type": "object",
   "additionalProperties": false,
   "not": {

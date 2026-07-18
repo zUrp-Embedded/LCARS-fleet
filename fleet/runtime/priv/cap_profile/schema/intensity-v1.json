@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:intensity-v1",
   "title": "LCARS Project Intensity v1",
-  "description": "Structural schema for a per-project intensity.json (template: 05_data-canon/config/intensity-template.json). DERIVED FROM: 05_data-canon/config/intensity-template.json. GO-7: date 2026-05-19, statut actif, derive Lot 0bis plan-implementation.md. Structural only: pipeline_default resolvability and level<->pipeline coherence are project-level concerns, not enforced here. Underscore-prefixed keys are informational (comment/schema marker/levels reference) and ignored by the runtime.",
+  "description": "Structural schema for a per-project intensity.json (template: priv/cap_profile/canon/config/intensity-template.json). Structural only: pipeline_default resolvability and level<->pipeline coherence are project-level concerns, not enforced here. Underscore-prefixed keys are informational (comment/schema marker/levels reference) and ignored by the runtime.",
   "type": "object",
   "required": [
     "level",
