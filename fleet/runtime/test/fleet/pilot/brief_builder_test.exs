@@ -119,6 +119,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       assert brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
+      # F-25 — the order CITES its source: the resolved pointer stays walkable (ref @ commit),
+      # it is not consumed silently by the resolution.
+      assert brief =~ "Source du brief : `#{ref} @ #{sha}`"
     end
 
     test "unresolvable pointer (wrong sha) → DEFER via the criterion rail, never a guessed brief",
@@ -135,6 +138,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
                build_worker(%{"number" => 42, "body" => "inline brief"}, work_root: tmp)
 
       assert brief =~ "inline brief"
+      # F-25 — honest citation: no separate authored doc → the order says so, it never
+      # fabricates a source reference.
+      assert brief =~ "Source du brief : brief inline du ticket"
     end
   end
 end

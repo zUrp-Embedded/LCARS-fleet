@@ -5,6 +5,8 @@
 
 {{brief_body}}
 
+*Source du brief : {{brief_source}}*
+
 ## Livraison (git-native)
 
 **Livraison (git-native)** : réalise le travail dans ton workspace, puis `git add` + `git commit`. Le SYSTÈME pousse ton commit et ouvre la PR — toi tu ne push pas (forge-aveugle). `submit_result` clôt la tâche : le LIVRABLE = ton COMMIT (ne RE-mets PAS le code/les fichiers dans le payload, ils sont déjà committés). Le payload, lui, N'EST PAS vide : il porte ta voix ↓.

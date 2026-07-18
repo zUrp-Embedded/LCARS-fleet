@@ -13,6 +13,7 @@ defmodule Fleet.Workflow.BriefTemplateTest do
         "role" => "engineer",
         "issue" => "3",
         "brief_body" => "Do X.",
+        "brief_source" => "brief inline du ticket",
         "signature" => "SIGN"
       })
 
@@ -30,6 +31,7 @@ defmodule Fleet.Workflow.BriefTemplateTest do
         "role" => "engineer",
         "issue" => "3",
         "brief_body" => "sneaky {{signature}}",
+        "brief_source" => "brief inline du ticket",
         "signature" => "SIGN"
       })
     end

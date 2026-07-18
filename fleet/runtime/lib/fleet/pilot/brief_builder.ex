@@ -153,9 +153,18 @@ defmodule Fleet.Pilot.BriefBuilder do
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
       "brief_body" => issue["body"] || "",
+      "brief_source" => brief_source_line(issue),
       "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     })
   end
+
+  # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
+  # (`ref @ commit`, the walkable link into work/ops history); an inline brief says so
+  # honestly (never a fabricated citation). FR: rendered to the human eye via the forge.
+  defp brief_source_line(%{"_brief_source" => {ref, sha}}),
+    do: "`#{ref} @ #{sha}` (doc d'auteur commité dans work/ops — version pinnée ci-dessus)"
+
+  defp brief_source_line(_issue), do: "brief inline du ticket (pas de doc d'auteur séparé)"
 
   # A **judge** pod must know WHAT
   # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`
@@ -174,8 +183,13 @@ defmodule Fleet.Pilot.BriefBuilder do
 
       {:ok, {ref, sha}} ->
         case Fleet.Workflow.BriefArtifact.resolve(repo, ref, sha, Keyword.take(opts, [:work_root])) do
-          {:ok, content} -> {:ok, Map.put(issue, "body", content)}
-          {:error, reason} -> {:error, {:criterion_unavailable, {:brief_pointer, reason}}}
+          # F-25 — the resolved pointer is KEPT alongside the pinned content: the work order
+          # cites its source doc (`ref @ commit`) instead of consuming the link silently.
+          {:ok, content} ->
+            {:ok, issue |> Map.put("body", content) |> Map.put("_brief_source", {ref, sha})}
+
+          {:error, reason} ->
+            {:error, {:criterion_unavailable, {:brief_pointer, reason}}}
         end
 
       {:error, reason} ->
