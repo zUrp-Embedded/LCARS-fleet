@@ -1,8 +1,4 @@
 defmodule Fleet.GitRef do
-  # Z4 migration (2026-07-12) — frontière COMPILÉE du domaine : deps = graphe ex-umbrella
-  # régularisé (successeur mécanique du verrou topologie, D-19), exports = la SURFACE
-  # cross-domaine MESURÉE (Z4c : tout à [] puis violations constatées → liste). Le
-  # compilateur refuse toute violation — plus de discipline. Rétrécir = geste Z6+.
   use Boundary, deps: [], exports: []
 
   @moduledoc """
@@ -10,20 +6,20 @@ defmodule Fleet.GitRef do
 
   Guardrail against catalogue/brief inputs that are manifestly broken (space, `..`, leading `-`):
   NOT an anti-injection defense (`System.cmd` uses no shell), but a boundary that keeps a malformed
-  name from reaching a raw `git clone`/`push`/`commit`. Enforces the `git check-ref-format` rules that a
-  charset regex alone misses (R2-06 — full git authority, not "roughly aligned").
+  name from reaching a raw `git clone`/`push`/`commit`. Enforces the `git check-ref-format` rules
+  that a charset regex alone misses — the full git authority, not "roughly aligned".
 
-  PURE foundation primitive (alongside `Fleet.Slug`) so BOTH the workflow (`Git`/`Deliverable`,
-  `Fleet.Workflow`) and the project bootstrap (`Phase.Clone`, `Fleet.ProjectBootstrap`) validate refs at their OWN boundary without
-  an upward compile edge — the reason it moved out of `fleet_workflow` (R1-07/08). Each caller keeps ITS
-  typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized.
+  PURE foundation primitive (alongside `Fleet.Slug`) so BOTH the workflow (`Git`/`Deliverable`)
+  and the project bootstrap (`Phase.Clone`) validate refs at their OWN boundary without an upward
+  compile edge. Each caller keeps ITS typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`);
+  only the `valid?` decision is centralized.
 
   **Last revised**: 2026-07-18
   """
 
   # `\A…\z`, NOT `^…$`: in PCRE `$` also matches just BEFORE a trailing newline, so `^…$` declares
   # "main\n" VALID and the ref reaches git clone/push/commit — the exact class this module exists to
-  # stop. Same trap, same fix as `Fleet.Slug` (its `valid_pod_id?` twin documents it too).
+  # stop. Same trap, same fix as `Fleet.Slug` and `Fleet.Spawner.valid_pod_id?`.
   @ref_re ~r/\A[A-Za-z0-9][A-Za-z0-9._\/\-]*\z/
 
   @doc """
@@ -35,12 +31,11 @@ defmodule Fleet.GitRef do
 
   ## Ref, not branch-name — `"HEAD"` is deliberately VALID
 
-  `git check-ref-format --branch HEAD` fails (you cannot CREATE a branch named `HEAD`), and a
-  differential property against that oracle flags `valid?("HEAD") == true` as a false-accept. It is
-  not one: this module gates the refs the runtime hands to git, and `"HEAD"` is the LOCAL side of
-  every deliverable push (`git push <remote> HEAD:refs/heads/<branch>` — `Deliverable.local_ref/1`
-  defaults to it, `StepRunBuild` sets it). Rejecting it would break the publication rail (proven:
-  12 red tests). The right oracle for this contract is git's ref grammar, not `--branch`.
+  `git check-ref-format --branch` refuses `HEAD` (you cannot CREATE a branch named `HEAD`) —
+  but this module gates the refs the runtime HANDS to git, and `"HEAD"` is the LOCAL side of
+  every deliverable push (`git push <remote> HEAD:refs/heads/<branch>`: `Deliverable.local_ref/1`
+  defaults to it, `StepRunBuild` sets it). The oracle for this contract is git's ref grammar,
+  not `--branch` — a `--branch`-style check here would break the publication rail.
   """
   @spec valid?(term()) :: boolean()
   def valid?(ref) when is_binary(ref) do
