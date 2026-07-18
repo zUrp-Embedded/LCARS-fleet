@@ -158,8 +158,11 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
         seams.step_run_completer.await_arch(step_run, seams.completer_opts)
       end)
 
-    # KICK the arch: a freeze-to-arch without notification = an issue waiting silently.
-    _ = kick_architect(seams.spawner)
+    # NO immediate kick here (signal-before-content race, live 2026-07-18): the arch's
+    # MANDATE is enqueued by the Poller's G4 pass (offer THEN wake, ordered) — a kick fired
+    # now wakes the arch BEFORE any mandate exists, and its doctrine-first `get_work_item`
+    # reads `{done:true}`: the wake is classified spurious and the escalation goes unseen.
+    # The label+comment above are the durable truth; the Poller offers + wakes next tick.
     result
   end
 

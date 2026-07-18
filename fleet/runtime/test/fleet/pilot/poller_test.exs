@@ -99,7 +99,9 @@ defmodule Fleet.Pilot.PollerTest do
         "assignees" => [%{"login" => "lordzurp"}]
       }
 
-      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil, task_queue: ArchBusyTQ)
+      # FREE arch (busy → deliberate silence since the offer-then-wake coupling): the wiring
+      # under test is the nil-spawner path, exercised on the path that still wakes.
+      {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil, task_queue: ArchFreeTQ)
 
       # The re-kick only arms on a tick multiple of @awaits_rekick_every (10); do_poll increments
       # poll_count by 1/tick (list_org_repos returns 1 repo). 10 polls → the 10th arms.
@@ -130,10 +132,11 @@ defmodule Fleet.Pilot.PollerTest do
       }
 
       # `forge_opts` replaced wholesale (Keyword.merge): same stub issues + 2-repo discovery.
+      # FREE arch: the wake path is the one that still fires (busy → deliberate silence).
       {name, pid} =
         start_entry_poller({:ok, [issue]}, %{},
           spawner: nil,
-          task_queue: ArchBusyTQ,
+          task_queue: ArchFreeTQ,
           forge_opts: [
             _test_issues: {:ok, [issue]},
             _test_routes: %{},
@@ -182,10 +185,10 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     # Symmetric: the arch BUSY (an active work-item) serializes via the forge — NO new enqueue
-    # (the backlog stays on the forge, re-offered next tick once the arch is free + the label
-    # drained). The wake fires anyway (nudge). It is the eng's role_busy transposed to the forever
-    # pod (busy = has a work-item).
-    test "BUSY arch (active work-item) → NO enqueue (serializes via the forge), wake only" do
+    # AND NO wake (a busy arch already knows its mandate; re-waking it every throttle tick was
+    # pure noise, observed live 2026-07-18). The backlog stays on the forge, re-offered + woken
+    # next tick once the arch submits and the label drains.
+    test "BUSY arch (active work-item) → NO enqueue, NO wake (it already knows its mandate)" do
       issue = %{
         "number" => 42,
         "body" => "x",
@@ -201,7 +204,7 @@ defmodule Fleet.Pilot.PollerTest do
         end)
 
       refute log =~ "arch mandate enqueued"
-      assert log =~ "re-kick"
+      refute log =~ "re-kick"
 
       GenServer.stop(pid)
     end

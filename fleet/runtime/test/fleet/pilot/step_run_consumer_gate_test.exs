@@ -257,12 +257,15 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     # LOAD-BEARING unlock: removes lcars-in-flight -> the poller stops re-dispatching (end of churn).
     assert_received :unlocked
+    # The FAILED run is SIGNED first (anti-runaway: the budget counts it), THEN the
+    # escalation comment ("Architecte" pins the FR user-facing one).
+    assert_received {:comment, fail_trace}
+    assert fail_trace =~ "gate-fail"
     assert_received {:comment, body}
-    # "Architecte" pins the FR user-facing escalation comment.
     assert body =~ "Rework"
     assert body =~ "Architecte"
-    # active KICK of the arch (the single airlock to the human).
-    assert_received {:wake, "permanent-architect"}
+    # NO immediate kick (signal-before-content race): the Poller offers the mandate THEN wakes.
+    refute_received {:wake, "permanent-architect"}
     # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
@@ -280,7 +283,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # "Aval humain" / "Architecte" pin the FR user-facing escalation comment.
     assert body =~ "Aval humain"
     assert body =~ "Architecte"
-    assert_received {:wake, "permanent-architect"}
+    # NO immediate kick (signal-before-content race): the Poller offers the mandate THEN wakes.
+    refute_received {:wake, "permanent-architect"}
     # escalation, NOT a bounce (rework) nor a PR.
     refute_received {:open_pr, _, _, _}
   end
@@ -462,10 +466,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert body =~ "gatekeeper"
     assert body =~ "escalate_user"
 
-    # #5.2 — comment ADDRESSED to the arch (single airlock) + active KICK (the arch arms its
-    # monitor at spawn).
+    # #5.2 — comment ADDRESSED to the arch (single airlock). NO immediate kick anymore
+    # (signal-before-content race): the Poller offers the mandate THEN wakes, ordered.
     assert body =~ "Architecte"
-    assert_received {:wake, "permanent-architect"}
+    refute_received {:wake, "permanent-architect"}
   end
 
   test "halt_wait_input verdict -> await_arch" do

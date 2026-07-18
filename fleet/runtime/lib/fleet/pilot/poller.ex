@@ -579,11 +579,15 @@ defmodule Fleet.Pilot.Poller do
       # (the backlog stays on the forge; this re-offers next tick, once the arch submits + the label drains,
       # ArchInboxConsumer). Enqueue is safe on replay: a fresh one supersedes, and once enqueued the arch is
       # busy → not re-offered until it drains.
+      # Offer THEN wake, and ONLY when the arch is free: a busy arch (mandate reserved, not
+      # yet submitted) already knows its work — waking it again is pure noise (live
+      # 2026-07-18: the arch was re-woken every throttle-tick while deliberately holding a
+      # mandate; the flag signalled "an escalation is pending", never "something NEW").
+      # Once it submits, the label drains → next tick it is free → offer + wake.
       unless arch_busy?(task_queue, pod_id) do
         offer_arch_mandate(task_queue, pod_id, awaits_ids)
+        rekick_wake(spawner, pod_id, MapSet.size(awaits_ids))
       end
-
-      rekick_wake(spawner, pod_id, MapSet.size(awaits_ids))
     end
 
     :ok

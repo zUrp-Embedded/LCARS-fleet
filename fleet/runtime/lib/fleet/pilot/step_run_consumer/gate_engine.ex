@@ -272,6 +272,14 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
             "StepRunConsumer: gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}"
           )
 
+          # ANTI-RUNAWAY: a failed gate consumed a REAL run (a pod was spawned, worked and
+          # completed) — it MUST consume budget. The rework budget counts SYSTEM-signed
+          # `[step_run:...]` markers on the issue, and this path posted none: the
+          # reaper/rework cycle re-dispatched the same step FOREVER with the counter frozen
+          # (live runaway 2026-07-18, citation-snoopy: ~25 spawns, the GateEngine invariant
+          # "an infinite rework loop must not be representable" falsified). We SIGN the
+          # failed run BEFORE rebounding so the budget mechanically bites.
+          _ = sign_failed_run(seams, n, payload["role"], step, reason)
           tag(:rework, rebound(workflow_map, n, seams))
 
         {:human_approval, reason} ->
@@ -375,6 +383,33 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp count_step_runs(seams, n) do
     forge = seams.forge_client || Fleet.Pilot.ForgeClient
     forge.count_signed_step_runs(seams.repo, n, seams.forge_opts)
+  end
+
+  # Signs a FAILED run on the issue (system comment carrying the counted
+  # `[step_run:<role>:gate-fail]` marker) — the failed run becomes visible to
+  # `count_signed_step_runs`, so `rebound`'s budget counts it like any signed run.
+  # NO dedup signature: each failed run is a distinct spend (that is the point).
+  # Best-effort LOUD: a failed post loses one count — a down forge also stalls the
+  # re-dispatch, so there is no silent runaway path through this branch.
+  defp sign_failed_run(seams, n, role, step, reason) do
+    forge = seams.forge_client || Fleet.Pilot.ForgeClient
+
+    body =
+      "Gate en échec — step `#{step}` : #{reason}\n\n" <>
+        Fleet.Pilot.ForgeProtocol.step_run_marker(role || "unknown", "gate-fail")
+
+    case forge.post_comment(seams.repo, n, body, seams.forge_opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, err} ->
+        Logger.warning(
+          "StepRunConsumer: gate-fail signing KO #{seams.repo}##{n} (#{inspect(err)}) — " <>
+            "this run escapes the rework budget"
+        )
+
+        :ok
+    end
   end
 
   # No `validate_explicit_step` (soft⟺gatekeeper biconditional):
