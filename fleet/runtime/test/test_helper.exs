@@ -8,4 +8,18 @@
 # - `ensure_all_started(:fleet_workflow)` (ex-workflow helper): covered by the single-app boot in
 #   test env — nothing left to start by hand.
 Application.put_env(:fleet_api, :start_listener, false)
+
+# Codex audit F-07 (2026-07-19): the in-tree `tmp/` @tmp_dir root is SHARED across runners of the
+# `fleet` group (multi-human box). A test interrupted (kill -9) or run by another UID could leave a
+# non-group-writable dir under the STABLE @tmp_dir path → the next runner's `create_tmp_dir!` fails
+# to `rm_rf` it before the test body. Pre-run best-effort sweep: make every leftover under `tmp/`
+# group-writable so ANY fleet-group runner can always erase it. Silent on failure (not-owner dirs
+# we cannot chmod are exactly the ones a fresh checkout will not have; the sweep is a belt, not a
+# gate). The fixtures that chmod a dir read-only restore it synchronously (see pod_test.exs).
+_ =
+  case File.stat("tmp") do
+    {:ok, _} -> System.cmd("chmod", ["-R", "g+rwX", "tmp"], stderr_to_stdout: true)
+    _ -> :ok
+  end
+
 ExUnit.start()

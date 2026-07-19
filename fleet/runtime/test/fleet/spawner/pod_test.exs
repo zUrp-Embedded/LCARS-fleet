@@ -2054,19 +2054,28 @@ defmodule Fleet.Spawner.PodTest do
 
       opts = [state_fs_root: state_root, pod_dir_root: pod_root]
 
+      # Codex audit F-07 (2026-07-19): the read-only parent must NEVER survive this test —
+      # a leftover `0500` dir under the STABLE @tmp_dir path blocks the NEXT runner's
+      # `create_tmp_dir!` (rm_rf of a non-writable dir owned by another UID fails). So the restore
+      # is SYNCHRONOUS (`try/after` — runs even if the body raises, unlike `on_exit`) AND
+      # group-writable (`0770` — a fleet-group runner can clean it; `on_exit` keeps a belt for the
+      # capture_log path). kill -9 mid-test is covered by test_helper's pre-run tmp sweep.
       File.chmod!(ro_parent, 0o500)
-      # Restores write access so that ExUnit's @tmp_dir cleanup can erase everything.
-      on_exit(fn -> File.chmod(ro_parent, 0o700) end)
+      on_exit(fn -> File.chmod(ro_parent, 0o770) end)
 
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok =
-                   Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
-        end)
+      try do
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert :ok =
+                     Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
+          end)
 
-      assert log =~ "tombstone erase FAILED"
-      assert log =~ "state_dir"
-      assert log =~ "loop the pod"
+        assert log =~ "tombstone erase FAILED"
+        assert log =~ "state_dir"
+        assert log =~ "loop the pod"
+      after
+        File.chmod(ro_parent, 0o770)
+      end
     end
   end
 
