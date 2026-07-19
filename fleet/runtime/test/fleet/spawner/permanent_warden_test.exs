@@ -225,6 +225,45 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     assert Process.alive?(warden)
   end
 
+  test "F-01 (codex audit): a BURST of pod.failed for one role schedules ONE respawn, not N" do
+    parent = self()
+
+    # Big backoff so the FIVE burst events are all processed (GenServer is sequential) BEFORE the
+    # first respawn timer fires. Without the pending dedup, each event scheduled its own timer AND
+    # the nil stamp reset the counter → five respawns, all "attempt 1/5".
+    warden =
+      start_warden(
+        fn role ->
+          send(parent, {:respawn, role})
+          {:ok, "permanent-#{role}"}
+        end,
+        backoff_base_ms: 150
+      )
+
+    for _ <- 1..5, do: send(warden, pod_failed("permanent-architect"))
+
+    # Exactly ONE respawn arrives from the burst (the four duplicates were deduped at the source).
+    assert_receive {:respawn, "architect"}, 1_000
+    refute_receive {:respawn, "architect"}, 400
+  end
+
+  test "F-01: after the pending timer fires, a NEW death re-schedules (dedup is per in-flight timer, not permanent)" do
+    parent = self()
+
+    warden =
+      start_warden(fn role ->
+        send(parent, {:respawn, role})
+        {:ok, "permanent-#{role}"}
+      end)
+
+    send(warden, pod_failed("permanent-architect"))
+    assert_receive {:respawn, "architect"}, 1_000
+
+    # The timer fired (pending cleared) → a genuine later death is a new cycle iteration, honored.
+    send(warden, pod_failed("permanent-architect"))
+    assert_receive {:respawn, "architect"}, 1_000
+  end
+
   test "backoff_delay/2: capped exponential, pure" do
     assert PermanentWarden.backoff_delay(0, 5_000) == 5_000
     assert PermanentWarden.backoff_delay(1, 5_000) == 10_000

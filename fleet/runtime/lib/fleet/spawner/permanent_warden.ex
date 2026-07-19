@@ -54,7 +54,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -92,7 +92,13 @@ defmodule Fleet.Spawner.PermanentWarden do
       # attempts: role => {count, last_respawn_mono_ms | nil} — count = consecutive attempts,
       # stamp = last WARDEN respawn ({:ok, _} from respawn_fun; nil when the last attempt failed
       # or none happened). Monotonic clock: wall-clock jumps must not fake a survival.
-      attempts: %{}
+      attempts: %{},
+      # pending: roles with a respawn timer IN FLIGHT (scheduled, not yet fired). Codex audit F-01
+      # (2026-07-19): without it, a burst of `pod.failed` (or event + reconcile) for the same role
+      # each scheduled a fresh timer — the bound of #{@max_attempts} was bypassed, all logged
+      # `attempt 1/5` (the nil stamp reset the counter every event). One pending timer per role:
+      # a second signal while one is in flight is a DUPLICATE, deduped at the source.
+      pending: MapSet.new()
     }
 
     :ok = schedule_reconcile(reconcile_ms)
@@ -120,6 +126,10 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   def handle_info({:respawn, role}, state) do
+    # The in-flight timer FIRED → clear pending (F-01): from now a fresh death re-schedules
+    # normally. A retry (spawn failure below) re-arms pending on its own timer.
+    state = %{state | pending: MapSet.delete(state.pending, role)}
+
     # respawn_fun is rescue-wrapped — a raise (cap-profile bug, FS) would kill the warden
     # (loss of counters + pending timers → roles dead silently after an empty restart).
     result =
@@ -158,7 +168,13 @@ defmodule Fleet.Spawner.PermanentWarden do
           )
 
           Process.send_after(self(), {:respawn, role}, delay)
-          {:noreply, %{state | attempts: Map.put(state.attempts, role, {attempt + 1, nil})}}
+
+          {:noreply,
+           %{
+             state
+             | attempts: Map.put(state.attempts, role, {attempt + 1, nil}),
+               pending: MapSet.put(state.pending, role)
+           }}
         else
           Logger.error(
             "PermanentWarden: respawn #{role} — #{@max_attempts} consecutive failures, HALT " <>
@@ -262,6 +278,19 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   defp handle_permanent_death(role, state) do
+    # F-01 DEDUP: a respawn is already scheduled for this role → this signal (burst pod.failed,
+    # or event racing the reconcile tick) is a DUPLICATE of the same incident. Drop it: no new
+    # timer, no counter touch. The in-flight timer will do the ONE respawn; if the pod dies again
+    # AFTER it fires (pending cleared), that death is a genuine new cycle iteration.
+    if MapSet.member?(state.pending, role) do
+      Logger.debug("PermanentWarden: #{role} death while a respawn is already pending → deduped")
+      {:noreply, state}
+    else
+      do_handle_permanent_death(role, state)
+    end
+  end
+
+  defp do_handle_permanent_death(role, state) do
     now = System.monotonic_time(:millisecond)
     {raw_count, last_respawn} = Map.get(state.attempts, role, {0, nil})
 
@@ -290,7 +319,13 @@ defmodule Fleet.Spawner.PermanentWarden do
       )
 
       Process.send_after(self(), {:respawn, role}, delay)
-      {:noreply, %{state | attempts: Map.put(state.attempts, role, {count + 1, nil})}}
+
+      {:noreply,
+       %{
+         state
+         | attempts: Map.put(state.attempts, role, {count + 1, nil}),
+           pending: MapSet.put(state.pending, role)
+       }}
     else
       # Crash-loop CONFIRMED: died under min-uptime with the bound exhausted → REAL, durable
       # HALT (no re-arm; the spend stops HERE). The stamp stays: a much later death (external
