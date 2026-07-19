@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -111,8 +111,20 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- publish_work_ops(full_name, work_dir, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} ready — main=#{proj_dir}, work/ops=#{work_dir}")
+      # Reorg 2026-07-19: opening a project spawns its per-project architect (best-effort, cf.
+      # maybe_open_architect — a spawn hiccup never fails the onboard, the project exists).
+      maybe_open_architect(full_name, url, name, opts)
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
+  end
+
+  # Spawns the project's per-project architect — best-effort, NEVER fails the onboard (the project is
+  # created; a spawn hiccup just means the arch is relaunched). Seam `:open_architect` (default = the real
+  # `Fleet.Pilot.ProjectArchitect.open/2`) keeps the onboard/import tests hermetic (no live spawn).
+  defp maybe_open_architect(repo, url, name, opts) do
+    opener = Keyword.get(opts, :open_architect, &Fleet.Pilot.ProjectArchitect.open/2)
+    _ = opener.(%{repo: repo, url: url, name: name}, opts)
+    :ok
   end
 
   @doc """
@@ -153,6 +165,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
         "ProjectOnboard: #{full_name} imported — main=#{proj_dir}, work/ops=#{work_dir}"
       )
 
+      # Reorg 2026-07-19: opening (importing) a project spawns its per-project architect (best-effort).
+      maybe_open_architect(full_name, url, name, opts)
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
   end
