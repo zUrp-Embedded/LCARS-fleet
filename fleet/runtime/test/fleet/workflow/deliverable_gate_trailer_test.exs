@@ -70,4 +70,33 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
     base = init_repo(dir)
     assert :ok = DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
   end
+
+  @tag :tmp_dir
+  test "F-03 (codex audit): PROSE quoting the marker is NOT a trailer → fail-loud", %{tmp_dir: dir} do
+    base = init_repo(dir)
+    # The marker appears in the BODY as prose (an audit note), never in the trailer block.
+    commit!(
+      dir,
+      "a.txt",
+      "feat: probe\n\nAudit note: expected marker Co-authored-by: LCARS-engineer but this is prose."
+    )
+
+    assert {:error, {:missing_coauthor_trailer, "engineer", [_sha]}} =
+             DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
+  end
+
+  @tag :tmp_dir
+  test "F-03: a REAL trailer plus unrelated prose mentioning it → :ok (the trailer is what counts)",
+       %{tmp_dir: dir} do
+    base = init_repo(dir)
+
+    commit!(
+      dir,
+      "a.txt",
+      "feat: probe\n\nSee Co-authored-by discussion below.\n\n" <>
+        "Co-authored-by: LCARS-engineer <engineer@lcars.local>"
+    )
+
+    assert :ok = DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
+  end
 end

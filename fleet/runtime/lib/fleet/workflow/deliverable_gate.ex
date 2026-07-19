@@ -18,7 +18,7 @@ defmodule Fleet.Workflow.DeliverableGate do
   The system-chosen target branch and the forge network isolation are outside this module
   (resp. `Fleet.Workflow.Deliverable.publish` and the bwrap containment).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   @git_timeout_ms 15_000
@@ -162,24 +162,44 @@ defmodule Fleet.Workflow.DeliverableGate do
   """
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
-    # Needle DERIVED from the canonical trailer (ForgeIdentity.coauthor_trailer = SINGLE SOURCE) — we
-    # take the prefix before the email (lenient on the address) while tracking any format change from
-    # the owner; no inline string that would drift from the instruction given to the pod.
+    # Codex audit F-03 (2026-07-19): the old check did `String.contains?(body, "Co-authored-by:
+    # LCARS-<role>")` over the WHOLE message — a PROSE line quoting the marker (an audit note, a
+    # review comment) passed the attestation without a real trailer. We now extract the ACTUAL
+    # Git trailers via `--format=%(trailers:key=Co-authored-by,valueonly)` (git parses the last
+    # paragraph's trailer block — prose in the body is NOT a trailer) and match the role on the
+    # trailer VALUE. Needle = `LCARS-<role>`, derived from the canonical trailer (ForgeIdentity =
+    # SINGLE SOURCE), the prefix before the email (lenient on the address).
     needle =
       Fleet.Credentials.ForgeIdentity.coauthor_trailer(expected_role)
+      |> String.replace_prefix("Co-authored-by: ", "")
       |> String.split(" <")
       |> hd()
 
-    # `%x00` (NUL) separates the commits — a NUL cannot appear in a git message.
-    case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%H%x1f%B%x00"]) do
+    # `%x00` separates commits, `%x1f` (unit separator) the sha from the extracted trailer values —
+    # neither can appear in a git message/trailer.
+    case git(workspace, [
+           "log",
+           "#{base_sha}..HEAD",
+           "--format=%H%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
+         ]) do
       {out, 0} ->
         missing =
           out
           |> String.split(<<0>>, trim: true)
           |> Enum.flat_map(fn chunk ->
             case String.split(chunk, <<0x1F>>, parts: 2) do
-              [sha, body] -> if String.contains?(body, needle), do: [], else: [String.trim(sha)]
-              _ -> []
+              # `values` = the newline-joined VALUES of the real Co-authored-by trailers (empty if
+              # none). A commit is covered iff ONE trailer value starts with `LCARS-<role>`.
+              [sha, values] ->
+                covered? =
+                  values
+                  |> String.split("\n", trim: true)
+                  |> Enum.any?(&(String.trim_leading(&1) |> String.starts_with?(needle)))
+
+                if covered?, do: [], else: [String.trim(sha)]
+
+              _ ->
+                []
             end
           end)
 
