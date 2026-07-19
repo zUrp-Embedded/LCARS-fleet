@@ -40,6 +40,33 @@ defmodule Fleet.Credentials.ShellTest do
       assert {:ok, {_out, 3}} = Shell.run("sh", ["-c", "exit 3"], timeout_ms: 5_000)
     end
 
+    test "F-04: bad max_output_bytes → {:error, {:bad_opt, {:max_output_bytes, _}}}" do
+      assert {:error, {:bad_opt, {:max_output_bytes, 0}}} =
+               Shell.run("sh", ["-c", "true"], max_output_bytes: 0)
+
+      assert {:error, {:bad_opt, {:max_output_bytes, "8"}}} =
+               Shell.run("sh", ["-c", "true"], max_output_bytes: "8")
+    end
+
+    test "F-04 (codex audit): output OVER the cap → group killed + {:error, {:output_overflow, bytes, max}}" do
+      # The wall deadline bounds TIME, not MEMORY (repro'd: 20 MB buffered whole) — the cap must
+      # kill the producer mid-stream, well before the deadline.
+      assert {:error, {:output_overflow, bytes, 4096}} =
+               Shell.run("sh", ["-c", "yes x | head -c 1000000; sleep 5"],
+                 max_output_bytes: 4096,
+                 timeout_ms: 10_000
+               )
+
+      assert bytes > 4096
+    end
+
+    test "F-04: output UNDER the cap → untouched {:ok, {output, 0}}" do
+      assert {:ok, {out, 0}} =
+               Shell.run("sh", ["-c", "printf hello"], max_output_bytes: 4096)
+
+      assert out == "hello"
+    end
+
     test "command LONGER than the timeout → KILLED + {:error, {:timeout, ms}}" do
       # `sleep 30` far exceeds the 200ms timeout: the guard MUST kill it and return a typed error,
       # NOT wait 30s. The test bounds its own wait too (assert < a short timeout).

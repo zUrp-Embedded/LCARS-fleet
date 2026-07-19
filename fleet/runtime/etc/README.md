@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date**: 2026-05-10
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-20
 **Status**: human-launched model (systemd removed 2026-06-16)
 **Referenced by**: `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -71,6 +71,8 @@ bash test/integration/host_launch_test.sh
 bash test/integration/sandbox_notrace_test.sh
 # F094 : invariant no-trace de bwrap_launch.sh vs bwrap RÉEL — arbo runtime LCARS host invisible,
 # /home tmpfs, HOME=pod_dir, /etc SÉLECTIF (/etc/fleet ABSENT du pod). Nécessite bwrap+userns+tmux.
+# Codes retour (audit F-09) : 0 = prouvé, 77 = SKIP (userns indispo — preuve NON exécutée), autre = échec.
+# Un wrapper qui compte doit distinguer 77 : un skip n'est JAMAIS un vert.
 ```
 
 *(`test/integration/boot_test.sh` testait le hardening/readiness systemd — obsolète avec le retrait,

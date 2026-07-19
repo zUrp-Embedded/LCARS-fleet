@@ -90,16 +90,22 @@ defmodule Fleet.Credentials.Shell do
 
   The caller MUST match: an `{:error, {:timeout, _}}` is not a silent success.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
 
   @default_timeout_ms 30_000
+  # Codex audit F-04 (2026-07-19): the wall deadline bounds TIME, not MEMORY — a 20 MB output
+  # was accepted whole (repro'd), and a hostile/verbose producer has the full timeout window to
+  # fill the BEAM heap. 8 MiB is generous for every git site in the codebase (ls-remote,
+  # rev-parse, push porcelain); larger flows must stream, not buffer.
+  @default_max_output_bytes 8_388_608
 
   @type result ::
           {:ok, {String.t(), non_neg_integer()}}
           | {:error, {:timeout, pos_integer()}}
+          | {:error, {:output_overflow, pos_integer(), pos_integer()}}
           | {:error, {:exit, term()}}
           | {:error, {:bad_opt, term()}}
 
@@ -152,6 +158,9 @@ defmodule Fleet.Credentials.Shell do
 
     * `:timeout_ms` — WALL deadline (default #{@default_timeout_ms} ms). Beyond it, the git OS
       process-GROUP is killed (`SIGKILL` to the group + port close) and we return `{:error, {:timeout, timeout_ms}}`.
+    * `:max_output_bytes` — output cap (default #{@default_max_output_bytes} bytes). Beyond it,
+      the process-GROUP is killed and we return `{:error, {:output_overflow, bytes, max}}` —
+      the time deadline is NOT a memory bound (F-04).
     * `:cd` — execution directory.
     * `:env` — the child process's env. **Default**: `Fleet.Credentials.ForgeAuth.git_env/0` (carries
       `GIT_TERMINAL_PROMPT=0` → a git with no credential FAILS instead of prompting/hanging). Pass
@@ -181,7 +190,7 @@ defmodule Fleet.Credentials.Shell do
       {:error, _} = err ->
         err
 
-      {:ok, timeout_ms, env, cd} ->
+      {:ok, timeout_ms, max_output_bytes, env, cd} ->
         case {System.find_executable(cmd), System.find_executable("setsid")} do
           {nil, _} ->
             {:error, {:exit, {:enoent, cmd}}}
@@ -224,7 +233,7 @@ defmodule Fleet.Credentials.Shell do
                 # discovery would return `nil`. By the deadline, the process has run for `timeout_ms` → it is
                 # there, fork included.
                 deadline = System.monotonic_time(:millisecond) + timeout_ms
-                collect(port, os_pid, timeout_ms, deadline, [])
+                collect(port, os_pid, timeout_ms, deadline, [], 0, max_output_bytes)
             end
         end
     end
@@ -236,6 +245,7 @@ defmodule Fleet.Credentials.Shell do
   # valid opts; this guards a direct/buggy caller so the contract holds.
   defp parse_run(args, opts) do
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+    max_output_bytes = Keyword.get(opts, :max_output_bytes, @default_max_output_bytes)
     env = Keyword.get(opts, :env, [])
     cd = Keyword.get(opts, :cd)
 
@@ -246,6 +256,9 @@ defmodule Fleet.Credentials.Shell do
       not (is_integer(timeout_ms) and timeout_ms > 0) ->
         {:error, {:bad_opt, {:timeout_ms, timeout_ms}}}
 
+      not (is_integer(max_output_bytes) and max_output_bytes > 0) ->
+        {:error, {:bad_opt, {:max_output_bytes, max_output_bytes}}}
+
       not (is_list(env) and Enum.all?(env, &match?({k, v} when is_binary(k) and is_binary(v), &1))) ->
         {:error, {:bad_opt, {:env, env}}}
 
@@ -253,7 +266,7 @@ defmodule Fleet.Credentials.Shell do
         {:error, {:bad_opt, {:cd, cd}}}
 
       true ->
-        {:ok, timeout_ms, env, cd}
+        {:ok, timeout_ms, max_output_bytes, env, cd}
     end
   end
 
@@ -340,12 +353,22 @@ defmodule Fleet.Credentials.Shell do
   # on exit; at the deadline (REMAINING time exhausted), kills the process-GROUP and closes the port →
   # `{:error, {:timeout, timeout_ms}}`. The `after` value is `deadline - now` (never re-armed to
   # `timeout_ms`): a dripping output advances the loop but does NOT push the deadline back.
-  defp collect(port, os_pid, timeout_ms, deadline, acc) do
+  defp collect(port, os_pid, timeout_ms, deadline, acc, bytes, max_bytes) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
       {^port, {:data, data}} ->
-        collect(port, os_pid, timeout_ms, deadline, [data | acc])
+        # MEMORY bound alongside the wall deadline (F-04): the deadline caps TIME only — a
+        # continuous producer had the whole window to fill the heap. Kill the GROUP on overflow
+        # (same gesture as the timeout) and return a typed error carrying size vs cap.
+        bytes = bytes + byte_size(data)
+
+        if bytes > max_bytes do
+          terminate(port, os_pid)
+          {:error, {:output_overflow, bytes, max_bytes}}
+        else
+          collect(port, os_pid, timeout_ms, deadline, [data | acc], bytes, max_bytes)
+        end
 
       {^port, {:exit_status, code}} ->
         {:ok, {acc |> Enum.reverse() |> IO.iodata_to_binary(), code}}

@@ -42,7 +42,11 @@ if timeout 10 "$BWRAP_BIN" --unshare-all --ro-bind /usr /usr \
      --proc /proc --dev /dev /usr/bin/true 2>/dev/null; then
   ok "userns bwrap fonctionnel"
 else
-  ko "userns bwrap indisponible (env ne supporte pas — SKIP non-bloquant)"; echo "SKIP"; exit 0
+  # Codex audit F-09 (2026-07-19): SKIP used to exit 0 — any wrapper keyed on the exit code
+  # counted "proof not executed" as "proof passed" (repro: LCARS_BWRAP_BIN=/bin/false → 0).
+  # Three-state convention: 0 = proven, 77 = skipped (automake standard), anything else = fail.
+  # A caller MUST count 77 explicitly — never fold it into green.
+  ko "userns bwrap indisponible (env ne supporte pas — SKIP)"; echo "SKIP"; exit 77
 fi
 
 # ------------------------------------------------------------------
