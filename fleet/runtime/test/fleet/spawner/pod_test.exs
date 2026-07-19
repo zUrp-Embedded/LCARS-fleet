@@ -782,6 +782,82 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_POD_RESUME"] == "0"
     end
 
+    test "boot-epoch: a snapshot from a PREVIOUS fleet life + graine → RESUME (not a crash recovery)",
+         %{tmp_dir: tmp_dir} do
+      # Live scar 2026-07-19: a clean `fleet_v2 stop` leaves a non-terminal state.json — without the
+      # epoch discriminator every reboot fell into :recreate and the slot never came back.
+      pod_id = "pod-epoch-#{System.unique_integer([:positive])}"
+      args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      # Snapshot of a PREVIOUS fleet life (stale/absent boot_id) — non-terminal phase.
+      state_path = state_fs_path(pod_id)
+      File.mkdir_p!(Path.dirname(state_path))
+
+      File.write!(
+        state_path,
+        Jason.encode!(%{
+          "v" => 1,
+          "pod_id" => pod_id,
+          "issue_id" => "issue-1",
+          "session_id" => uuid,
+          "phase" => "monitoring",
+          "boot_id" => "boot-PREVIOUS-LIFE"
+        })
+      )
+
+      # The identity's graine exists.
+      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
+
+      File.write!(
+        Path.join([tmp_dir, "seeds", "_slots", "#{uuid}.jsonl"]),
+        ~s({"type":"bridge-session","bridgeSessionId":"cse_01EPOCH","sessionId":"#{uuid}"}\n)
+      )
+
+      {:ok, _pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _largs, env}, 2_000
+      assert env["LCARS_POD_RESUME"] == "1"
+    end
+
+    test "boot-epoch: a snapshot from THIS fleet life keeps the fresh-reroll recovery (resume 0)",
+         %{tmp_dir: tmp_dir} do
+      pod_id = "pod-epoch-same-#{System.unique_integer([:positive])}"
+      args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      state_path = state_fs_path(pod_id)
+      File.mkdir_p!(Path.dirname(state_path))
+
+      File.write!(
+        state_path,
+        Jason.encode!(%{
+          "v" => 1,
+          "pod_id" => pod_id,
+          "issue_id" => "issue-1",
+          "session_id" => uuid,
+          "phase" => "monitoring",
+          # CURRENT epoch = the pod died while THIS fleet was alive → crash doctrine.
+          "boot_id" => Fleet.Spawner.BootEpoch.id()
+        })
+      )
+
+      # Even WITH a graine present, a same-life crash NEVER resumes (fresh-reroll).
+      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
+
+      File.write!(
+        Path.join([tmp_dir, "seeds", "_slots", "#{uuid}.jsonl"]),
+        ~s({"type":"bridge-session","bridgeSessionId":"cse_01SAME","sessionId":"#{uuid}"}\n)
+      )
+
+      {:ok, _pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _largs, env}, 2_000
+      assert env["LCARS_POD_RESUME"] == "0"
+    end
+
     test "UUID GC: a stale <uuid>.jsonl (pod_dir surviving a crash) is removed before --session-id",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"

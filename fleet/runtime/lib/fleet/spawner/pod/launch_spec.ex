@@ -248,10 +248,14 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   """
   @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t()) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path) do
-    mounts_env(
-      system_mounts(claude_launch_path) ++
-        cap_profile_mounts(cap_profile) ++ opts_mounts(opts) ++ project_ops_mount(opts, cap_profile)
-    )
+    # DEDUPE BY PATH, first wins — bwrap applies binds in order and the LAST one wins, so a duplicate
+    # path with a weaker mode downstream would silently DOWNGRADE an explicit mount (live 2026-07-19:
+    # the arch's dynamic work/ops RW was re-bound RO by the derived project_ops mount → doc-authoring
+    # blocked). Explicit intent (catalogue, then per-spawn opts) precedes the derived default.
+    (system_mounts(claude_launch_path) ++
+       cap_profile_mounts(cap_profile) ++ opts_mounts(opts) ++ project_ops_mount(opts, cap_profile))
+    |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
+    |> mounts_env()
   end
 
   # DYNAMIC per-spawn mounts (`opts[:mounts]`, same `%{"mode","path"}` shape as the catalogue's

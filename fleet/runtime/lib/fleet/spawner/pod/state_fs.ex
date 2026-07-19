@@ -33,7 +33,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
     by the `PodWarden`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -158,7 +158,10 @@ defmodule Fleet.Spawner.Pod.StateFs do
       "started_at" => DateTime.to_iso8601(state.started_at),
       "phase" => Atom.to_string(state.phase),
       "conditions" => state.conditions |> MapSet.to_list() |> Enum.map(&Atom.to_string/1),
-      "issue_id" => state.issue_id
+      "issue_id" => state.issue_id,
+      # Fleet-life epoch (reorg 2026-07-19): lets `recover_or_init` tell a POD crash (same epoch →
+      # fresh-reroll recovery) from a FLEET restart (stale epoch → unified seed decision).
+      "boot_id" => Fleet.Spawner.BootEpoch.id()
     }
 
     tmp = state.state_fs_path <> ".tmp"

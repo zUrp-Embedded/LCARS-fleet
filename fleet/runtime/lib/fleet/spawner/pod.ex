@@ -1012,9 +1012,25 @@ defmodule Fleet.Spawner.Pod do
 
       {:ok, json} ->
         case Jason.decode(json) do
-          {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) ->
-            phase = Recovery.phase_from_string(phase_str) || :launching
-            Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
+          {:ok, %{"session_id" => sid, "phase" => phase_str} = snap} when is_binary(sid) ->
+            if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
+              # SAME fleet life: the pod died while this fleet was alive (crash/wedge) →
+              # the fresh-reroll recovery doctrine (never resume a dead pod's accumulated session).
+              phase = Recovery.phase_from_string(phase_str) || :launching
+              Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
+            else
+              # PREVIOUS fleet life (clean stop / fleet crash — the whole BEAM was down): the
+              # snapshot is STALE, nothing was mid-flight in THIS life → the unified seed decision
+              # applies exactly as on a first boot (live jsonl → resume in place; graine → resume;
+              # else fresh). Live scar 2026-07-19: without this, every clean reboot fell into
+              # :recreate and the slot/context never came back.
+              Logger.info(
+                "pod #{base.pod_id} recover: state.json from a PREVIOUS fleet life " <>
+                  "(stale epoch) → unified seed decision (not a crash recovery)"
+              )
+
+              maybe_slot_resume(base)
+            end
 
           # state.json PRESENT but CORRUPT/incomplete (bad JSON, missing session_id/phase) = a broken
           # recovery point. We fresh-init (cannot recover), but LOUD (error = real loss: the durable

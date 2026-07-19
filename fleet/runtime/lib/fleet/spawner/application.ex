@@ -32,6 +32,11 @@ defmodule Fleet.Spawner.Application do
 
   @impl Supervisor
   def init(_init_arg) do
+    # Fleet-life epoch stamped BEFORE any pod starts (single init, no race) — the discriminator
+    # between a pod crash (same epoch → fresh-reroll) and a fleet restart (stale epoch → unified
+    # seed decision). Cf. Fleet.Spawner.BootEpoch.
+    :ok = Fleet.Spawner.BootEpoch.init()
+
     base = [
       {Registry, keys: :unique, name: Fleet.Spawner.Registry},
       Fleet.Spawner.Supervisor
