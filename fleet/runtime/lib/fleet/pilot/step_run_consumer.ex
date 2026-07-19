@@ -880,7 +880,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
         result = close_with_trace(n, role, arch_trace, state)
-        _ = TerminalEscalation.kick_architect(state.spawner)
+        _ = TerminalEscalation.kick_architect(state.spawner, state.repo)
         result
 
       other ->

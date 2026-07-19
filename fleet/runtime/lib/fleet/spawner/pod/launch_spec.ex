@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
     `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc """
@@ -77,8 +77,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       project = rc_project(opts, cap_profile) ->
         "/home/#{project}"
 
-      # Orchestrator → its declared RW mount (arch → /home/projects.work). Data-driven (cap-profile).
-      rw = first_rw_mount(cap_profile) ->
+      # Orchestrator → its RW mount (dynamic per-project first — the arch's work dir — then the
+      # catalogue's — starfleet's /home/projects.work). Data-driven (opts + cap-profile).
+      rw = first_rw_mount(cap_profile, opts) ->
         rw
 
       # Permanent / legacy (project without rc_name) → the REAL relocated path (pod_dir → sandbox_home).
@@ -105,10 +106,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   # An orchestrator's cwd = its 1st RW mount (ALREADY bound via LCARS_POD_MOUNTS, so no bind to
-  # create). nil if no rw. Reuses the single accessor cap_profile_mounts (no duplicated logic).
-  defp first_rw_mount(cap_profile) do
-    cap_profile
-    |> cap_profile_mounts()
+  # create). Dynamic opts mounts FIRST (per-project arch: its work dir), then the catalogue's
+  # (starfleet). nil if no rw. Reuses the single accessors (no duplicated logic).
+  defp first_rw_mount(cap_profile, opts) do
+    (opts_mounts(opts) ++ cap_profile_mounts(cap_profile))
     |> Enum.find_value(fn m -> if (m["mode"] || m[:mode]) == "rw", do: m["path"] || m[:path] end)
   end
 
@@ -249,9 +250,16 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   def pod_mounts_env(cap_profile, opts, claude_launch_path) do
     mounts_env(
       system_mounts(claude_launch_path) ++
-        cap_profile_mounts(cap_profile) ++ project_ops_mount(opts, cap_profile)
+        cap_profile_mounts(cap_profile) ++ opts_mounts(opts) ++ project_ops_mount(opts, cap_profile)
     )
   end
+
+  # DYNAMIC per-spawn mounts (`opts[:mounts]`, same `%{"mode","path"}` shape as the catalogue's
+  # `metadata.mounts`) — the per-project architect's world rides here ({proj RO, work RW}, derived from
+  # the project name by `Fleet.Pilot.ProjectArchitect.ensure`). System-side only: opts never come from
+  # the wire (the API admission allowlist has no `mounts` field), and the serialization below applies
+  # the SAME security guards as catalogue mounts (closed mode enum + newline refusal).
+  defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])
 
   # The pod's PROJECT work/ops (`/home/projects.work/<project>`) RO — the worker's PROJECT CONTEXT: the other
   # tickets' briefs, the provenance of delivered bricks, the project doctrine. A context-long/unique worker

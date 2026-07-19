@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use Supervisor
@@ -152,6 +152,10 @@ defmodule Fleet.Pilot.Application do
       # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
       # alignments (one `git` at a time per worktree, against index corruption).
       Fleet.Pilot.WorktreeSync,
+      # The architects' per-project activity feed (Bus consumer → fleet.feed in each arch pod_dir +
+      # the single informational wake on the :delivered unlock). Rides the step rail: its lines ARE
+      # step milestones — same lifecycle, hermetic in tests for free (step off).
+      Fleet.Pilot.ArchFeed,
       # Neither `:repo` to the Poller (org-membership discovery), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
       # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
       # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).

@@ -62,7 +62,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # (a name/email retyped here would be a divergence in the making with the gate).
   defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
-  @type result :: %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}
+  @type result :: %{
+          repo: String.t(),
+          project_dir: Path.t(),
+          work_dir: Path.t(),
+          # Per-project architect ensure outcome (reorg 2026-07-19) — reported, never dropped:
+          # %{status: "up", pod_id: _} | %{status: "failed", reason: _}.
+          architect: map()
+        }
 
   @doc """
   Onboard the project `name` (kebab-case slug). `opts`:
@@ -112,20 +119,25 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- publish_work_ops(full_name, work_dir, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} ready — main=#{proj_dir}, work/ops=#{work_dir}")
-      # Reorg 2026-07-19: opening a project spawns its per-project architect (best-effort, cf.
-      # maybe_open_architect — a spawn hiccup never fails the onboard, the project exists).
-      maybe_open_architect(full_name, url, name, opts)
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
+      # Reorg 2026-07-19: opening a project ensures its per-project architect (best-effort, cf.
+      # ensure_architect — a spawn hiccup never fails the onboard, the project exists).
+      arch = ensure_architect(full_name, opts)
+      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
     end
   end
 
-  # Spawns the project's per-project architect — best-effort, NEVER fails the onboard (the project is
-  # created; a spawn hiccup just means the arch is relaunched). Seam `:open_architect` (default = the real
-  # `Fleet.Pilot.ProjectArchitect.open/2`) keeps the onboard/import tests hermetic (no live spawn).
-  defp maybe_open_architect(repo, url, name, opts) do
-    opener = Keyword.get(opts, :open_architect, &Fleet.Pilot.ProjectArchitect.open/2)
-    _ = opener.(%{repo: repo, url: url, name: name}, opts)
-    :ok
+  # Ensures the project's per-project architect — best-effort, NEVER fails the onboard (the project is
+  # created; a failed ensure is retried on the next open/escalation trigger). Seam `:ensure_architect`
+  # (default = the real `Fleet.Pilot.ProjectArchitect.ensure/2`) keeps the onboard/import tests hermetic
+  # (no live spawn). The outcome is RETURNED (result key `architect`) so the caller (starfleet's
+  # create_project) can report honestly whether the arch is up — never silently dropped.
+  defp ensure_architect(repo, opts) do
+    ensure = Keyword.get(opts, :ensure_architect, &Fleet.Pilot.ProjectArchitect.ensure/2)
+
+    case ensure.(repo, opts) do
+      {:ok, pod_id} -> %{status: "up", pod_id: pod_id}
+      {:error, reason} -> %{status: "failed", reason: inspect(reason)}
+    end
   end
 
   @doc """
@@ -166,10 +178,42 @@ defmodule Fleet.Pilot.ProjectOnboard do
         "ProjectOnboard: #{full_name} imported — main=#{proj_dir}, work/ops=#{work_dir}"
       )
 
-      # Reorg 2026-07-19: opening (importing) a project spawns its per-project architect (best-effort).
-      maybe_open_architect(full_name, url, name, opts)
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
+      # Reorg 2026-07-19: opening (importing) a project ensures its per-project architect (best-effort).
+      arch = ensure_architect(full_name, opts)
+      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
     end
+  end
+
+  @doc """
+  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
+  2026-07-19: create / import / **open**). No forge write, no disk write: verifies the dual-dir
+  exists, then ensures the project's per-project architect (`Fleet.Pilot.ProjectArchitect.ensure`
+  — idempotent: alive → no-op; dead/never — fleet reboot, crash — → fresh spawn, context back via
+  the slot). THE human-driven path back to a project after `fleet_v2` restarts.
+
+  Refusals: dirs absent → `{:error, {:not_on_machine, full_name}}` (that project needs `import`,
+  or `create` if it does not exist at all — open never creates). Same `result()` shape as
+  `onboard`/`import` (the MCP channel pattern-matches it identically).
+  """
+  @spec open(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  def open(full_name, opts \\ []) when is_binary(full_name) do
+    name = full_name |> String.split("/") |> List.last()
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+
+    with :ok <- validate_name(name),
+         :ok <- require_on_machine(full_name, proj_dir, work_dir) do
+      arch = ensure_architect(full_name, opts)
+      Logger.info("ProjectOnboard: #{full_name} opened — architect #{arch.status}")
+      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+    end
+  end
+
+  # open's INVERSE of refute_existing: both dual-dirs must already exist (an onboarded project).
+  defp require_on_machine(full_name, proj_dir, work_dir) do
+    if File.dir?(proj_dir) and File.dir?(work_dir),
+      do: :ok,
+      else: {:error, {:not_on_machine, full_name}}
   end
 
   # WS3 admission = org-membership: an outside-org import would never be discovered by the poller. Check

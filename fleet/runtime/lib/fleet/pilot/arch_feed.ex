@@ -1,33 +1,35 @@
-defmodule Fleet.Spawner.ArchFeed do
+defmodule Fleet.Pilot.ArchFeed do
   @moduledoc """
-  The architect's LOCAL activity feed — Bus consumer appending ONE short FR line per
-  fleet milestone into `<arch pod_dir>/fleet.feed` (next to `turn.flag`, same in-pod
-  visibility: `~/fleet.feed`).
+  The architects' LOCAL activity feed — Bus consumer appending ONE short FR line per fleet
+  milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`, next to `turn.flag`,
+  in-pod visibility `~/fleet.feed`). PER-PROJECT since the 2026-07-19 reorg: each event routes
+  to the architect of ITS repo (`payload["repo"]` → `ProjectArchitect.pod_id_for/1`); an event
+  with no repo, or a project whose arch is not up, drops the line — LOSSY by doctrine (the Bus
+  is the lossy fast-path): the feed is a courtesy mirror, the truth is the forge.
 
-  PULL side of the arch's situational awareness: the arch READS the file to answer the
-  human's "où ça en est ?" instantly — no forge polling, no refresh. Writing a line NEVER
-  wakes the arch. The single PUSH exception: the `:delivered` unlock (`step.unlocked`
-  milestone — a DELIVERED brick, rare and meaningful) also sends an INFORMATIONAL wake via
-  `Fleet.Spawner.notify_pod/2` (typed flag message, NO kick net, zero send-keys — it must
-  never interfere with the human's typing; the arch relays "brique livrée" and does NOT
-  `get_work_item`).
+  Lives in the PILOT domain (moved from spawner, reorg 2026-07-19): the lines are pilot
+  vocabulary (bricks, verdicts, reworks) and the pod-id derivation is `ProjectArchitect`'s
+  authority — spawner cannot depend upward on it. Started by the step rail
+  (`Fleet.Pilot.Application.step_children!`): the feed renders step milestones, same lifecycle.
 
-  LOSSY by doctrine (the Bus is the lossy fast-path): the feed is a courtesy mirror, the
-  forge stays the truth. The file is BOUNDED (trimmed to the last #{200} lines on write).
-  The arch pod id is read from the SAME config key as `Fleet.Pilot.Roles.architect_pod_id`
-  (a module call would be a boundary cycle pilot→spawner→pilot; the config atom is the
-  shared source, D-07).
+  The single PUSH: a DELIVERED brick (`step.unlocked` milestone `delivered`) also notifies the
+  arch via `Fleet.Spawner.notify_pod/2` (typed flag message, NO kick net, zero send-keys — it
+  must never cost the human a turn). Everything else is pull-only (the file).
+
+  Axiom (reorg): a line NEVER names the repo — the arch has "the project", nothing else
+  (issue numbers only).
 
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
-  `:notify` (default `Fleet.Spawner.notify_pod/2`), `:arch_pod_id`.
+  `:notify` (default `Fleet.Spawner.notify_pod/2`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use GenServer
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Pilot.ProjectArchitect
 
   @max_lines 200
   @feed_file "fleet.feed"
@@ -58,32 +60,38 @@ defmodule Fleet.Spawner.ArchFeed do
     {:ok,
      %{
        pod_info: Keyword.get(opts, :pod_info, &Fleet.Spawner.pod_info/1),
-       notify: Keyword.get(opts, :notify, &Fleet.Spawner.notify_pod/2),
-       arch_pod_id:
-         Keyword.get(opts, :arch_pod_id) ||
-           Application.get_env(:fleet_pilot, :architect_pod_id, "permanent-architect")
+       notify: Keyword.get(opts, :notify, &Fleet.Spawner.notify_pod/2)
      }}
   end
 
   @impl true
   def handle_info(%Fleet.Event{type: type, payload: payload}, state) when type in @watched do
-    line = render_line(type, payload)
-    _ = append(line, state)
+    # PER-PROJECT routing: the event's repo names the architect. No repo → no route → drop
+    # (courtesy feed; failures reach the arch via the escalation rail regardless).
+    case payload["repo"] || payload[:repo] do
+      repo when is_binary(repo) and repo != "" ->
+        pod_id = ProjectArchitect.pod_id_for(repo)
+        line = render_line(type, payload)
+        _ = append(pod_id, line, state)
 
-    # The ONLY push: a DELIVERED brick (the `:delivered` unlock — terminal milestone).
-    # Everything else stays pull-only (the feed).
-    if type == :"step.unlocked" and payload["milestone"] == "delivered",
-      do: _ = state.notify.(state.arch_pod_id, "info : " <> line)
+        # The ONLY push: a DELIVERED brick (the `:delivered` unlock — terminal milestone).
+        if type == :"step.unlocked" and payload["milestone"] == "delivered",
+          do: _ = state.notify.(pod_id, "info : " <> line)
+
+      _ ->
+        :ok
+    end
 
     {:noreply, state}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # ── Rendering — one short FR line per milestone (the arch relays it to the human) ──
+  # ── Rendering — one short FR line per milestone (the arch relays it to the human). ──
+  # Axiom: the repo is NEVER named (the arch has "the project") — issue numbers only.
 
   defp render_line(:"step.unlocked", %{"milestone" => "delivered"} = p),
-    do: "brique #{p["repo"]}##{p["number"]} LIVRÉE — mergée, scellée, verrou levé"
+    do: "brique ##{p["number"]} LIVRÉE — mergée, scellée, verrou levé"
 
   defp render_line(:"step.unlocked", %{"milestone" => "verdict"} = p),
     do: "verdict rendu par #{p["role"]}#{ctx(p)}"
@@ -115,17 +123,12 @@ defmodule Fleet.Spawner.ArchFeed do
   defp render_line(:"audit.verdict", p),
     do: "verdict de juge#{ctx(p)}"
 
-  # Best-effort context suffix from whatever the payload carries (payload shapes vary
-  # per producer — the feed is a courtesy line, not a schema consumer).
+  # Best-effort context suffix — ISSUE NUMBER only (payload shapes vary per producer; the feed is
+  # a courtesy line, not a schema consumer). The repo never appears (axiom above).
   defp ctx(p) when is_map(p) do
-    repo = p["repo"] || p[:repo]
-    issue = p["issue"] || p[:issue] || p["number"] || p[:number] || p["issue_id"] || p[:issue_id]
-
-    cond do
-      repo && issue -> " (#{repo}##{issue})"
-      issue -> " (#{issue})"
-      repo -> " (#{repo})"
-      true -> ""
+    case p["issue"] || p[:issue] || p["number"] || p[:number] || p["issue_id"] || p[:issue_id] do
+      nil -> ""
+      issue -> " (##{issue})"
     end
   end
 
@@ -133,8 +136,8 @@ defmodule Fleet.Spawner.ArchFeed do
 
   # ── Feed file: append + bound (never a growing log) ──
 
-  defp append(line, state) do
-    with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(state.arch_pod_id) do
+  defp append(pod_id, line, state) do
+    with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(pod_id) do
       path = Path.join(pod_dir, @feed_file)
       {{_y, _m, _d}, {h, mi, _s}} = :calendar.local_time()
       stamp = :io_lib.format("~2..0B:~2..0B", [h, mi]) |> IO.iodata_to_binary()
@@ -155,7 +158,7 @@ defmodule Fleet.Spawner.ArchFeed do
           Logger.warning("ArchFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)")
       end
     else
-      # No arch pod (not booted yet / test) → the line is dropped, lossy by doctrine.
+      # This project's arch is not up (not opened yet / test) → drop, lossy by doctrine.
       _ -> :ok
     end
   rescue

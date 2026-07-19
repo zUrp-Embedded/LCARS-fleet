@@ -265,8 +265,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert body =~ "Rework"
     assert body =~ "Architecte"
     # IMMEDIATE offer-then-wake (design 2026-07-19) — order proven in the escalate_user test.
-    assert_received {:enqueued, "permanent-architect", _}
-    assert_received {:wake, "permanent-architect"}
+    assert_received {:enqueued, "architect-r", _}
+    assert_received {:wake, "architect-r"}
     # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
@@ -285,8 +285,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert body =~ "Aval humain"
     assert body =~ "Architecte"
     # IMMEDIATE offer-then-wake (design 2026-07-19) — order proven in the escalate_user test.
-    assert_received {:enqueued, "permanent-architect", _}
-    assert_received {:wake, "permanent-architect"}
+    assert_received {:enqueued, "architect-r", _}
+    assert_received {:wake, "architect-r"}
     # escalation, NOT a bounce (rework) nor a PR.
     refute_received {:open_pr, _, _, _}
   end
@@ -445,7 +445,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:assignee, _}
 
     # #5.2 — abandon NOTIFIES the arch (user airlock): kick + arch-addressed comment (no silent burial).
-    assert_received {:wake, "permanent-architect"}
+    assert_received {:wake, "architect-r"}
     assert_received {:comment, abody}
     assert abody =~ "Architecte"
   end
@@ -478,15 +478,15 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     {:messages, msgs} = Process.info(self(), :messages)
 
     enqueue_idx =
-      Enum.find_index(msgs, &match?({:enqueued, "permanent-architect", _}, &1))
+      Enum.find_index(msgs, &match?({:enqueued, "architect-r", _}, &1))
 
-    wake_idx = Enum.find_index(msgs, &match?({:wake, "permanent-architect"}, &1))
+    wake_idx = Enum.find_index(msgs, &match?({:wake, "architect-r"}, &1))
 
     assert enqueue_idx, "expected the arch arbitration mandate to be enqueued (immediate rail)"
     assert wake_idx, "expected the immediate arch wake after the mandate enqueue"
     assert enqueue_idx < wake_idx, "offer must PRECEDE wake (signal-before-content race)"
 
-    assert_received {:enqueued, "permanent-architect", attrs}
+    assert_received {:enqueued, "architect-r", attrs}
     assert attrs.brief =~ "Arbitrage requis"
   end
 

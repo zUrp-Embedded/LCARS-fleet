@@ -39,7 +39,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use ExMCP.Server
@@ -163,6 +163,29 @@ defmodule Fleet.MCP.PodTools do
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["name"]
+    })
+  end
+
+  deftool "open_project" do
+    meta do
+      name("Open Project")
+
+      description(
+        "OPEN (relaunch) a project ALREADY on the agent machine: ensures its per-project architect is " <>
+          "up (idempotent — alive = no-op; dead/never — fleet restart, crash — = fresh spawn, its context " <>
+          "comes back via its stable slot). Use it to RESUME working on an existing project (e.g. after " <>
+          "the fleet was restarted). No forge/disk write. `full_name` = `owner/name`. Dirs absent → " <>
+          "error (that project needs `import_project`, or `create_project` if it does not exist). " <>
+          "Returns {\"status\":\"opened\",\"repo\":...,\"architect\":{...}}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"}
+      },
+      "required" => ["full_name"]
     })
   end
 
@@ -395,6 +418,24 @@ defmodule Fleet.MCP.PodTools do
        {:invalid_full_name,
         "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
     end
+  end
+
+  def handle_tool_call("open_project", %{"full_name" => full_name}, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.open_project(full_name, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("open_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
   end
 
   def handle_tool_call("import_project", _bad_args, state) do

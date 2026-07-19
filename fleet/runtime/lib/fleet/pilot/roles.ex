@@ -8,14 +8,13 @@ defmodule Fleet.Pilot.Roles do
   (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
   (never an `engineer`/`gatekeeper` default rewritten at the caller).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
 
   @default_producer_role "engineer"
   @default_gatekeeper_role "gatekeeper"
-  @default_architect_pod_id "permanent-architect"
 
   @doc """
   PRODUCER role of the single-brick model (the one that codes the brick, e.g. `engineer`). Override by the opt
@@ -109,15 +108,7 @@ defmodule Fleet.Pilot.Roles do
       Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
   end
 
-  @doc """
-  Pod id of the permanent ARCHITECT (the SINGLE airlock to the human). Override by the opt `:architect_pod_id`
-  (test); otherwise config `:fleet_pilot, :architect_pod_id` (default `"permanent-architect"`,
-  deterministic id set by `PermanentBoot`). SINGLE accessor — the default is NOT rewritten at the
-  callers (`StepRunConsumer.kick_architect`, `Poller` re-kick of `lcars-awaits-arch` issues).
-  """
-  @spec architect_pod_id(keyword()) :: String.t()
-  def architect_pod_id(opts \\ []) do
-    Keyword.get(opts, :architect_pod_id) ||
-      Application.get_env(:fleet_pilot, :architect_pod_id, @default_architect_pod_id)
-  end
+  # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was
+  # REMOVED by the 2026-07-19 reorg: the architect is PER-PROJECT, its pod id derives from the repo
+  # via the single authority `Fleet.Pilot.ProjectArchitect.pod_id_for/1`.)
 end

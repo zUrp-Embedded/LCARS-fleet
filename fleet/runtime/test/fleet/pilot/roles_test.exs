@@ -105,8 +105,10 @@ defmodule Fleet.Pilot.RolesTest do
     assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == Roles.gatekeeper_role()
   end
 
-  test "architect_pod_id: default `permanent-architect`, overridden by the opt (SSOT)" do
-    assert "permanent-architect" == Roles.architect_pod_id()
-    assert "permanent-arch2" == Roles.architect_pod_id(architect_pod_id: "permanent-arch2")
+  test "the arch pod id is PER-PROJECT — the single authority is ProjectArchitect.pod_id_for/1" do
+    # Reorg 2026-07-19: Roles.architect_pod_id (the "permanent-architect" singleton accessor) is GONE.
+    refute function_exported?(Roles, :architect_pod_id, 1)
+    assert Fleet.Pilot.ProjectArchitect.pod_id_for("fleet/demo") == "architect-demo"
+    assert Fleet.Pilot.ProjectArchitect.pod_id_for("demo") == "architect-demo"
   end
 end

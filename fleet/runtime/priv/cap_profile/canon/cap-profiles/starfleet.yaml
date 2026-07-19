@@ -50,6 +50,7 @@ spec:
       - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
       - mcp__fleet__create_project       # start a fresh project (repo + dual-dir + card)
       - mcp__fleet__import_project       # twin of create_project: ADOPTS an existing repo
+      - mcp__fleet__open_project         # third verb: RELAUNCH a project already on the machine
     disallowedTools:
       - web_search
       - web_fetch

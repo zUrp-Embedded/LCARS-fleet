@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.Application do
   + `:boot_permanent_at_start` (does it boot the permanent pods?). This app, for its
   part, never boots a permanent pod (no boot hook here).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use Supervisor
@@ -68,17 +68,10 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    # The architect's local activity feed (Bus consumer → fleet.feed in the arch pod_dir +
-    # the single informational wake on the :delivered unlock). Gated `:start_arch_feed`
-    # (default true prod, false test — hermeticity: no Bus consumers in async tests).
-    arch_feed =
-      if Application.get_env(:fleet_spawner, :start_arch_feed, true) do
-        [Fleet.Spawner.ArchFeed]
-      else
-        []
-      end
-
-    children = base ++ publish ++ reaper ++ permanent_warden ++ arch_feed
+    # (The architects' activity feed moved to the PILOT domain — `Fleet.Pilot.ArchFeed`, started by
+    # the step rail: its lines are pilot vocabulary and its per-project routing derives from
+    # `ProjectArchitect`, a pilot authority spawner cannot depend on. Reorg 2026-07-19.)
+    children = base ++ publish ++ reaper ++ permanent_warden
 
     # No boot of permanent pods here — sole authority =
     # Fleet.Starfleet.BootOrchestrator (post-readiness). This app only

@@ -22,7 +22,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc """
@@ -42,6 +42,16 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   strictly, identical to the onboarding channel.
   """
   @callback import(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              | {:error, term()}
+
+  @doc """
+  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
+  2026-07-19): no forge/disk write, ensures the project's per-project architect. Same 3 return
+  keys as `onboard/2` (+ `architect`, the ensure outcome). Dirs absent →
+  `{:error, {:not_on_machine, _}}` (open never creates — that is `create`/`import`'s job).
+  """
+  @callback open(full_name :: String.t(), opts :: keyword()) ::
               {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
               | {:error, term()}
 

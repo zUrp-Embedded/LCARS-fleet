@@ -209,11 +209,11 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   forge state (label `lcars-awaits-arch` + the arch-addressed comment stay), the arch queries its inbox on the
   next round, and the Poller (G4) re-kicks every tick while the label is present.
   """
-  @spec kick_architect(module()) :: :ok
-  def kick_architect(spawner) do
-    # Pod id of the permanent arch (user airlock) — SINGLE AUTHORITY `Fleet.Pilot.Roles` (shared
-    # with the Poller's awaits-arch re-kick; no "permanent-architect" literal here).
-    pod_id = Fleet.Pilot.Roles.architect_pod_id()
+  @spec kick_architect(module(), String.t()) :: :ok
+  def kick_architect(spawner, repo) do
+    # Pod id of THIS project's architect (per-project since the 2026-07-19 reorg) — SINGLE
+    # AUTHORITY `Fleet.Pilot.ProjectArchitect.pod_id_for/1` (no rebuilt literal).
+    pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(repo)
 
     case spawner.wake_pod(pod_id) do
       :ok ->

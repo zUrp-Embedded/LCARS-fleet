@@ -462,6 +462,10 @@ defmodule Fleet.Spawner.Pod do
       # The ROLE is recorded at SPAWN (= the cap-profile's `metadata.name`), exposed via the Registry. It is
       # the AUTHENTICATED role identity (the pod cannot forge it over the wire).
       role: cap_profile_name(data.cap_profile),
+      # The repo the pod is BOUND to (`opts[:repo]`, `owner/name`) — the channel-side identity the MCP
+      # delegation tools resolve "the project" from (the pod never names its repo over the wire; it has
+      # "the project", nothing else). nil for unbound pods (starfleet, admin).
+      repo: Keyword.get(data.opts, :repo),
       # `phase` = the gen_statem state NAME reconstructed for pod_info (consumers depend on it:
       # tests read phase, and the dispatcher reads conditions+has_active_task below).
       phase: state,

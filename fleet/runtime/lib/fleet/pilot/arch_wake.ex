@@ -1,7 +1,8 @@
 defmodule Fleet.Pilot.ArchWake do
   @moduledoc """
-  SINGLE authority for waking the permanent architect on an `lcars-awaits-arch`
-  escalation: the ORDERED offer-then-wake pair, shared by the two rails.
+  SINGLE authority for waking a project's architect on an `lcars-awaits-arch`
+  escalation: the ORDERED offer-then-wake pair, shared by the two rails — PER-PROJECT
+  since the 2026-07-19 reorg (one architect per repo, `Fleet.Pilot.ProjectArchitect`).
 
   Callers (design 2026-07-19 — "first kick immediate, protection BEHIND it"):
 
@@ -11,56 +12,90 @@ defmodule Fleet.Pilot.ArchWake do
     * `Poller.maybe_rekick_arch` — the SAFETY NET (`via: "net"`): re-derives a wake
       from the persistent forge label, capped by a cooldown-since-last-kick.
 
-  Contract — 3 outcomes, decided on the arch's LATEST work-item state:
+  ## Per-project grouping + on-demand ensure (reorg 2026-07-19)
 
-    * arch FREE → enqueue the arbitration mandate THEN wake (`:offered`). The ORDER is
-      the invariant: a wake fired before the mandate exists is classified spurious by the
-      arch's doctrine-first `get_work_item` (`{done:true}` — signal-before-content race,
-      live 2026-07-18). Killing the race by ORDERING beats killing it by WAITING (the
-      grid-throttle detour turned "5 min max" into 0-5 min nominal, scar 2026-07-19).
-    * mandate `:pending` (offered but never fetched) → wake ONLY (`:woken_pending`).
-      The signal may have been lost; the content is already enqueued — re-offering would
-      churn it. This also closes the lost-wake liveness hole (a pending mandate no longer
-      silences the net forever).
+  `awaits` may span repos → grouped BY REPO, each repo's architect addressed independently
+  (project A no longer serializes behind project B — the "one mandate at a time" queue is
+  now per-project). Before waking, the architect is **ensured** (`ProjectArchitect.ensure`,
+  idempotent): the arch is spawn-on-demand like the engineer — dead/never-spawned (fleet
+  reboot, crash) → respawned here, and its bootstrap kick pulls the already-enqueued
+  mandate. The ORDER stays the invariant: mandate enqueued BEFORE any wake (a wake fired
+  before the mandate exists is classified spurious by the arch's doctrine-first
+  `get_work_item` — signal-before-content race, live 2026-07-18).
+
+  Contract — per-repo outcomes, decided on that arch's LATEST work-item state:
+
     * mandate `:assigned`/`:in_progress` → `:busy`, complete silence — the arch already
       knows its work; waking it again is pure noise (live 2026-07-18).
+    * mandate `:pending` (offered but never fetched) → ensure + wake ONLY (`:woken_pending`).
+      The signal may have been lost OR the pod died with the mandate pending — the ensure
+      covers both; the content is already enqueued, re-offering would churn it.
+    * arch free → enqueue the mandate (smallest `{repo, n}` of the repo — deterministic),
+      THEN ensure, THEN wake (`:offered`).
 
   A failed enqueue → `{:error, {:enqueue, reason}}`, logged loud, NO wake (a wake without
-  content is the race above). Nothing is lost either way: the `lcars-awaits-arch` label
-  persists on the forge and the net retries. The mandate targets the SMALLEST `{repo, n}`
-  (deterministic across ticks/callers; the arch drains one at a time WITH the human).
+  content is the race above). A failed ensure is logged and the wake still attempted
+  (belt: the pod may exist outside the registry's view). Nothing is lost either way: the
+  `lcars-awaits-arch` label persists on the forge and the net retries.
+
+  The aggregate return (multi-repo) keeps the poller's contract: `:offered` if ANY repo
+  was offered, else `:woken_pending` if any, else the first outcome — the net stamps its
+  cooldown on any SENT signal, exactly as before.
 
   **Last revised**: 2026-07-19
   """
 
   require Logger
 
-  alias Fleet.Pilot.Roles
+  alias Fleet.Pilot.ProjectArchitect
 
   @type outcome :: :offered | :woken_pending | :busy | {:error, {:enqueue, term()}}
 
   @doc """
-  Offer-then-wake the arch for `awaits` (a `{repo, n}` tuple or a non-empty MapSet of
-  them). `via` tags the calling rail in the logs (`"immediate"` / `"net"`).
+  Offer-then-wake the architect(s) for `awaits` (a `{repo, n}` tuple or a non-empty MapSet
+  of them, possibly spanning repos). `via` tags the calling rail in the logs
+  (`"immediate"` / `"net"`). `opts[:ensure]` — test seam for the on-demand arch ensure
+  (default `ProjectArchitect.ensure/2`, threaded with the caller's `spawner`).
   """
-  @spec offer_then_wake(module(), module(), {String.t(), pos_integer()} | MapSet.t(), String.t()) ::
-          outcome()
-  def offer_then_wake(task_queue, spawner, awaits, via) do
-    pod_id = Roles.architect_pod_id()
+  @spec offer_then_wake(
+          module(),
+          module(),
+          {String.t(), pos_integer()} | MapSet.t(),
+          String.t(),
+          keyword()
+        ) :: outcome()
+  def offer_then_wake(task_queue, spawner, awaits, via, opts \\ []) do
+    ensure = Keyword.get(opts, :ensure, &ProjectArchitect.ensure/2)
+
+    awaits
+    |> normalize()
+    |> Enum.group_by(fn {repo, _n} -> repo end)
+    |> Enum.map(fn {repo, pairs} ->
+      offer_one(task_queue, spawner, repo, Enum.min(pairs), via, ensure)
+    end)
+    |> aggregate()
+  end
+
+  defp normalize({repo, n}) when is_binary(repo), do: [{repo, n}]
+  defp normalize(%MapSet{} = awaits), do: MapSet.to_list(awaits)
+
+  # One repo, one architect. The pod-status check keys on THIS repo's arch — per-project queue.
+  defp offer_one(task_queue, spawner, repo, {repo, n}, via, ensure) do
+    pod_id = ProjectArchitect.pod_id_for(repo)
 
     case task_queue.pod_status(pod_id) do
       {:ok, state} when state in [:assigned, :in_progress] ->
         :busy
 
       {:ok, :pending} ->
+        ensure_arch(ensure, repo, spawner, via)
         wake(spawner, pod_id, via, "pending mandate never fetched → re-wake only")
         :woken_pending
 
       _free_or_terminal_or_never ->
-        {repo, n} = pick(awaits)
-
         case enqueue_mandate(task_queue, pod_id, repo, n) do
           :ok ->
+            ensure_arch(ensure, repo, spawner, via)
             wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)")
             :offered
 
@@ -75,15 +110,41 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  defp pick({repo, n}) when is_binary(repo), do: {repo, n}
-  defp pick(%MapSet{} = awaits), do: Enum.min(awaits)
+  # Aggregate multi-repo outcomes onto the historical single-atom contract (the poller's net
+  # stamps its cooldown on any SENT signal).
+  defp aggregate([outcome]), do: outcome
+
+  defp aggregate(outcomes) do
+    cond do
+      :offered in outcomes -> :offered
+      :woken_pending in outcomes -> :woken_pending
+      true -> List.first(outcomes)
+    end
+  end
+
+  # On-demand ensure — best-effort: a dead/never-spawned arch comes back here (fleet reboot,
+  # crash); alive → cheap no-op. A failed ensure is LOGGED, the wake still attempted (belt).
+  defp ensure_arch(ensure, repo, spawner, via) do
+    case ensure.(repo, spawner: spawner) do
+      {:ok, _pod_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ArchWake: [#{via}] arch ensure for #{repo} KO (#{inspect(reason)}) — wake still attempted; " <>
+            "label intact, net retries"
+        )
+
+        :ok
+    end
+  end
 
   defp enqueue_mandate(task_queue, pod_id, repo, n) do
     attrs = %{
       issue_id: "issue-#{n}",
       role: "architect",
       brief:
-        "Arbitrage requis : escalade sur l'issue `#{repo}##{n}`. Lis-la (`list_escalations` / " <>
+        "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
           "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou corrige+re-délègue. " <>
           "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente.",
       metadata: %{"awaits_arch" => true, "repo" => repo, "number" => n}
@@ -103,7 +164,7 @@ defmodule Fleet.Pilot.ArchWake do
       other ->
         Logger.warning(
           "ArchWake: [#{via}] #{context} — wake #{pod_id} UNREACHED (#{inspect(other)}); " <>
-            "forge label intact, net retries, PermanentWarden respawns the arch"
+            "forge label intact, net retries, the ensure respawns the arch on the next trigger"
         )
     end
   end

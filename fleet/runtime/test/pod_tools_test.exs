@@ -207,6 +207,19 @@ defmodule Fleet.MCP.PodToolsTest do
          work_dir: "/tmp/projects.work/#{name}"
        }}
     end
+
+    @impl true
+    def open(full_name, _opts) do
+      name = full_name |> String.split("/") |> List.last()
+
+      {:ok,
+       %{
+         repo: full_name,
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}",
+         architect: %{status: "up", pod_id: "architect-#{name}"}
+       }}
+    end
   end
 
   # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
@@ -694,6 +707,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @onboarding_tools [
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
+      {"open_project", %{"full_name" => "fleet/demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [

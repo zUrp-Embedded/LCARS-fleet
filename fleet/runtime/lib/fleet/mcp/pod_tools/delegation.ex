@@ -451,7 +451,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.onboard(name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
           {:ok,
            %{
              "status" => "onboarded",
@@ -459,7 +459,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
              "project_dir" => pdir,
              "work_dir" => wdir,
              "delegation_target" => repo
-           }}
+           }
+           |> put_architect(result)}
 
         {:error, reason} ->
           {:error, {:onboard_failed, inspect(reason)}}
@@ -478,7 +479,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.import(full_name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
           {:ok,
            %{
              "status" => "imported",
@@ -486,11 +487,65 @@ defmodule Fleet.MCP.PodTools.Delegation do
              "project_dir" => pdir,
              "work_dir" => wdir,
              "delegation_target" => repo
-           }}
+           }
+           |> put_architect(result)}
 
         {:error, reason} ->
           {:error, {:import_failed, inspect(reason)}}
       end
+    end
+  end
+
+  @doc """
+  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
+  2026-07-19: create / import / **open**), onboarding gate applied. No forge/disk write: the
+  seam verifies the dual-dir exists and ensures the project's per-project architect
+  (idempotent — THE human-driven path back to a project after a fleet restart).
+  """
+  @spec open_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def open_project(full_name, state) when is_binary(full_name) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, _role} -> do_open_project(full_name)
+    end
+  end
+
+  # Open sequence — same :project_onboard seam, callback :open.
+  defp do_open_project(full_name) do
+    with {:ok, onboard} <- conforming_onboard() do
+      case onboard.open(full_name, []) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+          {:ok,
+           %{
+             "status" => "opened",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir
+           }
+           |> put_architect(result)}
+
+        {:error, reason} ->
+          {:error, {:open_failed, inspect(reason)}}
+      end
+    end
+  end
+
+  # HONEST reporting of the per-project architect ensure (reorg 2026-07-19): the caller (starfleet)
+  # must be able to tell the human whether the project's arch is up — never silently dropped.
+  # `Map.get` tolerant: a test stub returning only the 3 contract keys stays valid.
+  defp put_architect(rendered, result) do
+    case Map.get(result, :architect) do
+      %{status: status} = arch ->
+        Map.put(
+          rendered,
+          "architect",
+          %{"status" => status, "pod_id" => Map.get(arch, :pod_id), "reason" => Map.get(arch, :reason)}
+          |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+          |> Map.new()
+        )
+
+      _ ->
+        rendered
     end
   end
 

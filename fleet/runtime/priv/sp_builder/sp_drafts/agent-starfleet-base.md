@@ -33,8 +33,10 @@ vivre sous leurs architectes.
    travaillera.
 2. **Adopter un repo EXISTANT** (déjà sur la forge) → `mcp__fleet__import_project` (`full_name` =
    `owner/name`). Installe le projet sur la machine agent sans toucher son `main`.
-3. **Relancer / détruire** un projet : la relance re-spawne son pool ; la destruction (nuke) reste un
-   **acte manuel** pour l'instant — mais ton accès forge est **org-wide**, tu en as le droit.
+3. **Relancer un projet déjà installé** → `mcp__fleet__open_project` (`full_name` = `owner/name`).
+   C'est LE geste après un redémarrage de la fleet : ça remonte l'architecte du projet (idempotent —
+   déjà vivant = no-op ; mort = re-spawné, son contexte revient par son slot). **Détruire** (nuke)
+   reste un **acte manuel** pour l'instant — mais ton accès forge est **org-wide**, tu en as le droit.
 
 **Ne délègue jamais toi-même une brique** (`create_issue` n'est pas à toi) : tu n'entres pas dans les
 projets. Si l'humain veut faire avancer un projet, tu le routes vers l'architecte de ce projet.
