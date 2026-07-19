@@ -5,7 +5,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   The contract belongs to the CONSUMER: the callbacks are EXACTLY the
   functions that `Delegation` calls (create_issue, add_label, get_issue,
-  list_open_pulls, parse_feature_branch, pr_review_verdicts) — not the full
+  list_pulls, parse_feature_branch, pr_review_state) — not the full
   surface of the pilot's forge client.
 
   ## Why a RUNTIME seam (and not a compile dep)
@@ -27,7 +27,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
     * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
       adopt the behaviour (the compiler checks conformance, anti lying-stub).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc "Creates an issue → `{:ok, number}` (author/assignee/token passed in `opts`)."
@@ -54,8 +54,12 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @callback get_issue(repo :: String.t(), number :: integer(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
-  @doc "OPEN PRs of the repo (raw Gitea API maps — Delegation reads `head.ref`/`head.sha`)."
-  @callback list_open_pulls(repo :: String.t(), opts :: keyword()) ::
+  @doc """
+  ALL the PRs of the repo, open + closed/merged (raw Gitea API maps — Delegation reads
+  `head.ref`/`head.sha`/`state`/`merged`/`number`). The full-state read is the point: the
+  review trail must survive the merge in `get_issue_status`.
+  """
+  @callback list_pulls(repo :: String.t(), opts :: keyword()) ::
               {:ok, [map()]} | {:error, term()}
 
   @doc """
@@ -66,9 +70,19 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @callback parse_feature_branch(head :: String.t()) ::
               {:ok, {issue_number :: integer(), role :: String.t()}} | :error
 
-  @doc "PR review verdicts (last review per reviewer, scoped to `head_sha`)."
-  @callback pr_review_verdicts(repo :: String.t(), index :: integer(), opts :: keyword()) ::
-              {:ok, %{optional(String.t()) => :approved | :changes_requested}}
+  @doc """
+  Jury state of a PR: `verdicts` (last decisive review per reviewer, scoped to `head_sha`),
+  `reviewers` (stable jury set), and `outcome` — the SAME routing predicate the merge gate runs
+  on (`Jury.review_outcome/2`), computed pilot-side and carried as DATA so no seam consumer
+  (nor any test stub) re-implements the rule.
+  """
+  @callback pr_review_state(repo :: String.t(), index :: integer(), opts :: keyword()) ::
+              {:ok,
+               %{
+                 verdicts: %{optional(String.t()) => :approved | :changes_requested},
+                 reviewers: [String.t()],
+                 outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+               }}
               | {:error, term()}
 
   # Canonical default: the real forge client on the fleet_pilot side. Literal atom (not a

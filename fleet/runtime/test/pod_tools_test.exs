@@ -169,15 +169,16 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_issue(_repo, _number, _opts), do: {:ok, %{"state" => "open"}}
     @impl true
-    def list_open_pulls(_repo, _opts), do: {:ok, []}
+    def list_pulls(_repo, _opts), do: {:ok, []}
 
     # Finding D1 (incomplete stub): these two contract callbacks were missing — a test whose
-    # `list_open_pulls` returned a PR would have crashed UndefinedFunctionError instead of showing
+    # `list_pulls` returned a PR would have crashed UndefinedFunctionError instead of showing
     # stub behavior. Completed minimal-honest: no fleet feature-branch, no verdicts.
     @impl true
     def parse_feature_branch(_head), do: :error
     @impl true
-    def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
+    def pr_review_state(_repo, _index, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
   end
 
   # Onboarding stub (`:project_onboard` seam): touches NEITHER forge NOR disk — returns a fictitious
@@ -249,13 +250,14 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
-    def list_open_pulls(_repo, _opts), do: {:ok, []}
+    def list_pulls(_repo, _opts), do: {:ok, []}
 
     @impl true
     def parse_feature_branch(_head), do: :error
 
     @impl true
-    def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
+    def pr_review_state(_repo, _index, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
     @impl true
     def create_issue(_repo, _title, _body, _opts),

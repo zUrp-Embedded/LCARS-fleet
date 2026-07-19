@@ -221,10 +221,12 @@ defmodule Fleet.MCP.PodTools do
           "\"closed_without_merge\" (closed WITHOUT delivery: abandon/rejection — do NOT chain) | " <>
           "\"in_review\" (PR open, review running) | \"open\" (no PR yet) | " <>
           "\"unknown\" (forge unreachable — retry, decide nothing on it). " <>
-          "`pr` semantics (in-flight tracking): {number, verdicts} of the OPEN PR; the key is " <>
-          "ABSENT when no PR exists to talk about — including AFTER the merge (by design: the " <>
-          "delivery info is `outcome`, not `pr`); {\"error\":\"forge_unreachable\"} means the PR " <>
-          "read failed — never confuse it with 'no PR'."
+          "`pr` = {number,state,merged,review,verdicts} of the fleet PR — the review trail " <>
+          "SURVIVES the merge (how it was judged stays readable after delivery). `review` is the " <>
+          "merge gate's own predicate: \"approved\" | \"pending\" | \"changes_requested\" | " <>
+          "\"no_jury\" | \"unknown\" (read failed). The `pr` key is ABSENT when no fleet PR " <>
+          "exists (nothing to say); {\"error\":\"forge_unreachable\"} means the PR read failed — " <>
+          "never confuse it with 'no PR'."
       )
     end
 

@@ -76,8 +76,9 @@ corrélation numéro↔titre est portée par le protocole, pas par ta mémoire.
 ## Suivre — `get_issue_status`
 
 `mcp__fleet__get_issue_status` avec `number` = le numéro d'issue. Te rend `{issue, title, outcome}`
-(+ `pr` quand il y a quelque chose de vrai à dire — verdicts des juges pendant la revue ; clé
-absente = pas de PR, `{"error": …}` = forge injoignable, jamais confondus). Règle de séquence :
+(+ `pr` quand il y a quelque chose de vrai à dire — `review` + verdicts des juges, pendant la revue
+ET après le merge : comment ça a été jugé reste lisible après livraison ; clé absente = pas de PR,
+`{"error": …}` = forge injoignable, jamais confondus). Règle de séquence :
 ne chaîne l'issue N+1 sur la N que si `outcome: "merged"` (fermée PAR un merge — une issue
 `closed_without_merge` est un abandon, pas une livraison ; `unknown` = forge muette, ne décide
 rien dessus, re-sonde).

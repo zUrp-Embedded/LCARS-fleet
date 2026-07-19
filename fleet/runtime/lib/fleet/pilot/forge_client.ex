@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   ⚠ CROSS CONTRACT (`fleet_mcp` seam): this module is the REAL (default) impl of the behaviour
   `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
-  `get_issue/3`, `list_open_pulls/2`, `parse_feature_branch/1`, `pr_review_verdicts/3`). It CANNOT
+  `get_issue/3`, `list_pulls/2`, `parse_feature_branch/1`, `pr_review_state/3`). It CANNOT
   be adopted as a `@behaviour`: `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference
   would be a Boundary violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps →
   compile error). Duck-typed impl — any evolution of
@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -112,17 +112,20 @@ defmodule Fleet.Pilot.ForgeClient do
     list_scoped_issues(repo, "issues", opts)
   end
 
-  # A SINGLE lister on `/issues`, parameterised by `type` (issues|pulls) + assignee-scoped FORGE-SIDE.
+  # A SINGLE lister on `/issues`, parameterised by `type` (issues|pulls) + `:state` opt
+  # (open — the default — | closed | all) + assignee-scoped FORGE-SIDE.
   # Single source of the listing/scoping (state/type/assigned_by), paginated. The forge filters
   # (`assigned_by` — Gitea 1.26.1 works on /issues for both types) → the poller sees
   # ONLY its own (the lease becomes per-human, consistent with N-fleets-per-human). The scoping lives HERE, in a
   # single place — decide/dispatch_review no longer have to re-check ownership.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
+    state = Keyword.get(opts, :state, "open")
+
     with {:ok, config} <- resolve_config(opts) do
       paginate(
         config,
         "/repos/#{encode_repo(repo)}/issues",
-        "state=open&type=#{type}" <> assigned_by_qs(opts)
+        "state=#{state}&type=#{type}" <> assigned_by_qs(opts)
       )
     end
   end
@@ -619,6 +622,20 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  ALL the PRs of the repo (`state=all`: open + closed/merged), full shape — same machinery as
+  `list_open_pulls` (single scoped lister + `get_pull` per number). Serves the arch-facing status
+  read (`get_issue_status`): the review trail must SURVIVE the merge — a merged PR leaves the open
+  list, not the forge. N+1 GETs by design (the full shape is per-PR only); fine at status-read
+  cadence, do not put on a hot dispatch path.
+  """
+  @spec list_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_pulls(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, pr_issues} <- list_scoped_issues(repo, "pulls", Keyword.put(opts, :state, "all")) do
+      pr_issues |> Enum.map(& &1["number"]) |> fetch_pulls(repo, opts)
+    end
+  end
+
   @doc "GET a single PR → full shape (head/head.sha/requested_reviewers). Building block of list_open_pulls."
   @spec get_pull(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
@@ -633,10 +650,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # default args). Doc + logic (commit-scoping, volatile jury) live in `Jury`.
   # ============================================================
 
-  @doc "Decisive per-judge verdicts of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_verdicts/3`."
-  def pr_review_verdicts(repo, index, opts \\ []), do: Jury.pr_review_verdicts(repo, index, opts)
-
-  @doc "Jury state (verdicts + jury SET) of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
+  @doc "Jury state (verdicts + jury SET + outcome) of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
   def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
   @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Pilot.ForgeClient.Jury.change_request_feedback/3`."

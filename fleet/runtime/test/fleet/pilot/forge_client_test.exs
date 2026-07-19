@@ -52,6 +52,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
     ]
   end
 
+  # Verdicts projection of `pr_review_state` — the standalone `pr_review_verdicts` projection was
+  # nuked with its last production caller (get_issue_status now consumes the full state); these
+  # tests keep exercising the same derivation (last-decisive, dismissed, commit-scoping) through
+  # the surviving read.
+  defp verdicts_of(repo, index, opts) do
+    with {:ok, %{verdicts: verdicts}} <- ForgeClient.pr_review_state(repo, index, opts),
+         do: {:ok, verdicts}
+  end
+
   describe "repo_id/2 — the repo's forge id (source of truth for <REPO4>, BL-055)" do
     test "GET /repos/<repo> → {:ok, id} integer" do
       h = %{
@@ -292,7 +301,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.get_pull("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_verdicts: last decisive review per reviewer (login↓ → verdict)" do
+    test "verdicts (pr_review_state): last decisive review per reviewer (login↓ → verdict)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -314,10 +323,10 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       # Qualifier=APPROVED, Reviewer=REQUEST_CHANGES (COMMENT/REQUEST_REVIEW non-decisive, ignored).
       assert {:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested}} =
-               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
+               verdicts_of("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_verdicts: dismissed reviews ignored" do
+    test "verdicts (pr_review_state): dismissed reviews ignored" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -333,19 +342,19 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       # the dismissed REQUEST_CHANGES is ignored → Qualifier = APPROVED (their last active one).
       assert {:ok, %{"qualifier" => :approved}} =
-               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
+               verdicts_of("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_verdicts: no decisive review -> %{}" do
+    test "verdicts (pr_review_state): no decisive review -> %{}" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200, [%{"state" => "REQUEST_REVIEW", "dismissed" => false}, %{"state" => "COMMENT"}]}
       }
 
-      assert {:ok, %{}} = ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
+      assert {:ok, %{}} = verdicts_of("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_verdicts: a re-review OVERWRITES the same reviewer's older one (②.1d, last active)" do
+    test "verdicts (pr_review_state): a re-review OVERWRITES the same reviewer's older one (②.1d, last active)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -363,10 +372,10 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       assert {:ok, %{"qualifier" => :approved, "reviewer" => :approved}} =
-               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
+               verdicts_of("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_verdicts: head_sha → a REQUEST_CHANGES on an OLD commit is stale (live #7)" do
+    test "verdicts (pr_review_state): head_sha → a REQUEST_CHANGES on an OLD commit is stale (live #7)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -391,14 +400,14 @@ defmodule Fleet.Pilot.ForgeClientTest do
       # Reviewer DISAPPEARS from the map (stale verdict) → will be `pending` → re-judged.
       # Qualifier stays.
       assert {:ok, %{"qualifier" => :approved}} =
-               ForgeClient.pr_review_verdicts(
+               verdicts_of(
                  "fleet/lcars",
                  6,
                  opts(handlers) ++ [head_sha: "head1111"]
                )
     end
 
-    test "pr_review_verdicts: head_sha → a re-review on head OVERWRITES the same judge's stale verdict" do
+    test "verdicts (pr_review_state): head_sha → a re-review on head OVERWRITES the same judge's stale verdict" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -421,7 +430,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       assert {:ok, %{"reviewer" => :approved}} =
-               ForgeClient.pr_review_verdicts(
+               verdicts_of(
                  "fleet/lcars",
                  6,
                  opts(handlers) ++ [head_sha: "head1111"]

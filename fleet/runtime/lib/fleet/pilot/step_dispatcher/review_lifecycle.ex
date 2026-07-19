@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   no captures in the `Ctx`: taking them at the source keeps the
   core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -130,13 +130,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   @spec dispatch_by_verdicts([String.t()], map(), integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch_by_verdicts(requested, verdicts, pr_number, head, %Ctx{} = ctx) do
-    pending = requested -- Map.keys(verdicts)
+    # The classification is NOT re-derived here: `Jury.review_outcome/2` is the single truth
+    # (also carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) —
+    # a divergence between what the gate does and what the status says would be a second truth.
+    case Fleet.Pilot.ForgeClient.Jury.review_outcome(requested, verdicts) do
+      {:pending, [next | _]} ->
+        RoleDispatch.dispatch(:judge, pr_number, head, next, ctx)
 
-    cond do
-      pending != [] ->
-        RoleDispatch.dispatch(:judge, pr_number, head, hd(pending), ctx)
-
-      requested == [] ->
+      :no_jury ->
         # The CARD arbitrates (doc point 4): zero-judge card → this IS the nominal path, seal
         # directly; judged card → orphan PR, lay the card's jury (adoption).
         case Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts) do
@@ -144,10 +145,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           card_jury -> adopt_orphan_pr(pr_number, card_jury, ctx)
         end
 
-      Enum.any?(Map.values(Map.take(verdicts, requested)), &(&1 == :changes_requested)) ->
+      :changes_requested ->
         Remediation.dispatch_rework(pr_number, head, ctx)
 
-      true ->
+      :approved ->
         # All approved → MERGE (sealed, honest failure routing — `promote_or_route`).
         promote_or_route(pr_number, head, ctx)
     end

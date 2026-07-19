@@ -208,8 +208,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #                            "closed_without_merge" — a false-NEGATIVE (the arch WAITS) = SAFE,
   #                            the opposite of the old false-positive that mis-sequenced.
   #   "closed_without_merge" — closed WITHOUT the merge proof: abandon/rejection/manual close.
-  #   "in_review"            — open with a live fleet PR.
-  #   "open"                 — open, no PR found. Also the honest FLOOR when the PR read failed
+  #   "in_review"            — open with a LIVE fleet PR (a matched-but-closed PR — cancelled
+  #                            attempt — is NOT a review in progress: back to "open").
+  #   "open"                 — open, no live PR. Also the honest FLOOR when the PR read failed
   #                            (the `pr` error object carries the degradation): both mean "wait".
   #   "unknown"              — the issue read itself failed (a mute forge is not a state).
   defp outcome("unknown", _labels, _pr), do: "unknown"
@@ -217,8 +218,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp outcome("closed", labels, _pr),
     do: if(@merged_label in labels, do: "merged", else: "closed_without_merge")
 
-  defp outcome(_open, _labels, {:ok, _pr}), do: "in_review"
-  defp outcome(_open, _labels, _none_or_error), do: "open"
+  defp outcome(_open, _labels, {:ok, %{"state" => "open"}}), do: "in_review"
+  defp outcome(_open, _labels, _none_error_or_closed_pr), do: "open"
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
@@ -655,9 +656,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The IN-PROGRESS PR of issue #n (among the open ones). Returns `{:ok, map}` (number + merged +
-  # review verdicts), `:none` (no fleet PR in sight — including after the merge: the PR left the
-  # open list, the delivery info is `outcome`), or `{:error, :forge_unreachable}` (the read failed —
+  # The fleet PR of issue #n across ALL states (open + merged/closed): the review trail must
+  # SURVIVE the merge (before this, the `state=open` read made the PR vanish from the result at
+  # delivery — and two agents each burned an investigation on that polysemous null). Returns
+  # `{:ok, map}`, `:none` (no fleet PR), or `{:error, :forge_unreachable}` (the read failed —
   # distinct from :none by design, cf. put_pr/2).
   defp issue_pr_status(forge, repo, number) do
     # The PR of issue #n = the one whose head is the feature-branch `lcars/issue-<n>-<role>`. Parsing
@@ -667,52 +669,71 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # runtime, default `Fleet.Pilot.ForgeClient`, which re-exports `parse_feature_branch` to ForgeProtocol) —
     # so no compile-time dep from fleet_mcp to fleet_pilot (that is why we keep the call via the seam
     # rather than a direct call to ForgeProtocol, which would create that dependency).
-    case forge.list_open_pulls(repo, []) do
+    case forge.list_pulls(repo, []) do
       {:ok, pulls} ->
-        found =
-          Enum.find_value(pulls, fn pr ->
-            head = get_in(pr, ["head", "ref"]) || ""
-
-            case forge.parse_feature_branch(head) do
-              {:ok, {^number, _role}} ->
-                verdicts =
-                  case forge.pr_review_verdicts(repo, pr["number"],
-                         head_sha: get_in(pr, ["head", "sha"])
-                       ) do
-                    {:ok, v} ->
-                      v
-
-                    # LOUD before the fallback (same stance as get_issue above): a mute forge must
-                    # not read as "no verdicts yet".
-                    err ->
-                      Logger.warning(
-                        "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
-                          "(pr_review_verdicts → #{inspect(err)}) — falling back to verdicts={}"
-                      )
-
-                      %{}
-                  end
-
-                %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
-
-              _ ->
-                nil
-            end
-          end)
-
-        if found, do: {:ok, found}, else: :none
+        pulls
+        |> Enum.filter(fn pr ->
+          head = get_in(pr, ["head", "ref"]) || ""
+          match?({:ok, {^number, _role}}, forge.parse_feature_branch(head))
+        end)
+        |> pick_pr()
+        |> case do
+          nil -> :none
+          pr -> {:ok, render_pr(forge, repo, pr)}
+        end
 
       # LOUD + typed: the caller renders {"error": "forge_unreachable"} — a swallowed outage
       # must never read as "no fleet PR for this issue".
       err ->
         Logger.warning(
-          "Delegation: issue_status #{repo} forge unreachable (list_open_pulls → " <>
+          "Delegation: issue_status #{repo} forge unreachable (list_pulls → " <>
             "#{inspect(err)}) — falling back to pr={error: forge_unreachable}"
         )
 
         {:error, :forge_unreachable}
     end
   end
+
+  # Several PRs can match one issue across state=all (a cancelled attempt + its successor):
+  # the LIVE one wins, else the most recent (highest number).
+  defp pick_pr([]), do: nil
+
+  defp pick_pr(matches),
+    do: Enum.find(matches, &(&1["state"] == "open")) || Enum.max_by(matches, & &1["number"])
+
+  # Arch-facing PR object. `review` renders the gate's own routing predicate, computed
+  # pilot-side (`Jury.review_outcome/2`) and carried as DATA by `pr_review_state` — factored,
+  # never copied here.
+  defp render_pr(forge, repo, pr) do
+    {verdicts, review} =
+      case forge.pr_review_state(repo, pr["number"], head_sha: get_in(pr, ["head", "sha"])) do
+        {:ok, %{verdicts: verdicts, outcome: outcome}} ->
+          {verdicts, review_string(outcome)}
+
+        # LOUD before the fallback (same stance as get_issue above): a mute forge must not
+        # read as "no verdicts yet" — review=unknown marks the degraded read.
+        err ->
+          Logger.warning(
+            "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
+              "(pr_review_state → #{inspect(err)}) — falling back to review=unknown"
+          )
+
+          {%{}, "unknown"}
+      end
+
+    %{
+      "number" => pr["number"],
+      "state" => pr["state"],
+      "merged" => pr["merged"],
+      "review" => review,
+      "verdicts" => verdicts
+    }
+  end
+
+  defp review_string({:pending, _}), do: "pending"
+  defp review_string(:no_jury), do: "no_jury"
+  defp review_string(:changes_requested), do: "changes_requested"
+  defp review_string(:approved), do: "approved"
 
   # ============================================================
   # Architect gate + role resolution

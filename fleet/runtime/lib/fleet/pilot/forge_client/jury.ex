@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
   not the requested field. Details in each `@doc`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, paginate: 3]
@@ -18,15 +18,45 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
 
   @doc """
-  Review verdict **PER judge** of a PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`): the
-  LAST decisive non-dismissed review of EACH reviewer, key = **downcased** login.
+  THE review-routing predicate — the SINGLE truth of "where does a jury stand", shared by the
+  merge gate (`ReviewLifecycle.dispatch_by_verdicts`, fed the defensive UNION of jury sources)
+  and the arch-facing status read (`pr_review_state`'s `outcome`, fed the stable jury). One rule,
+  two inputs — factored so the status surface can NEVER drift from what the gate actually does.
 
-  **Why per-judge and not `requested_reviewers`**: Gitea 1.26 does NOT clear `requested_reviewers`
-  when a judge has reviewed, and the DELETE is a no-op on an already-active reviewer → we
-  CANNOT rely on it to know "who is left to judge". The SOURCE OF TRUTH = the list of
-  reviews: a judge has a **decisive verdict** iff its last non-dismissed review is APPROVED or
-  REQUEST_CHANGES. The poller dispatches a requested judge that does NOT yet have a verdict, and decides
-  (merge/rework) when all the requested ones have one.
+    * `{:pending, [login↓]}` — at least one juror without a decisive verdict (input order kept)
+    * `:no_jury`             — empty jury (zero-judge card or orphan PR — the CARD arbitrates, caller-side)
+    * `:changes_requested`   — full jury, at least one REQUEST_CHANGES in force
+    * `:approved`            — full jury, all APPROVED
+  """
+  @spec review_outcome([String.t()], %{optional(String.t()) => :approved | :changes_requested}) ::
+          {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+  def review_outcome(jury, verdicts) when is_list(jury) and is_map(verdicts) do
+    pending = jury -- Map.keys(verdicts)
+
+    cond do
+      jury == [] ->
+        :no_jury
+
+      pending != [] ->
+        {:pending, pending}
+
+      Enum.any?(Map.values(Map.take(verdicts, jury)), &(&1 == :changes_requested)) ->
+        :changes_requested
+
+      true ->
+        :approved
+    end
+  end
+
+  @doc """
+  Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per
+  judge), `reviewers` (the jury SET) and `outcome` (cf. `review_outcome/2`).
+
+  **Verdicts — why per-judge and not `requested_reviewers`**: Gitea 1.26 does NOT clear
+  `requested_reviewers` when a judge has reviewed, and the DELETE is a no-op on an already-active
+  reviewer → we CANNOT rely on it to know "who is left to judge". The SOURCE OF TRUTH = the list
+  of reviews: a judge has a **decisive verdict** iff its last non-dismissed review is APPROVED or
+  REQUEST_CHANGES (COMMENT/PENDING/REQUEST_REVIEW are NOT decisive), key = **downcased** login.
 
   **Commit-scoping (`:head_sha`)**: a verdict is only valid for the COMMIT it judged. Passing
   `head_sha: pr.head.sha` (prod path) → only reviews `commit_id == head_sha` count; a review
@@ -34,24 +64,6 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   NEVER dismisses it on push (≠ stale approvals, dismissed by branch-protection) — without scoping, a
   stale REQUEST_CHANGES stays "active", its judge is never re-dispatched (it already has a verdict) and the
   PR would loop in infinite rework. Scoping makes it `pending` → re-judged on the current code.
-  COMMENT/PENDING/REQUEST_REVIEW reviews are NOT decisive (ignored).
-
-  ## Returns
-    * `{:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested, ...}}` — login(↓) → verdict
-    * `{:ok, %{}}` — no decisive review
-    * `{:error, term()}` — HTTP/transport/config
-  """
-  @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
-          {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
-  def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # "Verdicts only" projection of `pr_review_state` (factored: a single fetch, a single
-    # scoping/last-review logic). Kept for callers that don't need the jury SET (pod_tools).
-    with {:ok, %{verdicts: verdicts}} <- pr_review_state(repo, index, opts), do: {:ok, verdicts}
-  end
-
-  @doc """
-  Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per judge,
-  commit-scoped via `:head_sha` — cf. `pr_review_verdicts`) AND `reviewers` (the jury SET).
 
   **The jury SET is NOT read from `pr.requested_reviewers`**: that field is VOLATILE (Gitea
   alters it unreliably — a judge can DISAPPEAR from it without having voted, which would merge on a
@@ -61,14 +73,18 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   never-voted judge stays `pending` (spawned), NEVER skipped.
 
   ## Returns
-    * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓]}}`
+    * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓],
+      outcome: review_outcome(reviewers, verdicts)}}` — `outcome` is computed HERE (pilot-side)
+      and carried as DATA so a seam consumer (`get_issue_status`) renders the gate's own
+      predicate without re-implementing it.
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
           {:ok,
            %{
              verdicts: %{optional(String.t()) => :approved | :changes_requested},
-             reviewers: [String.t()]
+             reviewers: [String.t()],
+             outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -77,8 +93,11 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
            http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
+      verdicts = verdicts_by_reviewer(reviews, head_sha)
+      reviewers = jury_reviewers(reviews)
+
       {:ok,
-       %{verdicts: verdicts_by_reviewer(reviews, head_sha), reviewers: jury_reviewers(reviews)}}
+       %{verdicts: verdicts, reviewers: reviewers, outcome: review_outcome(reviewers, verdicts)}}
     else
       # F-C069 — a 2xx with a NON-LIST body (a proxy/gateway serving an HTML page or an object envelope
       # with 200) is fail-LOUD, NEVER an `{:ok, empty}`: an empty jury here → `dispatch_by_verdicts([], %{})`
