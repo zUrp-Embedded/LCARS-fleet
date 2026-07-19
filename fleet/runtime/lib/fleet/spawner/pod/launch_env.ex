@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -102,8 +102,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # pod_dir). The binary is resolved robustly here (from ~/.local/bin, not the `command -v` gamble).
           # The pod runs UNDER the human's UID BY CONSTRUCTION: the runtime runs *as* the human
           # (each human = THEIR fleet under their user), the pod = BEAM Port inherits this UID →
-          # ownership/perms/OS isolation for free, NO systemd-run --uid. (Only starfleet has a
-          # dedicated user, off-fleet.)
+          # ownership/perms/OS isolation for free, NO systemd-run --uid — for EVERY role (since the
+          # 2026-07-19 reorg starfleet is an ordinary bwrap pod too, no dedicated off-fleet user).
           |> Map.put("CLAUDE_DIR", claude_dir)
           |> maybe_put_vendor_bin(human)
           |> LaunchSpec.maybe_put_pod_cwd(state.opts, state.cap_profile, state.pod_dir)

@@ -5,9 +5,10 @@
 # block absent from disk → the generator FAILS (fail-loud). No SP → no pod → no fleet.
 # A non-regression test checks: all blocks exist + the committed flat == the regeneration (no-drift).
 #
-# NB: `architect` (user-facing, outside the pod socle) is NOT here — it keeps its historical draft (a
-# different socle: a human in front). All other roles spawned via `assets.ex` are covered → the no-fallback
-# flip of `read_agent_draft` is done (no more worker-base fallback).
+# NB: `architect` AND `starfleet` (user-facing orchestrators, outside the pod socle) are NOT here — each
+# keeps a manual draft (a different socle: a human in front — one per-project, one fleet-level). All other
+# roles spawned via `assets.ex` are covered → the no-fallback flip of `read_agent_draft` is done (no more
+# worker-base fallback).
 
 # --- PR judges (judge the diff in their workspace) ---
 qualifier:

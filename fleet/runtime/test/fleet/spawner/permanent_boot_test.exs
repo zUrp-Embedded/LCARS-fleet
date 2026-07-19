@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "CRITICAL D-01 guard — host_native excluded" do
-    test "false: starfleet (boot_at_start false + host_native true) — NEVER fleet_spawner" do
+    test "false: host_native profile with boot_at_start false — NEVER fleet_spawner" do
       refute PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => false,
@@ -293,9 +293,11 @@ defmodule Fleet.Spawner.PermanentBootTest do
       assert PermanentBoot.boot_at_start?(canon_spec("architect"))
     end
 
-    test "starfleet.yaml (real canon) → boot_at_start? FALSE (D-01 host_native preserved)" do
+    test "starfleet.yaml (real canon) → boot_at_start? FALSE (prepared, not yet activated)" do
+      # Since the 2026-07-19 reorg starfleet is an ordinary bwrap orchestrator (host_native:false); it is
+      # PREPARED but not booted (boot_at_start:false) — activation (flip + arch → on-demand) is a next step.
       refute PermanentBoot.boot_at_start?(canon_spec("starfleet")),
-             "canon starfleet must NEVER boot via fleet_spawner (D-01 host_native:true)"
+             "canon starfleet is boot_at_start:false — prepared, not yet the active boot-orchestrator"
     end
 
     test "engineer.yaml (real canon) → boot_at_start? FALSE (one-shot worker)" do

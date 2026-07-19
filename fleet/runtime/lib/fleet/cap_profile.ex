@@ -288,8 +288,10 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The profile's containment mode (`metadata.containment`). `"bwrap"` = sandboxed pod (RO mounts +
-  tmpfs /home + bind credentials, the default); `"none"` = host-native (interactive-architect, starfleet —
-  the pod runs ON THE HOST *as* the human, outside the sandbox = the strongest power in the fleet).
+  tmpfs /home + bind credentials, the default); `"none"` = host-native, the OUT-OF-BAND mode
+  (`bin/host_launch.sh`) for an off-fleet interactive session — the pod runs ON THE HOST *as* the human,
+  outside the sandbox = the strongest power in the fleet. No canon cap-profile is host-native since the
+  2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator); the guard below still forbids it.
 
   **SINGLE SOURCE** of this read (the spawner selects the N0 launcher off it, the spawn API forbids
   host-native). Default `"bwrap"` if the key is absent: missing containment ⇒ we assume the confined
@@ -436,8 +438,8 @@ defmodule Fleet.CapProfile do
   The pod's KILL/LIFECYCLE class — the `<X>` nibble of the deterministic session_id
   (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field):
 
-    * `0` = **starfleet** (`role_index == 0`) — fleet-level sysadmin, NEVER killed (`pkill -f 1badcafe`
-      / `2badcafe` spare it).
+    * `0` = **starfleet** (`role_index == 0`) — the fleet-level global orchestrator, NEVER killed
+      (`pkill -f 1badcafe` / `2badcafe` spare it).
     * `2` = **spawn-dead** (`lifetime_scope == "one-shot"` — the fan-out judges) — ephemeral, accumulate,
       reaped by `pkill -f 2badcafe`.
     * `1` = **persistent-resumable** (everything else: arch, gatekeeper, engineer) — kill-SAFE, they

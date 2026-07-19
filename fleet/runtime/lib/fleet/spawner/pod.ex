@@ -357,8 +357,8 @@ defmodule Fleet.Spawner.Pod do
     containment = cap_profile_containment(data.cap_profile)
 
     # The N0 launcher depends on the containment, read HERE (otherwise bwrap blind for everyone).
-    # "none" (host_native: architect, starfleet) → host_launch.sh (host, no sandbox);
-    # otherwise the bwrap chain.
+    # "none" (host-native, out-of-band interactive session) → host_launch.sh (host, no sandbox);
+    # otherwise the bwrap chain. (No canon cap-profile is host-native post-2026-07-19 reorg.)
     launcher_path =
       if containment == "none", do: Backend.host_launch_path(), else: Backend.bwrap_launch_path()
 

@@ -329,19 +329,42 @@ defmodule Fleet.API.ControlRouterTest do
   # F — host-native forbidden via /api/admin/spawn
   # ============================================================
   #
-  # A `containment: none` cap-profile (host-native: starfleet, interactive-architect) launched via this
-  # GENERIC no-auth spawn door = an OUT-OF-SANDBOX pod running on the host *as* the human — the strongest
-  # power in the fleet. It must NOT be reachable through this path: 422 refusal at admission, BEFORE
-  # any broadcast (no pod is born). Host-native keeps its dedicated out-of-band path.
+  # A `containment: none` cap-profile launched via this GENERIC no-auth spawn door = an OUT-OF-SANDBOX
+  # pod running on the host *as* the human — the strongest power in the fleet. It must NOT be reachable
+  # through this path: 422 refusal at admission, BEFORE any broadcast (no pod is born). Host-native keeps
+  # its dedicated out-of-band path (`bin/host_launch.sh`).
+  #
+  # Since the 2026-07-19 reorg made `starfleet` an ORDINARY bwrap orchestrator, NO canon profile is
+  # host-native anymore — but the guard MUST still hold for any future host-native profile. So we prove
+  # it against a FIXTURE (canon `engineer` with `containment` flipped to `none`), not a canon role.
   describe "POST /api/admin/spawn — host-native forbidden (F)" do
-    # PRE-CONDITION of the guard: both canon profiles exist AND differ on the single tested axis
-    # (containment). If `starfleet` became `bwrap` again (or disappeared), this test would prove nothing
-    # → anchor it explicitly (the test IS its own anti-bitrot guard).
-    test "pre-condition: engineer=bwrap, starfleet=none (otherwise the guard tests nothing)" do
-      assert {:ok, eng} = Fleet.CapProfile.load("engineer")
-      assert Fleet.CapProfile.containment(eng) == "bwrap"
-      assert {:ok, sf} = Fleet.CapProfile.load("starfleet")
-      assert Fleet.CapProfile.containment(sf) == "none"
+    # Writes a schema-valid host-native profile into `dir`, derived from the canon `engineer` YAML (valid)
+    # by flipping the 3 identity/containment values. Read by priv path (independent of the `:root_dir`
+    # this describe repoints), so the fixture tracks the real schema, never a 2nd hardcoded copy.
+    defp write_hostnative_fixture(dir) do
+      yaml =
+        [:code.priv_dir(:lcars_fleet), "cap_profile", "canon", "cap-profiles", "engineer.yaml"]
+        |> Path.join()
+        |> File.read!()
+        |> String.replace("name: engineer", "name: hostnative-probe")
+        |> String.replace("containment: bwrap", "containment: none")
+        |> String.replace("host_native: false", "host_native: true")
+
+      File.write!(Path.join(dir, "hostnative-probe.yaml"), yaml)
+    end
+
+    # PRE-CONDITION (anti-bitrot): the reorg is DONE — every canon profile is now bwrap, so no canon role
+    # can reach the host as the human. If a canon profile silently became `containment: none`, this fires.
+    test "pre-condition: every canon profile is bwrap (host-native retired from canon)" do
+      assert {:ok, names} = Fleet.CapProfile.list()
+
+      for name <- names do
+        assert {:ok, cp} = Fleet.CapProfile.load(name)
+
+        assert Fleet.CapProfile.containment(cp) == "bwrap",
+               "#{name} is #{Fleet.CapProfile.containment(cp)} — a host-native profile must take the " <>
+                 "out-of-band path (host_launch.sh), NEVER the no-auth API"
+      end
     end
 
     # The nominal case (bwrap) PASSES — the guard only closes host-native, not legitimate spawn. This is
@@ -359,19 +382,35 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # THE finding: a host-native cap-profile (starfleet) via the generic spawn door → 422, NO
-    # broadcast. Proven regression: removing the `containment == "bwrap"` branch from `validate_cap_profile`
-    # (rest.ex) turns this case back into 202 + broadcast → a host pod would be born from the API. The guard
-    # IS what makes this 422 true; without it, the profile loads (`CapProfile.load` OK) and admission passed.
-    test "containment none (starfleet, host-native) → 422 BEFORE spawn, no broadcast" do
+    # THE finding: a host-native cap-profile via the generic spawn door → 422, NO broadcast. Proven
+    # regression: removing the `containment == "bwrap"` branch from `validate_cap_profile` (spawn_admission.ex)
+    # turns this case into 202 + broadcast → a host pod would be born from the API. The guard IS what makes
+    # this 422 true; without it, the profile loads (`CapProfile.load` OK) and admission passed. The fixture
+    # lives in a tmp catalogue (`:root_dir` repointed, restored after) so no canon change is required.
+    @tag :tmp_dir
+    test "containment none (host-native fixture) → 422 BEFORE spawn, no broadcast", %{tmp_dir: tmp} do
+      write_hostnative_fixture(tmp)
+      prev = Application.get_env(:fleet_cap_profile, :root_dir)
+      Application.put_env(:fleet_cap_profile, :root_dir, tmp)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
+          else: Application.delete_env(:fleet_cap_profile, :root_dir)
+      end)
+
+      # Sanity: the fixture really is host-native (else the guard below would test nothing).
+      assert {:ok, sf} = Fleet.CapProfile.load("hostnative-probe")
+      assert Fleet.CapProfile.containment(sf) == "none"
+
       for key <- ["role", "cap_profile_name"] do
         conn =
-          conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "starfleet"}))
+          conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "hostnative-probe"}))
           |> put_req_header("content-type", "application/json")
           |> ControlRouter.call(@opts)
 
         assert conn.status == 422,
-               "#{key}=starfleet (host-native) should have been refused with 422, got #{conn.status}"
+               "#{key}=hostnative-probe (host-native) should have been refused with 422, got #{conn.status}"
 
         {:ok, body} = Jason.decode(conn.resp_body)
         assert body["error"] =~ "host-native"

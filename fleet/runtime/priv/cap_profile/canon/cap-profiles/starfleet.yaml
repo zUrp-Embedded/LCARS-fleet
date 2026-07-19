@@ -2,27 +2,30 @@
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
 # Schema: ../../schema/cap-profile-v2.5.json
 #
-# starfleet lives OUTSIDE bwrap (host-native sysadmin): it manages host
-# infrastructure (systemd, ACL, bwrap config, provisioning), which a sandbox
-# would break. Like every host-native role it would run AS the human by UID
-# inheritance (host_launch.sh — no UID drop, no sandbox).
+# starfleet = the GLOBAL fleet orchestrator (front-desk + project organizer) — the user-facing
+# FLEET-LEVEL controller. SANDBOXED (bwrap) like a briefing role: it reads project code to frame and
+# organizes repos, so it belongs INSIDE the sanctuary (the world is protected from it, and its doctrine
+# is protected from the human's ~/.claude). NO root / NO host-native anymore — the ex-sysadmin concern
+# (systemd/ACL/provisioning) moves to a dedicated infra agent later; starfleet is a plain bwrap pod.
+# (Reorg 2026-07-19: starfleet takes the global-orchestrator role; the arch specializes per-project.)
 kind: CapabilityProfile
 metadata:
   name: starfleet
-  containment: none
-  # Role identity coordinates (the metadata IS the single source of the WHAT), read via
-  # Fleet.CapProfile by the spawner to mint the hexspeak session_id (the SessionId encoder
-  # holds no catalogue): role_index = role slot in the UUID; protected = tier spared by
-  # the worker kill; fleet_level = single instance with no project dimension (repo 0000).
-  # starfleet has NO pod today (host-native sysadmin, outside the fleet); these fields
-  # reserve its role_index 0 slot.
+  containment: bwrap
+  # Role identity coordinates (the metadata IS the single source of the WHAT), read by the session_id
+  # builder (SessionId.encode): role_index = role slot in the UUID (0 = starfleet) ; protected =
+  # spared tier ; fleet_level = single instance, repo 0000 (no project dimension). kill_class derives
+  # 0 (starfleet) from role_index 0 → `pkill -f 1badcafe`/`2badcafe` never touch it.
   role_index: 0
   protected: true
-  # fleet_level true: the runtime sysadmin does not touch projects -> fleet-level (repo 0000).
-  # Inert as long as starfleet spawns no pod.
   fleet_level: true
+  mounts:
+    - path: /home/projects        # RO: read every project at once to frame/organize
+      mode: ro
+    - path: /home/projects.work   # RW: write the DOC (moon-shot/beyond), upstream of tickets
+      mode: rw
 spec:
-  # Host-native system role: brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
+  # Worker role (interactive front-desk): brief = executable instruction, never a judge. REQUIRED (schema).
   brief_kind: worker
   scope:
     allowedTools:
@@ -32,6 +35,19 @@ spec:
       - Bash
       - Write
       - Edit
+      - WebFetch       # PascalCase: native Claude Code tool, allowed pod-side
+      - WebSearch
+      - ToolSearch     # loads the deferred tools (Monitor, mcp__fleet__*)
+      - Monitor        # wake-by-flag (watch.sh) — wake without content send-keys
+      # Fleet MCP tools of the global orchestrator (delegation + project organization) —
+      # get_work_item/submit_result (universal) come from the launcher.
+      - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
+      - mcp__fleet__create_project
+      - mcp__fleet__import_project       # twin of create_project: ADOPTS an existing repo
+      - mcp__fleet__create_issue
+      - mcp__fleet__get_issue_status
+      - mcp__fleet__list_escalations     # return channel: reads the awaits-arch escalations
+      - mcp__fleet__comment_issue        # return channel: replies on an in-flight ticket
     disallowedTools:
       - web_search
       - web_fetch
@@ -40,40 +56,50 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Destructive patterns come from the universal baseline
-    # (`_baseline-git-denied.yaml`, intangible) — not duplicated here.
+    # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`) — not duplicated.
     git_ops_denied: []
-    outputs: ["/home/commons/starfleet/", "/var/log/fleet-starfleet.jsonl"]
+    outputs: ["/home/ready-room/outbox/"]
   knowledge:
     libs:
       - methodologie-axiome-inference-vs-mecanisable
+      - methodologie-protocole-design-note
       - methodologie-doctrine-yolo
       - methodologie-regles-yolo
-    skills: []  # modops are listed in modop_set
+    skills:
+      - memory-query
+      - brainstorming
+      - plan
     mcpServers: []
     plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
-    lifetime_scope: forever  # host-native permanent process
-    model: opus        # catalogue -> --model (alias or full name; tunable)
-    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
-    boot_at_start: false     # starfleet is NEVER spawned by the fleet boot (no pod today — identity reserved)
+    lifetime_scope: forever  # permanent front-desk
+    model: opus
+    effort: high
+    # PREPARED, not yet ACTIVATED. This profile DECLARES starfleet's target tool surface (the orchestrator
+    # MCP tools below), but activation is a deliberate later step with THREE flips, none silent:
+    #   1. this `boot_at_start` → true (+ the arch → on-demand + the create/relaunch flows);
+    #   2. the MCP delegation/onboarding gate (`Delegation.require_architect`) must ADMIT starfleet — today
+    #      those four tools are architect-only server-side, so starfleet would be refused if it called them;
+    #   3. a `starfleet` forge token deployed (issues authored in starfleet's own account, like the arch).
+    # Until all three land, starfleet is defined but does not boot and cannot yet delegate.
+    boot_at_start: false
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
-    host_native: true
-    max_alive_sec: null  # forever — host-native, until fleet shutdown
+    host_native: false       # was true (sysadmin) — now an ordinary sandboxed pod
+    max_alive_sec: null
     heartbeat_keepalive: false
-    bridge_enabled: false
+    bridge_enabled: true     # user-facing front-desk → needs the Desktop bridge (like the arch)
     policy: hide
     rubber_duck_enabled: false
-    long_session_protocol: false
+    long_session_protocol: true
     output_format: text
   injects:
     gitconfig: true
-    forge_signing_allowed: true
+    forge_signing_allowed: false
   modop_set:
-    default: []
-    optional: [fire-mode, rubber-duck]
+    default: [long-session-discipline]
+    optional: [brainstorming, rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null

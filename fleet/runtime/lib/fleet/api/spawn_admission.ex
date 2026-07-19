@@ -31,7 +31,9 @@ defmodule Fleet.API.SpawnAdmission do
        a pod OUT-OF-SANDBOX on the host *as* the human (the strongest power
        of the fleet) via this generic no-auth door. Made UNREPRESENTABLE
        by this path: refusal at admission, host-native keeps its dedicated
-       out-of-band path (starfleet / `bin/host_launch.sh`). Fail-closed.
+       out-of-band path (`bin/host_launch.sh`, an off-fleet interactive session).
+       Fail-closed — a defensive guard even though no canon profile is host-native
+       since the 2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator).
     5. **Brief required for a one-shot** — MIRROR of R18
        (`Fleet.Spawner.brief_guard`): a one-shot without `brief` would leave
        without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
@@ -42,7 +44,7 @@ defmodule Fleet.API.SpawnAdmission do
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   alias Fleet.EventRouter.Bus

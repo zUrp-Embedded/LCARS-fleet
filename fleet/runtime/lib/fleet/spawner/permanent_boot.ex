@@ -10,12 +10,12 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   `boot_at_start?/1` only allows a fleet_spawner boot if
   `boot_at_start: true` **AND** `lifetime_scope: forever` **AND**
-  `host_native != true`. The 3rd term is the **anti-violation guard**:
-  `starfleet` (host_native: true, canon derogation) must NEVER
-  be spawned via fleet_spawner bwrap
-  (it boots separately, host-native outside fleet_spawner — `host_launch.sh`,
-  containment: none). Defensive guard even if a host_native profile carried
-  `boot_at_start: true` by mistake.
+  `host_native != true`. The 3rd term is the **anti-violation guard**: a host_native profile
+  boots separately, host-native OUTSIDE fleet_spawner (`bin/host_launch.sh`, containment: none) —
+  it must NEVER be spawned via fleet_spawner bwrap. Since the 2026-07-19 reorg no canon profile is
+  host_native (starfleet became an ordinary bwrap orchestrator), so this term is now a purely
+  DEFENSIVE guard: it still fails-closed should a host_native profile ever carry
+  `boot_at_start: true` (a future off-fleet role, or a config mistake).
 
   ## String keys, not atom
 
