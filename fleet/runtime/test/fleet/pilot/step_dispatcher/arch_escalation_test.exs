@@ -18,12 +18,15 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
     # throttle never takes.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "label boom"}}
+    def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
   end
 
   defmodule OkForge do
     # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+    # awaits-arch ⇒ ¬in-flight (invariant 2026-07-19): best-effort removal on escalation.
+    def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
   end
 
   @head "lcars/issue-42-engineer"

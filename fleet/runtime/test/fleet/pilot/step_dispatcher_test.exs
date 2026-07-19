@@ -110,6 +110,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def count_change_request_rounds(_repo, _index, opts),
       do: Keyword.get(opts, :_test_rework_rounds, {:ok, 0})
 
+    # Étage 1 (conflict-rework budget): counts the `[conflict-rework:pr-N` markers. Seam
+    # `_test_conflict_rounds` (default {:ok, 0} = first conflict → producer rework, not escalation).
+    def count_comments_marked(_repo, _index, _prefix, opts),
+      do: Keyword.get(opts, :_test_conflict_rounds, {:ok, 0})
+
     # F181: compensation — lock removal on a post-lock failure.
     def remove_label(_repo, _n, label, _opts) do
       send(self(), {:removed_label, label})
@@ -1030,7 +1035,38 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # forge-blind → live dead end). The failure is re-read from the PR object (MergeOutcome) and
     # routed to its REAL cause.
 
-    test "merge failure + PR mergeable:false (REAL git conflict) → HONEST arch escalation (no impossible eng-rebase)" do
+    test "merge failure + REAL git conflict, budget available → producer CONFLICT-REWORK (étage 1), no escalation" do
+      # Étage 1 (fleet/hello#3 retex 2026-07-19): the producer resolves ON its PR — bounded by
+      # max_rework_rounds, counted via the [conflict-rework:pr-N markers posted by this path.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_route: {:ok, {"g", "build"}},
+            _test_merge_result: {:error, {:http, 409, "conflict"}},
+            _test_conflict_rounds: {:ok, 0},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => false
+            }
+          ]
+        )
+
+      assert {:ok, _} = StepDispatcher.dispatch_review(pr, opts)
+      # The PRODUCER is (re)spawned on its brick — the conflict is production work, not arbitrage.
+      assert_received {:spawned, _, _}
+      refute_received {:merged, _}
+    end
+
+    test "merge failure + REAL conflict, budget EXHAUSTED → honest arch escalation (étage 3)" do
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1042,6 +1078,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
             _test_merge_result: {:error, {:http, 409, "conflict"}},
+            _test_route: {:ok, {"g", "build"}},
+            # rounds ≥ budget (2, default loader) → no more automatic rework.
+            _test_conflict_rounds: {:ok, 2},
             _test_pull: %{
               "number" => 6,
               "state" => "open",
@@ -1051,8 +1090,6 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           ]
         )
 
-      # real conflict → honest arch escalation (the system does NOT rebase — forge-blind barrier);
-      # NO eng spawn, NO merge. `{:skipped, _}` shape handled by the poller.
       assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
       refute_received {:spawned, _, _}
       refute_received {:merged, _}

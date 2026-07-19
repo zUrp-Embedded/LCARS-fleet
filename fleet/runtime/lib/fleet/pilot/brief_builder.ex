@@ -27,15 +27,45 @@ defmodule Fleet.Pilot.BriefBuilder do
   # blind (a cautious eng refuses to guess → `blocked_dep` → wedge). We read the feedback on the forge
   # (the runtime, not the pod: forge boundary preserved) and inject it. If the read fails / no body,
   # we fall back to the generic instruction (the pod still has the cloned PR + its code).
-  def rework_brief(role, forge, repo, pr, forge_opts, _route) do
+  def rework_brief(role, forge, repo, pr, forge_opts, _route, opts \\ []) do
     # The eng-voice prose (OUTGOING info, twin of the incoming info starvation) lives IN the
     # template (F-23): the summary posted on the PR is the producer's only voice for the human.
     Fleet.Workflow.BriefTemplate.render("work-order-rework", %{
       "role" => role,
       "pr" => to_string(pr),
-      "feedback_section" => render_rework_feedback(forge, repo, pr, forge_opts),
+      "feedback_section" =>
+        conflict_section(opts) <> render_rework_feedback(forge, repo, pr, forge_opts),
       "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     })
+  end
+
+  # Conflict-rework lead section (`conflict: true` — Remediation étage 1): the jury APPROVED,
+  # main simply moved under the branch (sibling bricks landed). FR: agent-facing work-order
+  # prose, same stance as the feedback sections. HONEST about the refs: the pod cannot fetch
+  # (forge-blind) — if its workspace's `origin/main` is stale and un-refreshable, the doctrine
+  # answer is `blocked`, never a guessed resolution.
+  defp conflict_section(opts) do
+    if Keyword.get(opts, :conflict, false) do
+      """
+      ## Conflit de merge à résoudre (prioritaire)
+
+      Ta branche a divergé de `main` : des briques sœurs ont été mergées depuis ta coupe, et le
+      merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
+      déjà approuvé par les juges, seul le conflit bloque.
+
+      1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+      2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
+         des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
+      3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
+
+      Si `origin/main` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
+      peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
+      JAMAIS le contenu d'une brique sœur.
+
+      """
+    else
+      ""
+    end
   end
 
   # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable block.

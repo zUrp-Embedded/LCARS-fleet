@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -141,9 +141,99 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       :policy ->
         reconverge_policy(pr_number, head, ctx)
 
-      class when class in [:conflict, :unknown] ->
-        ArchEscalation.escalate_merge_blocked(arch_seams(ctx), pr_number, head, class, reason)
+      # A REAL git conflict is mechanically recoverable by the PRODUCER (étage 1, live retex
+      # fleet/hello#3 2026-07-19: a full re-delegated chain — 4 agent passes, ~7 min — for what a
+      # local merge-resolve on the SAME PR handles): bounded conflict-rework, budget exhausted →
+      # honest escalation (étage 3). `:unknown` stays a straight escalation (we don't guess).
+      :conflict ->
+        conflict_rework(pr_number, head, reason, ctx)
+
+      :unknown ->
+        ArchEscalation.escalate_merge_blocked(arch_seams(ctx), pr_number, head, :unknown, reason)
     end
+  end
+
+  # Étage 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
+  # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
+  # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
+  # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
+  # dedup makes the count replay-safe). Beyond budget, or any unreadable read → étage 3, the
+  # honest arch escalation (never a blind loop). NOTE the étage 2 (gatekeeper-agent diagnosis
+  # mechanical-vs-semantic before the arch) is a LATER increment — it needs a workspace for the
+  # gatekeeper one-shot; today budget-exhausted goes straight to the arch.
+  defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
+    marker_prefix = "[conflict-rework:pr-#{pr_number}"
+
+    with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
+         {:ok, budget} <- pr_rework_budget(ctx, issue_n),
+         {:ok, rounds} <-
+           ctx.forge.count_comments_marked(ctx.repo, pr_number, marker_prefix, ctx.forge_opts) do
+      if rounds < budget do
+        dispatch_conflict_rework(pr_number, head, rounds + 1, budget, ctx)
+      else
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :conflict,
+          {:conflict_rework_exhausted, rounds, reason}
+        )
+      end
+    else
+      {:skipped, _} = skip ->
+        skip
+
+      # Budget/counter unreadable → the arch rules (symmetric to dispatch_rework's stance):
+      # never a blind loop, never a guessed round.
+      {:error, err_reason} ->
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :conflict,
+          {:conflict_budget_unreadable, err_reason}
+        )
+    end
+  end
+
+  # The marker is posted BEFORE the dispatch (round-numbered signature → idempotent replay: a
+  # re-run of the same round dedups, a NEW conflict after a re-push posts the next round). A
+  # marker that cannot be posted → escalate rather than dispatch an uncounted round (the budget
+  # would silently stop bounding).
+  defp dispatch_conflict_rework(pr_number, head, round, budget, %Ctx{} = ctx) do
+    signature = "[conflict-rework:pr-#{pr_number}:round-#{round}]"
+
+    body =
+      "⚠ Conflit de merge avec `main` (des briques sœurs ont atterri depuis la coupe de cette " <>
+        "branche). Rework automatique round #{round}/#{budget} : le producteur intègre " <>
+        "`origin/main`, résout, et re-livre sur CETTE PR — les juges re-jugeront le nouveau " <>
+        "head.\n\n" <> signature
+
+    comment_opts =
+      ctx.forge_opts
+      |> Keyword.put(:dedup_signature, signature)
+      |> Keyword.put(:dedup_any_author, true)
+
+    case ctx.forge.post_comment(ctx.repo, pr_number, body, comment_opts) do
+      {:ok, _} ->
+        RoleDispatch.dispatch(:conflict_rework, pr_number, head, producer_of!(head), ctx)
+
+      {:error, reason} ->
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :conflict,
+          {:conflict_marker_unpostable, reason}
+        )
+    end
+  end
+
+  # The head was already parsed by the caller (conflict_rework) — a re-parse failure here is
+  # unreachable by construction; raise loud rather than a silent wrong role.
+  defp producer_of!(head) do
+    {:ok, {_issue_n, producer}} = Fleet.Pilot.ForgeProtocol.parse_feature_branch(head)
+    producer
   end
 
   # Re-reads the FRESH PR object and classifies it (source of truth = the forge fields, not the merge

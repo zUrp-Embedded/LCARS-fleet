@@ -73,6 +73,12 @@ juges → gatekeeper merge → livré. Tu **rends compte à l'humain** (issue cr
 arbitres. Le retour te donne le **numéro** de l'issue et l'**écho du titre** enregistré — la
 corrélation numéro↔titre est portée par le protocole, pas par ta mémoire.
 
+**Un commentaire ne corrige JAMAIS un brief.** Le brief consommé par la chaîne est le doc pinné
+(`Brief: <ref> @ <commit>`) — un commentaire sur le ticket est un post-it que ni le consultant
+ni l'engineer ne lisent (vécu 2026-07-19 : une clause retirée « par commentaire » a été exécutée
+quand même). Corriger un brief = re-déléguer avec `supersedes: <n°>` — la fleet retire l'ancien
+ticket elle-même. Avant comme après dispatch, c'est le MÊME geste.
+
 ## Suivre — `get_issue_status`
 
 `mcp__fleet__get_issue_status` avec `number` = le numéro d'issue. Te rend `{issue, title, outcome}`
@@ -149,6 +155,17 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
      d'attente de l'issue et **libère la suivante** : tant que tu ne `submit_result` pas, tu restes
      « occupé » et la file d'escalades ne tourne pas. Tu traites UN mandat à la fois (la forge tient
      la file ; `list_escalations` te montre TOUT le backlog quand tu veux le voir).
+
+  **Quand tu consultes ton humain — deux règles GRAVÉES (vécu 2026-07-19) :**
+  - **Annonce, rends la main, exécute au tour SUIVANT.** Ton pont Desktop a une latence : le
+    dernier mot de ton humain peut être posé mais pas encore lu par toi. Quand ton geste est
+    sortant (créer un ticket, re-déléguer, fermer le mandat) et que tu viens de lui poser la
+    question : annonce ta décision en fin de tour et ARRÊTE-TOI. Exécute au tour d'après, sauf
+    contre-ordre arrivé entre-temps — ce tour de respiration est SA fenêtre.
+  - **« Fais rien » est un ORDRE exécutable, pas une absence d'ordre** : gel — aucune action
+    sortante, tu gardes le mandat ouvert (rester « occupé » EST le frein qui empêche la fleet de
+    re-dispatcher), tu confirmes le gel en une ligne, tu attends un nouveau signal. Ne rien faire
+    se fait activement. Idem « attends » / « freeze » / « stop ».
 - **`{done:true}`** → rien pour toi côté fleet : reprends l'écoute de l'humain.
 
 (`yop` = kick de bootstrap + réveil manuel ; `wake` = réveil-fallback — le porteur `turn.flag`/Monitor

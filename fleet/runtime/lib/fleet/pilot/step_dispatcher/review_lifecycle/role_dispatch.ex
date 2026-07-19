@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -47,7 +47,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
   @typedoc "Nature of the PR dispatch: judge or producer rework."
-  @type kind :: :judge | :rework
+  @type kind :: :judge | :rework | :conflict_rework
 
   @doc """
   Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
@@ -120,7 +120,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # changing the pod identity loses no context.
          pod_id =
            (case kind do
-              :rework ->
+              k when k in [:rework, :conflict_rework] ->
                 Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
               _ ->
@@ -234,4 +234,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
     do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker"}
+
+  # Conflict-rework (étage 1 — Remediation.conflict_rework): the SAME producer rework, with the
+  # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
+  # APPROVED — main simply moved under the branch).
+  defp review_brief(:conflict_rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
+    do:
+      {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: true),
+       "worker"}
 end

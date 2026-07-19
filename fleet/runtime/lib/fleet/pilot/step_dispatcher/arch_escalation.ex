@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
   describes the escalation).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
@@ -39,6 +39,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   require Logger
 
   @awaits_arch_label Fleet.Labels.awaits_arch()
+  @in_flight_label Fleet.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """
@@ -179,6 +180,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
       _ ->
         :ok
     end
+
+    # INVARIANT (live 2026-07-19, fleet/hello#3): awaits-arch ⇒ NO `lcars-in-flight` on the issue
+    # — "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also
+    # shields the brick's pods from the quiesced-pod reap for the whole (human-timescale) park.
+    # Same stance as `StepRunCompleter.await_arch` (which removes it on its own path). Best-effort
+    # (`_ =`): the label may legitimately be absent; the throttle above is the load-bearing write.
+    _ = seams.forge.remove_label(seams.repo, issue_n, @in_flight_label, seams.forge_opts)
 
     :ok
   end

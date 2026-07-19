@@ -645,6 +645,27 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  Counts the comments of `issue_number` (PRs included — Gitea unifies) whose body carries
+  `prefix`. AUTHOR-AGNOSTIC (the counted markers are system-posted with dedup; a forged extra
+  marker only tightens a budget — over-count-safe, same stance as the step_run counter).
+  Serves the conflict-rework budget (`[conflict-rework:pr-N` rounds). `{:error, _}` on an
+  unreadable page (never a silent undercount).
+  """
+  @spec count_comments_marked(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count_comments_marked(repo, issue_number, prefix, opts \\ [])
+      when is_binary(repo) and is_integer(issue_number) and is_binary(prefix) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
+      {:ok, Enum.count(comments, &String.contains?(&1["body"] || "", prefix))}
+    else
+      {:ok, non_list} -> {:error, {:unexpected_comments_shape, non_list}}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   The MERGED PR of issue #n, resolved by the PROTOCOL marker (`[merge:pr-N]`, posted on the
   issue by the gatekeeper seal at merge — `ForgeProtocol.merge_marker/1`) — NEVER by branch
   names: Gitea (1.26.4, verified live 2026-07-19) REWRITES a merged PR's `head.ref` to
