@@ -1,10 +1,11 @@
 defmodule Fleet.Spawner.SessionId do
   @moduledoc """
-  PURE encoder of a fleet pod's DETERMINISTIC claude `session_id` (hexspeak). It transforms a
-  triplet `(role_index, protected, repo[, pool])` — supplied by the CALLER — into a stable hexspeak
+  PURE encoder of a fleet pod's DETERMINISTIC claude `session_id` (hexspeak). It transforms
+  `(role_index, kill_class, uid, repo[, pool])` — supplied by the CALLER — into a stable hexspeak
   UUID, with no timestamp suffix. It no longer CATALOGUES the roles: the source of the WHAT (the role
-  index, the protected tier, the fleet-level character) is the role's cap-profile (`metadata.role_index`
-  / `protected` / `fleet_level`, read via `Fleet.CapProfile`). Here we only do the string arithmetic.
+  index, the kill/lifecycle class, the fleet-level character) is the role's cap-profile
+  (`metadata.role_index` / `CapProfile.kill_class/1` / `fleet_level`); the WHO (the human's OS UID) is
+  supplied by the spawn side. Here we only do the string arithmetic.
 
   Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
@@ -20,7 +21,7 @@ defmodule Fleet.Spawner.SessionId do
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
-                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/4` REFUSES a
+                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/5` REFUSES a
                       repo outside it (function-clause), and the caller-side mint (`Pod.SessionMint`) refuses
                       it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
                       stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
@@ -30,24 +31,25 @@ defmodule Fleet.Spawner.SessionId do
                       `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a
                       local catalogue: the role → slot mapping lives on the cap-profile side.
 
-  The WHAT (role/tier/project) is DECLARED by the cap-profile ; the WHO lives on the OS axis (inherited
-  UID — the pod runs under the human's UID) — never duplicated (UID-in-UUID rejected). PURE module (zero
-  process, zero IO, zero catalogue): a TOTAL encoder over valid inputs — no role refusal (starfleet, an
-  unknown role: those decisions live at the spawn level, not here), no `{:error, _}`. An out-of-bounds
-  input = caller bug → function-clause/raise.
+  The WHAT (role/class/project) is DECLARED by the cap-profile ; the WHO (the human's OS UID) runs on
+  the OS axis AND is folded into the `<UID>` field (v2 2026-07-19) — NOT redundant: the Desktop slot
+  (OAuth + local-uuid) does NOT see the OS axis, so two humans sharing ONE OAuth need the UID IN the
+  UUID to be distinguishable. PURE module (zero process, zero IO, zero catalogue): a TOTAL encoder over
+  valid inputs — no role refusal (those decisions live at the spawn level, not here), no `{:error, _}`.
+  An out-of-bounds input = caller bug → function-clause/raise.
 
   **Last revised**: 2026-07-19
   """
   import Bitwise
 
-  # RFC4122 version-4 UUID shape (lowercase). Matches BOTH what `encode/4` produces (the hexspeak ids
+  # RFC4122 version-4 UUID shape (lowercase). Matches BOTH what `encode/5` produces (the hexspeak ids
   # are built as legal v4 UUIDs) AND a real vendor session UUID (`--session-id`/`--resume` accept only
   # this shape). Single source of the "is this a legal session id string" predicate.
   @uuid_v4_re ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
 
   @doc """
   Validates an EXPLICIT session id (recall seed / permanent boot-from-base / admin override) as a legal
-  RFC4122 v4 UUID — the shape `encode/4` produces and the shape the vendor's `--session-id`/`--resume`
+  RFC4122 v4 UUID — the shape `encode/5` produces and the shape the vendor's `--session-id`/`--resume`
   accept. `{:ok, uuid}` | `{:error, :not_uuid_shaped}`.
 
   An explicit session id is an identity that gets exported to the launcher (`LCARS_POD_SESSION_ID`)
@@ -55,7 +57,7 @@ defmodule Fleet.Spawner.SessionId do
   ALTERNATE authority for the deterministic-identity property (a non-reconstructible id passed to the
   vendor). The spawn path CASTS the seed through here — a present-but-non-UUID value is a caller/seed
   corruption, refused rather than posed as an identity. The deterministic ids remain a STRONGER subtype
-  (this gates the SHAPE only, not the hexspeak `<T>badcafe…` semantics).
+  (this gates the SHAPE only, not the hexspeak `<X>badcafe…` semantics).
   """
   @spec cast(term()) :: {:ok, String.t()} | {:error, :not_uuid_shaped}
   def cast(sid) when is_binary(sid) do
