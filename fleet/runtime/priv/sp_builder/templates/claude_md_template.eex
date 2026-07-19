@@ -12,8 +12,10 @@ Tous les paths absolus. Pas de cd hors `~`, pas de path relatif inter-fichiers.
 
 Chaque livrable ouvre sur son en-tête LCARS — deux familles selon la nature du fichier :
 
-- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par.
+- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par (+ Dérivé de, fichiers dérivés seulement).
 - **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), DATE (AAAA-MM-JJ), STATUS.
+
+Exception by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles, binaires, données brutes) ne portent AUCUN header — en ajouter un casserait le fichier.
 
 ## Contraintes pod
 
