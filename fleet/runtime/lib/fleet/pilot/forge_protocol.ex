@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
   dependency on fleet_pilot.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # ============================================================
@@ -97,6 +97,39 @@ defmodule Fleet.Pilot.ForgeProtocol do
   # counting (`ForgeClient.count_signed_step_runs`).
   def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
   def step_run_marker?(_), do: false
+
+  @merge_marker_rx ~r/\[merge:pr-(\d+)\]/
+
+  @doc """
+  Format of the merge marker `[merge:pr-<n>]` — posted ON THE ISSUE by the gatekeeper seal at
+  merge (also its `:dedup_signature`). This marker IS the durable issue→PR correlation: Gitea
+  (1.26.4, verified live 2026-07-19) REWRITES a merged PR's `head.ref` to `refs/pull/N/head`
+  once the head branch is deleted, so no branch scan can resolve a delivered brick's PR — the
+  protocol carries the link instead. Trust model: same as the `stage/*` labels (a forged marker
+  = compromised role account = nuke&redeploy, not this rail's concern).
+
+  Round-trip builder -> parser:
+
+      iex> marker = Fleet.Pilot.ForgeProtocol.merge_marker(6)
+      iex> marker
+      "[merge:pr-6]"
+      iex> Fleet.Pilot.ForgeProtocol.parse_merge_marker("scellé.\\n\\n" <> marker)
+      {:ok, 6}
+      iex> Fleet.Pilot.ForgeProtocol.parse_merge_marker("juste un commentaire")
+      :error
+  """
+  @spec merge_marker(integer()) :: String.t()
+  def merge_marker(pr_number) when is_integer(pr_number), do: "[merge:pr-#{pr_number}]"
+
+  @spec parse_merge_marker(term()) :: {:ok, integer()} | :error
+  def parse_merge_marker(body) when is_binary(body) do
+    case Regex.run(@merge_marker_rx, body) do
+      [_, n] -> {:ok, String.to_integer(n)}
+      _ -> :error
+    end
+  end
+
+  def parse_merge_marker(_), do: :error
 
   # ============================================================
   # ` ```result ` block — serialises a step's `outputs` in the step_run comment.

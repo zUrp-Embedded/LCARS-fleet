@@ -776,7 +776,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         end)
         |> pick_pr()
         |> case do
-          nil -> :none
+          nil -> merged_pr_fallback(forge, repo, number)
           pr -> {:ok, pr}
         end
 
@@ -785,6 +785,31 @@ defmodule Fleet.MCP.PodTools.Delegation do
       err ->
         Logger.warning(
           "Delegation: find_issue_pr #{repo}##{number} forge unreachable (list_pulls → " <>
+            "#{inspect(err)}) — typed :forge_unreachable"
+        )
+
+        {:error, :forge_unreachable}
+    end
+  end
+
+  # Post-merge fallback (live 2026-07-19, Gitea 1.26.4): a merged PR whose head branch was
+  # deleted gets its `head.ref` REWRITTEN to `refs/pull/N/head` — the branch scan above cannot
+  # match it ("Gitea keeps head.ref like GitHub" was plausible-and-false; the real forge
+  # decided). The PROTOCOL carries the correlation instead: the gatekeeper seal posts a signed
+  # `[merge:pr-N]` marker on the issue at merge — read it, fetch the PR directly.
+  defp merged_pr_fallback(forge, repo, number) do
+    case forge.merged_pr_of_issue(repo, number, []) do
+      {:ok, pr} ->
+        {:ok, pr}
+
+      :none ->
+        :none
+
+      # LOUD + typed (same stance as the scan): an outage on the marker read must never render
+      # as "no fleet PR" — the arch would read a delivered brick as never-built.
+      err ->
+        Logger.warning(
+          "Delegation: find_issue_pr #{repo}##{number} forge unreachable (merged_pr_of_issue → " <>
             "#{inspect(err)}) — typed :forge_unreachable"
         )
 

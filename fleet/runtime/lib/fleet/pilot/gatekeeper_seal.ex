@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -87,7 +87,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts) do
-    signature = "[merge:pr-#{pr_number}]"
+    # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
+    # delivered brick's PR in `get_issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
+    signature = Fleet.Pilot.ForgeProtocol.merge_marker(pr_number)
     body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
 
         # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup

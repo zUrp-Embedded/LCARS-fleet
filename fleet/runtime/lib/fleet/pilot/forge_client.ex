@@ -16,11 +16,12 @@ defmodule Fleet.Pilot.ForgeClient do
 
   ⚠ CROSS CONTRACT (`fleet_mcp` seam): this module is the REAL (default) impl of the behaviour
   `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
-  `get_issue/3`, `list_pulls/2`, `parse_feature_branch/1`, `pr_review_state/3`). It CANNOT
+  `get_issue/3`, `list_pulls/2`, `parse_feature_branch/1`, `pr_review_state/3`,
+  `post_comment/4`, `close_issue/3`, `merged_pr_of_issue/3`). It CANNOT
   be adopted as a `@behaviour`: `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference
   would be a Boundary violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps →
   compile error). Duck-typed impl — any evolution of
-  these 6 signatures MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
+  these 9 signatures MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
 
   ## Configuration
 
@@ -641,6 +642,49 @@ defmodule Fleet.Pilot.ForgeClient do
   def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts),
          do: http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{number}")
+  end
+
+  @doc """
+  The MERGED PR of issue #n, resolved by the PROTOCOL marker (`[merge:pr-N]`, posted on the
+  issue by the gatekeeper seal at merge — `ForgeProtocol.merge_marker/1`) — NEVER by branch
+  names: Gitea (1.26.4, verified live 2026-07-19) REWRITES a merged PR's `head.ref` to
+  `refs/pull/N/head` once the head branch is deleted, so a branch scan cannot find a delivered
+  brick's PR. Serves `get_issue_status` (the review trail must survive the merge).
+
+  Returns `{:ok, raw_pr}` | `:none` (no marker: not merged, or pre-marker legacy) |
+  `{:error, term}` — the caller must never read an outage as "none". The LAST marker wins
+  (a re-merged/reworked brick keeps its latest seal).
+  """
+  @spec merged_pr_of_issue(String.t(), integer(), Keyword.t()) ::
+          {:ok, map()} | :none | {:error, term()}
+  def merged_pr_of_issue(repo, issue_number, opts \\ [])
+      when is_binary(repo) and is_integer(issue_number) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
+      comments
+      |> Enum.reverse()
+      |> Enum.find_value(fn c ->
+        case ForgeProtocol.parse_merge_marker(c["body"] || "") do
+          {:ok, n} -> n
+          :error -> nil
+        end
+      end)
+      |> case do
+        nil -> :none
+        pr_number -> get_pull(repo, pr_number, opts)
+      end
+    else
+      # Mirror of pr_review_state's F-C069 stance: a 2xx with a non-list body is fail-LOUD,
+      # never a silent :none (which would hide a delivered PR behind a proxy hiccup).
+      {:ok, non_list} ->
+        {:error,
+         {:unexpected_comments_shape, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments",
+          non_list}}
+
+      {:error, _} = err ->
+        err
+    end
   end
 
   # ============================================================

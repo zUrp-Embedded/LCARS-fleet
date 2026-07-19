@@ -6,7 +6,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   The contract belongs to the CONSUMER: the callbacks are EXACTLY the
   functions that `Delegation` calls (create_issue, add_label, get_issue,
   list_pulls, parse_feature_branch, pr_review_state, post_comment,
-  close_issue) — not the full surface of the pilot's forge client.
+  close_issue, merged_pr_of_issue) — not the full surface of the pilot's
+  forge client.
 
   ## Why a RUNTIME seam (and not a compile dep)
 
@@ -104,6 +105,16 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   """
   @callback close_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
               {:ok, term()} | {:error, term()}
+
+  @doc """
+  The MERGED PR of an issue, resolved by the `[merge:pr-N]` seal marker on the issue (raw
+  Gitea PR map). Delegation call site: the post-merge fallback of `get_issue_status`'s PR
+  resolution — Gitea rewrites a merged PR's `head.ref` once its branch is deleted, so the
+  branch scan cannot find it (live 2026-07-19). `:none` = no marker; an outage must stay
+  `{:error, _}`, never `:none`.
+  """
+  @callback merged_pr_of_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
+              {:ok, map()} | :none | {:error, term()}
 
   # Canonical default: the real forge client on the fleet_pilot side. Literal atom (not a
   # literal remote call) → no compile-time dep. Set HERE once.

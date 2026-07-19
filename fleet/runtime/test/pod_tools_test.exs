@@ -180,6 +180,9 @@ defmodule Fleet.MCP.PodToolsTest do
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
+    @impl true
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
+
     # Supersede retirement writes — captured (the tests assert the SYSTEM comment+close pair).
     @impl true
     def post_comment(repo, n, body, opts) do
@@ -192,6 +195,75 @@ defmodule Fleet.MCP.PodToolsTest do
       send(self(), {:close_issue, repo, n, opts})
       {:ok, %{}}
     end
+  end
+
+  # The LIVE Gitea 1.26.4 post-merge shape (2026-07-19): issue delivered (closed + stage/merged),
+  # its PR merged with `head.ref` REWRITTEN to `refs/pull/6/head` (branch deleted) → the branch
+  # scan CANNOT match; the `[merge:pr-6]` seal marker resolves it (merged_pr_of_issue).
+  defmodule MergedMarkerForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def get_issue(_repo, _n, _opts),
+      do:
+        {:ok,
+         %{
+           "state" => "closed",
+           "labels" => [%{"name" => "stage/merged"}],
+           "title" => "Brique livrée"
+         }}
+
+    @impl true
+    def list_pulls(_repo, _opts),
+      do:
+        {:ok,
+         [
+           %{
+             "number" => 6,
+             "state" => "closed",
+             "merged" => true,
+             "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
+           }
+         ]}
+
+    @impl true
+    def parse_feature_branch(_head), do: :error
+
+    @impl true
+    def merged_pr_of_issue(_repo, 5, _opts),
+      do:
+        {:ok,
+         %{
+           "number" => 6,
+           "state" => "closed",
+           "merged" => true,
+           "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
+         }}
+
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
+
+    @impl true
+    def pr_review_state(_repo, 6, _opts),
+      do:
+        {:ok,
+         %{
+           verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+           reviewers: ["qualifier", "reviewer"],
+           outcome: :approved
+         }}
+
+    @impl true
+    def create_issue(_repo, _title, _body, _opts),
+      do: raise("MergedMarkerForge is read-only")
+
+    @impl true
+    def add_label(_repo, _n, _label, _opts), do: raise("MergedMarkerForge is read-only")
+
+    @impl true
+    def post_comment(_repo, _n, _body, _opts), do: raise("MergedMarkerForge is read-only")
+
+    @impl true
+    def close_issue(_repo, _n, _opts), do: raise("MergedMarkerForge is read-only")
   end
 
   # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
@@ -213,6 +285,9 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
     @impl true
     def create_issue(_repo, _title, _body, _opts),
@@ -248,6 +323,9 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
     @impl true
     def create_issue(repo, title, body, opts) do
@@ -344,6 +422,9 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
     @impl true
     def create_issue(_repo, _title, _body, _opts),
@@ -463,6 +544,28 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["outcome"] == "closed_without_merge"
+    end
+
+    test "delivered brick, branch DELETED (head.ref rewritten by Gitea) → pr resolved via the [merge:pr-N] marker" do
+      # The live 2026-07-19 falsification: Gitea 1.26.4 rewrites a merged PR's head.ref to
+      # `refs/pull/N/head` — the branch scan yields nothing; the seal marker carries the link.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, MergedMarkerForge)
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 5},
+                 pod_state(pod)
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["outcome"] == "merged"
+      # The review trail SURVIVES the merge — the whole point of the chantier.
+      assert %{"number" => 6, "merged" => true, "review" => "approved", "verdicts" => verdicts} =
+               result["pr"]
+
+      assert verdicts["qualifier"] == "approved"
     end
 
     test "open issue without a PR → `outcome: open`, no `pr` key (nothing to say = say nothing)" do
