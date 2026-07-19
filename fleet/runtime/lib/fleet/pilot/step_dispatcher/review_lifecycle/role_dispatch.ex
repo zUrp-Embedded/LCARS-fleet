@@ -102,8 +102,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
     # the rework resumes ITS own work. Read-only on the code via the workspace provisioned by the
     # system (the pod has no forge token). `base_branch: head` → the pod CLONES and starts from the
-    # feature-branch tip. (There is NO rebase-resolution role — merge conflicts are ESCALATED to
-    # the architect; the pod is forge-blind and cannot rebase; cf. `ArchEscalation`.)
+    # feature-branch tip. (Merge conflicts: `:conflict_rework` — the PRODUCER resolves locally,
+    # bounded, cf. `Remediation.conflict_rework`; the arch only receives the exhausted case.)
     review_opts = Keyword.put(opts, :base_branch, head)
 
     # Read-only pre-lock phase, CHEAP GATES FIRST (SAME rule/order as dispatch_issue,
