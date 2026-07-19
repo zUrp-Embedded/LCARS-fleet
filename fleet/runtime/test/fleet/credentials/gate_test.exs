@@ -1,0 +1,59 @@
+defmodule Fleet.Credentials.GateTest do
+  @moduledoc """
+  Login-validity gate at the spawn boundary. The scope/plan sub-gates were nuked 2026-07-20
+  (vendor-redundant — the claude binary enforces scope+plan via 401); only "is the human logged
+  in?" survives. `@tag :tmp_dir` gives each test a real claudeDir.
+  """
+  use ExUnit.Case, async: true
+
+  alias Fleet.Credentials.Gate
+
+  defp write_creds!(dir, json) do
+    File.write!(Path.join(dir, ".credentials.json"), json)
+  end
+
+  @tag :tmp_dir
+  test "valid login (claudeAiOauth with a non-empty accessToken) → :ok", %{tmp_dir: dir} do
+    write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":"tok-abc","subscriptionType":"max"}}))
+    assert :ok = Gate.validate(dir)
+  end
+
+  @tag :tmp_dir
+  test "no scope/plan check anymore: a free plan with NO scopes still passes (login is enough)", %{
+    tmp_dir: dir
+  } do
+    # Regression of the nuke: the old gate refused this (no scopes / unpaid). Now login-only.
+    write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":"tok-abc","subscriptionType":"free"}}))
+    assert :ok = Gate.validate(dir)
+  end
+
+  @tag :tmp_dir
+  test "no credentials file → {:credentials_invalid, {:credentials_unreadable, _, :enoent}}", %{
+    tmp_dir: dir
+  } do
+    assert {:error, {:credentials_invalid, {:credentials_unreadable, _, :enoent}}} =
+             Gate.validate(dir)
+  end
+
+  @tag :tmp_dir
+  test "malformed JSON → categorized :malformed_json (never the raw content)", %{tmp_dir: dir} do
+    write_creds!(dir, "{not json")
+
+    assert {:error, {:credentials_invalid, {:credentials_unreadable, _, :malformed_json}}} =
+             Gate.validate(dir)
+  end
+
+  @tag :tmp_dir
+  test "decoded but no claudeAiOauth block → :no_oauth_block", %{tmp_dir: dir} do
+    write_creds!(dir, ~s({"somethingElse":true}))
+
+    assert {:error, {:credentials_invalid, {:credentials_unreadable, _, :no_oauth_block}}} =
+             Gate.validate(dir)
+  end
+
+  @tag :tmp_dir
+  test "oauth block present but empty/absent accessToken → :not_logged_in", %{tmp_dir: dir} do
+    write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":""}}))
+    assert {:error, {:credentials_invalid, {:not_logged_in, _}}} = Gate.validate(dir)
+  end
+end

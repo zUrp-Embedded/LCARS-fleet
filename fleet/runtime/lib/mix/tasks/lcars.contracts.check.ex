@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use Mix.Task
@@ -577,18 +577,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The spawn-boundary gates must be wired onto the real spawn path,
   # NOT test-only, otherwise they are HOLLOW containment/credentials gates (called
   # in test but never in prod — the "hollow-gate" failure mode this checker
-  # exists to block). The containment gate stays direct in pod.ex; the
-  # scope+plan gates have been grouped behind a dedicated credentials gate (Fleet.Credentials.Gate),
-  # reached through Pod.LaunchEnv. This check verifies TWO levels, 5 checks (all required):
-  #   level 1 — wiring on the real spawn path:
+  # exists to block). The containment gate stays direct in pod.ex; the credentials
+  # gate (login-validity — the scope/plan sub-gates were nuked 2026-07-20 as vendor-redundant)
+  # lives behind Fleet.Credentials.Gate, reached through Pod.LaunchEnv. 3 checks (all required):
   #     (1) CapProfile.validate — containment gate (refusal of native server-tools), at do_allocate;
   #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
-  #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the credentials gate (scope+plan);
-  #   level 2 — the credentials gate ACTUALLY delegates (not an empty shell) in gate.ex:
-  #     (4) ScopeValidator.validate — per-role OAuth scope coverage;
-  #     (5) PlanValidator.validate — paid subscription.
-  # Red if one is missing. A gate that runs only in test, or a wired gate that
-  # delegates nothing, guards nothing in prod.
+  #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the login-validity gate.
+  # Red if one is missing. A gate that runs only in test guards nothing in prod.
   defp check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
@@ -597,7 +592,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # thus wired to the spawn by TWO conjoint facts: pod.ex calls LaunchEnv.build AND LaunchEnv.build
     # contains Gate.validate (stronger than the old single-file check where everything was inline in pod.ex).
     launch_env = "lib/fleet/spawner/pod/launch_env.ex"
-    gate = "lib/fleet/credentials/gate.ex"
 
     # Each check = {relative_file, regex, label}. The label names the expected file.
     items =
@@ -607,10 +601,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             {pod, ~r/LaunchEnv\.build\(/,
              "Pod.LaunchEnv.build wired to the spawn (do_launch chains env + credentials gates)"},
             {launch_env, ~r/Fleet\.Credentials\.Gate\.validate\(/,
-             "Fleet.Credentials.Gate.validate (scope+plan gate, in LaunchEnv.build)"},
-            {gate, ~r/ScopeValidator\.validate\(/,
-             "ScopeValidator.validate (scope-coverage delegation)"},
-            {gate, ~r/PlanValidator\.validate\(/, "PlanValidator.validate (paid-plan delegation)"}
+             "Fleet.Credentials.Gate.validate (login-validity gate, in LaunchEnv.build)"}
           ],
           do:
             {code_match?(root, rel, re),
@@ -621,7 +612,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         id: "spawn.gates_wired",
         remediation: "R-spawn-gates",
         note:
-          "containment gate (CapProfile.validate, do_allocate) in pod.ex + credentials gate wired to the spawn via Pod.LaunchEnv (do_launch calls LaunchEnv.build, which chains Fleet.Credentials.Gate.validate), AND the gate actually delegates scope (ScopeValidator) + plan (PlanValidator) in gate.ex — 5 checks, 2 levels"
+          "containment gate (CapProfile.validate, do_allocate) in pod.ex + login-validity credentials gate wired to the spawn via Pod.LaunchEnv (do_launch calls LaunchEnv.build, which chains Fleet.Credentials.Gate.validate) — 3 checks"
       },
       items
     )

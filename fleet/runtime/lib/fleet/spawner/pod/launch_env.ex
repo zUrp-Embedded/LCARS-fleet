@@ -5,7 +5,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   A single role: from the `state` (base env, cap_profile, opts), the `role`, the `containment` and
   the vendor launcher path, produce the COMPLETE env passed to the launch backend — auth `bind`
-  set, the human's git identity resolved, credentials gate (scope/plan) passed — or an
+  set, the human's git identity resolved, login-validity gate passed — or an
   `{:error, reason}` ALREADY tagged. `build/4` touches neither Port, nor timer, nor state machine: it returns a
   value, the `Pod` (state `:launching`) wires it onto `do_launch_backend` or `transition_failed`.
 
@@ -18,9 +18,9 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   ## Contract (called by `Pod`)
 
   - `build(state, role, containment, claude_launch_path)` — called by the `:launching` state; returns
-    `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
+    `{:ok, env}` (auth `bind` set, the human's git identity, login-validity gate passed) or
     `{:error, reason}` ALREADY tagged `:launch_env_unresolved` (raise from human/passwd/vendor-bin resolution),
-    `:credentials_invalid` (scope/plan gate) or `:git_identity_unresolved` (forge commit identity). Order
+    `:credentials_invalid` (login-validity gate) or `:git_identity_unresolved` (forge commit identity). Order
     auth → git → gate preserved. The `:launching` state wires it onto `do_launch_backend` / `transition_failed`.
 
   Depends on `Pod.LaunchSpec` (env builders), `Pod.McpProvision` (`mcp_channel_env`),
@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -37,7 +37,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   @doc """
   Builds the COMPLETE pod launch env + resolves/validates the credentials.
 
-  Returns `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
+  Returns `{:ok, env}` (auth `bind` set, the human's git identity, login-validity gate passed) or
   `{:error, reason}` tagged (`:launch_env_unresolved` | `:credentials_invalid` | `:git_identity_unresolved`),
   wired by the `:launching` state onto `do_launch_backend` / `transition_failed`. `role`/`containment`/
   `claude_launch_path` are resolved on the `Pod` side (state `:launching`) and passed here: `role` ==
@@ -130,12 +130,12 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
       end
 
     # The auth step sits outside the pipe (sets LCARS_AUTH_MODE=bind, fail-loud on error). The
-    # credentials gate (scope/plan) follows, tagged {:credentials_invalid, _} for a refusal distinct from auth.
+    # login-validity gate follows, tagged {:credentials_invalid, _} for a refusal distinct from auth.
     case launch_env do
       {:ok, human, env} ->
         with {:ok, env} <- maybe_put_auth_token(env, human),
              {:ok, env} <- maybe_put_git_identity(env, human, role),
-             :ok <- Fleet.Credentials.Gate.validate(claude_dir_for(human), state.cap_profile) do
+             :ok <- Fleet.Credentials.Gate.validate(claude_dir_for(human)) do
           {:ok, env}
         else
           {:error, {:credentials_invalid, _} = reason} -> {:error, reason}

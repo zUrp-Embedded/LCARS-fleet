@@ -1224,54 +1224,44 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "Z2 — credentials gate at spawn (CRED-D1: scope + plan)" do
+  describe "Z2 — credentials gate at spawn (login-validity only, scope/plan nuked 2026-07-20)" do
     defp write_creds(dir, oauth) do
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, ".credentials.json"), Jason.encode!(%{"claudeAiOauth" => oauth}))
       Application.put_env(:fleet_spawner, :claude_dir, dir)
     end
 
-    test "insufficient scopes (missing user:sessions:claude_code) → :failed, never launched",
+    test "free plan + minimal scopes still LAUNCHES (login is enough — vendor enforces scope/plan)",
          %{tmp_dir: tmp_dir} do
-      Process.flag(:trap_exit, true)
-      StubBackend.set_reply(interactive_reply())
-
-      write_creds(Path.join(tmp_dir, "creds-noscope"), %{
-        "accessToken" => "sk-ant-x",
-        "expiresAt" => 99_999_999_999_999,
-        "refreshToken" => "rt",
-        "scopes" => ["user:inference"],
-        "subscriptionType" => "max"
-      })
-
-      pod_id = "pod-noscope-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
-
-      assert_receive {:EXIT, ^pid,
-                      {:shutdown,
-                       {:credentials_invalid,
-                        {:insufficient_scopes, ["user:sessions:claude_code"]}}}},
-                     2_000
-
-      refute_received {:launch_called, _, _}
-    end
-
-    test "non-paying plan (subscriptionType free) → :failed", %{tmp_dir: tmp_dir} do
+      # Regression of the nuke: the old gate refused this (unpaid / missing scope). The scope+plan
+      # checks duplicated the claude binary's own 401 enforcement → removed; only login remains.
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
       write_creds(Path.join(tmp_dir, "creds-free"), %{
         "accessToken" => "sk-ant-x",
-        "expiresAt" => 99_999_999_999_999,
-        "refreshToken" => "rt",
-        "scopes" => ["user:inference", "user:sessions:claude_code"],
+        "scopes" => ["user:inference"],
         "subscriptionType" => "free"
       })
 
       pod_id = "pod-free-#{System.unique_integer([:positive])}"
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
+
+      # The login is valid → the pod LAUNCHES (no credentials refusal).
+      assert_receive {:launch_called, _, _}, 2_000
+    end
+
+    test "no valid login (empty accessToken) → :failed, never launched", %{tmp_dir: tmp_dir} do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      write_creds(Path.join(tmp_dir, "creds-nologin"), %{"accessToken" => ""})
+
+      pod_id = "pod-nologin-#{System.unique_integer([:positive])}"
       {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
 
-      assert_receive {:EXIT, ^pid, {:shutdown, {:credentials_invalid, {:invalid_plan, "free"}}}},
+      assert_receive {:EXIT, ^pid,
+                      {:shutdown, {:credentials_invalid, {:not_logged_in, _}}}},
                      2_000
 
       refute_received {:launch_called, _, _}

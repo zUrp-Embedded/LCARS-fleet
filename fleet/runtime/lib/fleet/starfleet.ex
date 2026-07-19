@@ -40,8 +40,8 @@ defmodule Fleet.Starfleet do
     * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
       validation (frozen `{decision, reason, details, chain}` schema)
     * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,
-      4 handlers (`pod.drift`, `workflow_map.failed`, `oauth.refresh.failed`,
-      `audit.verdict`)
+      4 handlers: `workflow_map.failed` + `audit.verdict` (draft producers, live);
+      `pod.drift` + `oauth.refresh.failed` (wired but DORMANT — no producer, F-08)
     * `Fleet.Starfleet.Cat5Escalator` — pure functions, Cat 5 escalation:
       canonical broadcast `starfleet.audit_cat5_<source>` + `CoordBackend` delegation
     * `Fleet.Starfleet.AuditLog` — pure functions, fail-safe non-bang `File.write`
@@ -67,7 +67,7 @@ defmodule Fleet.Starfleet do
 
   N0 (vendor-agnostic, no direct SDK call).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   @doc """
