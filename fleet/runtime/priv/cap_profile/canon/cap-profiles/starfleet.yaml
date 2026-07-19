@@ -79,8 +79,9 @@ spec:
     model: opus
     effort: high
     # ACTIVATED (reorg 2026-07-19): starfleet is the boot front-desk (the arch → on-demand per-project).
-    # The onboarding gate now admits starfleet (require_onboarder, done). Remaining for a LIVE run: the
-    # `starfleet` forge account org-admin + token deployed (forge-master step, outside the runtime).
+    # The onboarding gate admits starfleet (require_onboarder) AND the forge is provisioned on the TEST
+    # forge (account in org Owners — create+delete proven — + role token deployed at the layout). The
+    # WORK forge (NAS) needs the same forge-master gesture at its next deploy.
     boot_at_start: true
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
