@@ -462,6 +462,28 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
+  # Reap (B'): a live per-brick JUDGE pod + kill capture. `kill_pod` runs in the POLLER process →
+  # the capture goes through the registered test listener (`:reap_test_listener`), same reason the
+  # forge stub threads `_test_pid`.
+  defmodule QuiescedJudgeSpawner do
+    def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
+    def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-consultant"}]
+    def wake_pod(_pod_id), do: :ok
+
+    def kill_pod(pod_id) do
+      if pid = Process.whereis(:reap_test_listener), do: send(pid, {:killed, pod_id})
+      :ok
+    end
+  end
+
+  # TaskQueue stub: the judge DELIVERED its verdict (terminal task) → no active task, owns nothing.
+  # `enqueue`/`list_active`: the awaits-arch fixture also walks the arch-offer path on the tick.
+  defmodule QuiescedTaskQueue do
+    def pod_status(_pod_id), do: {:ok, :completed}
+    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+    def list_active, do: []
+  end
+
   # TaskQueue stub: the project eng DELIVERED #8 (task `:completed`) — martine + F-C050 configs.
   # `:completed` is TERMINAL (`WorkItem.active?/1` → false): a delivered eng NO LONGER owns its
   # lock. Two tests: martine (PR#6 open → issue excluded via pr_issue_ids, a dead judge's PR lock
@@ -617,6 +639,148 @@ defmodule Fleet.Pilot.PollerTest do
       # 2nd consecutive tick: orphan CONFIRMED → lock reclaimed (the next tick will re-dispatch).
       Poller.force_poll(name)
       assert_received {:remove_label, 8, "lcars-in-flight"}
+
+      GenServer.stop(pid)
+    end
+
+    test "reap (B'): a QUIESCED judge pod (brick unlocked, no active task) is reaped at the 2nd tick, not the 1st" do
+      # Live case 2026-07-19 (#5 zombie loop): consultant idle-at-prompt 16 min after its redirect
+      # verdict. Here: #8 is parked awaits-arch (in-flight lifted by await_arch), the judge pod is
+      # alive with a TERMINAL task → no reason to live → reaped after the 2-tick grace.
+      Process.register(self(), :reap_test_listener)
+
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-awaits-arch"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_reap_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: QuiescedJudgeSpawner,
+          task_queue: QuiescedTaskQueue
+        )
+
+      # 1st tick: the pod becomes a SUSPECT (2-tick grace) — NOT reaped yet.
+      Poller.force_poll(name)
+      refute_received {:killed, _}
+
+      # 2nd consecutive tick: quiesced CONFIRMED → reaped.
+      Poller.force_poll(name)
+      assert_received {:killed, "lordzurp-lcars-test-issue-8-consultant"}
+
+      GenServer.stop(pid)
+    end
+
+    test "reap (B'): a pod whose brick STILL holds the in-flight lock is NEVER reaped" do
+      Process.register(self(), :reap_test_listener)
+
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_reap_locked_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: QuiescedJudgeSpawner,
+          task_queue: QuiescedTaskQueue
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:killed, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "reap (B'): an ACTIVE-task pod is NEVER reaped even with its brick unlocked (mid-eval belt)" do
+      # Gate-eval belt: a one-shot gatekeeper mid-eval works an issue whose lock may be lifted —
+      # the active task (not the label) proves it is working. Same authority as the lock duty.
+      Process.register(self(), :reap_test_listener)
+
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_reap_active_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: QuiescedJudgeSpawner,
+          task_queue: ActiveTaskQueue
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:killed, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "reap (B'): a RESIDENT project pod (no brick ref in its id) is structurally exempt" do
+      # The resident eng (`<repo>-engineer`) has no `-issue-N-` ref: its lifecycle is the
+      # slot-freeze, never the brick reap — even fully idle on a quiet repo.
+      Process.register(self(), :reap_test_listener)
+
+      name = :"P_reap_resident_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, []}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: ProjectPipeSpawner,
+          task_queue: QuiescedTaskQueue
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:killed, _}
 
       GenServer.stop(pid)
     end

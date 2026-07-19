@@ -1,14 +1,21 @@
 defmodule Fleet.Pilot.Poller.Reconciliation do
   @moduledoc """
-  IMPURE "orphaned lock reconciliation" cluster of `Fleet.Pilot.Poller`.
+  IMPURE "orphan reconciliation" cluster of `Fleet.Pilot.Poller` — TWO symmetric duties on the
+  same tick, the same suspect set and the same 2-tick grace:
 
-  A `lcars-in-flight` lock is ORPHANED if the brick carries it but no live pod is
-  working it. Cause: a dead pod (`:result_timeout` deadline, crash, BEAM restart) reaped by the
-  PodWarden — which removes the PROCESS but NOT the forge label. Broken symmetry → without repair the
-  `dispatch_*` skips the `:in_flight` brick FOREVER (a single pod stall wedges the pipe). This
-  module REPAIRS: at each tick, it compares the locks seen on the forge to the refs that a LIVE pod
-  actually owns, and reclaims (removes the label) the CONFIRMED orphans → the next tick
-  re-dispatches.
+  **(1) Orphaned lock** (label without pod). A `lcars-in-flight` lock is ORPHANED if the brick
+  carries it but no live pod is working it. Cause: a dead pod (`:result_timeout` deadline, crash,
+  BEAM restart) reaped by the PodWarden — which removes the PROCESS but NOT the forge label.
+  Broken symmetry → without repair the `dispatch_*` skips the `:in_flight` brick FOREVER (a single
+  pod stall wedges the pipe). Repair: reclaim (remove the label) the CONFIRMED orphans → the next
+  tick re-dispatches.
+
+  **(2) Quiesced pod** (pod without lock — the inverse). A live PER-BRICK pod (judge, one-shot
+  gatekeeper) whose brick no longer holds the lock and which has no active task has no reason to
+  live: a one-shot never "ends itself" (the pod model is a persistent interactive PTY) — without
+  this reap it idles until `max_alive_sec` (hours) and gets re-briefed by the next dispatch
+  (live 2026-07-19: the #5 zombie loop). Repair: `Spawn.safe_kill` the CONFIRMED quiesced pods
+  (cf. `quiesced_brick_pods`). This is the NOMINAL end-of-life of per-brick pods.
 
   ## What this module does / does NOT do
 
@@ -47,10 +54,11 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   receives already-resolved modules.
 
   Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Labels` (single source of the
-  lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id) + the
+  lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id),
+  `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -146,11 +154,77 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
               into: MapSet.new(),
               do: {repo, :pr, n}
 
-        orphaned_now = MapSet.union(issue_orphans, pr_orphans)
-        to_reclaim = MapSet.intersection(orphaned_now, prior_suspects)
-        Enum.each(to_reclaim, fn {_repo, _type, n} -> reclaim_lock(seams, n) end)
-        MapSet.difference(orphaned_now, to_reclaim)
+        # SYMMETRIC duty — the INVERSE orphan (pod without lock): a live per-brick pod whose
+        # brick is quiesced. Same suspect set, same 2-tick grace: the entries are tagged
+        # `{repo, :pod, pod_id}` — the same 3-tuple shape as the lock refs, so the core's
+        # repo-filter (`fn {r, _type, _n} -> r == repo end`) threads them with ZERO plumbing.
+        zombie_pods = quiesced_brick_pods(issues, pulls, seams)
+
+        orphaned_now = issue_orphans |> MapSet.union(pr_orphans) |> MapSet.union(zombie_pods)
+        to_act = MapSet.intersection(orphaned_now, prior_suspects)
+
+        Enum.each(to_act, fn
+          {_repo, :pod, pod_id} -> reap_pod(seams, pod_id)
+          {_repo, _type, n} -> reclaim_lock(seams, n)
+        end)
+
+        MapSet.difference(orphaned_now, to_act)
     end
+  end
+
+  # SYMMETRIC duty — the inverse orphan: a LIVE per-brick pod (pod_id encodes `-issue-N-`/`-pr-N-`
+  # — judges, one-shot gatekeepers; resident/permanent pods carry no brick ref → structurally
+  # exempt, their lifecycle is elsewhere: slot-freeze for the resident eng, forever for the
+  # permanents) whose brick no longer holds the `lcars-in-flight` lock (verdict consumed,
+  # awaits-arch park, merge done, brick closed) AND which holds no active task (belt — same
+  # authority `pod_has_active_task?` as the lock duty: a gatekeeper mid-eval is never reaped).
+  #
+  # Live case 2026-07-19: a consultant idled INTERACTIVELY for 16 min after its redirect verdict.
+  # A one-shot does NOT "end itself" — the pod model is a persistent interactive PTY (tmux), so
+  # after the verdict the session sits at the prompt, backstopped only by `max_alive_sec` (2 h)
+  # and re-briefed by the next dispatch (the #5 zombie loop fed on this). No reason to live →
+  # reaped; a later re-dispatch re-spawns fresh (idempotent dispatch, graine/seed resume).
+  # Fail-safe: enumeration failure → empty set (never kill blindly).
+  defp quiesced_brick_pods(issues, pulls, %Seams{} = seams) do
+    locked_issues = for i <- issues, locked?(i), into: MapSet.new(), do: i["number"]
+    locked_prs = for p <- pulls, locked?(p), into: MapSet.new(), do: p["number"]
+
+    seams.spawner.list_pods()
+    |> Enum.flat_map(fn pod ->
+      pod_id = pod[:pod_id]
+
+      case parse_pod_ref(pod_id, seams.repo) do
+        [{repo, phase, n}] ->
+          locked? =
+            (phase == :issue and MapSet.member?(locked_issues, n)) or
+              (phase == :pr and MapSet.member?(locked_prs, n))
+
+          if locked? or pod_has_active_task?(seams.task_queue, pod_id),
+            do: [],
+            else: [{repo, :pod, pod_id}]
+
+        _ ->
+          []
+      end
+    end)
+    |> MapSet.new()
+  rescue
+    _ -> MapSet.new()
+  catch
+    _, _ -> MapSet.new()
+  end
+
+  # The reap is the NOMINAL end-of-life of a per-brick pod since 2026-07-19 (a one-shot never
+  # "ends itself", cf. quiesced_brick_pods) → `info`, not warning (≠ reclaim_lock, which flags an
+  # ANOMALY). Kill via the SINGLE authority `Spawn.safe_kill/2` (no fork of the kill wrapper);
+  # a kill that fails is swallowed there — the next tick re-suspects, self-healing.
+  defp reap_pod(%Seams{spawner: spawner, repo: repo}, pod_id) do
+    Logger.info(
+      "Poller: reconciliation : pod #{pod_id} QUIESCED on #{repo} " <>
+        "(brick unlocked, no active task) → reaped (a re-dispatch re-spawns fresh)"
+    )
+
+    Fleet.Pilot.StepDispatcher.Spawn.safe_kill(spawner, pod_id)
   end
 
   # Refs `{repo, :issue|:pr, n}` that a pod is REALLY working, derived from the deterministic STABLE pod_ids
