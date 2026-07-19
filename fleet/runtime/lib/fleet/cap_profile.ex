@@ -386,28 +386,10 @@ defmodule Fleet.CapProfile do
         "CapProfile without a valid role_index (integer 0..15) — not a catalogued role"
       )
 
-  @doc """
-  Is the role a PROTECTED TIER (`metadata.protected`)? `true` = spared by the worker kill
-  (`pkill -f 1badcafe`) and encoded `0badcafe` in the session_id. **SINGLE SOURCE** of this read.
-
-  Default `false` (unprotected) if the key is absent or non-boolean: a conservative default — a config
-  gap NEVER promotes a role to the protected tier.
-  """
-  @spec protected?(t()) :: boolean()
-  def protected?(%__MODULE__{metadata: %{"protected" => p}}) when is_boolean(p), do: p
-  def protected?(%__MODULE__{}), do: false
-
-  @doc """
-  Is the role FLEET-LEVEL (`metadata.fleet_level`)? `true` = a single instance, repo always
-  `0000` (no project dimension). `false` = project-bound → the session_id REQUIRES the repo (otherwise
-  cross-project collision). **SINGLE SOURCE** of this read.
-
-  Default `false` (project-bound) if the key is absent or non-boolean: a conservative default — we never
-  promote a role to fleet-level status (repo 0000) by accident.
-  """
-  @spec fleet_level?(t()) :: boolean()
-  def fleet_level?(%__MODULE__{metadata: %{"fleet_level" => f}}) when is_boolean(f), do: f
-  def fleet_level?(%__MODULE__{}), do: false
+  # (`protected?/1` and `fleet_level?/1` were REMOVED by the 2026-07-19 reorg: once every other role
+  # went per-project, both bits collapsed into "role_index 0 ≡ starfleet" — `kill_class/1` carries the
+  # kill tier, and the fleet-scope (repo 0000) is `role_index == 0` at the mint. The schema no longer
+  # accepts the fields.)
 
   @doc """
   The role's identity/slot granularity — **DERIVED from `lifetime_scope`**, never a declared

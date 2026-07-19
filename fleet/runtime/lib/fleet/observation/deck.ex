@@ -29,7 +29,7 @@ defmodule Fleet.Observation.Deck do
   (routing + role-catalogue derivation + live snapshots) and passes the
   data to the view as an argument. The view reads no source itself.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   use Plug.Router
@@ -135,9 +135,10 @@ defmodule Fleet.Observation.Deck do
   # DISPLAY catalogue (role → dedicated SVG icon) DERIVED from the assets actually present in
   # `priv/observation/static/assets`: any `<role>.svg` dropped there is recognized automatically — never a
   # hard-coded list to keep in sync with the files (the asset is the authority).
-  # Exclusions: the `favicon*.svg` (chrome, not a role) and `starfleet` (out-of-band system domain,
-  # the asset exists but no panel instruments it). `File.ls` KO (dir absent) → `[]`: safe degradation
-  # (all pods on the generic icon, never a crash). Resolved via `app_dir` = same priv as `Plug.Static`.
+  # Exclusions: the `favicon*.svg` (chrome, not a role). `starfleet` is NO LONGER excluded (reorg
+  # 2026-07-19: it is an ordinary pod role — the dashboard shows it like any other). `File.ls` KO
+  # (dir absent) → `[]`: safe degradation (all pods on the generic icon, never a crash). Resolved
+  # via `app_dir` = same priv as `Plug.Static`.
   defp display_roles do
     case File.ls(Application.app_dir(:lcars_fleet, "priv/observation/static/assets")) do
       {:ok, files} ->
@@ -145,7 +146,6 @@ defmodule Fleet.Observation.Deck do
             String.ends_with?(f, ".svg"),
             role = Path.rootname(f),
             not String.starts_with?(role, "favicon"),
-            role != "starfleet",
             do: role
 
       _ ->
@@ -182,8 +182,9 @@ defmodule Fleet.Observation.Deck do
     do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
 
   # Role that runs as a fleet POD (so it can carry a pod state): `host_native != true`.
-  # Same semantic discriminator as `Fleet.Spawner.PermanentBoot.boot_at_start?/1` — excludes `starfleet`
-  # (host-native, containment: none, "has NO pod") without hard-coding its name. Unreadable profile → excluded.
+  # Since the 2026-07-19 reorg NO canon role is host-native (starfleet became an ordinary bwrap pod
+  # and is instrumented like the rest) — the guard stays for a future off-fleet role. Unreadable
+  # profile → excluded.
   defp pod_role?(name) do
     case Fleet.CapProfile.load(name) do
       {:ok, %Fleet.CapProfile{spec: spec}} -> get_in(spec, ["invocation", "host_native"]) != true

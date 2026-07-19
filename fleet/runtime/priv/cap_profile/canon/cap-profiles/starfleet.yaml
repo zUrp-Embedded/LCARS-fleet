@@ -12,13 +12,11 @@ kind: CapabilityProfile
 metadata:
   name: starfleet
   containment: bwrap
-  # Role identity coordinates (the metadata IS the single source of the WHAT), read by the session_id
-  # builder (SessionId.encode): role_index = role slot in the UUID (0 = starfleet) ; protected =
-  # spared tier ; fleet_level = single instance, repo 0000 (no project dimension). kill_class derives
-  # 0 (starfleet) from role_index 0 → `pkill -f 1badcafe`/`2badcafe` never touch it.
+  # Role identity (the metadata IS the single source of the WHAT): role_index = role slot in the
+  # UUID — and 0 IS starfleet, the ONLY fleet-scoped pod (repo 0000 in its UUID, kill_class 0 →
+  # `pkill -f 1badcafe`/`2badcafe` never touch it). The old `protected`/`fleet_level` bits are GONE
+  # (reorg 2026-07-19): both collapsed into "role_index 0" once every other role went per-project.
   role_index: 0
-  protected: true
-  fleet_level: true
   # Large focal length (cf. DESIGN-carte-des-roles §2/§5): starfleet sees the WHOLE project space.
   # RW on both — NOT to edit files routinely (the skills create_project/import_project do the structured
   # work, system-side), but as a LEVER to act as the human's hand when needed. Default runtime activity

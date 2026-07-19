@@ -11,15 +11,12 @@ metadata:
   # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
-  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
-  # fleet_level = single instance with no project dimension (repo 0000).
+  # role_index = role slot in the hexspeak UUID.
   role_index: 1
-  protected: true
   # PER-PROJECT (reorg 2026-07-19): the architect is a project-bound worker, ONE per active project,
-  # spawned on-open by starfleet (fleet_level:false → repo in its UUID, a stable Desktop slot per repo).
+  # spawned on-open by starfleet (repo in its UUID → a stable Desktop slot per repo).
   # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`
   # (effective_project). Narrow focal length = the box it cannot reach out of.
-  fleet_level: false
 spec:
   # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker

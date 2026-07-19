@@ -883,14 +883,11 @@ defmodule Fleet.CapProfileTest do
       assert eff.spec["project"] == %{"repo_path" => "/r", "nested" => %{"a" => 1}}
     end
 
-    test "protected?/1 + fleet_level?/1 read the bool, default false (conservative) when absent" do
-      assert Fleet.CapProfile.protected?(role_struct(%{"protected" => true}))
-      refute Fleet.CapProfile.protected?(role_struct(%{"protected" => false}))
-      refute Fleet.CapProfile.protected?(role_struct(%{"name" => "x"}))
-
-      assert Fleet.CapProfile.fleet_level?(role_struct(%{"fleet_level" => true}))
-      refute Fleet.CapProfile.fleet_level?(role_struct(%{"fleet_level" => false}))
-      refute Fleet.CapProfile.fleet_level?(role_struct(%{"name" => "x"}))
+    test "protected?/1 + fleet_level?/1 are GONE (reorg 2026-07-19 — collapsed into role_index 0)" do
+      # Both bits died when every non-starfleet role went per-project: the kill tier is kill_class/1,
+      # the fleet-scope (repo 0000) is `role_index == 0` at the mint. The schema rejects the fields.
+      refute function_exported?(Fleet.CapProfile, :protected?, 1)
+      refute function_exported?(Fleet.CapProfile, :fleet_level?, 1)
     end
 
     test "catalogued?/1: true iff an integer role_index is present (presence check WITHOUT raise)" do

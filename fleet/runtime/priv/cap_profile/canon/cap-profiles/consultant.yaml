@@ -6,11 +6,8 @@ metadata:
   name: consultant
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
-  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
-  # fleet_level = single instance with no project dimension (repo 0000).
+  # role_index = role slot in the hexspeak UUID.
   role_index: 6
-  protected: false
-  fleet_level: false
 spec:
   # WORKER profile: executable brief by default. Becomes a judge VIA the per-step override
   # (`brief_kind: judge` on the brief-review step) — no duplicated profile. REQUIRED (schema) —

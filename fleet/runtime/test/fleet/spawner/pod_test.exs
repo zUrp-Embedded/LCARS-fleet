@@ -615,25 +615,30 @@ defmodule Fleet.Spawner.PodTest do
     end
 
     defp gatekeeper_args(pod_id, opts \\ []) do
-      # gatekeeper = slot 2, worker (1badcafe), fleet-level (repo 0000) — catalog in the metadata.
+      # gatekeeper = slot 2 — PROJECT-BOUND since the 2026-07-19 reorg (repo in its UUID): the spawn
+      # carries a repo_id, like every non-starfleet pod. Catalog in the metadata.
       gk = %{
         valid_profile()
         | metadata: %{
             "name" => "gatekeeper",
             "containment" => "bwrap",
-            "role_index" => 2,
-            "protected" => false,
-            "fleet_level" => true
+            "role_index" => 2
           }
       }
 
-      %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: opts}
+      %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: Keyword.put_new(opts, :repo_id, 7)}
     end
 
-    test "fleet-level role (gatekeeper) → deterministic hexspeak session_id (v2: class + uid)" do
-      pod_id = "pod-gk-det-#{System.unique_integer([:positive])}"
-      # uid injected (hermetic — else the assert would depend on the runner's uid).
-      args = gatekeeper_args(pod_id, uid: 4242)
+    test "fleet-scope role (role_index 0) → deterministic hexspeak session_id, repo 0000 (v2)" do
+      pod_id = "pod-sf-det-#{System.unique_integer([:positive])}"
+      # role_index 0 ≡ the fleet-scope (starfleet) — the ONLY pod minted on repo 0000 (the old
+      # fleet_level flag collapsed into this identity). uid injected (hermetic).
+      sf = %{
+        valid_profile()
+        | metadata: %{"name" => "starfleet", "containment" => "bwrap", "role_index" => 0}
+      }
+
+      args = %{cap_profile: sf, issue_id: "issue-1", pod_id: pod_id, opts: [uid: 4242]}
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
@@ -641,9 +646,22 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      # role 2, class from the fixture's lifetime_scope, uid 4242, fleet repo 0. Asserts the pod went
-      # through the DETERMINISTIC mint (not a random uuid) with the right inputs.
-      expected = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 0)
+      expected = Fleet.Spawner.SessionId.encode(0, Fleet.CapProfile.kill_class(sf), 4242, 0)
+      assert content["session_id"] == expected
+    end
+
+    test "project-bound role (gatekeeper, reorg) → deterministic session_id with ITS repo (v2)" do
+      pod_id = "pod-gk-det-#{System.unique_integer([:positive])}"
+      # uid injected (hermetic — else the assert would depend on the runner's uid).
+      args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      GenServer.call(pid, :info)
+
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+      # role 2, class from the fixture's lifetime_scope, uid 4242, repo 7 — the per-project identity.
+      expected = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
       assert content["session_id"] == expected
     end
 
@@ -723,9 +741,9 @@ defmodule Fleet.Spawner.PodTest do
     test "UUID GC: a stale <uuid>.jsonl (pod_dir surviving a crash) is removed before --session-id",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"
-      args = gatekeeper_args(pod_id, uid: 4242)
-      # the pod's deterministic v2 uuid (class from fixture, uid injected) — the GC targets THIS name.
-      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 0)
+      args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+      # the pod's deterministic v2 uuid (class from fixture, uid injected, ITS repo) — the GC targets THIS name.
+      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # simulates a surviving pod_dir (failed teardown): the deterministic UUID's jsonl already lingers.
       stale =

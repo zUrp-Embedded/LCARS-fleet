@@ -3,7 +3,11 @@
   "title": "LCARS Capability Profile v2.5",
   "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24). STRICT: additionalProperties:false at every object level — an unknown/typo'd field (e.g. `containmnet`) is REJECTED, not silently ignored (R0-CAP-001). As the COMPOSED profile (base + modops) is validated here, this also catches junk fields introduced by a modop fragment (R0-CAP-009 backstop).",
   "type": "object",
-  "required": ["kind", "metadata", "spec"],
+  "required": [
+    "kind",
+    "metadata",
+    "spec"
+  ],
   "additionalProperties": false,
   "properties": {
     "kind": {
@@ -11,24 +15,46 @@
     },
     "metadata": {
       "type": "object",
-      "required": ["name", "containment"],
+      "required": [
+        "name",
+        "containment"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "containment": { "type": "string" },
-        "role_index": { "type": "integer", "minimum": 0, "maximum": 15 },
-        "protected": { "type": "boolean" },
-        "fleet_level": { "type": "boolean" },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "containment": {
+          "type": "string"
+        },
+        "role_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
         "mounts": {
           "type": "array",
           "description": "CATALOGUE mounts projected into the bwrap sandbox (the world provided TO the pod). bwrap_launch binds them at the SAME path, RO/RW, after the /home tmpfs. Inert when containment: none (host = native access). Empty/absent = no extra mount (bare worker).",
           "items": {
             "type": "object",
-            "required": ["path", "mode"],
+            "required": [
+              "path",
+              "mode"
+            ],
             "additionalProperties": false,
             "properties": {
-              "path": { "type": "string", "pattern": "^/" },
-              "mode": { "type": "string", "enum": ["ro", "rw"] }
+              "path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ro",
+                  "rw"
+                ]
+              }
             }
           }
         }
@@ -49,24 +75,35 @@
         "scope": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["allowedTools", "disallowedTools"],
+          "required": [
+            "allowedTools",
+            "disallowedTools"
+          ],
           "$comment": "allowedTools AND disallowedTools are HARD-REQUIRED by bin/claude_launch.sh (`jq -r '.spec.scope.<field> | join(\",\")' || exit 1` — an absent field makes `join` hit null, jq fails, the pod NEVER launches). A profile that would crash the launcher is rejected at LOAD time, not at spawn.",
           "properties": {
             "allowedTools": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "disallowedTools": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "git_ops_denied": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "outputs": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
@@ -74,45 +111,137 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "libs": { "type": "array", "items": { "type": "string" } },
-            "skills": { "type": "array", "items": { "type": "string" } },
-            "mcpServers": { "type": "array", "items": { "type": "string" } },
-            "plugins": { "type": "array", "items": { "type": "string" } },
-            "monk_registry": { "type": ["string", "null"] },
-            "monk_instance": { "type": ["string", "null"] },
-            "sp_template": { "type": ["string", "null"], "description": "SP template used to materialize a PERMANENT pod (monk, archivist). Distinct from invocation.subagent_template, which implies a one-shot dispatch (G24-11)." },
-            "skills_plugin_versions": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" }, "description": "Per-plugin version pin (map plugin_name -> semver). Semver regex validated at load." }
+            "libs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mcpServers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "plugins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "monk_registry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "monk_instance": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sp_template": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "SP template used to materialize a PERMANENT pod (monk, archivist). Distinct from invocation.subagent_template, which implies a one-shot dispatch (G24-11)."
+            },
+            "skills_plugin_versions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+\\.\\d+"
+              },
+              "description": "Per-plugin version pin (map plugin_name -> semver). Semver regex validated at load."
+            }
           }
         },
         "invocation": {
           "type": "object",
-          "required": ["lifetime_scope"],
+          "required": [
+            "lifetime_scope"
+          ],
           "additionalProperties": false,
           "properties": {
             "lifetime_scope": {
               "type": "string",
-              "enum": ["one-shot", "pipe", "run", "forever"]
+              "enum": [
+                "one-shot",
+                "pipe",
+                "run",
+                "forever"
+              ]
             },
-            "boot_at_start": { "type": "boolean" },
-            "subagent_template": { "type": ["string", "null"] },
+            "boot_at_start": {
+              "type": "boolean"
+            },
+            "subagent_template": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "mcp_channels": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
-            "host_native": { "type": "boolean" },
-            "max_alive_sec": { "type": ["number", "null"] },
-            "heartbeat_keepalive": { "type": "boolean" },
-            "bridge_enabled": { "type": "boolean" },
-            "remote_control": { "type": "boolean", "description": "Claude Desktop visibility: false makes the launcher omit --remote-control (pod functional but invisible). Default (absent) = true. Set false on ephemeral judges (qualifier/reviewer)." },
-            "wake_send_keys": { "type": "boolean", "description": "Send-keys wake fallback authorized for this pod. Default (absent) = true. false = flag-only: the kick loop never types into the pod's terminal (set on the architect - interactive human session); the no-ACK wake.failed escalation remains the terminal net." },
-            "policy": { "type": "string" },
-            "rubber_duck_enabled": { "type": "boolean" },
-            "long_session_protocol": { "type": "boolean" },
-            "output_format": { "type": "string" },
-            "model": { "type": "string" },
+            "host_native": {
+              "type": "boolean"
+            },
+            "max_alive_sec": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "heartbeat_keepalive": {
+              "type": "boolean"
+            },
+            "bridge_enabled": {
+              "type": "boolean"
+            },
+            "remote_control": {
+              "type": "boolean",
+              "description": "Claude Desktop visibility: false makes the launcher omit --remote-control (pod functional but invisible). Default (absent) = true. Set false on ephemeral judges (qualifier/reviewer)."
+            },
+            "wake_send_keys": {
+              "type": "boolean",
+              "description": "Send-keys wake fallback authorized for this pod. Default (absent) = true. false = flag-only: the kick loop never types into the pod's terminal (set on the architect - interactive human session); the no-ACK wake.failed escalation remains the terminal net."
+            },
+            "policy": {
+              "type": "string"
+            },
+            "rubber_duck_enabled": {
+              "type": "boolean"
+            },
+            "long_session_protocol": {
+              "type": "boolean"
+            },
+            "output_format": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
             "effort": {
               "type": "string",
-              "enum": ["low", "medium", "high", "xhigh", "max"]
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
             }
           }
         },
@@ -120,28 +249,40 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "gitconfig": { "type": "boolean" },
-            "forge_signing_allowed": { "type": "boolean" }
+            "gitconfig": {
+              "type": "boolean"
+            },
+            "forge_signing_allowed": {
+              "type": "boolean"
+            }
           }
         },
         "modop_set": {
           "type": "object",
-          "required": ["default"],
+          "required": [
+            "default"
+          ],
           "additionalProperties": false,
           "properties": {
             "default": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "optional": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "incompatible": {
               "type": "array",
               "items": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "minItems": 2,
                 "maxItems": 2
               }
@@ -149,24 +290,49 @@
           }
         },
         "project": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
-            "repo_path": { "type": "string" },
-            "base_branch": { "type": "string" },
-            "branch_isolation": { "type": "boolean" },
-            "reference_repo_path": { "type": ["string", "null"] },
-            "work_branch": { "type": ["string", "null"] }
+            "repo_path": {
+              "type": "string"
+            },
+            "base_branch": {
+              "type": "string"
+            },
+            "branch_isolation": {
+              "type": "boolean"
+            },
+            "reference_repo_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "work_branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         },
         "deliverable_mode": {
           "type": "string",
-          "enum": ["payload", "git_native"],
+          "enum": [
+            "payload",
+            "git_native"
+          ],
           "description": "Shape of the role's deliverable, entry condition of Fleet.Workflow.Deliverable.publish/1 (differentiation by catalogue, not by code branch). `payload`: the pod produces a file payload, the SYSTEM writes+commits (verdict roles). `git_native`: the pod commits itself in its workspace, the system verifies (I-CBC gate) then pushes (code roles). Absent: the `payload` default is applied code-side (only relevant to steps with post_extract.git). OPTIONAL-with-default is DELIBERATE, the inverse of its dual `brief_kind` (REQUIRED): a wrong `payload` default is fail-SAFE (`StepRunConsumer.default_deliverable_mode` treats an unresolved role as `payload` = NON-producer, so its output is NEVER pushed as unverified code; only an EXPLICIT `git_native` enters the I-CBC gate), while a wrong `brief_kind` default (`worker`) would be fail-OPEN (a judge would execute attacking content) — hence `brief_kind` required and `deliverable_mode` not. Only the producer (engineer) declares `git_native`; judges/system omit it = correct `payload` default."
         },
         "brief_kind": {
           "type": "string",
-          "enum": ["worker", "judge"],
+          "enum": [
+            "worker",
+            "judge"
+          ],
           "description": "Shape of the BRIEF the role receives — entry dual of deliverable_mode (differentiation by catalogue, not by magic code name). `worker`: brief = executable instruction (the issue body); the role ACTS. `judge`: the role JUDGES and receives a defused I-CBC GateBrief (context + deliverable + verdict contract, NO executable instruction). REQUIRED (`spec.required`): judge-ness is a SECURITY property, NEVER inferred — a profile without `brief_kind` is REJECTED at load. No silent `worker` default (a judge missing `judge` would fall back to worker=execute = fail-open on attacking content)."
         }
       },
@@ -177,9 +343,13 @@
             "properties": {
               "invocation": {
                 "properties": {
-                  "boot_at_start": { "const": true }
+                  "boot_at_start": {
+                    "const": true
+                  }
                 },
-                "required": ["boot_at_start"]
+                "required": [
+                  "boot_at_start"
+                ]
               }
             }
           },
@@ -187,7 +357,9 @@
             "properties": {
               "invocation": {
                 "properties": {
-                  "lifetime_scope": { "const": "forever" }
+                  "lifetime_scope": {
+                    "const": "forever"
+                  }
                 }
               }
             }
@@ -199,9 +371,14 @@
             "properties": {
               "invocation": {
                 "properties": {
-                  "subagent_template": { "type": "string", "minLength": 1 }
+                  "subagent_template": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 },
-                "required": ["subagent_template"]
+                "required": [
+                  "subagent_template"
+                ]
               }
             }
           },
@@ -209,7 +386,9 @@
             "properties": {
               "invocation": {
                 "properties": {
-                  "lifetime_scope": { "const": "one-shot" }
+                  "lifetime_scope": {
+                    "const": "one-shot"
+                  }
                 }
               }
             }
@@ -221,9 +400,13 @@
             "properties": {
               "invocation": {
                 "properties": {
-                  "host_native": { "const": true }
+                  "host_native": {
+                    "const": true
+                  }
                 },
-                "required": ["host_native"]
+                "required": [
+                  "host_native"
+                ]
               }
             }
           },
@@ -231,7 +414,9 @@
             "properties": {
               "metadata": {
                 "properties": {
-                  "containment": { "const": "none" }
+                  "containment": {
+                    "const": "none"
+                  }
                 }
               }
             }
