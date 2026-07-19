@@ -630,16 +630,21 @@ defmodule Fleet.Spawner.PodTest do
       %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: opts}
     end
 
-    test "fleet-level role (gatekeeper) → deterministic hexspeak session_id 1badcafe-...02" do
+    test "fleet-level role (gatekeeper) → deterministic hexspeak session_id (v2: class + uid)" do
       pod_id = "pod-gk-det-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(gatekeeper_args(pod_id))
+      # uid injected (hermetic — else the assert would depend on the runner's uid).
+      args = gatekeeper_args(pod_id, uid: 4242)
+      {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
       # sync barrier (state.json written at LAUNCH, after :launch_called) — cf. the state.json test
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      assert content["session_id"] == "1badcafe-feed-4dad-babe-0000dec0de02"
+      # role 2, class from the fixture's lifetime_scope, uid 4242, fleet repo 0. Asserts the pod went
+      # through the DETERMINISTIC mint (not a random uuid) with the right inputs.
+      expected = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 0)
+      assert content["session_id"] == expected
     end
 
     test "explicit opts[:session_id] WINS (e.g. arch boot-from-base on 0badcafe)" do
@@ -700,21 +705,27 @@ defmodule Fleet.Spawner.PodTest do
       refute_received {:launch_called, _args, _env}
     end
 
-    test "project-bound (engineer) WITH repo_id → deterministic hexspeak (DECIMAL repo encoded)" do
+    test "project-bound (engineer) WITH repo_id → deterministic hexspeak (v2: class + uid + DECIMAL repo)" do
       pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
-      args = build_args(pod_id, "issue-1") |> Map.put(:opts, repo_id: 161)
+      # uid injected (hermetic). repo 161 = 4 DECIMAL digits (grep-direct).
+      args = build_args(pod_id, "issue-1") |> Map.put(:opts, repo_id: 161, uid: 4242)
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      assert content["session_id"] == "1badcafe-feed-4dad-babe-0161dec0de03"
+      expected =
+        Fleet.Spawner.SessionId.encode(3, Fleet.CapProfile.kill_class(valid_profile()), 4242, 161)
+
+      assert content["session_id"] == expected
     end
 
     test "UUID GC: a stale <uuid>.jsonl (pod_dir surviving a crash) is removed before --session-id",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"
-      uuid = "1badcafe-feed-4dad-babe-0000dec0de02"
+      args = gatekeeper_args(pod_id, uid: 4242)
+      # the pod's deterministic v2 uuid (class from fixture, uid injected) — the GC targets THIS name.
+      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 0)
 
       # simulates a surviving pod_dir (failed teardown): the deterministic UUID's jsonl already lingers.
       stale =
@@ -732,7 +743,7 @@ defmodule Fleet.Spawner.PodTest do
       File.write!(stale, "{}\n")
       assert File.exists?(stale)
 
-      {:ok, pid} = spawn_via_supervisor(gatekeeper_args(pod_id))
+      {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       GenServer.call(pid, :info)
 

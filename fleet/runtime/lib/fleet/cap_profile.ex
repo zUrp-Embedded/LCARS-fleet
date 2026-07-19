@@ -433,6 +433,29 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
+  The pod's KILL/LIFECYCLE class — the `<X>` nibble of the deterministic session_id
+  (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field):
+
+    * `0` = **starfleet** (`role_index == 0`) — fleet-level sysadmin, NEVER killed (`pkill -f 1badcafe`
+      / `2badcafe` spare it).
+    * `2` = **spawn-dead** (`lifetime_scope == "one-shot"` — the fan-out judges) — ephemeral, accumulate,
+      reaped by `pkill -f 2badcafe`.
+    * `1` = **persistent-resumable** (everything else: arch, gatekeeper, engineer) — kill-SAFE, they
+      resume their slot + context (Phase 0 slots). `pkill -f 1badcafe` restarts them without loss.
+
+  Replaces the old `protected` bit as the `<X>` source: "protected" collapses into "class 0 = starfleet"
+  (the arch moves from protected(0) to persistent(1) — kill-safe because resumable).
+  """
+  @spec kill_class(t()) :: 0..2
+  def kill_class(%__MODULE__{} = profile) do
+    cond do
+      role_index(profile) == 0 -> 0
+      lifetime_scope(profile) == "one-shot" -> 2
+      true -> 1
+    end
+  end
+
+  @doc """
   Is the cap-profile a CATALOGUED role (carries an integer `role_index`)? A predicate WITHOUT a raise —
   it is the presence test `Fleet.Spawner.Pod.SessionMint.mint/2` queries BEFORE calling `role_index/1`:
   a non-catalogued role (ad-hoc, out-of-fleet) has no deterministic identity to rebuild → a random

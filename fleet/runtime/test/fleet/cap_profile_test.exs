@@ -23,6 +23,15 @@ defmodule Fleet.CapProfileTest do
   # Fixtures
   # ============================================================
 
+  # Minimal in-memory profile carrying just role_index + lifetime_scope (for kill_class/1).
+  defp kc_prof(role_index, lifetime) do
+    %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      metadata: %{"name" => "r", "role_index" => role_index},
+      spec: %{"invocation" => %{"lifetime_scope" => lifetime}}
+    }
+  end
+
   defp valid_profile_yaml do
     # NB: no `apiVersion` — the field was REMOVED from the model (versioning lives in the code, R0.8-brick3);
     # the strict v2.5 schema (additionalProperties:false) rejects it as an unknown field.
@@ -646,6 +655,23 @@ defmodule Fleet.CapProfileTest do
     test "nil / non-profile input → visible (safe default)" do
       assert Fleet.CapProfile.remote_control?(nil)
       assert Fleet.CapProfile.remote_control?(%{})
+    end
+  end
+
+  describe "kill_class/1 — the <X> nibble (lifecycle/kill), derived (2026-07-19)" do
+    test "starfleet (role_index 0) → 0 (never killed), whatever the lifetime" do
+      assert Fleet.CapProfile.kill_class(kc_prof(0, "forever")) == 0
+    end
+
+    test "one-shot judge (qualifier/reviewer/consultant) → 2 (spawn-dead, reaped)" do
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 2
+      assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot")) == 2
+    end
+
+    test "persistent non-starfleet (arch forever, gatekeeper/eng pipe) → 1 (kill-safe, resumable)" do
+      assert Fleet.CapProfile.kill_class(kc_prof(1, "forever")) == 1
+      assert Fleet.CapProfile.kill_class(kc_prof(2, "pipe")) == 1
+      assert Fleet.CapProfile.kill_class(kc_prof(3, "pipe")) == 1
     end
   end
 

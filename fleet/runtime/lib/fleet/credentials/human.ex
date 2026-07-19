@@ -9,7 +9,7 @@ defmodule Fleet.Credentials.Human do
   divergent failure policy (`ForgeIdentity.resolve_human` → `{:error}`; `Fleet.Spawner.Pod.LaunchEnv.runtime_user` → raise);
   if the rule evolves, spawn-ownership (pod_dir/UID) and commit-identity (git author) diverge.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc "The current human (`id -un`). `{:ok, login}` | `{:error, reason}`."
@@ -30,6 +30,34 @@ defmodule Fleet.Credentials.Human do
 
       {:error, reason} ->
         raise "Fleet.Credentials.Human: current user unresolvable (#{inspect(reason)})"
+    end
+  end
+
+  @doc """
+  The current human's OS UID (`id -u`) as an integer. Folded into the deterministic session_id
+  (`SessionId.encode`) so two humans sharing ONE OAuth account get distinct UUIDs (same axis as
+  `id -un` — the OS user IS the human). `{:ok, uid}` | `{:error, reason}`.
+  """
+  @spec current_uid() :: {:ok, non_neg_integer()} | {:error, term()}
+  def current_uid do
+    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+      {out, 0} ->
+        case Integer.parse(String.trim(out)) do
+          {uid, _} -> {:ok, uid}
+          :error -> {:error, {:uid_unparseable, out}}
+        end
+
+      other ->
+        {:error, {:uid_unresolved, other}}
+    end
+  end
+
+  @doc "The current human's OS UID, fail-loud."
+  @spec current_uid!() :: non_neg_integer()
+  def current_uid! do
+    case current_uid() do
+      {:ok, uid} -> uid
+      {:error, reason} -> raise "Fleet.Credentials.Human: current UID unresolvable (#{inspect(reason)})"
     end
   end
 end

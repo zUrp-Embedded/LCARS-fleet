@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.Pod.SessionMint do
   - `mint/2` — called by `initial_state` (via `recover_or_init`) when `opts[:session_id]` (explicit
     seed, e.g. arch recall) is not supplied — the seed ALWAYS PRIMES over the mint.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   @doc """
@@ -36,6 +36,10 @@ defmodule Fleet.Spawner.Pod.SessionMint do
   @spec mint(Fleet.CapProfile.t(), keyword()) :: String.t()
   def mint(%Fleet.CapProfile{} = cap_profile, opts) when is_list(opts) do
     repo = Keyword.get(opts, :repo_id)
+    # UID of the runtime human, folded into the deterministic id (distinguishes two humans on ONE
+    # OAuth). Seam `opts[:uid]` → tests inject a fixed uid (else the deterministic-id asserts would
+    # depend on the runner's uid); prod resolves it from `id -u` (fail-loud).
+    uid = Keyword.get(opts, :uid) || Fleet.Credentials.Human.current_uid!()
 
     cond do
       not Fleet.CapProfile.catalogued?(cap_profile) ->
@@ -44,14 +48,16 @@ defmodule Fleet.Spawner.Pod.SessionMint do
       Fleet.CapProfile.fleet_level?(cap_profile) ->
         Fleet.Spawner.SessionId.encode(
           Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.protected?(cap_profile),
+          Fleet.CapProfile.kill_class(cap_profile),
+          uid,
           0x0000
         )
 
       is_integer(repo) and repo in 0..9999 ->
         Fleet.Spawner.SessionId.encode(
           Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.protected?(cap_profile),
+          Fleet.CapProfile.kill_class(cap_profile),
+          uid,
           repo
         )
 

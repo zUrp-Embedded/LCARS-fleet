@@ -171,6 +171,11 @@ defmodule Fleet.Spawner.SeedStore do
     end
 
     File.cp!(seed_jsonl, dest)
+    # v2 (2026-07-19): the base seed carries a baked `sessionId` (its capture-time uuid) that may
+    # DIFFER from the resume `uuid` (the arch's uuid is now COMPUTED per-human, not owned by the shared
+    # seed). Normalize the internal `sessionId` fields to the resume uuid so `--resume <uuid>` finds a
+    # self-consistent session. No-op for recall pods (their seed already carries the target uuid).
+    normalize_session_id!(dest, uuid)
     # Desktop-slot preservation: after the seed BODY lands, graft the captured `bridge_status`
     # line (if any) so `--resume` RE-ATTACHES the same server slot instead of minting a new one
     # (proven 2026-07-19, F1/F5: same uuid + own bridge_status → reattach; without it → new slot,
@@ -281,6 +286,14 @@ defmodule Fleet.Spawner.SeedStore do
 
   defp slot_dir, do: Path.join(root(), "_slots")
   defp slot_path(uuid), do: Path.join(slot_dir(), "#{uuid}.jsonl")
+
+  # Rewrites every `"sessionId":"…"` in a restored jsonl to the resume `uuid` (only that field —
+  # `uuid`/`parentUuid`/`bridgeSessionId` are distinct things, untouched). Makes a body-only base seed
+  # self-consistent under a COMPUTED resume uuid (v2).
+  defp normalize_session_id!(path, uuid) do
+    content = File.read!(path)
+    File.write!(path, Regex.replace(~r/"sessionId":"[^"]*"/, content, ~s("sessionId":"#{uuid}")))
+  end
 
   # Default = per-human state (`~/.lcars/seeds`), the same value `runtime.exs` re-derives for the
   # `LCARS_SEED_STORE_ROOT` env override. `Fleet.Layout.state_dir/0` raises on an unresolvable

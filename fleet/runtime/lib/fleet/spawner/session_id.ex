@@ -6,13 +6,17 @@ defmodule Fleet.Spawner.SessionId do
   index, the protected tier, the fleet-level character) is the role's cap-profile (`metadata.role_index`
   / `protected` / `fleet_level`, read via `Fleet.CapProfile`). Here we only do the string arithmetic.
 
-  Format: `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>`
+  Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<T>`            tier: `0` = protected (`0badcafe`) · `1` = worker (`1badcafe`). The bit comes from
-                      the `protected` argument (= the cap-profile's `metadata.protected`). `badcafe` =
-                      universal kill-marker → `pkill -f 1badcafe` nukes the workers and SPARES the
-                      protected ones (the user's terminal arch) ; `pkill -f badcafe` = everything.
-    - `feed-4dad-babe` fixed hexspeak filler (`4` of `4dad` = UUID version nibble ; `b` of `babe` =
+    - `<X>`            kill/lifecycle CLASS (hex nibble): `0` = starfleet (never killed) · `1` =
+                      persistent-resumable (arch, gatekeeper, eng — kill-safe, they resume their slot) ·
+                      `2` = spawn-dead (one-shot judges — accumulate, reaped). `badcafe` = universal
+                      kill-marker → `pkill -f 2badcafe` reaps the judge cadavers, `pkill -f 1badcafe`
+                      the persistents, `0badcafe` (starfleet) always spared ; `pkill -f badcafe` = all.
+    - `<UID>`         the runtime human's OS **UID**, in **DECIMAL** 4 digits (exact copy, like `<REPO4>`
+                      — grep-direct, zero conversion). Distinguishes two humans sharing ONE OAuth
+                      account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999.
+    - `4dad-babe`     fixed hexspeak filler (`4` of `4dad` = UUID version nibble ; `b` of `babe` =
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
@@ -32,7 +36,7 @@ defmodule Fleet.Spawner.SessionId do
   unknown role: those decisions live at the spawn level, not here), no `{:error, _}`. An out-of-bounds
   input = caller bug → function-clause/raise.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
   import Bitwise
 
@@ -61,24 +65,26 @@ defmodule Fleet.Spawner.SessionId do
   def cast(_), do: {:error, :not_uuid_shaped}
 
   @doc """
-  Encodes the triplet `(role_index, protected, repo[, pool])` into a deterministic hexspeak UUID.
+  Encodes `(role_index, kill_class, uid, repo[, pool])` into a deterministic hexspeak UUID.
 
-  `role_index` (0..15) and `protected` (tier spared by the workers' kill) come from the cap-profile
-  (`metadata.role_index` / `protected`). `repo` = DECIMAL forge id (0..9999 ; `0` = fleet-level, no
-  project dimension). `pool` = high nibble of `<P><R>` (0 = sequential, default).
+  `role_index` (0..15) and `kill_class` (0..15 — the lifecycle/kill tier, `CapProfile.kill_class/1`)
+  come from the cap-profile. `uid` = the runtime human's OS UID, DECIMAL 0..9999 (distinguishes two
+  humans on ONE OAuth). `repo` = DECIMAL forge id (0..9999 ; `0` = fleet-level). `pool` = high nibble
+  of `<P><R>` (0 = sequential, default).
 
   Total over valid inputs: no `{:error, _}` — an out-of-bounds input triggers a function-clause
   (caller bug), not an error return.
   """
-  @spec encode(0..15, boolean(), 0..9999, 0..0xF) :: String.t()
-  def encode(role_index, protected, repo, pool \\ 0)
-      when is_integer(role_index) and role_index in 0..15 and is_boolean(protected) and
+  @spec encode(0..15, 0..15, 0..9999, 0..9999, 0..0xF) :: String.t()
+  def encode(role_index, kill_class, uid, repo, pool \\ 0)
+      when is_integer(role_index) and role_index in 0..15 and
+             is_integer(kill_class) and kill_class in 0..15 and
+             is_integer(uid) and uid in 0..9999 and
              repo in 0..9999 and pool in 0..0xF do
-    t = if protected, do: 0, else: 1
     xx = bsl(pool, 4) ||| role_index
 
-    # repo = DECIMAL (the forge creates it in decimal → grep direct) ; tier + XX = HEX (native counter).
-    "#{hex(t, 1)}badcafe-feed-4dad-babe-#{dec(repo, 4)}dec0de#{hex(xx, 2)}"
+    # uid + repo = DECIMAL (grep-direct, zero conversion) ; class + XX = HEX (native counter/tier).
+    "#{hex(kill_class, 1)}badcafe-#{dec(uid, 4)}-4dad-babe-#{dec(repo, 4)}dec0de#{hex(xx, 2)}"
   end
 
   defp hex(n, width),

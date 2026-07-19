@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
 
   """
 
@@ -270,7 +270,7 @@ defmodule Fleet.Spawner.PermanentBoot do
     # context (the base captured out-of-fleet, not the accumulated session of the previous run). Otherwise → recreate
     # (new session, default behavior). Distinct from CRASH recovery (which never resumes
     # a session — it rerolls FRESH); here it is the clean DELIBERATE boot.
-    opts = boot_opts(name, pod_id)
+    opts = boot_opts(cp, name, pod_id)
 
     case spawner.(cp, pod_id, opts) do
       {:ok, _pid} ->
@@ -291,28 +291,21 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   # Spawn opts of a permanent.
-  # Base present (`priv/base_seeds/<role>.jsonl`) → boot-from-base: FIXED UUID = the `sessionId` CARRIED by
-  # the base (the base IS the source of the UUID, no separate config) → `--resume` that same UUID at each
-  # boot = ONE Desktop entry, and `recall_seed_jsonl` restores the base BEFORE the launch = fresh context.
-  # No base → `[pod_id:]` alone = recreate (new session).
-  defp boot_opts(name, pod_id) do
+  # Base present (`priv/base_seeds/<role>.jsonl`) → boot-from-base: the UUID is COMPUTED
+  # (`SessionMint.mint` — deterministic + per-human via the OS uid), NOT extracted from the base seed.
+  # The base seed is BODY-ONLY (fresh out-of-fleet context), restored under the computed UUID (its
+  # internal `sessionId` normalized by `SeedStore.restore`). `--resume` that computed UUID at each boot
+  # = ONE Desktop slot reused (Phase 0), fresh context. No base → `[pod_id:]` alone = recreate.
+  # (v2 2026-07-19: the base seed no longer OWNS the UUID — a per-human UUID cannot live in a SHARED
+  # committed artifact — so the ex-`base_seed_uuid` extraction + F-C043 corrupt-seed escalation are moot.)
+  defp boot_opts(cp, name, pod_id) do
     path = base_seed_path(name)
 
-    cond do
-      # No base = a FRESH permanent pod (nominal) → recreate, SILENT (normal, not an incident).
-      not File.exists?(path) ->
-        [pod_id: pod_id]
-
-      is_binary(uuid = base_seed_uuid(path)) ->
-        [pod_id: pod_id, session_id: uuid, resume: true, recall_seed_jsonl: path]
-
-      # F-C043 — base PRESENT but no valid session UUID (unreadable / no `sessionId`) = a CORRUPT versioned
-      # seed. The permanent pod boots FRESH (a NEW Desktop entry each boot → accumulation, its STABLE
-      # identity lost). We KEEP booting (availability > this non-safety optimization) but ESCALATE it as an
-      # INCIDENT, not merely a log (user decision F-C043).
-      true ->
-        escalate_corrupt_seed(name, pod_id, path)
-        [pod_id: pod_id]
+    if File.exists?(path) do
+      uuid = Fleet.Spawner.Pod.SessionMint.mint(cp, [])
+      [pod_id: pod_id, session_id: uuid, resume: true, recall_seed_jsonl: path]
+    else
+      [pod_id: pod_id]
     end
   end
 
@@ -360,20 +353,4 @@ defmodule Fleet.Spawner.PermanentBoot do
     Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "#{name}.jsonl"])
   end
 
-  # Fixed UUID = 1st `sessionId` found in the base. nil if absent (→ boot_opts falls back to recreate).
-  defp base_seed_uuid(path) do
-    path
-    |> File.stream!()
-    |> Enum.find_value(fn line ->
-      case Jason.decode(line) do
-        {:ok, %{"sessionId" => uuid}} when is_binary(uuid) -> uuid
-        _ -> nil
-      end
-    end)
-  rescue
-    # Unreadable base (permission / truncated file) → nil. A MISSING base is normal (fresh permanent pod)
-    # and is filtered UPSTREAM by `boot_opts` (`File.exists?`); a PRESENT-but-unreadable/invalid base is the
-    # CORRUPT case → `boot_opts` escalates it (F-C043, `escalate_corrupt_seed`), the single log+incident site.
-    _e -> nil
-  end
 end
