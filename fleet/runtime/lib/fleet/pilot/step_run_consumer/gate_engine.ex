@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @moduledoc """
   Step-rail gate DECISION engine of `Fleet.Pilot.StepRunConsumer`:
   at the end of a step_run, decides what COMES NEXT — advance in the workflow_map, bounce
-  back into rework (bounded), apply a judge's verdict, or escalate to the permanent gatekeeper.
+  back into rework (bounded), apply a judge's verdict, or escalate to the one-shot gatekeeper.
 
   ## Why a separate module
 
@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
       blindly) — no silent misroute.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger

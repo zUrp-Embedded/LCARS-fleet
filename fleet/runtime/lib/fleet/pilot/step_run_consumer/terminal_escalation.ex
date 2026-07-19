@@ -34,10 +34,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   `terminal_escalate?/1` (pure) classifies TERMINAL NON-TRANSIENT errors; the
   consumer calls it on the `{:error, reason}` path of the gate decision. The
-  transient / self-healing errors (`:no_gatekeeper` → the permanent gatekeeper
-  reboots; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
+  transient / self-healing errors (`:no_gatekeeper` → the one-shot gatekeeper is
+  (re)spawned on the next tick; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -99,7 +99,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       (not a failure, not a rework).
 
   Everything else (`:no_gatekeeper` wrapped as `gatekeeper_dispatch`, workflow_map nav, workflow_map
-  load…) stays bubbled up: transient (the permanent gatekeeper reboots) or of a
+  load…) stays bubbled up: transient (the one-shot gatekeeper is (re)spawned next tick) or of a
   different concern (G6 → IncidentRegistry).
   """
   @spec terminal_escalate?(term()) :: boolean()

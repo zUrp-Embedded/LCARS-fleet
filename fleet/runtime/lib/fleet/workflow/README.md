@@ -1,7 +1,7 @@
 # Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-20
 **Status**: active — domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: —
 
@@ -21,7 +21,9 @@ is restated, only pointed at.
 - `Fleet.Workflow.Gates.Predicate` — `eval?/2`: pure evaluator of v2.5 rule-strings against self-reported `outputs`, fail-closed
 - `Fleet.Workflow.GateBrief` — `build/1`: pure markdown brief the gatekeeper pulls via MCP to judge a gate
 - `Fleet.Workflow.GateDecision` — `decisions/0`: single authority for the gatekeeper decision vocabulary (mirrored by `gate-decision-v1.json`)
-- `Fleet.Workflow.Gatekeeper` — boot + registration seam of the singleton gatekeeper (the only non-pure module)
+  <!-- `Fleet.Workflow.Gatekeeper` (singleton boot/registration seam) REMOVED — the resident
+       singleton was replaced by the one-shot per-project gatekeeper (reorg 2026-07-19); its
+       summoning now lives in `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation`. -->
 - `Fleet.Workflow.Deliverable` — unified publication of a pod deliverable (`:payload` / `:git_native`)
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push

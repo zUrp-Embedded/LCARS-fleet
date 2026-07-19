@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `{:fail, _}`             → bounded REBOUND to the 1st step (anti-runaway rework).
     * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft` or `terminal`
       gate is NOT a scheduling step — it is a summons
-      of the **permanent gatekeeper** (exception judge). We enqueue
+      of the **one-shot per-project gatekeeper** (exception judge, reorg 2026-07-19). We enqueue
       an eval brief to the gatekeeper (work-session, addressed by `pod_id` via
       TaskQueue/MCP), we hold the resume context in RAM (`gate_evals`, keyed
       by `correlation_id`), and the decision comes back async via
@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -596,8 +596,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
           # re-fail → infinite CHURN without ever notifying a human (asymmetry with the verdict path which
           # does escalate). We ESCALATE it to the arch (await_arch: comment + `lcars-awaits-arch` + unlock
           # → the poller SKIPS the issue, the churn stops, the human decides). The other errors bubble up
-          # unchanged: transient/self-healing (`:no_gatekeeper` = the permanent gatekeeper reboots,
-          # reconciliation re-dispatches) or handled elsewhere (unreadable workflow_map → IncidentRegistry, G6).
+          # unchanged: transient/self-healing (`:no_gatekeeper` = the one-shot gatekeeper is (re)spawned
+          # on the next dispatch tick) or handled elsewhere (unreadable workflow_map → IncidentRegistry, G6).
           if TerminalEscalation.terminal_escalate?(reason),
             do:
               TerminalEscalation.escalate_terminal_error(
