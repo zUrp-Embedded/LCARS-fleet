@@ -13,7 +13,7 @@ Tous les paths absolus. Pas de cd hors `~`, pas de path relatif inter-fichiers.
 Chaque livrable ouvre sur son en-tête LCARS — deux familles selon la nature du fichier :
 
 - **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par.
-- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), STARDATE, STATUS.
+- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), DATE (AAAA-MM-JJ), STATUS.
 
 ## Contraintes pod
 
