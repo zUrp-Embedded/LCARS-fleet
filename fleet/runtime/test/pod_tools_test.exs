@@ -687,20 +687,25 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "architect gate (refusal of any non-architect role on the privileged tools)" do
+  describe "onboarding + delegation gates (the arch's two heads, reorg 2026-07-19)" do
     @describetag :tmp_dir
 
-    # The 4 privileged tools with a VALID business argument set (so that only the role decides the refusal).
-    @privileged_tools [
+    # Privileged tools split along the arch's two heads. VALID business args so ONLY the role decides.
+    @onboarding_tools [
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
-      {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
-      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}},
       {"list_workflow_cards", %{}}
     ]
+    @delegation_tools [
+      {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
+      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
+    ]
+    @privileged_tools @onboarding_tools ++ @delegation_tools
 
-    # Roles not authorized to delegate/onboard/track. `nil` models a pod without an engraved role
-    # (incomplete binding) — must ALSO be refused (fail-closed, never access through an absent role).
+    # Neither onboarder nor architect → refused EVERYWHERE. `nil` models a pod without an engraved role
+    # (incomplete binding) — refused too (fail-closed, never access through an absent role).
+    @non_onboarder_roles ["engineer", "reviewer", "scout", nil]
+    # Not the delegation head: starfleet IS an onboarder but NOT an architect → refused on delegation.
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
 
     setup %{tmp_dir: tmp} do
@@ -716,19 +721,50 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "every NON-architect role is REFUSED on the 4 tools — with no side effect" do
+    test "onboarding tools: non-onboarder roles REFUSED → :forbidden_not_onboarder" do
+      for role <- @non_onboarder_roles do
+        Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
+
+        for {tool, biz_args} <- @onboarding_tools do
+          pod = uniq("pod-#{role || "nil"}")
+
+          assert {:error, :forbidden_not_onboarder, _} =
+                   PodTools.handle_tool_call(tool, biz_args, pod_state(pod)),
+                 "tool=#{tool} role=#{inspect(role)} should be REFUSED (not an onboarder)"
+        end
+      end
+    end
+
+    test "delegation tools: non-architect roles (incl. starfleet) REFUSED → :forbidden_not_architect" do
       for role <- @non_architect_roles do
         Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
 
-        for {tool, biz_args} <- @privileged_tools do
+        for {tool, biz_args} <- @delegation_tools do
           pod = uniq("pod-#{role || "nil"}")
 
           assert {:error, :forbidden_not_architect, _} =
                    PodTools.handle_tool_call(tool, biz_args, pod_state(pod)),
-                 "tool=#{tool} role=#{inspect(role)} should have been REFUSED"
+                 "tool=#{tool} role=#{inspect(role)} should be REFUSED (not the delegation head)"
         end
 
         refute_received {:create_issue, _, _, _, _}
+      end
+    end
+
+    test "starfleet (fleet-master): ADMITTED on onboarding, REFUSED on delegation (the head split)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "starfleet"}} end)
+
+      for {tool, biz_args} <- @onboarding_tools do
+        result = PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
+
+        assert match?({:ok, _, _}, result),
+               "tool=#{tool}: starfleet should PASS the onboarding gate (#{inspect(result)})"
+      end
+
+      for {tool, biz_args} <- @delegation_tools do
+        assert {:error, :forbidden_not_architect, _} =
+                 PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf"))),
+               "tool=#{tool}: starfleet must NOT reach the delegation head"
       end
     end
 

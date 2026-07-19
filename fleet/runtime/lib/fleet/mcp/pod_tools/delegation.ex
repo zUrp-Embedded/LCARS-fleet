@@ -12,20 +12,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
       the machine (dual-worktree, `main` content intact — ≠ `create_project`).
     * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
 
-  ## Architect gate (common to the four)
+  ## Two server-side gates (reorg 2026-07-19, cf. DESIGN-carte-des-roles §9)
 
-  These tools are ARCHITECT acts: create a forge repo, write/push into
-  `/home/projects`, delegate work, track a delegation. The barrier is
-  server-side: `require_architect/1` resolves the role from the CHANNEL identity
-  (`state.pod_id`, carried by the socket acceptor — not a wire field) THEN requires
-  that this role burned in at spawn be `architect`. A worker pod (engineer, reviewer), a
-  nil/unknown role or a pod absent from the registry → REFUSAL. Fail-closed end to end:
-  no case falls back onto an authorized access. (The tool-visibility filter now lives
-  SERVER-side — the acceptor's `tools/list` lists only this role's tools, F-C138; the
-  bridge forwards blindly. A UX convenience, but the authorization has always lived HERE.)
+  The barrier is server-side: the role is resolved from the CHANNEL identity (`state.pod_id`, carried by
+  the socket acceptor — NOT a wire field), then matched. The tools split along the arch's two heads:
 
-  The four functions take the MCP `state` as their last argument and read ONLY
-  `pod_id` from it (the gate) — never an identity from the wire arguments.
+    * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
+      `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
+      OR `architect` (transitionally, until it goes per-project). Refusal → `:forbidden_not_onboarder`.
+    * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
+      `comment_issue`: the per-project head. Admits ONLY `architect`. Refusal → `:forbidden_not_architect`.
+
+  A worker pod (engineer, reviewer), a nil/unknown role or a pod absent from the registry → REFUSAL on
+  both. Fail-closed end to end: no case falls back onto an authorized access. (The tool-visibility filter
+  now lives SERVER-side — the acceptor's `tools/list` lists only this role's tools, F-C138; the bridge
+  forwards blindly. A UX convenience, but the authorization has always lived HERE.)
+
+  Every function takes the MCP `state` as its last argument and reads ONLY `pod_id` from it (the gate) —
+  never an identity from the wire arguments.
 
   ## Seams (app-env `:fleet_mcp`)
 
@@ -42,7 +46,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -117,8 +121,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec create_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def create_project(name, args, state) when is_binary(name) and is_map(args) do
-    # Fail-closed: no architect = no project.
-    case require_architect(state) do
+    # Fail-closed: no onboarder (starfleet/architect) = no project.
+    case require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_create_project(name, args)
     end
@@ -134,7 +138,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec import_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def import_project(full_name, state) when is_binary(full_name) do
-    case require_architect(state) do
+    case require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_import_project(full_name)
     end
@@ -209,7 +213,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
-    with {:ok, _role} <- require_architect(state) do
+    with {:ok, _role} <- require_onboarder(state) do
       dir = Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
 
       {cards, unreadable} =
@@ -639,6 +643,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp require_architect(_state), do: {:error, :pod_id_required}
+
+  # ONBOARDING gate (create_project/import_project/list_workflow_cards) — the PORTFOLIO head. Since the
+  # 2026-07-19 role reorg (cf. DESIGN-carte-des-roles §9), onboarding belongs to the `starfleet`
+  # fleet-master; the `architect` keeps it TRANSITIONALLY (it still onboards until it goes per-project,
+  # at which point it loses these tools). Same channel-identity resolution as `require_architect` — the
+  # role is read from `state.pod_id`, never the wire. A worker / nil / unknown pod → REFUSAL, fail-closed.
+  defp require_onboarder(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
+    case resolve_role(pod_id) do
+      {:ok, role} when role in ["starfleet", "architect"] -> {:ok, role}
+      {:ok, _other_role} -> {:error, :forbidden_not_onboarder}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  defp require_onboarder(_state), do: {:error, :pod_id_required}
 
   # The ROLE (architect / engineer / …) is burned in at SPAWN and read from the Spawner registry
   # (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test seam
