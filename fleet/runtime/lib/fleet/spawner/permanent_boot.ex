@@ -270,7 +270,7 @@ defmodule Fleet.Spawner.PermanentBoot do
     # context (the base captured out-of-fleet, not the accumulated session of the previous run). Otherwise → recreate
     # (new session, default behavior). Distinct from CRASH recovery (which never resumes
     # a session — it rerolls FRESH); here it is the clean DELIBERATE boot.
-    opts = boot_opts(cp, name, pod_id)
+    opts = boot_opts(name, pod_id)
 
     case spawner.(cp, pod_id, opts) do
       {:ok, _pid} ->
@@ -290,20 +290,19 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  # Spawn opts of a permanent.
-  # Base present (`priv/base_seeds/<role>.jsonl`) → boot-from-base: the UUID is COMPUTED
-  # (`SessionMint.mint` — deterministic + per-human via the OS uid), NOT extracted from the base seed.
-  # The base seed is BODY-ONLY (fresh out-of-fleet context), restored under the computed UUID (its
-  # internal `sessionId` normalized by `SeedStore.restore`). `--resume` that computed UUID at each boot
-  # = ONE Desktop slot reused (Phase 0), fresh context. No base → `[pod_id:]` alone = recreate.
-  # (v2 2026-07-19: the base seed no longer OWNS the UUID — a per-human UUID cannot live in a SHARED
-  # committed artifact — so the ex-`base_seed_uuid` extraction + F-C043 corrupt-seed escalation are moot.)
-  defp boot_opts(cp, name, pod_id) do
+  # Spawn opts of a permanent. The ONLY thing that distinguishes a boot-from-base pod is that it
+  # carries a base-seed BODY (`recall_seed_jsonl`) to restore + `resume: true`. Its UUID is NOT set
+  # here: it is minted by the SAME uniform path as every other pod (`Pod.resolve_session_id` →
+  # `SessionMint.mint`, v2 deterministic + per-human), and `SeedStore.restore` copies the base seed
+  # under that computed UUID (internal `sessionId` normalized). No base → `[pod_id:]` = recreate.
+  # (v2 2026-07-19: pre-v2 the UUID was EXTRACTED from the base seed → had to be set explicitly here;
+  # v2 makes it computable → the extraction, the explicit set, and F-C043 corrupt-seed escalation are
+  # all gone. The arch is NOT special — it's a pod with a body to restore.)
+  defp boot_opts(name, pod_id) do
     path = base_seed_path(name)
 
     if File.exists?(path) do
-      uuid = Fleet.Spawner.Pod.SessionMint.mint(cp, [])
-      [pod_id: pod_id, session_id: uuid, resume: true, recall_seed_jsonl: path]
+      [pod_id: pod_id, resume: true, recall_seed_jsonl: path]
     else
       [pod_id: pod_id]
     end
