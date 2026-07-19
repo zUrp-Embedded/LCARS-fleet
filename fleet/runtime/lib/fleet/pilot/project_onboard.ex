@@ -10,8 +10,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
       mounts `/home/projects` ro — a linked worktree would leave work/ops uncommittable for
       the producer (`add_work_ops` carries the full rationale).
 
-  It is a **mechanical rail** (structural compliance): the arch *triggers* via the MCP
-  tool `create_project`, the SYSTEM *executes* this deterministic sequence — the arch never types git.
+  It is a **mechanical rail** (structural compliance): starfleet (the fleet-master) *triggers* via the
+  MCP tool `create_project`, the SYSTEM *executes* this deterministic sequence — the caller never types
+  git. Reorg 2026-07-19: onboarding also spawns the project's per-project architect (`maybe_open_architect`).
 
   Sequence (FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
   scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
