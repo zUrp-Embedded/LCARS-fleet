@@ -15,12 +15,11 @@ metadata:
   # fleet_level = single instance with no project dimension (repo 0000).
   role_index: 1
   protected: true
-  fleet_level: true
-  mounts:
-    - path: /home/projects        # RO: read the code to frame briefs (every project at once)
-      mode: ro
-    - path: /home/projects.work   # RW: write the DOC (moon-shot/beyond), upstream of tickets
-      mode: rw
+  # PER-PROJECT (reorg 2026-07-19): the architect is a project-bound worker, ONE per active project,
+  # spawned on-open by starfleet (fleet_level:false → repo in its UUID, a stable Desktop slot per repo).
+  # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`
+  # (effective_project). Narrow focal length = the box it cannot reach out of.
+  fleet_level: false
 spec:
   # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
@@ -41,12 +40,10 @@ spec:
       - WebSearch      # PascalCase: native Claude Code tool, allowed pod-side
       - ToolSearch     # PascalCase: loads the deferred tools (Monitor, mcp__fleet__*)
       - Monitor        # PascalCase: wake-by-flag (watch.sh) — wake without content send-keys
-      # Role-specific fleet MCP tools of the arch (delegation) — required in
-      # --permission-mode default (otherwise prompt). get_work_item/submit_result
-      # (universal) come from the launcher.
-      - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
-      - mcp__fleet__create_project
-      - mcp__fleet__import_project   # twin of create_project: ADOPTS an existing repo
+      # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
+      # (create_project/import_project/list_workflow_cards) belongs to starfleet (fleet-master) since the
+      # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.
+      # get_work_item/submit_result (universal) come from the launcher.
       - mcp__fleet__create_issue
       - mcp__fleet__get_issue_status
       - mcp__fleet__list_escalations  # return channel: reads the awaits-arch escalations (worker verdict)
@@ -79,10 +76,12 @@ spec:
     monk_registry: null
     monk_instance: null
   invocation:
-    lifetime_scope: forever  # G24-10: boot_at_start: true requires forever (permanent pod)
+    lifetime_scope: forever  # lives for its project's duration (resumable, holds context) — NOT booted at start
     model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
-    boot_at_start: true
+    # PER-PROJECT: spawned on-open by starfleet (create_project/relaunch), NOT at fleet boot. The
+    # boot-orchestrator role is starfleet's now (reorg 2026-07-19).
+    boot_at_start: false
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false

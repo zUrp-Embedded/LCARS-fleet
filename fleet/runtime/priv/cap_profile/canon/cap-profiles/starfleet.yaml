@@ -79,14 +79,10 @@ spec:
     lifetime_scope: forever  # permanent front-desk
     model: opus
     effort: high
-    # PREPARED, not yet ACTIVATED (cf. DESIGN-carte-des-roles §13). Activation = deliberate flips, none silent:
-    #   1. this `boot_at_start` → true (starfleet becomes the boot front-desk; the arch → on-demand per-project);
-    #   2. the MCP onboarding gate re-SPLIT: `create_project`/`import_project` become fleet-master-gated
-    #      (role == starfleet), not architect-only — today those tools are architect-only server-side, so
-    #      starfleet would be refused if it called them;
-    #   3. the `starfleet` forge account made org-admin (forge-wide: create/delete any repo) + token deployed.
-    # Until these land, starfleet is defined but does not boot and cannot yet onboard.
-    boot_at_start: false
+    # ACTIVATED (reorg 2026-07-19): starfleet is the boot front-desk (the arch → on-demand per-project).
+    # The onboarding gate now admits starfleet (require_onboarder, done). Remaining for a LIVE run: the
+    # `starfleet` forge account org-admin + token deployed (forge-master step, outside the runtime).
+    boot_at_start: true
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false       # was true (sysadmin) — now an ordinary sandboxed pod

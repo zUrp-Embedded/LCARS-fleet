@@ -214,15 +214,25 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
            "slot_scope must no longer be declared in the schema (derived from lifetime_scope)"
   end
 
-  test "F-C138/F-C142: architect exposes import_project via mcp_fleet_tools (canon → MCP surface, single source)" do
-    # The canon (`architect.yaml` allowedTools) is the ONLY source of the role MCP surface: the spawner
-    # threads it to the central which serves `tools/list`. `import_project` (twin of create_project,
-    # wired deftool) must appear now that it is declared — no more Python↔Elixir drift, ever.
-    canon = @canon_dir |> Path.join("architect.yaml") |> YamlElixir.read_from_file!()
-    cp = %Fleet.CapProfile{kind: canon["kind"], metadata: canon["metadata"], spec: canon["spec"]}
-    tools = Fleet.CapProfile.mcp_fleet_tools(cp)
+  test "F-C138/F-C142: canon → MCP surface reflects the two heads (onboarding=starfleet, delegation=architect)" do
+    # The canon (`<role>.yaml` allowedTools) is the ONLY source of the role MCP surface: the spawner
+    # threads it to the central which serves `tools/list`. Since the 2026-07-19 reorg the two heads are
+    # split — this proves the canon carries the split, no Python↔Elixir drift, ever.
+    tools = fn role ->
+      canon = @canon_dir |> Path.join("#{role}.yaml") |> YamlElixir.read_from_file!()
+      cp = %Fleet.CapProfile{kind: canon["kind"], metadata: canon["metadata"], spec: canon["spec"]}
+      Fleet.CapProfile.mcp_fleet_tools(cp)
+    end
 
-    assert "import_project" in tools
-    assert "create_project" in tools and "create_issue" in tools and "get_issue_status" in tools
+    # starfleet = ONBOARDING head (portfolio).
+    sf = tools.("starfleet")
+    assert "create_project" in sf and "import_project" in sf and "list_workflow_cards" in sf
+    refute "create_issue" in sf
+
+    # architect = DELEGATION head (its project) — NOT onboarding.
+    arch = tools.("architect")
+    assert "create_issue" in arch and "get_issue_status" in arch and "list_escalations" in arch
+    refute "create_project" in arch
+    refute "import_project" in arch
   end
 end

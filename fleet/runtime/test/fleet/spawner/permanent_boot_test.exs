@@ -289,22 +289,22 @@ defmodule Fleet.Spawner.PermanentBootTest do
       |> Map.get("spec")
     end
 
-    test "architect.yaml (real canon) → boot_at_start? TRUE (Type 1)" do
-      assert PermanentBoot.boot_at_start?(canon_spec("architect"))
+    test "starfleet.yaml (real canon) → boot_at_start? TRUE (the boot front-desk, reorg 2026-07-19)" do
+      assert PermanentBoot.boot_at_start?(canon_spec("starfleet"))
     end
 
-    test "starfleet.yaml (real canon) → boot_at_start? FALSE (prepared, not yet activated)" do
-      # Since the 2026-07-19 reorg starfleet is an ordinary bwrap orchestrator (host_native:false); it is
-      # PREPARED but not booted (boot_at_start:false) — activation (flip + arch → on-demand) is a next step.
-      refute PermanentBoot.boot_at_start?(canon_spec("starfleet")),
-             "canon starfleet is boot_at_start:false — prepared, not yet the active boot-orchestrator"
+    test "architect.yaml (real canon) → boot_at_start? FALSE (per-project, spawned on-open not at boot)" do
+      # Since the 2026-07-19 reorg the architect is per-project: starfleet is the boot front-desk, the arch
+      # is spawned on-open by create_project/relaunch — never at fleet boot.
+      refute PermanentBoot.boot_at_start?(canon_spec("architect")),
+             "canon architect is boot_at_start:false — per-project, spawned on-open, not a permanent"
     end
 
     test "engineer.yaml (real canon) → boot_at_start? FALSE (one-shot worker)" do
       refute PermanentBoot.boot_at_start?(canon_spec("engineer"))
     end
 
-    test "select_permanent on the 7 canon cap-profiles → architect alone" do
+    test "select_permanent on the 7 canon cap-profiles → starfleet alone" do
       profiles =
         ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
         |> Enum.map(fn n ->
@@ -316,7 +316,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
         end)
 
       selected = PermanentBoot.select_permanent(profiles)
-      assert [%Fleet.CapProfile{metadata: %{"name" => "architect"}}] = selected
+      assert [%Fleet.CapProfile{metadata: %{"name" => "starfleet"}}] = selected
     end
   end
 
