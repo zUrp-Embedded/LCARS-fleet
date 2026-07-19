@@ -28,7 +28,7 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
-  test "canonical pod.drift (type-only, producer to come): log warning + count++" do
+  test "canonical pod.drift (type-only, DORMANT — no producer, F-08): log warning + count++" do
     {pid, _} = start_consumer()
 
     send(

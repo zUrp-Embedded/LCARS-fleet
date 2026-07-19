@@ -24,14 +24,17 @@ events:
   # producer if pod progression becomes observable.
   pod.completed: []
   pod.failed: []
-  # pod.drift: consumed by DriftMonitor; producer LIVE (F-C043) — Fleet.Spawner.PermanentBoot
-  # emits it (source :spawner) on a corrupt versioned base seed. drift_count>=3 => Cat5Escalator.
+  # pod.drift: consumed by DriftMonitor + AuditConsumer (wired + tested), but DORMANT — NO producer
+  # emits it (codex audit F-08 2026-07-19: the claimed F-C043 producer in Fleet.Spawner.PermanentBoot
+  # does NOT exist, and the "corrupt versioned base seed" it was meant to detect vanished with the
+  # boot-from-base nuke / unified graine flow). Consumers stay ready; do NOT count as live coverage.
   pod.drift: []
   # CAT-5 CHAIN (partially wired, Q2 2026-07-09): `workflow_map.failed` and `audit.verdict` now have a
   # DRAFT producer (`Pilot.StepRunConsumer`, source `:workflow`) → the DriftMonitor→Cat5Escalator/
   # CoordBackend→coord rail BLINKS end-to-end on a real signal (draft, not the final signal — see the
-  # per-key comments). STILL DORMANT: `oauth.refresh.failed` (never implemented on the launcher/credentials side) — no
-  # honest signal to emit yet. (`pod.drift` is now LIVE via Fleet.Spawner.PermanentBoot, F-C043.) Keys kept: consumers wired + tested, ready.
+  # per-key comments). STILL DORMANT (consumers wired + tested, NO producer, not live coverage):
+  # `oauth.refresh.failed` (never implemented launcher/credentials side) and `pod.drift`
+  # (F-08: claimed producer absent). Keys kept: consumers wired + tested, ready.
   # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
   # attempts (agent never acked) — payload `pod_id`/`reason` (stable category string, JSON-safe;
   # keys the IncidentRegistry dedup signature)/`reason_detail`/`pane`. Consumed by

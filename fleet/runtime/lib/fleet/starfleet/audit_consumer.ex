@@ -11,8 +11,9 @@ defmodule Fleet.Starfleet.AuditConsumer do
     * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
       `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
 
-  `:"pod.drift"` handler (type-only clause): producer LIVE — `Fleet.Spawner.PermanentBoot`
-  (source `:spawner`, F-C043); also consumed by DriftMonitor.
+  `:"pod.drift"` handler (type-only clause): DORMANT — NO producer emits it (codex audit F-08
+  2026-07-19; the claimed F-C043 PermanentBoot producer does not exist). Also consumed by
+  DriftMonitor. Kept wired for the day a real drift signal is produced.
 
   GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
   ONLY (no tuple format exists on the Bus). No runtime side effect
@@ -21,7 +22,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
   Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
   → tests instantiate without the global subscribe.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -95,9 +96,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # pod.drift: producer LIVE via `Fleet.Spawner.PermanentBoot` (source :spawner, F-C043). This
-  # AuditConsumer clause stays TYPE-ONLY (audit rail, no anti-spoof), UNLIKE DriftMonitor which
-  # matches source: :spawner.
+  # pod.drift: DORMANT (codex audit F-08) — NO producer emits it. This AuditConsumer clause stays
+  # TYPE-ONLY (audit rail, no anti-spoof), UNLIKE DriftMonitor which matches source: :spawner.
   def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
     Logger.warning(
       "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>
