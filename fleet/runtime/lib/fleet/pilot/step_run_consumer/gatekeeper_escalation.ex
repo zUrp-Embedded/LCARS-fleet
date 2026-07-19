@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   (hardened boundary: `@enforce_keys` forces the fields, an access `seams.<other>` does not
   compile).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -83,10 +83,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
         ) :: {:ok, term()} | {:error, term()}
   def dispatch(workflow_map, step, outputs, payload, n, role, %Seams{} = seams) do
     gk_role = Fleet.Pilot.Roles.gatekeeper_role()
-    # Judge naming (same shape as the PR judges): one pod per eval'd issue, deterministic →
-    # a re-dispatch of the same eval lands on the same pod id (idempotent), and the single-brick
-    # model keeps concurrent same-project gatekeepers structurally absent.
-    pod_id = "issue-#{n}-#{gk_role}"
+    # Judge naming via the SINGLE AUTHORITY `PodId.for_issue` — REPO-QUALIFIED (codex audit F-02
+    # 2026-07-19: the bare `issue-#{n}-…` literal collided across repos — two projects on issue 42
+    # shared one pod id, so the first live pod could receive the OTHER project's mandate).
+    # Deterministic → a re-dispatch of the same eval lands on the same pod id (idempotent).
+    pod_id = Fleet.Pilot.PodId.for_issue(seams.repo, n, gk_role)
 
     gate = get_in(workflow_map, ["steps", step, "gate"])
 

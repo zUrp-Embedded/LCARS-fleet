@@ -81,8 +81,11 @@ spec:
     forge_signing_allowed: false
   modop_set:
     default: [rubber-duck]
-    optional: [fire-mode]
-    incompatible: [[fire-mode, long-session-discipline]]
+    optional: []
+    incompatible: []
+    # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,
+    # self-exit one-shot — predates MCP submit_result and contradicted the runtime protocol; the
+    # anti-conversation discipline lives in the base worker SP blocks.)
   project: null
   # The gatekeeper is a JUDGE: it receives a DEFUSED I-CBC GateBrief (context +
   # deliverable + verdict contract, NO executable instruction). Declared by catalogue

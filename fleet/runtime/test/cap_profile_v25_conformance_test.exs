@@ -235,4 +235,44 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     refute "create_project" in arch
     refute "import_project" in arch
   end
+
+  test "F-05 (codex audit): no canon profile default-injects a modop whose SP contradicts its lifecycle" do
+    # fire-mode's v1.5 doctrine (JSON on stdout, self-exit one-shot) predates MCP submit_result:
+    # injected into a pipe/forever profile it ORDERS the agent the opposite of the runtime
+    # protocol — an executed contract, not lateral documentation. Semantic guard on the DATA:
+    # a non-one-shot profile must not default a one-shot-doctrine modop.
+    modop_sp = fn name ->
+      path =
+        Path.join([
+          __DIR__,
+          "..",
+          "priv",
+          "cap_profile",
+          "canon",
+          "modop-bundles",
+          name,
+          "sp.md"
+        ])
+
+      case File.read(path) do
+        {:ok, body} -> body
+        _ -> ""
+      end
+    end
+
+    for profile <- ~w(engineer consultant qualifier reviewer gatekeeper architect starfleet) do
+      raw = YamlElixir.read_from_file!(Path.join(@canon_dir, "#{profile}.yaml"))
+      scope = get_in(raw, ["spec", "invocation", "lifetime_scope"])
+      defaults = get_in(raw, ["spec", "modop_set", "default"]) || []
+
+      if scope != "one-shot" do
+        for modop <- defaults do
+          body = modop_sp.(modop)
+
+          refute body =~ "one-shot",
+                 "#{profile} (#{scope}) default-injects modop #{modop} carrying one-shot doctrine"
+        end
+      end
+    end
+  end
 end

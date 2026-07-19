@@ -345,7 +345,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert ctx.role == "engineer"
 
     # Judge naming (reorg 2026-07-19): one pod per eval'd issue, project-bound one-shot.
-    assert_received {:enqueued, "issue-1-gatekeeper", attrs}
+    assert_received {:enqueued, "o-r-issue-1-gatekeeper", attrs}
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
     assert attrs.metadata["step"] == "build"
@@ -353,7 +353,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert attrs.metadata["outputs"] == %{"sev" => "high"}
 
     # The one-shot spawn (its boot kick pulls the enqueued brief — no separate wake needed).
-    assert_received {:spawned, "issue-1-gatekeeper", spawn_opts}
+    assert_received {:spawned, "o-r-issue-1-gatekeeper", spawn_opts}
     assert spawn_opts[:repo] == "o/r"
     assert is_binary(spawn_opts[:brief])
 
@@ -375,8 +375,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc(spawner: AliveSpawner)
              )
 
-    assert_received {:enqueued, "issue-1-gatekeeper", _attrs}
-    assert_received {:wake, "issue-1-gatekeeper"}
+    assert_received {:enqueued, "o-r-issue-1-gatekeeper", _attrs}
+    assert_received {:wake, "o-r-issue-1-gatekeeper"}
   end
 
   test "escalation: ENVELOPED outputs %{status,result} -> unwrapped before the brief (#2)" do

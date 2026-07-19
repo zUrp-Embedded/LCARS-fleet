@@ -91,9 +91,12 @@ spec:
     gitconfig: true
     forge_signing_allowed: true
   modop_set:
-    default: [fire-mode]
+    default: []
     optional: [tdd, subagent-driven, rubber-duck]
-    incompatible: [[fire-mode, long-session-discipline]]
+    incompatible: []
+    # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,
+    # self-exit one-shot — predates MCP submit_result and contradicted the runtime protocol; the
+    # anti-conversation discipline lives in the base worker SP blocks.)
   project: null
   # The engineer IS a dev: it commits its code in its own workspace (git-native). The
   # system verifies (I-CBC gate: identity/secrets/base) then pushes on the branch IT
