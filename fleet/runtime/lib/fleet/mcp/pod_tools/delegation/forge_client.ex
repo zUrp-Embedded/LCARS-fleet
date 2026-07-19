@@ -5,8 +5,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   The contract belongs to the CONSUMER: the callbacks are EXACTLY the
   functions that `Delegation` calls (create_issue, add_label, get_issue,
-  list_pulls, parse_feature_branch, pr_review_state) — not the full
-  surface of the pilot's forge client.
+  list_pulls, parse_feature_branch, pr_review_state, post_comment,
+  close_issue) — not the full surface of the pilot's forge client.
 
   ## Why a RUNTIME seam (and not a compile dep)
 
@@ -84,6 +84,26 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
                  outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
                }}
               | {:error, term()}
+
+  @doc """
+  Posts a comment on an issue. Delegation call site: the SYSTEM's supersede-retirement trace
+  on the replaced ticket (default opts = system token — the system executes the retirement,
+  the arch's decision is visible on the NEW ticket's filiation trailer).
+  """
+  @callback post_comment(
+              repo :: String.t(),
+              issue_number :: integer(),
+              body :: String.t(),
+              opts :: keyword()
+            ) :: {:ok, term()} | {:error, term()}
+
+  @doc """
+  Closes an issue (state=closed). Delegation call site: the supersede retirement — the arch
+  NEVER closes anything itself (no close tool); it expresses `supersedes: N` on `create_issue`
+  and the SYSTEM executes the retirement.
+  """
+  @callback close_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
+              {:ok, term()} | {:error, term()}
 
   # Canonical default: the real forge client on the fleet_pilot side. Literal atom (not a
   # literal remote call) → no compile-time dep. Set HERE once.

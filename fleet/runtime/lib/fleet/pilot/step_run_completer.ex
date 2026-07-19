@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
@@ -222,7 +222,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     body =
       "**Architecte** (auteur du brief) — " <>
         lead <>
-        "\n\nReprends ce brief : corrige-le puis re-soumets (relance le cycle), ou tranche avec ton humain " <>
+        "\n\nReprends ce brief : corrige-le puis re-soumets via `create_issue` avec " <>
+        "`supersedes: <n° de CE ticket>` — la fleet retire alors l'ancien ticket elle-même " <>
+        "(jamais deux tickets vivants pour la même brique). Ou tranche avec ton humain " <>
         "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
         "`lcars-awaits-arch` est posé.\n\n" <> signature
 

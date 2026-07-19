@@ -179,6 +179,92 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    # Supersede retirement writes — captured (the tests assert the SYSTEM comment+close pair).
+    @impl true
+    def post_comment(repo, n, body, opts) do
+      send(self(), {:post_comment, repo, n, body, opts})
+      {:ok, %{}}
+    end
+
+    @impl true
+    def close_issue(repo, n, opts) do
+      send(self(), {:close_issue, repo, n, opts})
+      {:ok, %{}}
+    end
+  end
+
+  # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
+  # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
+  defmodule InFlightSupersedeForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
+
+    @impl true
+    def list_pulls(_repo, _opts),
+      do: {:ok, [%{"number" => 9, "state" => "open", "merged" => false, "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}}]}
+
+    @impl true
+    def parse_feature_branch("lcars/issue-5-engineer"), do: {:ok, {5, "engineer"}}
+    def parse_feature_branch(_), do: :error
+
+    @impl true
+    def pr_review_state(_repo, _index, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def create_issue(_repo, _title, _body, _opts),
+      do: raise("InFlightSupersedeForge: create_issue must NOT be reached (preflight refuses)")
+
+    @impl true
+    def add_label(_repo, _n, _label, _opts),
+      do: raise("InFlightSupersedeForge: add_label must NOT be reached")
+
+    @impl true
+    def post_comment(_repo, _n, _body, _opts),
+      do: raise("InFlightSupersedeForge: post_comment must NOT be reached")
+
+    @impl true
+    def close_issue(_repo, _n, _opts),
+      do: raise("InFlightSupersedeForge: close_issue must NOT be reached")
+  end
+
+  # Supersede pre-flight stub: issue 5 is already CLOSED → filiation only, NO retirement write
+  # (a re-take of an abandoned brick is legitimate).
+  defmodule ClosedTargetForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "closed"}}
+
+    @impl true
+    def list_pulls(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def parse_feature_branch(_head), do: :error
+
+    @impl true
+    def pr_review_state(_repo, _index, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def create_issue(repo, title, body, opts) do
+      send(self(), {:create_issue, repo, title, body, opts})
+      {:ok, 78}
+    end
+
+    @impl true
+    def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+
+    @impl true
+    def post_comment(_repo, _n, _body, _opts),
+      do: raise("ClosedTargetForge: post_comment must NOT be reached (target already closed)")
+
+    @impl true
+    def close_issue(_repo, _n, _opts),
+      do: raise("ClosedTargetForge: close_issue must NOT be reached (target already closed)")
   end
 
   # Onboarding stub (`:project_onboard` seam): touches NEITHER forge NOR disk — returns a fictitious
@@ -266,6 +352,14 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def add_label(_repo, _n, _label, _opts),
       do: raise("RecordingForge is read-only — unexpected add_label in these tests")
+
+    @impl true
+    def post_comment(_repo, _n, _body, _opts),
+      do: raise("RecordingForge is read-only — unexpected post_comment in these tests")
+
+    @impl true
+    def close_issue(_repo, _n, _opts),
+      do: raise("RecordingForge is read-only — unexpected close_issue in these tests")
   end
 
   describe "get_issue_status (arch tracking — repo from the POD BINDING, no wire param)" do
@@ -421,6 +515,64 @@ defmodule Fleet.MCP.PodToolsTest do
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
       :ok
+    end
+
+    test "supersedes: OPEN target without live PR → new ticket + SYSTEM retirement (comment then close) + filiation" do
+      # The #5 zombie loop (live 2026-07-19): the rework gesture must carry BOTH halves — without
+      # the retirement the old ticket re-dispatches on the arch's submit_result, forever.
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{
+                   "title" => "Brique v2",
+                   "brief" => "brief re-cadré",
+                   "supersedes" => 5
+                 },
+                 pod_state(uniq("pod-arch"))
+               )
+
+      # Creation carries the filiation trailer IN the source of truth (the issue body).
+      assert_received {:create_issue, "fleet/demo", "Brique v2", body, _opts}
+      assert body =~ "Remplace : #5"
+
+      # Retirement: SYSTEM comment (pointing at the successor) THEN close — on the OLD ticket.
+      assert_received {:post_comment, "fleet/demo", 5, comment, _opts}
+      assert comment =~ "#77"
+      assert_received {:close_issue, "fleet/demo", 5, _opts}
+
+      # The result echoes the filiation (protocol-carried, not arch memory).
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["supersedes"] == 5
+      refute Map.has_key?(result, "supersede_warning")
+    end
+
+    test "supersedes: target with a LIVE fleet PR → REFUSED, nothing created, nothing written" do
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, InFlightSupersedeForge)
+
+      assert {:error, {:supersedes_target_in_flight, 5}, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{"title" => "Brique v2", "brief" => "x", "supersedes" => 5},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      refute_received {:create_issue, _, _, _, _}
+    end
+
+    test "supersedes: target already CLOSED → filiation only, NO retirement write (re-take of an abandoned brick)" do
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, ClosedTargetForge)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{"title" => "Reprise", "brief" => "x", "supersedes" => 5},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, "fleet/demo", "Reprise", body, _opts}
+      assert body =~ "Remplace : #5"
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["supersedes"] == 5
     end
 
     test "inline brief is ALWAYS materialized: doc committed in work/ops, ticket = dedicated summary + pinned pointer",

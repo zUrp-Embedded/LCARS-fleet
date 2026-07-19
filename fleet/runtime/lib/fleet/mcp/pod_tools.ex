@@ -108,7 +108,13 @@ defmodule Fleet.MCP.PodTools do
           "authored+committed the doc yourself (multi-doc brief), pass `brief_ref` (entry doc, e.g. " <>
           "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
           "human summary, unchanged. Returns {\"status\":\"issue_created\",\"issue\":N," <>
-          "\"title\":<echoed as registered — confirm your number-to-title association on it>}."
+          "\"title\":<echoed as registered — confirm your number-to-title association on it>}. " <>
+          "REWORK of a rejected/abandoned ticket: pass `supersedes: <old issue number>` — the " <>
+          "fleet then RETIRES the old ticket itself (system comment + close; never two live " <>
+          "tickets for one brick, never close anything yourself — you have no close tool). " <>
+          "Refused if the old ticket has a LIVE PR (let it land or escalate). The result echoes " <>
+          "{\"supersedes\":N}; a \"supersede_warning\" means the old ticket could NOT be closed — " <>
+          "relay it to your human."
       )
     end
 
@@ -119,7 +125,8 @@ defmodule Fleet.MCP.PodTools do
         "brief" => %{"type" => "string"},
         "summary" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
-        "brief_sha" => %{"type" => "string"}
+        "brief_sha" => %{"type" => "string"},
+        "supersedes" => %{"type" => "integer"}
       },
       "required" => ["title", "brief"]
     })
@@ -359,7 +366,14 @@ defmodule Fleet.MCP.PodTools do
           _ -> nil
         end
 
-      case Delegation.create_issue(title, brief, state, brief_pointer(args), summary) do
+      case Delegation.create_issue(
+             title,
+             brief,
+             state,
+             brief_pointer(args),
+             summary,
+             args["supersedes"]
+           ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end

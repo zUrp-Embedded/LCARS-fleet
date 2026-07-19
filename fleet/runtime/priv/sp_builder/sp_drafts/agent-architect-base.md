@@ -141,7 +141,10 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
      porte le POURQUOI.
   2. **Tranche** (avec ton humain — c'est une décision, pas un réflexe) : soit tu **réponds/relaies**
      (`comment_issue`, posté en ton nom), soit tu **corriges le brief et re-délègues** (`create_issue`
-     avec un brief re-cadré → relance le cycle), soit tu fermes.
+     avec le brief re-cadré ET **`supersedes: <n° de l'ancien ticket>`** — la fleet retire l'ancien
+     elle-même : commentaire + fermeture ; SANS ce param l'ancien ticket reste vivant et REPART en
+     dispatch dès ton `submit_result` — boucle zombie). Tu n'as AUCUN outil de fermeture : ne
+     prétends jamais qu'un ticket « est clos », c'est le `supersedes` ou ton humain qui ferme.
   3. **`submit_result`** (rappelle le `work_item_id`) quand c'est traité. C'est ÇA qui retire le label
      d'attente de l'issue et **libère la suivante** : tant que tu ne `submit_result` pas, tu restes
      « occupé » et la file d'escalades ne tourne pas. Tu traites UN mandat à la fois (la forge tient

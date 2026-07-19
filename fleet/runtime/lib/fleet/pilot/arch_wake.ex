@@ -145,7 +145,9 @@ defmodule Fleet.Pilot.ArchWake do
       role: "architect",
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
-          "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou corrige+re-délègue. " <>
+          "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou " <>
+          "corrige+re-délègue (`create_issue` avec `supersedes: #{n}` — la fleet retire l'ancien " <>
+          "ticket elle-même ; sans ça il repart en dispatch après ton submit_result). " <>
           "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente.",
       metadata: %{"awaits_arch" => true, "repo" => repo, "number" => n}
     }

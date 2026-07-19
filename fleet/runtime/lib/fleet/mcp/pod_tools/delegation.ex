@@ -73,7 +73,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec create_issue(String.t(), String.t(), map(), {String.t(), String.t()} | nil, String.t() | nil) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(title, brief, state, brief_pointer \\ nil, summary \\ nil)
+  def create_issue(title, brief, state, brief_pointer \\ nil, summary \\ nil, supersedes \\ nil)
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
     # gate (the pod's spawn binding — reorg 2026-07-19): the arch has "the project", it never names
@@ -87,11 +87,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
     # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
     # committed doc carries the detail; degraded → inline legacy, never a wall).
+    # `supersedes` (2026-07-19, #5 zombie loop): the rework gesture is ONE act with BOTH halves —
+    # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
+    # Without the second half, the old ticket stays dispatchable and loops (consultant re-reviews
+    # the same stale brief every time the arch answers its escalation).
     with {:ok, forge} <- conforming_forge(),
          {:ok, %{role: role, repo: repo}} <- require_architect(state),
-         {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
+         {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
+         {:ok, target_state} <- supersedes_preflight(forge, repo, supersedes) do
       {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
-      do_create_issue(forge, repo, title, with_pointer(body, pointer), token: identity.token)
+      full_body = body |> with_pointer(pointer) |> with_supersedes(supersedes)
+
+      case do_create_issue(forge, repo, title, full_body, token: identity.token) do
+        {:ok, result} ->
+          {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
+
+        err ->
+          err
+      end
     else
       {:error, :role_token_unavailable} = err ->
         # Pod proven but role token not found on disk = provisioning hole (the role account has no
@@ -615,6 +628,82 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp with_pointer(brief, {ref, sha}),
     do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
+  # Filiation trailer — written INTO the source of truth (the issue body on the forge), never a
+  # side-channel: "#9 refait #5" must survive every session (arch doctrine: protocol-carried
+  # correlation, not memory). FR: forge content rendered to the human.
+  defp with_supersedes(body, nil), do: body
+
+  defp with_supersedes(body, n),
+    do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
+
+  # Supersede pre-flight — BEFORE any write, fail-loud on anything unverifiable: the retirement
+  # is a destructive gesture executed by the SYSTEM on the arch's intent. A target with a LIVE
+  # fleet PR is REFUSED (never decapitate an in-flight brick — let it land or escalate), and a
+  # mute forge is a refusal, not a guess (a half-checked supersede could retire the wrong brick).
+  # An already-closed target is LEGITIMATE (re-take an abandoned brick): filiation only, no
+  # retirement to execute.
+  defp supersedes_preflight(_forge, _repo, nil), do: {:ok, nil}
+
+  defp supersedes_preflight(forge, repo, n) when is_integer(n) and n > 0 do
+    case forge.get_issue(repo, n, []) do
+      {:ok, %{"state" => "closed"}} ->
+        {:ok, :closed}
+
+      {:ok, _open} ->
+        case find_issue_pr(forge, repo, n) do
+          {:ok, %{"state" => "open"}} -> {:error, {:supersedes_target_in_flight, n}}
+          {:ok, _closed_pr} -> {:ok, :open}
+          :none -> {:ok, :open}
+          {:error, _} -> {:error, {:supersedes_target_unverifiable, n}}
+        end
+
+      err ->
+        Logger.warning(
+          "Delegation: supersedes preflight ##{n} on #{repo} unreadable (#{inspect(err)}) — REFUSED"
+        )
+
+        {:error, {:supersedes_target_unreadable, n}}
+    end
+  end
+
+  defp supersedes_preflight(_forge, _repo, _bad), do: {:error, :invalid_supersedes}
+
+  # Retirement of the replaced ticket — SYSTEM identity (default token: the system executes,
+  # the arch only expressed the intent), comment BEFORE close (chronology readable on the forge,
+  # same stance as the gatekeeper seal). The awaits-arch label is left as historical trace: a
+  # CLOSED issue leaves the poller and the escalation inbox by itself (both list open only).
+  # A retirement failure NEVER unwinds the created ticket (it exists): the result says so
+  # honestly (`supersede_warning`) and the human closes by hand — loud, no half-lie.
+  defp retire_superseded(_forge, _repo, nil, _target_state, result), do: result
+
+  defp retire_superseded(_forge, _repo, n, :closed, result),
+    do: Map.put(result, "supersedes", n)
+
+  defp retire_superseded(forge, repo, n, :open, result) do
+    new_number = Map.get(result, "issue")
+
+    comment =
+      "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
+
+    with {:ok, _} <- forge.post_comment(repo, n, comment, []),
+         {:ok, _} <- forge.close_issue(repo, n, []) do
+      Map.put(result, "supersedes", n)
+    else
+      err ->
+        Logger.error(
+          "Delegation: supersede retirement of #{repo}##{n} FAILED (#{inspect(err)}) — " <>
+            "##{new_number} created but ##{n} still open (zombie risk): close it manually"
+        )
+
+        result
+        |> Map.put("supersedes", n)
+        |> Map.put(
+          "supersede_warning",
+          "le retrait de ##{n} a échoué — il est encore ouvert, fais-le fermer par ton humain"
+        )
+    end
+  end
+
   # Places the issue (author = role account via `author_opts`, assignee = human owner) and its visual label.
   defp do_create_issue(forge, repo, title, brief, author_opts) do
     # assignee = the HUMAN owner (fixed point: routing + ownership, never the role). Forge login
@@ -662,13 +751,22 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # `{:ok, map}`, `:none` (no fleet PR), or `{:error, :forge_unreachable}` (the read failed —
   # distinct from :none by design, cf. put_pr/2).
   defp issue_pr_status(forge, repo, number) do
-    # The PR of issue #n = the one whose head is the feature-branch `lcars/issue-<n>-<role>`. Parsing
-    # this format is delegated to the SINGLE AUTHORITY `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
-    # (co-located with its builder `feature_branch/2`) instead of rebuilding the prefix by hand: a
-    # format change happens in ForgeProtocol alone. We reach it via the INJECTED `forge` (resolved
-    # runtime, default `Fleet.Pilot.ForgeClient`, which re-exports `parse_feature_branch` to ForgeProtocol) —
-    # so no compile-time dep from fleet_mcp to fleet_pilot (that is why we keep the call via the seam
-    # rather than a direct call to ForgeProtocol, which would create that dependency).
+    case find_issue_pr(forge, repo, number) do
+      {:ok, pr} -> {:ok, render_pr(forge, repo, pr)}
+      other -> other
+    end
+  end
+
+  # The fleet PR of issue #n (raw Gitea map) — SHARED by the status read (then rendered) and the
+  # supersede pre-flight (then state-checked). The PR of issue #n = the one whose head is the
+  # feature-branch `lcars/issue-<n>-<role>`. Parsing this format is delegated to the SINGLE
+  # AUTHORITY `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1` (co-located with its builder
+  # `feature_branch/2`) instead of rebuilding the prefix by hand: a format change happens in
+  # ForgeProtocol alone. We reach it via the INJECTED `forge` (resolved runtime, default
+  # `Fleet.Pilot.ForgeClient`, which re-exports `parse_feature_branch` to ForgeProtocol) — so no
+  # compile-time dep from fleet_mcp to fleet_pilot (that is why we keep the call via the seam
+  # rather than a direct call to ForgeProtocol, which would create that dependency).
+  defp find_issue_pr(forge, repo, number) do
     case forge.list_pulls(repo, []) do
       {:ok, pulls} ->
         pulls
@@ -679,15 +777,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
         |> pick_pr()
         |> case do
           nil -> :none
-          pr -> {:ok, render_pr(forge, repo, pr)}
+          pr -> {:ok, pr}
         end
 
-      # LOUD + typed: the caller renders {"error": "forge_unreachable"} — a swallowed outage
-      # must never read as "no fleet PR for this issue".
+      # LOUD + typed: the callers must never read a swallowed outage as "no fleet PR for this
+      # issue" (status renders {"error": "forge_unreachable"}, the preflight REFUSES).
       err ->
         Logger.warning(
-          "Delegation: issue_status #{repo} forge unreachable (list_pulls → " <>
-            "#{inspect(err)}) — falling back to pr={error: forge_unreachable}"
+          "Delegation: find_issue_pr #{repo}##{number} forge unreachable (list_pulls → " <>
+            "#{inspect(err)}) — typed :forge_unreachable"
         )
 
         {:error, :forge_unreachable}
