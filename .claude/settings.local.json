@@ -6,7 +6,8 @@
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [
-      "/home/commons"
+      "/home/commons",
+      "/home/projects.work/LCARS/work"
     ]
   },
   "hooks": {
