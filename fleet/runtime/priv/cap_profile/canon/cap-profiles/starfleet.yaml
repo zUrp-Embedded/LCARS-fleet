@@ -19,10 +19,14 @@ metadata:
   role_index: 0
   protected: true
   fleet_level: true
+  # Large focal length (cf. DESIGN-carte-des-roles §2/§5): starfleet sees the WHOLE project space.
+  # RW on both — NOT to edit files routinely (the skills create_project/import_project do the structured
+  # work, system-side), but as a LEVER to act as the human's hand when needed. Default runtime activity
+  # is low. (An ordinary parametric pod: this wide RW mount is the only thing that sets its focal length.)
   mounts:
-    - path: /home/projects        # RO: read every project at once to frame/organize
-      mode: ro
-    - path: /home/projects.work   # RW: write the DOC (moon-shot/beyond), upstream of tickets
+    - path: /home/projects        # RW: act on any project's main on the human's behalf, when needed
+      mode: rw
+    - path: /home/projects.work   # RW: the DOC (moon-shot/beyond), upstream of tickets
       mode: rw
 spec:
   # Worker role (interactive front-desk): brief = executable instruction, never a judge. REQUIRED (schema).
@@ -39,15 +43,13 @@ spec:
       - WebSearch
       - ToolSearch     # loads the deferred tools (Monitor, mcp__fleet__*)
       - Monitor        # wake-by-flag (watch.sh) — wake without content send-keys
-      # Fleet MCP tools of the global orchestrator (delegation + project organization) —
-      # get_work_item/submit_result (universal) come from the launcher.
+      # Fleet MCP tools of the FLEET-MASTER: ONLY the portfolio head (create/adopt a project + card
+      # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
+      # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
+      # it does not do a project's métier). get_work_item/submit_result (universal) come from the launcher.
       - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
-      - mcp__fleet__create_project
+      - mcp__fleet__create_project       # start a fresh project (repo + dual-dir + card)
       - mcp__fleet__import_project       # twin of create_project: ADOPTS an existing repo
-      - mcp__fleet__create_issue
-      - mcp__fleet__get_issue_status
-      - mcp__fleet__list_escalations     # return channel: reads the awaits-arch escalations
-      - mcp__fleet__comment_issue        # return channel: replies on an in-flight ticket
     disallowedTools:
       - web_search
       - web_fetch
@@ -77,13 +79,13 @@ spec:
     lifetime_scope: forever  # permanent front-desk
     model: opus
     effort: high
-    # PREPARED, not yet ACTIVATED. This profile DECLARES starfleet's target tool surface (the orchestrator
-    # MCP tools below), but activation is a deliberate later step with THREE flips, none silent:
-    #   1. this `boot_at_start` → true (+ the arch → on-demand + the create/relaunch flows);
-    #   2. the MCP delegation/onboarding gate (`Delegation.require_architect`) must ADMIT starfleet — today
-    #      those four tools are architect-only server-side, so starfleet would be refused if it called them;
-    #   3. a `starfleet` forge token deployed (issues authored in starfleet's own account, like the arch).
-    # Until all three land, starfleet is defined but does not boot and cannot yet delegate.
+    # PREPARED, not yet ACTIVATED (cf. DESIGN-carte-des-roles §13). Activation = deliberate flips, none silent:
+    #   1. this `boot_at_start` → true (starfleet becomes the boot front-desk; the arch → on-demand per-project);
+    #   2. the MCP onboarding gate re-SPLIT: `create_project`/`import_project` become fleet-master-gated
+    #      (role == starfleet), not architect-only — today those tools are architect-only server-side, so
+    #      starfleet would be refused if it called them;
+    #   3. the `starfleet` forge account made org-admin (forge-wide: create/delete any repo) + token deployed.
+    # Until these land, starfleet is defined but does not boot and cannot yet onboard.
     boot_at_start: false
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
