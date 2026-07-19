@@ -243,7 +243,8 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok,
        %{
          "state" => Application.get_env(:fleet_mcp, :test_issue_state, "open"),
-         "labels" => labels
+         "labels" => labels,
+         "title" => "Brique de test"
        }}
     end
 
@@ -330,7 +331,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert_received {:get_issue, "fleet/bound", 42}
     end
 
-    test "F-C047: `delivered: true` when the issue is closed AND carries `stage/merged` (merge proof)" do
+    test "F-C047: `outcome: merged` when the issue is closed AND carries `stage/merged` (merge proof)" do
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
       Application.put_env(:fleet_mcp, :test_issue_labels, ["stage/merged"])
       pod = uniq("pod-arch")
@@ -343,13 +344,15 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       assert {:ok, result} = Jason.decode(txt)
-      assert result["issue_state"] == "closed"
-      assert result["delivered"] == true
+      assert result["outcome"] == "merged"
+      assert result["title"] == "Brique de test"
+      # Post-merge the PR left the open list: nothing true to say → NO `pr` key (never null).
+      refute Map.has_key?(result, "pr")
     end
 
-    test "F-C047: issue CLOSED WITHOUT `stage/merged` (non-delivery close: onboarding/manual) → `delivered: false`" do
+    test "F-C047: issue CLOSED WITHOUT `stage/merged` (non-delivery close: onboarding/manual) → `outcome: closed_without_merge`" do
       # The heart of the finding: `closed` alone conflated delivery-by-merge and close-without-delivery
-      # (onboarding marker / manual close) → false `delivered:true` → the arch chained N+1 on an
+      # (onboarding marker / manual close) → a false delivery signal → the arch chained N+1 on an
       # ABANDONED brick. Closed but without merge proof = NOT delivered (the arch waits, safe direction).
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
       Application.put_env(:fleet_mcp, :test_issue_labels, ["lcars-onboarded"])
@@ -363,8 +366,22 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       assert {:ok, result} = Jason.decode(txt)
-      assert result["issue_state"] == "closed"
-      assert result["delivered"] == false
+      assert result["outcome"] == "closed_without_merge"
+    end
+
+    test "open issue without a PR → `outcome: open`, no `pr` key (nothing to say = say nothing)" do
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 7},
+                 pod_state(pod)
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["outcome"] == "open"
+      refute Map.has_key?(result, "pr")
     end
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default)" do

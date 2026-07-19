@@ -25,7 +25,7 @@ defmodule Fleet.MCP.PodTools do
       - `create_project`   : the arch starts a fresh project (repo + dual-dir + scaffold).
       - `import_project`   : the arch imports an EXISTING forge repo (dual-dir, main content
         intact — ≠ create_project which starts a fresh one).
-      - `get_issue_status` : the arch tracks a delegation (issue + PR, `delivered`).
+      - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
 
@@ -107,7 +107,8 @@ defmodule Fleet.MCP.PodTools do
           "what/why/done-when (without it the ticket shows a raw excerpt). If you ALREADY " <>
           "authored+committed the doc yourself (multi-doc brief), pass `brief_ref` (entry doc, e.g. " <>
           "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
-          "human summary, unchanged. Returns {\"status\":\"issue_created\",\"issue\":N}."
+          "human summary, unchanged. Returns {\"status\":\"issue_created\",\"issue\":N," <>
+          "\"title\":<echoed as registered — confirm your number-to-title association on it>}."
       )
     end
 
@@ -213,11 +214,17 @@ defmodule Fleet.MCP.PodTools do
       name("Get Issue Status")
 
       description(
-        "Check the state of a delegated issue of YOUR project (issue + linked PR): issue open/closed, " <>
-          "PR merged or not, review verdicts. Use it to TRACK an issue before chaining — e.g. validate " <>
-          "the delivery (issue closed by the merge) of issue N BEFORE posting issue N+1. " <>
-          "`number` = the issue number. " <>
-          "Returns {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
+        "Check the state of a delegated issue of YOUR project (issue + linked PR). " <>
+          "`number` = the issue number. Returns {\"issue\":N,\"title\":...,\"outcome\":...} " <>
+          "plus \"pr\" only when there is something true to say. `outcome` values: " <>
+          "\"merged\" (closed BY the merge — the delivery proof; only chain issue N+1 on this) | " <>
+          "\"closed_without_merge\" (closed WITHOUT delivery: abandon/rejection — do NOT chain) | " <>
+          "\"in_review\" (PR open, review running) | \"open\" (no PR yet) | " <>
+          "\"unknown\" (forge unreachable — retry, decide nothing on it). " <>
+          "`pr` semantics (in-flight tracking): {number, verdicts} of the OPEN PR; the key is " <>
+          "ABSENT when no PR exists to talk about — including AFTER the merge (by design: the " <>
+          "delivery info is `outcome`, not `pr`); {\"error\":\"forge_unreachable\"} means the PR " <>
+          "read failed — never confuse it with 'no PR'."
       )
     end
 

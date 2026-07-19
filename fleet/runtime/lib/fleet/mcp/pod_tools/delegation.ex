@@ -154,56 +154,83 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @doc """
   Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
   delegation stays reserved to the architect, consistent with `create_issue`/`create_project`).
+  Read-only (ForgeClient); the repo comes from the CHANNEL BINDING (`require_architect/1`),
+  never from a wire argument.
 
-  "Delivered" = issue closed by the merge (`Closes #N`): a multi-issue sequencing
-  signal (the arch only chains issue N+1 on `delivered: true`). Read-only
-  (ForgeClient). The repo is PASSED explicitly, NEVER read from a global memory: an
-  arch tracking several projects in parallel names the ONE it is querying.
+  Result: `{"issue", "title", "outcome"}` + `"pr"` when there is something true to say.
+  `outcome` is the ONE tracking verdict (subsumes the old `issue_state`+`delivered` pair) —
+  the arch only chains issue N+1 on `outcome == "merged"`.
   """
   @spec issue_status(integer(), map()) :: {:ok, map()} | {:error, term()}
   def issue_status(number, state) when is_integer(number) do
     with {:ok, %{repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_forge() do
-      {issue_state, issue_labels} =
+      {issue_state, issue_labels, title} =
         case forge.get_issue(repo, number, []) do
           {:ok, issue} ->
             {Map.get(issue, "state", "unknown"),
-             Enum.map(Map.get(issue, "labels") || [], & &1["name"])}
+             Enum.map(Map.get(issue, "labels") || [], & &1["name"]), Map.get(issue, "title")}
 
           # LOUD before the fallback: without the warning, a forge outage folds into
-          # {issue_state: "unknown", delivered: false} — a green result indistinguishable from a
-          # real "issue open, no PR yet". delivered:false stays SAFE (the arch waits), but the
-          # operator must be able to tell a mute forge from a genuine non-delivery.
+          # {outcome: "unknown"} with no operator trace. "unknown" stays SAFE (the arch waits),
+          # but the operator must be able to tell a mute forge from a genuine non-delivery.
           err ->
             Logger.warning(
               "Delegation: issue_status #{repo}##{number} forge unreachable (get_issue → " <>
-                "#{inspect(err)}) — falling back to issue_state=unknown"
+                "#{inspect(err)}) — falling back to outcome=unknown"
             )
 
-            {"unknown", []}
+            {"unknown", [], nil}
         end
 
+      pr = issue_pr_status(forge, repo, number)
+
       # Axiom (reorg 2026-07-19): no "repo" in the result — the arch has "the project".
-      result = %{
-        "issue" => number,
-        "issue_state" => issue_state,
-        # "delivered" = closed BY A MERGE — a multi-issue sequencing signal (the arch only chains issue
-        # N+1 on `delivered: true`).
-        #
-        # F-C047: `closed` ALONE would conflate a real delivery ("closed by a
-        # merge") with a NON-delivery closure (onboarding marker `[lcars-onboarded]` / manual close) →
-        # false `delivered:true` → the arch chains N+1 on an ABANDONED brick. We PROVE the merge via
-        # the `stage/merged` label (WS1, set by the gatekeeper seal AT MERGE, before the explicit close).
-        # A missing label is possible: the seal's `set_stage` failure is discarded un-logged and no
-        # rail re-sets it (cf. gatekeeper_seal.ex). Here that reads as a false-NEGATIVE (the arch
-        # WAITS on delivered:false) = SAFE, the opposite of the old false-positive that mis-sequenced.
-        "delivered" => issue_state == "closed" and @merged_label in issue_labels,
-        "pr" => issue_pr_status(forge, repo, number)
-      }
+      # One meaning per shape (2026-07-19): no polysemous null — `title`/`pr` are ABSENT
+      # when there is nothing true to say, never null (cf. put_pr/2).
+      result =
+        %{"issue" => number, "outcome" => outcome(issue_state, issue_labels, pr)}
+        |> put_present("title", title)
+        |> put_pr(pr)
 
       {:ok, result}
     end
   end
+
+  # `outcome` — the ONE tracking verdict; every value is PROVABLE from the forge reads:
+  #   "merged"               — closed BY A MERGE. F-C047: `closed` ALONE would conflate a real
+  #                            delivery with a NON-delivery closure (onboarding marker
+  #                            `[lcars-onboarded]` / manual close) → the arch chains N+1 on an
+  #                            ABANDONED brick. We PROVE the merge via the `stage/merged` label
+  #                            (WS1, set by the gatekeeper seal AT MERGE, before the explicit
+  #                            close). A missing label is possible (the seal's `set_stage` failure
+  #                            is discarded un-logged, cf. gatekeeper_seal.ex) and reads as
+  #                            "closed_without_merge" — a false-NEGATIVE (the arch WAITS) = SAFE,
+  #                            the opposite of the old false-positive that mis-sequenced.
+  #   "closed_without_merge" — closed WITHOUT the merge proof: abandon/rejection/manual close.
+  #   "in_review"            — open with a live fleet PR.
+  #   "open"                 — open, no PR found. Also the honest FLOOR when the PR read failed
+  #                            (the `pr` error object carries the degradation): both mean "wait".
+  #   "unknown"              — the issue read itself failed (a mute forge is not a state).
+  defp outcome("unknown", _labels, _pr), do: "unknown"
+
+  defp outcome("closed", labels, _pr),
+    do: if(@merged_label in labels, do: "merged", else: "closed_without_merge")
+
+  defp outcome(_open, _labels, {:ok, _pr}), do: "in_review"
+  defp outcome(_open, _labels, _none_or_error), do: "open"
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  # One JSON shape per meaning: a real PR → object; nothing to say (no fleet PR) → NO key;
+  # a mute forge → {"error": "forge_unreachable"} — "we do not know" must never read as
+  # "there is none" (two agents burned an investigation each on the old polysemous null).
+  defp put_pr(map, {:ok, pr}), do: Map.put(map, "pr", pr)
+  defp put_pr(map, :none), do: map
+
+  defp put_pr(map, {:error, :forge_unreachable}),
+    do: Map.put(map, "pr", %{"error" => "forge_unreachable"})
 
   @doc """
   Reads the validation-card catalogue (canon workflow maps) for the framing interview: for each
@@ -609,11 +636,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
             _ = forge.add_label(repo, number, "type:feature", [])
 
             # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
-            # project"; the issue NUMBER is the only correlation it needs.
+            # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
+            # association instead of presuming it (protocol-carried correlation, not memory).
             {:ok,
              %{
                "status" => "issue_created",
                "issue" => number,
+               "title" => title,
                "assignee" => human
              }}
 
@@ -626,8 +655,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The IN-PROGRESS PR of issue #n (among the open ones). Delivered (merged) → the PR is no longer open → `nil`
-  # (the "delivered" info then comes from the closed issue). Otherwise: number + merged + review verdicts.
+  # The IN-PROGRESS PR of issue #n (among the open ones). Returns `{:ok, map}` (number + merged +
+  # review verdicts), `:none` (no fleet PR in sight — including after the merge: the PR left the
+  # open list, the delivery info is `outcome`), or `{:error, :forge_unreachable}` (the read failed —
+  # distinct from :none by design, cf. put_pr/2).
   defp issue_pr_status(forge, repo, number) do
     # The PR of issue #n = the one whose head is the feature-branch `lcars/issue-<n>-<role>`. Parsing
     # this format is delegated to the SINGLE AUTHORITY `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
@@ -638,45 +669,48 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # rather than a direct call to ForgeProtocol, which would create that dependency).
     case forge.list_open_pulls(repo, []) do
       {:ok, pulls} ->
-        Enum.find_value(pulls, fn pr ->
-          head = get_in(pr, ["head", "ref"]) || ""
+        found =
+          Enum.find_value(pulls, fn pr ->
+            head = get_in(pr, ["head", "ref"]) || ""
 
-          case forge.parse_feature_branch(head) do
-            {:ok, {^number, _role}} ->
-              verdicts =
-                case forge.pr_review_verdicts(repo, pr["number"],
-                       head_sha: get_in(pr, ["head", "sha"])
-                     ) do
-                  {:ok, v} ->
-                    v
+            case forge.parse_feature_branch(head) do
+              {:ok, {^number, _role}} ->
+                verdicts =
+                  case forge.pr_review_verdicts(repo, pr["number"],
+                         head_sha: get_in(pr, ["head", "sha"])
+                       ) do
+                    {:ok, v} ->
+                      v
 
-                  # LOUD before the fallback (same stance as get_issue above): a mute forge must
-                  # not read as "no verdicts yet".
-                  err ->
-                    Logger.warning(
-                      "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
-                        "(pr_review_verdicts → #{inspect(err)}) — falling back to verdicts={}"
-                    )
+                    # LOUD before the fallback (same stance as get_issue above): a mute forge must
+                    # not read as "no verdicts yet".
+                    err ->
+                      Logger.warning(
+                        "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
+                          "(pr_review_verdicts → #{inspect(err)}) — falling back to verdicts={}"
+                      )
 
-                    %{}
-                end
+                      %{}
+                  end
 
-              %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
+                %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
 
-            _ ->
-              nil
-          end
-        end)
+              _ ->
+                nil
+            end
+          end)
 
-      # LOUD before the fallback: pr=nil must mean "no fleet PR for this issue", never a
-      # swallowed forge outage.
+        if found, do: {:ok, found}, else: :none
+
+      # LOUD + typed: the caller renders {"error": "forge_unreachable"} — a swallowed outage
+      # must never read as "no fleet PR for this issue".
       err ->
         Logger.warning(
           "Delegation: issue_status #{repo} forge unreachable (list_open_pulls → " <>
-            "#{inspect(err)}) — falling back to pr=nil"
+            "#{inspect(err)}) — falling back to pr={error: forge_unreachable}"
         )
 
-        nil
+        {:error, :forge_unreachable}
     end
   end
 
