@@ -269,7 +269,12 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
         for modop <- defaults do
           body = modop_sp.(modop)
 
-          refute body =~ "one-shot",
+          # Fingerprint = fire-mode's IRON-LAW line, not the bare word (long-session-discipline
+          # legitimately MENTIONS one-shot to contrast itself — prose about ≠ doctrine of).
+          refute body =~ "ONE-SHOT execution",
+                 "#{profile} (#{scope}) default-injects modop #{modop} carrying one-shot doctrine"
+
+          refute body =~ "Lifetime_scope = `one-shot`",
                  "#{profile} (#{scope}) default-injects modop #{modop} carrying one-shot doctrine"
         end
       end
