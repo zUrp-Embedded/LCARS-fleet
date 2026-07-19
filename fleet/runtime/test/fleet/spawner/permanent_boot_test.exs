@@ -342,31 +342,14 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  describe "escalate_corrupt_seed/3 (F-C043 — corrupt permanent seed → INCIDENT, not just a log)" do
-    test "emits pod.drift (source :spawner, drift_count at the DriftMonitor threshold) → escalates on the 1st hit" do
-      # User decision F-C043: keep the boot (fleet alive) BUT escalate the corruption as an incident.
-      # `drift_count` = 3 (threshold): a corrupt VERSIONED seed is a CERTAIN problem, not a strike to
-      # accumulate → DriftMonitor (source :spawner) escalates on the 1st occurrence.
-      Fleet.EventRouter.Bus.subscribe()
+  test "the boot-from-base branch is GONE (reorg 2026-07-19 — one seed authority, in the pod)" do
+    # Base seeds died with the reorg: the pod's unified seed decision (`maybe_slot_resume`: live
+    # jsonl / captured graine / fresh) replaced them, and the F-C043 corrupt-seed rail died with
+    # the artifact it guarded.
+    refute function_exported?(PermanentBoot, :escalate_corrupt_seed, 3)
 
-      assert :ok =
-               PermanentBoot.escalate_corrupt_seed(
-                 "architect",
-                 "permanent-architect",
-                 "/priv/base_seeds/architect.jsonl"
-               )
-
-      assert_receive %Fleet.Event{
-                       source: :spawner,
-                       type: :"pod.drift",
-                       payload: %{
-                         "role" => "architect",
-                         "pod_id" => "permanent-architect",
-                         "drift_count" => 3,
-                         "reason" => "base_seed_corrupt"
-                       }
-                     },
-                     500
-    end
+    refute File.exists?(
+             Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "architect.jsonl"])
+           )
   end
 end

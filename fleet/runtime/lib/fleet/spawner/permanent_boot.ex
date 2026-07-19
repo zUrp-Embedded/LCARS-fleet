@@ -265,14 +265,10 @@ defmodule Fleet.Spawner.PermanentBoot do
     # relaunch if dead, `{:already_started}` no-op if alive; no more holder-leak/accumulation).
     pod_id = @permanent_prefix <> name
 
-    # If a base exists for this role → boot-from-base (FIXED UUID carried by
-    # the base + restore + `--resume`) → a UNIQUE Claude Desktop entry reused at each boot + FRESH
-    # context (the base captured out-of-fleet, not the accumulated session of the previous run). Otherwise → recreate
-    # (new session, default behavior). Distinct from CRASH recovery (which never resumes
-    # a session — it rerolls FRESH); here it is the clean DELIBERATE boot.
-    opts = boot_opts(name, pod_id)
-
-    case spawner.(cp, pod_id, opts) do
+    # No boot-from-base anymore (reorg 2026-07-19): the pod itself runs the UNIFIED seed decision
+    # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured graine →
+    # resume from it; else fresh). PermanentBoot only names the pod — one seed authority, in the pod.
+    case spawner.(cp, pod_id, pod_id: pod_id) do
       {:ok, _pid} ->
         {:ok, pod_id}
 
@@ -290,66 +286,8 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  # Spawn opts of a permanent. The ONLY thing that distinguishes a boot-from-base pod is that it
-  # carries a base-seed BODY (`recall_seed_jsonl`) to restore + `resume: true`. Its UUID is NOT set
-  # here: it is minted by the SAME uniform path as every other pod (`Pod.resolve_session_id` →
-  # `SessionMint.mint`, v2 deterministic + per-human), and `SeedStore.restore` copies the base seed
-  # under that computed UUID (internal `sessionId` normalized). No base → `[pod_id:]` = recreate.
-  # (v2 2026-07-19: pre-v2 the UUID was EXTRACTED from the base seed → had to be set explicitly here;
-  # v2 makes it computable → the extraction, the explicit set, and F-C043 corrupt-seed escalation are
-  # all gone. The arch is NOT special — it's a pod with a body to restore.)
-  defp boot_opts(name, pod_id) do
-    path = base_seed_path(name)
-
-    if File.exists?(path) do
-      [pod_id: pod_id, resume: true, recall_seed_jsonl: path]
-    else
-      [pod_id: pod_id]
-    end
-  end
-
-  # F-C043 — a corrupt permanent base seed is a CERTAIN config problem (a versioned artifact in `priv` is
-  # broken), not a probabilistic strike. We log LOUD and emit `pod.drift` (source `:spawner`) with
-  # `drift_count` AT the DriftMonitor threshold → the anomaly rail (DriftMonitor → Cat5Escalator) escalates
-  # it on the FIRST occurrence (an operator repairs the seed). The incident signal never blocks/crashes
-  # the boot (`Bus.safe_emit` flattens any emit failure into a logged `:ok`) — the pod still comes up
-  # (degraded); the Logger.error below stays the visibility floor even if the event itself is lost.
-  # @drift_escalate_count must be ≥ `Fleet.Starfleet.DriftMonitor`'s threshold (3, a protocol constant;
-  # fleet_spawner→fleet_starfleet is not a dependency, so it is asserted by a comment, not referenced).
-  @drift_escalate_count 3
-  @doc false
-  def escalate_corrupt_seed(name, pod_id, path) do
-    Logger.error(
-      "PermanentBoot: base seed #{path} (role #{name}) present but NO valid session UUID — booting a " <>
-        "FRESH session (new Desktop entry each boot, accumulation, stable identity lost). Escalating as " <>
-        "INCIDENT (pod.drift → Cat5). FIX the versioned seed."
-    )
-
-    _ =
-      Fleet.EventRouter.Bus.safe_emit(
-        :spawner,
-        :"pod.drift",
-        [
-          payload: %{
-            "pod_id" => pod_id,
-            "role" => name,
-            "drift_count" => @drift_escalate_count,
-            "reason" => "base_seed_corrupt",
-            "path" => path,
-            "detail" =>
-              "permanent base seed present but no valid session UUID — booting fresh (Desktop-entry accumulation)"
-          }
-        ],
-        on_unregistered: :log,
-        context: "PermanentBoot corrupt base seed (role #{name})"
-      )
-
-    :ok
-  end
-
-  # Base seed of a permanent: clean resumable anchor, captured out-of-fleet (pure claude), versioned in priv.
-  defp base_seed_path(name) do
-    Path.join([:code.priv_dir(:lcars_fleet), "spawner", "base_seeds", "#{name}.jsonl"])
-  end
-
+  # (boot_opts / base_seed_path / escalate_corrupt_seed — the whole boot-from-base branch — were
+  # REMOVED by the 2026-07-19 reorg: base seeds are gone, the pod's unified seed decision
+  # (`maybe_slot_resume`: live jsonl / captured graine / fresh) is the ONLY resume authority, and
+  # the F-C043 corrupt-seed rail died with the artifact it guarded.)
 end

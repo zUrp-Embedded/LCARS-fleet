@@ -215,8 +215,15 @@ defmodule Fleet.Spawner.SeedStore do
   @doc """
   Captures the pod's CURRENT Desktop slot into `<seed_root>/_slots/<uuid>.jsonl`, so the next boot
   re-attaches it. Reads the live jsonl (`SessionFiles.latest_jsonl`, robust to `/clear`) and stores
-  the most recent RC-identity record(s) — `bridge-session` and/or `system/bridge_status` — written
-  by claude at `--remote-control` registration.
+  the most recent GRAINE record of each type — `mode` / `permission-mode` / `bridge-session` /
+  `system/bridge_status` — the F5 minimal-seed set (proven 2026-07-19: those records alone resume
+  cleanly, re-attach the slot, and start on an EMPTY context). The sidecar therefore IS a resumable
+  graine, not just the identity lines. Captures only once RC-registered (identity lines present).
+
+  MERGE-BY-TYPE with the existing sidecar: a resumed session may not re-emit every record type
+  (e.g. `mode`) — a type absent from the live jsonl keeps its previously-captured line, so the
+  graine never thins across boots.
+
   `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
   Best-effort: never raises to the caller (a miss = the slot is re-minted + re-captured next boot).
   """
@@ -224,17 +231,35 @@ defmodule Fleet.Spawner.SeedStore do
   def capture_slot_bridge(pod_dir, uuid) when is_binary(pod_dir) and is_binary(uuid) do
     with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
          {:ok, jsonl} <- Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir),
-         [_ | _] = lines <- rc_identity_lines(jsonl) do
+         %{} = live <- graine_records(jsonl),
+         true <- rc_registered?(live) || :none do
       File.mkdir_p!(slot_dir())
-      File.write!(slot_path(uuid), Enum.join(lines, "\n") <> "\n")
+      merged = Map.merge(existing_graine_records(slot_path(uuid)), live)
+      File.write!(slot_path(uuid), (merged |> Map.values() |> Enum.join("\n")) <> "\n")
       :ok
     else
       :none -> :none
-      [] -> :none
       {:error, _} = err -> err
     end
   rescue
     e -> {:error, e}
+  end
+
+  @doc """
+  The identity's slot GRAINE, if one was captured: `{:ok, path}` (non-empty sidecar for this
+  deterministic `uuid`) | `:none`. THE probe of the unified seed decision (reorg 2026-07-19,
+  socle Décision 1): an RC pod with no live jsonl but a graine resumes FROM it — slot back,
+  context empty — instead of minting a new Desktop slot.
+  """
+  @spec slot_graine(String.t()) :: {:ok, Path.t()} | :none
+  def slot_graine(uuid) when is_binary(uuid) do
+    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+         path = slot_path(uuid),
+         {:ok, %{size: size}} when size > 0 <- File.stat(path) do
+      {:ok, path}
+    else
+      _ -> :none
+    end
   end
 
   # Grafts the captured RC-identity line(s) (if the per-identity sidecar exists) onto a freshly-
@@ -258,20 +283,33 @@ defmodule Fleet.Spawner.SeedStore do
     _ -> :ok
   end
 
-  # Most recent RC-identity record of EACH format present (`bridge-session` / `system/bridge_status`),
-  # as raw lines. Empty list = the session has not registered RC yet.
-  defp rc_identity_lines(jsonl_path) do
+  # Most recent GRAINE record of EACH type present, keyed by type — the F5 minimal-seed set:
+  # `mode` + `permission-mode` (session posture) and the RC-identity pair (`bridge-session` /
+  # `system/bridge_status`, both formats seen live 2026-07-19).
+  defp graine_records(jsonl_path) do
     jsonl_path
     |> File.stream!()
     |> Enum.reduce(%{}, fn line, acc ->
       case Jason.decode(line) do
+        {:ok, %{"type" => "mode"}} -> Map.put(acc, :mode, String.trim_trailing(line))
+        {:ok, %{"type" => "permission-mode"}} -> Map.put(acc, :permission, String.trim_trailing(line))
         {:ok, %{"type" => "bridge-session"}} -> Map.put(acc, :session, String.trim_trailing(line))
         {:ok, %{"type" => "system", "subtype" => "bridge_status"}} -> Map.put(acc, :status, String.trim_trailing(line))
         _ -> acc
       end
     end)
-    |> Map.values()
   end
+
+  # The sidecar's previously-captured records (same keying) — `%{}` if absent/unreadable.
+  defp existing_graine_records(path) do
+    if File.exists?(path), do: graine_records(path), else: %{}
+  rescue
+    _ -> %{}
+  end
+
+  # Captured only once the session is RC-REGISTERED (an identity line present): a pre-registration
+  # capture would store mode/permission alone — a graine that resumes but re-attaches NO slot.
+  defp rc_registered?(records), do: Map.has_key?(records, :session) or Map.has_key?(records, :status)
 
   defp dest_has_rc_identity?(dest) do
     case File.read(dest) do

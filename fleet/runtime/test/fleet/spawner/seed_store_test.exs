@@ -327,4 +327,67 @@ defmodule Fleet.Spawner.SeedStoreTest do
       assert occurrences == 2, "expected exactly 1 bridge-session, got #{occurrences - 1}"
     end
   end
+
+  describe "sidecar-as-GRAINE (unified seed, reorg 2026-07-19)" do
+    @uuid "1badcafe-feed-4dad-babe-9999dec0de04"
+    @bridge ~s({"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01ABC","sessionId":"1badcafe-feed-4dad-babe-9999dec0de04"})
+    @mode ~s({"type":"mode","mode":"default"})
+    @perm ~s({"type":"permission-mode","mode":"default"})
+
+    test "capture stores the FULL F5 graine set (mode + permission-mode + identity)", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod-graine")
+      make_jsonl(pod_dir, "-home-x", @uuid, Enum.join([@mode, @perm, @bridge], "\n") <> "\n")
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+
+      sidecar = File.read!(Path.join([root, "_slots", "#{@uuid}.jsonl"]))
+      assert sidecar =~ ~s("type":"mode")
+      assert sidecar =~ ~s("type":"permission-mode")
+      assert sidecar =~ "bridge_status"
+    end
+
+    test "capture MERGES by type — a resumed session that re-emits only the identity keeps the graine full",
+         %{tmp: tmp, root: root} do
+      # Boot A captured the full set; boot B's live jsonl carries ONLY a (newer) identity line.
+      File.mkdir_p!(Path.join(root, "_slots"))
+
+      File.write!(
+        Path.join([root, "_slots", "#{@uuid}.jsonl"]),
+        Enum.join([@mode, @perm, @bridge], "\n") <> "\n"
+      )
+
+      newer = ~s({"type":"bridge-session","bridgeSessionId":"cse_01NEW"})
+      pod_dir = Path.join(tmp, "pod-graine-b")
+      make_jsonl(pod_dir, "-home-x", @uuid, newer <> "\n")
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+
+      sidecar = File.read!(Path.join([root, "_slots", "#{@uuid}.jsonl"]))
+      # The newer identity landed AND the mode/permission records survived (never thins).
+      assert sidecar =~ "cse_01NEW"
+      assert sidecar =~ ~s("type":"mode")
+      assert sidecar =~ ~s("type":"permission-mode")
+    end
+
+    test "capture stays :none pre-registration EVEN IF mode/permission are present", %{tmp: tmp} do
+      # A graine without an identity line would resume but re-attach NO slot — refused.
+      pod_dir = Path.join(tmp, "pod-prereg")
+      make_jsonl(pod_dir, "-home-x", @uuid, Enum.join([@mode, @perm], "\n") <> "\n")
+      assert :none = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+    end
+
+    test "slot_graine/1: {:ok, path} for a captured identity, :none otherwise", %{root: root} do
+      assert :none = SeedStore.slot_graine(@uuid)
+      assert :none = SeedStore.slot_graine("not-a-uuid")
+
+      File.mkdir_p!(Path.join(root, "_slots"))
+      path = Path.join([root, "_slots", "#{@uuid}.jsonl"])
+      File.write!(path, @bridge <> "\n")
+
+      assert {:ok, ^path} = SeedStore.slot_graine(@uuid)
+    end
+  end
 end

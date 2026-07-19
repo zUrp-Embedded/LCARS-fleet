@@ -738,6 +738,50 @@ defmodule Fleet.Spawner.PodTest do
       assert content["session_id"] == expected
     end
 
+    test "graine decision: a captured sidecar for the identity → resume-FROM-GRAINE (slot back)",
+         %{tmp_dir: tmp_dir} do
+      pod_id = "pod-graine-#{System.unique_integer([:positive])}"
+      args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      # The identity's graine sits in the seed store (captured by a previous life).
+      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
+
+      File.write!(
+        Path.join([tmp_dir, "seeds", "_slots", "#{uuid}.jsonl"]),
+        ~s({"type":"bridge-session","bridgeSessionId":"cse_01GRAINE","sessionId":"#{uuid}"}\n)
+      )
+
+      {:ok, _pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _largs, env}, 2_000
+
+      # The pod flipped itself to resume (unified seed decision) and the graine was RESTORED
+      # under its identity (the --resume will find it → slot re-attached).
+      assert env["LCARS_POD_RESUME"] == "1"
+
+      restored =
+        Path.join([tmp_dir, "pods", "pod_#{pod_id}", ".claude", "projects"])
+        |> then(fn base ->
+          base |> File.ls!() |> Enum.map(&Path.join([base, &1, "#{uuid}.jsonl"]))
+        end)
+        |> Enum.find(&File.exists?/1)
+
+      assert restored, "the graine should be restored under the identity's jsonl path"
+      assert File.read!(restored) =~ "cse_01GRAINE"
+    end
+
+    test "graine decision: NO sidecar, NO live jsonl → fresh create (resume 0)", %{tmp_dir: tmp_dir} do
+      pod_id = "pod-nograine-#{System.unique_integer([:positive])}"
+      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+
+      {:ok, _pid} = spawn_via_supervisor(gatekeeper_args(pod_id, uid: 4242, repo_id: 7))
+      assert_receive {:launch_called, _largs, env}, 2_000
+      assert env["LCARS_POD_RESUME"] == "0"
+    end
+
     test "UUID GC: a stale <uuid>.jsonl (pod_dir surviving a crash) is removed before --session-id",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"

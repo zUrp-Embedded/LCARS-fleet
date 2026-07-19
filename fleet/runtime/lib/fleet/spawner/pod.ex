@@ -1003,9 +1003,12 @@ defmodule Fleet.Spawner.Pod do
     base = initial_state(args)
 
     case File.read(base.state_fs_path) do
-      # No prior state.json = a FRESH pod (first boot for this pod_id) → silent fresh init (normal).
+      # No prior state.json = a FRESH pod (first boot for this pod_id) → the UNIFIED seed decision
+      # (maybe_slot_resume): an RC identity with a live jsonl or a captured graine RESUMES it; else
+      # fresh create. ONLY on this branch — a crash-recovery (snapshot below) keeps the fresh-reroll
+      # doctrine (never resume a dead pod's accumulated session).
       {:error, :enoent} ->
-        base
+        maybe_slot_resume(base)
 
       {:ok, json} ->
         case Jason.decode(json) do
@@ -1072,6 +1075,48 @@ defmodule Fleet.Spawner.Pod do
       tmux_session: nil,
       liveness_sample: nil
     }
+  end
+
+  # UNIFIED seed decision (socle Décision 1, reorg 2026-07-19) — FRESH first-boot only (the caller
+  # gates on :enoent). Precedence:
+  #   1. explicit recall/resume (opts) → untouched (the deliberate paths stay authoritative);
+  #   2. non-RC pod → fresh create (it never captured, nothing to resume);
+  #   3. its LIVE jsonl exists in the pod_dir (clean fleet reboot, pod_dir persisted) →
+  #      resume IN PLACE: full context back + slot re-attached (the jsonl carries its own RC
+  #      identity) — THE per-project arch continuity story, zero restore needed;
+  #   4. a captured GRAINE exists for the identity → resume FROM it via the recall machinery
+  #      (restore copies it under the uuid): slot back, context empty (F5) — judges/one-shots;
+  #   5. nothing → fresh create (first boot ever; the capture seeds the graine for next time).
+  defp maybe_slot_resume(base) do
+    cond do
+      base.resume or Keyword.has_key?(base.opts, :recall_seed_jsonl) ->
+        base
+
+      not Fleet.CapProfile.remote_control?(base.cap_profile) ->
+        base
+
+      live_jsonl_exists?(base) ->
+        %{base | resume: true}
+
+      true ->
+        case Fleet.Spawner.SeedStore.slot_graine(base.session_id) do
+          {:ok, graine} ->
+            %{base | resume: true, opts: Keyword.put(base.opts, :recall_seed_jsonl, graine)}
+
+          :none ->
+            base
+        end
+    end
+  end
+
+  # Is the identity's live jsonl already in the pod_dir? (Same path shape as `SeedStore.restore`
+  # writes and `--resume <uuid>` reads: `.claude/projects/<slugify(cwd)>/<uuid>.jsonl`.)
+  defp live_jsonl_exists?(base) do
+    cwd = LaunchSpec.pod_cwd(base.opts, base.cap_profile, base.pod_dir)
+
+    [base.pod_dir, ".claude", "projects", Fleet.Spawner.SeedStore.slugify(cwd), "#{base.session_id}.jsonl"]
+    |> Path.join()
+    |> File.exists?()
   end
 
   # The explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
