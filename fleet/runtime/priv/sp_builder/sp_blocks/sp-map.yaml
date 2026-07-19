@@ -51,10 +51,11 @@ consultant:
   - role/consultant
 
 # --- Exception judge / final promotion (arbitrates the upstream verdicts; no diff) ---
+# One-shot per-project judge (reorg 2026-07-19) — NO core/wake-longlived: its single eval mandate
+# is enqueued before spawn, no second wake can reach it (same rule as the PR judges).
 gatekeeper:
   - core/pod-sanctuary
   - core/runtime-contract
-  - core/wake-longlived
   - core/evidence
   - core/judge-verdict
   - method/gatekeeper-arbitrate

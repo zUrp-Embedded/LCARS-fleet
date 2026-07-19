@@ -41,7 +41,7 @@ defmodule Fleet.Coord do
   ## Gate judgment lives elsewhere
 
   The LLM judgment of the gates is consolidated onto the **permanent
-  gatekeeper** (single judge), booted by `Fleet.Workflow.Gatekeeper.ensure_booted/1`
+  gatekeeper** (one-shot per-project judge, spawned per gate eval — reorg 2026-07-19)
   and engaged via an enqueued eval brief (`StepRunConsumer` rail, non-decidable
   gate → gatekeeper). `Fleet.Coord` carries NO spawn — only the declarative policies.
 
@@ -56,7 +56,7 @@ defmodule Fleet.Coord do
 
   N0 (vendor-agnostic, no inference — pure declarative rule).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # Strict canonical arities — the correlation_id is always explicit.

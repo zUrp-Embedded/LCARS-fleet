@@ -374,7 +374,6 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       deliverable_mode_fun: dmode(),
       task_queue: StubTaskQueue,
       spawner: SpawnStub,
-      gatekeeper_pod_id_fun: fn -> "gk-perm" end,
       gate_evals: %{}
     }
   end

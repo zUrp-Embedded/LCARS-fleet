@@ -5,12 +5,13 @@ kind: CapabilityProfile
 metadata:
   name: gatekeeper
   containment: bwrap
-  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
-  # role_index = role slot in the hexspeak UUID; protected = tier spared by the worker kill;
-  # fleet_level = single instance with no project dimension (repo 0000).
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT).
+  # PER-PROJECT (reorg 2026-07-19, cf. DESIGN-carte-des-roles §7): the gatekeeper is a project-bound
+  # ONE-SHOT judge, spawned per gate eval by GatekeeperEscalation — the old fleet-level resident
+  # singleton (documented as an MVP awaiting the project model) is gone. repo in its UUID.
   role_index: 2
   protected: false
-  fleet_level: true
+  fleet_level: false
 spec:
   scope:
     allowedTools:
@@ -58,7 +59,9 @@ spec:
     monk_registry: null
     monk_instance: null
   invocation:
-    lifetime_scope: pipe
+    # ONE-SHOT (reorg 2026-07-19): a judge must be FRESH — each gate eval gets a new pod, no
+    # accumulated context; the re-eval is forge-driven (the persisted verdict, not the pod).
+    lifetime_scope: one-shot
     model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false

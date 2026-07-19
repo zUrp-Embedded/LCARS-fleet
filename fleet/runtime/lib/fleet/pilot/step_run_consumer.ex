@@ -139,16 +139,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # Resolves a role's deliverable_mode (`"git_native"` producer / `"payload"` judge)
     # to classify the PR-native step_run. Default = cap-profile catalogue. Test seam (zero loading).
     :deliverable_mode_fun,
-    # Gatekeeper escalation seams.
+    # Gatekeeper escalation seams (one-shot per-project judge since the 2026-07-19 reorg —
+    # spawned per eval by GatekeeperEscalation, no resident pod_id/boot to hold here).
     :task_queue,
     :spawner,
-    :gatekeeper_pod_id_fun,
-    # Boot of the permanent gatekeeper in step-mode (idempotent ensure_booted, guarded
-    # by :gatekeeper_autoboot). Without it, in step-only nothing boots/registers the gatekeeper →
-    # pod_id/0 nil → any soft/terminal escalation fails {:error,:no_gatekeeper}.
-    :gatekeeper_boot_fun,
-    # Seam of the gatekeeper's wake recovery (default = the real fn). Lets us test that the
-    # LOAD-BEARING return of the kick (`{:error,{:escalated,_}}`) is SURFACED (telemetry/warning), not swallowed.
+    # Wake recovery seam (kept: used by TerminalEscalation's rails).
     :wake_recovery,
     # Pending escalations, keyed by correlation_id (= task.id of the eval brief). Value =
     # resume context `%{n, role, payload, workflow_map, step, stored_at}`. fast-path OPTIMIZATION
@@ -231,13 +226,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
       # (The rebound's anti-runaway bound is NOT an opt: it is DATA from the map
       # `spec.max_rework_rounds`, read by GateEngine.rebound — never a hidden global default.)
-      # Gatekeeper escalation seams (defaults = real broker/spawner/registry).
+      # Gatekeeper escalation seams (defaults = real broker/spawner; the gatekeeper itself is
+      # spawned one-shot per eval — reorg 2026-07-19, no resident registry fun).
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
-      gatekeeper_pod_id_fun:
-        Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Workflow.Gatekeeper.pod_id/0),
-      gatekeeper_boot_fun:
-        Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Workflow.Gatekeeper.ensure_booted/0),
       # Wake recovery seam (default = the real fn).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{},
@@ -257,28 +249,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # does not depend on the Bus being subscribed, and the tick is a no-op on an empty map.
     Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
 
-    # In step-mode, the StepRunConsumer IS the active path → it ensures the permanent
-    # gatekeeper (handle_continue: boot outside init, OTP). Idempotent + autoboot-guarded (no-op
-    # in test where gatekeeper_autoboot=false; no-op if the RAM path already booted it).
-    {:ok, state, {:continue, :ensure_gatekeeper}}
-  end
-
-  @impl GenServer
-  def handle_continue(:ensure_gatekeeper, state) do
-    case state.gatekeeper_boot_fun.() do
-      {:ok, :disabled} ->
-        :ok
-
-      {:ok, pod_id} ->
-        Logger.info("StepRunConsumer: gatekeeper permanent ensured (pod=#{pod_id})")
-
-      {:error, reason} ->
-        Logger.warning(
-          "StepRunConsumer: ensure gatekeeper failed (#{inspect(reason)}) — escalations KO"
-        )
-    end
-
-    {:noreply, state}
+    # (No gatekeeper boot: since the 2026-07-19 reorg the gatekeeper is a ONE-SHOT per-project
+    # judge, spawned per eval by GatekeeperEscalation.dispatch — no resident to ensure.)
+    {:ok, state}
   end
 
   @impl GenServer
@@ -803,11 +776,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # the 4 async-out seams read from the state (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery).
   # We do NOT pass the whole `state` — hardened boundary: the escalation cluster can read nothing else.
   defp escalation_seams(state) do
+    # NB: `loader` stays nil → GatekeeperEscalation defaults to `Fleet.CapProfile` (the CAP loader).
+    # `state.loader` is the WORKFLOW-MAP loader — a different authority, never passed here.
     %GatekeeperEscalation.Seams{
       task_queue: state.task_queue,
       spawner: state.spawner,
-      gatekeeper_pod_id_fun: state.gatekeeper_pod_id_fun,
-      wake_recovery: state.wake_recovery
+      repo: state.repo,
+      forge: state.forge_client,
+      forge_opts: state.forge_opts
     }
   end
 

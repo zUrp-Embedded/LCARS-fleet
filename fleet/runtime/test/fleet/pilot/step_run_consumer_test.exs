@@ -441,7 +441,6 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
         StepRunConsumer.start_link(
           name: name,
           subscribe: false,
-          gatekeeper_boot_fun: fn -> {:ok, :disabled} end
         )
 
       assert Process.alive?(pid)

@@ -2,16 +2,24 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   @moduledoc """
   IMPURE "gatekeeper escalation" cluster (async-out) of `Fleet.Pilot.StepRunConsumer`.
 
-  When a `:soft`/undecidable-terminal gate escalates (`{:dispatch_gatekeeper, _}`), this
-  module SUMMONS the permanent gatekeeper:
+  When a `:soft`/undecidable-terminal gate escalates (`{:dispatch_gatekeeper, _}`), this module
+  summons the gatekeeper — a **ONE-SHOT per-project judge since the 2026-07-19 reorg** (cf.
+  DESIGN-carte-des-roles §7; the old resident singleton `Fleet.Workflow.Gatekeeper` is gone —
+  it was documented as an MVP awaiting the project model, and the project model now exists):
 
-    1. enqueues an eval brief to the PERMANENT gatekeeper (work-session, addressed by `pod_id` via the
-       TaskQueue — the overseer is NOT spawned/owned here);
-    2. kicks the pod (wake WITH recovery: respawn on 1st failure, starfleet escalation on 2nd;
-       an unreachable kick is SURFACED — telemetry + warning — never silent, and the enqueued
-       brief survives in the broker until the re-wake);
+    1. enqueues the eval brief to the deterministic pod id `issue-<n>-gatekeeper` (judge naming —
+       the broker holds the content BEFORE any wake: offer-then-wake ordering, no
+       signal-before-content race);
+    2. SPAWNS the one-shot gatekeeper (composed cap + repo binding + numeric repo id for its
+       deterministic UUID — same mold as every judge; its BOOT KICK pulls the enqueued brief).
+       Already alive (previous eval still closing) → plain wake instead (it pulls next);
     3. returns the `correlation_id` (= task.id) for the async resumption
        (`task_queue.work_item.completed` → `resume_gate`).
+
+  A judge must be FRESH: each eval gets a new pod (no accumulated context), and the re-eval is
+  forge-driven (the verdict is persisted — nothing needs the pod to survive). A failed spawn is
+  `{:error, _}` — the caller fail-louds (`{:error, {:gatekeeper_dispatch, _}}`, the issue stays
+  locked, LOUD): an eval that cannot get its judge must never silently pass.
 
   It does NOT DECIDE the route: the stateful decision core (`gate_decide`/`resume_gate`/
   `apply_verdict`) stays the SINGLE-AUTHORITY of the root module, which calls `dispatch/7` on the
@@ -19,53 +27,46 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
   ## Boundary: explicit seams struct (not the whole `state`)
 
-  The cluster reads ONLY 4 seams from the consumer's `state` (`task_queue`, `spawner`,
-  `gatekeeper_pod_id_fun`, `wake_recovery`). We do NOT pass the whole `state` — that would be a
-  boundary leak: the caller builds a `%Seams{}` (narrow contract, TYPED → dialyzer sees
-  exactly the 4 fields, no other state read is representable here). The struct
-  (vs a bare map) is the choice that best ARMORS the boundary: `@enforce_keys` forces the 4
-  fields at the call, and an access `seams.<other_field>` does not compile (static KeyError). A map
-  would silently let `Map.get(seams, :repo)` through.
+  The cluster reads ONLY the seams below from the consumer's `state` — never the whole `state`
+  (hardened boundary: `@enforce_keys` forces the fields, an access `seams.<other>` does not
+  compile).
 
-  ## Narrow return contract
-
-  `dispatch/7 :: {:ok, corr} | {:error, reason}` — `gate_decide` consumes this contract as-is:
-  `{:ok, corr}` → legitimate escalation (`{:escalate, corr, eval_ctx}`); `{:error, reason}` →
-  fail-loud (`{:error, {:gatekeeper_dispatch, reason}}`, never a silent pass).
-
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   require Logger
 
+  alias Fleet.Pilot.StepDispatcher.Spawn
+
   defmodule Seams do
     @moduledoc """
-    Boundary contract of the escalation cluster: the 4 async-out seams read from the
+    Boundary contract of the escalation cluster: the async-out seams read from the
     `StepRunConsumer`'s `state`. Built by the caller BEFORE `dispatch/7` — the cluster never
     receives the whole `state`.
     """
-    @enforce_keys [:task_queue, :spawner, :gatekeeper_pod_id_fun, :wake_recovery]
-    defstruct [:task_queue, :spawner, :gatekeeper_pod_id_fun, :wake_recovery]
+    @enforce_keys [:task_queue, :spawner, :repo, :forge, :forge_opts]
+    defstruct [:task_queue, :spawner, :repo, :forge, :forge_opts, :loader]
 
     @type t :: %__MODULE__{
             # Broker of eval briefs (prod default `Fleet.TaskQueue`).
             task_queue: module(),
-            # Wake of the gatekeeper pod (prod default `Fleet.Spawner`).
+            # Spawn + wake of the one-shot gatekeeper (prod default `Fleet.Spawner`).
             spawner: module(),
-            # Resolves the permanent gatekeeper's pod_id (`nil` if not booted → fail-loud).
-            gatekeeper_pod_id_fun: (-> any()),
-            # Wake recovery (respawn on 1st failure, starfleet escalation on 2nd); `nil` → default.
-            wake_recovery: (... -> any()) | nil
+            # The project (`owner/name`) this consumer serves — the gatekeeper's binding.
+            repo: String.t(),
+            # Forge client + opts (numeric repo id resolution for the deterministic UUID).
+            forge: module(),
+            forge_opts: keyword(),
+            # Cap-profile loader (load + compose with default modops). nil → `Fleet.CapProfile`.
+            loader: module() | nil
           }
   end
 
   @doc """
-  Forge-driven summoning of the gatekeeper on gate escalation. Enqueues an eval brief to the
-  PERMANENT gatekeeper (addressed by `pod_id`), kicks (WakeRecovery: respawn then starfleet escalation;
-  an unreachable kick is surfaced by telemetry + warning while the enqueued brief survives in the
-  broker), and returns the `correlation_id`
-  (= task.id) for the `task_queue.work_item.completed` correlation. No booted gatekeeper /
-  failed enqueue → `{:error, _}` (the caller fail-louds; never a silent pass).
+  Forge-driven summoning of the one-shot gatekeeper on gate escalation. Enqueue-then-spawn
+  (the boot kick pulls the brief), returns the `correlation_id` (= task.id) for the
+  `task_queue.work_item.completed` correlation. Failed enqueue / failed spawn → `{:error, _}`
+  (the caller fail-louds; never a silent pass).
 
   `outputs`/`payload`/`n`/`role` are EMBEDDED in the metadata of the eval task (self-describing
   resumption context): the restarted StepRunConsumer (empty gate_evals RAM) rebuilds
@@ -81,101 +82,103 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
           Seams.t()
         ) :: {:ok, term()} | {:error, term()}
   def dispatch(workflow_map, step, outputs, payload, n, role, %Seams{} = seams) do
-    case seams.gatekeeper_pod_id_fun.() do
-      pod_id when is_binary(pod_id) ->
-        gate = get_in(workflow_map, ["steps", step, "gate"])
+    gk_role = Fleet.Pilot.Roles.gatekeeper_role()
+    # Judge naming (same shape as the PR judges): one pod per eval'd issue, deterministic →
+    # a re-dispatch of the same eval lands on the same pod id (idempotent), and the single-brick
+    # model keeps concurrent same-project gatekeepers structurally absent.
+    pod_id = "issue-#{n}-#{gk_role}"
 
-        # TWO names exist for a map and they are NOT the same authority: `map["name"]` is the
-        # DECLARED name (`metadata.name` of the YAML), while the reload path takes the LOADING
-        # name (the file/route name, `payload["workflow_map"]` → `Loader.load!/1`). Nothing forces
-        # them equal (no schema rule, no contracts check). We engrave the LOADING name — the one
-        # the reconstruction will feed back to the Loader — so a crash-recovery cannot fail to
-        # reload the map on precisely the rare path this mechanism exists to cover. The declared
-        # name stays the HUMAN label of the brief.
-        load_name = Map.get(payload, "workflow_map") || Map.get(workflow_map, "name")
-        declared_name = Map.get(workflow_map, "name")
+    gate = get_in(workflow_map, ["steps", step, "gate"])
 
-        brief =
-          Fleet.Workflow.GateBrief.build(%{
-            step: step,
-            workflow_map_id: declared_name,
-            gate: gate,
-            outputs: outputs
-          })
+    # TWO names exist for a map and they are NOT the same authority: `map["name"]` is the
+    # DECLARED name (`metadata.name` of the YAML), while the reload path takes the LOADING
+    # name (the file/route name, `payload["workflow_map"]` → `Loader.load!/1`). We engrave the
+    # LOADING name — the one the reconstruction will feed back to the Loader. The declared
+    # name stays the HUMAN label of the brief.
+    load_name = Map.get(payload, "workflow_map") || Map.get(workflow_map, "name")
+    declared_name = Map.get(workflow_map, "name")
 
-        # SELF-DESCRIBING VERDICT: the eval task's metadata carries the RESUMPTION context
-        # (`payload`/`n`/`role` on top of the step/loading-name already present). This task survives in the broker
-        # (TaskQueue = another process) a crash of the StepRunConsumer alone → the verdict (`work_item.completed`) brings
-        # this metadata back → the restarted StepRunConsumer (emptied gate_evals RAM) rebuilds the eval_ctx
-        # (`workflow_map = Loader.load!(meta["workflow_map"])`) instead of a silent `{:noreply}` (issue wedged forever). No
-        # NEW source: `payload` already carries `workspace`/`base_sha`/`gate_base_sha` — we embed it as-is.
-        attrs = %{
-          # Escalation target = the gatekeeper (STRUCTURAL exception judge, GATE-D1) — via the
-          # SINGLE accessor `Roles.gatekeeper_role` (config-overridable), no scattered literal. It is NOT
-          # configurable per map: the gatekeeper IS the escalation (it handles the hot potato via its SP).
-          role: Fleet.Pilot.Roles.gatekeeper_role(),
-          brief: brief,
-          metadata: %{
-            "gate_eval" => true,
-            "step" => step,
-            # The LOADING name (see above): this key is read back by `reconstruct_eval_ctx/2` and
-            # handed to the Loader — it must be what the Loader accepts, not the declared label.
-            "workflow_map" => load_name,
-            "gate" => gate,
-            "outputs" => outputs,
-            "resume_payload" => payload,
-            "resume_n" => n,
-            "resume_role" => role
-          }
-        }
+    brief =
+      Fleet.Workflow.GateBrief.build(%{
+        step: step,
+        workflow_map_id: declared_name,
+        gate: gate,
+        outputs: outputs
+      })
 
-        case seams.task_queue.enqueue(pod_id, attrs) do
-          {:ok, %{id: corr}} ->
-            # The kick's return is LOAD-BEARING: if the wake escalates (gatekeeper unreachable →
-            # starfleet) or fails, we do NOT SWALLOW it (`_ = kick`). The eval brief IS enqueued (valid
-            # corr) → the gatekeeper escalation stays legitimate ({:escalate, corr, …}); but an unreachable
-            # kick is SURFACED (telemetry + distinct warning), not confused with an OK kick. Without this,
-            # a gatekeeper never woken would stay invisible (the verdict would never come back, gate stalled
-            # silently). `corr` returned in both cases (the brief survives, the re-wake/escalation covers it).
-            case kick(seams, pod_id) do
-              :ok ->
-                {:ok, corr}
+    # SELF-DESCRIBING VERDICT: the eval task's metadata carries the RESUMPTION context
+    # (`payload`/`n`/`role` on top of the step/loading-name already present). This task survives in
+    # the broker (TaskQueue = another process) a crash of the StepRunConsumer alone → the verdict
+    # (`work_item.completed`) brings this metadata back → the restarted StepRunConsumer (emptied
+    # gate_evals RAM) rebuilds the eval_ctx instead of a silent `{:noreply}` (issue wedged forever).
+    attrs = %{
+      role: gk_role,
+      brief: brief,
+      metadata: %{
+        "gate_eval" => true,
+        "step" => step,
+        "workflow_map" => load_name,
+        "gate" => gate,
+        "outputs" => outputs,
+        "resume_payload" => payload,
+        "resume_n" => n,
+        "resume_role" => role
+      }
+    }
 
-              {:error, reason} ->
-                :telemetry.execute(
-                  [:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached],
-                  %{count: 1},
-                  %{pod_id: pod_id, corr: corr, reason: reason}
-                )
-
-                Logger.warning(
-                  "StepRunConsumer: gatekeeper #{pod_id} kicked BUT UNREACHABLE (#{inspect(reason)}) — " <>
-                    "eval brief enqueued (corr=#{inspect(corr)}), WakeRecovery escalation active; the verdict " <>
-                    "will only return on re-wake/repair (not a silent kick that lies)"
-                )
-
-                {:ok, corr}
-            end
+    # ORDER is the invariant: enqueue BEFORE spawn/wake — the one-shot's boot kick pulls the brief;
+    # a kick before the content exists is the spurious-wake race.
+    case seams.task_queue.enqueue(pod_id, attrs) do
+      {:ok, %{id: corr}} ->
+        case spawn_gatekeeper(seams, pod_id, brief) do
+          :ok ->
+            {:ok, corr}
 
           {:error, reason} ->
-            {:error, reason}
+            # No judge will ever pull this brief → LOUD failure, never a silent stall. The caller
+            # fail-louds ({:error, {:gatekeeper_dispatch, _}}) and the issue stays locked, visible.
+            Logger.error(
+              "StepRunConsumer: one-shot gatekeeper spawn FAILED (pod=#{pod_id}, #{inspect(reason)}) — " <>
+                "gate eval cannot proceed (brief enqueued but judge-less); fail-loud upstream"
+            )
+
+            {:error, {:gatekeeper_spawn, reason}}
         end
 
-      _ ->
-        {:error, :no_gatekeeper}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  # KICK the gatekeeper after the enqueue. PERMANENT pod already booted+idle (:monitoring): its boot
-  # kick-loop is over, this brief arrives AFTER → without a wake it never pulls (stalling gate). A failed
-  # wake = a FLEET failure (unreachable pod), NOT a project problem → re-roll (reboot the gatekeeper) on the 1st fail,
-  # system escalation → starfleet on the 2nd. No warn-and-forget here (the gatekeeper is a judge, not a
-  # sysadmin: it can do nothing with a system error).
-  defp kick(seams, pod_id) do
-    wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
+  # Spawns the ONE-SHOT gatekeeper for this eval — the judge mold: composed cap, repo binding,
+  # numeric repo id (deterministic UUID → its stable per-project Desktop slot), the brief in the
+  # spawn opts (R18: a one-shot without brief is refused at the spawner). Already alive (previous
+  # eval closing / re-dispatch) → plain wake: the pod pulls the enqueued brief when free.
+  defp spawn_gatekeeper(%Seams{} = seams, pod_id, brief) do
+    loader = seams.loader || Fleet.CapProfile
+    gk_role = Fleet.Pilot.Roles.gatekeeper_role()
 
-    wake_recovery.(pod_id, fn -> Fleet.Workflow.Gatekeeper.reboot() end,
-      wake_fun: fn p -> seams.spawner.wake_pod(p) end
-    )
+    with {:ok, base} <- loader.load(gk_role),
+         {:ok, cap} <- loader.compose(gk_role, loader.default_modops(base)) do
+      spawn_opts = [
+        pod_id: pod_id,
+        repo: seams.repo,
+        repo_id: Spawn.resolve_repo_id(seams.forge, seams.repo, seams.forge_opts),
+        brief: brief
+      ]
+
+      case seams.spawner.spawn_pod(cap, pod_id, spawn_opts) do
+        {:ok, _pid} ->
+          :ok
+
+        {:error, {:already_started, _pid}} ->
+          # Previous eval still closing (or re-dispatch): the brief is queued — wake, best-effort.
+          _ = seams.spawner.wake_pod(pod_id)
+          :ok
+
+        {:error, _reason} = err ->
+          err
+      end
+    end
   end
 end

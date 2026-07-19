@@ -46,6 +46,18 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   defmodule StubSpawner do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+
+    # One-shot gatekeeper spawn (reorg 2026-07-19): captured + succeeds.
+    def spawn_pod(_cap, pod_id, opts) do
+      send(self(), {:spawned, pod_id, opts})
+      {:ok, self()}
+    end
+  end
+
+  # Spawn failure stub — proves a judge-less eval fails LOUD (never a silent stall).
+  defmodule FailSpawner do
+    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def spawn_pod(_cap, _pod_id, _opts), do: {:error, :launch_failed}
   end
 
   # Engineer-first 2-step WorkflowMaps: build(engineer, producer) -> review(reviewer, judge).
@@ -171,8 +183,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
       task_queue: StubTaskQueue,
-      spawner: StubSpawner,
-      gatekeeper_pod_id_fun: Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper" end),
+      spawner: Keyword.get(opts, :spawner, StubSpawner),
       # MA-17 — wake recovery seam (default = the real fn; a test injects it to simulate escalation).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{}
@@ -326,55 +337,46 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   # ── B (L441): gatekeeper escalation (soft gate on the producer step) ────────
 
-  test "soft gate -> ESCALATION: brief enqueued, NO advance/forge write" do
+  test "soft gate -> ESCALATION: brief enqueued THEN one-shot gatekeeper SPAWNED (offer-then-spawn)" do
     assert {:escalate, "corr-1", ctx} =
              StepRunConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
 
     assert ctx.step == "build"
     assert ctx.role == "engineer"
 
-    assert_received {:enqueued, "gatekeeper", attrs}
+    # Judge naming (reorg 2026-07-19): one pod per eval'd issue, project-bound one-shot.
+    assert_received {:enqueued, "issue-1-gatekeeper", attrs}
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
     assert attrs.metadata["step"] == "build"
     assert is_binary(attrs.brief)
     assert attrs.metadata["outputs"] == %{"sev" => "high"}
-    assert_received {:wake, "gatekeeper"}
+
+    # The one-shot spawn (its boot kick pulls the enqueued brief — no separate wake needed).
+    assert_received {:spawned, "issue-1-gatekeeper", spawn_opts}
+    assert spawn_opts[:repo] == "o/r"
+    assert is_binary(spawn_opts[:brief])
 
     refute_received {:assignee, _}
     refute_received {:open_pr, _, _, _}
     refute_received :unlocked
   end
 
-  # MA-17 — the gatekeeper kick's return is LOAD-BEARING. A `_ = kick_gatekeeper(...)` discarding
-  # WakeRecovery.wake's return → a never-woken gatekeeper stayed INVISIBLE (the verdict would never
-  # come back, gate silently stalled). The eval brief IS enqueued → the escalation stays legitimate
-  # ({:escalate, corr, _}), but the unreachable kick is SURFACED (telemetry), not conflated with an
-  # OK kick.
-  test "MA-17: gatekeeper kick UNREACHABLE → escalates anyway BUT surfaced via telemetry (not swallowed)" do
-    ref =
-      :telemetry_test.attach_event_handlers(self(), [
-        [:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached]
-      ])
+  test "escalation: gatekeeper already ALIVE (previous eval closing) → enqueue + wake, no double spawn" do
+    # {:already_started} from the spawner → the brief is queued, a plain wake nudges the live pod.
+    defmodule AliveSpawner do
+      def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+      def spawn_pod(_cap, _pod_id, _opts), do: {:error, {:already_started, self()}}
+    end
 
-    on_exit(fn -> :telemetry.detach(ref) end)
-
-    # Seam: the wake recovery ESCALATES (gatekeeper unreachable, re-wake KO → starfleet).
-    escalating = fn _pod, _respawn, _opts -> {:error, {:escalated, :dead}} end
-
-    # The escalation stays legitimate: the brief is enqueued, corr returned (the verdict will come
-    # back at re-wake).
     assert {:escalate, "corr-1", _ctx} =
              StepRunConsumer.maybe_complete(
                build_done("soft", %{"sev" => "high"}),
-               hc(wake_recovery: escalating)
+               hc(spawner: AliveSpawner)
              )
 
-    assert_received {:enqueued, "gatekeeper", _attrs}
-
-    # THE finding: the unreachable kick is SURFACED (telemetry emitted), not silently swallowed.
-    assert_received {[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached], ^ref,
-                     %{count: 1}, %{pod_id: "gatekeeper", reason: {:escalated, :dead}}}
+    assert_received {:enqueued, "issue-1-gatekeeper", _attrs}
+    assert_received {:wake, "issue-1-gatekeeper"}
   end
 
   test "escalation: ENVELOPED outputs %{status,result} -> unwrapped before the brief (#2)" do
@@ -387,10 +389,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert attrs.metadata["outputs"] == %{"sev" => "low"}
   end
 
-  test "escalation: no gatekeeper booted -> fail-loud (never a silent pass)" do
-    state = hc(gatekeeper_pod_id_fun: fn -> nil end)
+  test "escalation: gatekeeper SPAWN fails -> fail-loud (never a silent judge-less stall)" do
+    # Reorg 2026-07-19: the gatekeeper is spawned one-shot per eval — a failed spawn means no judge
+    # will ever pull the brief → the dispatch fail-louds (issue stays locked, visible).
+    state = hc(spawner: FailSpawner)
 
-    assert {:error, {:gatekeeper_dispatch, :no_gatekeeper}} =
+    assert {:error, {:gatekeeper_dispatch, {:gatekeeper_spawn, :launch_failed}}} =
              StepRunConsumer.maybe_complete(build_done("soft", %{}), state)
 
     refute_received {:assignee, _}
@@ -694,7 +698,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         deliverable_mode_fun: dmode(),
         task_queue: StubTaskQueue,
         spawner: StubSpawner,
-        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end
       )
 
@@ -734,7 +737,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         deliverable_mode_fun: dmode(),
         task_queue: StubTaskQueue,
         spawner: StubSpawner,
-        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end
       )
 
@@ -769,7 +771,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         deliverable_mode_fun: dmode(),
         task_queue: StubTaskQueue,
         spawner: StubSpawner,
-        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end,
         gate_eval_ttl_ms: 0,
         # LONG cadence: we do NOT want to race the automatic tick (under load it would arrive
@@ -879,7 +880,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         deliverable_mode_fun: dmode(),
         task_queue: StubTaskQueue,
         spawner: StubSpawner,
-        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end
       )
 

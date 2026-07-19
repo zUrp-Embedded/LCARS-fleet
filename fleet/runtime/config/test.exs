@@ -83,11 +83,8 @@ config :fleet_spawner, start_permanent_warden: false
 # Process.sleep, partagé StepRunCompleter + ProjectOnboard). Tests rapides ET déterministes.
 config :fleet_pilot, forge_write_spacing_ms: 0
 
-# R4 sous-lot C — hermétisme : pas d'autoboot du gatekeeper permanent en test
-# (start_pipeline ne spawnera pas de pod gatekeeper). Le test dédié
-# (gatekeeper_test.exs) active l'autoboot + injecte des seams stub ; les tests
-# de gate (executor_gate_pending) posent `:gatekeeper_pod_id` directement.
-config :fleet_workflow, gatekeeper_autoboot: false
+# (Gatekeeper : plus d'autoboot — juge one-shot per-projet depuis la réorg 2026-07-19,
+# spawné par éval de gate ; les tests stubbent le spawner de GatekeeperEscalation.)
 
 # BL-027 — hermétisme : registry events.yaml non chargé en test (authorized_event_types
 # vide → escape-hatch assert_authorized! → Bus.broadcast/2 ne valide pas). Le test dédié

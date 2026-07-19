@@ -1,15 +1,18 @@
 defmodule Fleet.Workflow do
   @moduledoc """
   Workflow domain facade — workflow-maps (loader/nav), gates (PURE evaluation),
-  deliverable (git-native publication + DeliverableGate), gatekeeper (exception judge).
+  deliverable (git-native publication + DeliverableGate).
 
   Boundary anchor; the contract lives in each module's @moduledoc:
   `Fleet.Workflow.Loader`, `Fleet.Workflow.Gates`, `Fleet.Workflow.Deliverable`,
-  `Fleet.Workflow.DeliverableGate`, `Fleet.Workflow.Gatekeeper`,
+  `Fleet.Workflow.DeliverableGate`,
   `Fleet.Workflow.GateDecision` (decision vocabulary), `Fleet.Workflow.BriefArtifact`
   and `Fleet.Workflow.Provenance` (physical-brief provenance).
+  (The resident-singleton `Fleet.Workflow.Gatekeeper` was REMOVED by the 2026-07-19 reorg:
+  the gatekeeper is a one-shot per-project judge, spawned per gate eval by the pilot's
+  `GatekeeperEscalation` — the module was the documented MVP awaiting the project model.)
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
@@ -34,7 +37,6 @@ defmodule Fleet.Workflow do
     # Provenance.Verifier exported: the SEAL (pilot) runs the deterministic triplet wall
     # on every brick before merging — deliberate API widening (Phase 2 of the verifier brief).
     exports: [
-      Gatekeeper,
       GateBrief,
       Loader,
       Gates,
