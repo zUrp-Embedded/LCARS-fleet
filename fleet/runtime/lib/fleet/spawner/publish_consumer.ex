@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   Test-seam: `:subscribe` (default true) + `:spawner` backend
   (default `Fleet.Spawner`, overridable for a mock).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -65,6 +65,19 @@ defmodule Fleet.Spawner.PublishConsumer do
         )
 
         emit_spawn_failed(payload, reason)
+    catch
+      # Codex audit F-06 (2026-07-19): `rescue` covers exceptions ONLY — a backend that
+      # `exit`s (plausible OTP path: GenServer.call on a dead/unstarted spawner) killed this
+      # consumer, and the 202-acked request was lost WITHOUT the spawn.failed alarm (the
+      # supervisor restart hid the drop). Same stance for exit and throw: normalize, alarm,
+      # stay alive.
+      kind, reason ->
+        Logger.error(
+          "PublishConsumer: handle_spawn_request #{kind} — spawn DROPPED while the API already " <>
+            "answered 202 \"queued\" — #{inspect(reason)}"
+        )
+
+        emit_spawn_failed(payload, {kind, reason})
     end
 
     {:noreply, %{state | count: state.count + 1}}

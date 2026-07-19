@@ -24,6 +24,11 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: raise("boom spawn (test E-04)")
   end
 
+  # F-06 — the backend EXITS (not a raise): the plausible OTP path (call on a dead process).
+  defmodule ExitingSpawner do
+    def spawn_pod(_cap_profile, _issue_id, _opts), do: exit(:spawner_unavailable)
+  end
+
   # F-C044 — spawn_pod returns {:error, _} (NOT a raise) → exercises the ordinary {:error} branch
   # of `handle_spawn_request` (the one that only logged a warning, without `spawn.failed`).
   defmodule ErrorOnSpawnSpawner do
@@ -158,6 +163,34 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     assert reason =~ "boom spawn"
     # The drop is non-fatal: the consumer stays alive and counted the event.
+    assert Process.alive?(pid)
+    assert %{count: 1} = :sys.get_state(pid)
+  end
+
+  test "F-06 (codex audit): EXITING dispatch → consumer stays ALIVE + spawn.failed emitted" do
+    # `rescue` covers exceptions only — a backend that `exit`s (GenServer.call on a dead
+    # spawner) killed the consumer: supervisor restart hid the drop, the 202-acked request was
+    # lost WITHOUT its alarm. The `catch kind, reason` must normalize exit/throw the same way.
+    :ok = Fleet.EventRouter.Bus.subscribe()
+    {pid, _} = start_consumer(ExitingSpawner)
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "engineer", "issue_id" => "tk-66"}
+      )
+    )
+
+    assert_receive %Fleet.Event{
+                     source: :spawner,
+                     type: :"spawn.failed",
+                     payload: %{"issue_id" => "tk-66", "reason" => reason} = failed
+                   },
+                   2000
+
+    # reason = the STABLE category (JSON-safe rail contract); the term goes to reason_detail.
+    assert reason == "exit"
+    assert inspect(failed["reason_detail"]) =~ "spawner_unavailable"
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
   end
