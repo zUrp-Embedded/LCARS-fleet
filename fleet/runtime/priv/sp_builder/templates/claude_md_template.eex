@@ -10,7 +10,7 @@ Tous les paths absolus. Pas de cd hors `~`, pas de path relatif inter-fichiers.
 
 ## Sortie obligatoire
 
-Chaque livrable agent doit porter son header LCARS : Date, Statut, Auteur, Référencé par.
+Chaque livrable **markdown** ouvre sur l'en-tête LCARS (lignes en gras sous le titre H1) : Date, Dernière révision, Statut, Référencé par. Le code n'en porte pas : docstring/en-tête natif du langage.
 
 ## Contraintes pod
 
