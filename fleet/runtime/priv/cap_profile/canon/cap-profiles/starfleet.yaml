@@ -59,7 +59,8 @@ spec:
       - tool_search_bash
     # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`) — not duplicated.
     git_ops_denied: []
-    outputs: ["/home/ready-room/outbox/"]
+    # (no `outputs`: the ready-room/outbox line was a SYSADMIN reliquat left over from starfleet's
+    # previous role — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
   knowledge:
     libs:
       - methodologie-axiome-inference-vs-mecanisable
@@ -90,7 +91,8 @@ spec:
     heartbeat_keepalive: false
     bridge_enabled: true     # user-facing front-desk → needs the Desktop bridge (like the arch)
     policy: hide
-    rubber_duck_enabled: false
+    # (no `rubber_duck_enabled`: it is a DEAD flag — zero consumer in lib/ (the rubber-duck behaviour
+    # lives in the modops/SP). Removed here 2026-07-19; the full field nuke is on the sabrer-list.)
     long_session_protocol: true
     output_format: text
   injects:

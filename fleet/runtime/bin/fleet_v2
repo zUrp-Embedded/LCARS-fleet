@@ -2,8 +2,9 @@
 # SOURCE: bin/fleet_v2
 # AUTHOR: starfleet
 # STARDATE: 2026-06-15
-# STATUS: PROTO-V2 — launcher humain. `fleet_v2 start` démarre la fleet SOUS l'humain, boote l'arch
-#         (pod permanent), et attache l'humain à son REPL claude.
+# STATUS: PROTO-V2 — launcher humain. `fleet_v2 start` démarre la fleet SOUS l'humain (détachée) ;
+#         starfleet (front-desk) monte en permanent et est joignable via Claude Desktop, PAS un
+#         terminal (reorg 2026-07-19 : plus d'attache-arch — l'arch est per-projet, spawné on-open).
 #
 # Modèle (ADR-E / doctrine 2026-06-11) : la BEAM tourne *as* l'humain qui lance → le Port spawn les pods,
 # qui HÉRITENT son UID (pas de systemd, pas de drop d'UID, pas de /var/lib/lcars). Les chemins d'état
@@ -11,7 +12,7 @@
 # commit c368f89d). Ce launcher ne pose donc QUE le non-defaultable :
 #   - les PORTS per-humain (offset déterministe sur l'UID → N fleets coexistent dans UN conteneur) ;
 #   - la spec MCP (3 env requis sinon le pod ne lance pas : :mcp_server_spec_required) ;
-#   - les on-switches (arch permanent + machine step-mode forge-driven).
+#   - les on-switches (starfleet permanent front-desk + machine step-mode forge-driven).
 #
 # Config humaine : ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (les projets sont
 #         découverts par topic `lcars-fleet-<humain>`, plus de repo fixe surveillé).
@@ -179,51 +180,27 @@ export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
 RT
 }
 
-# Attend que l'arch (pod permanent `permanent-architect`, sas UNIQUE vers l'humain) ait sa session tmux
-# INTERNE, puis y attache CE terminal (exec — remplace le process ; Ctrl-b d détache sans tuer la fleet).
-# Boucle bornée : arch DÉJÀ vivant → attache immédiate (1er tour, zéro attente) ; arch en (re)boot →
-# on attend son apparition. Couvre 3 cas d'un SEUL geste : (1) boot initial au `start` ; (2) re-`start`
-# sur fleet vivante = simple rattache ; (3) arch MORT sur fleet vivante = le PermanentWarden l'a respawné
-# (event-driven sur `pod.failed`, pod_id déterministe idempotent) → on attend son retour. `$1` = message
-# de contexte, `$2` = timeout (s). Pas de respawn shell-side (le warden EST l'autorité de respawn ; un
-# `lcars spawn` ferait un pod ad-hoc au mauvais id, et le rpc est indispo distribution OFF par défaut).
-attach_arch() {
-  local ctx="$1" timeout="$2"
-  local sock_base="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
-  echo "fleet_v2: $ctx" >&2
-
-  local arch_sock arch_pod="" i
-  for i in $(seq 1 "$timeout"); do
-    # Glob PRÉFIXE (pas `-*`) : depuis BL-055 l'id permanent est DÉTERMINISTE (`permanent-architect`,
-    # sans `-<os_time>`) → le `-*` historique ne matchait plus jamais.
-    arch_sock="$(ls -1d "$sock_base"/permanent-architect*/ 2>/dev/null | head -1 || true)"
-    if [[ -n "$arch_sock" && -S "${arch_sock}pod.sock" ]]; then
-      arch_pod="$(basename "${arch_sock%/}")"
-      # F-ATTACH-RACE : le FICHIER sock apparaît une fraction avant la session tmux INTERNE
-      # (`lcars-pod-<id>`) → on attend la SESSION, pas juste le sock (sinon `lcars attach` → « no sessions »).
-      "$TMUX_BIN" -S "${arch_sock}pod.sock" has-session -t "lcars-pod-$arch_pod" 2>/dev/null && break
-    fi
-    dtmux has-session -t "$SESSION" 2>/dev/null \
-      || die "le BEAM s'est arrêté (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
-    sleep 1
-    arch_pod=""
-  done
-  [[ -n "$arch_pod" ]] || die "l'arch n'a pas (re)booté en ${timeout}s — « fleet_v2 restart » pour le rebooter (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
-
-  echo "fleet_v2: arch up ($arch_pod) — attache (Ctrl-b d = détacher sans tuer la fleet)" >&2
-  exec "$BIN_DIR/lcars" attach "$arch_pod"
+# Note à l'humain : la fleet est démarrée DÉTACHÉE (daemon tmux). Il n'y a PLUS d'attache automatique
+# vers un pod (reorg 2026-07-19 : l'arch ne boote plus au start — starfleet est le front-desk, joignable
+# via Claude Desktop, PAS un terminal ; l'arch est per-projet, spawné à l'ouverture d'un projet). Pour
+# débugger un pod à la main : `lcars attach <pod_id>` (générique, inchangé) ; pour les logs BEAM : le
+# daemon tmux ci-dessous.
+fleet_up_notice() {
+  echo "fleet_v2: fleet up (détachée). starfleet (front-desk) est dans Claude Desktop." >&2
+  echo "fleet_v2: logs BEAM : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION » · un pod : « lcars attach <pod_id> »" >&2
 }
 
 cmd_start() {
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
-    # Fleet DÉJÀ démarrée : au lieu d'envoyer bouler l'humain, on RECOLLE l'arch directement (attache si
-    # vivant ; s'il est mort le warden l'a respawné → on attend son retour, borné 60s). L'env runtime posé
-    # au start (sock base) est ressourcé pour matcher exactement la fleet vivante.
+    # Fleet DÉJÀ démarrée : on ressource l'env runtime (pour matcher la fleet vivante) et on informe —
+    # plus d'attache automatique (starfleet est dans Desktop, cf. fleet_up_notice).
     local rt="$HOME/.lcars/run/fleet_v2.runtime.env"
     # shellcheck source=/dev/null
     [[ -r "$rt" ]] && { set -a; . "$rt"; set +a; }
-    attach_arch "déjà démarrée — rattache l'arch (respawn warden si mort)…" 60
+    echo "fleet_v2: fleet déjà démarrée." >&2
+    fleet_up_notice
+    return 0
   fi
   setup_env
 
@@ -268,9 +245,9 @@ cmd_start() {
   # UI : molette = scroll du scrollback des logs BEAM (pas l'historique shell). cf. même geste dans `lcars attach`.
   dtmux set -g mouse on 2>/dev/null || true
 
-  # Attente du boot de l'arch (BootOrchestrator) PUIS attache — même autorité que le rattache sur fleet
-  # vivante (fonction UNIQUE `attach_arch`, pas de fork de la logique wait+attach).
-  attach_arch "attente du boot de l'arch…" 120
+  # Plus d'attente/attache de l'arch (il ne boote plus au start). Le BEAM boote détaché ; le
+  # BootOrchestrator monte starfleet + la gouvernance en post-readiness. On rend la main tout de suite.
+  fleet_up_notice
 }
 
 # F7 (E1 2026-07-04) : stop GRACEFUL d'abord — Shutdown.begin (refuse + drain in-flight) puis

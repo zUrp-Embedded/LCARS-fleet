@@ -318,6 +318,9 @@ fi
 
 exec "$BWRAP_BIN" \
   --unshare-all --share-net \
+  --hostname "lcars-pod-$POD_ID" \
+  `# uts déjà unshared (--unshare-all) mais le hostname n'était pas réécrit → le pod se croyait sur la` \
+  `# machine de l'humain (fuite du nom d'hôte dans le contexte agent + logs trompeurs). role-agnostic.` \
   --die-with-parent \
   --clearenv \
   --ro-bind /usr /usr \
@@ -337,6 +340,11 @@ exec "$BWRAP_BIN" \
   --ro-bind-try /etc/protocols /etc/protocols \
   --ro-bind-try /etc/services /etc/services \
   --ro-bind-try /etc/localtime /etc/localtime \
+  --ro-bind-try /etc/alternatives /etc/alternatives \
+  `# /etc/alternatives : le résolveur Debian des symlinks /usr/bin (awk→gawk, cc→gcc, vi, java…). Sans` \
+  `# lui, ~46 liens de /usr/bin dandlent → 'awk: command not found' alors que gawk EST là (mordait le` \
+  `# 1er Makefile/script d'un engineer). Universel (plomberie /usr, zéro secret) → même liste que les` \
+  `# autres /etc, pas de case par rôle : le launcher reste role-agnostic, le métier vit au cap-profile.` \
   --ro-bind /sys /sys \
   --tmpfs /home \
   --tmpfs /tmp \
