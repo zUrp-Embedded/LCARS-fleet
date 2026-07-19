@@ -12,7 +12,7 @@ defmodule Fleet.Workflow.GateBrief do
   Pure function over its inputs + the template files (fail-loud on a missing/miswired
   template — a judge never receives a half-rendered order).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   alias Fleet.Workflow.BriefTemplate
@@ -54,8 +54,21 @@ defmodule Fleet.Workflow.GateBrief do
   defp template_name(:brief), do: "gate-brief-brief"
   defp template_name(_deliverable), do: "gate-brief-deliverable"
 
-  # :brief → the judged brief as a READABLE defused blockquote (E2 — a JSON-escaped one-line
-  # blob is unreadable at scale). :deliverable → step outputs as pretty JSON (structured data).
+  # :brief with a SOURCE pointer → the judged brief is NOT re-quoted (dedup, one source of
+  # truth): the judge reads the authored doc through its RO-mounted project work/ops. FR: prose
+  # rendered to the agent (same stance as the git-native `livrable` pointer text).
+  defp subject_body(:brief, %{"brief_ref" => ref, "brief_sha" => sha})
+       when is_binary(ref) and is_binary(sha) do
+    "Le brief à juger n'est PAS recopié ici (une seule source de vérité) : c'est le doc " <>
+      "**`#{ref}`** de ton work/ops projet (monté RO — chemin `$LCARS_PROJECT_OPS/#{ref}`), " <>
+      "version pinnée au commit `#{sha}`. LIS-LE EN ENTIER avant de juger. Si le fichier a " <>
+      "changé depuis le pin, la version exacte à juger est " <>
+      "`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`."
+  end
+
+  # :brief inline (degraded dispatch, no authored doc) → READABLE defused blockquote (E2 — a
+  # JSON-escaped one-line blob is unreadable at scale). :deliverable → step outputs as pretty
+  # JSON (structured data).
   defp subject_body(:brief, %{"brief" => brief}) when is_binary(brief), do: blockquote(brief)
   defp subject_body(:brief, outputs), do: blockquote(render_json(outputs))
   defp subject_body(_deliverable, outputs), do: render_json(outputs)

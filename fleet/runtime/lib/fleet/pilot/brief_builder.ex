@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
@@ -277,12 +277,24 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
+    # DEDUP (user 2026-07-19): a pointer-backed brief is NOT re-embedded — the gate-brief points
+    # at the SOURCE doc (`_brief_source` = {ref, sha}, kept by the F-25 resolution) and the judge
+    # reads it through its RO project work/ops mount (`project_ops_mount`: "a judge needs it to
+    # weigh completeness" — the mount is already there). Before this, gate-briefs/issue-N-<judge>.md
+    # duplicated briefs/<slug>.md verbatim in the same worktree. Inline brief (degraded dispatch,
+    # no authored doc) → embedded as before, nothing else to point at.
+    outputs =
+      case Map.get(issue, "_brief_source") do
+        {ref, sha} -> %{"brief_ref" => ref, "brief_sha" => sha}
+        _ -> %{"brief" => brief}
+      end
+
     Fleet.Workflow.GateBrief.build(%{
       step: step,
       workflow_map_id: workflow_map_name,
       gate: nil,
       subject: :brief,
-      outputs: %{"brief" => brief}
+      outputs: outputs
     })
   end
 

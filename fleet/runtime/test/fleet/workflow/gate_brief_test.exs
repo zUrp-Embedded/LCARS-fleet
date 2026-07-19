@@ -77,4 +77,36 @@ defmodule Fleet.Workflow.GateBriefTest do
     assert is_binary(brief)
     assert brief =~ "Judged step: s"
   end
+
+  test "subject :brief with a SOURCE pointer → the brief is POINTED, never re-embedded (dedup)" do
+    # User 2026-07-19: gate-briefs/issue-N-consultant.md duplicated briefs/<slug>.md verbatim.
+    # The pointer path renders ref + pinned sha + the RO-mount read instruction — no copy.
+    brief =
+      Fleet.Workflow.GateBrief.build(%{
+        step: "brief-review",
+        workflow_map_id: "brief-gate",
+        gate: nil,
+        subject: :brief,
+        outputs: %{"brief_ref" => "briefs/issue-5-engineer.md", "brief_sha" => "0627de8abc"}
+      })
+
+    assert brief =~ "briefs/issue-5-engineer.md"
+    assert brief =~ "0627de8abc"
+    assert brief =~ "$LCARS_PROJECT_OPS"
+    # No embedded blockquote of a brief body: the pointer instruction replaces the copy.
+    refute brief =~ "> "
+  end
+
+  test "subject :brief INLINE (degraded, no authored doc) → embedded blockquote as before" do
+    brief =
+      Fleet.Workflow.GateBrief.build(%{
+        step: "brief-review",
+        workflow_map_id: "brief-gate",
+        gate: nil,
+        subject: :brief,
+        outputs: %{"brief" => "contenu inline du brief dégradé"}
+      })
+
+    assert brief =~ "> contenu inline du brief dégradé"
+  end
 end
