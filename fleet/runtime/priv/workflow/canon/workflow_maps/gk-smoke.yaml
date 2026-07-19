@@ -7,7 +7,8 @@
 #
 # review n'est PAS un step gatekeeper : c'est un step metier reviewer avec une
 # gate `soft`. A l'evaluation, une gate soft retourne une decision d'escalade vers
-# le gatekeeper permanent (juge unique) qui tranche, et le rail reprend sur son
+# le gatekeeper (juge one-shot par-projet, spawne pour cette eval — reorg 2026-07-19)
+# qui tranche, et le rail reprend sur son
 # verdict (continue -> avance ; abandon -> close ; humain -> await_arch). Smoke-test
 # du chemin d'escalade de bout en bout.
 

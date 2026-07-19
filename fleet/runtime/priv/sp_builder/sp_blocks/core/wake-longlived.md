@@ -1,7 +1,8 @@
 <!-- Date: 2026-07-18 — bloc SP : armement du Monitor, réservé aux pods à VIE LONGUE (lifetime_scope
-pipe/forever : engineer, gatekeeper). Un one-shot (juge) ne le reçoit PAS : son unique mandat est
-enqueué avant son spawn, il meurt au submit_result — aucun second réveil ne peut lui arriver, et armer
-une sentinelle coûterait deux appels d'outil + un process par pod pour rien. -->
+pipe/forever : engineer, architect). Un one-shot (juge — consultant/qualifier/reviewer/gatekeeper,
+one-shot par-projet depuis la réorg 2026-07-19) ne le reçoit PAS : son unique mandat est enqueué avant
+son spawn, il meurt au submit_result — aucun second réveil ne peut lui arriver, et armer une sentinelle
+coûterait deux appels d'outil + un process par pod pour rien. -->
 
 ### Armement du Monitor — ÉTAPE 0 (pods à vie longue)
 
