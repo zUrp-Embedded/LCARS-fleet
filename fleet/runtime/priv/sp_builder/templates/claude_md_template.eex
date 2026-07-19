@@ -10,7 +10,10 @@ Tous les paths absolus. Pas de cd hors `~`, pas de path relatif inter-fichiers.
 
 ## Sortie obligatoire
 
-Chaque livrable **markdown** ouvre sur l'en-tête LCARS (lignes en gras sous le titre H1) : Date, Dernière révision, Statut, Référencé par. Le code n'en porte pas : docstring/en-tête natif du langage.
+Chaque livrable ouvre sur son en-tête LCARS — deux familles selon la nature du fichier :
+
+- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par.
+- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), STARDATE, STATUS.
 
 ## Contraintes pod
 
