@@ -71,11 +71,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   posting under the system account would mask traceability and bypass
   least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge).
   """
-  @spec create_issue(String.t(), String.t(), String.t(), map(), {String.t(), String.t()} | nil) ::
+  @spec create_issue(String.t(), String.t(), map(), {String.t(), String.t()} | nil, String.t() | nil) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(repo, title, brief, state, brief_pointer \\ nil, summary \\ nil)
-      when is_binary(repo) and is_binary(title) and is_binary(brief) do
-    # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The arch then
+  def create_issue(title, brief, state, brief_pointer \\ nil, summary \\ nil)
+      when is_binary(title) and is_binary(brief) do
+    # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
+    # gate (the pod's spawn binding — reorg 2026-07-19): the arch has "the project", it never names
+    # a repo over the wire (no param to refuse = no leak that other repos exist). The arch then
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
     # `brief_pointer` (E4, validated by the tool handler): the ticket body becomes
@@ -86,7 +88,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
     # committed doc carries the detail; degraded → inline legacy, never a wall).
     with {:ok, forge} <- conforming_forge(),
-         {:ok, role} <- require_architect(state),
+         {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
       {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
       do_create_issue(forge, repo, title, with_pointer(body, pointer), token: identity.token)
@@ -158,9 +160,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   (ForgeClient). The repo is PASSED explicitly, NEVER read from a global memory: an
   arch tracking several projects in parallel names the ONE it is querying.
   """
-  @spec issue_status(String.t(), integer(), map()) :: {:ok, map()} | {:error, term()}
-  def issue_status(repo, number, state) when is_binary(repo) and is_integer(number) do
-    with {:ok, _role} <- require_architect(state),
+  @spec issue_status(integer(), map()) :: {:ok, map()} | {:error, term()}
+  def issue_status(number, state) when is_integer(number) do
+    with {:ok, %{repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_forge() do
       {issue_state, issue_labels} =
         case forge.get_issue(repo, number, []) do
@@ -181,8 +183,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
             {"unknown", []}
         end
 
+      # Axiom (reorg 2026-07-19): no "repo" in the result — the arch has "the project".
       result = %{
-        "repo" => repo,
         "issue" => number,
         "issue_state" => issue_state,
         # "delivered" = closed BY A MERGE — a multi-issue sequencing signal (the arch only chains issue
@@ -267,16 +269,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_escalations(map()) :: {:ok, map()} | {:error, term()}
   def list_escalations(state) do
-    with {:ok, _role} <- require_architect(state),
+    # PER-PROJECT inbox (reorg 2026-07-19): the arch reads ITS project's awaits-arch issues only —
+    # the repo comes from the gate (spawn binding), and the old org-wide scan is GONE (an arch that
+    # scanned every repo was the fleet-level head; a single-repo read is all that remains).
+    with {:ok, %{repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_escalation_forge() do
-      case forge.list_org_repos(escalation_org(), []) do
-        {:ok, repos} ->
-          escalations = Enum.flat_map(repos, &collect_awaits_arch(forge, &1, escalation_human()))
-          {:ok, %{"count" => length(escalations), "escalations" => escalations}}
-
-        {:error, reason} ->
-          {:error, {:forge, reason}}
-      end
+      escalations = collect_awaits_arch(forge, repo, escalation_human())
+      {:ok, %{"count" => length(escalations), "escalations" => escalations}}
     end
   end
 
@@ -286,16 +285,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
   gate; `:role_token_unavailable` REFUSES rather than posting under the system account (traceability +
   least-privilege, same policy as `create_issue`).
   """
-  @spec comment_issue(String.t(), integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def comment_issue(repo, number, body, state)
-      when is_binary(repo) and is_integer(number) and is_binary(body) do
+  @spec comment_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def comment_issue(number, body, state)
+      when is_integer(number) and is_binary(body) do
     # Gate (identity) FIRST, before validating the seam or touching the forge — an unauthorized caller
-    # must be refused on identity, not leak a seam/mechanics error (and the gate test relies on this order).
-    with {:ok, role} <- require_architect(state),
+    # must be refused on identity, not leak a seam/mechanics error (and the gate test relies on this
+    # order). The repo comes from the gate (spawn binding) — no wire param, no repo in the result.
+    with {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_escalation_forge(),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
       case forge.post_comment(repo, number, body, token: identity.token) do
-        {:ok, _} -> {:ok, %{"status" => "commented", "repo" => repo, "number" => number}}
+        {:ok, _} -> {:ok, %{"status" => "commented", "number" => number}}
         {:error, reason} -> {:error, {:comment_failed, reason}}
       end
     else
@@ -370,8 +370,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp escalation_entry(forge, repo, issue) do
     number = Map.get(issue, "number")
 
+    # Axiom (reorg 2026-07-19): no "repo" in the entry — the arch's inbox is ITS project's.
     %{
-      "repo" => repo,
       "number" => number,
       "title" => Map.get(issue, "title"),
       "verdict" => latest_verdict(forge, repo, number)
@@ -401,11 +401,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # SAME org authority as `do_create_project` / the poller's discovery (`:fleet_pilot, :fleet_org`) —
   # an inbox scanning an org the fleet never onboards into would be a dead read. `:delegation_org` is
   # the explicit override, both default `fleet`.
-  defp escalation_org do
-    Application.get_env(:fleet_mcp, :delegation_org) ||
-      Application.get_env(:fleet_pilot, :fleet_org) || "fleet"
-  end
-
+  # (escalation_org/0 removed with the org-wide scan — reorg 2026-07-19: the arch's inbox is
+  # single-repo, resolved from its spawn binding.)
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 
   # ============================================================
@@ -611,11 +608,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
             # visible on the issue in the forge UI.
             _ = forge.add_label(repo, number, "type:feature", [])
 
+            # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
+            # project"; the issue NUMBER is the only correlation it needs.
             {:ok,
              %{
                "status" => "issue_created",
-               "issue" => "#{repo}##{number}",
-               "repo" => repo,
+               "issue" => number,
                "assignee" => human
              }}
 
@@ -689,11 +687,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Common gate of the four tools: resolves the role from the channel identity (`state.pod_id`)
   # THEN requires `architect`. State without pod_id = acceptor anomaly → :pod_id_required
   # (fail-closed, never anonymous access).
+  # DELEGATION gate — returns the arch's full channel identity `%{role, repo}`: since the 2026-07-19
+  # reorg the architect is PROJECT-BOUND and its repo comes from the SPAWN binding (pod_info `repo`,
+  # set by `ProjectArchitect.ensure`), NEVER from a wire argument — the arch has "the project", it
+  # never names it. A bound-less architect (`repo` nil — stale spawn path, forged state) is REFUSED
+  # fail-closed (`:repo_unbound`): no default, no fallback routing.
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
-    case resolve_role(pod_id) do
-      {:ok, "architect"} -> {:ok, "architect"}
-      {:ok, _other_role} -> {:error, :forbidden_not_architect}
-      {:error, _reason} = err -> err
+    case resolve_identity(pod_id) do
+      {:ok, %{role: "architect"} = identity} ->
+        case Map.get(identity, :repo) do
+          repo when is_binary(repo) and repo != "" -> {:ok, %{role: "architect", repo: repo}}
+          _ -> {:error, :repo_unbound}
+        end
+
+      {:ok, _other_role_identity} ->
+        {:error, :forbidden_not_architect}
+
+      {:error, _reason} = err ->
+        err
     end
   end
 
@@ -705,26 +716,28 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # at which point it loses these tools). Same channel-identity resolution as `require_architect` — the
   # role is read from `state.pod_id`, never the wire. A worker / nil / unknown pod → REFUSAL, fail-closed.
   defp require_onboarder(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
-    case resolve_role(pod_id) do
-      {:ok, role} when role in ["starfleet", "architect"] -> {:ok, role}
-      {:ok, _other_role} -> {:error, :forbidden_not_onboarder}
+    case resolve_identity(pod_id) do
+      {:ok, %{role: role}} when role in ["starfleet", "architect"] -> {:ok, role}
+      {:ok, _other_role_identity} -> {:error, :forbidden_not_onboarder}
       {:error, _reason} = err -> err
     end
   end
 
   defp require_onboarder(_state), do: {:error, :pod_id_required}
 
-  # The ROLE (architect / engineer / …) is burned in at SPAWN and read from the Spawner registry
-  # (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test seam
-  # `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role}}` | `{:error, _}`.
-  # Default = DIRECT call to `Fleet.Spawner.pod_info/1` — the dep is DECLARED (boundary
-  # Fleet.MCP → Fleet.Spawner, downward): the boundary compiler carries this edge,
-  # no `apply` indirection needed. Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
-  defp resolve_role(pod_id) when is_binary(pod_id) do
+  # The CHANNEL IDENTITY (role + repo binding) is burned in at SPAWN and read from the Spawner
+  # registry (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test
+  # seam `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role, ...}}` |
+  # `{:error, _}` — `repo` optional in the map (the delegation gate refuses its absence; the
+  # onboarding gate ignores it). Default = DIRECT call to `Fleet.Spawner.pod_info/1` — the dep is
+  # DECLARED (boundary Fleet.MCP → Fleet.Spawner, downward): the boundary compiler carries this
+  # edge, no `apply` indirection needed. Unknown pod / Spawner unavailable → `:pod_unknown`
+  # (fail-closed).
+  defp resolve_identity(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 
     case resolver.(pod_id) do
-      {:ok, %{role: role}} -> {:ok, role}
+      {:ok, %{role: role} = identity} -> {:ok, %{role: role, repo: Map.get(identity, :repo)}}
       _ -> {:error, :pod_unknown}
     end
   end

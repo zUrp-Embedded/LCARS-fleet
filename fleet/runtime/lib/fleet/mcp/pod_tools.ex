@@ -98,19 +98,16 @@ defmodule Fleet.MCP.PodTools do
       name("Create Issue")
 
       description(
-        "Delegate an implementation brick to the LCARS fleet: creates a forge issue ready " <>
-          "for forge-native delivery (engineer → PR → review → merge). Use it to DELEGATE " <>
-          "rather than code yourself (the fleet delivers better and preserves your context). " <>
-          "`brief` = the FULL brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
-          "the repo returned by `create_project`, or the project designated by the human. The fleet does NOT route by " <>
-          "default — without `project`, the issue is REFUSED (never a silent misroute to another project). " <>
-          "The system ALWAYS commits your `brief` as the authored doc in the project's work/ops and the " <>
-          "ticket carries `summary` + the pinned pointer (`Brief: <ref> @ <commit>`) — so ALSO pass " <>
-          "`summary`: 2-6 lines, human-facing, what/why/done-when (without it the ticket shows a raw " <>
-          "excerpt). If you ALREADY authored+committed the doc yourself (multi-doc brief), pass " <>
-          "`brief_ref` (entry doc, e.g. `briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and " <>
-          "`brief` then carries the human summary, unchanged. " <>
-          "Returns {\"status\":\"issue_created\",\"repo\":...}."
+        "Delegate an implementation brick of YOUR project to the LCARS fleet: creates a work ticket " <>
+          "ready for delivery (engineer → PR → review → merge). Use it to DELEGATE rather than code " <>
+          "yourself (the fleet delivers better and preserves your context). `brief` = the FULL brief " <>
+          "for the engineer. The system ALWAYS commits your `brief` as the authored doc in your " <>
+          "project's work/ops and the ticket carries `summary` + the pinned pointer " <>
+          "(`Brief: <ref> @ <commit>`) — so ALSO pass `summary`: 2-6 lines, human-facing, " <>
+          "what/why/done-when (without it the ticket shows a raw excerpt). If you ALREADY " <>
+          "authored+committed the doc yourself (multi-doc brief), pass `brief_ref` (entry doc, e.g. " <>
+          "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
+          "human summary, unchanged. Returns {\"status\":\"issue_created\",\"issue\":N}."
       )
     end
 
@@ -120,11 +117,10 @@ defmodule Fleet.MCP.PodTools do
         "title" => %{"type" => "string"},
         "brief" => %{"type" => "string"},
         "summary" => %{"type" => "string"},
-        "project" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"}
       },
-      "required" => ["title", "brief", "project"]
+      "required" => ["title", "brief"]
     })
   end
 
@@ -217,12 +213,10 @@ defmodule Fleet.MCP.PodTools do
       name("Get Issue Status")
 
       description(
-        "Check the state of a delegated issue (issue + linked PR): issue open/closed, PR merged " <>
-          "or not, review verdicts. Use it to TRACK an issue before chaining — e.g. validate " <>
+        "Check the state of a delegated issue of YOUR project (issue + linked PR): issue open/closed, " <>
+          "PR merged or not, review verdicts. Use it to TRACK an issue before chaining — e.g. validate " <>
           "the delivery (issue closed by the merge) of issue N BEFORE posting issue N+1. " <>
-          "`number` = the issue number. `project` = the issue's `owner/name` repo, **REQUIRED**: the repo " <>
-          "returned by `create_project` (or the one passed to `create_issue`). The fleet does NOT route by " <>
-          "default — without `project`, the read is REFUSED (never state read on the wrong project). " <>
+          "`number` = the issue number. " <>
           "Returns {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
       )
     end
@@ -230,10 +224,9 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{
       "type" => "object",
       "properties" => %{
-        "number" => %{"type" => "integer"},
-        "project" => %{"type" => "string"}
+        "number" => %{"type" => "integer"}
       },
-      "required" => ["number", "project"]
+      "required" => ["number"]
     })
   end
 
@@ -242,12 +235,13 @@ defmodule Fleet.MCP.PodTools do
       name("List Escalations")
 
       description(
-        "List the fleet escalations awaiting YOUR arbitration (issues labelled `lcars-awaits-arch`): " <>
-          "a worker (consultant/engineer/gatekeeper) hit `escalate_user` and handed the decision back to you. " <>
-          "The wake (\"ton tour\") only signals THAT there is work; THIS reads WHAT. Returns each awaiting issue " <>
-          "with `repo`, `number`, `title` and `verdict` (the worker's escalation comment — the reasoning). " <>
-          "Then act: fix + re-`create_issue`, `comment_issue` your decision, or bring it to your human. " <>
-          "No arguments — it is your inbox across all the fleet's projects."
+        "List the escalations of YOUR project awaiting YOUR arbitration (issues labelled " <>
+          "`lcars-awaits-arch`): a worker (consultant/engineer/gatekeeper) hit `escalate_user` and " <>
+          "handed the decision back to you. The wake (\"ton tour\") only signals THAT there is work; " <>
+          "THIS reads WHAT. Returns each awaiting issue with `number`, `title` and `verdict` (the " <>
+          "worker's escalation comment — the reasoning). Then act: fix + re-`create_issue`, " <>
+          "`comment_issue` your decision, or bring it to your human. No arguments — it is your " <>
+          "project's inbox."
       )
     end
 
@@ -279,21 +273,20 @@ defmodule Fleet.MCP.PodTools do
       name("Comment Issue")
 
       description(
-        "Post a comment on a forge issue IN YOUR OWN NAME (the architect role account) — your reply on a " <>
-          "ticket in flight, typically to answer an escalation surfaced by `list_escalations`. " <>
-          "`project` = the issue's `owner/name` repo, **REQUIRED** (no default routing). `number` = the issue " <>
-          "number. `body` = your comment (markdown). Returns {\"status\":\"commented\",\"repo\":...,\"number\":...}."
+        "Post a comment on an issue of YOUR project IN YOUR OWN NAME (the architect role account) — " <>
+          "your reply on a ticket in flight, typically to answer an escalation surfaced by " <>
+          "`list_escalations`. `number` = the issue number. `body` = your comment (markdown). " <>
+          "Returns {\"status\":\"commented\",\"number\":...}."
       )
     end
 
     input_schema(%{
       "type" => "object",
       "properties" => %{
-        "project" => %{"type" => "string"},
         "number" => %{"type" => "integer"},
         "body" => %{"type" => "string"}
       },
-      "required" => ["project", "number", "body"]
+      "required" => ["number", "body"]
     })
   end
 
@@ -341,54 +334,32 @@ defmodule Fleet.MCP.PodTools do
   # Dispatch — architect forge delegation (Fleet.MCP.PodTools.Delegation)
   # ============================================================
 
-  # The architect gate (require_architect: role resolved from the channel, never from the wire) is applied
-  # INSIDE Delegation, before any forge mechanics. Here: argument-shape guards + structural refusals
-  # `project` REQUIRED (no default routing).
+  # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
+  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. Since the
+  # 2026-07-19 reorg there is NO `project` wire param on the delegation tools: the arch has "the
+  # project", the system knows which — a param to refuse would itself leak that other repos exist.
 
-  def handle_tool_call(
-        "create_issue",
-        %{"title" => title, "brief" => brief, "project" => repo} = args,
-        state
-      )
-      when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
-    cond do
-      not valid_repo_ref?(repo) ->
-        {:error,
-         {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
-         state}
-
-      # Pointer args are a PAIR: one without the other, or an out-of-scheme value, is a
-      # STRUCTURAL REFUSAL (mirror of the `project` gate) — never a ticket with a half-pointer.
-      not valid_brief_pointer_args?(args) ->
-        {:error,
-         {:invalid_brief_pointer,
-          "`brief_ref`+`brief_sha` come TOGETHER: ref = work/ops brief path " <>
-            "(e.g. `briefs/<slug>.md`), sha = the introducing 40-hex COMMIT sha"}, state}
-
-      true ->
-        summary =
-          case args["summary"] do
-            s when is_binary(s) and s != "" -> s
-            _ -> nil
-          end
-
-        case Delegation.create_issue(repo, title, brief, state, brief_pointer(args), summary) do
-          {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-          {:error, reason} -> {:error, reason, state}
-        end
-    end
-  end
-
-  # create_issue WITHOUT a valid `project` → STRUCTURAL REFUSAL. Goodwill does not impose itself: no default
-  # routing (an omitted `project` silently routed to a "last worked-on" project would misroute). `project`
-  # is REQUIRED; without it, NO issue is created.
-  def handle_tool_call("create_issue", %{"title" => title, "brief" => brief}, state)
+  def handle_tool_call("create_issue", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
-    {:error,
-     {:project_required,
-      "create_issue REFUSED — `project` is REQUIRED (the `owner/name` repo where to deliver). No default " <>
-        "routing. Pass `project` = the repo returned by create_project, or the project designated by the human."},
-     state}
+    # Pointer args are a PAIR: one without the other, or an out-of-scheme value, is a
+    # STRUCTURAL REFUSAL — never a ticket with a half-pointer.
+    if valid_brief_pointer_args?(args) do
+      summary =
+        case args["summary"] do
+          s when is_binary(s) and s != "" -> s
+          _ -> nil
+        end
+
+      case Delegation.create_issue(title, brief, state, brief_pointer(args), summary) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_brief_pointer,
+        "`brief_ref`+`brief_sha` come TOGETHER: ref = work/ops brief path " <>
+          "(e.g. `briefs/<slug>.md`), sha = the introducing 40-hex COMMIT sha"}, state}
+    end
   end
 
   def handle_tool_call("create_issue", _bad_args, state) do
@@ -442,34 +413,12 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call(
-        "get_issue_status",
-        %{"number" => number, "project" => repo},
-        state
-      )
-      when is_integer(number) and is_binary(repo) and repo != "" do
-    if valid_repo_ref?(repo) do
-      case Delegation.issue_status(repo, number, state) do
-        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-        {:error, reason} -> {:error, reason, state}
-      end
-    else
-      {:error,
-       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
-       state}
-    end
-  end
-
-  # get_issue_status WITHOUT a valid `project` → STRUCTURAL REFUSAL (mirror of create_issue). No default
-  # routing: an omitted `project` would read the state on the last onboarded project → wrong state, the
-  # multi-issue is mis-sequenced. `project` is REQUIRED; without it (or empty), NO read.
   def handle_tool_call("get_issue_status", %{"number" => number}, state)
       when is_integer(number) do
-    {:error,
-     {:project_required,
-      "get_issue_status REFUSED — `project` is REQUIRED (the issue's `owner/name` repo). No default " <>
-        "routing. Pass `project` = the repo returned by create_project, or the one passed to create_issue."},
-     state}
+    case Delegation.issue_status(number, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
   end
 
   def handle_tool_call("get_issue_status", _bad, state) do
@@ -491,31 +440,12 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call(
-        "comment_issue",
-        %{"project" => repo, "number" => number, "body" => body},
-        state
-      )
-      when is_binary(repo) and repo != "" and is_integer(number) and is_binary(body) and body != "" do
-    if valid_repo_ref?(repo) do
-      case Delegation.comment_issue(repo, number, body, state) do
-        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-        {:error, reason} -> {:error, reason, state}
-      end
-    else
-      {:error,
-       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
-       state}
-    end
-  end
-
-  # comment_issue WITHOUT a valid project → STRUCTURAL REFUSAL (mirror of create_issue/get_issue_status).
   def handle_tool_call("comment_issue", %{"number" => number, "body" => body}, state)
-      when is_integer(number) and is_binary(body) do
-    {:error,
-     {:project_required,
-      "comment_issue REFUSED — `project` is REQUIRED (the issue's `owner/name` repo). No default routing."},
-     state}
+      when is_integer(number) and is_binary(body) and body != "" do
+    case Delegation.comment_issue(number, body, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
   end
 
   def handle_tool_call("comment_issue", _bad_args, state) do

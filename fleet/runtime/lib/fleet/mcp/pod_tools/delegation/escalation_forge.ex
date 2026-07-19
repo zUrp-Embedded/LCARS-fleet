@@ -15,12 +15,11 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   `Fleet.Pilot.ForgeClient` implements BOTH surfaces; a stub used on the escalation path adopts THIS
   behaviour. Runtime (upward mcp → pilot) seam, like `ForgeClient` — no compile dep.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
 
-  @doc "Repos of the escalation org — `{:ok, [full_name]}` (`\"owner/name\"`)."
-  @callback list_org_repos(org :: String.t(), opts :: keyword()) ::
-              {:ok, [String.t()]} | {:error, term()}
+  # (`list_org_repos` callback removed — reorg 2026-07-19: the arch's escalation inbox is
+  # single-repo (its spawn binding), the org-wide scan is gone.)
 
   @doc "OPEN issues of `repo` (raw Gitea maps; `opts[:assigned_by]` scopes to the human)."
   @callback list_open_issues(repo :: String.t(), opts :: keyword()) ::

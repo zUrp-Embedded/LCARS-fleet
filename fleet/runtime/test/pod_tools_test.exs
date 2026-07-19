@@ -265,14 +265,14 @@ defmodule Fleet.MCP.PodToolsTest do
       do: raise("RecordingForge is read-only — unexpected add_label in these tests")
   end
 
-  describe "get_issue_status (arch tracking — repo PASSED as `project`, no more mutable global)" do
+  describe "get_issue_status (arch tracking — repo from the POD BINDING, no wire param)" do
     setup do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForge)
 
-      # Tracking an issue is an ARCHITECT act: the resolver engraves the architect role on the
-      # channel's pod.
+      # Tracking an issue is an ARCHITECT act; since the 2026-07-19 reorg the arch is PROJECT-BOUND:
+      # the resolver engraves role AND repo (the spawn binding) on the channel's pod.
       TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
-        {:ok, %{role: "architect"}}
+        {:ok, %{role: "architect", repo: "fleet/bound"}}
       end)
 
       # :test_issue_state / :test_issue_labels are set by some tests (RecordingForge) — restore only.
@@ -291,29 +291,43 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, {:seam_misconfigured, Enum, missing}, _} =
                PodTools.handle_tool_call(
                  "get_issue_status",
-                 %{"number" => 1, "project" => "fleet/x"},
+                 %{"number" => 1},
                  pod_state(pod)
                )
 
       assert {:get_issue, 3} in missing
     end
 
-    test "reads the state of the repo PASSED in `project` (not of a globalized current project)" do
+    test "reads the state of the POD'S BOUND repo — and the result never names it (axiom)" do
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "get_issue_status",
-                 %{"number" => 42, "project" => "fleet/specific"},
+                 %{"number" => 42},
                  pod_state(pod)
                )
 
-      # The repo queried forge-side IS the passed `project` — not a "last onboarded project". Two
-      # projects tracked in parallel no longer contaminate each other via a rewritten global.
-      assert_received {:get_issue, "fleet/specific", 42}
+      # The repo queried forge-side IS the spawn binding — resolved by the SYSTEM from the channel
+      # identity, never a wire field. And the result carries NO repo name: the arch has "the project".
+      assert_received {:get_issue, "fleet/bound", 42}
       assert {:ok, result} = Jason.decode(txt)
-      assert result["repo"] == "fleet/specific"
+      refute Map.has_key?(result, "repo")
       assert result["issue"] == 42
+    end
+
+    test "a stale wire `project` is IGNORED — the binding wins (no wire override of identity)" do
+      pod = uniq("pod-arch")
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 42, "project" => "fleet/evil"},
+                 pod_state(pod)
+               )
+
+      # Extra args are inert: the forge read went to the BOUND repo, never the wire value.
+      assert_received {:get_issue, "fleet/bound", 42}
     end
 
     test "F-C047: `delivered: true` when the issue is closed AND carries `stage/merged` (merge proof)" do
@@ -324,7 +338,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "get_issue_status",
-                 %{"number" => 7, "project" => "fleet/other"},
+                 %{"number" => 7},
                  pod_state(pod)
                )
 
@@ -344,7 +358,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "get_issue_status",
-                 %{"number" => 7, "project" => "fleet/other"},
+                 %{"number" => 7},
                  pod_state(pod)
                )
 
@@ -353,29 +367,15 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["delivered"] == false
     end
 
-    test "REFUSES if `project` is omitted — no default routing (mirror of create_issue)" do
-      # The pod is legitimate (architect) — it is the missing `project` that refuses. Without an
-      # explicit repo, get_issue_status would read the state of the wrong project (the hole we close).
+    test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default)" do
+      # Stale spawn path / forged state: the delegation gate refuses rather than guessing a project.
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
       pod = uniq("pod-arch")
 
-      assert {:error, {:project_required, msg}, _} =
+      assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
                  "get_issue_status",
                  %{"number" => 42},
-                 pod_state(pod)
-               )
-
-      assert msg =~ "project"
-      refute_received {:get_issue, _, _}
-    end
-
-    test "REFUSES if `project` is empty" do
-      pod = uniq("pod-arch")
-
-      assert {:error, {:project_required, _}, _} =
-               PodTools.handle_tool_call(
-                 "get_issue_status",
-                 %{"number" => 42, "project" => ""},
                  pod_state(pod)
                )
 
@@ -390,10 +390,12 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
 
       # Delegating is an ARCHITECT act: the `:pod_resolver` must return the `architect` role (otherwise
-      # `require_architect` refuses `:forbidden_not_architect`). The architect account's token must also
-      # be on disk, otherwise create_issue REFUSES (`:role_token_unavailable`, fail-closed).
+      # `require_architect` refuses `:forbidden_not_architect`) AND the repo BINDING (reorg 2026-07-19:
+      # the arch is project-bound — the system resolves "the project" from the channel, no wire param).
+      # The architect account's token must also be on disk, otherwise create_issue REFUSES
+      # (`:role_token_unavailable`, fail-closed).
       TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
-        {:ok, %{role: "architect"}}
+        {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
@@ -418,8 +420,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{
                    "title" => "Un vrai ticket",
                    "brief" => long_brief,
-                   "summary" => "Résumé dédié : livrer X, fini quand Y.",
-                   "project" => "fleet/demo"
+                   "summary" => "Résumé dédié : livrer X, fini quand Y."
                  },
                  pod_state(uniq("pod-arch"))
                )
@@ -445,7 +446,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "Sans résumé", "brief" => long_brief, "project" => "fleet/demo"},
+                 %{"title" => "Sans résumé", "brief" => long_brief},
                  pod_state(uniq("pod-arch"))
                )
 
@@ -458,6 +459,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "degraded materialization (no work/ops) → full inline body, the legacy behavior", %{tmp_dir: tmp} do
       # work_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
+      # (The binding repo is fleet/demo but tmp/demo was NOT created in this test → degraded path.)
       TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
 
       log =
@@ -465,7 +467,7 @@ defmodule Fleet.MCP.PodToolsTest do
           assert {:ok, _, _} =
                    PodTools.handle_tool_call(
                      "create_issue",
-                     %{"title" => "T", "brief" => "tout le brief inline", "project" => "fleet/ghost"},
+                     %{"title" => "T", "brief" => "tout le brief inline"},
                      pod_state(uniq("pod-arch"))
                    )
         end)
@@ -476,17 +478,18 @@ defmodule Fleet.MCP.PodToolsTest do
       assert :none = Fleet.Layout.parse_brief_pointer(body)
     end
 
-    test "creates the issue (human assignee) + visual label, WITHOUT engraving a route (decoupling)" do
+    test "creates the issue in the BOUND repo (human assignee) + visual label, WITHOUT engraving a route" do
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
+                 %{"title" => "T", "brief" => "fais X"},
                  pod_state(pod)
                )
 
-      # assignee = the human owner (fixed point). No labels INSIDE create_issue (Gitea wants IDs).
+      # The repo is the SPAWN BINDING (resolver) — never a wire field. assignee = the human owner
+      # (fixed point). No labels INSIDE create_issue (Gitea wants IDs).
       assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
       human = Fleet.Credentials.Human.current!()
       assert opts[:assignees] == [human]
@@ -496,67 +499,41 @@ defmodule Fleet.MCP.PodToolsTest do
       # discarded and its absence is directly visible on the issue in the forge UI.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
+      # Axiom (reorg): the result never names the repo — the issue NUMBER is the whole correlation.
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "issue_created"
-      assert result["issue"] == "fleet/demo#77"
+      assert result["issue"] == 77
+      refute Map.has_key?(result, "repo")
       assert result["assignee"] == human
     end
 
-    test "EXPLICIT `project` → the issue is created IN that repo" do
+    test "a stale wire `project` is IGNORED — the binding wins (no wire override of identity)" do
       pod = uniq("pod-arch")
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/explicit"},
+                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/evil"},
                  pod_state(pod)
                )
 
-      assert_received {:create_issue, "fleet/explicit", "T", "fais X", _opts}
+      # Extra args are inert: the issue landed in the BOUND repo, never the wire value.
+      assert_received {:create_issue, "fleet/demo", "T", "fais X", _opts}
     end
 
-    test "REFUSES if `project` is omitted — no default routing" do
-      # Good will is not imposed: without `project`, we REFUSE. The pod is legitimate (architect) —
-      # it is the missing `project` that refuses, not the identity.
+    test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default routing)" do
+      # Stale spawn path / forged state: the gate refuses rather than guessing a project.
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
       pod = uniq("pod-arch")
 
-      assert {:error, {:project_required, msg}, _} =
+      assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
                  "create_issue",
                  %{"title" => "T", "brief" => "fais X"},
                  pod_state(pod)
                )
 
-      assert msg =~ "project"
       refute_received {:create_issue, _, _, _, _}
-    end
-
-    test "REFUSES if `project` is empty" do
-      pod = uniq("pod-arch")
-
-      assert {:error, {:project_required, _}, _} =
-               PodTools.handle_tool_call(
-                 "create_issue",
-                 %{"title" => "T", "brief" => "fais X", "project" => ""},
-                 pod_state(pod)
-               )
-
-      refute_received {:create_issue, _, _, _, _}
-    end
-
-    test "R2-03: non-empty but malformed `project` (not owner/name) → {:invalid_project_ref} at the edge" do
-      pod = uniq("pod-arch")
-
-      # no slash, 3 components, empty part, or a space → rejected BEFORE any forge/gate call
-      for bad <- ["justname", "a/b/c", "owner/", "/name", "own er/name"] do
-        assert {:error, {:invalid_project_ref, _}, _} =
-                 PodTools.handle_tool_call(
-                   "create_issue",
-                   %{"title" => "T", "brief" => "X", "project" => bad},
-                   pod_state(pod)
-                 ),
-               "project #{inspect(bad)} should be rejected"
-      end
     end
   end
 
@@ -609,13 +586,15 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "the spawn says architect → delegation accepted, ARCHITECT token (spawn role)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
+    test "the spawn says architect (+ repo binding) → delegation accepted, ARCHITECT token (spawn role)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect", repo: "fleet/demo"}}
+      end)
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
+                 %{"title" => "T", "brief" => "fais X"},
                  %{pod_id: "p-arch"}
                )
 
@@ -649,12 +628,14 @@ defmodule Fleet.MCP.PodToolsTest do
         )
       )
 
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect", repo: "fleet/demo"}}
+      end)
 
       assert {:error, :role_token_unavailable, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
+                 %{"title" => "T", "brief" => "fais X"},
                  %{pod_id: "p-arch2"}
                )
 
@@ -711,8 +692,9 @@ defmodule Fleet.MCP.PodToolsTest do
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
-      {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
-      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
+      # No `project` wire param (reorg 2026-07-19): the repo comes from the pod binding.
+      {"create_issue", %{"title" => "T", "brief" => "B"}},
+      {"get_issue_status", %{"number" => 1}}
     ]
     @privileged_tools @onboarding_tools ++ @delegation_tools
 
@@ -805,7 +787,10 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "architect → the 4 tools PASS the gate (no :forbidden / :pod_unknown)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
+      # The arch is project-bound (reorg 2026-07-19): the resolver carries its repo binding.
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect", repo: "fleet/demo"}}
+      end)
 
       for {tool, biz_args} <- @privileged_tools do
         pod = uniq("pod-arch")
@@ -818,14 +803,12 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # RICH forge stub for the return channel: 2 repos, one awaits-arch (#4 + verdict comment) + a
-  # normal issue (#5, to be ignored). DR-012: the escalation contract is now a DECLARED behaviour
-  # (`Delegation.EscalationForge`) → the stub ADOPTS it (compile-checked, anti lying-stub, like StubForge).
+  # RICH forge stub for the return channel: the BOUND repo (fleet/alpha) carries one awaits-arch
+  # (#4 + verdict comment) + a normal issue (#5, to be ignored). DR-012: the escalation contract is a
+  # DECLARED behaviour (`Delegation.EscalationForge`) → the stub ADOPTS it (compile-checked, anti
+  # lying-stub, like StubForge). (No list_org_repos: the org-wide scan died with the per-project reorg.)
   defmodule EscalationForge do
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
-
-    @impl true
-    def list_org_repos(_org, _opts), do: {:ok, ["fleet/alpha", "fleet/beta"]}
 
     @impl true
     def list_open_issues("fleet/alpha", _opts) do
@@ -836,7 +819,7 @@ defmodule Fleet.MCP.PodToolsTest do
        ]}
     end
 
-    def list_open_issues("fleet/beta", _opts),
+    def list_open_issues(_other_repo, _opts),
       do: {:ok, [%{"number" => 9, "title" => "rien", "labels" => []}]}
 
     @impl true
@@ -862,7 +845,12 @@ defmodule Fleet.MCP.PodToolsTest do
 
     setup %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, EscalationForge)
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+
+      # The arch is BOUND to fleet/alpha (reorg 2026-07-19): its inbox and replies are that repo's.
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+        {:ok, %{role: "architect", repo: "fleet/alpha"}}
+      end)
+
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
       :ok
@@ -872,12 +860,14 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
 
+      # Single-repo inbox (the binding) — and the entry never names the repo (axiom).
       assert {:ok, result} = Jason.decode(txt)
       assert result["count"] == 1
 
-      assert [%{"repo" => "fleet/alpha", "number" => 4, "title" => "sonde retour", "verdict" => v}] =
+      assert [%{"number" => 4, "title" => "sonde retour", "verdict" => v} = entry] =
                result["escalations"]
 
+      refute Map.has_key?(entry, "repo")
       assert v =~ "PING-RETOUR-OK"
     end
 
@@ -888,17 +878,19 @@ defmodule Fleet.MCP.PodToolsTest do
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-eng")))
     end
 
-    test "comment_issue: posts on the passed project, IN THE NAME of the architect role (role token)" do
+    test "comment_issue: posts on the BOUND repo, IN THE NAME of the architect role (role token)" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "comment_issue",
-                 %{"project" => "fleet/alpha", "number" => 4, "body" => "vu, je re-cadre le brief"},
+                 %{"number" => 4, "body" => "vu, je re-cadre le brief"},
                  pod_state(uniq("pod-arch"))
                )
 
+      # The repo is the spawn binding — never a wire field; the result never names it (axiom).
       assert_received {:post_comment, "fleet/alpha", 4, "vu, je re-cadre le brief", opts}
       assert opts[:token] =~ "ARCH_TOKEN"
-      assert {:ok, %{"status" => "commented", "repo" => "fleet/alpha", "number" => 4}} = Jason.decode(txt)
+      assert {:ok, %{"status" => "commented", "number" => 4} = decoded} = Jason.decode(txt)
+      refute Map.has_key?(decoded, "repo")
     end
 
     test "comment_issue: architect gate (non-architect role → refused, nothing posted)" do
@@ -907,22 +899,23 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
                  "comment_issue",
-                 %{"project" => "fleet/alpha", "number" => 4, "body" => "x"},
+                 %{"number" => 4, "body" => "x"},
                  pod_state(uniq("pod-rev"))
                )
 
       refute_received {:post_comment, _, _, _, _}
     end
 
-    test "comment_issue: REFUSES without project (mirror of create_issue, no default routing)" do
-      assert {:error, {:project_required, msg}, _} =
+    test "comment_issue: arch WITHOUT a repo binding → :repo_unbound (fail-closed)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+
+      assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
                  "comment_issue",
                  %{"number" => 4, "body" => "x"},
                  pod_state(uniq("pod-arch"))
                )
 
-      assert msg =~ "project"
       refute_received {:post_comment, _, _, _, _}
     end
   end
