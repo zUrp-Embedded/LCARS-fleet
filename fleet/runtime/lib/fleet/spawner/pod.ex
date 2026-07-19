@@ -209,8 +209,21 @@ defmodule Fleet.Spawner.Pod do
   # response watchdogs (state_timeout :result_deadline + generic timeout :liveness).
   @impl :gen_statem
   def handle_event(:enter, old_state, :monitoring, data) do
-    unless old_state == :extracting, do: :ok = Bus.subscribe()
-    {:keep_state_and_data, arm_result_deadline_actions(data)}
+    first_entry? = old_state != :extracting
+    if first_entry?, do: :ok = Bus.subscribe()
+
+    actions = arm_result_deadline_actions(data)
+
+    # Desktop-slot capture: on the FIRST entry into :monitoring (post-launch), if this pod is
+    # RC-visible, arm a bounded poll that persists its `bridge_status` once claude has registered
+    # → the slot re-attaches next boot (SeedStore.capture_slot_bridge). A no-RC pod never registers
+    # → never armed. Once per boot suffices (the slot is stable for the process lifetime).
+    actions =
+      if first_entry? and Fleet.CapProfile.remote_control?(data.cap_profile),
+        do: [schedule_capture_action(0, capture_slot_first_delay_ms()) | actions],
+        else: actions
+
+    {:keep_state_and_data, actions}
   end
 
   # All other states: entry does nothing (the work lives in `:proceed`).
@@ -674,6 +687,38 @@ defmodule Fleet.Spawner.Pod do
 
   # No tmux_session (StubBackend, or vanished session/kill race) → no kick.
   def handle_event({:timeout, :kick}, {:attempt, _n}, _state, _data), do: :keep_state_and_data
+
+  # Desktop-slot capture loop (generic timeout `:capture_slot`, RC-visible pods only). Bounded poll
+  # of the live jsonl until claude has written its `bridge_status` (RC registration), then persist it
+  # to the per-identity sidecar and STOP. Best-effort: a cap without capture gives up quietly (the
+  # slot is re-minted + re-captured next boot). Isolated from kick/liveness/deadline — a failure here
+  # never touches the pod's core loop.
+  def handle_event({:timeout, :capture_slot}, {:attempt, n}, :monitoring, data) do
+    case Fleet.Spawner.SeedStore.capture_slot_bridge(data.pod_dir, data.session_id) do
+      :ok ->
+        Logger.debug(
+          "pod #{data.pod_id} Desktop slot captured (bridge_status → sidecar) — stable on next boot"
+        )
+
+        {:keep_state_and_data, [cancel_capture_action()]}
+
+      _not_yet ->
+        if n + 1 < capture_slot_max() do
+          {:keep_state_and_data, [schedule_capture_action(n + 1, capture_slot_retry_ms())]}
+        else
+          Logger.debug(
+            "pod #{data.pod_id} Desktop slot NOT captured after #{n + 1} tries (best-effort; " <>
+              "re-mint + re-capture next boot)"
+          )
+
+          {:keep_state_and_data, [cancel_capture_action()]}
+        end
+    end
+  end
+
+  # Residual capture tick outside :monitoring (generic timeout not auto-cancelled on state change) → no-op.
+  def handle_event({:timeout, :capture_slot}, {:attempt, _n}, _state, _data),
+    do: :keep_state_and_data
 
   # BOUNDED extract-retry timer — the ONLY re-fire of pod.completed after a failed
   # broadcast. Guarded on :monitoring + a non-nil submitted_result: a no-op if a long-lived cycle has
@@ -1181,6 +1226,20 @@ defmodule Fleet.Spawner.Pod do
 
   # Cancel = set the :kick generic timeout to :infinity (= no timer).
   defp cancel_kick_action, do: {{:timeout, :kick}, :infinity, {:attempt, 0}}
+
+  # Desktop-slot capture (generic timeout `:capture_slot`) — arming/cancel + cadence. Wider window
+  # than the kick: claude's RC registration lands after the cold-start (~15s under bwrap), so the
+  # default 5s + 20×5s ≈ 105s comfortably covers it. Best-effort, no escalation on cap.
+  defp schedule_capture_action(n, delay), do: {{:timeout, :capture_slot}, delay, {:attempt, n}}
+  defp cancel_capture_action, do: {{:timeout, :capture_slot}, :infinity, {:attempt, 0}}
+
+  defp capture_slot_first_delay_ms,
+    do: Application.get_env(:fleet_spawner, :capture_slot_first_delay_ms, 5_000)
+
+  defp capture_slot_retry_ms,
+    do: Application.get_env(:fleet_spawner, :capture_slot_retry_ms, 5_000)
+
+  defp capture_slot_max, do: Application.get_env(:fleet_spawner, :capture_slot_max, 20)
 
   defp safe_resolve_disallowed(cap_profile) do
     {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}

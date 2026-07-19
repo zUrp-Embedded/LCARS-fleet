@@ -190,4 +190,141 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
     refute File.exists?(escape_target)
   end
+
+  describe "Desktop-slot bridge_status sidecar (2026-07-19)" do
+    @uuid "1badcafe-feed-4dad-babe-9999dec0de04"
+    @bridge ~s({"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01ABC","sessionId":"1badcafe-feed-4dad-babe-9999dec0de04"})
+
+    test "capture: writes the most recent bridge_status to <root>/_slots/<uuid>.jsonl", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+
+      content =
+        ~s({"type":"system","subtype":"mode"}\n) <>
+          @bridge <> "\n" <> ~s({"type":"user","message":"hi"}\n)
+
+      make_jsonl(pod_dir, "-home-x-arch", @uuid, content)
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+
+      sidecar = Path.join([root, "_slots", "#{@uuid}.jsonl"])
+      assert File.exists?(sidecar)
+      line = sidecar |> File.read!() |> String.trim()
+      assert line =~ "bridge_status"
+      assert line =~ "session_01ABC"
+    end
+
+    test "capture: :none when the live jsonl has NO bridge_status (not registered yet)", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      make_jsonl(pod_dir, "-home-x-arch", @uuid, ~s({"type":"system","subtype":"mode"}\n))
+      assert :none = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+    end
+
+    test "capture: :none when there is no live jsonl at all", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "emptypod")
+      File.mkdir_p!(pod_dir)
+      assert :none = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+    end
+
+    test "restore: injects the captured bridge_status onto the restored seed (F5 reattach)", %{
+      tmp: tmp,
+      root: root
+    } do
+      File.mkdir_p!(Path.join(root, "_slots"))
+      File.write!(Path.join([root, "_slots", "#{@uuid}.jsonl"]), @bridge <> "\n")
+
+      seed = Path.join(tmp, "base.jsonl")
+      File.write!(seed, ~s({"type":"system","subtype":"mode"}\n{"type":"user","message":"setup"}\n))
+      pod_dir = Path.join(tmp, "recallpod")
+
+      {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallpod", @uuid)
+      restored = File.read!(dest)
+      assert restored =~ "setup", "seed body must be kept"
+      assert restored =~ "bridge_status", "slot line must be grafted"
+      assert restored =~ "session_01ABC"
+    end
+
+    test "restore: idempotent — no double-inject if the seed already carries a bridge_status", %{
+      tmp: tmp,
+      root: root
+    } do
+      File.mkdir_p!(Path.join(root, "_slots"))
+      File.write!(Path.join([root, "_slots", "#{@uuid}.jsonl"]), @bridge <> "\n")
+
+      seed = Path.join(tmp, "base.jsonl")
+      File.write!(seed, @bridge <> "\n")
+      pod_dir = Path.join(tmp, "recallpod2")
+
+      {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallpod2", @uuid)
+      occurrences = dest |> File.read!() |> String.split("bridge_status") |> length()
+      assert occurrences == 2, "expected exactly 1 bridge_status, got #{occurrences - 1}"
+    end
+
+    test "capture then restore: round-trip re-attaches the same slot line", %{tmp: tmp} do
+      # boot 1: a live jsonl registered a slot → capture
+      pod1 = Path.join(tmp, "pod1")
+      make_jsonl(pod1, "-home-x-arch", @uuid, @bridge <> "\n")
+      assert :ok = SeedStore.capture_slot_bridge(pod1, @uuid)
+
+      # boot 2: restore a fresh base seed (no slot) → the captured slot is grafted back
+      seed = Path.join(tmp, "base.jsonl")
+      File.write!(seed, ~s({"type":"system","subtype":"mode"}\n))
+      pod2 = Path.join(tmp, "pod2")
+      {:ok, dest} = SeedStore.restore(seed, pod2, "/home/r/pod2", @uuid)
+      assert File.read!(dest) =~ "session_01ABC"
+    end
+
+    # The RESUMED-session format (the arch, manual-mode): the RC identity is a `bridge-session`
+    # record (bridgeSessionId = the slot), NOT `system/bridge_status`. Proven live 2026-07-19 that
+    # injecting it re-attaches the arch's `cse_…` slot. Capture must grab this format too.
+    @bridge_session ~s({"type":"bridge-session","sessionId":"1badcafe-feed-4dad-babe-9999dec0de04","bridgeSessionId":"cse_01ABC","lastSequenceNum":0})
+
+    test "capture: grabs the bridge-session record (resumed-session format, e.g. the arch)", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+
+      make_jsonl(
+        pod_dir,
+        "-home-x-arch",
+        @uuid,
+        ~s({"type":"system","subtype":"mode"}\n) <> @bridge_session <> "\n"
+      )
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, @uuid)
+      captured = Path.join([root, "_slots", "#{@uuid}.jsonl"]) |> File.read!()
+      assert captured =~ "bridge-session"
+      assert captured =~ "cse_01ABC"
+    end
+
+    test "restore: injects a captured bridge-session (arch reattach)", %{tmp: tmp, root: root} do
+      File.mkdir_p!(Path.join(root, "_slots"))
+      File.write!(Path.join([root, "_slots", "#{@uuid}.jsonl"]), @bridge_session <> "\n")
+
+      seed = Path.join(tmp, "base.jsonl")
+      File.write!(seed, ~s({"type":"user","message":"setup"}\n))
+      pod_dir = Path.join(tmp, "recallarch")
+
+      {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallarch", @uuid)
+      restored = File.read!(dest)
+      assert restored =~ "setup", "seed body kept"
+      assert restored =~ "cse_01ABC", "arch slot line grafted"
+    end
+
+    test "restore: idempotent on an already-present bridge-session", %{tmp: tmp, root: root} do
+      File.mkdir_p!(Path.join(root, "_slots"))
+      File.write!(Path.join([root, "_slots", "#{@uuid}.jsonl"]), @bridge_session <> "\n")
+
+      seed = Path.join(tmp, "base.jsonl")
+      File.write!(seed, @bridge_session <> "\n")
+      pod_dir = Path.join(tmp, "recallarch2")
+
+      {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallarch2", @uuid)
+      occurrences = dest |> File.read!() |> String.split("bridge-session") |> length()
+      assert occurrences == 2, "expected exactly 1 bridge-session, got #{occurrences - 1}"
+    end
+  end
 end

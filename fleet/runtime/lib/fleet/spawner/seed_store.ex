@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.SeedStore do
   NB git: the `cp` drops the seed; putting the work repo under git is a SEPARATE gesture (outside the
   teardown hot-path — no `git` in a pod's death).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-19
   """
   require Logger
 
@@ -171,6 +171,12 @@ defmodule Fleet.Spawner.SeedStore do
     end
 
     File.cp!(seed_jsonl, dest)
+    # Desktop-slot preservation: after the seed BODY lands, graft the captured `bridge_status`
+    # line (if any) so `--resume` RE-ATTACHES the same server slot instead of minting a new one
+    # (proven 2026-07-19, F1/F5: same uuid + own bridge_status → reattach; without it → new slot,
+    # the "12 archs" bug). Keyed by the deterministic `uuid` = the slot's identity. Best-effort:
+    # a missing/failed sidecar just means this boot re-mints + re-captures (self-healing).
+    maybe_inject_slot_bridge(dest, uuid)
     {:ok, dest}
   end
 
@@ -185,6 +191,96 @@ defmodule Fleet.Spawner.SeedStore do
   """
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")
+
+  # ── Desktop-slot preservation (per-identity RC-identity sidecar) ─────────────
+  # A Desktop remote-control slot is bound server-side to the LOCAL session that minted it. It
+  # re-attaches ONLY via `--resume` on a jsonl carrying its RC-identity record(s) (proven live
+  # 2026-07-19; a create or a resume-without-them mints a NEW slot → the "12 archs" bug). So we
+  # capture the RC-identity line(s) at boot (once registered) into a per-identity sidecar, and graft
+  # them back onto the restored seed at the next boot. Keyed by the DETERMINISTIC uuid (the slot's
+  # identity); per-human via `seed_root`. Universal (arch/judge/eng), gated caller-side on
+  # `remote_control?` (a no-RC pod never registers → nothing to capture).
+  #
+  # ⚠ TWO record formats, both seen live (2026-07-19): `bridge-session` (`bridgeSessionId` = the
+  # slot; emitted by a RESUMED session — e.g. the arch, manual-mode) AND/OR `system`+`bridge_status`
+  # (`url` = session_01…; emitted by a FRESH `--remote-control` session). A session emits one or
+  # both — we preserve WHATEVER is present. Injecting the `bridge-session` line was proven to
+  # re-attach the arch's `cse_…` slot (control: no sidecar → a NEW random cse_ each boot).
+
+  @doc """
+  Captures the pod's CURRENT Desktop slot into `<seed_root>/_slots/<uuid>.jsonl`, so the next boot
+  re-attaches it. Reads the live jsonl (`SessionFiles.latest_jsonl`, robust to `/clear`) and stores
+  the most recent RC-identity record(s) — `bridge-session` and/or `system/bridge_status` — written
+  by claude at `--remote-control` registration.
+  `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
+  Best-effort: never raises to the caller (a miss = the slot is re-minted + re-captured next boot).
+  """
+  @spec capture_slot_bridge(Path.t(), String.t()) :: :ok | :none | {:error, term()}
+  def capture_slot_bridge(pod_dir, uuid) when is_binary(pod_dir) and is_binary(uuid) do
+    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+         {:ok, jsonl} <- Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir),
+         [_ | _] = lines <- rc_identity_lines(jsonl) do
+      File.mkdir_p!(slot_dir())
+      File.write!(slot_path(uuid), Enum.join(lines, "\n") <> "\n")
+      :ok
+    else
+      :none -> :none
+      [] -> :none
+      {:error, _} = err -> err
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  # Grafts the captured RC-identity line(s) (if the per-identity sidecar exists) onto a freshly-
+  # restored seed → `--resume` re-attaches the SAME server slot. Idempotent (skips if the dest
+  # already carries an RC-identity record; the base seed never does). Best-effort: any failure is
+  # swallowed (the restore already succeeded; slot preservation is a bonus).
+  defp maybe_inject_slot_bridge(dest, uuid) do
+    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+         sidecar = slot_path(uuid),
+         true <- File.exists?(sidecar),
+         {:ok, raw} <- File.read(sidecar),
+         body = String.trim_trailing(raw),
+         true <- body != "",
+         false <- dest_has_rc_identity?(dest) do
+      File.write!(dest, body <> "\n", [:append])
+      :ok
+    else
+      _ -> :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # Most recent RC-identity record of EACH format present (`bridge-session` / `system/bridge_status`),
+  # as raw lines. Empty list = the session has not registered RC yet.
+  defp rc_identity_lines(jsonl_path) do
+    jsonl_path
+    |> File.stream!()
+    |> Enum.reduce(%{}, fn line, acc ->
+      case Jason.decode(line) do
+        {:ok, %{"type" => "bridge-session"}} -> Map.put(acc, :session, String.trim_trailing(line))
+        {:ok, %{"type" => "system", "subtype" => "bridge_status"}} -> Map.put(acc, :status, String.trim_trailing(line))
+        _ -> acc
+      end
+    end)
+    |> Map.values()
+  end
+
+  defp dest_has_rc_identity?(dest) do
+    case File.read(dest) do
+      {:ok, c} ->
+        String.contains?(c, ~s("subtype":"bridge_status")) or
+          String.contains?(c, ~s("type":"bridge-session"))
+
+      _ ->
+        false
+    end
+  end
+
+  defp slot_dir, do: Path.join(root(), "_slots")
+  defp slot_path(uuid), do: Path.join(slot_dir(), "#{uuid}.jsonl")
 
   # Default = per-human state (`~/.lcars/seeds`), the same value `runtime.exs` re-derives for the
   # `LCARS_SEED_STORE_ROOT` env override. `Fleet.Layout.state_dir/0` raises on an unresolvable

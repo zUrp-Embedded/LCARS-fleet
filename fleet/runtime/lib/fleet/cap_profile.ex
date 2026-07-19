@@ -325,6 +325,19 @@ defmodule Fleet.CapProfile do
   def wake_send_keys?(_), do: true
 
   @doc """
+  Is this pod VISIBLE in Claude Desktop? (`spec.invocation.remote_control`, default `true`.)
+  `false` = the launcher omits `--remote-control` (pod functional but invisible — churny judges).
+  Read spawner-side to decide whether to arm the Desktop-slot capture (a no-RC pod never
+  registers a slot → nothing to capture/preserve). Twin of the launcher's jq read of the
+  SAME field. Tolerates `nil`/non-profile input (`true`).
+  """
+  @spec remote_control?(t() | nil | term()) :: boolean()
+  def remote_control?(%__MODULE__{spec: spec}) when is_map(spec),
+    do: get_in(spec, ["invocation", "remote_control"]) != false
+
+  def remote_control?(_), do: true
+
+  @doc """
   Is the profile in sandboxed bwrap containment (the default)? `false` = host-native (`"none"`, the
   pod runs on the host *as* the human). The single predicate for host-native guards (e.g. API admission).
   """

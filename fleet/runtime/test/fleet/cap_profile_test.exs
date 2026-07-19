@@ -621,6 +621,34 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
+  describe "remote_control?/1" do
+    # Gates the Desktop-slot capture (a no-RC pod never registers → nothing to capture).
+    test "false in spec.invocation → invisible (no capture)" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "qualifier"},
+        spec: %{"invocation" => %{"remote_control" => false}}
+      }
+
+      refute Fleet.CapProfile.remote_control?(profile)
+    end
+
+    test "absent → visible (default true)" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "architect"},
+        spec: %{"invocation" => %{"lifetime_scope" => "forever"}}
+      }
+
+      assert Fleet.CapProfile.remote_control?(profile)
+    end
+
+    test "nil / non-profile input → visible (safe default)" do
+      assert Fleet.CapProfile.remote_control?(nil)
+      assert Fleet.CapProfile.remote_control?(%{})
+    end
+  end
+
   describe "git_ops_denied_patterns/1" do
     test "translates each semantic entry into Bash(git X:*)" do
       profile = %Fleet.CapProfile{
