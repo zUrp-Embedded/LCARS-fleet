@@ -655,13 +655,12 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, non_neg_integer()} | {:error, term()}
   def count_comments_marked(repo, issue_number, prefix, opts \\ [])
       when is_binary(repo) and is_integer(issue_number) and is_binary(prefix) do
+    # No local non-list guard: `paginate` already fail-louds an unexpected page as
+    # `{:error, {:unexpected_page_shape, …}}` (dialyzer-proven — a re-guard here is dead code).
     with {:ok, config} <- resolve_config(opts),
-         {:ok, comments} when is_list(comments) <-
+         {:ok, comments} <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, Enum.count(comments, &String.contains?(&1["body"] || "", prefix))}
-    else
-      {:ok, non_list} -> {:error, {:unexpected_comments_shape, non_list}}
-      {:error, _} = err -> err
     end
   end
 
@@ -680,8 +679,11 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, map()} | :none | {:error, term()}
   def merged_pr_of_issue(repo, issue_number, opts \\ [])
       when is_binary(repo) and is_integer(issue_number) do
+    # No local non-list guard: `paginate` already fail-louds an unexpected page as
+    # `{:error, {:unexpected_page_shape, …}}` (dialyzer-proven — a re-guard here is dead code),
+    # so an outage can never read as a silent :none.
     with {:ok, config} <- resolve_config(opts),
-         {:ok, comments} when is_list(comments) <-
+         {:ok, comments} <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       comments
       |> Enum.reverse()
@@ -695,16 +697,6 @@ defmodule Fleet.Pilot.ForgeClient do
         nil -> :none
         pr_number -> get_pull(repo, pr_number, opts)
       end
-    else
-      # Mirror of pr_review_state's F-C069 stance: a 2xx with a non-list body is fail-LOUD,
-      # never a silent :none (which would hide a delivered PR behind a proxy hiccup).
-      {:ok, non_list} ->
-        {:error,
-         {:unexpected_comments_shape, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments",
-          non_list}}
-
-      {:error, _} = err ->
-        err
     end
   end
 
