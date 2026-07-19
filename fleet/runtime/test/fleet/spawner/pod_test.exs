@@ -80,18 +80,26 @@ defmodule Fleet.Spawner.PodTest do
     {:ok, tmp_dir: tmp_dir}
   end
 
-  describe "kick_keyword/2 (#5.2 — kick keyword based on the ACK)" do
-    test "not yet polled → 'yop' (bootstrap-arm, NEVER gated)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true) == "yop"
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false) == "yop"
+  describe "kick_keyword/3 (#5.2 — kick keyword based on the ACK + the two gates)" do
+    test "not yet polled → 'yop' (bootstrap-arm, never gated by the GLOBAL knob)" do
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true) == "yop"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, true) == "yop"
     end
 
     test "already polled + knob on → 'wake' (fallback)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true) == "wake"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true) == "wake"
     end
 
     test "already polled + knob off → nil (flag-only, no send-keys)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false, true) == nil
+    end
+
+    test "profile gate off → nil for EVERYTHING, yop included (human-terminal class)" do
+      # Live 2026-07-19: a resumed starfleet (front-desk, Desktop bridge) took the bootstrap yop
+      # drizzle to the cap — the cap-profile gate must mute the yop too, not just the wake.
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, false) == nil
     end
   end
 

@@ -87,6 +87,10 @@ spec:
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false       # was true (sysadmin) — now an ordinary sandboxed pod
+    # Human-terminal class (like the architect): the REPL is the human's conversation (Desktop
+    # bridge) — NO kick send-keys at all, yop included (live 2026-07-19: a resumed starfleet took
+    # the bootstrap yop drizzle ~3 min to the cap). Flag-only; the human/bridge side is the armer.
+    wake_send_keys: false
     max_alive_sec: null
     heartbeat_keepalive: false
     bridge_enabled: true     # user-facing front-desk → needs the Desktop bridge (like the arch)

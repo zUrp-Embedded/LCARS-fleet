@@ -125,22 +125,41 @@ defmodule Fleet.Spawner.Pod.Kick do
   """
   @spec kick_send(map(), boolean()) :: :ok
   def kick_send(state, polled) do
-    fallback_on? =
-      Application.get_env(:fleet_spawner, :wake_send_keys, true) and
-        Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
+    # TWO gates, two scopes (2026-07-19 — do not re-merge them):
+    #  - PER-POD (cap-profile `invocation.wake_send_keys: false` — the human-terminal class:
+    #    arch, starfleet): gates EVERY send-keys, `yop` INCLUDED. The pod's REPL is a
+    #    human-facing conversation (bridge/Desktop) — every keystroke lands as a spurious user
+    #    turn (live: a RESUMED starfleet took the bootstrap yop drizzle for ~3 min to the cap,
+    #    because `polled?` is broker RAM, wiped at fleet restart). Arming comes from the
+    #    human/bridge side; briefs ride the Monitor flag rail.
+    #  - GLOBAL (knob `:wake_send_keys`): gates the `wake` FALLBACK only (Monitor-rail
+    #    validation in isolation) — NEVER the yop: muting the bootstrap globally would leave
+    #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
+    fallback_on? = Application.get_env(:fleet_spawner, :wake_send_keys, true)
 
-    case kick_keyword(polled, fallback_on?) do
+    case kick_keyword(polled, fallback_on?, profile_send_keys?(state)) do
       nil -> :ok
       key -> do_send_keys(state, key)
     end
   end
 
+  @doc """
+  Does the pod's cap-profile allow kick send-keys at all? (`invocation.wake_send_keys`,
+  default true.) `false` = the human-terminal class (arch, starfleet): flag-only, yop included —
+  also read by the pod's `:kick` handler to cancel a bootstrap loop that would have NO action.
+  """
+  @spec profile_send_keys?(map()) :: boolean()
+  def profile_send_keys?(state),
+    do: Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
+
   @doc false
-  # PURE decision of the keyword (testable). `polled` = the agent has already called get_work_item; `fallback_on?` = knob
-  # `:wake_send_keys`. `nil` ⇒ no send-keys (flag-only). The `"yop"` (bootstrap) is NEVER gated.
-  @spec kick_keyword(boolean(), boolean()) :: String.t() | nil
-  def kick_keyword(polled, fallback_on?) do
+  # PURE decision of the keyword (testable). `polled` = the agent has already called get_work_item;
+  # `fallback_on?` = global knob `:wake_send_keys` (wake fallback only); `profile_allows?` =
+  # cap-profile gate (EVERY send-keys, yop included — cf. kick_send/2). `nil` ⇒ no send-keys.
+  @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
+  def kick_keyword(polled, fallback_on?, profile_allows?) do
     cond do
+      not profile_allows? -> nil
       not polled -> "yop"
       fallback_on? -> "wake"
       true -> nil

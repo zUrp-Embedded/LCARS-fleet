@@ -653,6 +653,19 @@ defmodule Fleet.Spawner.Pod do
 
         {:keep_state_and_data, [cancel_kick_action()]}
 
+      # Human-terminal pod (cap-profile `wake_send_keys: false`) with NOTHING pending: a
+      # flag-only bootstrap loop has NO action left (every send-keys gated, yop included) and
+      # would only burn its cap into a FALSE `wake.failed` escalation — the human/bridge side
+      # is the armer of this class (live 2026-07-19: resumed starfleet, `polled?` wiped by the
+      # fleet restart). A pod WITH a pending brief keeps the loop: `wake.failed` stays the
+      # terminal net of an unpulled mandate.
+      bootstrap? and not Kick.profile_send_keys?(data) ->
+        Logger.debug(
+          "pod #{data.pod_id} bootstrap kick canceled (profile is flag-only, nothing pending)"
+        )
+
+        {:keep_state_and_data, [cancel_kick_action()]}
+
       n >= cap ->
         # Cap exhausted = the agent NEVER acked. Layer-clean: we BROADCAST → a fleet_pilot
         # consumer `record_or_escalate` → recurring = `:sp_suspect`.
