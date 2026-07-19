@@ -148,4 +148,47 @@ defmodule Fleet.Pilot.ArchFeedTest do
     refute File.exists?(Path.join(tmp, "fleet.feed"))
     assert Process.alive?(pid)
   end
+
+  # Title stub — the feed reads the title at the FORGE (source of truth, never cached).
+  defmodule TitleForge do
+    def get_issue(_repo, 12, _opts), do: {:ok, %{"title" => "Script chifoumi (CLI)"}}
+    def get_issue(_repo, _n, _opts), do: {:error, :not_found}
+  end
+
+  test "the line carries the issue TITLE read at the forge — self-sufficient message", %{tmp_dir: tmp} do
+    pid = start_feed(tmp, forge: TitleForge)
+
+    send(
+      pid,
+      event(:"step.unlocked", %{
+        "repo" => "fleet/demo",
+        "number" => 12,
+        "role" => "engineer",
+        "milestone" => "delivered"
+      })
+    )
+
+    :sys.get_state(pid)
+
+    assert feed(tmp) =~ "brique #12 « Script chifoumi (CLI) » LIVRÉE"
+  end
+
+  test "title unreadable at the forge → line renders WITHOUT it (best-effort, pre-title shape)", %{tmp_dir: tmp} do
+    pid = start_feed(tmp, forge: TitleForge)
+
+    send(
+      pid,
+      event(:"step.unlocked", %{
+        "repo" => "fleet/demo",
+        "number" => 99,
+        "role" => "qualifier",
+        "milestone" => "verdict"
+      })
+    )
+
+    :sys.get_state(pid)
+
+    assert feed(tmp) =~ "verdict rendu par qualifier (#99)"
+    refute feed(tmp) =~ "«"
+  end
 end

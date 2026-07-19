@@ -19,8 +19,14 @@ defmodule Fleet.Pilot.ArchFeed do
   Axiom (reorg): a line NEVER names the repo — the arch has "the project", nothing else
   (issue numbers only).
 
+  Lines carry the issue TITLE (`#3 « Script chifoumi » LIVRÉE`) so the MESSAGE is self-sufficient
+  — the arch relays a sentence, not a number to decode. The title is read from the FORGE at
+  render time (`get_issue`, best-effort): the forge stays the single source of truth — the feed
+  never stores or caches state (a fresh instance recovering does NOT read the feed, it re-reads
+  the forge; the feed is a courtesy mirror, full stop). Title unreadable → line without it.
+
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
-  `:notify` (default `Fleet.Spawner.notify_pod/2`).
+  `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
 
   **Last revised**: 2026-07-19
   """
@@ -60,7 +66,8 @@ defmodule Fleet.Pilot.ArchFeed do
     {:ok,
      %{
        pod_info: Keyword.get(opts, :pod_info, &Fleet.Spawner.pod_info/1),
-       notify: Keyword.get(opts, :notify, &Fleet.Spawner.notify_pod/2)
+       notify: Keyword.get(opts, :notify, &Fleet.Spawner.notify_pod/2),
+       forge: Keyword.get(opts, :forge, Fleet.Pilot.ForgeClient)
      }}
   end
 
@@ -71,7 +78,9 @@ defmodule Fleet.Pilot.ArchFeed do
     case payload["repo"] || payload[:repo] do
       repo when is_binary(repo) and repo != "" ->
         pod_id = ProjectArchitect.pod_id_for(repo)
-        line = render_line(type, payload)
+        # Title read from the FORGE at render (source of truth, never cached) — best-effort:
+        # unreadable → the line renders without it, exactly the pre-title behavior.
+        line = render_line(type, annotate_title(payload, repo, state))
         _ = append(pod_id, line, state)
 
         # The ONLY push: a DELIVERED brick (the `:delivered` unlock — terminal milestone).
@@ -91,7 +100,7 @@ defmodule Fleet.Pilot.ArchFeed do
   # Axiom: the repo is NEVER named (the arch has "the project") — issue numbers only.
 
   defp render_line(:"step.unlocked", %{"milestone" => "delivered"} = p),
-    do: "brique ##{p["number"]} LIVRÉE — mergée, scellée, verrou levé"
+    do: "brique ##{p["number"]}#{title_part(p)} LIVRÉE — mergée, scellée, verrou levé"
 
   defp render_line(:"step.unlocked", %{"milestone" => "verdict"} = p),
     do: "verdict rendu par #{p["role"]}#{ctx(p)}"
@@ -123,16 +132,52 @@ defmodule Fleet.Pilot.ArchFeed do
   defp render_line(:"audit.verdict", p),
     do: "verdict de juge#{ctx(p)}"
 
-  # Best-effort context suffix — ISSUE NUMBER only (payload shapes vary per producer; the feed is
-  # a courtesy line, not a schema consumer). The repo never appears (axiom above).
+  # Best-effort context suffix — issue number + title when readable (payload shapes vary per
+  # producer; the feed is a courtesy line, not a schema consumer). The repo never appears (axiom
+  # above).
   defp ctx(p) when is_map(p) do
-    case p["issue"] || p[:issue] || p["number"] || p[:number] || p["issue_id"] || p[:issue_id] do
+    case ctx_number(p) do
       nil -> ""
-      issue -> " (##{issue})"
+      issue -> " (##{issue}#{title_part(p)})"
     end
   end
 
   defp ctx(_), do: ""
+
+  defp ctx_number(p) when is_map(p),
+    do: p["issue"] || p[:issue] || p["number"] || p[:number] || p["issue_id"] || p[:issue_id]
+
+  defp ctx_number(_), do: nil
+
+  defp title_part(%{"_title" => t}) when is_binary(t) and t != "", do: " « #{t} »"
+  defp title_part(_), do: ""
+
+  # Forge read of the issue title, best-effort (any failure → no annotation): the truth stays AT
+  # the forge — the feed never memorizes it. Number shapes: integer, or digit-string.
+  defp annotate_title(payload, repo, state) do
+    with n when is_integer(n) <- normalize_number(ctx_number(payload)),
+         {:ok, %{"title" => t}} when is_binary(t) and t != "" <-
+           state.forge.get_issue(repo, n, []) do
+      Map.put(payload, "_title", t)
+    else
+      _ -> payload
+    end
+  rescue
+    _ -> payload
+  catch
+    _, _ -> payload
+  end
+
+  defp normalize_number(n) when is_integer(n), do: n
+
+  defp normalize_number(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp normalize_number(_), do: nil
 
   # ── Feed file: append + bound (never a growing log) ──
 
