@@ -35,7 +35,6 @@ spec:
     # --- Step 1: audit (consultant fire-mode) ---
     audit:
       role: consultant
-      profile: consultant.yaml  # cap-profile.modop_set inclut fire-mode + rubber-duck
       needs: []  # racine DAG
       inputs:
         - ticket.body

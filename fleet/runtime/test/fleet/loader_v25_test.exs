@@ -84,7 +84,6 @@ defmodule Fleet.Workflow.LoaderV25Test do
       steps:
         publish:
           role: engineer
-          profile: engineer
           post_extract:
             git:
               repo_url: http://gitea/fleet/lcars
@@ -114,7 +113,6 @@ defmodule Fleet.Workflow.LoaderV25Test do
       steps:
         publish:
           role: engineer
-          profile: engineer
           post_extract:
             git:
               push: true
@@ -145,10 +143,8 @@ defmodule Fleet.Workflow.LoaderV25Test do
       steps:
         a:
           role: engineer
-          profile: engineer
         b:
           role: engineer
-          profile: engineer
           needs: ["a", "a"]
     """
 
@@ -196,7 +192,6 @@ defmodule Fleet.Workflow.LoaderV25Test do
       steps:
         build:
           role: engineer
-          profile: engineer
           gate:
             type: hard
             rules: []
@@ -221,7 +216,6 @@ defmodule Fleet.Workflow.LoaderV25Test do
       steps:
         only:
           role: engineer
-          profile: engineer.yaml
     """
 
     File.write!(Path.join(dir, "override-target.yaml"), yaml)

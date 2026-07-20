@@ -9,7 +9,7 @@ defmodule Fleet.Workflow.GraphValidatorTest do
 
   # Minimal step spec. `needs` omitted = root (the Loader normalizes absent `needs` → []).
   defp step(needs \\ nil) do
-    base = %{"role" => "noop", "profile" => "empty"}
+    base = %{"role" => "noop"}
     if needs, do: Map.put(base, "needs", needs), else: base
   end
 

@@ -30,7 +30,6 @@ spec:
     # --- Step 1 (racine) : revue du brief par le consultant (mode JUGE) ---
     brief-review:
       role: consultant
-      profile: consultant.yaml      # profil worker (audit), passé en JUGE par brief_kind ci-dessous
       brief_kind: judge           # #8.B : override per-step → GateBrief désamorcé (verdict, pas de prod)
       judge_target: brief         # #8.E : juge le BRIEF (ticket.body), PAS un livrable/PR → pré-PR,
                                     #        avance issue-level, no-PR légitime (vs deliverable = fail-loud)
@@ -46,7 +45,6 @@ spec:
     # --- Step 2 : implémentation (engineer), gated par la validation du brief ---
     build:
       role: engineer
-      profile: engineer.yaml
       needs: [brief-review]       # ne part QUE si brief-review a avancé la route ici
       inputs:
         - ticket.body

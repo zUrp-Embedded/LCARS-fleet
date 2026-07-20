@@ -1,14 +1,15 @@
 defmodule Fleet.Workflow.ModopsConsumptionTest do
   @moduledoc """
   LIGHT conformance: fleet_workflow consumes the V2 data
-  (9 SP modop-bundles + 3 subagent-templates + `profile` refs of the
-  v2.5 pipelines resolve to existing cap-profiles).
+  (9 SP modop-bundles + 3 subagent-templates).
 
   No over-schematization: modop-bundles are markdown SP fragments
   (SPBuilder @import), NOT JSON config. The structured schema
   (modop-profile.json) validates the profile.yaml overlay. Here we check
-  presence + well-formedness + consistency of the pipeline→profile
-  references (the "fleet_workflow consumes" invariant). `async: true`.
+  presence + well-formedness of the bundle/template catalogue. `async: true`.
+
+  (The old `profile` reference test died 2026-07-20: `workflow.step.profile` was
+  removed — Décision A of the catalogue chantier; a step no longer names a cap-profile file.)
   """
   use ExUnit.Case, async: true
 
@@ -17,9 +18,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   # (F-C146/PORT) in `priv/cap_profile/canon/` (co-located with the overlay profiles +
   # reachable by SPBuilder); cap-profiles in
   # `priv/cap_profile/canon/cap-profiles/` (R0.7). app_dir pattern (brick1/brick5).
-  @canon Application.app_dir(:lcars_fleet, "priv/workflow/canon")
   @modop_canon Application.app_dir(:lcars_fleet, "priv/cap_profile/canon")
-  @cap_profiles Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
 
   @bundles ~w(archive-mode brainstorming dual-review fire-mode long-session-discipline
               persuasion-discipline rubber-duck subagent-driven tdd)
@@ -44,25 +43,6 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
       assert File.exists?(f), "missing subagent-template: #{f}"
       c = File.read!(f)
       assert byte_size(c) > 150 and c =~ ~r/^#\s/, "#{t}.md malformed"
-    end
-  end
-
-  test "`profile` refs of the v2.5 pipelines resolve to existing cap-profiles" do
-    for pname <- ["standard-qa", "audit-only", "brief-gate"] do
-      pipe = YamlElixir.read_from_file!(Path.join([@canon, "workflow_maps", "#{pname}.yaml"]))
-      steps = get_in(pipe, ["spec", "steps"])
-
-      for {sname, spec} <- steps do
-        profile = spec["profile"]
-
-        assert is_binary(profile) and profile != "",
-               "#{pname}/#{sname}: missing profile"
-
-        cp_path = Path.join(@cap_profiles, profile)
-
-        assert File.exists?(cp_path),
-               "#{pname}/#{sname}: profile #{profile} not found (#{cp_path})"
-      end
     end
   end
 

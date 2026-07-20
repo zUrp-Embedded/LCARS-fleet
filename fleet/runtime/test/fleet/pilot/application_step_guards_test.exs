@@ -67,7 +67,6 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
       steps:
         only:
           role: engineer
-          profile: engineer.yaml
     """)
 
     Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)

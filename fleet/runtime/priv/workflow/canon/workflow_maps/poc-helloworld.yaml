@@ -23,7 +23,6 @@ spec:
   steps:
     implement:
       role: engineer
-      profile: fire-mode   # NB: `profile` = MODOP overlay (pas le fichier cap-profile) ; `role` charge engineer.yaml. (dette C8: canon pipelines mal-authorés profile=<role>.yaml)
       needs: []
       inputs:
         - ticket.body

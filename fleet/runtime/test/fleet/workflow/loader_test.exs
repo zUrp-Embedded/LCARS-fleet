@@ -26,7 +26,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           only:
             role: noop
-            profile: empty
       """)
 
       # Normalized shape `%{"name", "steps"}`: the envelope (kind/metadata/spec)
@@ -60,7 +59,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           s1:
             role: noop
-            profile: empty
             gate:
               type: hocus_pocus
       """)
@@ -89,7 +87,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           only:
             role: noop
-            profile: empty
       """)
 
       # Without the slug guard, `Path.join(root, "../escape.yaml")` would read this out-of-catalog YAML.
@@ -118,12 +115,10 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           a:
             role: scout
-            profile: empty
             outputs:
               - result_id
           b:
             role: archivist
-            profile: empty
             needs: [a]
             inputs:
               - result_id
@@ -151,7 +146,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           review:
             role: reviewer
-            profile: noop
             brief_kind: judge
             judge_target: brief
             timeout_sec: 600
@@ -176,7 +170,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           review:
             role: reviewer
-            profile: noop
             brief_kind: reviewer
       """)
 
@@ -198,7 +191,6 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           s:
             role: noop
-            profile: empty
             bogus_field: oops
       """)
 
@@ -225,10 +217,8 @@ defmodule Fleet.Workflow.LoaderTest do
         steps:
           a:
             role: noop
-            profile: empty
           b:
             role: noop
-            profile: empty
             needs: [typo]
       """)
 

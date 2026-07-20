@@ -29,7 +29,6 @@ spec:
     # --- Step unique : implémentation (engineer, fire-mode) ---
     build:
       role: engineer
-      profile: fire-mode   # MODOP overlay (authoring C8-correct) ; le cap-profile est chargé par `role`.
       needs: []            # racine DAG
       inputs:
         - ticket.body

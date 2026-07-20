@@ -25,12 +25,10 @@ spec:
   steps:
     build:
       role: engineer
-      profile: noop
       needs: []
       timeout_sec: 900
     review:
       role: reviewer
-      profile: noop
       needs: [build]
       gate:
         type: soft
