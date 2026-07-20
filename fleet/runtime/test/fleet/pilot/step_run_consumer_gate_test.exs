@@ -16,7 +16,17 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   # Forge sim: §5 (abandon/await) + PR primitives. Step_run counter via forge_opts[:_step_runs].
   defmodule StubForge do
-    def post_comment(_r, _n, body, _o), do: send(self(), {:comment, body}) && {:ok, :posted}
+    # `_sign_fails` (via forge_opts) forces the gate-fail SIGNATURE post to fail (forge write
+    # outage) while every other post still succeeds → the failed run cannot be signed onto the
+    # budget counter, exercising the "unsigned run must NOT bounce" path.
+    def post_comment(_r, _n, body, o) do
+      if body =~ "gate-fail" and Keyword.get(o, :_sign_fails, false) do
+        {:error, :forge_write_down}
+      else
+        send(self(), {:comment, body}) && {:ok, :posted}
+      end
+    end
+
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
@@ -281,6 +291,34 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
+  end
+
+  test "gate {:fail} but the failed-run SIGNATURE post fails -> ESCALATION, not an unbudgeted bounce" do
+    # sign_failed_run posts the `[step_run:gate-fail]` marker the rework budget counts. If that
+    # POST fails (forge write outage), the run is UNSIGNED — bouncing on it would freeze the
+    # counter while rework keeps spawning (the live 2026-07-18 runaway, ~25 spawns). Under budget
+    # (0/6) the gate would normally bounce; with the signature KO it must ESCALATE instead (surface
+    # `:gate_fail_unsigned`, never guess). A swallowed signature error (`:ok`) reopened this hole.
+    payload = build_done("gated", %{})
+
+    assert {:ok, :awaiting_arch} =
+             StepRunConsumer.maybe_complete(
+               payload,
+               hc(forge_opts: [_step_runs: 0, _sign_fails: true])
+             )
+
+    # LOAD-BEARING regression: NO bounce back to the first step, despite being under budget.
+    refute_received {:route, "gated", "build"}
+    refute_received {:open_pr, _, _, _}
+
+    # Escalated to the arch: frozen (await-arch), unlocked (churn stops), FR message names the cause.
+    assert_received {:label, "lcars-awaits-arch"}
+    assert_received :unlocked
+    assert_received {:comment, body}
+    assert body =~ "non comptabilisé"
+    assert body =~ "Architecte"
+    assert_received {:enqueued, "architect-r", _}
+    assert_received {:wake, "architect-r"}
   end
 
   test "terminal human_approval gate -> DIRECT ESCALATION await_arch (D2, no 6 wasted rework rounds)" do

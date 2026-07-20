@@ -37,7 +37,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   transient / self-healing errors (`:no_gatekeeper` → the one-shot gatekeeper is
   (re)spawned on the next tick; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -96,6 +96,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       re-dispatch = re-fail, never convergence without intervention → ESCALATE.
     * `rework_budget_unreadable`: the code explicitly chooses to "surface" rather
       than bounce blindly (an unverifiable bounce could loop) → ESCALATE.
+    * `gate_fail_unsigned`: the failed run could not be signed onto the budget counter
+      (forge write outage). Rebounding on an unbudgeted run would reopen the runaway
+      (counter frozen while rework spawns) → SURFACE, not bounce → ESCALATE. Symmetric
+      to `rework_budget_unreadable` (budget unreadable ↔ budget unwritable).
     * `human_approval_required` (D2/G3): human approval required (gate) → direct escalation
       (not a failure, not a rework).
 
@@ -106,6 +110,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   @spec terminal_escalate?(term()) :: boolean()
   def terminal_escalate?({:rework_exhausted, _}), do: true
   def terminal_escalate?({:rework_budget_unreadable, _}), do: true
+  def terminal_escalate?({:gate_fail_unsigned, _}), do: true
   def terminal_escalate?({:human_approval_required, _}), do: true
   # DR-013: an unloadable cap-profile at completion is a TERMINAL config anomaly (the producer/judge
   # property is unknown). ESCALATE, never bubble: bubbling would let the reaper re-dispatch a persistently
@@ -257,6 +262,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   defp terminal_error_message({:rework_budget_unreadable, reason}, _role) do
     "🛑 **Budget de rework illisible** (`#{inspect(reason)}`) — on ne rebondit pas à l'aveugle (risque de " <>
       "boucle). Vérifie l'état forge de l'issue (comments `[step_run:…]`) puis relance ou abandonne."
+  end
+
+  defp terminal_error_message({:gate_fail_unsigned, reason}, role) do
+    "🛑 **Échec de gate non comptabilisé** (step `#{role}`, `#{inspect(reason)}`) — impossible de signer ce " <>
+      "run raté sur le compteur forge (écriture KO). On ne rebondit PAS sans le débiter (un rework non " <>
+      "budgété peut boucler à l'infini). Vérifie l'accès en écriture à la forge puis relance ou abandonne."
   end
 
   defp terminal_error_message(:cap_profile_unloadable, role) do

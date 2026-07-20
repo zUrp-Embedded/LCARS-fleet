@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
       blindly) — no silent misroute.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -290,8 +290,18 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
           # (live runaway 2026-07-18, citation-snoopy: ~25 spawns, the GateEngine invariant
           # "an infinite rework loop must not be representable" falsified). We SIGN the
           # failed run BEFORE rebounding so the budget mechanically bites.
-          _ = sign_failed_run(seams, n, payload["role"], step, reason)
-          tag(:rework, rebound(workflow_map, n, seams))
+          #
+          # The signature is a CONDITION of the rebound, not a best-effort side note: an
+          # UNSIGNED failed run does not count toward the budget, so rebounding on it would
+          # reopen the exact 2026-07-18 hole under a forge write outage (post KO, read OK →
+          # counter frozen while rework keeps spawning). A failed signature therefore SURFACES
+          # `:gate_fail_unsigned` (terminal-escalate, symmetric to `rework_budget_unreadable`:
+          # the budget cannot be READ there, cannot be WRITTEN here) → freeze to arch instead
+          # of an unbudgeted bounce.
+          case sign_failed_run(seams, n, payload["role"], step, reason) do
+            :ok -> tag(:rework, rebound(workflow_map, n, seams))
+            {:error, err} -> {:error, {:gate_fail_unsigned, err}}
+          end
 
         {:human_approval, reason} ->
           # D2/G3: a required human approval is NOT a gate failure → we do NOT enter rework (which
@@ -400,8 +410,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   # `[step_run:<role>:gate-fail]` marker) — the failed run becomes visible to
   # `count_signed_step_runs`, so `rebound`'s budget counts it like any signed run.
   # NO dedup signature: each failed run is a distinct spend (that is the point).
-  # Best-effort LOUD: a failed post loses one count — a down forge also stalls the
-  # re-dispatch, so there is no silent runaway path through this branch.
+  # A failed post is SURFACED as `{:error, _}`, never swallowed to `:ok`: the caller
+  # makes the signature a condition of the rebound (an unsigned run must NOT bounce,
+  # or the budget is undercounted → runaway). A down forge fails the READ too, so this
+  # branch never becomes the sole guard, but a write-only outage is now covered here.
+  @spec sign_failed_run(map(), pos_integer(), String.t() | nil, String.t(), term()) ::
+          :ok | {:error, term()}
   defp sign_failed_run(seams, n, role, step, reason) do
     forge = seams.forge_client || Fleet.Pilot.ForgeClient
 
@@ -416,10 +430,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       {:error, err} ->
         Logger.warning(
           "StepRunConsumer: gate-fail signing KO #{seams.repo}##{n} (#{inspect(err)}) — " <>
-            "this run escapes the rework budget"
+            "run NOT budgeted; refusing to rebound unbudgeted, escalating to arch"
         )
 
-        :ok
+        {:error, err}
     end
   end
 
