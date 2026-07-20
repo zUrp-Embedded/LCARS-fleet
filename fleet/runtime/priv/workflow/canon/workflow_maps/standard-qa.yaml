@@ -33,7 +33,6 @@ spec:
       needs: []                     # racine DAG
       inputs:
         - ticket.body
-      timeout_sec: 600
 
     # --- Step 2 : implémentation (engineer), gated par la validation du brief ---
     build:
@@ -41,7 +40,6 @@ spec:
       needs: [brief-review]         # ne part QUE si brief-review a avancé la route ici
       inputs:
         - ticket.body
-      timeout_sec: 3600
 
 # Metadata cycle
 cycle:

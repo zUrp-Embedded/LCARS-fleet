@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   String keys (the Loader normalizes v1/v2.5 to this form). `WorkflowMapNav` does not load —
   the caller passes the already-loaded workflow_map.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   @type workflow_map :: %{required(String.t()) => any()}
@@ -86,7 +86,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
     end
   end
 
-  @doc "Raw spec of a step (to read `gate`, `profile`, `timeout_sec`…). `:error` if unknown."
+  @doc "Raw spec of a step (to read `gate`, `brief_kind`, `judge_target`, `modops`…). `:error` if unknown."
   @spec step_spec(workflow_map(), step_name()) :: {:ok, map()} | :error
   def step_spec(workflow_map, step_name) do
     case Map.get(steps(workflow_map), step_name) do

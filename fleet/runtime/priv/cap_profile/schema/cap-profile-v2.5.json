@@ -198,12 +198,6 @@
             "host_native": {
               "type": "boolean"
             },
-            "max_alive_sec": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
             "heartbeat_keepalive": {
               "type": "boolean"
             },

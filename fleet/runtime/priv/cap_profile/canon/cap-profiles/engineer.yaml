@@ -80,7 +80,6 @@ spec:
     # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
     mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
-    max_alive_sec: 3600
     heartbeat_keepalive: false
     bridge_enabled: false
     policy: hide

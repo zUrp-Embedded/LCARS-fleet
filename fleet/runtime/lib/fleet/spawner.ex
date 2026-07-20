@@ -68,7 +68,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.Spawner.Pod
@@ -522,7 +522,7 @@ defmodule Fleet.Spawner do
       start: {Pod, :start_link, [args]},
       restart: restart_strategy_for(scope),
       # Supervisor SHUTDOWN bound = the TEARDOWN time (kill tmux + rm + seed checkpoint,
-      # seconds), NOT the pod's lifetime (the old `max_alive_sec * 1000` = 600s waited
+      # seconds), NOT the pod's lifetime (an ex-attempt tied it to the pod lifetime = 600s waited
       # 10 min on a pod stubborn to stop — dead config without trap_exit, a real wall with it). 15s then
       # OTP brutal-kill — which cuts `terminate/3` short. Both footprints have a RUNTIME reaper on
       # that path: the PodWarden reconciles the tmux sessions/pod_dirs, and `Fleet.MCP.SocketWarden`

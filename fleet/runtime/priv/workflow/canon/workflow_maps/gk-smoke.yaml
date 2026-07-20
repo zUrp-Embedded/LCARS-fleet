@@ -26,10 +26,8 @@ spec:
     build:
       role: engineer
       needs: []
-      timeout_sec: 900
     review:
       role: reviewer
       needs: [build]
       gate:
         type: soft
-      timeout_sec: 900

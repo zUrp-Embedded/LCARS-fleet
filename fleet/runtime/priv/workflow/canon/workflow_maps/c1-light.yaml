@@ -32,4 +32,3 @@ spec:
       needs: []            # racine DAG
       inputs:
         - ticket.body
-      timeout_sec: 1800

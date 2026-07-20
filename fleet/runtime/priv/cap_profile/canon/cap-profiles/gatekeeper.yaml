@@ -68,7 +68,6 @@ spec:
     # `fleet-control.gatekeeper.*` (submit_result); the system writes the forge.
     mcp_channels: ["fleet-control.gatekeeper.*"]
     host_native: false
-    max_alive_sec: 3600
     heartbeat_keepalive: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control

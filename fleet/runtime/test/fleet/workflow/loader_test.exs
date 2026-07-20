@@ -148,7 +148,6 @@ defmodule Fleet.Workflow.LoaderTest do
             role: reviewer
             brief_kind: judge
             judge_target: brief
-            timeout_sec: 600
       """)
 
       assert %{"steps" => %{"review" => step}} = Loader.load!("typed")

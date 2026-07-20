@@ -28,4 +28,3 @@ spec:
         - ticket.body
       outputs:
         - deliverable
-      timeout_sec: 1800

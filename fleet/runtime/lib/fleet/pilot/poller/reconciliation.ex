@@ -13,7 +13,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   **(2) Quiesced pod** (pod without lock — the inverse). A live PER-BRICK pod (judge, one-shot
   gatekeeper) whose brick no longer holds the lock and which has no active task has no reason to
   live: a one-shot never "ends itself" (the pod model is a persistent interactive PTY) — without
-  this reap it idles until `max_alive_sec` (hours) and gets re-briefed by the next dispatch
+  this reap it idles at the prompt INDEFINITELY (the `max_alive_sec` cap was nuked 2026-07-20 —
+  this reap IS the lifetime mechanism, not a belt) and gets re-briefed by the next dispatch
   (live 2026-07-19: the #5 zombie loop). Repair: `Spawn.safe_kill` the CONFIRMED quiesced pods
   (cf. `quiesced_brick_pods`). This is the NOMINAL end-of-life of per-brick pods.
 
@@ -58,7 +59,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -181,9 +182,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   #
   # Live case 2026-07-19: a consultant idled INTERACTIVELY for 16 min after its redirect verdict.
   # A one-shot does NOT "end itself" — the pod model is a persistent interactive PTY (tmux), so
-  # after the verdict the session sits at the prompt, backstopped only by `max_alive_sec` (2 h)
-  # and re-briefed by the next dispatch (the #5 zombie loop fed on this). No reason to live →
-  # reaped; a later re-dispatch re-spawns fresh (idempotent dispatch, graine/seed resume).
+  # after the verdict the session sits at the prompt indefinitely (no lifetime cap since
+  # `max_alive_sec` was nuked 2026-07-20) and re-briefed by the next dispatch (the #5 zombie loop
+  # fed on this). No reason to live → reaped; a later re-dispatch re-spawns fresh (idempotent
+  # dispatch, graine/seed resume).
   # Fail-safe: enumeration failure → empty set (never kill blindly).
   defp quiesced_brick_pods(issues, pulls, %Seams{} = seams) do
     locked_issues = for i <- issues, locked?(i), into: MapSet.new(), do: i["number"]

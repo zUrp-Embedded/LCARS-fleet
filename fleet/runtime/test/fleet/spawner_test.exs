@@ -98,7 +98,7 @@ defmodule Fleet.SpawnerTest do
         "systemPrompt" => "engineer-role.md",
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
-        "invocation" => %{"lifetime_scope" => "one-shot", "max_alive_sec" => 60},
+        "invocation" => %{"lifetime_scope" => "one-shot"},
         "injects" => %{},
         "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 60},
         "modop_set" => []

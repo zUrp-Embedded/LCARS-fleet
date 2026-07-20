@@ -139,7 +139,7 @@ defmodule Fleet.Spawner.PodTest do
         "systemPrompt" => "engineer-role.md",
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
-        "invocation" => %{"lifetime_scope" => "one-shot", "max_alive_sec" => 60},
+        "invocation" => %{"lifetime_scope" => "one-shot"},
         "injects" => %{},
         "modop_set" => []
       }
@@ -1087,7 +1087,7 @@ defmodule Fleet.Spawner.PodTest do
       profile = valid_profile()
 
       profile =
-        put_in(profile.spec["invocation"], %{"lifetime_scope" => "forever", "max_alive_sec" => 60})
+        put_in(profile.spec["invocation"], %{"lifetime_scope" => "forever"})
 
       args = %{
         cap_profile: short_timeout(profile),
@@ -1327,8 +1327,7 @@ defmodule Fleet.Spawner.PodTest do
       profile = valid_profile()
 
       put_in(profile.spec["invocation"], %{
-        "lifetime_scope" => "pipe",
-        "max_alive_sec" => 60
+        "lifetime_scope" => "pipe"
       })
     end
 

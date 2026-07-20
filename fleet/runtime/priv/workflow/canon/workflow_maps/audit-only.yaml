@@ -48,7 +48,6 @@ spec:
         type: terminal
         rules:
           - "audit_doc_exists AND audit_doc_non_empty"
-      timeout_sec: 1800
 
 # Metadata cycle
 cycle:

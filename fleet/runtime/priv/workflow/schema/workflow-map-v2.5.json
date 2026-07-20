@@ -160,10 +160,6 @@
           "type": "string"
          }
         },
-        "timeout_sec": {
-         "type": "integer",
-         "minimum": 1
-        },
         "coordHook": {
          "type": [
           "string",

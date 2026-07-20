@@ -82,7 +82,6 @@ spec:
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false
-    max_alive_sec: null  # forever — permanent pod until fleet shutdown
     heartbeat_keepalive: false
     bridge_enabled: true
     # The arch terminal IS the human's interactive session: the send-keys wake fallback would

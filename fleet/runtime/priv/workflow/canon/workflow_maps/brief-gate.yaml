@@ -40,7 +40,6 @@ spec:
       #   continue      → advance(build)         (brief exécutable)
       #   abandon       → close                  (brief à jeter)
       #   escalate_user → await_arch (arch)     (brief à retravailler par l'arch)
-      timeout_sec: 600
 
     # --- Step 2 : implémentation (engineer), gated par la validation du brief ---
     build:
@@ -48,4 +47,3 @@ spec:
       needs: [brief-review]       # ne part QUE si brief-review a avancé la route ici
       inputs:
         - ticket.body
-      timeout_sec: 1800
