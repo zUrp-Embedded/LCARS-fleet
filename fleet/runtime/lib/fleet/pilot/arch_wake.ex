@@ -33,23 +33,30 @@ defmodule Fleet.Pilot.ArchWake do
     * arch free → enqueue the mandate (smallest `{repo, n}` of the repo — deterministic),
       THEN ensure, THEN wake (`:offered`).
 
+  In the `:pending` and free cases, if the wake itself does not leave (unreachable arch)
+  the outcome is `:wake_unreached`: the mandate/label persist, NO cooldown is armed, and the
+  next tick retries — a cooldown on a signal that never left would make the escalation wait
+  for nothing.
+
   A failed enqueue → `{:error, {:enqueue, reason}}`, logged loud, NO wake (a wake without
   content is the race above). A failed ensure is logged and the wake still attempted
   (belt: the pod may exist outside the registry's view). Nothing is lost either way: the
   `lcars-awaits-arch` label persists on the forge and the net retries.
 
-  The aggregate return (multi-repo) keeps the poller's contract: `:offered` if ANY repo
-  was offered, else `:woken_pending` if any, else the first outcome — the net stamps its
-  cooldown on any SENT signal, exactly as before.
+  The aggregate return (multi-repo): `:offered` if ANY repo was offered, else `:woken_pending`
+  if any, else the first outcome — so the poller stamps its cooldown ONLY on a signal that
+  actually left (`:offered`/`:woken_pending`), never on `:busy` / `:wake_unreached` / an
+  enqueue error.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger
 
   alias Fleet.Pilot.ProjectArchitect
 
-  @type outcome :: :offered | :woken_pending | :busy | {:error, {:enqueue, term()}}
+  @type outcome ::
+          :offered | :woken_pending | :busy | :wake_unreached | {:error, {:enqueue, term()}}
 
   @doc """
   Offer-then-wake the architect(s) for `awaits` (a `{repo, n}` tuple or a non-empty MapSet
@@ -89,15 +96,25 @@ defmodule Fleet.Pilot.ArchWake do
 
       {:ok, :pending} ->
         ensure_arch(ensure, repo, spawner, via)
-        wake(spawner, pod_id, via, "pending mandate never fetched → re-wake only")
-        :woken_pending
+
+        case wake(spawner, pod_id, via, "pending mandate never fetched → re-wake only") do
+          :ok -> :woken_pending
+          # No signal left → do NOT report a sent wake (the caller would arm a cooldown on it).
+          # The mandate is already pending; the next tick re-wakes without re-enqueuing.
+          {:error, _} -> :wake_unreached
+        end
 
       _free_or_terminal_or_never ->
         case enqueue_mandate(task_queue, pod_id, repo, n) do
           :ok ->
             ensure_arch(ensure, repo, spawner, via)
-            wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)")
-            :offered
+
+            case wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)") do
+              :ok -> :offered
+              # Mandate is durably enqueued but the wake never left → NOT a sent signal. Next tick
+              # finds the arch pending and re-wakes only (no duplicate mandate).
+              {:error, _} -> :wake_unreached
+            end
 
           {:error, reason} ->
             Logger.warning(
@@ -158,16 +175,22 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
+  # Returns the EFFECTIVE verdict: `:ok` only if the signal actually left. A caller that stamps a
+  # cooldown on "signal sent" must not be told `:ok` for a wake that never reached — that is what
+  # made an unreached escalation wait a full cooldown before the next attempt.
   defp wake(spawner, pod_id, via, context) do
     case spawner.wake_pod(pod_id) do
       :ok ->
         Logger.info("ArchWake: [#{via}] #{context} → wake sent to #{pod_id}")
+        :ok
 
       other ->
         Logger.warning(
           "ArchWake: [#{via}] #{context} — wake #{pod_id} UNREACHED (#{inspect(other)}); " <>
             "forge label intact, net retries, the ensure respawns the arch on the next trigger"
         )
+
+        {:error, other}
     end
   end
 end

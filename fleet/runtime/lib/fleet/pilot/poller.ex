@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.Poller do
     * test seams: `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injected if non-nil).
     * `:start_tick?` — default `true`; `false` = no auto first tick (tests drive via `force_poll/1`).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -587,7 +587,9 @@ defmodule Fleet.Pilot.Poller do
 
           %{state | last_arch_rekick_at: now}
 
-        _busy_or_enqueue_error ->
+        # :busy / :wake_unreached / enqueue error — nothing left, so no cooldown is armed: the
+        # next eligible tick retries (the durable forge label + any enqueued mandate persist).
+        _no_signal_sent ->
           state
       end
     else

@@ -123,11 +123,12 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      # Before the fix: nil → no-op clause → no net line. After: the real
-      # Fleet.Spawner.wake_pod(arch) is called (returns {:error,:not_found}, tick not crashed —
-      # ArchWake logs the UNREACHED warning).
-      assert log =~ "awaits-arch"
+      # nil spawner → the re-kick uses the REAL Fleet.Spawner: wake_pod(arch) on an unspawned arch
+      # returns {:error, :not_found}, the tick does not crash, and ArchWake logs the UNREACHED
+      # warning. No signal left → NO cooldown is armed (arming one would delay the retry for nothing).
       assert log =~ "ArchWake: [net]"
+      assert log =~ "UNREACHED"
+      refute log =~ "cooldown"
 
       GenServer.stop(pid)
     end
@@ -146,10 +147,12 @@ defmodule Fleet.Pilot.PollerTest do
       }
 
       # `forge_opts` replaced wholesale (Keyword.merge): same stub issues + 2-repo discovery.
-      # FREE arch: the wake path is the one that still fires (busy → deliberate silence).
+      # The default spawner (StepStubSpawner.wake_pod → :ok) is kept — its wake REACHES, so the
+      # re-kick fires and arms the fleet-global cooldown, which is what caps the 10 polls below to
+      # ONE net line. (A nil/real spawner would fail wake_pod on the unspawned arch →
+      # :wake_unreached → no cooldown → the throttle under test would never engage.)
       {name, pid} =
         start_entry_poller({:ok, [issue]}, %{},
-          spawner: nil,
           task_queue: ArchFreeTQ,
           forge_opts: [
             _test_issues: {:ok, [issue]},
