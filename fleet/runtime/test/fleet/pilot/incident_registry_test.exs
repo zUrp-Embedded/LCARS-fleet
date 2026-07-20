@@ -143,6 +143,51 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.seen_before?("wake:b:y", server: name)
     end
 
+    test "boot: forge UNREADABLE (not a 404) → boots on WAL, LOUD, schedules a re-sync",
+         %{tmp_dir: tmp} do
+      # An unreadable forge is NOT an empty forge: on a fresh node (empty WAL) collapsing it to `%{}`
+      # would replay every past recurrence as a first occurrence. Boot on WAL, log LOUD, and mark a
+      # re-sync pending (the node catches up when the forge returns). Long debounce keeps the
+      # scheduled re-sync from firing mid-test.
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!(
+            {Reg,
+             [
+               name: name,
+               wal_path: Path.join(tmp, "incidents.json"),
+               sync_debounce_ms: 60_000,
+               retry_ms: 60_000,
+               get_file_fun: fn _r, _p, _o -> {:error, {:http, 503, "down"}} end
+             ]}
+          )
+
+          _ = :sys.get_state(name)
+        end)
+
+      assert log =~ "forge backing UNREADABLE"
+      assert log =~ "re-sync"
+      assert :sys.get_state(name).sync_pending == true
+    end
+
+    test "boot: forge file CORRUPT (present but not a JSON map) → treated empty, LOUD",
+         %{tmp_dir: tmp} do
+      # The file EXISTED (≠ 404) but its content is not a JSON map — real amnesia, must be loud.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          name =
+            start_reg(tmp,
+              get_file_fun: fn _r, _p, _o -> {:ok, %{content: "not json {{{", sha: "s"}} end
+            )
+
+          _ = :sys.get_state(name)
+        end)
+
+      assert log =~ "CORRUPT"
+    end
+
     test "boot: WAL present but CORRUPT → LOUD log (visible amnesia), reg boots empty anyway",
          %{
            tmp_dir: tmp

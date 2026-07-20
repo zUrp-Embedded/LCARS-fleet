@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
   façade (defdelegate) for WakeRecovery and the failure consumers.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
   use GenServer
   require Logger
@@ -234,9 +234,33 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   @impl true
   def handle_continue(:load, state) do
-    registry = merge(read_wal(state.wal_path), load_forge(state.opts))
-    Logger.info("IncidentRegistry: loaded #{map_size(registry)} signature(s) (WAL ∪ forge)")
-    {:noreply, %{state | registry: registry}}
+    wal = read_wal(state.wal_path)
+
+    case load_forge(state.opts) do
+      {:ok, forge_reg} ->
+        registry = merge(wal, forge_reg)
+        Logger.info("IncidentRegistry: loaded #{map_size(registry)} signature(s) (WAL ∪ forge)")
+        {:noreply, %{state | registry: registry}}
+
+      :absent ->
+        Logger.info(
+          "IncidentRegistry: loaded #{map_size(wal)} signature(s) (WAL only — no forge file yet)"
+        )
+
+        {:noreply, %{state | registry: wal}}
+
+      {:error, reason} ->
+        # UNREADABLE forge ≠ empty forge. Boot on the WAL, but say so LOUD (on a fresh node the WAL
+        # is empty → this is blind cross-machine memory), and schedule a re-sync so the node catches
+        # up when the forge returns — instead of silently believing there is nothing to remember.
+        Logger.error(
+          "IncidentRegistry: forge backing UNREADABLE at boot (#{inspect(reason)}) — booting on WAL " <>
+            "only (#{map_size(wal)} signature(s)); cross-machine memory is BLIND until a re-read. " <>
+            "Scheduling a forge re-sync."
+        )
+
+        {:noreply, schedule_sync(%{state | registry: wal})}
+    end
   end
 
   @impl true
@@ -459,19 +483,33 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
+  # `{:ok, map}` on a readable file, `:absent` on a genuine 404 (never written yet — no memory to
+  # lose), `{:error, reason}` on an UNREADABLE forge (down/transport). The caller must not turn an
+  # unreadable backing into a silent empty registry: on a fresh node (no WAL) the forge IS the only
+  # cross-machine memory, and `%{}` there would replay every past recurrence as a first occurrence.
   defp load_forge(opts) do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
-      {:ok, %{content: content}} -> decode(content)
-      _ -> %{}
+      {:ok, %{content: content}} -> {:ok, decode(content)}
+      {:error, :not_found} -> :absent
+      {:error, reason} -> {:error, reason}
     end
   end
 
   defp decode(content) do
     case Jason.decode(content) do
-      {:ok, reg} when is_map(reg) -> drop_non_map_entries(reg, "forge file")
-      _ -> %{}
+      {:ok, reg} when is_map(reg) ->
+        drop_non_map_entries(reg, "forge file")
+
+      _ ->
+        # The file EXISTED but its content is not a JSON map — real amnesia, not an absence.
+        Logger.error(
+          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — treated as empty; " <>
+            "cross-machine memory is lost until the file is overwritten by the next sync"
+        )
+
+        %{}
     end
   end
 
