@@ -46,7 +46,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -338,8 +338,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # the repo comes from the gate (spawn binding), and the old org-wide scan is GONE (an arch that
     # scanned every repo was the fleet-level head; a single-repo read is all that remains).
     with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_escalation_forge() do
-      escalations = collect_awaits_arch(forge, repo, escalation_human())
+         {:ok, forge} <- conforming_escalation_forge(),
+         {:ok, escalations} <- collect_awaits_arch(forge, repo, escalation_human()) do
       {:ok, %{"count" => length(escalations), "escalations" => escalations}}
     end
   end
@@ -408,22 +408,29 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # SSOT `Fleet.Labels.awaits_arch/0` (foundation, both domains depend on it) — no drifting literal.
   @awaits_arch_label Fleet.Labels.awaits_arch()
 
-  # All the awaits-arch issues of ONE repo (scoped to the human), mapped to escalation entries. A repo
-  # read failing is LOUD + SKIPPED (partial inbox) — never a silent [] hiding an escalation, never a
-  # fail-closed blinding the whole list because one repo hiccuped.
+  # The awaits-arch issues of the arch's ONE repo (scoped to the human), mapped to escalation entries.
+  # The inbox is single-repo: an unreadable repo IS an unreadable inbox → surfaced as
+  # `{:error, {:inbox_unreadable, ...}}`, NEVER a silent `[]` the arch would read as "nothing to do"
+  # (that indistinguishability between empty and broken is the bug this returns an error to close).
+  @spec collect_awaits_arch(module(), String.t(), String.t()) ::
+          {:ok, [map()]} | {:error, {:inbox_unreadable, String.t(), term()}}
   defp collect_awaits_arch(forge, repo, human) do
     case forge.list_open_issues(repo, assigned_by: human) do
       {:ok, issues} when is_list(issues) ->
-        issues
-        |> Enum.filter(&has_awaits_arch_label?/1)
-        |> Enum.map(&escalation_entry(forge, repo, &1))
+        entries =
+          issues
+          |> Enum.filter(&has_awaits_arch_label?/1)
+          |> Enum.map(&escalation_entry(forge, repo, &1))
+
+        {:ok, entries}
 
       other ->
         Logger.warning(
-          "Delegation: list_escalations — repo #{repo} unreadable (#{inspect(other)}) — skipped (partial inbox)"
+          "Delegation: list_escalations — inbox unreadable: repo #{repo} (#{inspect(other)}) — " <>
+            "surfaced as error, not an empty inbox"
         )
 
-        []
+        {:error, {:inbox_unreadable, repo, other}}
     end
   end
 

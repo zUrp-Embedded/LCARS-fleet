@@ -1174,6 +1174,21 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
+  # The arch's single repo is UNREADABLE: an unreadable repo is an unreadable inbox, which must
+  # surface as an error — not a `count: 0` the arch would read as "nothing to escalate".
+  defmodule EscalationForgeUnreadable do
+    @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:error, :forge_down}
+
+    @impl true
+    def list_comments(_repo, _n, _opts), do: {:ok, []}
+
+    @impl true
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+  end
+
   describe "arch return channel (list_escalations reads / comment_issue replies)" do
     @describetag :tmp_dir
 
@@ -1203,6 +1218,13 @@ defmodule Fleet.MCP.PodToolsTest do
 
       refute Map.has_key?(entry, "repo")
       assert v =~ "PING-RETOUR-OK"
+    end
+
+    test "list_escalations: unreadable inbox surfaces an error, never a silent empty inbox" do
+      Application.put_env(:fleet_mcp, :forge_client, EscalationForgeUnreadable)
+
+      assert {:error, {:inbox_unreadable, "fleet/alpha", {:error, :forge_down}}, _} =
+               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
     end
 
     test "list_escalations: architect gate (non-architect role → refused, no read)" do
