@@ -218,6 +218,16 @@
               "type": "boolean",
               "description": "Send-keys wake fallback authorized for this pod. Default (absent) = true. false = flag-only: the kick loop never types into the pod's terminal (set on the architect - interactive human session); the no-ACK wake.failed escalation remains the terminal net."
             },
+            "permission_mode": {
+              "type": "string",
+              "enum": [
+                "default",
+                "acceptEdits",
+                "bypassPermissions",
+                "plan"
+              ],
+              "description": "Claude CLI permission mode per role (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.LaunchSpec but the schema rejected the field, so it always fell to `default`). Absent = `default` (allow/deny lists ENFORCED). `bypassPermissions` re-opens yolo explicitly. Write enforcement is the MOUNT (RO/RW), not this — a judge keeps Write/Edit for its report, bounded by the mount."
+            },
             "policy": {
               "type": "string"
             },
@@ -242,6 +252,17 @@
                 "xhigh",
                 "max"
               ]
+            }
+          }
+        },
+        "timeouts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "response_sec": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Per-role watchdog: max seconds of silence on the pod's active task before the result-deadline fires (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.Liveness but the schema rejected `timeouts`). Absent = a scope-coded default (one-shot 300 s; forever inert). INTEGER only (a float would crash the deadline arm)."
             }
           }
         },
