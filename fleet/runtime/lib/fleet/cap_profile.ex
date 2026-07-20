@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -167,6 +167,34 @@ defmodule Fleet.CapProfile do
     case spec do
       %{"modop_set" => %{"default" => defaults}} when is_list(defaults) -> defaults
       _ -> []
+    end
+  end
+
+  @doc """
+  Turns a `role` into a SPAWN-READY cap-profile: base + its `default` modops (+ optional `extra`
+  step-modops). THE single launch-site authority (catalogue chantier L1a) — every spawn path calls
+  this via its injected `loader`, so the structural modop overlay is applied IDENTICALLY everywhere.
+
+  Before this, the 5 launch sites diverged: architect/gatekeeper composed the modops, the dispatch/
+  admin/permanent paths only `load`ed the base — a latent bug (the day a `modop/<n>/profile.yaml`
+  overlay carries structural data, the same modop would behave differently by launch origin,
+  A-01). `default_modops/1` is called on the loaded STRUCT (pure — a stub loader needs only
+  `load`+`compose`, never `default_modops`).
+
+  `loader` = the injected cap-profile loader (prod `Fleet.CapProfile`); `extra_modops` = step-level
+  modops (validated against the role's `optional` by the caller — cf. B-01), `[]` by default.
+  """
+  @spec resolve(module(), String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
+  def resolve(loader, role, extra_modops \\ [])
+      when is_atom(loader) and is_binary(role) and is_list(extra_modops) do
+    with {:ok, base} <- loader.load(role) do
+      # A loader seam without `compose/2` is a TEST STUB (a fixed `%CapProfile{}` with no modop
+      # overlays) → the base IS the resolved profile (composing empty overlays is a no-op). The
+      # prod loader `Fleet.CapProfile` always exposes `compose/2`, so this branch never yields the
+      # base in prod — it spares the stubs a trivial `compose` clause, nothing more.
+      if function_exported?(loader, :compose, 2),
+        do: loader.compose(role, default_modops(base) ++ extra_modops),
+        else: {:ok, base}
     end
   end
 

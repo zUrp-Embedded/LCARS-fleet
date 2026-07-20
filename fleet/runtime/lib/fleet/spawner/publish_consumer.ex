@@ -114,7 +114,7 @@ defmodule Fleet.Spawner.PublishConsumer do
       # (F-C044): the failure must reach the observation read-model, not just the server log.
       emit_spawn_failed(payload, :name_missing_or_empty)
     else
-      case Fleet.CapProfile.load(name) do
+      case Fleet.CapProfile.resolve(Fleet.CapProfile, name) do
         {:ok, cap_profile} ->
           case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
             {:ok, _pod_ref} ->

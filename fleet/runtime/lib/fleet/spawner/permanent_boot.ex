@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
 
   """
 
@@ -124,7 +124,7 @@ defmodule Fleet.Spawner.PermanentBoot do
           [{:ok, String.t()} | {:error, {String.t(), term()}}] | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
+    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
 
     with {:ok, roles} <- list_roles(dir),
@@ -157,7 +157,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   @spec expected_permanent_roles(keyword()) :: [String.t()]
   def expected_permanent_roles(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
+    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
 
     case list_roles(dir) do
       {:ok, roles} ->
@@ -187,7 +187,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   """
   @spec respawn(String.t(), keyword()) :: {:ok, String.t()} | {:error, {String.t(), term()}}
   def respawn(role, opts \\ []) when is_binary(role) and is_list(opts) do
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
+    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
 
     case loader.(role) do

@@ -1099,4 +1099,54 @@ defmodule Fleet.CapProfileTest do
                )
     end
   end
+
+  describe "resolve/3 (catalogue chantier L1a — the single launch-site authority)" do
+    # A loader that records what `compose` was called with, so we prove resolve composes
+    # `default_modops(base) ++ extra` — the whole point (no divergence across launch sites).
+    defmodule RecordingLoader do
+      def load("engineer"),
+        do:
+          {:ok,
+           %Fleet.CapProfile{
+             kind: "CapabilityProfile",
+             metadata: %{"name" => "engineer"},
+             spec: %{
+               "modop_set" => %{"default" => ["rubber-duck"], "optional" => ["tdd"]},
+               "invocation" => %{"lifetime_scope" => "pipe"}
+             }
+           }}
+
+      def compose(role, modops) do
+        send(self(), {:composed, role, modops})
+        {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
+      end
+    end
+
+    # A stub loader WITHOUT compose/2 (the common dispatch-test shape) → resolve returns the base.
+    defmodule LoadOnlyLoader do
+      def load("engineer"),
+        do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+      def load(_), do: {:error, :not_found}
+    end
+
+    test "composes default modops (no extra)" do
+      assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer")
+      assert_received {:composed, "engineer", ["rubber-duck"]}
+    end
+
+    test "composes default ++ extra step-modops (order preserved)" do
+      assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
+      assert_received {:composed, "engineer", ["rubber-duck", "tdd"]}
+    end
+
+    test "loader without compose/2 (test stub, no overlays) → the base IS the resolved profile" do
+      assert {:ok, %Fleet.CapProfile{}} = Fleet.CapProfile.resolve(LoadOnlyLoader, "engineer")
+      refute_received {:composed, _, _}
+    end
+
+    test "load error propagates (never a half-resolved profile)" do
+      assert {:error, :not_found} = Fleet.CapProfile.resolve(LoadOnlyLoader, "ghost")
+    end
+  end
 end

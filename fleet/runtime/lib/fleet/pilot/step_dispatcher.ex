@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   delegated to `Fleet.Pilot.StepDispatcher.ReviewLifecycle`. The modules
   `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` are **seams** (defaults = real modules).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -162,7 +162,10 @@ defmodule Fleet.Pilot.StepDispatcher do
                Opts.tag_err(
                  workflow_map_role(
                    route,
-                   &loader.load/1,
+                   # `resolve` (not bare `load`): the producer pod gets its role's composed modops
+                   # like every launch site (catalogue chantier L1a). Step-modops (B-01) will thread
+                   # here in L1a.3.
+                   &Fleet.CapProfile.resolve(loader, &1),
                    workflow_map_loader,
                    Keyword.get(opts, :prefetched_workflow_map)
                  ),

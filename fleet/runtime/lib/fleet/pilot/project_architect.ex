@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:projects_root` / `:work_root` — FS roots (defaults `Fleet.Layout`), same keys as
       `ProjectOnboard` (the onboard opts thread through unchanged).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -90,8 +90,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
         {:error, {:repo_id_unresolved, repo}}
 
       true ->
-        with {:ok, base} <- loader.load("architect"),
-             {:ok, cap} <- loader.compose("architect", loader.default_modops(base)) do
+        with {:ok, cap} <- Fleet.CapProfile.resolve(loader, "architect") do
           pod_id = pod_id_for(name)
 
           spawn_opts = [

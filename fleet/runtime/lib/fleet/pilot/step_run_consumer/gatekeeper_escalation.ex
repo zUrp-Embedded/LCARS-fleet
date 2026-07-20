@@ -159,8 +159,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     loader = seams.loader || Fleet.CapProfile
     gk_role = Fleet.Pilot.Roles.gatekeeper_role()
 
-    with {:ok, base} <- loader.load(gk_role),
-         {:ok, cap} <- loader.compose(gk_role, loader.default_modops(base)) do
+    with {:ok, cap} <- Fleet.CapProfile.resolve(loader, gk_role) do
       spawn_opts = [
         pod_id: pod_id,
         repo: seams.repo,

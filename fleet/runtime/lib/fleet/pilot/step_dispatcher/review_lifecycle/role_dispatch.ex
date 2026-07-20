@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -82,7 +82,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   defp load_role_or_skip(_loader, ""), do: {:skipped, :no_role}
 
   defp load_role_or_skip(loader, role) do
-    case loader.load(role) do
+    # `resolve` (not bare `load`): composes the role's modops so the structural overlay is applied
+    # on the review/rework pod like every other launch site (catalogue chantier L1a — no divergence).
+    case Fleet.CapProfile.resolve(loader, role) do
       {:ok, _} = ok -> ok
       {:error, _} -> {:skipped, :no_role}
     end
