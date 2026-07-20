@@ -40,10 +40,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   ## `refuse_new_jobs/1`
 
-  Activates `Fleet.Shutdown.Quiesce` → the top-level REST entry point
-  `/api/admin/spawn` (`Fleet.API.ControlRouter` reads `quiescing?` before admission) refuses new work. That
-  admission is the SOLE way new work enters, so gating it is total. The internal work
-  of an in-flight step_run is NOT gated.
+  Activates `Fleet.Shutdown.Quiesce` → the points that OPEN new work refuse it: the REST admin door
+  (`/api/admin/spawn`, `Fleet.API.ControlRouter`), the permanent respawn (`Fleet.Spawner.PermanentWarden`),
+  AND the producer-spawn point (`Fleet.Pilot.StepDispatcher.dispatch_issue`, CI-01 — a fresh issue or the
+  next step of an engaged run). The FINALIZATION of an in-flight step_run (completion/review/merge) is NOT
+  gated (cf. `Fleet.Shutdown.Quiesce` for the full reader list + the finish-vs-open rationale).
 
   ## `in_flight_count/0` — the WORK to finish (CI-02)
 
