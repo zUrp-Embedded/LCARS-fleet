@@ -29,7 +29,7 @@ defmodule Fleet.API.ControlRouter do
   each verdict to an HTTP status + JSON body. A refusal = NOTHING was broadcast (admission
   precedes emission by construction). Quiescing (shutdown drain) → 503.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use Plug.Router
@@ -153,8 +153,12 @@ defmodule Fleet.API.ControlRouter do
   purpose: BindAddress governs NETWORK surfaces — an AF_UNIX path is not one — and the
   stale-socket rm + chmod must run at every (re)start, hence this MFA.)
   """
-  @spec start_control_listener(Path.t()) :: {:ok, pid()} | {:error, term()}
-  def start_control_listener(sock) when is_binary(sock) do
+  @spec start_control_listener(Path.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def start_control_listener(sock, opts \\ []) when is_binary(sock) do
+    # `chmod_fun` (test seam, default `&File.chmod/2`) — lets a test force the chmod to FAIL and prove the
+    # fail-closed readiness (CI-12). The MFA child-spec start `[sock]` keeps working (opts defaults).
+    chmod_fun = Keyword.get(opts, :chmod_fun, &File.chmod/2)
+
     _ = File.mkdir_p(Path.dirname(sock))
     _ = File.rm(sock)
 
@@ -166,10 +170,32 @@ defmodule Fleet.API.ControlRouter do
       )
 
     case apply(m, f, a) do
-      {:ok, _pid} = ok ->
-        _ = File.chmod(sock, 0o600)
-        Logger.info("ControlRouter: admin control socket bound at #{sock} (AF_UNIX, host-only)")
-        ok
+      {:ok, pid} = ok ->
+        # CI-12 (audit intégrité 2026-07-20): the chmod is part of the READINESS COMMIT, not an
+        # afterthought. This AF_UNIX socket is the ONLY admin WRITE door; `LCARS_API_SOCK` is overridable
+        # and confidentiality vs OTHER host users rests on the 0600 mode (the pod mount-ns isolation covers
+        # pods, not host peers). A swallowed chmod would announce "host-only" while the file kept its default
+        # mode — a FALSE readiness. On failure: tear the listener down + remove the socket + return an error
+        # (a host-readable admin door is NEVER announced ready).
+        case chmod_fun.(sock, 0o600) do
+          :ok ->
+            Logger.info("ControlRouter: admin control socket bound at #{sock} (AF_UNIX, host-only)")
+            ok
+
+          {:error, reason} ->
+            Logger.error(
+              "ControlRouter: admin control socket #{sock} bound but chmod 0600 FAILED " <>
+                "(#{inspect(reason)}) — tearing the listener down + removing the socket (a host-readable " <>
+                "admin door is never announced ready)"
+            )
+
+            # The just-bound ranch tree is LINKED to us → unlink BEFORE shutting it down, else its exit
+            # would take us with it.
+            Process.unlink(pid)
+            Process.exit(pid, :shutdown)
+            _ = File.rm(sock)
+            {:error, {:chmod_failed, reason}}
+        end
 
       {:error, reason} = err ->
         Logger.error("ControlRouter: FAILED to bind admin control socket #{sock}: #{inspect(reason)}")

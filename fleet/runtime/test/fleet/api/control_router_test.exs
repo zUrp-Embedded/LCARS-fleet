@@ -122,6 +122,31 @@ defmodule Fleet.API.ControlRouterTest do
       {:dictionary, dict} = :erlang.process_info(pid, :dictionary)
       refute :ranch_sup in Keyword.get(dict, :"$ancestors", [])
     end
+
+    test "CI-12: a successful bind tightens the socket to 0600 (host-only IS part of readiness)" do
+      sock = short_sock()
+      on_exit(fn -> File.rm(sock) end)
+
+      {:ok, pid} = ControlRouter.start_control_listener(sock)
+      on_exit(fn -> stop_tree(pid) end)
+
+      {:ok, %File.Stat{mode: mode}} = File.stat(sock)
+      assert Bitwise.band(mode, 0o777) == 0o600
+    end
+
+    test "CI-12: chmod FAILURE → fail-closed (error + socket removed), never a ready host-readable door" do
+      sock = short_sock()
+      on_exit(fn -> File.rm(sock) end)
+
+      # Seam: the readiness chmod FAILS → the socket bound but could not be tightened to 0600. The door
+      # must NOT be announced ready: tear down + remove the socket + surface the error.
+      failing_chmod = fn _path, _mode -> {:error, :eperm} end
+
+      assert {:error, {:chmod_failed, :eperm}} =
+               ControlRouter.start_control_listener(sock, chmod_fun: failing_chmod)
+
+      refute File.exists?(sock)
+    end
   end
 
   describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
