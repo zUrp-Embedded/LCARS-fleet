@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
 
   """
 
@@ -289,5 +289,5 @@ defmodule Fleet.Spawner.PermanentBoot do
   # (boot_opts / base_seed_path / escalate_corrupt_seed — the whole boot-from-base branch — were
   # REMOVED by the 2026-07-19 reorg: base seeds are gone, the pod's unified seed decision
   # (`maybe_slot_resume`: live jsonl / captured graine / fresh) is the ONLY resume authority, and
-  # the F-C043 corrupt-seed rail died with the artifact it guarded.)
+  # the corrupt-seed rail died with the artifact it guarded.)
 end

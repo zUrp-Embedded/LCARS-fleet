@@ -13,8 +13,8 @@ defmodule Fleet.Starfleet.DriftMonitor do
     `:workflow`) on an escalation-worthy judge verdict (halt/`halt_invalid` → freeze-to-arch), translated
     to a decision-v1 `{decision: "escalate", reason: "audit_verdict", details: <real verdict>}`. Routed
     DIRECTLY to `CoordBackend` (`handle_decision`), NOT via `Cat5Escalator`.
-  - `pod.drift` — DORMANT (codex audit F-08 2026-07-19): the handler is wired + tested but NO
-    producer emits it. The claimed `Fleet.Spawner.PermanentBoot` producer (F-C043) does not exist,
+  - `pod.drift` — DORMANT: the handler is wired + tested but NO
+    producer emits it. The claimed `Fleet.Spawner.PermanentBoot` producer does not exist,
     and the "corrupt versioned base seed" it targeted disappeared with the boot-from-base nuke
     (unified graine flow). If a real drift signal is ever needed, whoever wires it MUST add its
     `source:` here (anti-spoof rule). Escalates on `drift_count >= 3` once a producer emits.
@@ -26,7 +26,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   | event_type | source match | Cat 5 trigger |
   |---|---|---|
-  | `pod.drift` | `:spawner` (dormant — no producer, F-08) | if `drift_count >= 3` |
+  | `pod.drift` | `:spawner` (dormant — no producer) | if `drift_count >= 3` |
   | `workflow_map.failed` | `:workflow` (draft producer) | unconditional → `Cat5Escalator` |
   | `oauth.refresh.failed` | type-only (dormant) | unconditional |
   | `audit.verdict` | `:workflow` (draft producer) | validate decision JSON → `CoordBackend` |
@@ -37,7 +37,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   functions are impossible. No state = minimal Iron Law (1 process, no local
   ETS).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -73,7 +73,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   # CANNOT trigger the Cat 5 escalation. The DORMANT types (`pod.drift`, `oauth.refresh.failed`)
   # have NO producer yet — whoever wires one MUST keep its `source:` match (same anti-spoof rule).
 
-  # DORMANT (codex audit F-08): `pod.drift` has NO producer (the claimed F-C043 PermanentBoot
+  # DORMANT: `pod.drift` has NO producer (the claimed PermanentBoot
   # emit does not exist; the corrupt-base-seed scenario is gone with boot-from-base). The handler
   # stays wired + source-matched so the rail is one emit away from live — but it is NOT coverage.
   def handle_info(
