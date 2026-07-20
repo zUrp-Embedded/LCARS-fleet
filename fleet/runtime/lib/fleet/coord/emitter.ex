@@ -26,10 +26,9 @@ defmodule Fleet.Coord.Emitter do
   Via the protected core `Bus.safe_emit/4` (the substrate authority of this
   policy): `UnregisteredError` (registry not yet populated at boot order)
   tolerated in SILENCE so as not to break the boot — fire-and-forget; a
-  MALFORMED event (build bug) is logged ERROR by safe_emit then neutralized —
-  coord must not crash on an observability defect. A `{:error, _}` PubSub
-  return passes THROUGH `safe_emit` (its passthrough contract) and is LOGGED
-  warning here (`safe_canon_broadcast`): nothing re-derives the lost
+  MALFORMED event (build bug) AND a `{:error, _}` PubSub delivery failure are
+  BOTH logged by `safe_emit` (CI-09 — the single lossy publisher), with this
+  emitter's context passed via `:context`: nothing re-derives the lost
   notification — the escalation's durable trace, when there is one, is the
   upstream starfleet audit log (`Cat5Escalator` writes it BEFORE dispatching
   here), not this event. The `correlation_id`
