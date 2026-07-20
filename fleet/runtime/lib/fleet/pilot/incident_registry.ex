@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
   façade (defdelegate) for WakeRecovery and the failure consumers.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
   use GenServer
   require Logger
@@ -622,12 +622,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
         })
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")
-  defp reason_category(reason) when is_atom(reason), do: Atom.to_string(reason)
 
-  defp reason_category(reason) when is_tuple(reason) and tuple_size(reason) > 0,
-    do: reason_category(elem(reason, 0))
-
-  defp reason_category(reason) when is_binary(reason), do: reason
-
-  defp reason_category(reason), do: inspect(reason)
+  # C-07 (sonde convergence 2026-07-20): the recurrence category IS the FIRST projection of the canonical
+  # `Fleet.Event.reason_fields/1` (the single source of the atom/tuple/binary/other split, used on the
+  # broadcast path). A local copy of the clauses would silently drift the incident dedup key from the
+  # event category — same split, two owners. Consume the canonical projection instead.
+  defp reason_category(reason), do: elem(Fleet.Event.reason_fields(reason), 0)
 end
