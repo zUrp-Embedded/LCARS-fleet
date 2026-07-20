@@ -46,6 +46,8 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     File.write!(Path.join(tmp, "consultant.gitea_token"), "tok-consultant")
     File.write!(Path.join(tmp, "reviewer.gitea_token"), "tok-reviewer")
     File.write!(Path.join(tmp, "engineer.gitea_token"), "tok-engineer")
+    # B-04: a non-engineer producer (documentalist card) needs its own resolvable token.
+    File.write!(Path.join(tmp, "documentalist.gitea_token"), "tok-documentalist")
 
     # :promote goes through `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) →
     # gatekeeper token required.
@@ -118,6 +120,35 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     # ISSUE stopwatch (42): started by the PRODUCER at `dispatch_issue`, persistent through the
     # whole review — the stop MUST stay PRODUCER-signed (engineer), NEVER the finishing judge's role
     # (otherwise Gitea refuses the stop — per-user — and the engineer's stopwatch leaks forever).
+    # Post-B-04 this identity comes from the branch (`lcars/issue-42-engineer`), not the config global.
     assert_received {:stop_stopwatch, 42, "tok-engineer"}
+  end
+
+  # B-04 (catalogue chantier 2026-07-20): the producer is whoever the CARD dispatched — read from the
+  # feature branch, NOT the `Roles.producer_role` config global (a fixed "engineer"). A `documentalist`
+  # card (docs into work/ops, not code into main) is the motivating case: pre-B-04 the ISSUE stopwatch
+  # stop was signed "engineer" (config) → Gitea per-user refuses the mis-signed stop → the
+  # documentalist's watch leaks forever. This is the SAME branch source the poller-driven promote
+  # already reads (`ReviewLifecycle.promote_pr` — "no fork"); this test locks the workflow_map path onto it.
+  test "judge :promote → ISSUE stopwatch stop signed by the CARD's producer (documentalist), not the config default" do
+    step_run = %{
+      repo: "fleet/docs-proj",
+      issue_number: 99,
+      role: "reviewer",
+      pr_role: :judge,
+      intent: :promote,
+      next_assignee: nil,
+      producer_branch: "lcars/issue-99-documentalist"
+    }
+
+    assert {:ok, :promoted} =
+             StepRunCompleter.complete_pr(step_run,
+               forge_client: TokenCaptureForge,
+               forge_opts: [token: "system-token"]
+             )
+
+    # The ISSUE stopwatch (99) is stopped as DOCUMENTALIST — the producer the branch names — even
+    # though `Roles.producer_role` defaults to "engineer". Pre-B-04 this asserted "tok-engineer".
+    assert_received {:stop_stopwatch, 99, "tok-documentalist"}
   end
 end

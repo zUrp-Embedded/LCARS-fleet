@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -431,6 +431,23 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp producer_of(_), do: "inconnu"
 
+  # STOP identity of the ISSUE-lock stopwatch (B-04). That watch was STARTED by the PRODUCER at
+  # `dispatch_issue`; its stop MUST carry the SAME identity — Gitea is per-user, a mis-signed stop
+  # is swallowed silently and the watch runs forever (cf. `unlock/6` doc). The producer is whoever
+  # the CARD dispatched (a `documentalist` card produces docs in work/ops, not an engineer in
+  # main/code), carried by the feature branch `lcars/issue-N-<producer>` — the SAME source the
+  # poller-driven promote already reads (`ReviewLifecycle.promote_pr`: "no fork"). Read it from the
+  # run; the catalogue default `Roles.producer_role(opts)` is the fallback ONLY when the branch is
+  # absent/unrecognized (a normal engineer brick) — never worse than the pre-B-04 behavior. NB the
+  # fallback DIFFERS from `producer_of/1`'s `"inconnu"`: an attribution comment may honestly say
+  # "unknown", but a stopwatch stop needs a real, tokened identity or it no-ops.
+  defp producer_stop_role(step_run, opts) do
+    case ForgeProtocol.parse_feature_branch(Map.get(step_run, :producer_branch)) do
+      {:ok, {_n, producer}} -> producer
+      :error -> Roles.producer_role(opts)
+    end
+  end
+
   @doc """
   **PR-native — step-run-completion orchestrator.** Composes the PR primitives
   (`open_deliverable_pr`/`record_review`/`promote`) + routing according to the gate `intent`.
@@ -605,7 +622,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
              step_run.repo,
              step_run.issue_number,
              forge_opts,
-             Roles.producer_role(opts),
+             producer_stop_role(step_run, opts),
              :delivered
            ) do
       {:ok, :promoted}
