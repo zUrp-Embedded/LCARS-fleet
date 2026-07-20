@@ -18,16 +18,25 @@ defmodule Fleet.TaskQueue.Broadcast do
     * `required/3` — load-bearing LIFECYCLE (`work_item.completed`). The failure is NOT
       swallowed: it surfaces `{:error, {:broadcast_failed, _}}` → the caller (`submit_result`
       on the Server side) propagates it to the pod, which sees an honest failure instead of a
-      false "task closed". Recovery is NOT a pod re-submit (the item is already
-      `:completed`+persisted BEFORE the broadcast → a re-submit lands in
-      `:double_submit_ignored`): the durable backstop is the forge/poller reconciliation,
-      which reclaims the orphaned lock and re-dispatches the step (cf.
-      `Fleet.MCP.PodTools.WorkItems.submit_result/3`).
+      false "task closed". Recovery (CI-03): the Server commits `:completed` only AFTER a
+      confirmed broadcast (broadcast-before-commit), so on failure the item STAYS ACTIVE → a
+      re-submit RE-PLAYS the delivery (the intra-uptime backstop). The across-restart backstop
+      stays the forge/poller reconciliation, which reclaims the orphaned lock and re-dispatches
+      the step (cf. `Fleet.MCP.PodTools.WorkItems.submit_result/3`).
 
   In-process `Phoenix.PubSub.broadcast` almost never raises (local supervised process);
   the realistic failure mode is `UnregisteredError` (lifecycle type outside the registry = build/config
   bug, caught in test) or PubSub not started (early boot). Both become
   LOUD on the lifecycle side.
+
+  **Invariant `required {:error} ⟺ zero subscriber delivered`** (load-bearing for CI-03's
+  broadcast-before-commit + re-submit-replay): BOTH failure modes are PRE-DISPATCH and
+  all-or-nothing — the `UnregisteredError` raise fires (in `assert_authorized!`) BEFORE any
+  subscriber is notified, and the `{:error, _}` adapter case delivers to nobody. So an item that
+  stays active after a failed `required` broadcast was received by NO ONE → a re-emission never
+  double-delivers. A future clustered/async Bus that could deliver PARTIALLY before erroring would
+  break this — the re-submit-replay must be revisited then (esp. the gatekeeper resume path, which
+  is not idempotent by pod-state the way the double-hop pod path is).
 
   ## Why NOT `Fleet.EventRouter.Bus.safe_emit/4`
 

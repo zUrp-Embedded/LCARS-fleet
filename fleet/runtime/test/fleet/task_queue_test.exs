@@ -24,6 +24,19 @@ defmodule Fleet.TaskQueueTest do
     def broadcast(_topic, _ev), do: raise(Fleet.Event.UnregisteredError, "forced raise")
   end
 
+  # CI-03 — bus stub whose behavior is TOGGLED per-topic (topics are unique per test → async-safe):
+  # `:fail` returns `{:error, _}` (no delivery), `:deliver` delegates to the real Bus (the registry-gate
+  # is traversed — permitted since the registry is empty in test — then Phoenix.PubSub delivers for real).
+  # Lets one test simulate a broadcast that FAILS then HEALS across a re-submit.
+  defmodule ToggleBus do
+    def broadcast(topic, ev) do
+      case :persistent_term.get({__MODULE__, topic}, :fail) do
+        :deliver -> Fleet.EventRouter.Bus.broadcast(topic, ev)
+        :fail -> {:error, :toggled_fail}
+      end
+    end
+  end
+
   setup %{tmp_dir: tmp_dir} do
     topic = "fleet.events.test.#{System.unique_integer([:positive])}"
     Phoenix.PubSub.subscribe(Fleet.PubSub, topic)
@@ -198,6 +211,74 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
     assert_receive %Fleet.Event{type: :"work_item.completed"}
 
+    assert {:error, :double_submit_ignored} =
+             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
+  end
+
+  # CI-03 — broadcast BEFORE commit. A failed `work_item.completed` broadcast must NOT commit the
+  # terminal `:completed` state: the item STAYS ACTIVE so a re-submit RE-PLAYS the delivery instead of
+  # being lied to with `:double_submit_ignored` (pre-CI-03 the commit was done first → lost broadcast =
+  # terminal item + false "already received" at retry).
+  test "CI-03: a FAILED broadcast leaves the item ACTIVE + a re-submit RE-ATTEMPTS (never double_submit_ignored)",
+       %{tmp_dir: tmp_dir} do
+    state_path = Path.join(tmp_dir, "state_ci03_active.json")
+
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: "t.ci03.active", state_path: state_path, bus: FailBus},
+        id: :q_ci03_active
+      )
+
+    {:ok, _t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+
+    assert {:error, {:broadcast_failed, :forced_broadcast_fail}} =
+             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    # NOT committed → the item is still ACTIVE (owns the slot; reclaimable if the pod dies).
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
+
+    # A re-submit RE-ATTEMPTS the delivery (fails again here) — it is NOT the false `:double_submit_ignored`.
+    assert {:error, {:broadcast_failed, :forced_broadcast_fail}} =
+             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+  end
+
+  test "CI-03: a re-submit after a failed broadcast RE-PLAYS the delivery, exactly once → :completed",
+       %{tmp_dir: tmp_dir} do
+    topic = "t.ci03.toggle.#{System.unique_integer([:positive])}"
+    Phoenix.PubSub.subscribe(Fleet.PubSub, topic)
+    :persistent_term.put({ToggleBus, topic}, :fail)
+    on_exit(fn -> :persistent_term.erase({ToggleBus, topic}) end)
+
+    state_path = Path.join(tmp_dir, "state_ci03_toggle.json")
+
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: topic, state_path: state_path, bus: ToggleBus},
+        id: :q_ci03_toggle
+      )
+
+    {:ok, _t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+
+    # 1st submit: broadcast fails → nothing committed, nothing delivered, item stays active.
+    assert {:error, {:broadcast_failed, :toggled_fail}} =
+             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
+    refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
+
+    # Bus heals → the re-submit RE-PLAYS: delivers exactly once, item becomes :completed.
+    :persistent_term.put({ToggleBus, topic}, :deliver)
+
+    assert {:ok, completed} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+    assert completed.state == :completed
+    assert_receive %Fleet.Event{type: :"work_item.completed"}
+    assert {:ok, :completed} = TaskQueue.pod_status(q, "pod-A")
+
+    # NOW genuinely delivered → a further double-submit IS ignored (no second emission).
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
 

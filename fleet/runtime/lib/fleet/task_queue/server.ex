@@ -62,7 +62,7 @@ defmodule Fleet.TaskQueue.Server do
       selection (`find_active`), supersession and the deadline guard — extracting it
       would force either a duplication of that authority, or a dedicated module for 20 LOC.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -284,14 +284,6 @@ defmodule Fleet.TaskQueue.Server do
                 result: clean_result
             }
 
-            new_state = state |> put_work_item(completed) |> persist()
-
-            # `work_item.completed` is LIFECYCLE load-bearing: the StepRunConsumer DEPENDS on it to finish the
-            # step_run (lift the forge lock). The broadcast goes through `required_broadcast`: its failure is NO LONGER
-            # swallowed into `:ok`. If the broadcast fails, we do NOT return `{:ok, completed}` (which would make the
-            # pod believe "task closed" while the step_run never finishes → lock kept for life): we propagate
-            # `{:error, {:broadcast_failed, _}}`. The task STAYS `:completed`+persisted (the deliverable is
-            # not lost; the forge-driven rail re-derives as needed), but the pod sees an honest failure.
             # additive role/issue_id: KEPT for consumers outside this tree — the Bus feeds the
             # no-auth WS surface, whose external readers correlate on the origin agent's identity.
             # No in-tree module reads these keys; existing consumers ignore the extra keys.
@@ -308,12 +300,28 @@ defmodule Fleet.TaskQueue.Server do
                 metadata: completed.metadata
               })
 
-            case required_broadcast(new_state, ev) do
+            # BROADCAST BEFORE COMMIT (CI-03). `work_item.completed` is LIFECYCLE load-bearing (the double-hop
+            # STARTS here: the pod consumes it in `:monitoring` → `pod.completed` → StepRunConsumer). The terminal
+            # `:completed` state is committed ONLY after the delivery is confirmed — same ordering doctrine as
+            # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
+            # failure NOTHING is committed: the item STAYS active (`:assigned`/`:in_progress`) → `find_active`
+            # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
+            # `:double_submit_ignored`/"already received" on an UNdelivered item. Pre-CI-03 the commit was done
+            # first, so a lost broadcast left a terminal `:completed` + a false success at retry.
+            #
+            # INVARIANT this rests on: `required_broadcast {:error} ⟺ ZERO subscriber delivered`. True on the
+            # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
+            # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
+            # dispatch — cf. `Broadcast.required`). So an item stays active only if NOBODY received → re-emission
+            # never double-delivers. A future clustered/async Bus (partial delivery before error) would break it.
+            # Across-restart durability stays the forge reconciliation (F-C050), NOT this ephemeral broker.
+            case required_broadcast(state, ev) do
               :ok ->
+                new_state = state |> put_work_item(completed) |> persist()
                 {:reply, {:ok, completed}, new_state}
 
               {:error, _} = err ->
-                {:reply, err, new_state}
+                {:reply, err, state}
             end
         end
     end

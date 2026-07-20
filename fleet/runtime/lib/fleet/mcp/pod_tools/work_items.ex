@@ -19,7 +19,7 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   acceptor (identity IS the channel) and verified by `PodTools`'s clauses — this module
   receives an already-established `pod_id`, never read off the wire.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.TaskQueue
@@ -58,12 +58,14 @@ defmodule Fleet.MCP.PodTools.WorkItems do
       brief (the broker's anti-impersonation lock).
     * `{:error, :broadcast_failed}` — the `work_item.completed` lifecycle broadcast
       failed: the step_run will NOT finish (the StepRunConsumer received nothing). The pod
-      sees a failure instead of believing its deliverable accepted. Recovery is NOT a pod
-      re-submit (a re-submit is idempotently ignored → `{:ok, "already received"}`, no
-      re-emission): the durable backstop is the poller — the `:completed`-but-unresumed eval
-      no longer owns its lock, so `Reconciliation` reclaims the orphan and re-dispatches the
-      step (re-evaluated afresh). The pod is not left believing success while the forge lock
-      stays set for life.
+      sees a failure instead of believing its deliverable accepted. Recovery (CI-03): the broker
+      commits `:completed` only AFTER a confirmed broadcast (broadcast-before-commit), so on
+      failure the item STAYS ACTIVE → a pod re-submit RE-PLAYS the delivery (re-broadcast) — the
+      intra-uptime backstop. A re-submit that DOES deliver returns `{:ok, "Result received"}`;
+      `{:ok, "already received"}` is now returned only for a genuinely-delivered item. The
+      across-restart backstop stays the poller/forge reconciliation (the still-active lock is
+      reclaimed if the pod dies before re-submitting). The pod is not left believing success
+      while the forge lock stays set for life.
   """
   @spec submit_result(String.t(), map(), map()) :: {:ok, String.t()} | {:error, atom()}
   def submit_result(pod_id, args, payload)
