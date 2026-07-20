@@ -1,9 +1,10 @@
 defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   @moduledoc """
-  B-#3 — arch escalation sets the `lcars-awaits-arch` lock (THE throttle: `decide/1`/`dispatch_review`
-  skip on it). If `add_label` FAILS, the lock does not take → the PR is re-dispatched every tick
-  (the EXACT churn the escalation exists to stop), while the return stays `{:skipped, _escalated}`.
-  A `_ = add_label(...)` fallback would SWALLOW the failure, making the loop invisible. Fix: log LOUD.
+  B-#3 / C-02 — arch escalation sets the `lcars-awaits-arch` lock (THE throttle: `decide/1`/
+  `dispatch_review` skip on it). If `add_label` FAILS, the lock does not take → the PR is re-dispatched
+  every tick (the EXACT churn the escalation exists to stop). C-02 (sonde convergence 2026-07-20): the
+  return must NOT stay a lying `{:skipped, _escalated}` — it becomes `{:error, {:escalation_incomplete,
+  pr, reason}}` so the poller folds an HONEST `tally.errors` and re-attempts next tick, AND we log LOUD.
 
   We test the PUBLIC API (`escalate_rework/4`) directly with a forge whose `add_label` fails.
   """
@@ -33,10 +34,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
 
   defp seams(forge), do: %Seams{forge: forge, repo: "fleet/proj", forge_opts: []}
 
-  test "throttle label FAILS → return {:skipped, _escalated} BUT log LOUD (churn visible)" do
+  test "throttle label FAILS → return {:error, escalation_incomplete} AND log LOUD (honest tally, C-02)" do
     log =
       capture_log(fn ->
-        assert {:skipped, {:rework_exhausted_escalated, 5}} =
+        assert {:error, {:escalation_incomplete, 5, {:awaits_arch_label_failed, _}}} =
                  ArchEscalation.escalate_rework(seams(LabelFailForge), 5, @head, %{
                    rounds: 4,
                    budget: 3

@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
   describes the escalation).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
@@ -66,11 +66,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   the ISSUE (the poller SKIPS it, no more re-dispatch). `detail` (map `%{rounds, budget}` or
   `{:budget_unreadable, reason}`) goes INTO the comment, not into the dedup key.
 
-  Returns `{:skipped, {:rework_exhausted_escalated, pr_number}}` (form handled by the poller). Non-fleet
-  head (anomaly: the caller already parsed the producer upstream) → `{:skipped,
-  :not_fleet_branch}` (defensive).
+  Returns `{:skipped, {:rework_exhausted_escalated, pr_number}}` when the throttle label took (form
+  handled by the poller), or `{:error, {:escalation_incomplete, pr_number, reason}}` when it did NOT
+  (C-02: honest error tally, not a lying skip — the poller re-attempts next tick). Non-fleet head
+  (anomaly: the caller already parsed the producer upstream) → `{:skipped, :not_fleet_branch}` (defensive).
   """
-  @spec escalate_rework(Seams.t(), integer(), String.t(), term()) :: {:skipped, term()}
+  @spec escalate_rework(Seams.t(), integer(), String.t(), term()) ::
+          {:skipped, term()} | {:error, term()}
   def escalate_rework(%Seams{} = seams, pr_number, head, detail) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
       signature = "[rework-exhausted-escalation:pr-#{pr_number}]"
@@ -81,8 +83,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
           "Reprends : re-cadre le brief, tranche le désaccord, ou ferme la PR. L'issue reste hors-dispatch " <>
           "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
-      escalate_to_arch(seams, issue_n, signature, body)
-      {:skipped, {:rework_exhausted_escalated, pr_number}}
+      case escalate_to_arch(seams, issue_n, signature, body) do
+        :ok -> {:skipped, {:rework_exhausted_escalated, pr_number}}
+        {:error, reason} -> {:error, {:escalation_incomplete, pr_number, reason}}
+      end
     end
   end
 
@@ -94,13 +98,15 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   lock on the ISSUE → the poller SKIPS it (out-of-dispatch, no more retry; the label IS the
   throttle). `reason` (forge detail of the failed merge) goes INTO the comment.
 
-  Returns `{:skipped, {:merge_blocked_escalated, pr_number}}` = form HANDLED by the poller
-  (`step_process_pulls`) → counted skipped, no crash. An `{:escalated, _}` would be in NO
-  clause of the `case do_poll` → CaseClauseError at each tick: a dispatch return MUST be
-  `{:ok|:skipped|:error}`, never a 4th form. Non-fleet head → `{:skipped, :not_fleet_branch}`.
+  Returns `{:skipped, {:merge_blocked_escalated, pr_number}}` when the throttle label took, or
+  `{:error, {:escalation_incomplete, pr_number, reason}}` when it did NOT (C-02: honest tally,
+  re-attempted next tick). Both forms are HANDLED by the poller (`step_process_pulls` folds
+  `:skipped`/`:error`) → no crash. An `{:escalated, _}` would be in NO clause of the `case do_poll`
+  → CaseClauseError: a dispatch return MUST be `{:ok|:skipped|:error}`, never a 4th form. Non-fleet
+  head → `{:skipped, :not_fleet_branch}`.
   """
   @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom(), term()) ::
-          {:skipped, term()}
+          {:skipped, term()} | {:error, term()}
   def escalate_merge_blocked(%Seams{} = seams, pr_number, head, class, reason) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
       signature = "[merge-blocked-escalation:pr-#{pr_number}]"
@@ -112,8 +118,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
           "rebaser). Reprends : résous/rebase la PR sur `main` (ou re-cadre). L'issue reste hors-dispatch " <>
           "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
-      escalate_to_arch(seams, issue_n, signature, body)
-      {:skipped, {:merge_blocked_escalated, pr_number}}
+      case escalate_to_arch(seams, issue_n, signature, body) do
+        :ok -> {:skipped, {:merge_blocked_escalated, pr_number}}
+        {:error, reason} -> {:error, {:escalation_incomplete, pr_number, reason}}
+      end
     end
   end
 
@@ -167,19 +175,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         )
     end
 
-    case seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts) do
-      {:error, reason} ->
-        # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
-        # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP), while we report
-        # `{:skipped, _escalated}`. NOT silent → LOG LOUD (an operator must know the escalation did not throttle).
-        Logger.error(
-          "ArchEscalation: issue ##{issue_n} escalated but throttle label #{inspect(@awaits_arch_label)} " <>
-            "NOT added (#{inspect(reason)}) — the PR will re-dispatch (churn) until the label sticks"
-        )
-
-      _ ->
-        :ok
-    end
+    label_verdict = seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts)
 
     # INVARIANT (live 2026-07-19, fleet/hello#3): awaits-arch ⇒ NO `lcars-in-flight` on the issue
     # — "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also
@@ -188,7 +184,24 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     # (`_ =`): the label may legitimately be absent; the throttle above is the load-bearing write.
     _ = seams.forge.remove_label(seams.repo, issue_n, @in_flight_label, seams.forge_opts)
 
-    :ok
+    # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
+    # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP). We SURFACE it
+    # (C-02, sonde convergence 2026-07-20): return `{:error, ...}` so the caller reports an error tally,
+    # NOT a lying `{:skipped, _escalated}` (the escalation did NOT durably take). The poller folds this as
+    # `tally.errors` (`step_process_pulls`, F-037: telemetry only, never a backoff) and re-attempts next
+    # tick (idempotent: dedup comment + idempotent add_label). LOG LOUD stays — the operator sees the churn.
+    case label_verdict do
+      {:error, reason} ->
+        Logger.error(
+          "ArchEscalation: issue ##{issue_n} escalated but throttle label #{inspect(@awaits_arch_label)} " <>
+            "NOT added (#{inspect(reason)}) — the PR will re-dispatch (churn) until the label sticks"
+        )
+
+        {:error, {:awaits_arch_label_failed, reason}}
+
+      _ ->
+        :ok
+    end
   end
 
   # Extracts the parent ISSUE number from the feature-branch (`lcars/issue-<n>-<role>`) via the
