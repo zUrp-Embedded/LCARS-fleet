@@ -182,13 +182,12 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   # The producer branch of issue N = the `head.ref` of the (1st) open PR whose head parses
   # to issue N. Ambiguity (≥2 PRs for N — abnormal) → the first; none → nil (fail-loud downstream).
   defp producer_head_for_issue(pulls, n) do
-    Enum.find_value(pulls, fn pr ->
-      head = get_in(pr, ["head", "ref"]) || ""
-
-      case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
-        {:ok, {^n, _role}} -> head
-        _ -> false
-      end
+    # C-05: the single Fleet-PR selector (ForgeProtocol); local projection = the head.ref of issue N's PR.
+    pulls
+    |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
+    |> Enum.find_value(fn
+      {^n, pr} -> get_in(pr, ["head", "ref"])
+      _ -> false
     end)
   end
 

@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.Poller do
     * test seams: `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injected if non-nil).
     * `:start_tick?` — default `true`; `false` = no auto first tick (tests drive via `force_poll/1`).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -619,13 +619,10 @@ defmodule Fleet.Pilot.Poller do
   # the producer is done, the rest is dispatched via the pulls -> the issue path SKIPS them
   # (otherwise the poller would re-spawn the producer, still assigned).
   defp pulls_issue_ids(pulls) do
+    # C-05: the single Fleet-PR selector (ForgeProtocol); local projection = the SET of issue numbers.
     pulls
-    |> Enum.flat_map(fn pr ->
-      case Fleet.Pilot.ForgeProtocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
-        {:ok, {n, _role}} -> [n]
-        :error -> []
-      end
-    end)
+    |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
+    |> Enum.map(fn {n, _pr} -> n end)
     |> MapSet.new()
   end
 

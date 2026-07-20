@@ -243,7 +243,10 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..10, do: Poller.force_poll(name)
         end)
 
-      refute log =~ "ArchWake"
+      # Bleed-proof (`capture_log` is GLOBAL — it catches a CONCURRENT test's ArchWake on ANOTHER repo):
+      # scope to an ArchWake line naming THIS test's repo (`lcars-test`), not the bare shared token. A real
+      # regression (this busy arch wrongly woken) logs `ArchWake … lcars-test`; another repo's net does not.
+      refute log =~ ~r/ArchWake.*lcars-test/
       refute log =~ "(fleet-wide) → net"
 
       GenServer.stop(pid)

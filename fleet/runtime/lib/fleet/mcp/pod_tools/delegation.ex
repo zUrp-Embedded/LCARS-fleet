@@ -772,6 +772,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp find_issue_pr(forge, repo, number) do
     case forge.list_pulls(repo, []) do
       {:ok, pulls} ->
+        # C-05: the parse of the Fleet feature-branch already goes through the SINGLE AUTHORITY
+        # (`forge.parse_feature_branch` seam → ForgeProtocol) — so the correlation is NOT duplicated
+        # logic, only a 3-line loop shape. We keep it LOCAL rather than extend the forge seam with the
+        # selector (that would force EVERY forge stub, present and future, to implement it). The two
+        # in-Pilot correlations converge on `ForgeProtocol.fleet_prs_by_issue`; this MCP-side one keeps
+        # its own state/merged-fallback policy over the single-authority parse.
         pulls
         |> Enum.filter(fn pr ->
           head = get_in(pr, ["head", "ref"]) || ""

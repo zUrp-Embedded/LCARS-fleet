@@ -103,4 +103,24 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
       refute ForgeProtocol.system_authored?("not a comment", "lcars-bot")
     end
   end
+
+  describe "fleet_prs_by_issue/1 — the single issue↔PR selector (C-05)" do
+    test "keeps only pulls whose head parses as a fleet feature-branch, as {issue, pull} pairs" do
+      pulls = [
+        %{"number" => 10, "head" => %{"ref" => "lcars/issue-42-engineer"}},
+        %{"number" => 11, "head" => %{"ref" => "feature/manual-branch"}},
+        %{"number" => 12, "head" => %{"ref" => "lcars/issue-7-reviewer"}},
+        %{"number" => 13, "head" => %{}}
+      ]
+
+      result = ForgeProtocol.fleet_prs_by_issue(pulls)
+
+      # Non-fleet (manual branch) and head-less pulls are dropped; the fleet ones carry their issue N.
+      assert [{42, %{"number" => 10}}, {7, %{"number" => 12}}] = result
+    end
+
+    test "empty list → empty (Poller/StepRunBuild project a set / a head from this)" do
+      assert ForgeProtocol.fleet_prs_by_issue([]) == []
+    end
+  end
 end
