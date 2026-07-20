@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use Supervisor
@@ -143,6 +143,7 @@ defmodule Fleet.Pilot.Application do
     end
 
     validate_card_juries!()
+    validate_card_steps!()
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
@@ -207,6 +208,32 @@ defmodule Fleet.Pilot.Application do
           raise "fleet_pilot: workflow map #{map_name} jury contains #{inspect(role)} that does NOT resolve " <>
                   "to a cap-profile (#{inspect(reason)}) — a non-role login in a jury WEDGES at dispatch " <>
                   "(no cap-profile → :no_role). Fix the card."
+      end
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Symmetric to validate_card_juries!, for the STEP roles. The schema guards the SHAPE of
+  # spec.steps.*.role (any string) but not the CONTENT: a typo or a retired role passes the boot
+  # and only WEDGES at the first dispatch (`StepDispatcher` → `CapProfile.resolve` → :not_found, a
+  # stuck ticket that never spawns). We resolve every canon step role at boot — a role that cannot
+  # load = a broken canon, fail-loud HERE. A step without a role (nil) is skipped: it is not a
+  # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
+  def validate_card_steps!(opts \\ []) do
+    for map_name <- Fleet.Workflow.Loader.canon_names(opts),
+        {step_name, spec} <- Fleet.Workflow.Loader.load!(map_name, opts)["steps"] || %{},
+        role = Map.get(spec, "role"),
+        is_binary(role) do
+      case Fleet.CapProfile.load(role) do
+        {:ok, _cp} ->
+          :ok
+
+        {:error, reason} ->
+          raise "fleet_pilot: workflow map #{map_name} step #{inspect(step_name)} has role " <>
+                  "#{inspect(role)} that does NOT resolve to a cap-profile (#{inspect(reason)}) — a bad " <>
+                  "canon role WEDGES at dispatch (CapProfile.resolve → :not_found, stuck ticket). Fix the card."
       end
     end
 
