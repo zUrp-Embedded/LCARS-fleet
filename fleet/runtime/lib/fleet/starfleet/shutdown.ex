@@ -10,7 +10,7 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
     * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
       aggregates the real in-flight + activates quiescence
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
   @callback refuse_new_jobs(opts :: keyword()) :: :ok
   @callback in_flight_count() :: non_neg_integer()
@@ -45,129 +45,74 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   admission is the SOLE way new work enters, so gating it is total. The internal work
   of an in-flight step_run is NOT gated.
 
-  ## `in_flight_count/0` — scope (user decision)
+  ## `in_flight_count/0` — the WORK to finish (CI-02)
 
-  **Every live NON-PERMANENT pod counts** (the real forge work) + unassigned queued
-  work items. Permanent pods (arch, gatekeeper…) are RESIDENTS, not work — EXCLUDED
-  (see below). In-flight is read from the pods and the queue, NEVER from an in-memory
-  run table: RAM state can lie (it drifts on a crash/restart), the pods and the forge
-  stay true — one live pod = one step_run in progress.
+  In-flight = the broker's ACTIVE work-items + the in-flight COMPLETION offloads. Read from the
+  living truth (the broker + the supervisors), NEVER from an in-memory run table: RAM state can lie
+  (it drifts on a crash/restart).
 
-    * `Fleet.Spawner.list_pods/0` filtered to NON-permanent — active workers (also covers
-      assigned work: an assigned work item ⇒ its pod is live ⇒ counted here)
-    * `Fleet.TaskQueue.list_pending/0` — queued work items **not yet assigned**
+    * `Fleet.TaskQueue.list_active/0` — the `@active_states` work-items (`:pending` queued +
+      `:assigned`/`:in_progress` being worked). This IS the real forge work, and it EXCLUDES the idle
+      residents by construction: a project architect (`architect-<name>`, `forever` but NOT
+      `permanent-` prefixed) or a `pipe` engineer between briefs has NO active work-item → not counted.
+      (The old `list_pods` count kept them in — one open project ⇒ `in_flight > 0` FOREVER ⇒ every stop
+      timed out. An arch mid-arbitration DOES have a work-item and IS counted, correctly.)
+    * the **completion offloads** via the `:completion_inflight_fun` seam — after `pod.completed`, the
+      business completion (push + PR + forge writes, ≤30s) runs in `Fleet.Pilot.StepRunConsumer`'s
+      `Task.Supervisor`: neither a pod nor a work-item (the item is already `:completed`), so the
+      old count cut it mid-push. See `## Boundary` for why it is a seam and not a call.
 
-  **No double-counting**: `list_pending` filters `state == :pending` STRICT
-  (cf. `task_queue/server.ex` `handle_call(:list_pending)`) — `:assigned`/`:in_progress`
-  work items are excluded from it and are represented by their live pod
-  (counted in `list_pods`). Neither double-counting nor under-counting.
+  **Fail-CLOSED on the broker**: broker PRESENT but unreachable (restart mid-quiesce) → sentinel
+  `> 0` (`@count_unavailable`) → the drain waits its timeout, never concludes "empty" on an unknown
+  (a `0` would be fail-open: under-count ⇒ stop WHILE work is in flight). Broker GENUINELY absent
+  (isolated test) → honest `0`, decided on the live PROCESS (`Process.whereis`), not the code path.
 
-  ⚠ Permanents EXCLUDED: permanent pods (Type 1/3 "forever":
-  gatekeeper, archivist…) live continuously — counting them would keep `in_flight_count > 0`
-  forever ⇒ every graceful stop would consume its full grace then conclude "timeout" instead
-  of "drained". They are filtered out (`list_pods` |> reject `permanent?`), so the
-  drain can actually reach empty on the real forge work.
+  **ASYMMETRY on the completion seam**: if that supervisor is DOWN, its Tasks are already dead WITH
+  it (the work is already lost, independent of the drain) → the seam returns `0` (honest), NOT the
+  broker's `> 0` sentinel. A `> 0` there would make every stop time out whenever step is off.
 
-  **Fail-CLOSED when counting fails**: if a component (Spawner / task_queue
-  broker) is PRESENT but unreachable — typically a restart RIGHT IN THE MIDDLE OF
-  quiesce — its count returns a sentinel > 0 (never `0`) → the drain never
-  concludes "empty" on an unknown, it waits out its timeout (the safeguard).
-  A `0` there would be fail-OPEN: under-counting ⇒ drain wrongly declared complete ⇒
-  stop WHILE work is in flight. A task_queue app GENUINELY absent from the
-  build stays `0` (there really is nothing to drain) — we decide on the
-  actually-running broker PROCESS (`Process.whereis(Fleet.TaskQueue.Server)`),
-  not the code path — in the single app all modules are loadable, so
-  "module loaded" would distinguish nothing.
+  ## Boundary — why the completion count is a runtime seam
 
-  ## Layering
-
-  `fleet_starfleet` depends on `fleet_spawner` (`list_pods` as a direct call — the
-  `:spawner_mod` app-env seam exists ONLY to inject a stub in test, default
-  = the real `Fleet.Spawner`). It DEPENDS on `Fleet.TaskQueue` (declared
-  boundary dep, downward) → `list_pending` is a direct call, guarded by
-  `Process.whereis` + rescue/catch for a broker restarting mid-quiesce.
+  `Fleet.Starfleet` does NOT depend on `Fleet.Pilot` (and must not — siblings). So the completion
+  Task.Supervisor (a Pilot concern) cannot be referenced here at compile time. `:completion_inflight_fun`
+  (`Application.get_env`, wired in `runtime.exs` to `&Fleet.Pilot.StepRunConsumer.inflight_completions/0`)
+  crosses that boundary as a runtime fun, never a compile reference — same shape as `:shutdown_dispatcher`
+  / `:coord_backend`. Default (no wiring / test) = `fn -> 0 end`. The broker count stays a direct call
+  (`Fleet.TaskQueue` IS a declared downward dep), through the `:task_queue_mod` test seam.
   """
   @behaviour Fleet.Starfleet.Shutdown.Dispatcher
 
   require Logger
 
-  # Sentinel "in-flight count unavailable". The drain-end condition (`do_wait_drain`) concludes
-  # "empty" only on `in_flight == 0` → any value > 0 PREVENTS concluding and forces the drain
-  # to wait out its timeout (the safeguard, never an indefinite block). 1 = minimal "not empty". We
-  # return this value when the count FAILS (component unreachable): fail-CLOSED ("I don't know
-  # ⇒ I do NOT declare the drain complete"), the opposite of the fail-open `0` that cut during work.
+  # Sentinel "broker count unavailable". `do_wait_drain` concludes "empty" only on a STABLE `in_flight
+  # == 0` → any value > 0 prevents concluding and forces the drain to wait out its timeout (the
+  # safeguard). 1 = minimal "not empty". Returned when the BROKER count fails (present but unreachable):
+  # fail-CLOSED, the opposite of the fail-open `0` that would cut during work.
   @count_unavailable 1
 
-  # Spawner module — defaults to the real `Fleet.Spawner` (direct call, real compile-time dep). App-env
-  # seam ONLY to inject a stub in test (induce a list_pods that raises/exits); prod never
-  # sets this key → behavior = direct call `Fleet.Spawner.list_pods/0`.
-  @spawner_default Fleet.Spawner
+  # Broker module — direct call to the real `Fleet.TaskQueue` (declared downward dep). App-env seam
+  # ONLY to inject a stub in test (induce a `list_active` that raises/exits); prod never sets it.
+  @task_queue_default Fleet.TaskQueue
 
   @impl true
   def refuse_new_jobs(_opts), do: Fleet.Shutdown.Quiesce.refuse!()
 
   @impl true
-  def in_flight_count do
-    # In-flight = live NON-PERMANENT pods + queued work not yet pulled — counted from the pods
-    # and the queue, NEVER from an in-memory run table: RAM state can lie (it drifts on a
-    # crash/restart), the pods and the forge stay true (one live pod = one step_run in progress).
-    # The PERMANENTS (arch, gatekeeper) are RESIDENTS, not work: they live continuously — counting
-    # them would keep the drain unreachable → every graceful stop would burn its full grace and
-    # conclude "timeout" instead of "drained". Hence excluded.
-    spawner_pods() + tasks_pending()
-  end
+  def in_flight_count, do: broker_active() + completion_phases()
 
-  # Live pods. fleet_spawner is a HARD compile-time dep (always present in prod): a
-  # `list_pods` that raises/exits = the Spawner is unreachable, ABNORMAL — typically a restart RIGHT
-  # IN THE MIDDLE OF quiesce. NEVER masked as `0` (a `0` would under-count the in-flight → drain
-  # declared complete wrongly → stop WHILE work is in flight, fail-open). Instead: Logger.error +
-  # sentinel "not empty" → the drain does not conclude, it waits out its timeout (safeguard).
-  defp spawner_pods do
-    # Filter by the prefix AUTHORITY (PermanentBoot.permanent?/1) — residents do not count.
-    spawner_mod().list_pods()
-    |> Enum.reject(fn %{pod_id: pod_id} -> Fleet.Spawner.PermanentBoot.permanent?(pod_id) end)
-    |> length()
-  rescue
-    e ->
-      Logger.error(
-        "Shutdown: live pod count unavailable (Spawner unreachable — restart " <>
-          "mid-quiesce?) — drain can NOT conclude 0, staying cautious: #{Exception.message(e)}"
-      )
-
-      @count_unavailable
-  catch
-    :exit, reason ->
-      Logger.error(
-        "Shutdown: live pod count unavailable (Spawner exit #{inspect(reason)} " <>
-          "— restart mid-quiesce?) — drain can NOT conclude 0, staying cautious"
-      )
-
-      @count_unavailable
-  end
-
-  defp spawner_mod, do: Application.get_env(:fleet_starfleet, :spawner_mod, @spawner_default)
-
-  # Unassigned queued mandates via a DIRECT call to `Fleet.TaskQueue.list_pending()`
-  # (dep declared, downward). Two regimes NOT to confuse:
-  #   * task_queue app ABSENT from this build/env (legitimate: isolated starfleet test, deployment without the
-  #     broker) → there really is NO queue to drain → HONEST `0` (not a failure mask).
-  #   * app PRESENT but the call raises/exits (broker restarting during the quiesce) → ABNORMAL: we do NOT
-  #     mask as `0` (under-counting ⇒ drain would conclude "empty" wrongly) → sentinel "not empty".
-  # All modules are loadable in the single app, so "module loaded" does not distinguish absent
-  # from crashed: we decide on the ACTUALLY-running broker PROCESS (`Process.whereis`), not the
-  # code path. (An OTP-app check in `started_applications` would be `false` FOREVER in the
-  # single app — no `:fleet_task_queue` app exists — → drain short-circuited to 0 with tasks
-  # still queued. The live process is the real fact.)
-  defp tasks_pending do
+  # The broker's ACTIVE work-items (queued + being worked) — the real forge work, minus the idle
+  # residents (no work-item). Fail-CLOSED: broker present-but-unreachable → sentinel > 0; genuinely
+  # absent → honest 0 (decided on the live process, not the code path).
+  defp broker_active do
     if task_queue_running?() do
-      case safe_count_pending() do
+      case safe_count_active() do
         {:ok, n} ->
           n
 
         :error ->
           Logger.error(
-            "Shutdown: queued work item count unavailable (task_queue broker " <>
-              "present but unreachable — restart mid-quiesce?) — drain can NOT conclude 0, cautious"
+            "Shutdown: active work-item count unavailable (task_queue broker present but " <>
+              "unreachable — restart mid-quiesce?) — drain can NOT conclude 0, staying cautious"
           )
 
           @count_unavailable
@@ -177,24 +122,36 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     end
   end
 
-  defp task_queue_running? do
-    is_pid(Process.whereis(Fleet.TaskQueue.Server))
-  end
+  defp task_queue_running?, do: is_pid(Process.whereis(Fleet.TaskQueue.Server))
 
-  # DIRECT call — the dep is DECLARED (boundary Fleet.Starfleet → Fleet.TaskQueue,
-  # downward). A module-in-a-variable detour would only dodge a compile order that
-  # does not exist — the boundary compiler carries the dep. The try/rescue around
-  # the call (broker restarting mid-quiesce)
-  # keeps its role: never mask as `0`, return :error → sentinel "not empty".
-  defp safe_count_pending do
-    # The nominal return IS a list (list_pending/0 spec — a defensive `_ -> :error`
-    # clause would be dead-by-spec, dialyzer-provable).
-    # The real "broker down mid-quiesce" protection = rescue/catch (noproc → :error).
-    {:ok, length(Fleet.TaskQueue.list_pending())}
+  defp task_queue_mod, do: Application.get_env(:fleet_starfleet, :task_queue_mod, @task_queue_default)
+
+  # The nominal return IS a list (`list_active/0` spec) — the real "broker down mid-quiesce" protection
+  # is the rescue/catch (noproc/exit → `:error` → sentinel), never a mask as `0`.
+  defp safe_count_active do
+    {:ok, length(task_queue_mod().list_active())}
   rescue
     _ -> :error
   catch
     :exit, _ -> :error
+  end
+
+  # In-flight completion offloads via the runtime seam (cf. ## Boundary). ASYMMETRIC vs the broker: a
+  # dead/absent completion supervisor means its Tasks are ALREADY dead (work lost, not the drain's
+  # concern) → 0 is HONEST here, not a fail-open. The seam fun itself guards `Process.whereis` → 0; this
+  # rescue is only a backstop for a fun that raises (bug) — still 0 (a raising counter is not "work in
+  # flight" we can protect).
+  defp completion_phases do
+    Application.get_env(:fleet_starfleet, :completion_inflight_fun, fn -> 0 end).()
+  rescue
+    e ->
+      Logger.error(
+        "Shutdown: completion-phase count raised (#{Exception.message(e)}) — treating as 0"
+      )
+
+      0
+  catch
+    :exit, _ -> 0
   end
 end
 
@@ -205,10 +162,11 @@ defmodule Fleet.Starfleet.Shutdown do
   `:init.stop()`. The GenServer serves that RPC; the drain is LIVE.
 
   `begin/1` is the SOLE prod entry (`bin/fleet_v2 stop` RPCs it): it refuses new jobs (dispatcher
-  gate) THEN drains in ONE loop — `wait_drain` polls `in_flight_count` (live non-permanent pods +
-  pending queue items) until 0 or `grace_ms`. `bin/fleet_v2` then calls `:init.stop()` (ordered OTP
-  stop). `drain_in_flight/1` re-enters that same drain WITHOUT the refuse step — a TEST-ONLY seam to
-  exercise `wait_drain` in isolation (convergence/timeout); no prod caller.
+  gate) THEN drains in ONE loop — `wait_drain` polls `in_flight_count` (the broker's active work-items +
+  the in-flight completion offloads, cf. `AggregateDispatcher`) until it reads 0 on N consecutive polls
+  (the CI-02 debounce) or `grace_ms`. `bin/fleet_v2` then calls `:init.stop()` (ordered OTP stop).
+  `drain_in_flight/1` re-enters that same drain WITHOUT the refuse step — a TEST-ONLY seam to exercise
+  `wait_drain` in isolation (convergence/timeout); no prod caller.
 
   ## Dispatcher backend (seam `:shutdown_dispatcher`)
 
@@ -236,6 +194,14 @@ defmodule Fleet.Starfleet.Shutdown do
   require Logger
 
   @default_grace_ms 45_000
+  @default_poll_ms 500
+
+  # CI-02 debounce: `in_flight` must read 0 on N CONSECUTIVE polls before concluding `:drained`. Covers
+  # the `pod.completed` → offload HANDOFF window — the work-item is already `:completed` but the completion
+  # `Task` has not started yet (incl. a synchronous forge read in `resolve_next` before the offload), which
+  # the work-item/Task aggregate momentarily misses. Without it, a single racy 0-read would conclude the
+  # drain mid-handoff and `:init.stop()` would cut the completion. Default 3 × 500ms ≈ 1.5s of stable 0.
+  @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real
   # prod backend `AggregateDispatcher` is not wired (runtime.exs). Set HERE once
@@ -283,7 +249,17 @@ defmodule Fleet.Starfleet.Shutdown do
     # config via the single source (canonical NoOp default included).
     backend = opts[:dispatcher] || configured_dispatcher()
 
-    {:ok, %{status: :running, backend: backend, in_flight: 0}}
+    {:ok,
+     %{
+       status: :running,
+       backend: backend,
+       in_flight: 0,
+       # Poll interval + debounce count (opts for fast tests; prod defaults 500ms / 3 confirmations).
+       # `confirmations` clamped to ≥ 1: 0 would make `zero_streak >= 0` conclude `:drained` on the FIRST
+       # poll regardless of `in_flight` (fail-OPEN, the exact opposite of the debounce's purpose).
+       poll_ms: Keyword.get(opts, :poll_ms, @default_poll_ms),
+       confirmations: max(1, Keyword.get(opts, :drain_confirmations, @default_drain_confirmations))
+     }}
   end
 
   @impl true
@@ -301,14 +277,18 @@ defmodule Fleet.Starfleet.Shutdown do
 
   defp wait_drain(state, grace_ms) do
     deadline = System.monotonic_time(:millisecond) + grace_ms
-    do_wait_drain(state, deadline)
+    do_wait_drain(state, deadline, 0)
   end
 
-  defp do_wait_drain(state, deadline) do
+  # `zero_streak` = number of CONSECUTIVE `in_flight == 0` reads so far. Conclude `:drained` only when it
+  # reaches `state.confirmations` (the debounce, CI-02): a lone transitory 0 (handoff window) does not end
+  # the drain. Any non-zero read RESETS the streak.
+  defp do_wait_drain(state, deadline, zero_streak) do
     in_flight = state.backend.in_flight_count()
+    zero_streak = if in_flight == 0, do: zero_streak + 1, else: 0
 
     cond do
-      in_flight == 0 ->
+      zero_streak >= state.confirmations ->
         %{state | status: :drained, in_flight: 0}
 
       System.monotonic_time(:millisecond) >= deadline ->
@@ -316,8 +296,8 @@ defmodule Fleet.Starfleet.Shutdown do
         %{state | status: :timeout, in_flight: in_flight}
 
       true ->
-        Process.sleep(500)
-        do_wait_drain(%{state | in_flight: in_flight}, deadline)
+        Process.sleep(state.poll_ms)
+        do_wait_drain(%{state | in_flight: in_flight}, deadline, zero_streak)
     end
   end
 end

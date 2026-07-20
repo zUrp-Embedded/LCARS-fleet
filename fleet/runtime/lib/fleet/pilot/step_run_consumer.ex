@@ -186,6 +186,33 @@ defmodule Fleet.Pilot.StepRunConsumer do
   @doc false
   def task_supervisor, do: @step_run_task_supervisor
 
+  @doc """
+  Count of IN-FLIGHT completion offloads — live children of the completion `Task.Supervisor` (CI-02).
+
+  The graceful drain (`Fleet.Starfleet.Shutdown`) counts these as in-flight work: after `pod.completed`,
+  the business completion (push + PR + forge writes, ≤30s) runs HERE, in a Task — neither a pod nor a
+  broker work-item (the item is already `:completed`), so the pod/work-item aggregate would otherwise cut
+  it mid-push. Wired into the drain via the `:completion_inflight_fun` seam (`runtime.exs`) — Starfleet must
+  NOT reference Pilot at compile time (no boundary dep), so this crosses as a runtime fun, not a call.
+
+  Counts the LIVE children (self-correcting: a Task gone/crashed leaves the supervisor → no leak, unlike a
+  RAM inc/dec). Supervisor absent (step off) or unreachable → `0`: its Tasks are dead with it (work already
+  lost, independent of the drain) — an HONEST 0, NOT the broker's fail-closed sentinel.
+  """
+  @spec inflight_completions() :: non_neg_integer()
+  def inflight_completions do
+    if is_pid(Process.whereis(@step_run_task_supervisor)) do
+      %{active: n} = DynamicSupervisor.count_children(@step_run_task_supervisor)
+      n
+    else
+      0
+    end
+  rescue
+    _ -> 0
+  catch
+    :exit, _ -> 0
+  end
+
   # ASYNC runner (prod, injected as `:step_run_runner`) — offloads the completion into the
   # `Task.Supervisor`: the git push ≤30s + forge writes do NOT block the singleton. Returns
   # `{:ok, :offloaded}` (the real outcome is logged in the task). Spawn failure → fail-loud logged.

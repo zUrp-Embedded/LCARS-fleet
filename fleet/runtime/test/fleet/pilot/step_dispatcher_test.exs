@@ -395,6 +395,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
+    test "CI-01: draining → dispatch_issue = {:skipped, :draining}, NO spawn, NO lock (gate is the flag, not a block)" do
+      payload = eng_issue()
+
+      # Drain in progress (`quiescing?` seam true): dispatch_issue opens NO new producer — it skips BEFORE
+      # decide/spawn → no `lcars-in-flight` label, no pod. The issue stays assigned+unlocked on the forge.
+      assert {:skipped, :draining} =
+               StepDispatcher.dispatch_issue(payload, dispatch_opts(quiescing?: fn -> true end))
+
+      refute_received {:spawned, _, _}
+      refute_received {:enqueued, _, _}
+
+      # NOT draining (seam explicitly false → hermetic, independent of the global flag): the SAME issue
+      # dispatches normally → the gate is the drain flag, never a blanket block.
+      assert {:ok, {:spawned, _pod, "engineer"}} =
+               StepDispatcher.dispatch_issue(payload, dispatch_opts(quiescing?: fn -> false end))
+
+      assert_received {:spawned, _, _}
+    end
+
     test "GATE slot_scope: engineer (project) already alive → DEFERS :role_busy (serialized, no rebrief)" do
       payload = eng_issue()
 

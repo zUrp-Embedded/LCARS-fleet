@@ -43,7 +43,7 @@ defmodule Fleet.Pilot do
 
   ## Operator entries (delegated here — the façade is the contract)
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
@@ -65,6 +65,9 @@ defmodule Fleet.Pilot do
       Fleet.Credentials,
       Fleet.CapProfile,
       Fleet.TaskQueue,
+      # Foundation drain flag (CI-01): dispatch_issue refuses to open a new producer while the daemon
+      # quiesces — the poller-side reader, added to the two existing ones (ControlRouter, PermanentWarden).
+      Fleet.Shutdown.Quiesce,
       # — external wire surface (lib fencing: every reference is declared) —
       Req,
       Req.Response

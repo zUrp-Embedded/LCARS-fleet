@@ -1,7 +1,7 @@
 # Fleet.Starfleet — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-20
 **Status**: active — system-side audit/validation, N0
 **Referenced by**: —
 
@@ -29,6 +29,6 @@ restated, only pointed at.
 
 ## Config & deps
 - Child gating (`:fleet_starfleet`) read by `Application` — `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`, `:start_boot_orchestrator`, `:start_mcp_monitor` (default `true`), `:start_mcp_watcher` (default `false`, outbound HTTP); all forced `false` in `test.exs`.
-- Backend seams — `:coord_backend` (read via `CoordBackend.resolved/0`), `:shutdown_dispatcher` (read via `Shutdown.configured_dispatcher/0`), `:spawner_mod` (test-only stub); prod values set by `runtime.exs`.
+- Backend seams — `:coord_backend` (read via `CoordBackend.resolved/0`), `:shutdown_dispatcher` (read via `Shutdown.configured_dispatcher/0`), `:completion_inflight_fun` (CI-02 drain: in-flight completion offloads, wired to a Pilot fn since Starfleet ∌ Pilot), `:task_queue_mod` (test-only stub for the drain's `list_active` count); prod values set by `runtime.exs`.
 - Params, each read by its owning module (defaults in the `@moduledoc`) — `:decision_schema_path`, `:audit_log_path` / `:audit_log_max_bytes`, `:mcp_monitor_check_interval_ms` / `:mcp_monitor_target`, `:mcp_watcher_check_interval_ms` / `:mcp_watcher_package` / `:mcp_watcher_upstream_fetcher`.
-- Deps: declared in `Fleet.Starfleet`'s `use Boundary` (compile-enforced) — incl. `Fleet.Coord` and `Fleet.TaskQueue`, which ARE compile deps (`AggregateDispatcher` calls `Fleet.TaskQueue.list_pending/0` directly; never a module-in-variable/`apply` detour). The ONLY true runtime seams are the injected backends above (`:coord_backend`, `:shutdown_dispatcher`, `:spawner_mod` test-only) — not Coord/TaskQueue.
+- Deps: declared in `Fleet.Starfleet`'s `use Boundary` (compile-enforced) — incl. `Fleet.Coord` and `Fleet.TaskQueue`, which ARE compile deps (`AggregateDispatcher` calls `Fleet.TaskQueue.list_active/0` directly; never a module-in-variable/`apply` detour). The completion count crosses to `Fleet.Pilot` (NOT a dep) as a runtime fun via `:completion_inflight_fun`. The runtime seams are the injected backends above (`:coord_backend`, `:shutdown_dispatcher`, `:completion_inflight_fun`, `:task_queue_mod` test-only) — not Coord/TaskQueue.

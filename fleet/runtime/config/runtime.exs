@@ -237,13 +237,20 @@ if config_env() != :test do
       audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
   end
 
-  # Shutdown drain: real backend (aggregates the Spawner + TaskQueue in-flight and activates
-  # quiescence). Outside `:test` (this file is guarded) →
+  # Shutdown drain: real backend (aggregates the TaskQueue active work + the completion offloads and
+  # activates quiescence). Outside `:test` (this file is guarded) →
   # tests keep the `NoOpDispatcher` default (hermeticity). User decision:
   # no Fleet.Dispatcher god-module, the seam IS the abstraction.
   config :fleet_starfleet,
          :shutdown_dispatcher,
          Fleet.Starfleet.Shutdown.AggregateDispatcher
+
+  # CI-02 — in-flight COMPLETION offloads for the drain. Starfleet must NOT reference Pilot at compile
+  # time (no boundary dep); this runtime fun crosses the boundary as a value (cf. AggregateDispatcher
+  # ## Boundary). Absent in `:test` → the seam default `fn -> 0 end` (no completion Tasks to drain there).
+  config :fleet_starfleet,
+         :completion_inflight_fun,
+         &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
   # ============================================================
   # fleet_coord — wired Fleet.Coord backend for starfleet

@@ -35,7 +35,8 @@ defmodule Fleet.Starfleet.ShutdownTest do
 
   defp start_sd(opts) do
     name = :"sd_#{System.unique_integer([:positive])}"
-    {:ok, _} = start_supervised({Fleet.Starfleet.Shutdown, [name: name] ++ opts})
+    # Fast poll for tests (prod default 500ms); the debounce (drain_confirmations, default 3) still applies.
+    {:ok, _} = start_supervised({Fleet.Starfleet.Shutdown, [name: name] ++ Keyword.put_new(opts, :poll_ms, 10)})
     name
   end
 
@@ -56,6 +57,18 @@ defmodule Fleet.Starfleet.ShutdownTest do
     box(List.duplicate(3, 100))
     name = start_sd(dispatcher: StubDispatcher)
     assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 300)
+  end
+
+  test "debounce (CI-02): a LONE transient 0 does NOT conclude — needs N consecutive 0s" do
+    # A 0 at position 2 is followed by a 1 (reset) → the drain must NOT stop there (pre-CI-02, one 0-read
+    # concluded → the pod.completed→offload handoff window would cut the completion). It concludes only on
+    # the final 3 consecutive 0s. Proof: the WHOLE seq is consumed — had the middle 0 concluded, [1,0,0,0]
+    # would remain.
+    box([1, 0, 1, 0, 0, 0])
+    name = start_sd(dispatcher: StubDispatcher, drain_confirmations: 3)
+    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
+    assert %{seq: []} = Agent.get(@box, & &1)
+    assert %{status: :drained} = :sys.get_state(name)
   end
 
   test "begin calls refuse_new_jobs" do

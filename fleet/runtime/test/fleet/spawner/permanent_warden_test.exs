@@ -3,7 +3,11 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   G5 — respawn of dead permanents. Seams: `subscribe: false` (no real Bus — events are sent
   directly to the process), `respawn_fun` stub, `backoff_base_ms: 1` (~ms delays, fast test).
   """
-  use ExUnit.Case, async: true
+  # async: FALSE — this suite flips the GLOBAL `Fleet.Shutdown.Quiesce` flag (`refuse!/0`, the drain
+  # gate) via `:persistent_term`. Since CI-01, `StepDispatcher.dispatch_issue` reads that flag by default
+  # → an async write here would bleed into the ~30 async dispatch tests (they'd see `{:skipped, :draining}`).
+  # Same stance as the other Quiesce-mutating suites (control_router_test, quiesce_test — both async:false).
+  use ExUnit.Case, async: false
 
   alias Fleet.Spawner.PermanentWarden
 

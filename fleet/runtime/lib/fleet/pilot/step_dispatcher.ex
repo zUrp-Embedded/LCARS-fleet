@@ -111,6 +111,24 @@ defmodule Fleet.Pilot.StepDispatcher do
           | {:skipped, atom()}
           | {:error, term()}
   def dispatch_issue(payload, opts) do
+    # CI-01 — drain gate. `dispatch_issue` is the SINGLE spawn point of every PRODUCER — a fresh issue
+    # AND the step 2..N boundary of an already-engaged run (Lease's ENGAGED path routes here too). During a
+    # graceful drain (`Fleet.Shutdown.Quiesce`, the foundation new-work flag) we open NO new producer: skip
+    # BEFORE any spawn/lock → the issue stays assigned+unlocked on the forge → re-dispatched at the next
+    # boot, ZERO orphan lock. Finalization is NOT here (merge = dispatch_review→promote_pr; terminal producer
+    # → :review) → in-flight bricks still finish. This gate PAUSES multi-step pipelines at their producer
+    # boundary (safe: state on the forge) — it does not "let the engaged run finish", it stops opening work.
+    # Seam `:quiescing?` (default = the real foundation flag) for test isolation (no global persistent_term).
+    quiescing? = Keyword.get(opts, :quiescing?, &Fleet.Shutdown.Quiesce.quiescing?/0)
+
+    if quiescing?.() do
+      {:skipped, :draining}
+    else
+      do_dispatch_issue(payload, opts)
+    end
+  end
+
+  defp do_dispatch_issue(payload, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)

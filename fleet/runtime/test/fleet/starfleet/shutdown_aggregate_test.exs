@@ -1,24 +1,34 @@
 defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   @moduledoc """
-  REAL backend of the `:shutdown_dispatcher` seam (R4 D5 brick 2/3). async: false:
-  `refuse_new_jobs` mutates the global `Fleet.Shutdown.Quiesce` flag — on_exit
-  resume! is mandatory.
+  REAL backend of the `:shutdown_dispatcher` seam. async: false: `refuse_new_jobs` mutates the global
+  `Fleet.Shutdown.Quiesce` flag (on_exit `resume!` mandatory).
+
+  CI-02: the drain count is now `TaskQueue.list_active/0` (queued + worked work-items — residents with
+  NO active work-item are inherently excluded) + the completion offloads (seam `:completion_inflight_fun`),
+  NOT a live-pod scan. Fail-closed on the broker (present-but-unreachable → sentinel > 0), honest 0 on a
+  dead completion supervisor (its Tasks are already dead).
   """
   use ExUnit.Case, async: false
 
   alias Fleet.Shutdown.Quiesce
   alias Fleet.Starfleet.Shutdown.AggregateDispatcher
 
-  # Stubs injected via the `:fleet_starfleet, :spawner_mod` seam to induce a failing pod count
-  # (Spawner unreachable = restart mid-quiesce) without touching the real Spawner.
-  # Named after the op that fails (`list_pods`): a `RaisingSpawner` homonym in fleet_spawner
-  # raises on `spawn_pod` — same name, different contracts = reading trap (B6 dedup, renamed).
-  defmodule RaisingOnCountSpawner do
-    def list_pods, do: raise("Spawner unreachable (test E-05)")
+  # Broker stubs injected via `:fleet_starfleet, :task_queue_mod`. The REAL broker IS present in the test
+  # env (so `task_queue_running?` is true) — these induce specific `list_active` returns/failures.
+  defmodule TwoActiveBroker do
+    def list_active, do: [%{id: "a"}, %{id: "b"}]
   end
 
-  defmodule ExitingOnCountSpawner do
-    def list_pods, do: exit(:noproc)
+  defmodule EmptyBroker do
+    def list_active, do: []
+  end
+
+  defmodule RaisingBroker do
+    def list_active, do: raise("broker unreachable (test)")
+  end
+
+  defmodule ExitingBroker do
+    def list_active, do: exit(:noproc)
   end
 
   setup do
@@ -26,8 +36,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
     :ok
   end
 
-  defp inject_spawner(mod),
-    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :spawner_mod, mod)
+  defp inject_broker(mod),
+    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :task_queue_mod, mod)
+
+  defp inject_completion(fun),
+    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :completion_inflight_fun, fun)
 
   test "refuse_new_jobs/1 activates quiescence" do
     Quiesce.resume!()
@@ -36,35 +49,41 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
     assert Quiesce.quiescing?()
   end
 
-  test "in_flight_count/0 returns an integer >= 0 (layering-resilient aggregate)" do
-    # Direct Spawner.list_pods (filtered non-permanents) (Spawner started in the fleet_starfleet test
-    # env → real count). fleet_task_queue is NOT a dep → app not started → `task_queue_running?` false
-    # → `tasks_pending` returns an HONEST 0 (legitimate absence, not a masked failure) without logging
-    # an error. So this test exercises the nominal path (no crash) in addition to the shape.
-    n = AggregateDispatcher.in_flight_count()
-    assert is_integer(n) and n >= 0
+  test "in_flight_count/0 = active work-items + completion offloads (work-items, NEVER a pod scan → residents excluded)" do
+    # The count is the broker's ACTIVE work-items, not live pods: a resident arch/pipe-eng (no active
+    # work-item) is inherently absent — the CI-02 fix for "one open project ⇒ in_flight > 0 forever".
+    inject_broker(TwoActiveBroker)
+    inject_completion(fn -> 3 end)
+    assert AggregateDispatcher.in_flight_count() == 5
   end
 
-  test "list_pods that RAISES → in_flight_count > 0 (fail-closed: drain CANNOT conclude 0)" do
-    # E-05: Spawner present but unreachable (restart mid-quiesce). A `rescue -> 0` would undercount
-    # → drain wrongly declared complete. Instead: a "not empty" sentinel.
-    inject_spawner(RaisingOnCountSpawner)
+  test "list_active that RAISES → in_flight_count > 0 (fail-closed: broker present but unreachable)" do
+    inject_broker(RaisingBroker)
+    inject_completion(fn -> 0 end)
     assert AggregateDispatcher.in_flight_count() > 0
   end
 
-  test "list_pods that EXITs (:noproc) → in_flight_count > 0 (no undercount)" do
-    inject_spawner(ExitingOnCountSpawner)
+  test "list_active that EXITs (:noproc) → in_flight_count > 0 (no undercount)" do
+    inject_broker(ExitingBroker)
+    inject_completion(fn -> 0 end)
     assert AggregateDispatcher.in_flight_count() > 0
   end
 
-  test "drain with AggregateDispatcher when list_pods RAISES → does not conclude :drained (timeout)" do
-    # Integration: the real drain must NOT declare "empty" when the count is unavailable —
-    # it consumes the grace window then proceeds (status :timeout), instead of a premature :drained.
-    inject_spawner(RaisingOnCountSpawner)
-    name = :"sd_e05_#{System.unique_integer([:positive])}"
+  test "completion seam that RAISES → treated as 0 (asymmetry: dead completion supervisor ⇒ dead Tasks, honest 0)" do
+    inject_broker(EmptyBroker)
+    inject_completion(fn -> raise "count boom" end)
+    assert AggregateDispatcher.in_flight_count() == 0
+  end
+
+  test "drain with a RAISING broker → does NOT conclude :drained (fail-closed sentinel → timeout)" do
+    inject_broker(RaisingBroker)
+    inject_completion(fn -> 0 end)
+    name = :"sd_ci02_#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      start_supervised({Fleet.Starfleet.Shutdown, name: name, dispatcher: AggregateDispatcher})
+      start_supervised(
+        {Fleet.Starfleet.Shutdown, name: name, dispatcher: AggregateDispatcher, poll_ms: 10}
+      )
 
     assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 200)
     assert %{status: :timeout} = :sys.get_state(name)
