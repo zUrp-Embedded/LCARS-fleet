@@ -12,18 +12,20 @@ defmodule Fleet.Workflow.Git do
   (No coupled add+commit+push entry point: Deliverable always goes commit → gate → push —
   the gate must run between the two.)
 
-  Fail-closed on inputs: neither `--force` nor `--no-verify` is ever composed
+  Fail-closed on inputs: neither a force nor `--no-verify` is ever composed
   from caller data or as a default option. `--no-verify` is never composed at all.
-  `--force` is composed by ONE system-owned policy only: a bounded retry when the
-  push is rejected for a non-fast-forward on the system-owned feature branch (the
-  system is the sole pusher — its own rebase is safe to overwrite). A protected-branch
-  or server-hook rejection is NEVER force-retried (fail-closed, no data-loss bypass).
+  A force is composed by ONE system-owned policy only: a bounded retry when the
+  push is rejected for a non-fast-forward (a resolution rebase rewrote the branch).
+  That retry is a LEASED force (`--force-with-lease`), never a blind `--force`: it
+  overwrites only if the remote still sits at our own prior push, so a commit a
+  producer duplicate/race put there is surfaced, never destroyed. A protected-branch
+  or server-hook rejection is NEVER force-retried (fail-closed).
 
   Distinct identities: `author_*` reflects the worker (role) identity;
   `committer_*` reflects the system identity. Native git
   (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -363,9 +365,12 @@ defmodule Fleet.Workflow.Git do
 
       {:ok, {out, rc}} ->
         # A CONFLICT RESOLUTION rebases the feature-branch → history rewritten → push rejected
-        # "non-fast-forward". The feature-branch is SYSTEM-owned (only the system pushes it; the pod
-        # is forge-blind, no concurrent pusher) → a `--force` retry is safe: the system overwrites
-        # ITS OWN branch with the rebase. Without it, the resolution rebase NEVER lands.
+        # "non-fast-forward". "SYSTEM-owned, no concurrent pusher" is the INTENT, not a guarantee:
+        # a producer duplicate/race CAN put a second commit on the remote we never saw, and a blind
+        # `--force` would silently destroy it (unrecoverable). So the force is LEASED: it overwrites
+        # ONLY IF the remote is still where our remote-tracking ref last left it (our own prior push),
+        # i.e. exactly the resolution-rebase case. A commit we never observed → stale lease → we
+        # surface, never clobber. See `force_push/4`.
         if non_fast_forward?(out),
           do: force_push(workspace, remote, refspec, auth_env),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
@@ -378,13 +383,73 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
+  # LEASED force: never a blind `--force` (which would silently overwrite a commit a producer
+  # duplicate/race put on the remote we never observed — unrecoverable data loss). We read OUR OWN
+  # remote-tracking sha for the target (what git recorded at our last push of this branch) and force
+  # ONLY IF the remote still sits there: `--force-with-lease=<target>:<expected>`. A concurrent commit
+  # advanced the remote past our record → git refuses ("stale info") → `:git_push_lease_stale` surfaced,
+  # the other commit preserved. No remote-tracking ref (no basis to believe the remote is ours to
+  # overwrite) → we do NOT force at all (`:git_push_no_lease_basis`, fail-closed).
   defp force_push(workspace, remote, refspec, auth_env) do
-    case run_push(workspace, remote, refspec, ["--force"], auth_env) do
-      {:ok, {_out, 0}} -> {:ok, true}
-      {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
-      {:error, {:timeout, _ms}} -> {:error, {:git_push_timeout, push_timeout_ms()}}
-      {:error, {:exit, reason}} -> {:error, {:git_push_exit, reason}}
+    target = target_of_refspec(refspec)
+
+    case read_remote_tracking_sha(workspace, remote, target) do
+      {:ok, expected} ->
+        lease = "--force-with-lease=#{target}:#{expected}"
+
+        case run_push(workspace, remote, refspec, [lease], auth_env) do
+          {:ok, {_out, 0}} ->
+            {:ok, true}
+
+          {:ok, {out, rc}} ->
+            # git prints "stale info" / "[rejected]" when the lease no longer holds (the remote moved
+            # under us) — classify it apart so the caller knows a concurrent push, not a plain failure.
+            if lease_stale?(out),
+              do: {:error, {:git_push_lease_stale, target, String.trim(out)}},
+              else: {:error, {:git_push_failed, rc, String.trim(out)}}
+
+          {:error, {:timeout, _ms}} ->
+            {:error, {:git_push_timeout, push_timeout_ms()}}
+
+          {:error, {:exit, reason}} ->
+            {:error, {:git_push_exit, reason}}
+        end
+
+      :absent ->
+        {:error, {:git_push_no_lease_basis, target}}
+
+      {:error, reason} ->
+        {:error, {:git_push_no_lease_basis, {target, reason}}}
     end
+  end
+
+  # Target ref of a `push` refspec: the part AFTER `:` (`local:target`), or the whole thing for a bare
+  # `main` (which git reads as `main:main`). A leading `+` (in-refspec force) rides on the SOURCE side,
+  # so the last `:`-segment is the remote-side ref being updated = the ref the lease must name.
+  defp target_of_refspec(refspec), do: refspec |> String.split(":") |> List.last()
+
+  # OUR remote-tracking sha for `<remote>/<target>` — the lease basis. Populated by git at every
+  # successful push of the branch (verified empirically) → in the resolution-rebase case it equals the
+  # actual remote tip and the lease passes. Bounded, hooks-off, same discipline as `read_head_sha/1`.
+  # `--verify --quiet`: rc 1 + empty = no such ref (`:absent`, no basis → fail-closed above).
+  defp read_remote_tracking_sha(workspace, remote, target) do
+    case Fleet.Credentials.Shell.git(
+           @hooks_off ++ ["rev-parse", "--verify", "--quiet", "refs/remotes/#{remote}/#{target}"],
+           cd: workspace,
+           timeout_ms: git_local_timeout_ms()
+         ) do
+      {:ok, {sha, 0}} -> {:ok, String.trim(sha)}
+      {:ok, {_out, 1}} -> :absent
+      {:ok, {err, rc}} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
+      {:error, {:timeout, ms}} -> {:error, {:rev_parse_timeout, ms}}
+      {:error, {:exit, reason}} -> {:error, {:rev_parse_exit, reason}}
+    end
+  end
+
+  # A refused lease reads "stale info" (the ref moved) or the generic "[rejected]" git emits for it.
+  defp lease_stale?(out) do
+    o = String.downcase(out)
+    String.contains?(o, "stale info") or String.contains?(o, "rejected")
   end
 
   # `git push [extra] remote refspec` bounded via `Fleet.Credentials.Shell` (single source of the bound) —

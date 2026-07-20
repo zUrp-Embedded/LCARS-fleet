@@ -218,6 +218,44 @@ defmodule Fleet.GitTest do
       assert String.trim(remote_head) == String.trim(rewritten)
     end
 
+    # NB naming (as above): the tmp_dir path embeds the test name into git's output; the name must avoid
+    # every substring the classifiers key on — `non_fast_forward?` (non-fast-forward / fetch first) AND
+    # `lease_stale?` (stale info / rejected) — hence "declines" / "kept", not "rejected"/"stale".
+    test "a racing producer advanced the remote: the leased force declines, the other commit is kept", %{
+      tmp_dir: tmp
+    } do
+      bare = init_bare_repo(Path.join(tmp, "remote.git"))
+      ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
+      commit_initial(ws, "C1")
+
+      # our first push → remote at C1; ws records refs/remotes/origin/main = C1 (the lease basis).
+      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+
+      # a DUPLICATE/racing producer pushes a commit we never observed → the remote tip moves past C1
+      # while OUR remote-tracking ref still says C1 (no fetch happened in our workspace).
+      ws2 = Path.join(tmp, "ws2")
+      {_o, 0} = System.cmd("git", ["clone", bare, ws2])
+      {_o, 0} = System.cmd("git", ["config", "user.email", "c@x.y"], cd: ws2)
+      {_o, 0} = System.cmd("git", ["config", "user.name", "racer"], cd: ws2)
+      File.write!(Path.join(ws2, "other.txt"), "concurrent\n")
+      {_o, 0} = System.cmd("git", ["add", "."], cd: ws2)
+      {_o, 0} = System.cmd("git", ["commit", "-m", "CONCURRENT"], cd: ws2)
+      {_o, 0} = System.cmd("git", ["push", "origin", "HEAD:main"], cd: ws2)
+      {concurrent_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
+
+      # our workspace rewrites history (amend, like a resolution rebase) → the re-push is non-ff.
+      {_o, 0} = System.cmd("git", ["commit", "--amend", "-m", "C1-rebase"], cd: ws)
+
+      # a BLIND --force (the old code) would obliterate the racer's commit. The LEASE expects our stale
+      # C1, the remote is elsewhere → git declines → we surface :git_push_lease_stale, never clobber.
+      assert {:error, {:git_push_lease_stale, "main", _out}} =
+               Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+
+      # the racing producer's commit is intact on the remote (no silent data loss).
+      {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
+      assert String.trim(remote_head) == String.trim(concurrent_sha)
+    end
+
     # NB naming: the ExUnit tmp_dir is derived from the test name; git embeds that path in its error
     # output. The name must NOT contain the substrings classified by `non_fast_forward?` (otherwise the
     # path pollutes `out` and makes a false positive). Hence a deliberately neutral wording.
