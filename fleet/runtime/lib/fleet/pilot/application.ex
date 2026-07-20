@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   use Supervisor
@@ -33,7 +33,16 @@ defmodule Fleet.Pilot.Application do
     # The forge pool starts UNCONDITIONALLY, before the step rail: the ForgeClient is also called
     # by `create_issue` (fleet_mcp) outside the Poller/StepRunConsumer rail, so the pool must exist as soon as
     # fleet_pilot boots. Lazy (no connection until a request) → harmless outside prod/tests.
-    children = [forge_finch_spec() | step_children()]
+    #
+    # SAME always-on rationale for the work/ops write serializer (CI-11): `create_issue` (MCP)
+    # materializes briefs (`BriefArtifact` → `OpsObjectSync`) OUTSIDE the step rail, so the gate that
+    # serializes concurrent git transactions on the shared worktree must exist as soon as the node
+    # boots, not only in `:step_dispatch?` mode. Domain-owned engine (Fleet.Workflow), pilot only
+    # starts it (pilot → workflow, declared). No ordering constraint with the step rail (a leaf).
+    # `start_ops_object_sync: false` in :test (hermeticity): the suite takes OpsObjectSync's direct
+    # fallback (in-process OpsObject logs, no serialization-induced capture_log bleed) — the
+    # serialization is proven in isolation by OpsObjectSyncTest's own instance.
+    children = [forge_finch_spec()] ++ ops_object_sync_child() ++ step_children()
 
     # `:one_for_one` (not `:rest_for_one`) even though the children refer to each other in order
     # (Task.Supervisor + IncidentRegistry started BEFORE Poller + StepRunConsumer which use them):
@@ -52,6 +61,13 @@ defmodule Fleet.Pilot.Application do
     ]
 
     Supervisor.init(children, opts)
+  end
+
+  # Work/ops write serializer (CI-11) — always-on in prod, OFF in test (hermeticity, cf. init).
+  defp ops_object_sync_child do
+    if Application.get_env(:fleet_pilot, :start_ops_object_sync, true),
+      do: [Fleet.Workflow.OpsObjectSync],
+      else: []
   end
 
   # HTTP pool dedicated to the ForgeClient. `conn_max_idle_time: 30_000` closes any connection left idle >30s

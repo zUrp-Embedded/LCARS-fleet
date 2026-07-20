@@ -37,7 +37,11 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   require Logger
 
-  alias Fleet.Workflow.OpsObject
+  # Writes go through the SERIALIZER (CI-11): concurrent brief materializations (several MCP
+  # connections + the poller dispatch) on the same project's work/ops worktree would race on
+  # `.git/index.lock`. `OpsObjectSync` funnels one git transaction at a time; `OpsObject` stays the
+  # engine (reached only via the gate). Same signature, so the switch is a one-liner.
+  alias Fleet.Workflow.OpsObjectSync
 
   @type ok :: %{ref: String.t(), sha: String.t()}
 
@@ -59,7 +63,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   def commit(work_dir, content, opts \\ []) when is_binary(work_dir) and is_binary(content) do
     ref = Fleet.Layout.brief_ref(Keyword.get(opts, :kind), object_name(content, opts))
 
-    case OpsObject.commit_object(work_dir, ref, content, Keyword.put(opts, :label, "brief")) do
+    case OpsObjectSync.commit_object(work_dir, ref, content, Keyword.put(opts, :label, "brief")) do
       {:ok, commit_sha} -> {:ok, %{ref: ref, sha: commit_sha}}
       {:error, reason} -> {:error, reason}
     end

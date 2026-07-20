@@ -83,6 +83,12 @@ config :fleet_spawner, start_permanent_warden: false
 # Process.sleep, partagé StepRunCompleter + ProjectOnboard). Tests rapides ET déterministes.
 config :fleet_pilot, forge_write_spacing_ms: 0
 
+# CI-11 — le sérialiseur work/ops (OpsObjectSync) NE démarre PAS en test : la suite prend son fallback
+# direct (logs OpsObject dans le process appelant, comportement pré-CI-11 → pas de bleed capture_log
+# induit par la sérialisation d'un singleton partagé entre tests async). La sérialisation elle-même est
+# prouvée en isolation par OpsObjectSyncTest (instance dédiée, nom custom, commit_object/5).
+config :fleet_pilot, start_ops_object_sync: false
+
 # (Gatekeeper : plus d'autoboot — juge one-shot per-projet depuis la réorg 2026-07-19,
 # spawné par éval de gate ; les tests stubbent le spawner de GatekeeperEscalation.)
 

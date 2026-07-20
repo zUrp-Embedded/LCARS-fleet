@@ -12,7 +12,7 @@ defmodule Fleet.Workflow do
   the gatekeeper is a one-shot per-project judge, spawned per gate eval by the pilot's
   `GatekeeperEscalation` — the module was the documented MVP awaiting the project model.)
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
@@ -44,6 +44,11 @@ defmodule Fleet.Workflow do
       BriefArtifact,
       Provenance,
       Provenance.Verifier,
-      BriefTemplate
+      BriefTemplate,
+      # OpsObjectSync exported: the work/ops write serializer is SUPERVISED by Fleet.Pilot.Application
+      # (always-on, next to the ForgeFinch pool — MCP briefs write outside the step rail). The domain
+      # owns the engine (OpsObject, internal); pilot only starts the gate → the child spec must be
+      # nameable from the supervisor (CI-11).
+      OpsObjectSync
     ]
 end

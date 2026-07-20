@@ -24,10 +24,13 @@ defmodule Fleet.Workflow.Provenance do
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
-  alias Fleet.Workflow.OpsObject
+  # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
+  # onto the same project's work/ops worktree → `.git/index.lock` race. `OpsObjectSync` serializes one
+  # git transaction at a time; `OpsObject` stays the engine (reached only via the gate).
+  alias Fleet.Workflow.OpsObjectSync
 
   @build_type "lcars-fleet-pipeline-v2"
 
@@ -71,7 +74,7 @@ defmodule Fleet.Workflow.Provenance do
 
         with {:ok, json} <- encode(statement(attrs)),
              {:ok, _commit_sha} <-
-               OpsObject.commit_object(work_dir, ref, json, Keyword.put(opts, :label, "provenance")) do
+               OpsObjectSync.commit_object(work_dir, ref, json, Keyword.put(opts, :label, "provenance")) do
           {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
         end
     end
