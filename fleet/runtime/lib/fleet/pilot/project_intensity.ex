@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
   default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -88,10 +88,15 @@ defmodule Fleet.Pilot.ProjectIntensity do
     # fabricated into an C0 the human did not say) — `declared_by` stays truthful.
     declared? = is_binary(level) or is_binary(card)
 
+    # B-03 (catalogue chantier 2026-07-20): `declared_by` = the ACTUAL onboarder role that called
+    # create_project (threaded as `:onboarded_by`), not a hardcoded "architect" — starfleet onboards
+    # too since the 2026-07-19 reorg. Fallback "architect" for a legacy/direct call without the opt.
+    onboarded_by = Keyword.get(opts, :onboarded_by) || "architect"
+
     base = %{
       "_schema" => "lcars/intensity-v1",
       "declared_at" => Date.to_iso8601(Date.utc_today()),
-      "declared_by" => if(declared?, do: "architect", else: "system-default"),
+      "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
       "justification" => justification || default_justification(level, card),
       "pipeline_default" => card || Fleet.Pilot.Roles.delegation_workflow_map(opts)
     }

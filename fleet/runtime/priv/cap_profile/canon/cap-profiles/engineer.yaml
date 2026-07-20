@@ -9,6 +9,8 @@ metadata:
   # role_index = role slot in the hexspeak UUID.
   role_index: 3
 spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  capabilities: [producer]
   scope:
     allowedTools:
       - Read

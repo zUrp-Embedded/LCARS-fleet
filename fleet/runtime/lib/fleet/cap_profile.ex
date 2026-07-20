@@ -171,6 +171,25 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
+  Does the profile declare the business CAPABILITY `cap`? (catalogue chantier L3, B-03 2026-07-20).
+
+  A capability is a RESPONSIBILITY the role carries (`spec.capabilities`, e.g. `onboarder`,
+  `project_delegate`, `exception_judge`, `producer`) — the gates resolve a CAPABILITY, never a magic
+  role name (`role in ["starfleet","architect"]`). A rename/substitution of a role becomes a
+  cap-profile edit, not an Elixir change. Absent/malformed `capabilities` → `false` (a role has a
+  capability only if it DECLARES it, fail-closed for a gate).
+  """
+  @spec has_capability?(t(), atom() | String.t()) :: boolean()
+  def has_capability?(%__MODULE__{spec: spec}, cap) do
+    want = to_string(cap)
+
+    case spec do
+      %{"capabilities" => caps} when is_list(caps) -> want in caps
+      _ -> false
+    end
+  end
+
+  @doc """
   Turns a `role` into a SPAWN-READY cap-profile: base + its `default` modops (+ optional `extra`
   step-modops). THE single launch-site authority (catalogue chantier L1a) — every spawn path calls
   this via its injected `loader`, so the structural modop overlay is applied IDENTICALLY everywhere.

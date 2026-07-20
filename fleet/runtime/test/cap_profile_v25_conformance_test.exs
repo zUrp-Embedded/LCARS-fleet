@@ -280,4 +280,22 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       end
     end
   end
+
+  test "B-03 (catalogue L3): the canon roles carry the RIGHT capabilities (data, not magic names)" do
+    cap = fn role -> {:ok, p} = Fleet.CapProfile.load(role); p end
+
+    assert Fleet.CapProfile.has_capability?(cap.("architect"), :onboarder)
+    assert Fleet.CapProfile.has_capability?(cap.("architect"), :project_delegate)
+    assert Fleet.CapProfile.has_capability?(cap.("starfleet"), :onboarder)
+    refute Fleet.CapProfile.has_capability?(cap.("starfleet"), :project_delegate)
+    assert Fleet.CapProfile.has_capability?(cap.("gatekeeper"), :exception_judge)
+    assert Fleet.CapProfile.has_capability?(cap.("engineer"), :producer)
+    refute Fleet.CapProfile.has_capability?(cap.("engineer"), :onboarder)
+
+    # The judges are NOT onboarders/delegates — the gates must refuse them.
+    for judge <- ~w(consultant qualifier reviewer) do
+      refute Fleet.CapProfile.has_capability?(cap.(judge), :onboarder)
+      refute Fleet.CapProfile.has_capability?(cap.(judge), :project_delegate)
+    end
+  end
 end

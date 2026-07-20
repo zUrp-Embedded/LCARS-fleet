@@ -1100,6 +1100,30 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
+  describe "has_capability?/2 (catalogue chantier L3, B-03 — gates resolve a capability, not a name)" do
+    defp cp_caps(caps),
+      do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{"capabilities" => caps}}
+
+    test "declared capability → true (atom or string)" do
+      cp = cp_caps(["onboarder", "project_delegate"])
+      assert Fleet.CapProfile.has_capability?(cp, :onboarder)
+      assert Fleet.CapProfile.has_capability?(cp, "project_delegate")
+      refute Fleet.CapProfile.has_capability?(cp, :producer)
+    end
+
+    test "absent/malformed capabilities → false (fail-closed for a gate)" do
+      refute Fleet.CapProfile.has_capability?(
+               %Fleet.CapProfile{kind: "x", metadata: %{}, spec: %{}},
+               :onboarder
+             )
+
+      refute Fleet.CapProfile.has_capability?(cp_caps("not-a-list"), :onboarder)
+    end
+
+    # NB: "the canon roles carry the RIGHT capabilities" lives in the conformance test (loads the
+    # REAL canon; this file redirects the catalogue to a tmp_dir).
+  end
+
   describe "resolve/3 (catalogue chantier L1a — the single launch-site authority)" do
     # A loader that records what `compose` was called with, so we prove resolve composes
     # `default_modops(base) ++ extra` — the whole point (no divergence across launch sites).

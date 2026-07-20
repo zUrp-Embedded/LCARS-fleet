@@ -18,6 +18,8 @@ metadata:
   # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`
   # (effective_project). Narrow focal length = the box it cannot reach out of.
 spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  capabilities: [onboarder, project_delegate]
   # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
   scope:

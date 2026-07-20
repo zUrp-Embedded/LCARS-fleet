@@ -11,6 +11,8 @@ metadata:
   # singleton (documented as an MVP awaiting the project model) is gone. repo in its UUID.
   role_index: 2
 spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  capabilities: [exception_judge]
   scope:
     allowedTools:
       - Read

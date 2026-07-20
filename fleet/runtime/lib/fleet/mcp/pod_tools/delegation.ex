@@ -46,7 +46,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -139,7 +139,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # Fail-closed: no onboarder (starfleet/architect) = no project.
     case require_onboarder(state) do
       {:error, reason} -> {:error, reason}
-      {:ok, _role} -> do_create_project(name, args)
+      # B-03: the ACTUAL onboarder role is threaded to `declared_by` (honest — was hardcoded
+      # "architect" even when starfleet onboarded).
+      {:ok, role} -> do_create_project(name, args, role)
     end
   end
 
@@ -454,7 +456,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # dual-worktree main/work-ops + scaffold + push) via the :project_onboard seam (contract =
   # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
-  defp do_create_project(name, args) do
+  defp do_create_project(name, args, onboarder_role) do
     with {:ok, onboard} <- conforming_onboard() do
       # SAME config key as the poller's discovery org (`:fleet_pilot, :fleet_org`) — a project
       # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
@@ -484,6 +486,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         intensity_justification: Map.get(args, "intensity_justification"),
         intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
+        onboarded_by: onboarder_role,
         allow_unverifiable_human_team?:
           Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
       ]
@@ -872,14 +875,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # fail-closed (`:repo_unbound`): no default, no fallback routing.
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
     case resolve_identity(pod_id) do
-      {:ok, %{role: "architect"} = identity} ->
-        case Map.get(identity, :repo) do
-          repo when is_binary(repo) and repo != "" -> {:ok, %{role: "architect", repo: repo}}
-          _ -> {:error, :repo_unbound}
+      {:ok, %{role: role} = identity} ->
+        # B-03: the DELEGATE capability (declared by the cap-profile), never `role == "architect"`.
+        if role_has_capability?(role, :project_delegate) do
+          case Map.get(identity, :repo) do
+            repo when is_binary(repo) and repo != "" -> {:ok, %{role: role, repo: repo}}
+            _ -> {:error, :repo_unbound}
+          end
+        else
+          {:error, :forbidden_not_architect}
         end
-
-      {:ok, _other_role_identity} ->
-        {:error, :forbidden_not_architect}
 
       {:error, _reason} = err ->
         err
@@ -895,13 +900,27 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # role is read from `state.pod_id`, never the wire. A worker / nil / unknown pod → REFUSAL, fail-closed.
   defp require_onboarder(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
     case resolve_identity(pod_id) do
-      {:ok, %{role: role}} when role in ["starfleet", "architect"] -> {:ok, role}
-      {:ok, _other_role_identity} -> {:error, :forbidden_not_onboarder}
-      {:error, _reason} = err -> err
+      # B-03: the ONBOARDER capability (declared by the cap-profile), never a magic role list.
+      {:ok, %{role: role}} ->
+        if role_has_capability?(role, :onboarder),
+          do: {:ok, role},
+          else: {:error, :forbidden_not_onboarder}
+
+      {:error, _reason} = err ->
+        err
     end
   end
 
   defp require_onboarder(_state), do: {:error, :pod_id_required}
+
+  # B-03 capability resolution — delegated to `Fleet.Spawner` (the domain that can load cap-profiles;
+  # `Fleet.MCP → Fleet.CapProfile` is a FORBIDDEN boundary edge, `Fleet.MCP → Fleet.Spawner` is the
+  # declared one, same as `pod_info`). A gate resolves a CAPABILITY, never a magic role name —
+  # renaming/substituting a role is a cap-profile edit, not Elixir. Fail-closed (nil/unknown → false).
+  defp role_has_capability?(role, cap) when is_binary(role) and role != "",
+    do: Fleet.Spawner.role_has_capability?(role, cap)
+
+  defp role_has_capability?(_role, _cap), do: false
 
   # The CHANNEL IDENTITY (role + repo binding) is burned in at SPAWN and read from the Spawner
   # registry (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test

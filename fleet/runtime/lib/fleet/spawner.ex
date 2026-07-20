@@ -109,6 +109,21 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Does the `role`'s cap-profile declare the business capability `cap`? (catalogue chantier L3,
+  B-03 — the cross-boundary capability resolver). `Fleet.MCP`'s delegation gates cannot reference
+  `Fleet.CapProfile` (forbidden boundary edge) but CAN reference `Fleet.Spawner` — this is the
+  bridge: load the role's profile, read its `capabilities`. Fail-closed: a role that does not load
+  has NO capability (an unknown identity is never admitted by a gate).
+  """
+  @spec role_has_capability?(String.t(), atom() | String.t()) :: boolean()
+  def role_has_capability?(role, cap) when is_binary(role) do
+    case Fleet.CapProfile.load(role) do
+      {:ok, profile} -> Fleet.CapProfile.has_capability?(profile, cap)
+      _ -> false
+    end
+  end
+
+  @doc """
   Spawn a new pod.
 
   ## Inputs

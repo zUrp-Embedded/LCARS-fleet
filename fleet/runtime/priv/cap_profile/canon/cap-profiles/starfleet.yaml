@@ -27,6 +27,8 @@ metadata:
     - path: /home/projects.work   # RW: the DOC (moon-shot/beyond), upstream of tickets
       mode: rw
 spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  capabilities: [onboarder]
   # Worker role (interactive front-desk): brief = executable instruction, never a judge. REQUIRED (schema).
   brief_kind: worker
   scope:

@@ -304,6 +304,20 @@
             }
           }
         },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "onboarder",
+              "project_delegate",
+              "exception_judge",
+              "producer"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Business RESPONSIBILITIES the role carries (catalogue chantier L3, B-03 2026-07-20). The gates resolve a CAPABILITY via CapProfile.has_capability?, NEVER a magic role name. `onboarder` = create/import/open projects (starfleet + architect); `project_delegate` = delegate issues within its project (architect); `exception_judge` = the soft-gate escalation judge (gatekeeper); `producer` = the default deliverable producer (engineer). Renaming/substituting a role = a cap-profile edit, not Elixir. Absent = no special responsibility."
+        },
         "project": {
           "type": [
             "object",
