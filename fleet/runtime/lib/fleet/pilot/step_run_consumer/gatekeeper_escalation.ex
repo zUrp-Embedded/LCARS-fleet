@@ -25,6 +25,31 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   `apply_verdict`) stays the SINGLE-AUTHORITY of the root module, which calls `dispatch/7` on the
   sole `{:dispatch_gatekeeper, _}` path.
 
+  ## Distinct dispatch rail — DELIBERATE, verified, DO NOT merge (L1b, sonde convergence 2026-07-20)
+
+  This dispatch shares a SKELETON with the poller-driven producer/judge dispatch
+  (`StepDispatcher.Spawn.spawn_step`) — resolve profile → opts → spawn/reuse → pull → wake — but the
+  resemblance is of FORM, not of substance. The truly-shared atoms are ALREADY factored out and used by
+  BOTH rails: `CapProfile.resolve` (effective profile), `WakeRecovery.wake` (wake+recovery, wired here by
+  C-01), `PodId.for_*`, `Spawn.resolve_repo_id`. What stays distinct is the OPERATIONAL CONTRACT, not
+  duplicated logic — this rail is:
+
+    * COMPLETION-triggered (a gate escalation), never the Poller's detection side;
+    * LOCKLESS — it evals UNDER a brick that is ALREADY `lcars-in-flight`; it takes no lock of its own, so
+      there is nothing to compensate → it FAIL-LOUDS (never unlock+kill);
+    * ENQUEUE-BEFORE-SPAWN — the inverse of the producer's `lock → pod → enqueue` (the one-shot's boot kick
+      pulls the brief; a wake before the content would be the spurious-wake race);
+    * never CAPACITY-DEFERRED — a gate verdict IS the resolution of an in-flight brick; deferring it would
+      stall the whole workflow, so it always dispatches;
+    * carrying a defused I-CBC GateBrief, never a physicalized worker brief (no SLSA triplet).
+
+  Doctrine (why the rail is structural, not a caprice): the gatekeeper is spawned as a one-shot pod like
+  any judge, but it is LESS a production worker the fleet DISPATCHES onto a work-item than a part of the
+  fleet's own GOVERNANCE mechanic — it resolves the gate and SEALS the merge. Merging this into the
+  producer/judge dispatch would carry a flag per axis above (takes_lock? / enqueue_when / defer? /
+  compensate? / brief_kind) — relocating the divergence into a conditional forest instead of two honest,
+  self-documenting rails. Verified: kept separate ON PURPOSE.
+
   ## Boundary: explicit seams struct (not the whole `state`)
 
   The cluster reads ONLY the seams below from the consumer's `state` — never the whole `state`

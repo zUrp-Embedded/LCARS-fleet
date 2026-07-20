@@ -9,6 +9,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   action `maybe_reprovision/5` after).
   This module DECIDES nothing (route, role, verdict, budget stay in the `StepDispatcher` core): it
   EXECUTES the spawn sequence. There is only ONE copy of each — never an issue/review fork.
+  (The gatekeeper EVAL dispatch is a DELIBERATE separate rail — completion-triggered, lockless,
+  enqueue-before-spawn, fail-loud — NOT merged here; the shared atoms are already factored, only the
+  operational contract differs. See `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` for the why.)
   (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
   live in the Naming cluster at the bottom of this module, quasi-pure, called by both flows.)
 
