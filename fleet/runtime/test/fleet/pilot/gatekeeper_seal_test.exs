@@ -60,6 +60,21 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     end
   end
 
+  # CI-06 — FLAKY stage/merged: fails 2×, succeeds the 3rd → proves the load-bearing projection self-heals
+  # via its retry (mirror of the close retry). merge/comment/close all OK.
+  defmodule StageFlakyForge do
+    def merge_pr(_r, _pr, _o), do: :ok
+    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
+    def close_issue(_r, _n, _o), do: {:ok, :closed}
+
+    def set_stage(_r, n, _s, _o) do
+      attempt = (Process.get({:stage_attempts, n}) || 0) + 1
+      Process.put({:stage_attempts, n}, attempt)
+      send(self(), {:stage_attempt, n, attempt})
+      if attempt < 3, do: {:error, {:http, 500, "flaky stage"}}, else: {:ok, :posted}
+    end
+  end
+
   test "signed merge THEN gatekeeper comment (internal as_gatekeeper signature) + dedup → :ok" do
     # RAW forge_opts (system token): the gatekeeper signature must be applied INTERNALLY by
     # `seal_and_merge` (single writer `as_gatekeeper`) — the role token OVERWRITES the system's.
@@ -116,6 +131,18 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert_received {:close_attempt, 42}
     assert_received {:close_attempt, 42}
     refute_received {:close_attempt, 42}
+  end
+
+  test "CI-06: FLAKY stage/merged (fails 2×) → self-heals via retry, the load-bearing label lands, seal :ok" do
+    # Pre-CI-06 the set_stage failure was discarded UN-retried → the load-bearing `stage/merged` label
+    # was lost on a transient blip → Delegation read `closed_without_merge` forever (arch waits on a
+    # merged brick). Now retried (mirror of the close retry): a transient failure self-heals.
+    assert :ok = GatekeeperSeal.seal_and_merge(StageFlakyForge, "fleet/p", 7, 42, "engineer", [])
+
+    assert_received {:stage_attempt, 42, 1}
+    assert_received {:stage_attempt, 42, 2}
+    assert_received {:stage_attempt, 42, 3}
+    refute_received {:stage_attempt, 42, _}
   end
 
   test "F-C066: flaky close (fails 2×, succeeds the 3rd) → retry → :ok (self-heal of a transient blip)" do

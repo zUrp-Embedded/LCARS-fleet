@@ -132,21 +132,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
             # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
             # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
-            # `{:skip, :merged}` guard (F-C066) when the close below fails. Its failure is ERROR-level:
-            # a load-bearing label NOT engraved (no rail re-sets it — in the close-also-fails case only
-            # the kept `lcars-in-flight` lock still guards against re-dispatch, and Delegation.issue_status
-            # reports delivered=false forever: the arch would wait on a merged brick).
-            case forge.set_stage(repo, issue_n, Fleet.Labels.stage_merged(), forge_opts) do
-              {:ok, _} ->
-                :ok
-
-              {:error, reason} ->
-                Logger.error(
-                  "GatekeeperSeal: #{repo}##{issue_n} stage/merged NOT engraved (#{inspect(reason)}) — " <>
-                    "load-bearing label lost (F-C066 durable guard + Delegation delivered-detection); " <>
-                    "no rail re-sets it, only the in-flight lock still guards re-dispatch"
-                )
-            end
+            # `{:skip, :merged}` guard (F-C066) when the close below fails. CI-06 (audit intégrité
+            # 2026-07-20): a load-bearing projection MUST have a reconciliation — a discarded, un-retried
+            # failure left the arch waiting FOREVER on a merged brick. Now RETRIED (below), and its
+            # delivery role is ALSO derived from the authoritative merged PR by `Delegation.issue_status`.
+            _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
 
             # EXPLICIT close, as the LAST visible act on the issue (coherent chronology): never a
             # `Closes #N` in the PR body (Gitea would auto-close AT MERGE, before even this comment — a
@@ -290,6 +280,39 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # contention / GenServer timeout) self-heals on retry; a PERSISTENT failure returns `{:error, reason}` →
   # `seal_and_merge` surfaces `{:close_after_merge, _}` (no swallowed `:ok`). Immediate retries (no sleep):
   # this runs in the offloaded completion task, the dominant cause is a MOMENTARY forge/GenServer hiccup.
+  # CI-06 — BOUNDED retry of the load-bearing `stage/merged` projection (mirror of `close_with_retry`).
+  # This label proves the merge to `decide/1` (F-C066 anti-redispatch guard when the close fails) AND
+  # historically to `Delegation.issue_status` (delivery detection). A transient blip (HTTP 500 / lock
+  # contention) self-heals on retry; a PERSISTENT failure is logged LOUD — the merge is authoritative and
+  # done: the kept `lcars-in-flight` lock backstops `decide/1` (close-also-fails case), and Delegation now
+  # ALSO derives delivery from the merged PR (its `outcome/3`), so a definitively-lost label is no longer
+  # an arch-waits-forever. Not propagated (a lost label ≠ a failed close: the promote flow reads the close
+  # result, not this projection). Immediate retries (offloaded completion task, momentary hiccup dominant).
+  @set_stage_attempts 3
+  defp set_stage_merged_with_retry(forge, repo, issue_n, forge_opts, attempt \\ 1) do
+    case forge.set_stage(repo, issue_n, Fleet.Labels.stage_merged(), forge_opts) do
+      {:error, reason} when attempt < @set_stage_attempts ->
+        Logger.warning(
+          "GatekeeperSeal: #{repo}##{issue_n} stage/merged projection attempt " <>
+            "#{attempt}/#{@set_stage_attempts} FAILED (#{inspect(reason)}) — retrying"
+        )
+
+        set_stage_merged_with_retry(forge, repo, issue_n, forge_opts, attempt + 1)
+
+      {:error, reason} ->
+        Logger.error(
+          "GatekeeperSeal: #{repo}##{issue_n} stage/merged NOT engraved after #{@set_stage_attempts} " <>
+            "attempts (#{inspect(reason)}) — merge is authoritative + done; the in-flight lock backstops " <>
+            "decide/1 and Delegation derives delivery from the merged PR (no arch-waits-forever)"
+        )
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   @close_attempts 3
   defp close_with_retry(forge, repo, issue_n, gk_opts, pr_number, attempt \\ 1) do
     case forge.close_issue(repo, issue_n, gk_opts) do

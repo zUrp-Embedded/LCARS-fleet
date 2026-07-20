@@ -266,6 +266,35 @@ defmodule Fleet.MCP.PodToolsTest do
     def close_issue(_repo, _n, _opts), do: raise("MergedMarkerForge is read-only")
   end
 
+  # CI-06: a closed issue WITHOUT `stage/merged` (the seal's projection was lost) but WITH a merged fleet
+  # PR — delivery derived from the AUTHORITATIVE PR, not the label. Same as MergedMarkerForge minus the label.
+  defmodule MergedNoStageLabelForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def get_issue(_repo, _n, _opts),
+      do:
+        {:ok,
+         %{"state" => "closed", "labels" => [%{"name" => "lcars-onboarded"}], "title" => "Livrée sans label"}}
+
+    @impl true
+    defdelegate list_pulls(repo, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate parse_feature_branch(head), to: MergedMarkerForge
+    @impl true
+    defdelegate merged_pr_of_issue(repo, n, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate pr_review_state(repo, n, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate create_issue(repo, title, body, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate add_label(repo, n, label, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate post_comment(repo, n, body, opts), to: MergedMarkerForge
+    @impl true
+    defdelegate close_issue(repo, n, opts), to: MergedMarkerForge
+  end
+
   # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
   # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
   defmodule InFlightSupersedeForge do
@@ -566,6 +595,21 @@ defmodule Fleet.MCP.PodToolsTest do
                result["pr"]
 
       assert verdicts["qualifier"] == "approved"
+    end
+
+    test "CI-06: closed WITHOUT stage/merged but a MERGED fleet PR → outcome merged (derived from the authoritative PR)" do
+      # The seal's `stage/merged` projection can be lost (transient forge failure). Pre-CI-06 this read as
+      # `closed_without_merge` → the arch waited FOREVER on a delivered brick. Now the merged PR ITSELF
+      # proves delivery, label or not (never a false-positive: a merged fleet PR IS a delivery).
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, MergedNoStageLabelForge)
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("get_issue_status", %{"number" => 5}, pod_state(pod))
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["outcome"] == "merged"
+      assert %{"number" => 6, "merged" => true} = result["pr"]
     end
 
     test "open issue without a PR → `outcome: open`, no `pr` key (nothing to say = say nothing)" do

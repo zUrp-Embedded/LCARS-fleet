@@ -216,12 +216,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #   "merged"               — closed BY A MERGE. F-C047: `closed` ALONE would conflate a real
   #                            delivery with a NON-delivery closure (onboarding marker
   #                            `[lcars-onboarded]` / manual close) → the arch chains N+1 on an
-  #                            ABANDONED brick. We PROVE the merge via the `stage/merged` label
-  #                            (WS1, set by the gatekeeper seal AT MERGE, before the explicit
-  #                            close). A missing label is possible (the seal's `set_stage` failure
-  #                            is discarded un-logged, cf. gatekeeper_seal.ex) and reads as
-  #                            "closed_without_merge" — a false-NEGATIVE (the arch WAITS) = SAFE,
-  #                            the opposite of the old false-positive that mis-sequenced.
+  #                            ABANDONED brick. We prove the merge via the `stage/merged` label
+  #                            (WS1, set by the gatekeeper seal AT MERGE) OR — CI-06, audit intégrité
+  #                            2026-07-20 — the AUTHORITATIVE merged PR itself: a closed issue with a
+  #                            MERGED fleet PR is a delivery even if the label was lost (the seal's
+  #                            projection can fail; it is now retried too). Never a false-positive (a
+  #                            merged fleet PR IS a delivery), and the arch no longer waits forever on a
+  #                            merged brick whose label slipped.
   #   "closed_without_merge" — closed WITHOUT the merge proof: abandon/rejection/manual close.
   #   "in_review"            — open with a LIVE fleet PR (a matched-but-closed PR — cancelled
   #                            attempt — is NOT a review in progress: back to "open").
@@ -230,11 +231,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #   "unknown"              — the issue read itself failed (a mute forge is not a state).
   defp outcome("unknown", _labels, _pr), do: "unknown"
 
-  defp outcome("closed", labels, _pr),
-    do: if(@merged_label in labels, do: "merged", else: "closed_without_merge")
+  defp outcome("closed", labels, pr),
+    do: if(@merged_label in labels or pr_merged?(pr), do: "merged", else: "closed_without_merge")
 
   defp outcome(_open, _labels, {:ok, %{"state" => "open"}}), do: "in_review"
   defp outcome(_open, _labels, _none_error_or_closed_pr), do: "open"
+
+  # CI-06 — the authoritative delivery proof: a MERGED fleet PR. `pr` = `issue_pr_status/3`'s result
+  # (`{:ok, render_pr}` | `:none` | `{:error, _}`); only an explicit `"merged" => true` counts (never a
+  # merely-closed PR → no false-positive on an abandoned brick).
+  defp pr_merged?({:ok, %{"merged" => true}}), do: true
+  defp pr_merged?(_), do: false
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
