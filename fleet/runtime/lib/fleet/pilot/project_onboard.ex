@@ -209,6 +209,113 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
+  @doc """
+  DELETE a project — the general, reusable teardown of a project's whole runtime footprint. A
+  first-class capability (no such thing existed): callable by ANY process — the MCP tool
+  `delete_project`, a starfleet gesture, the onboard-reset (CI-07). Stops the project's resident
+  architect pod (if any), deletes the forge repo (branch-protection falls with it), and `rm -rf`s the
+  two local dirs (`main` clone + work/ops).
+
+  **FAIL-CLOSED — destruction only under `force: true`.** `full_name` is a FREE argument (an onboarder
+  can name ANY project — this is not channel-bound like `create_issue`), and the delete is IRREVERSIBLE
+  (forge repo + local dirs). There is NO reliable "valueless" heuristic: an IMPORTED repo carries real
+  external content with ZERO fleet issues/PRs, so "no fleet activity" ≠ "safe to nuke". So the caller
+  MUST own the destruction explicitly: without `force: true`, delete refuses with
+  `{:error, {:force_required, full_name}}` and touches NOTHING. CI-07's "reset a failed onboard" is then
+  `delete_project(name, force: true)` → re-`create_project` — one deliberate flag, no wrong auto-nuke
+  (cattle-not-pets: a failed onboard IS reproducible cattle, but the operator still confirms the kill).
+
+  `opts`: `:force` (required-true to act), `:org`, `:projects_root`/`:work_root`, `:forge_opts`; seams
+  `:forge_repo` (default `ForgeClient.Repo`) / `:spawner` (default `Fleet.Spawner`) for test isolation.
+  A forge check that does not cleanly resolve (outage) → REFUSED (never delete on an unverifiable state).
+  Returns `{:ok, %{repo, forge, architect, project_dir, work_dir}}` (`forge` = `:deleted` | `:absent`;
+  `architect` = `:stopped` | `:none` | `:error`) or `{:error, term()}`. The local removals + the
+  architect stop are best-effort (logged, never fail the delete once the forge teardown is decided).
+  """
+  @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def delete_project(full_name, opts \\ []) when is_binary(full_name) do
+    name = Fleet.Layout.project_name(full_name)
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+
+    with :ok <- validate_name(name),
+         :ok <- require_force(full_name, opts),
+         {:ok, forge} <- delete_forge(full_name, opts) do
+      # Forge teardown decided → the rest is best-effort cattle cleanup (never fails the delete).
+      architect = stop_architect(full_name, opts)
+      nuke_dir(proj_dir)
+      nuke_dir(work_dir)
+
+      Logger.info(
+        "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, local dirs nuked"
+      )
+
+      {:ok,
+       %{
+         repo: full_name,
+         forge: forge,
+         architect: architect,
+         project_dir: proj_dir,
+         work_dir: work_dir
+       }}
+    end
+  end
+
+  # Destruction is deliberate: no `force: true` → refuse, touch nothing (cf. moduledoc — no reliable
+  # "valueless" heuristic, and the target is a free argument).
+  defp require_force(full_name, opts) do
+    if Keyword.get(opts, :force, false), do: :ok, else: {:error, {:force_required, full_name}}
+  end
+
+  # Forge teardown: absent → nothing to delete; present → delete. A non-404 read error → refuse (never
+  # delete on an unverifiable forge state). No value-guard here — the `force` gate above owns the decision.
+  defp delete_forge(full_name, opts) do
+    repo_mod = Keyword.get(opts, :forge_repo, ForgeClient.Repo)
+    fc = fc_opts(opts)
+
+    case repo_mod.default_branch(full_name, fc) do
+      {:error, {:http, 404, _}} ->
+        {:ok, :absent}
+
+      {:error, reason} ->
+        {:error, {:forge_check_failed, reason}}
+
+      {:ok, _branch} ->
+        with :ok <- repo_mod.delete_repo(full_name, fc), do: {:ok, :deleted}
+    end
+  end
+
+  # Stops the project's resident architect pod (its whole world — the deleted repo — is gone). Best-effort:
+  # `:none` if no pod was running, `:error` on a spawner hiccup (never fails the delete).
+  defp stop_architect(full_name, opts) do
+    spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
+    pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(full_name)
+
+    case spawner.kill_pod(pod_id) do
+      :ok -> :stopped
+      {:error, :not_found} -> :none
+    end
+  rescue
+    e ->
+      Logger.warning("ProjectOnboard: delete could not stop architect #{full_name}: #{inspect(e)}")
+      :error
+  catch
+    :exit, _ ->
+      Logger.warning("ProjectOnboard: delete architect stop exited (#{full_name})")
+      :error
+  end
+
+  defp nuke_dir(dir) do
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason, path} ->
+        Logger.warning("ProjectOnboard: reset could not fully remove #{path}: #{inspect(reason)}")
+        :ok
+    end
+  end
+
   # open's INVERSE of refute_existing: both dual-dirs must already exist (an onboarded project).
   defp require_on_machine(full_name, proj_dir, work_dir) do
     if File.dir?(proj_dir) and File.dir?(work_dir),

@@ -39,7 +39,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   use ExMCP.Server
@@ -211,6 +211,31 @@ defmodule Fleet.MCP.PodTools do
       "type" => "object",
       "properties" => %{
         "full_name" => %{"type" => "string"}
+      },
+      "required" => ["full_name"]
+    })
+  end
+
+  deftool "delete_project" do
+    meta do
+      name("Delete Project")
+
+      description(
+        "DELETE a project entirely: stops its architect, deletes the forge repo (branch-protection " <>
+          "falls with it), and removes the 2 local dual-dir folders. IRREVERSIBLE, and it destroys " <>
+          "WHATEVER `full_name` you pass → FAIL-CLOSED: it does NOTHING unless you pass `force: true` to " <>
+          "confirm the destruction (there is no safe auto-detect — an imported repo has real content with " <>
+          "0 fleet issues/PRs). Use it to RETIRE a project, or to clean up a FAILED `create_project` " <>
+          "(`force: true`) then re-create on clean ground. `full_name` = `owner/name`. Without force → " <>
+          "error `force_required`. Returns {\"status\":\"deleted\",\"repo\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"},
+        "force" => %{"type" => "boolean"}
       },
       "required" => ["full_name"]
     })
@@ -433,6 +458,24 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("import_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("delete_project", %{"full_name" => full_name} = args, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.delete_project(full_name, args, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("delete_project", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

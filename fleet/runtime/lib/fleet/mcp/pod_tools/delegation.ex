@@ -161,6 +161,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  @doc """
+  DELETES a project `full_name` (`"owner/name"`) — general teardown (architect pod + forge repo +
+  dual-dir) via the `:project_onboard` seam. Onboarder gate (starfleet/architect), same as
+  create/import. FAIL-CLOSED: `args["force"]` MUST be the boolean `true` to act — without it the seam
+  returns `{:error, {:force_required, _}}` and destroys nothing (the target is a free argument and the
+  delete is irreversible; there is no reliable "valueless" heuristic).
+  """
+  @spec delete_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def delete_project(full_name, args, state) when is_binary(full_name) and is_map(args) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, _role} -> do_delete_project(full_name, args)
+    end
+  end
+
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
   # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
   # a local literal would drift ("stage/merged" = `stage_prefix() <> stage_merged()`).
@@ -540,6 +555,31 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
         {:error, reason} ->
           {:error, {:import_failed, inspect(reason)}}
+      end
+    end
+  end
+
+  # Delete sequence — same :project_onboard seam, callback :delete_project. `force` bypasses the
+  # anti-work safety guard (deliberate end-of-life delete).
+  defp do_delete_project(full_name, args) do
+    with {:ok, onboard} <- conforming_onboard() do
+      opts = [force: Map.get(args, "force", false) == true]
+
+      case onboard.delete_project(full_name, opts) do
+        {:ok, %{repo: repo} = result} ->
+          {:ok,
+           %{
+             "status" => "deleted",
+             "repo" => repo,
+             "forge" => to_string(Map.get(result, :forge, "")),
+             "architect" => to_string(Map.get(result, :architect, ""))
+           }}
+
+        # Preserve the TYPED reason (do NOT flatten): the caller must distinguish
+        # `{:force_required, _}` (pass `force: true` to confirm the destruction) from
+        # `{:forge_check_failed, _}` (forge down, retry) — a destructive op's most useful signal.
+        {:error, _reason} = err ->
+          err
       end
     end
   end

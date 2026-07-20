@@ -44,7 +44,24 @@ defmodule Fleet.Pilot.ProjectIntensity do
 
     with :ok <- validate(declaration),
          :ok <- warn_off_matrix(declaration, opts) do
-      File.write(Path.join(proj_dir, @file_name), Jason.encode!(declaration, pretty: true) <> "\n")
+      atomic_write(Path.join(proj_dir, @file_name), Jason.encode!(declaration, pretty: true) <> "\n")
+    end
+  end
+
+  # ATOMIC write (CI-07): write a sibling temp then rename (atomic on POSIX, same dir/FS). A crash
+  # mid-write never leaves a TRUNCATED intensity.json — which `pipeline_default/2` would otherwise read
+  # as invalid → fall back LOUD to the default card (a real project silently sized C0 until someone reads
+  # the warning). The temp is removed on failure.
+  defp atomic_write(path, content) do
+    tmp = path <> ".tmp"
+
+    with :ok <- File.write(tmp, content),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, _} = err ->
+        _ = File.rm(tmp)
+        err
     end
   end
 

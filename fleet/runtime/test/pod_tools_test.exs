@@ -414,6 +414,21 @@ defmodule Fleet.MCP.PodToolsTest do
          architect: %{status: "up", pod_id: "architect-#{name}"}
        }}
     end
+
+    @impl true
+    def delete_project(full_name, opts) do
+      name = full_name |> String.split("/") |> List.last()
+
+      {:ok,
+       %{
+         repo: full_name,
+         forge: :deleted,
+         architect: :stopped,
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}",
+         forced: Keyword.get(opts, :force, false)
+       }}
+    end
   end
 
   # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
@@ -1007,6 +1022,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
       {"open_project", %{"full_name" => "fleet/demo-proj"}},
+      {"delete_project", %{"full_name" => "fleet/demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
@@ -1082,7 +1098,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "unknown pod (resolver → :pod_unknown) REFUSED on the 4 tools (unresolved identity)" do
+    test "unknown pod (resolver → :pod_unknown) REFUSED on the privileged tools (unresolved identity)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:error, :pod_unknown} end)
 
       for {tool, biz_args} <- @privileged_tools do
@@ -1094,7 +1110,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "state without pod_id (acceptor anomaly) REFUSED on the 4 tools → :pod_id_required" do
+    test "state without pod_id (acceptor anomaly) REFUSED on the privileged tools → :pod_id_required" do
       # The pod_id is carried by the acceptor; absent from the state = anomaly → typed refusal, never
       # access.
       for {tool, biz_args} <- @privileged_tools do
@@ -1104,7 +1120,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "architect → the 4 tools PASS the gate (no :forbidden / :pod_unknown)" do
+    test "architect → the privileged tools PASS the gate (no :forbidden / :pod_unknown)" do
       # The arch is project-bound (reorg 2026-07-19): the resolver carries its repo binding.
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}

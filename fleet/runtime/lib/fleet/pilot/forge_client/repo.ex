@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
   are called directly by `Fleet.Pilot.ProjectOnboard`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -18,6 +18,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       http_get: 2,
       http_post: 3,
       http_patch: 3,
+      http_delete: 2,
       paginate: 3
     ]
 
@@ -277,6 +278,23 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
 
         {:error, _} = err ->
           err
+      end
+    end
+  end
+
+  @doc """
+  Deletes the repo `repo` (`"owner/name"`) on the forge — `DELETE /repos/{owner}/{repo}` (the
+  branch-protection falls with it). Idempotent: a 404 (already gone) → `:ok`. Used by
+  `Fleet.Pilot.ProjectOnboard.delete_project/2` (the general project teardown) — this is the raw
+  primitive; the caller owns the `force`/confirmation gate.
+  """
+  @spec delete_repo(String.t(), keyword()) :: :ok | {:error, term()}
+  def delete_repo(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_delete(config, "/repos/#{encode_repo(repo)}") do
+        {:ok, _} -> :ok
+        {:error, {:http, 404, _}} -> :ok
+        {:error, _} = err -> err
       end
     end
   end

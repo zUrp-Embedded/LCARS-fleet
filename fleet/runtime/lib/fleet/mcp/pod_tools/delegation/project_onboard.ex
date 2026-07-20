@@ -22,7 +22,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   @doc """
@@ -54,6 +54,14 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @callback open(full_name :: String.t(), opts :: keyword()) ::
               {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
               | {:error, term()}
+
+  @doc """
+  DELETES a project — general teardown (architect pod + forge repo + dual-dir). `opts[:force]` bypasses
+  the anti-work safety guard (a DELIBERATE end-of-life delete). Result carries `repo` (+ `forge`/
+  `architect` status keys); `Delegation.do_delete_project/2` reads `%{repo: _}`.
+  """
+  @callback delete_project(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
 
   # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom
   # (not a literal remote call) → no compile-time dep. Set HERE once.
