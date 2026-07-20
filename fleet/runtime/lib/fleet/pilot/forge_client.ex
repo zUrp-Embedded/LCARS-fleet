@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -956,8 +956,13 @@ defmodule Fleet.Pilot.ForgeClient do
   colors + tooltips from THIS module's single source (`label_color`/`label_description`).
   Used by `mix lcars.project_template.sync` to seed the TEMPLATE repo: every generated
   project then carries them from birth (the lazy per-repo creation stays as the net for
-  dynamic labels — `wfmap/<map>` is per-card, never seeded here). Idempotent (create 409
-  tolerated by `ensure_repo_label`).
+  dynamic labels — `wfmap/<map>` is per-card, never seeded here).
+
+  `:ok` means the six labels are PRESENT on the repo after the call — verified by reading
+  them back, not by trusting the create POSTs (those tolerate a duplicate, so a POST result
+  proves nothing). A label still missing → `{:error, {:labels_missing, names}}`; an
+  unreadable verification → `{:error, {:labels_unverifiable, reason}}`. The caller
+  (`mix lcars.project_template.sync`) must not announce a synced project on either.
   """
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
@@ -972,7 +977,26 @@ defmodule Fleet.Pilot.ForgeClient do
       ]
 
       Enum.each(statics, &ensure_repo_label(config, repo, &1))
-      :ok
+      verify_labels_present(config, repo, statics)
+    end
+  end
+
+  # Success is CONVERGENT, not per-POST: `create_repo_label` tolerates a failed POST (Gitea does
+  # not 409 a duplicate, so a POST error is no proof the label is missing). The only honest test is
+  # to read the repo's labels back and require every protocol label to be there. A still-missing
+  # label, or an unreadable read, is surfaced — never a bare `:ok` the caller reads as label-ready.
+  defp verify_labels_present(config, repo, expected) do
+    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
+      {:ok, labels} when is_list(labels) ->
+        present = MapSet.new(labels, & &1["name"])
+
+        case Enum.reject(expected, &MapSet.member?(present, &1)) do
+          [] -> :ok
+          missing -> {:error, {:labels_missing, missing}}
+        end
+
+      other ->
+        {:error, {:labels_unverifiable, other}}
     end
   end
 

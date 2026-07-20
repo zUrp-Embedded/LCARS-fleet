@@ -61,6 +61,40 @@ defmodule Fleet.Pilot.ForgeClientTest do
          do: {:ok, verdicts}
   end
 
+  describe "ensure_protocol_labels/2 — convergent verification, not per-POST optimism" do
+    @protocol_labels [
+      "lcars-in-flight",
+      "lcars-awaits-arch",
+      "stage/brief-review",
+      "stage/build",
+      "stage/review",
+      "stage/merged"
+    ]
+
+    test "all six labels present after the sync → :ok" do
+      all = Enum.map(@protocol_labels, &%{"name" => &1})
+      # Every label already exists → no POST needed; the convergent read confirms all six.
+      h = %{{"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, all}}
+
+      assert :ok = ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
+    end
+
+    test "a label still missing after the sync → error, never a bare :ok" do
+      # The read always returns five (no stage/merged) and the create POST fails — tolerated by
+      # create_repo_label, so the label stays absent. The convergent read must surface it.
+      five =
+        @protocol_labels |> Enum.reject(&(&1 == "stage/merged")) |> Enum.map(&%{"name" => &1})
+
+      h = %{
+        {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, five},
+        {"POST", "/api/v1/repos/fleet/tmpl/labels"} => {500, %{"error" => "boom"}}
+      }
+
+      assert {:error, {:labels_missing, ["stage/merged"]}} =
+               ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
+    end
+  end
+
   describe "repo_id/2 — the repo's forge id (source of truth for <REPO4>, BL-055)" do
     test "GET /repos/<repo> → {:ok, id} integer" do
       h = %{
