@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   no captures in the `Ctx`: taking them at the source keeps the
   core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -240,26 +240,72 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # feed line "brique LIVRÉE" and triggers the arch's single informational wake.
           # (Missed on the first live round 2026-07-18: only the completer's promote carried
           # it — the poller promote, the path real rounds actually take, said "étape franchie".)
-          _ =
-            Fleet.Pilot.StepRunCompleter.unlock(
-              ctx.forge,
-              ctx.repo,
-              issue_n,
-              ctx.forge_opts,
-              producer,
-              :delivered
-            )
+          #
+          # CI-08 — the caller must NOT announce the retrait before its VERDICT. `seal_and_merge` has
+          # just CLOSED the issue, so the OPEN-issue poll no longer revisits it: a lost unlock leaves a
+          # residual `lcars-in-flight` + a stopwatch running forever with NO natural retry. We therefore
+          # (a) VERIFY the verdict (no more `_ =` + a blanket "lock released" log that lied on failure),
+          # (b) RETRY it bounded — this is the LAST reconciliation opportunity (idempotent: `unlock` no-ops
+          # a removed label / a 409'd stopwatch), and (c) log per the ACTUAL outcome. We deliberately do NOT
+          # fold the unlock into `GatekeeperSeal.seal_and_finalize` (the Cible's other option): unlock
+          # (stop_stopwatch + remove in-flight + emit) is a concern OWNED by `StepRunCompleter.unlock` (its
+          # SOLE-AUTHORITY @doc), and the stop identity differs between callers (here the branch-parsed
+          # `producer`; `route(:promote)` uses `producer_stop_role`) — folding it would couple the seal to
+          # the lock/stopwatch lifecycle AND fork that identity. The convergence that matters is the shared
+          # honesty discipline (verify-then-announce), not a physical merge.
+          case finalize_issue_unlock(ctx, issue_n, producer) do
+            :ok ->
+              Logger.info(
+                "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
+                  "(judges OK → rebase merge, gatekeeper sealed, explicit close ; eng killed, issue lock released)"
+              )
 
-          Logger.info(
-            "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-              "(judges OK → rebase merge, gatekeeper sealed, explicit close ; eng killed, issue lock released)"
-          )
+            {:error, reason} ->
+              Logger.error(
+                "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} MERGED+SEALED+CLOSED " <>
+                  "but issue lock NOT released (#{inspect(reason)}) — residual lcars-in-flight + running " <>
+                  "stopwatch on the CLOSED issue, NOT re-polled (open-issue poll skips it); warden/manual cleanup"
+              )
+          end
 
           {:ok, {:merged, pr_number}}
 
         {:error, _} = err ->
           err
       end
+    end
+  end
+
+  # CI-08 — BOUNDED retry of THE terminal issue unlock (mirror of `GatekeeperSeal.{close,set_stage_merged}_with_retry`).
+  # This is the LAST reconciliation of the poller-driven promote: after the explicit close, the open-issue poll no
+  # longer revisits the issue, so a lost unlock has no natural retry. A transient blip (HTTP 500 / lock contention)
+  # self-heals on retry; `unlock` is idempotent (`remove_label` no-ops if absent, `stop_stopwatch` 409 → :ok), so a
+  # re-run is safe. Immediate retries (poller tick — a momentary hiccup dominates; no sleep, same stance as the seal
+  # retries). NOT propagated (the promote genuinely succeeded — merged + sealed + closed); the caller logs LOUD on
+  # persistent failure and keeps `{:ok, {:merged, _}}`.
+  @issue_unlock_attempts 3
+  defp finalize_issue_unlock(%Ctx{} = ctx, issue_n, producer, attempt \\ 1) do
+    case Fleet.Pilot.StepRunCompleter.unlock(
+           ctx.forge,
+           ctx.repo,
+           issue_n,
+           ctx.forge_opts,
+           producer,
+           :delivered
+         ) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} when attempt < @issue_unlock_attempts ->
+        Logger.warning(
+          "StepDispatcher: PROMOTE issue ##{issue_n} unlock attempt " <>
+            "#{attempt}/#{@issue_unlock_attempts} FAILED (#{inspect(reason)}) — retrying"
+        )
+
+        finalize_issue_unlock(ctx, issue_n, producer, attempt + 1)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 end

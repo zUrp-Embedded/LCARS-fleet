@@ -985,6 +985,41 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:stopped_watch, 42}
     end
 
+    test "CI-08: promote unlock FAILS → honest 'issue lock NOT released' log (never the lie) + retry, still {:ok, {:merged}}" do
+      # The merge/seal/close all succeed; only the TERMINAL issue unlock (remove_label) fails. The
+      # promote genuinely succeeded → the return stays {:ok, {:merged}}, but the log must follow the
+      # VERDICT (CI-08 — "le caller ne doit pas annoncer le retrait avant son verdict"): never the
+      # blanket "issue lock released" lie, and the retrait is retried (last-chance: the closed issue is
+      # no longer re-polled) before being surfaced LOUD.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_remove_label: {:error, :forge_down}
+          ]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
+        end)
+
+      # The merge happened — the promote succeeded despite the unlock failure.
+      assert_received {:merged, 6}
+      # Verdict-following honest log (bleed-proof: scoped to THIS test's issue #42 + the new phrase).
+      assert log =~ "issue=#42 MERGED+SEALED+CLOSED but issue lock NOT released"
+      # The bounded retry was attempted (last-chance reconciliation).
+      assert log =~ "issue #42 unlock attempt 1/3 FAILED"
+      # The old blanket lie must NOT appear on the failure path.
+      refute log =~ "eng killed, issue lock released"
+    end
+
     test "F-C061: a NON-jury login (human) among the reviewers is filtered (does not starve the jury) + LOUD" do
       # A human (`Lordzurp`) reviews/is-requested on the PR (read suffices — verified live, the
       # forge does NOT prevent it). WITHOUT the filter: they have no verdict → `hd(pending)` =
