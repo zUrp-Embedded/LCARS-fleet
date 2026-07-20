@@ -196,6 +196,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   `step_run`: `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_arch}`
   | `{:error, {:await_arch, reason}}`.
+
+  The ISSUE-side twin of `Fleet.Pilot.StepDispatcher.ArchEscalation` (the PR-side freeze): same
+  invariant discipline (dedup comment → awaits-arch throttle → in-flight retrait, all verified), kept
+  as SEPARATE functions on purpose — cf. that module's "Two freeze rails, ONE invariant discipline"
+  note. Here the comment is IN THE JUDGE'S NAME and IS the verdict record (load-bearing); there it is a
+  gatekeeper ruling (explanatory).
   """
   @spec await_arch(map(), keyword()) :: {:ok, :awaiting_arch} | {:error, {:await_arch, term()}}
   def await_arch(step_run, opts \\ []) when is_map(step_run) do

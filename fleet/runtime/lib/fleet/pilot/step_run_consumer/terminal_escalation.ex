@@ -62,7 +62,8 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       # Spawner for the arch kick (seam, consumer-side default = Fleet.Spawner).
       :spawner,
       # Broker for the arch's arbitration mandate (seam, consumer-side default = Fleet.TaskQueue) —
-      # the IMMEDIATE offer-then-wake of freeze_to_arch enqueues BEFORE it wakes (ArchWake).
+      # freeze_to_arch's post-commit offer-then-wake enqueues BEFORE it wakes (ArchWake), inside the
+      # offloaded completion unit and only after a confirmed await_arch commit (CI-04).
       :task_queue,
       # Closure (label :: String.t(), fun :: (-> outcome)) -> outcome — sync/offload execution.
       :run_completion
@@ -141,11 +142,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   @doc """
   THE single freeze-to-arch gesture: `await_arch` (comment + `lcars-awaits-arch` +
-  unlock) via `run_completion`, THEN the IMMEDIATE offer-then-wake of the arch (`ArchWake`,
-  latency only: the durable truth is the forge state — label + comment — and a failed kick,
-  logged warning, is retried by the Poller's cooldown-capped awaits-arch net). Returns the completion's
-  outcome (the kick never alters the result). Also called by the consumer for
-  the fail-closed verdicts (redirect/escalate_user/halt_*) — net parity.
+  unlock) via `run_completion`, THEN — inside the SAME offloaded unit, GATED on a confirmed
+  commit — the offer-then-wake of the arch (`ArchWake`, latency only: the durable truth is the
+  forge state — label + comment — and a failed kick, logged warning, is retried by the Poller's
+  cooldown-capped awaits-arch net). Returns the completion's outcome (the kick never alters the
+  result). Also called by the consumer for the fail-closed verdicts (redirect/escalate_user/halt_*)
+  — net parity.
   """
   @spec freeze_to_arch(pos_integer(), String.t(), term(), String.t(), Seams.t()) :: term()
   def freeze_to_arch(n, role, decision, comment_body, %Seams{} = seams) do
@@ -157,21 +159,28 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       comment_body: comment_body
     }
 
-    result =
-      seams.run_completion.(label(n, decision), fn ->
-        seams.step_run_completer.await_arch(step_run, seams.completer_opts)
-      end)
+    # WAKE-AFTER-COMMIT, inside the offloaded unit (CI-04). `run_completion` is SYNC by default but
+    # in prod it OFFLOADS onto a Task.Supervisor and returns `{:ok, :offloaded}` at once — so an
+    # offer-then-wake placed AFTER this call (outside the closure) fired BEFORE await_arch's forge
+    # writes, or on a synchronous `{:error, _}`: the arch was woken onto a mandate that did not exist
+    # yet. This reopened, one layer up, the very 2026-07-18 signal-before-content race that ArchWake's
+    # internal enqueue-then-wake order (design 2026-07-19: "first kick immediate, protection BEHIND")
+    # was built to close. The fix is ORDERING, not deferral to the poll grid: the offer-then-wake now
+    # lives INSIDE the completion closure and only after await_arch returns `{:ok, _}` — a confirmed
+    # forge commit (comment + label). On `{:error, _}` the escalation did NOT commit → we do NOT wake
+    # the arch onto a non-existent mandate; the Poller net (cooldown-capped) re-derives the wake next
+    # tick from the durable forge state, if any took. The offer stays best-effort (`safe_offer_then_wake`
+    # NEVER alters the completion's outcome).
+    seams.run_completion.(label(n, decision), fn ->
+      case seams.step_run_completer.await_arch(step_run, seams.completer_opts) do
+        {:ok, _} = committed ->
+          safe_offer_then_wake(seams, n)
+          committed
 
-    # IMMEDIATE first kick (design 2026-07-19: "first kick immediate, protection BEHIND").
-    # The 2026-07-18 signal-before-content race (kick woke the arch BEFORE any mandate existed
-    # → doctrine-first `get_work_item` read `{done:true}`, wake classified spurious) is killed
-    # by ORDERING — ArchWake enqueues the mandate THEN wakes — not by waiting for the Poller:
-    # deferring the whole pair to the throttled poll grid turned "5 min max" into 0-5 min
-    # NOMINAL latency (scar 2026-07-19). The label+comment above stay the durable truth; the
-    # Poller net (cooldown-capped) re-derives a wake if this one is lost. Best-effort by
-    # construction: NEVER alters the completion's outcome.
-    safe_offer_then_wake(seams, n)
-    result
+        {:error, _} = failed ->
+          failed
+      end
+    end)
   end
 
   # The immediate kick must never take the completion down with it (the escalation is GRAVED

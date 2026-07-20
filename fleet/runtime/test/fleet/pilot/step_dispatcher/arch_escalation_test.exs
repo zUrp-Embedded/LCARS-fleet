@@ -26,8 +26,16 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
     # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
-    # awaits-arch ⇒ ¬in-flight (invariant 2026-07-19): best-effort removal on escalation.
+    # awaits-arch ⇒ ¬in-flight (invariant 2026-07-19): verified removal on escalation.
     def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
+  end
+
+  defmodule RemoveFailForge do
+    # awaits-arch ADD succeeds (throttle takes), but the in-flight retrait FAILS → CI-04: the retrait
+    # is verified and SURFACES (both labels present would contradict awaits-arch⇒¬in-flight).
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+    def remove_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "remove boom"}}
   end
 
   @head "lcars/issue-42-engineer"
@@ -63,5 +71,21 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
     # SHARED string "NOT added": robust to async bleed from a concurrent IncidentRegistry.Escalation
     # log (flaky fix).
     refute log =~ "ArchEscalation:"
+  end
+
+  test "throttle OK but in-flight retrait FAILS → {:error, escalation_incomplete/in_flight_removal_failed} + LOUD (CI-04)" do
+    log =
+      capture_log(fn ->
+        assert {:error, {:escalation_incomplete, 5, {:in_flight_removal_failed, _}}} =
+                 ArchEscalation.escalate_rework(seams(RemoveFailForge), 5, @head, %{
+                   rounds: 4,
+                   budget: 3
+                 })
+      end)
+
+    # Module-unique prefix + the retrait-specific fragment (robust to async bleed).
+    assert log =~ "ArchEscalation:"
+    assert log =~ "NOT removed"
+    assert log =~ "invariant awaits-arch⇒¬in-flight violated"
   end
 end

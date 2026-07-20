@@ -31,6 +31,19 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
   describes the escalation).
 
+  ## Two freeze rails, ONE invariant discipline (CI-04) — deliberate, NOT merged
+
+  This PR-side freeze and the issue-side `StepRunCompleter.await_arch` share the SAME shape —
+  dedup comment addressed to the arch → `lcars-awaits-arch` throttle (load-bearing) → `lcars-in-flight`
+  removal (invariant maintenance) — and now the SAME integrity discipline: the throttle is verified and
+  surfaces on failure (C-02), the in-flight retrait is verified and surfaces on failure (CI-04, `escalate_to_arch`
+  below). They stay SEPARATE functions on purpose: the SIGNATORY differs (gatekeeper here — a ruling on
+  rework/merge — vs the JUDGE on `await_arch`, whose comment IS the verdict record), and so does the
+  comment's WEIGHT (explanatory here, load-bearing verdict there). Folding both into one primitive
+  parameterized by signatory/text/weight/return would relocate the divergence into a parameter soup, not
+  remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
+  rails — not a physical merge.
+
   **Last revised**: 2026-07-20
   """
 
@@ -175,32 +188,47 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         )
     end
 
-    label_verdict = seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts)
-
-    # INVARIANT (live 2026-07-19, fleet/hello#3): awaits-arch ⇒ NO `lcars-in-flight` on the issue
-    # — "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also
-    # shields the brick's pods from the quiesced-pod reap for the whole (human-timescale) park.
-    # Same stance as `StepRunCompleter.await_arch` (which removes it on its own path). Best-effort
-    # (`_ =`): the label may legitimately be absent; the throttle above is the load-bearing write.
-    _ = seams.forge.remove_label(seams.repo, issue_n, @in_flight_label, seams.forge_opts)
-
     # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
     # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP). We SURFACE it
     # (C-02, sonde convergence 2026-07-20): return `{:error, ...}` so the caller reports an error tally,
     # NOT a lying `{:skipped, _escalated}` (the escalation did NOT durably take). The poller folds this as
     # `tally.errors` (`step_process_pulls`, F-037: telemetry only, never a backoff) and re-attempts next
     # tick (idempotent: dedup comment + idempotent add_label). LOG LOUD stays — the operator sees the churn.
-    case label_verdict do
+    case seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts) do
       {:error, reason} ->
         Logger.error(
           "ArchEscalation: issue ##{issue_n} escalated but throttle label #{inspect(@awaits_arch_label)} " <>
             "NOT added (#{inspect(reason)}) — the PR will re-dispatch (churn) until the label sticks"
         )
 
+        # The throttle did NOT take → we KEEP `lcars-in-flight` (do NOT remove it here): removing it now
+        # would leave the object with NEITHER lock → a pod could grab it AND the poller would re-dispatch
+        # (worse than the churn). in-flight holds the object until a later tick re-adds awaits-arch.
         {:error, {:awaits_arch_label_failed, reason}}
 
       _ ->
-        :ok
+        # INVARIANT (live 2026-07-19, fleet/hello#3): awaits-arch ⇒ NO `lcars-in-flight` on the issue —
+        # "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also shields
+        # the brick's pods from the quiesced-pod reap for the whole (human-timescale) park. The throttle
+        # took, so we now maintain the invariant: remove in-flight. VERIFIED, no more silent `_ =` (CI-04:
+        # the audit flagged "retire in-flight sans vérifier ce retrait" while the comment ASSERTS the
+        # invariant). Same standard as `StepRunCompleter.await_arch` (which verifies its remove in the
+        # `with`). `remove_label` is idempotent (`{:ok, :already_absent}`); on failure we SURFACE — both
+        # labels present contradicts the invariant AND the stale in-flight leaks the reap-shield — so the
+        # poller re-attempts next tick (idempotent add+remove), same honest tally as the throttle failure.
+        case seams.forge.remove_label(seams.repo, issue_n, @in_flight_label, seams.forge_opts) do
+          {:error, reason} ->
+            Logger.error(
+              "ArchEscalation: issue ##{issue_n} awaits-arch SET but #{inspect(@in_flight_label)} NOT removed " <>
+                "(#{inspect(reason)}) — invariant awaits-arch⇒¬in-flight violated (both labels present, stale " <>
+                "in-flight shields pods from reap); poller re-attempts next tick (idempotent)"
+            )
+
+            {:error, {:in_flight_removal_failed, reason}}
+
+          _ ->
+            :ok
+        end
     end
   end
 
