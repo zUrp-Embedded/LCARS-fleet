@@ -379,6 +379,32 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:wake, "o-r-issue-1-gatekeeper"}
   end
 
+  test "escalation: gatekeeper already ALIVE but the WAKE fails → recovery SURFACED, not a silent :ok (C-01)" do
+    # Pre-C-01 (sonde convergence 2026-07-20): `already_started` + a failed `wake_pod` was SWALLOWED to
+    # `:ok` → the eval brief sat pending, the gate announced-but-never-run, the issue silently locked with
+    # NO failure reported. Now the wake routes through the injectable WakeRecovery; its verdict is
+    # SURFACED (fail-loud upstream → issue visible). Stubbed here (the real WakeRecovery would hit
+    # IncidentRegistry + a sysadmin forge escalation): assert it IS invoked (the wake is no longer
+    # swallowed) and that its error verdict propagates as a dispatch failure.
+    defmodule AlreadyAliveFailingWake do
+      def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && {:error, :tmux_gone}
+      def spawn_pod(_cap, _pod_id, _opts), do: {:error, {:already_started, self()}}
+    end
+
+    recovery = fn pod_id, _respawn, _opts ->
+      send(self(), {:recovery_called, pod_id})
+      {:error, {:escalated, :tmux_gone}}
+    end
+
+    assert {:error, {:gatekeeper_dispatch, {:gatekeeper_spawn, {:escalated, :tmux_gone}}}} =
+             StepRunConsumer.maybe_complete(
+               build_done("soft", %{"sev" => "high"}),
+               hc(spawner: AlreadyAliveFailingWake, wake_recovery: recovery)
+             )
+
+    assert_received {:recovery_called, "o-r-issue-1-gatekeeper"}
+  end
+
   test "escalation: ENVELOPED outputs %{status,result} -> unwrapped before the brief (#2)" do
     enveloped = %{"status" => "ok", "result" => %{"sev" => "low"}}
 

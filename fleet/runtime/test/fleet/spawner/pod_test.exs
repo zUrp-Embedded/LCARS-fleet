@@ -471,7 +471,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — admin.spawn (opts[:brief], no dispatcher) enqueues the brief in the TaskQueue (get_work_item channel) [F-arch-MCP]" do
+    test "PUSH — admin.spawn (opts[:brief] + self_enqueue_brief, no dispatcher) enqueues the brief in the TaskQueue (get_work_item channel) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq-#{System.unique_integer([:positive])}"
@@ -482,7 +482,8 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: valid_profile(),
         issue_id: "issue-mq",
         pod_id: pod_id,
-        opts: [brief: brief, repo_id: @test_repo_id]
+        # C-01: the admin rail authorizes the pod's own enqueue via `self_enqueue_brief` (no dispatcher).
+        opts: [brief: brief, self_enqueue_brief: true, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -496,30 +497,32 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — no double-enqueue if a brief is ALREADY queued (dispatch step: enqueued before the spawn) [F-arch-MCP]" do
+    test "PUSH — dispatch spawn (opts[:brief], NO self_enqueue flag) never self-enqueues, even on a FREE slot (C-01 race fix) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
-      # Simulates the dispatch step: the role-aware brief is enqueued BEFORE the spawn (StepDispatcher).
-      {:ok, _} =
-        Fleet.TaskQueue.enqueue(pod_id, %{brief: "brief-du-dispatcher", role: "engineer"})
-
+      # The DISPATCHER owns the enqueue (via TaskQueue, AFTER the spawn — canonical order
+      # lock→pod→enqueue→wake). The brief is in opts only for the pod's DATA (SLSA/provenance). Pre-C-01
+      # the pod ALSO self-enqueued from opts[:brief] whenever it booted onto a FREE slot (dispatcher not
+      # yet enqueued) → double-enqueue / :cleared mid-run race. Now the self-enqueue is gated on the
+      # explicit `self_enqueue_brief` flag (admin rail only). Here the slot is FREE and a brief IS in
+      # opts, but the flag is ABSENT (dispatch rail) → the pod self-enqueues NOTHING. `maybe_enqueue_brief`
+      # runs in `:projecting`, BEFORE the launch, so by `:launch_called` it has already (not) fired.
       args = %{
         cap_profile: valid_profile(),
         issue_id: "issue-mq2",
         pod_id: pod_id,
-        opts: [brief: "autre-brief", repo_id: @test_repo_id]
+        opts: [brief: "dispatch-brief", repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # Idempotent: a SINGLE queued brief, the dispatcher's (not "autre-brief") — the spawn did not
-      # re-enqueue (`no_pending_brief?` guard).
-      assert [%{brief: "brief-du-dispatcher"}] =
-               Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
+      # Free slot + brief in opts, NO flag → the pod is the sole non-enqueuer: the dispatcher (absent in
+      # this unit test) is the only owner of the enqueue on this rail. The race is structurally gone.
+      assert [] = Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
 
       Process.exit(pid, :kill)
     end

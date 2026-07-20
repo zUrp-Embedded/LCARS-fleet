@@ -211,13 +211,16 @@ defmodule Fleet.Spawner.PublishConsumer do
   ALLOWLIST (R1-30): beyond the atom-leak filter, only `@allowed_spawn_opts` keys are kept — the DROP
   of everything else is what actually doubles the `/api/admin/spawn` admission lock.
   The allowlist mirrors the SOLE producer
-  (`Fleet.API.SpawnAdmission.build_admin_opts`, which emits ONLY `brief` + `pod_id`). The infrastructure
+  (`Fleet.API.SpawnAdmission.build_admin_opts`, which emits `brief` + `pod_id` + `self_enqueue_brief`).
+  The `self_enqueue_brief` flag (C-01) authorizes the pod's own brief enqueue — legitimate on THIS
+  (admin, no-dispatcher) rail; a forged bus event that set it would only make the pod self-enqueue its
+  brief (the slot check still dedups), never an FS/backend escape. The infrastructure
   opts (`pod_dir_root`/`state_fs_root` = FS redirect out of the confined home, `containment` = host-native
   escape, `launch_backend`/`fleet_spawner` = backend override) are all existing atoms → they PASS the
   atom-leak filter, so without an allowlist a forged bus event could inject them. `pod_id` stays
   re-validated by `spawn_pod` itself (T1 `valid_pod_id?`).
   """
-  @allowed_spawn_opts ~w(brief pod_id)a
+  @allowed_spawn_opts ~w(brief pod_id self_enqueue_brief)a
 
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->

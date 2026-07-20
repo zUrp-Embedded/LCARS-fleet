@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.Brief do
   - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -80,22 +80,30 @@ defmodule Fleet.Spawner.Pod.Brief do
   end
 
   @doc """
-  Enqueues the brief into the TaskQueue (the CANONICAL channel `get_work_item`), idempotent:
+  Self-enqueues the pod's OWN brief into the TaskQueue (the CANONICAL channel `get_work_item`) — but
+  ONLY on the admin rail, gated by the `self_enqueue_brief` opt (`SpawnAdmission.build_admin_opts`).
+  Idempotent:
 
-  - no brief (permanent/interactive pod cold-booted) → nothing to pull → bootstrap (skip);
-  - brief ALREADY in the queue (`TaskProbe.no_pending_brief?` false: dispatch step, the
-    StepDispatcher enqueued BEFORE the spawn) → no double-enqueue (skip);
-  - otherwise (`admin.spawn` / `lcars spawn --brief`: no dispatcher) → we enqueue here, else
-    `get_work_item` returns `{done:true}` and the pod stays idle (cf. StepDispatcher.enqueue_brief).
+  - no `self_enqueue_brief` flag (a Fleet DISPATCH or gatekeeper spawn: the ORCHESTRATOR owns the
+    enqueue — it enqueues via TaskQueue itself; or a resident pod with no brief) → skip. C-01 (sonde
+    convergence 2026-07-20): the dispatcher enqueues AFTER the spawn (canonical order
+    lock→pod→enqueue→wake), so gating self-enqueue on the SLOT was RACY — the pod could self-enqueue in
+    the window BEFORE the dispatcher's enqueue, double-enqueuing / clearing the active item mid-run. The
+    explicit flag removes that race structurally (never slot-timing-dependent on a dispatch spawn);
+  - flag set, brief ALREADY in the queue (`:occupied` — an admin retry) → no double-enqueue (skip);
+  - flag set, slot free (`admin.spawn` / `lcars spawn --brief`: NO dispatcher owns the enqueue) → we
+    enqueue here, else `get_work_item` returns `{done:true}` and the pod stays idle.
 
   Mirror of StepDispatcher's `attrs` (`issue_id`/`role`/`brief`/`metadata`).
   """
   @spec maybe_enqueue_brief(map()) ::
           :ok | {:error, {:brief_enqueue_failed, term()} | {:brief_slot_unknown, String.t()}}
   def maybe_enqueue_brief(state) do
-    brief = Keyword.get(state.opts || [], :brief)
+    opts = state.opts || []
+    brief = Keyword.get(opts, :brief)
+    self_enqueue? = Keyword.get(opts, :self_enqueue_brief, false)
 
-    if is_binary(brief) and brief != "" do
+    if self_enqueue? and is_binary(brief) and brief != "" do
       enqueue_by_slot(state, brief, TaskProbe.brief_slot(state.pod_id))
     else
       :ok
@@ -110,7 +118,8 @@ defmodule Fleet.Spawner.Pod.Brief do
   def enqueue_by_slot(state, brief, slot) do
     case slot do
       :occupied ->
-        # A brief is genuinely already pending (dispatch step) → skip, silent.
+        # A brief is genuinely already pending (an admin retry: only the flagged admin rail reaches
+        # here since C-01) → skip, silent.
         :ok
 
       :unknown ->

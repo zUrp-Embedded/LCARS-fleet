@@ -44,7 +44,7 @@ defmodule Fleet.API.SpawnAdmission do
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.EventRouter.Bus
@@ -153,7 +153,15 @@ defmodule Fleet.API.SpawnAdmission do
 
   # Builds the spawn `opts` from the public fields only. `pod_id` is kept only if path-safe.
   defp build_admin_opts(raw) do
-    opts = if is_binary(raw["brief"]), do: %{"brief" => raw["brief"]}, else: %{}
+    # `self_enqueue_brief`: the admin spawn has NO dispatcher/orchestrator to enqueue its brief, so the
+    # POD self-enqueues it (`Pod.Brief.maybe_enqueue_brief`). This flag is what AUTHORIZES that (C-01,
+    # sonde convergence 2026-07-20): a Fleet dispatch/gatekeeper spawn ALSO carries `brief` in its opts
+    # (for the pod's data), but the DISPATCHER owns the enqueue there — the flag is ABSENT, so the pod
+    # never self-enqueues on those paths, killing the spawn→enqueue race structurally (not by slot-timing).
+    opts =
+      if is_binary(raw["brief"]),
+        do: %{"brief" => raw["brief"], "self_enqueue_brief" => true},
+        else: %{}
 
     case Map.fetch(raw, "pod_id") do
       :error ->

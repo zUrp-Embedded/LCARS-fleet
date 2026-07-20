@@ -783,7 +783,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       spawner: state.spawner,
       repo: state.repo,
       forge: state.forge_client,
-      forge_opts: state.forge_opts
+      forge_opts: state.forge_opts,
+      wake_recovery: state.wake_recovery
     }
   end
 

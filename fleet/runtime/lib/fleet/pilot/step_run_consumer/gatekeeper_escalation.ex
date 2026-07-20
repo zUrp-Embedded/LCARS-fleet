@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     receives the whole `state`.
     """
     @enforce_keys [:task_queue, :spawner, :repo, :forge, :forge_opts]
-    defstruct [:task_queue, :spawner, :repo, :forge, :forge_opts, :loader]
+    defstruct [:task_queue, :spawner, :repo, :forge, :forge_opts, :loader, :wake_recovery]
 
     @type t :: %__MODULE__{
             # Broker of eval briefs (prod default `Fleet.TaskQueue`).
@@ -58,7 +58,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
             forge: module(),
             forge_opts: keyword(),
             # Cap-profile loader (load + compose with default modops). nil → `Fleet.CapProfile`.
-            loader: module() | nil
+            loader: module() | nil,
+            # Wake-with-recovery of an already-alive gatekeeper (C-01). nil → `&WakeRecovery.wake/3`.
+            wake_recovery: (String.t(), (-> any()), keyword() -> :ok | {:error, term()}) | nil
           }
   end
 
@@ -172,9 +174,23 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
           :ok
 
         {:error, {:already_started, _pid}} ->
-          # Previous eval still closing (or re-dispatch): the brief is queued — wake, best-effort.
-          _ = seams.spawner.wake_pod(pod_id)
-          :ok
+          # Previous eval still closing (or re-dispatch): the brief is queued (enqueue-before-spawn) — wake
+          # WITH RECOVERY. C-01 (sonde convergence 2026-07-20): a bare `wake_pod`-then-`:ok` SWALLOWED a
+          # failed wake → a dead/stuck pod left the eval brief pending, the gate announced-but-never-run,
+          # the issue silently locked with NO failure reported (the dispatcher, by contrast, has recovery).
+          # Route through the SAME `WakeRecovery` — the module was BUILT for this ("gatekeeper reboot",
+          # brief already queued): re-roll (respawn + re-wake), then sysadmin escalation at the cap. The
+          # verdict is forge-driven (nothing needs THIS pod to survive), so a surfaced `{:error, _}`
+          # fail-louds upstream (issue stays visible), never a silent stall. wake_fun routed through the
+          # injected spawner (test seam).
+          wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
+
+          wake_recovery.(
+            pod_id,
+            fn -> seams.spawner.spawn_pod(cap, pod_id, spawn_opts) end,
+            wake_fun: &seams.spawner.wake_pod/1,
+            op: "gatekeeper-wake"
+          )
 
         {:error, _reason} = err ->
           err
