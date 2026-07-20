@@ -30,7 +30,7 @@ defmodule Fleet.API.Readiness do
   Each probe is defensive: an exception is folded into `:degraded`
   rather than crashing the endpoint (resilient read-model).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -219,6 +219,15 @@ defmodule Fleet.API.Readiness do
 
       :degraded ->
         probe("mcp.pod_facing", :degraded, detail)
+
+      # The pod-facing cross-check could not run (see MCP.Supervisor): unverified → NOT ready.
+      # Fail-closed — an unverifiable substrate is not announced operational.
+      :unknown ->
+        probe(
+          "mcp.pod_facing",
+          :degraded,
+          Map.put(detail, :note, "pod-facing cross-check unverified this tick — not ready")
+        )
     end
   end
 

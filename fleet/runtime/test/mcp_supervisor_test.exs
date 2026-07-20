@@ -24,5 +24,28 @@ defmodule Fleet.MCP.SupervisorTest do
       # No pod provisioned in the ambient test env → zero active acceptor/socket.
       assert detail.sockets == 0
     end
+
+    test ":unknown when the on-disk cross-check cannot run — fail-closed, never a hollow :operational" do
+      # Force the socket scan to raise (a non-path base makes Path.join/wildcard raise) → the
+      # deaf-pod cross-check could not run. The acceptor DynamicSupervisor is alive in the ambient
+      # test env, so we reach the cross-check. The status must NOT read :operational.
+      prev = Application.get_env(:fleet_mcp, :sock_base)
+      Application.put_env(:fleet_mcp, :sock_base, 123)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:fleet_mcp, :sock_base, prev),
+          else: Application.delete_env(:fleet_mcp, :sock_base)
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:unknown, detail} = Fleet.MCP.Supervisor.pod_facing_status()
+          assert detail.acceptor_supervisor == true
+          assert detail.note =~ "could not run"
+        end)
+
+      assert log =~ "scan FAILED"
+    end
   end
 end

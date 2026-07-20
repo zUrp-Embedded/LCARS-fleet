@@ -33,7 +33,7 @@ defmodule Fleet.MCP.Supervisor do
   (`Fleet.EventRouter.Application`, substrate, launched by `Fleet.Application`), not started
   here (no double-start).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use Supervisor
@@ -102,8 +102,11 @@ defmodule Fleet.MCP.Supervisor do
     * `:degraded`    — either the DynamicSupervisor is absent/dead (should run
       host-side but does not), OR it is alive but a pod has a socket FILE without
       an acceptor behind it (deaf pods after an emfile cascade). Hollow-green avoided.
+    * `:unknown`     — the DynamicSupervisor is alive but the on-disk socket scan
+      (the deaf-pod cross-check) could not run: neither `:operational` (unverified)
+      nor `:degraded` (nothing detected). The readiness caller treats it fail-closed.
   """
-  @spec pod_facing_status() :: {:operational | :degraded, map()}
+  @spec pod_facing_status() :: {:operational | :degraded | :unknown, map()}
   def pod_facing_status do
     if acceptor_supervisor_alive?() do
       sockets = active_sockets()
@@ -113,18 +116,32 @@ defmodule Fleet.MCP.Supervisor do
       # LOCAL probe (zero dep toward spawner): the socket FILES on disk survive a
       # cascade (only release_pod_socket erases them) → `files > alive acceptors` = some pods
       # have a socket-file WITHOUT an acceptor behind it = they are DEAF. Degraded, no longer operational.
-      orphaned = max(socket_files_on_disk() - sockets, 0)
+      case socket_files_on_disk() do
+        {:ok, files} ->
+          orphaned = max(files - sockets, 0)
 
-      if orphaned > 0 do
-        {:degraded,
-         %{
-           acceptor_supervisor: true,
-           sockets: sockets,
-           socket_files: sockets + orphaned,
-           note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
-         }}
-      else
-        {:operational, %{acceptor_supervisor: true, sockets: sockets}}
+          if orphaned > 0 do
+            {:degraded,
+             %{
+               acceptor_supervisor: true,
+               sockets: sockets,
+               socket_files: sockets + orphaned,
+               note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
+             }}
+          else
+            {:operational, %{acceptor_supervisor: true, sockets: sockets}}
+          end
+
+        # The cross-check could not run → we do NOT claim :operational (unverified) and we do NOT
+        # claim :degraded (nothing was detected, and a fabricated degraded would trigger a needless
+        # reap). :unknown is the honest state; the readiness caller treats it fail-closed.
+        {:error, reason} ->
+          {:unknown,
+           %{
+             acceptor_supervisor: true,
+             sockets: sockets,
+             note: "deaf-pod cross-check could not run (#{inspect(reason)}) — status unverified"
+           }}
       end
     else
       {:degraded, %{acceptor_supervisor: false, note: "PodSocketSupervisor not alive"}}
@@ -133,29 +150,24 @@ defmodule Fleet.MCP.Supervisor do
 
   # Socket files present under the per-pod base (created by ensure_pod_socket, erased by
   # release_pod_socket — an acceptor cascade does NOT erase them: that is the witness).
+  # `{:ok, count}` of the per-pod socket FILES (`<base>/<pod_id>/sock`), NOT the entries of `base` —
+  # those are the per-pod DIRECTORIES, and a stray dir or a half-provisioned pod-dir WITHOUT a `sock`
+  # would inflate the count → a FALSE "orphaned socket / deaf pod" degraded reading. The glob matches
+  # exactly the sockets. A FAILED scan returns `{:error, _}`, never a fabricated `0`: this scan IS the
+  # deaf-pod cross-check, and collapsing a failure to `0` would read `{:operational}` (a hollow green)
+  # even though the check could not run.
   defp socket_files_on_disk do
     base = Fleet.MCP.PodSocketSupervisor.base_dir()
 
-    # Count the actual per-pod socket FILES (`<base>/<pod_id>/sock`), NOT the entries of `base` — those
-    # are the per-pod DIRECTORIES, and a stray dir or a half-provisioned pod-dir WITHOUT a `sock` would
-    # inflate the count → a FALSE "orphaned socket / deaf pod" degraded reading (SOC-EFF-005). The glob
-    # matches exactly the sockets.
-    base
-    |> Path.join("*/sock")
-    |> Path.wildcard()
-    |> length()
+    {:ok, base |> Path.join("*/sock") |> Path.wildcard() |> length()}
   rescue
     e ->
-      # The socket scan IS the deaf-pod / orphaned-socket cross-check. Collapsing a FAILED scan to `0`
-      # yields `orphaned = max(0 - sockets, 0) = 0` → an `{:operational, …}` (green) reading even though
-      # the check could NOT run — a hollow green. We keep `0` (a fabricated `:degraded` would be worse), but
-      # LOUD: the operator must know the cross-check was blind this tick.
       Logger.warning(
         "MCP.Supervisor: on-disk socket-file scan FAILED (#{inspect(e)}) — deaf-pod cross-check could " <>
-          "not run, treating on-disk sockets as 0 (status may read operational without verification)"
+          "not run; status = :unknown (fail-closed, never a hollow :operational)"
       )
 
-      0
+      {:error, e}
   end
 
   defp acceptor_supervisor_alive? do
