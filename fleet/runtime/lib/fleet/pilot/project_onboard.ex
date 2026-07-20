@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -161,7 +161,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
     org = Keyword.get(opts, :org, "fleet")
-    name = full_name |> String.split("/") |> List.last()
+    name = Fleet.Layout.project_name(full_name)
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
@@ -197,7 +197,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   """
   @spec open(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def open(full_name, opts \\ []) when is_binary(full_name) do
-    name = full_name |> String.split("/") |> List.last()
+    name = Fleet.Layout.project_name(full_name)
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 

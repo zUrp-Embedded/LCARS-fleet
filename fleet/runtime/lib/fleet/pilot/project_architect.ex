@@ -53,12 +53,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
   """
   @spec pod_id_for(String.t()) :: String.t()
   def pod_id_for(repo_or_name) when is_binary(repo_or_name),
-    do: @pod_prefix <> project_name(repo_or_name)
-
-  @doc "The project name segment of a `owner/name` (or already-bare) repo reference."
-  @spec project_name(String.t()) :: String.t()
-  def project_name(repo_or_name) when is_binary(repo_or_name),
-    do: repo_or_name |> String.split("/") |> List.last()
+    do: @pod_prefix <> Fleet.Layout.project_name(repo_or_name)
 
   @doc """
   Ensures the per-project architect of `repo` (`owner/name`) is up — idempotent (alive → no-op).
@@ -72,7 +67,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     forge_opts = Keyword.take(opts, [:token, :base_url])
 
-    name = project_name(repo)
+    name = Fleet.Layout.project_name(repo)
     proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
     repo_id = Spawn.resolve_repo_id(forge, repo, forge_opts)

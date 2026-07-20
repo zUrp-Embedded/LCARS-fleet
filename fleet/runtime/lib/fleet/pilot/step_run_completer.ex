@@ -145,7 +145,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with %{} = dopts <- Map.get(step_run, :deliverable_opts),
          repo when is_binary(repo) <- Map.get(step_run, :repo),
-         work_dir = Path.join(work_root, project_name(repo)),
+         work_dir = Path.join(work_root, Fleet.Layout.project_name(repo)),
          true <- File.dir?(work_dir) do
       emit_provenance(work_dir, step_run, dopts, livrable_sha)
     else
@@ -179,8 +179,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
         :ok
     end
   end
-
-  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   @awaits_arch_label Labels.awaits_arch()
 

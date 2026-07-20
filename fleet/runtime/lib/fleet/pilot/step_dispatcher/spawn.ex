@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
   `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -533,14 +533,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   suffix). Distinct from the pod_id (repo-scoped technical key); here it is the human-readable Desktop label.
   """
   @spec rc_name(String.t(), String.t()) :: String.t()
-  def rc_name(repo, role), do: "#{project_name(repo)}_#{role}"
-
-  # Path/name-safe project name (charset [A-Za-z0-9-], zero space/`/`/`_`).
-  # Final segment of the repo, sanitized. It is THE source of `<project>` everywhere downstream (Desktop RC name,
-  # SANDBOX_HOME `/home/<project>`, seed-store, branch) via `rc_name` → a single point of truth, clean.
-  # No `_` (rc_name separator `<project>_<role>` → would keep the ambiguity).
-  defp project_name(repo),
-    do: repo |> String.split("/") |> List.last() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
+  def rc_name(repo, role), do: "#{Fleet.Layout.project_slug(repo)}_#{role}"
 
   @doc """
   Speaking slug from the issue title for the LOCAL branch (`feature/<slug>`).

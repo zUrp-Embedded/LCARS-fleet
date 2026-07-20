@@ -32,7 +32,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -117,7 +117,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   def physicalize(brief, repo, opts)
       when is_binary(brief) and brief != "" and is_binary(repo) and repo != "" do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
-    work_dir = Path.join(work_root, project_name(repo))
+    work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
 
     case commit(work_dir, brief, Keyword.delete(opts, :work_root)) do
       {:ok, %{ref: ref, sha: sha}} ->
@@ -146,7 +146,7 @@ defmodule Fleet.Workflow.BriefArtifact do
           {:ok, String.t()} | {:error, term()}
   def resolve(repo, ref, sha, opts \\ []) when is_binary(repo) and is_binary(ref) and is_binary(sha) do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
-    work_dir = Path.join(work_root, project_name(repo))
+    work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
 
     cond do
       not Fleet.Layout.valid_brief_ref?(ref) -> {:error, {:invalid_pointer_ref, ref}}
@@ -156,7 +156,6 @@ defmodule Fleet.Workflow.BriefArtifact do
   end
 
   # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
-  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   # Plain human name from the hint (versions live in git history, not in the filename). No
   # hint → the content's sha256 (legacy/test path).

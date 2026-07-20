@@ -56,7 +56,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   @spec pipeline_default(String.t(), keyword()) :: String.t()
   def pipeline_default(repo, opts \\ []) when is_binary(repo) do
     root = Keyword.get(opts, :projects_root, Fleet.Layout.projects_root())
-    path = Path.join([root, project_name(repo), @file_name])
+    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
 
     with {:ok, raw} <- File.read(path),
          {:ok, declaration} <- Jason.decode(raw),
@@ -183,5 +183,4 @@ defmodule Fleet.Pilot.ProjectIntensity do
     |> ExJsonSchema.Schema.resolve()
   end
 
-  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 end

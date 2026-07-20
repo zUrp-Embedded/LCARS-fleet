@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-20
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -208,8 +208,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
     head_branch = Keyword.get(opts, :head_branch)
     # Roots injectable (tests) — defaults = the container layout authority.
-    project_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), project_name(repo))
-    work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), project_name(repo))
+    project_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), Fleet.Layout.project_name(repo))
+    work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), Fleet.Layout.project_name(repo))
 
     with true <- is_binary(head_branch) || {:skip, :no_head_branch},
          true <-
@@ -268,8 +268,6 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         :ok
     end
   end
-
-  defp project_name(repo), do: repo |> String.split("/") |> List.last()
 
   defp comment(forge, repo, issue_n, body, opts) do
     case forge.post_comment(repo, issue_n, body, opts) do

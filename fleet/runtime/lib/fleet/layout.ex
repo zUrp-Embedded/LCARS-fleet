@@ -20,7 +20,7 @@ defmodule Fleet.Layout do
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   @projects_root "/home/projects"
@@ -46,6 +46,23 @@ defmodule Fleet.Layout do
   @doc "Meta/ops root (`/home/projects.work`) — journals, seeds, resume folders."
   @spec work_root() :: Path.t()
   def work_root, do: @work_root
+
+  @doc """
+  Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory
+  under `projects_root`/`work_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
+  derivation (C-06, sonde convergence 2026-07-20) — copied across ~8 sites before.
+  """
+  @spec project_name(String.t()) :: String.t()
+  def project_name(repo) when is_binary(repo), do: repo |> String.split("/") |> List.last()
+
+  @doc """
+  Path-safe project SLUG: `project_name/1` with anything outside `[A-Za-z0-9-]` folded to `-`. Used where
+  the project identity is interpolated into a shell/tmux name (e.g. the Desktop `rc_name`) — the raw
+  `project_name` may carry `.`/`_`. SINGLE SOURCE of the slug derivation (C-06).
+  """
+  @spec project_slug(String.t()) :: String.t()
+  def project_slug(repo) when is_binary(repo),
+    do: repo |> project_name() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
 
   @doc """
   Per-human runtime state (`~/.lcars`). An unresolvable HOME means a broken runtime →

@@ -21,6 +21,20 @@ defmodule Fleet.LayoutTest do
     assert String.ends_with?(dir, "/.lcars")
   end
 
+  describe "project reference — the single `owner/name → name`/`slug` authority (C-06)" do
+    test "project_name: last `/`-segment of a repo (or a bare name unchanged)" do
+      assert Layout.project_name("lordzurp/lcars-test") == "lcars-test"
+      assert Layout.project_name("bare-name") == "bare-name"
+    end
+
+    test "project_slug: project_name with anything outside [A-Za-z0-9-] folded to `-`" do
+      # `.`/`_` (legal in a name) become `-` so the slug is safe as a tmux/rc_name segment
+      # (`<slug>_<role>`): the `_` separator stays unambiguous.
+      assert Layout.project_slug("owner/my.proj_v2") == "my-proj-v2"
+      assert Layout.project_slug("owner/clean-name") == "clean-name"
+    end
+  end
+
   describe "work/ops artifact layout (the producer/validator shared truth)" do
     test "brief_ref: worker → briefs/, judge → gate-briefs/, name sanitized" do
       assert Layout.brief_ref(nil, "issue-3-engineer") == "briefs/issue-3-engineer.md"

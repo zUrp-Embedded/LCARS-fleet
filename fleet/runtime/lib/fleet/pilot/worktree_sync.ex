@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.WorktreeSync do
   want "clone == latest `main`". The timing with the merges therefore has no functional importance —
   that's what makes the non-coalescence inconsequential (the lease already spaces out the merges of a same repo).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -79,7 +79,7 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   defp do_sync(repo, root) do
     # The forge repo is `<org>/<name>`; the local clone lives under `<root>/<name>` (final segment).
-    name = repo |> String.split("/") |> List.last()
+    name = Fleet.Layout.project_name(repo)
     dir = Path.join(root, name)
 
     if File.dir?(Path.join(dir, ".git")) do
