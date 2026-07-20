@@ -59,7 +59,6 @@ defmodule Fleet.CapProfileTest do
       knowledge: {}
       invocation:
         lifetime_scope: one-shot
-      injects: {}
       modop_set:
         default: []
     """
@@ -107,7 +106,6 @@ defmodule Fleet.CapProfileTest do
         },
         "knowledge" => %{},
         "invocation" => %{"lifetime_scope" => "one-shot"},
-        "injects" => %{},
         "modop_set" => %{"default" => []}
       }
     }

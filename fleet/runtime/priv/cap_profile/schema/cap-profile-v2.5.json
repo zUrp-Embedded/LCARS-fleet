@@ -66,7 +66,6 @@
         "scope",
         "knowledge",
         "invocation",
-        "injects",
         "modop_set",
         "brief_kind"
       ],
@@ -98,12 +97,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "outputs": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
             }
           }
         },
@@ -111,25 +104,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "libs": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "skills": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "mcpServers": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "plugins": {
               "type": "array",
               "items": {
                 "type": "string"
@@ -153,14 +128,6 @@
                 "null"
               ],
               "description": "SP template used to materialize a PERMANENT pod (monk, archivist). Distinct from invocation.subagent_template, which implies a one-shot dispatch (G24-11)."
-            },
-            "skills_plugin_versions": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string",
-                "pattern": "^\\d+\\.\\d+\\.\\d+"
-              },
-              "description": "Per-plugin version pin (map plugin_name -> semver). Semver regex validated at load."
             }
           }
         },
@@ -198,9 +165,6 @@
             "host_native": {
               "type": "boolean"
             },
-            "heartbeat_keepalive": {
-              "type": "boolean"
-            },
             "bridge_enabled": {
               "type": "boolean"
             },
@@ -221,18 +185,6 @@
                 "plan"
               ],
               "description": "Claude CLI permission mode per role (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.LaunchSpec but the schema rejected the field, so it always fell to `default`). Absent = `default` (allow/deny lists ENFORCED). `bypassPermissions` re-opens yolo explicitly. Write enforcement is the MOUNT (RO/RW), not this — a judge keeps Write/Edit for its report, bounded by the mount."
-            },
-            "policy": {
-              "type": "string"
-            },
-            "rubber_duck_enabled": {
-              "type": "boolean"
-            },
-            "long_session_protocol": {
-              "type": "boolean"
-            },
-            "output_format": {
-              "type": "string"
             },
             "model": {
               "type": "string"
@@ -257,18 +209,6 @@
               "type": "integer",
               "minimum": 1,
               "description": "Per-role watchdog: max seconds of silence on the pod's active task before the result-deadline fires (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.Liveness but the schema rejected `timeouts`). Absent = a scope-coded default (one-shot 300 s; forever inert). INTEGER only (a float would crash the deadline arm)."
-            }
-          }
-        },
-        "injects": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "gitconfig": {
-              "type": "boolean"
-            },
-            "forge_signing_allowed": {
-              "type": "boolean"
             }
           }
         },

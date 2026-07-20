@@ -16,7 +16,6 @@ metadata:
   description: "Carte C2+ : revue du brief (consultant-juge) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
   presentation: "C2→C4 — La carte SÉRIEUSE : un consultant-juge valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui, matrice réservée C2→C4 : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
   applicable_intensity: [C2, C3, C4]
-  applicable_regime: [R1, R2]
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement).
@@ -41,15 +40,3 @@ spec:
       inputs:
         - ticket.body
 
-# Metadata cycle
-cycle:
-  regime_default: R2
-  score_target: 4/4
-  profile_preuve: CONFORMANCE
-
-# Sélection pipeline
-selection_priority:
-  - flag_pipeline_explicit
-  - ticket_body_brief
-  - intensity_json_pipeline_default
-  - default

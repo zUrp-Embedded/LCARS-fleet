@@ -64,17 +64,10 @@ spec:
     # (no `outputs`: the ready-room/outbox line was a SYSADMIN reliquat left over from starfleet's
     # previous role — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
   knowledge:
-    libs:
-      - methodologie-axiome-inference-vs-mecanisable
-      - methodologie-protocole-design-note
-      - methodologie-doctrine-yolo
-      - methodologie-regles-yolo
     skills:
       - memory-query
       - brainstorming
       - plan
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -93,16 +86,9 @@ spec:
     # bridge) — NO kick send-keys at all, yop included (live 2026-07-19: a resumed starfleet took
     # the bootstrap yop drizzle ~3 min to the cap). Flag-only; the human/bridge side is the armer.
     wake_send_keys: false
-    heartbeat_keepalive: false
     bridge_enabled: true     # user-facing front-desk → needs the Desktop bridge (like the arch)
-    policy: hide
     # (no `rubber_duck_enabled`: it is a DEAD flag — zero consumer in lib/ (the rubber-duck behaviour
     # lives in the modops/SP). Removed here 2026-07-19; the full field nuke is on the sabrer-list.)
-    long_session_protocol: true
-    output_format: text
-  injects:
-    gitconfig: true
-    forge_signing_allowed: false
   modop_set:
     default: [long-session-discipline]
     optional: [brainstorming, rubber-duck]

@@ -44,40 +44,7 @@
        "C4"
       ]
      }
-    },
-    "applicable_regime": {
-     "type": "array",
-     "items": {
-      "enum": [
-       "R1",
-       "R2"
-      ]
-     }
     }
-   }
-  },
-  "cycle": {
-   "type": "object",
-   "additionalProperties": false,
-   "properties": {
-    "regime_default": {
-     "enum": [
-      "R1",
-      "R2"
-     ]
-    },
-    "score_target": {
-     "type": "string"
-    },
-    "profile_preuve": {
-     "type": "string"
-    }
-   }
-  },
-  "selection_priority": {
-   "type": "array",
-   "items": {
-    "type": "string"
    }
   },
   "spec": {
@@ -130,13 +97,6 @@
           "deliverable"
          ]
         },
-        "effect": {
-         "enum": [
-          "reversible",
-          "fire_once"
-         ],
-         "description": "réservé : idempotence/fire-once, pas encore consommé par aucune logique"
-        },
         "needs": {
          "type": "array",
          "items": {
@@ -144,9 +104,6 @@
          },
          "uniqueItems": true,
          "description": "prédécesseurs (noms de steps), SANS doublon : un `needs` répété (copier-coller) posait deux fois la même arête → le graphe partait en rejet :fan_out avec un diagnostic MENTEUR (« 2 successeurs [b, b] » sur une chaîne linéaire). Le rejet vit ICI, en amont, avec le vrai motif."
-        },
-        "condition": {
-         "type": "string"
         },
         "inputs": {
          "type": "array",
@@ -159,12 +116,6 @@
          "items": {
           "type": "string"
          }
-        },
-        "coordHook": {
-         "type": [
-          "string",
-          "null"
-         ]
         },
         "decisions": {
          "type": "array",
@@ -236,39 +187,6 @@
            ]
           }
          ]
-        },
-        "post_extract": {
-         "type": "object",
-         "additionalProperties": false,
-         "properties": {
-          "git": {
-           "type": "object",
-           "required": [
-            "repo_url",
-            "branch"
-           ],
-           "additionalProperties": false,
-           "properties": {
-            "repo_url": {
-             "type": "string",
-             "minLength": 1
-            },
-            "branch": {
-             "type": "string",
-             "minLength": 1
-            },
-            "push": {
-             "type": "boolean"
-            },
-            "add_paths": {
-             "type": "array",
-             "items": {
-              "type": "string"
-             }
-            }
-           }
-          }
-         }
         }
        }
       }

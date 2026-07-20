@@ -45,14 +45,8 @@ spec:
     # barrier: `Bash(git push:*)` becomes disallowed (disallow > allow), not merely absent
     # from the allowlist. The pod CANNOT push.
     git_ops_denied: [push]
-    outputs: ["/home/commons/engineer/"]
   knowledge:
-    libs:
-      - methodologie-axiome-inference-vs-mecanisable
-      - methodologie-protocole-design-note
     skills: []  # modops are listed in modop_set
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -82,15 +76,7 @@ spec:
     # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
     mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
-    heartbeat_keepalive: false
     bridge_enabled: false
-    policy: hide
-    rubber_duck_enabled: false
-    long_session_protocol: false
-    output_format: text
-  injects:
-    gitconfig: true
-    forge_signing_allowed: true
   modop_set:
     default: []
     optional: [tdd, subagent-driven, rubber-duck]

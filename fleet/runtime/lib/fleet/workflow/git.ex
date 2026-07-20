@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.Git do
   @moduledoc """
   System-side git publication mechanism, post-EXTRACT. Composed by the
-  orchestration rail on `pod.completed`, when the step declares `post_extract.git`,
-  to turn the pod's work into a commit (then push) on the world side.
+  orchestration rail on `pod.completed`, when the producer's `spec.deliverable_mode`
+  is `git_native`, to turn the pod's work into a commit (then push) on the world side.
 
   Pure data → action. Two INDEPENDENT primitives (composed by `Fleet.Workflow.Deliverable`,
   which separates CONTENT from PUBLICATION — the deliverable gate runs between the two):
@@ -23,7 +23,7 @@ defmodule Fleet.Workflow.Git do
   `committer_*` reflects the system identity. Native git
   (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger

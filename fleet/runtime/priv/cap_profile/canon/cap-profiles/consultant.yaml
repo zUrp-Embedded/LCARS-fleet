@@ -41,16 +41,8 @@ spec:
     # restrictions remain: no push/reset/rebase/commit (audit role, never touches
     # the workspace).
     git_ops_denied: ["push", "reset", "rebase", "commit"]
-    outputs: ["/home/commons/consultant/"]
   knowledge:
-    libs:
-      - methodologie-axiome-inference-vs-mecanisable
-      - methodologie-protocole-design-note
-      - methodologie-doctrine-yolo
-      - methodologie-anti-patterns-agent-2026-05-16
     skills: []  # modops are listed in modop_set, not in skills
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -61,16 +53,8 @@ spec:
     subagent_template: null
     mcp_channels: ["fleet-control.consultant.*", "fleet-forge.consultant"]  # fleet-control: Memory-X + coord; fleet-forge: Gitea ticket routing
     host_native: false
-    heartbeat_keepalive: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (ephemeral, churny brief-judge) — no --remote-control
-    policy: hide
-    rubber_duck_enabled: false
-    long_session_protocol: false
-    output_format: text
-  injects:
-    gitconfig: false
-    forge_signing_allowed: false
   modop_set:
     default: []
     optional: [rubber-duck]

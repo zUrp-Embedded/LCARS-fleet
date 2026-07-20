@@ -17,7 +17,6 @@ metadata:
   description: "Light C1 : engineer + qualifier seul juge (plancher : le code compile ; tests runner à venir)."
   presentation: "C1 — LÉGÈRE : l'engineer livre, UN seul juge (qualifier) dont le plancher est « le code compile ». Pour un outil qui doit tenir debout sans mériter le pipeline complet."
   applicable_intensity: [C1]
-  applicable_regime: [R1, R2]
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement) : le qualifier seul.

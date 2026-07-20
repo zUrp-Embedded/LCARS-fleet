@@ -22,7 +22,6 @@ metadata:
   description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 step, gate terminal). Escalade gatekeeper sur échec de règle (dispatch_gatekeeper)."
   presentation: "C0→C4 — AUDIT PUR : un consultant lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
   applicable_intensity: [C0, C1, C2, C3, C4]
-  applicable_regime: [R1, R2]
 
 spec:
   # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique
@@ -49,15 +48,3 @@ spec:
         rules:
           - "audit_doc_exists AND audit_doc_non_empty"
 
-# Metadata cycle
-cycle:
-  regime_default: R1  # audit = data déclarative
-  score_target: 4/4
-  profile_preuve: CONFORMANCE
-
-# Sélection pipeline
-selection_priority:
-  - flag_pipeline_explicit
-  - ticket_body_brief
-  - intensity_json_pipeline_default
-  - default

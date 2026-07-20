@@ -16,7 +16,6 @@ metadata:
   description: "PoC C0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
   presentation: "C0 — PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
   applicable_intensity: [C0]
-  applicable_regime: [R1, R2]
 
 spec:
   # Jury VIDE délibéré (doctrine schéma : « an empty array is a deliberate zero-judge card »).

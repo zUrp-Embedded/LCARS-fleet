@@ -47,15 +47,8 @@ spec:
     # `Bash(git push:*)` stays denied even if re-added to allowedTools (defense in
     # depth, same as engineer).
     git_ops_denied: [push]
-    outputs: ["/home/commons/gatekeeper/"]
   knowledge:
-    libs:
-      - methodologie-protocole-design-note
-      - methodologie-axiome-inference-vs-mecanisable
-      - regles-meres-consolidees
     skills: []
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -70,16 +63,8 @@ spec:
     # `fleet-control.gatekeeper.*` (submit_result); the system writes the forge.
     mcp_channels: ["fleet-control.gatekeeper.*"]
     host_native: false
-    heartbeat_keepalive: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control
-    policy: hide
-    rubber_duck_enabled: true
-    long_session_protocol: false
-    output_format: json
-  injects:
-    gitconfig: true
-    forge_signing_allowed: false
   modop_set:
     default: [rubber-duck]
     optional: []

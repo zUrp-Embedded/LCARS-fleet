@@ -72,60 +72,6 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
-  test "V2.5 step with post_extract.git passes schema (face 2 of the git architecture decision)",
-       %{tmp_dir: dir} do
-    yaml = """
-    kind: WorkflowMap
-    metadata:
-      name: face2-step
-    spec:
-      max_rework_rounds: 1
-      jury: []
-      steps:
-        publish:
-          role: engineer
-          post_extract:
-            git:
-              repo_url: http://gitea/fleet/lcars
-              branch: feature/x
-              push: true
-              add_paths: ["docs/", "src/"]
-    """
-
-    File.write!(Path.join(dir, "face2-step.yaml"), yaml)
-    loaded = Loader.load!("face2-step", workflow_maps_root: dir)
-    step = get_in(loaded, ["steps", "publish"])
-    assert get_in(step, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
-    assert get_in(step, ["post_extract", "git", "branch"]) == "feature/x"
-    assert get_in(step, ["post_extract", "git", "push"]) == true
-    assert get_in(step, ["post_extract", "git", "add_paths"]) == ["docs/", "src/"]
-  end
-
-  @tag :tmp_dir
-  test "V2.5 post_extract.git without repo_url nor branch → invalid", %{tmp_dir: dir} do
-    yaml = """
-    kind: WorkflowMap
-    metadata:
-      name: face2-missing-required
-    spec:
-      max_rework_rounds: 1
-      jury: []
-      steps:
-        publish:
-          role: engineer
-          post_extract:
-            git:
-              push: true
-    """
-
-    File.write!(Path.join(dir, "face2-missing-required.yaml"), yaml)
-
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
-      Loader.load!("face2-missing-required", workflow_maps_root: dir)
-    end
-  end
-
-  @tag :tmp_dir
   test "V2.5 needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
   } do

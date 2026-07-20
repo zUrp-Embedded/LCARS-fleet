@@ -140,7 +140,6 @@ defmodule Fleet.Spawner.PodTest do
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot"},
-        "injects" => %{},
         "modop_set" => []
       }
     }
@@ -1868,7 +1867,6 @@ defmodule Fleet.Spawner.PodTest do
               "base_branch" => "main",
               "work_branch" => "work/ops"
             })
-            |> Map.put("injects", %{"gitconfig" => true})
       }
 
       StubBackend.set_reply(interactive_reply())

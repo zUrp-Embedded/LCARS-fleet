@@ -42,14 +42,8 @@ spec:
     # restrictions remain: no push (verdict-only) and no rebase (preserves
     # the tested history).
     git_ops_denied: ["push", "rebase"]
-    outputs: ["/home/commons/qualifier/"]
   knowledge:
-    libs:
-      - methodologie-axiome-inference-vs-mecanisable
-      - methodologie-protocole-design-note
     skills: []  # modops are listed in modop_set
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -60,16 +54,8 @@ spec:
     subagent_template: spec-reviewer
     mcp_channels: ["fleet-control.qualifier.*"]  # fleet-control: Memory-X + coord. NO fleet-forge channel: a judge clones in-pod and returns a payload verdict — NOTHING to do with the forge.
     host_native: false
-    heartbeat_keepalive: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (ephemeral, churny judge) — no --remote-control
-    policy: hide
-    rubber_duck_enabled: false
-    long_session_protocol: false
-    output_format: json
-  injects:
-    gitconfig: false
-    forge_signing_allowed: false
   modop_set:
     default: []
     optional: [dual-review]

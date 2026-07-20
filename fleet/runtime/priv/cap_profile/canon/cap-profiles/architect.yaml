@@ -59,19 +59,11 @@ spec:
     # Destructive patterns come from the universal baseline
     # (`_baseline-git-denied.yaml`, intangible) — not duplicated here.
     git_ops_denied: []
-    outputs: ["/home/ready-room/outbox/"]
   knowledge:
-    libs:
-      - methodologie-axiome-inference-vs-mecanisable
-      - methodologie-protocole-design-note
-      - methodologie-doctrine-yolo
-      - methodologie-regles-yolo
     skills:
       - memory-query
       - brainstorming
       - plan
-    mcpServers: []
-    plugins: []
     monk_registry: null
     monk_instance: null
   invocation:
@@ -84,19 +76,11 @@ spec:
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false
-    heartbeat_keepalive: false
     bridge_enabled: true
     # The arch terminal IS the human's interactive session: the send-keys wake fallback would
     # type "wake" into the human's prompt (costs a spurious turn — seen live 2026-07-19, fired
     # DURING nominal Monitor delivery). Flag-only for this pod; wake.failed stays the net.
     wake_send_keys: false
-    policy: hide
-    rubber_duck_enabled: false
-    long_session_protocol: true
-    output_format: text
-  injects:
-    gitconfig: true
-    forge_signing_allowed: false
   modop_set:
     default: [long-session-discipline]
     optional: [brainstorming, rubber-duck]
