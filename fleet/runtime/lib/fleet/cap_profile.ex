@@ -453,6 +453,23 @@ defmodule Fleet.CapProfile do
   def name(%__MODULE__{}), do: raise(ArgumentError, "CapProfile without a name — forbidden state")
 
   @doc """
+  Resolves the requested cap-profile NAME from an admin-spawn request DTO (string-keyed map):
+  `cap_profile_name` takes precedence, `role` is the fallback; both blank-normalized (`""` / non-string
+  → `nil`, so a truthy `""` never masks a valid `role`). SINGLE SOURCE of the `cap_profile_name || role`
+  interpretation (C-03/C-04, sonde convergence 2026-07-20), shared by the API admission
+  (`Fleet.API.SpawnAdmission`) and the async consumer (`Fleet.Spawner.PublishConsumer`) — the Bus is NOT
+  a trust boundary, so both parse, but from ONE parser: the DTO interpretation cannot drift between what
+  admission validates and what the consumer executes.
+  """
+  @spec name_from_request(map()) :: String.t() | nil
+  def name_from_request(dto) when is_map(dto) do
+    blank_to_nil(Map.get(dto, "cap_profile_name")) || blank_to_nil(Map.get(dto, "role"))
+  end
+
+  defp blank_to_nil(v) when is_binary(v) and v != "", do: v
+  defp blank_to_nil(_), do: nil
+
+  @doc """
   The role's index in the hexspeak UUID (`metadata.role_index`, 0..15) — the `R` nibble of the
   deterministic session_id. The role → slot catalogue lives HERE: the encoder `Fleet.Spawner.SessionId`
   no longer catalogues, it receives this index. **SINGLE SOURCE** of this read.

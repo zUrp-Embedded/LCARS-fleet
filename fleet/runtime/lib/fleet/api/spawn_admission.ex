@@ -202,7 +202,7 @@ defmodule Fleet.API.SpawnAdmission do
     # is TRUTHY, so `Map.get(p, "cap_profile_name") || Map.get(p, "role")` returned "" for
     # `{cap_profile_name: "", role: "reviewer"}` — silently IGNORING the valid role and answering
     # `:missing_cap_profile`. Fail-closed by luck, wrong verdict by construction.
-    case presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role")) do
+    case Fleet.CapProfile.name_from_request(payload) do
       name when is_binary(name) ->
         # C-03 (sonde convergence 2026-07-20): validate the EFFECTIVE profile (`resolve` = base + default
         # modops), the SAME one `PublishConsumer` spawns — not the bare `load`. A structural modop overlay

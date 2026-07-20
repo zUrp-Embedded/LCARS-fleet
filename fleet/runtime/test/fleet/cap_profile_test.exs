@@ -1208,4 +1208,27 @@ defmodule Fleet.CapProfileTest do
                Fleet.CapProfile.resolve(IncompatibleLoader, "x", ["b"])
     end
   end
+
+  describe "name_from_request/1 — the shared admin-spawn name parser (C-04)" do
+    test "cap_profile_name takes precedence over role" do
+      assert Fleet.CapProfile.name_from_request(%{
+               "cap_profile_name" => "engineer",
+               "role" => "reviewer"
+             }) == "engineer"
+    end
+
+    test "role is the fallback when cap_profile_name is absent" do
+      assert Fleet.CapProfile.name_from_request(%{"role" => "reviewer"}) == "reviewer"
+    end
+
+    test "a blank cap_profile_name never masks a valid role (the truthy \"\" trap)" do
+      assert Fleet.CapProfile.name_from_request(%{"cap_profile_name" => "", "role" => "reviewer"}) ==
+               "reviewer"
+    end
+
+    test "no usable name (blank/nil/absent) → nil" do
+      assert Fleet.CapProfile.name_from_request(%{"cap_profile_name" => "", "role" => nil}) == nil
+      assert Fleet.CapProfile.name_from_request(%{}) == nil
+    end
+  end
 end

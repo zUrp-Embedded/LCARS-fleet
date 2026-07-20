@@ -94,11 +94,11 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   # `payload` = application map (the canonical %Fleet.Event{} carries issue_id IN the payload).
   defp handle_spawn_request(payload, state) do
-    # `presence/1` on EACH candidate before the fallback (the Bus is no-auth: SpawnAdmission
-    # broadcasts a parsed DTO, but any process can emit on fleet.events) — a truthy "" in
-    # `cap_profile_name` would short-circuit `||` and mask a valid `role`.
-    # This consumer is a REAL boundary, not defensive re-validation.
-    name = presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role"))
+    # Single-source `cap_profile_name || role` resolution (C-04): the Bus is no-auth (SpawnAdmission
+    # broadcasts a parsed DTO, but any process can emit on fleet.events) — this consumer is a REAL
+    # boundary, not defensive re-validation, so it re-parses, but from the SAME authority as admission
+    # (`CapProfile.name_from_request`, blank-normalized: a truthy "" never masks a valid `role`).
+    name = Fleet.CapProfile.name_from_request(payload)
 
     issue_id = Map.get(payload, "issue_id") || ""
 
@@ -143,12 +143,6 @@ defmodule Fleet.Spawner.PublishConsumer do
     end
   end
 
-  # A usable name is a non-empty string; anything else (nil, "", non-string) counts as ABSENT so
-  # the `||` fallback reaches the next candidate instead of short-circuiting on a truthy "".
-  # Same rule as `SpawnAdmission.presence/1` (the admission twin of this consumer).
-  defp presence(v) when is_binary(v) and v != "", do: v
-  defp presence(_), do: nil
-
   # `spawn.failed` alarm (spawn cycle) — emitted when the dispatch of an `admin.spawn.request` RAISED and
   # the spawn is therefore dropped. The rescue protects the PROCESS only (a Bus down must not kill the
   # consumer), BUT the broadcast failure is NOT swallowed silently: Logger.error, because losing
@@ -168,9 +162,7 @@ defmodule Fleet.Spawner.PublishConsumer do
     result =
       Bus.emit(:spawner, :"spawn.failed",
         payload: %{
-          "cap_profile_name" =>
-            presence(Map.get(payload, "cap_profile_name")) || presence(Map.get(payload, "role")) ||
-              "unknown",
+          "cap_profile_name" => Fleet.CapProfile.name_from_request(payload) || "unknown",
           "issue_id" => Map.get(payload, "issue_id"),
           "reason" => reason_cat,
           "reason_detail" => reason_detail
