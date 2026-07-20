@@ -10,19 +10,19 @@ defmodule Fleet.API.ControlRouter do
   reasoning is the mirror image. `/api/admin/spawn` is the one remaining WRITE (it spawns pods);
   its only legitimate client is `bin/lcars`, run host-side by the human. A pod runs under bwrap
   with `--share-net`, so it SHARES the host network namespace: its `127.0.0.1` is the host's, and
-  it can reach any TCP loopback listener — including a no-auth admin endpoint (A-21, confused
-  deputy: a compromised/injected pod re-obtains the "spawner" capability the MCP tool-gating
-  denies it, amplifying claude sessions on the human's subscription; bounded by `max_pods` but
-  self-refilling). A UNIX socket closes that BY CONSTRUCTION: the socket file lives under
+  it can reach any TCP loopback listener — including a no-auth admin endpoint. That is the confused
+  deputy: a compromised/injected pod re-obtains the "spawner" capability the MCP tool-gating denies
+  it, amplifying claude sessions on the human's subscription; bounded by `max_pods` but
+  self-refilling. A UNIX socket closes that BY CONSTRUCTION: the socket file lives under
   `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not in the
   pod's mount namespace. The boundary is the filesystem, not a firewall or an auth token. The
   human's `lcars` runs host-side and reaches it via `curl --unix-socket`; the pod cannot.
 
   The READ surface (`/api/health`, `/api/version`, …) and the WS event stream stay on TCP
   (`Fleet.API.Rest` / `Fleet.API.WS`): they are low-risk (a browser dashboard needs TCP, and a
-  pod reading them is read-only information disclosure, not the spawn amplification A-21 is about).
+  pod reading them is read-only information disclosure, not the spawn amplification described above).
 
-  ## Contract (unchanged from the old TCP route)
+  ## Contract
 
   All the admission POLICY lives in `Fleet.API.SpawnAdmission.admit/1` (DTO allowlist, path-safe
   pod_id, loadable cap-profile, host-native refused, one-shot brief R18). This router only maps
@@ -143,15 +143,14 @@ defmodule Fleet.API.ControlRouter do
   (defense-in-depth — the real boundary is the pod's mount namespace, which never contains the
   file). Returns `{:ok, pid}` of the EMBEDDED ranch tree, LINKED to the calling supervisor.
 
-  F-20 — the tree MUST be embedded (`Plug.Cowboy.child_spec` start, not `Plug.Cowboy.http`):
-  the old-style `http/3` parks the listener under the ranch APPLICATION's own supervisor, so
-  the pid returned here had a foreign parent — at OTP shutdown, our supervisor's exit signal
-  was IGNORED (a supervisor only obeys its real parent) and the stop hung FOREVER on a 'DOWN'
-  that could never come (`type: :supervisor` → shutdown `:infinity`) → every graceful stop
-  ended in the launcher's 30s fallback kill. Embedded, the ranch sup is a true child: the
-  shutdown drains and the BEAM dies clean. (`Listener.cowboy_child` is not used here on
-  purpose: BindAddress governs NETWORK surfaces — an AF_UNIX path is not one — and the
-  stale-socket rm + chmod must run at every (re)start, hence this MFA.)
+  The tree MUST be embedded — `Plug.Cowboy.child_spec` start, never `Plug.Cowboy.http`. The
+  obvious `http/3` parks the listener under ranch's OWN application supervisor: the pid returned
+  here gets a foreign parent, so our supervisor's shutdown signal has no authority over it (a
+  supervisor only obeys its real parent) and the stop hangs on a 'DOWN' that never comes
+  (`type: :supervisor` → shutdown `:infinity`), down to the launcher's fallback kill. Embedded,
+  the ranch sup is a true child: the shutdown drains and the BEAM dies clean. (`Listener.cowboy_child`
+  is not used on purpose: BindAddress governs NETWORK surfaces — an AF_UNIX path is not one — and
+  the stale-socket rm + chmod must run at every (re)start, hence this MFA.)
   """
   @spec start_control_listener(Path.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_control_listener(sock, opts \\ []) when is_binary(sock) do

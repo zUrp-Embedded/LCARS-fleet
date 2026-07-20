@@ -23,7 +23,7 @@ defmodule Fleet.API.Rest do
 
   The one WRITE — `POST /api/admin/spawn` — is NOT on this TCP surface. It lives on the
   local AF_UNIX control socket (`Fleet.API.ControlRouter`, `~/.lcars/run/api.sock`), served
-  host-side to `bin/lcars`. RATIONALE (A-21): a pod runs under bwrap with `--share-net`, so it
+  host-side to `bin/lcars`. RATIONALE: a pod runs under bwrap with `--share-net`, so it
   SHARES the host netns — its `127.0.0.1` is the host's, and it could reach a no-auth TCP admin
   endpoint and re-obtain the spawner capability the MCP tool-gating denies it (confused deputy).
   A UNIX socket closes that BY CONSTRUCTION (the socket file is outside the pod's mount namespace
@@ -36,7 +36,7 @@ defmodule Fleet.API.Rest do
   **No config writing**: an active directive (cap-profiles, coord-policies,
   workflow_maps) is only modified via git/forge (the traced source of truth), never via a POST.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use Plug.Router
@@ -86,7 +86,7 @@ defmodule Fleet.API.Rest do
 
   # `POST /api/admin/spawn` is NOT served here: the one WRITE door lives OFF TCP on the
   # local AF_UNIX control socket (`Fleet.API.ControlRouter`), so a pod on the shared host netns
-  # cannot reach it (A-21). This TCP surface is READ-ONLY. A stray POST here falls through to
+  # cannot reach it. This TCP surface is READ-ONLY. A stray POST here falls through to
   # the 404 below — honest, not a silent accept.
 
   match _ do

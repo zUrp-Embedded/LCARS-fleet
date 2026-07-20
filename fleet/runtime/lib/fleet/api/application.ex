@@ -21,7 +21,7 @@ defmodule Fleet.API.Application do
   `:one_for_one` — Cowboy listener restart `:permanent`.
   Pre-registration of event atoms (created at compile-time, not derived from external input → no atom-exhaustion DoS leak).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use Supervisor
@@ -103,7 +103,7 @@ defmodule Fleet.API.Application do
 
       # TCP listener = READ surface + WS (loopback by default via BindAddress; public exposure =
       # named opt-in LCARS_BIND_HOST). The WRITE (/api/admin/spawn) is NOT here — it moved onto
-      # the AF_UNIX control socket below, off the network the pod shares (A-21, cf. Rest § Auth).
+      # the AF_UNIX control socket below, off the network the pod shares (cf. Rest § Auth).
       tcp =
         Fleet.EventRouter.Listener.cowboy_child(
           plug: Fleet.API.Rest,
