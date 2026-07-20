@@ -1,32 +1,42 @@
 # Fleet.API — domain card
 
-**Date**: 2026-05-10
-**Last revised**: 2026-07-18
-**Status**: active — public REST + WS API (surface)
+**Date**: 2026-07-12
+**Last revised**: 2026-07-20
+**Status**: active — external surface of the fleet (REST + WS + admin control socket)
 **Referenced by**: —
 
-LCARS public API (external surface): REST + WS on a per-human port. Client-agnostic
-(consumers: `bin/lcars`, health/readiness probes). **No-auth by design** — the security contract
-is the container's network isolation, not an app-level token (see `Fleet.API.Rest` § Auth).
+The fleet's external surface. Client-agnostic: `bin/lcars`, health/readiness probes and
+the observation deck are consumers among others, none coupled to the internals.
 
-**This file is a map, not the contract.** Each module owns its contract in its own
-`@moduledoc` — read those (`h Fleet.API` in IEx, or `lib/`). Nothing here is restated,
-only pointed at.
+**No-auth by design** — the security contract is the container's network isolation, not an
+app-level token. The one exception to "read-only over the network" is the admin write, which
+is moved OFF TCP entirely (see invariants).
 
-## Modules
+**This file is a map. Each module owns its contract in its own `@moduledoc` — read those
+(`h Fleet.API` for the domain overview, then `h Fleet.API.<Module>`). Nothing here is
+restated, only pointed at.**
 
-- `Fleet.API` — context moduledoc (REST + WS overview, vendor frontier); no code
-- `Fleet.API.Rest` — `Plug.Router` HTTP: no-auth reads (health/version/readiness) + maps spawn-admission verdicts to HTTP statuses
-- `Fleet.API.WS` — Cowboy WebSocket `/ws`: PubSub subscribe + per-client topic filter + 30s heartbeat
-- `Fleet.API.SpawnAdmission` — the `POST /api/admin/spawn` admission pipeline (DTO allowlist → path-safe `pod_id` → cap-profile → host-native fail-closed → brief-required, mirror of R18); pure functions
-- `Fleet.API.Readiness` — LIVE operational state (anti-hollow-green); `deep/0` → `operational|degraded` + subsystems
-- `Fleet.API.BuildInfo` — observable build stamp (`current/0` → `sha`/`dirty`/`ref`/`source`); total, memoized
-- `Fleet.API.Application` — `:one_for_one` supervisor; starts the Cowboy listener; `post_boot/0` = build-info trace (no sd_notify: no systemd deployment)
+## Invariants
+
+- The public TCP surface is **read-only**. The single write, `POST /api/admin/spawn`, is served
+  off TCP on a local AF_UNIX socket a pod on the shared network cannot reach — so a TCP client
+  hitting that path gets a 404, not a write. Split proven in `Fleet.API.Rest` + `ControlRouter`.
+- No app-level auth. Confidentiality of the admin socket rests on its `0600` mode; everything
+  else rests on network/container isolation. A change to either is a security decision.
+
+## Modules — read the `@moduledoc` for the contract
+
+- `Fleet.API` — domain overview + vendor frontier (context module, no code)
+- `Fleet.API.Rest` — the read-only TCP HTTP surface
+- `Fleet.API.ControlRouter` — the admin write door, on the AF_UNIX socket
+- `Fleet.API.WS` — the `/ws` WebSocket surface onto the PubSub bus
+- `Fleet.API.SpawnAdmission` — the spawn-admission pipeline (pure functions)
+- `Fleet.API.Readiness` — live operational state (anti-hollow-green)
+- `Fleet.API.BuildInfo` — observable build stamp
+- `Fleet.API.Application` — the domain supervisor + listener wiring
 
 ## Config & deps
 
-- Knob `:fleet_api, :http_port` — Cowboy port, `fetch_env!` fail-loud; set by `runtime.exs` from `FLEET_API_PORT` (per-human, `bin/fleet_v2`); `0` in `:test`.
-- Knob `:fleet_api, :start_listener` (default `true`; `false` in `:test` — REST via `Plug.Test`, WS via direct callbacks).
-- Env `LCARS_BIND_HOST` (default `127.0.0.1`) — listener bind IP; local-only by default (frontier = network isolation).
-- Deps (all descending — see `use Boundary`): `fleet_event_router` (Bus + listener), `fleet_pilot` (readiness step probe), `fleet_mcp` (readiness pod-facing probe), `fleet_spawner` (admission + backend), `fleet_starfleet` (shutdown dispatcher), `fleet_cap_profile` (cap-profile validation), + `plug`/`plug_cowboy`/`jason`.
-- Vendor frontier: N0 (vendor-agnostic). REST/WS split: deferred (criterion in the façade `@moduledoc`).
+Knobs and env vars are not inventoried here — they live where they are read (`config/runtime.exs`,
+the `use Boundary` deps of `Fleet.API`) and drift if copied. The vendor frontier is N0 (see
+`h Fleet.API`).

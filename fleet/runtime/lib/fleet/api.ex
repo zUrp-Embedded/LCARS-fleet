@@ -42,12 +42,13 @@ defmodule Fleet.API do
 
   ## Sub-modules
 
-    * `Fleet.API.Rest` — Plug.Router HTTP REST endpoints (per-human port, laid down by bin/fleet_v2)
-      (GET workflow_runs/issues/pods/health + POST admin/spawn) — no-auth
-      reads, guarded writes (no `X-Auth-Token` HMAC:
-      the boundary = network/container isolation, cf. `Fleet.API.Rest` §Auth)
-    * `Fleet.API.WS` — Cowboy WebSocket handler `:<port>/ws` (per-human port, bin/fleet_v2) subscribes
-      the Phoenix.PubSub bus + per-client topic filter + 30s heartbeat
+    * `Fleet.API.Rest` — Plug.Router HTTP over TCP (per-human port, laid down by bin/fleet_v2):
+      no-auth GET reads (workflow_runs/issues/pods/health/version/readiness). No `X-Auth-Token`
+      HMAC — the boundary is network/container isolation (`h Fleet.API.Rest` §Auth).
+    * `Fleet.API.ControlRouter` — the one WRITE, `POST /api/admin/spawn`, served OFF this TCP
+      surface on a local AF_UNIX socket a pod on the shared network cannot reach.
+    * `Fleet.API.WS` — Cowboy WebSocket handler `:<port>/ws` subscribes the Phoenix.PubSub bus
+      + per-client topic filter + 30s heartbeat
 
   ## Deferred split
 
@@ -68,6 +69,6 @@ defmodule Fleet.API do
   N0 (vendor-agnostic, no inference — orchestration via the PubSub bus;
   no vendor inference in this layer).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 end
