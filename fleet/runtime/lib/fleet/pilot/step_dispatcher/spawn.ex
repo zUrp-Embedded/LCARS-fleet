@@ -242,11 +242,27 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # A POST-lock step failed → compensation (removal of the lock, else stuck forever).
         # Kill ONLY if fresh spawn (a re-brief NEVER kills the living eng + its context).
         if not alive_before?, do: safe_kill(spawner, pod_id)
-        _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
+
+        # CI-10 (audit intégrité 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
+        # return + a flat "lock removed" log LIED when the removal failed (the issue stays in-flight while
+        # the message claims the opposite). Capture it and log the FACT. A failed removal is
+        # auto-repairable (unlike a teardown that erases its proof, CI-05): the Poller reconciliation
+        # reclaims the orphan lock in ≤2 ticks — but we name the real cause instead of absorbing the
+        # recovery time under a false success.
+        lock_state =
+          case forge.remove_label(repo, lock_target, @in_flight_label, forge_opts) do
+            {:ok, _} ->
+              "lock removed"
+
+            other ->
+              "lock removal FAILED (#{inspect(other)}) — issue stays lcars-in-flight, " <>
+                "Poller reconciliation reclaims (≤2 ticks)"
+          end
 
         # Stopwatch started with the lock → stopped with it (the dispatch never succeeded, the elapsed
         # time would be noise, not real work). SAME identity as at the start (`as_role`, that
-        # same role) — Gitea accepts the stop ONLY from the user who started it.
+        # same role) — Gitea accepts the stop ONLY from the user who started it. Pure Gitea metric
+        # (best-effort, NOT load-bearing) → its failure is not surfaced.
         _ =
           with {:ok, ro} <- Fleet.Pilot.ForgeClient.as_role(forge_opts, role) do
             forge.stop_stopwatch(repo, lock_target, ro)
@@ -254,7 +270,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
-            "(lock removed#{if(alive_before?, do: "", else: ", pod killed")} — re-dispatch on next tick)"
+            "(#{lock_state}#{if(alive_before?, do: "", else: ", pod killed")} — re-dispatch on next tick)"
         )
 
         err

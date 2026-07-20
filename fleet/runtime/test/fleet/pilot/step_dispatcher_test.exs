@@ -115,10 +115,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def count_comments_marked(_repo, _index, _prefix, opts),
       do: Keyword.get(opts, :_test_conflict_rounds, {:ok, 0})
 
-    # F181: compensation — lock removal on a post-lock failure.
-    def remove_label(_repo, _n, label, _opts) do
+    # F181: compensation — lock removal on a post-lock failure. Seam `_test_remove_label` (default
+    # {:ok, :removed}) lets a test force the removal to FAIL (CI-10: honest "lock removal FAILED" log).
+    def remove_label(_repo, _n, label, opts) do
       send(self(), {:removed_label, label})
-      {:ok, :removed}
+      Keyword.get(opts, :_test_remove_label, {:ok, :removed})
     end
 
     # ②.1d: FF merge (PR-state-driven promote, all judges OK). Signals for assertion.
@@ -439,6 +440,29 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:spawned, "issue-42", _}
       assert_received {:killed, "lordzurp-lcars-test-engineer"}
       assert_received {:removed_label, "lcars-in-flight"}
+    end
+
+    test "CI-10: POST-lock failure + remove_label FAILS → honest 'lock removal FAILED' log, never the 'lock removed' lie" do
+      payload = eng_issue()
+
+      opts =
+        dispatch_opts(
+          task_queue: FailTaskQueue,
+          forge_opts: [_test_route: {:ok, {"g", "build"}}, _test_remove_label: {:error, :forge_down}]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:enqueue_failed, :broker_down}} =
+                   StepDispatcher.dispatch_issue(payload, opts)
+        end)
+
+      # The compensation ATTEMPTED the removal (message sent) but it FAILED → the log names the FACT
+      # (issue stays in-flight, reconciliation reclaims). Scoped to THIS pod (bleed-proof, capture_log is
+      # global); NEVER the pre-CI-10 flat "lock removed" for this pod.
+      assert_received {:removed_label, "lcars-in-flight"}
+      assert log =~ ~r/pod=lordzurp-lcars-test-engineer.*lock removal FAILED/
+      refute log =~ ~r/pod=lordzurp-lcars-test-engineer.*\(lock removed/
     end
 
     # MA-17 — escalated wake (unreachable pod, re-wake KO → {:error,{:escalated,_}}). A discarded
