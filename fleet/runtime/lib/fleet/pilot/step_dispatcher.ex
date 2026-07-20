@@ -162,10 +162,9 @@ defmodule Fleet.Pilot.StepDispatcher do
                Opts.tag_err(
                  workflow_map_role(
                    route,
-                   # `resolve` (not bare `load`): the producer pod gets its role's composed modops
-                   # like every launch site (catalogue chantier L1a). Step-modops (B-01) will thread
-                   # here in L1a.3.
-                   &Fleet.CapProfile.resolve(loader, &1),
+                   # `loader` (module) — `workflow_map_role` reads the step's `modops` (B-01) and
+                   # resolves the role WITH them (composed like every launch site, catalogue L1a).
+                   loader,
                    workflow_map_loader,
                    Keyword.get(opts, :prefetched_workflow_map)
                  ),
@@ -443,27 +442,39 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Route nil = ANOMALY: the poller onboards every routeless one BEFORE dispatch (ensure_workflow_map_or_onboard)
   # → if we arrive here without a route, fail-loud, NEVER a silent eng fallback. The role ALWAYS comes from the
   # workflow_map position (written route).
-  defp workflow_map_role(nil, _load_role, _workflow_map_loader, _prefetched_workflow_map),
+  defp workflow_map_role(nil, _loader, _workflow_map_loader, _prefetched_workflow_map),
     do: {:error, :unrouted}
 
   defp workflow_map_role(
          {workflow_map_name, step},
-         load_role,
+         loader,
          workflow_map_loader,
          prefetched_workflow_map
        ) do
     with {:ok, workflow_map} <-
            workflow_map_or_load(prefetched_workflow_map, workflow_map_name, workflow_map_loader),
          {:ok, role} <- workflow_map_step_role(workflow_map, workflow_map_name, step),
-         {:ok, profile} <- load_role.(role) do
-      # We surface the whole STEP_SPEC (extensible) rather than an isolated field. build_brief
-      # reads `brief_kind` there (per-step override: consultant worker → judge without a duplicate profile) AND
-      # `judge_target` (judges the BRIEF vs a deliverable). No nil case: `workflow_map_step_role`
-      # above already proved the step EXISTS in the map (unknown step → error before this line).
-      step_spec = get_in(workflow_map, ["steps", step])
+         # STEP_SPEC read BEFORE the resolve: it carries `modops` (B-01 — the step's optional
+         # modops, validated ⊆ the role's `optional` by `resolve`). `brief_kind`/`judge_target`
+         # are surfaced too (per-step overrides). No nil case: `workflow_map_step_role` proved the
+         # step EXISTS in the map above.
+         step_spec = get_in(workflow_map, ["steps", step]),
+         step_modops = step_modops(step_spec),
+         {:ok, profile} <- Fleet.CapProfile.resolve(loader, role, step_modops) do
       {:ok, {role, profile, step_spec}}
     end
   end
+
+  # Step-level optional modops (B-01), `[]` if absent/malformed (defensive — a non-list yields no
+  # extra modop rather than crashing the dispatch).
+  defp step_modops(step_spec) when is_map(step_spec) do
+    case Map.get(step_spec, "modops") do
+      l when is_list(l) -> l
+      _ -> []
+    end
+  end
+
+  defp step_modops(_), do: []
 
   # WorkflowMap pre-loaded (poller) → reused; else loaded via the seam.
   defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader),

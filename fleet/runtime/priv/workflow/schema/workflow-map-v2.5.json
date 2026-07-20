@@ -110,6 +110,14 @@
          "type": "string",
          "minLength": 1
         },
+        "modops": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "minLength": 1
+         },
+         "description": "OPTIONAL step-modops (B-01, catalogue chantier 2026-07-20): activates modops the step's ROLE declares in its cap-profile `modop_set.optional` (e.g. `modops: [tdd]` on a `role: engineer` step = an engineer in tdd mode). NEVER loads another role's profile (killed as incoherent). Validated at dispatch by `CapProfile.resolve` (⊆ optional, no incompatible pair) — an out-of-optional modop is refused. Absent = the role's default modops only."
+        },
         "brief_kind": {
          "enum": [
           "worker",

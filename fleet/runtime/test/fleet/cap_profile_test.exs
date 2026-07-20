@@ -1148,5 +1148,42 @@ defmodule Fleet.CapProfileTest do
     test "load error propagates (never a half-resolved profile)" do
       assert {:error, :not_found} = Fleet.CapProfile.resolve(LoadOnlyLoader, "ghost")
     end
+
+    # B-01 guard: a step can only activate a modop the ROLE declares in its `optional`.
+    test "extra modop IN the role's optional → allowed (engineer + tdd)" do
+      assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
+      assert_received {:composed, "engineer", ["rubber-duck", "tdd"]}
+    end
+
+    test "extra modop OUTSIDE the role's optional → refused (no silent role-mixing)" do
+      assert {:error, {:modops_not_in_optional, ["evil"]}} =
+               Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["evil"])
+
+      refute_received {:composed, _, _}
+    end
+
+    defmodule IncompatibleLoader do
+      def load("x"),
+        do:
+          {:ok,
+           %Fleet.CapProfile{
+             kind: "CapabilityProfile",
+             metadata: %{},
+             spec: %{
+               "modop_set" => %{
+                 "default" => ["a"],
+                 "optional" => ["b"],
+                 "incompatible" => [["a", "b"]]
+               }
+             }
+           }}
+
+      def compose(_role, _modops), do: {:ok, %Fleet.CapProfile{kind: "x", metadata: %{}, spec: %{}}}
+    end
+
+    test "activating an incompatible pair (default a + optional b, a⊥b) → refused" do
+      assert {:error, {:modops_incompatible, ["a", "b"]}} =
+               Fleet.CapProfile.resolve(IncompatibleLoader, "x", ["b"])
+    end
   end
 end

@@ -187,7 +187,8 @@ defmodule Fleet.CapProfile do
   @spec resolve(module(), String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
   def resolve(loader, role, extra_modops \\ [])
       when is_atom(loader) and is_binary(role) and is_list(extra_modops) do
-    with {:ok, base} <- loader.load(role) do
+    with {:ok, base} <- loader.load(role),
+         :ok <- validate_extra_modops(base, extra_modops) do
       # A loader seam without `compose/2` is a TEST STUB (a fixed `%CapProfile{}` with no modop
       # overlays) → the base IS the resolved profile (composing empty overlays is a no-op). The
       # prod loader `Fleet.CapProfile` always exposes `compose/2`, so this branch never yields the
@@ -196,6 +197,47 @@ defmodule Fleet.CapProfile do
         do: loader.compose(role, default_modops(base) ++ extra_modops),
         else: {:ok, base}
     end
+  end
+
+  # B-01 GUARD: a STEP can only activate a modop the role itself declares in `modop_set.optional`
+  # — it can never turn a reviewer into an engineer (that would be the killed profile-swap), only
+  # run its own role in an optional mode (`role: engineer, modops: [tdd]`). And no `incompatible`
+  # pair may end up both active (default ∪ extra). A modop outside `optional` = LOUD refusal, never
+  # a silent mix.
+  defp validate_extra_modops(_base, []), do: :ok
+
+  defp validate_extra_modops(%__MODULE__{} = base, extra) do
+    optional = optional_modops(base)
+
+    case Enum.reject(extra, &(&1 in optional)) do
+      [] -> check_incompatible(base, default_modops(base) ++ extra)
+      out -> {:error, {:modops_not_in_optional, out}}
+    end
+  end
+
+  defp optional_modops(%__MODULE__{spec: spec}) do
+    case spec do
+      %{"modop_set" => %{"optional" => opt}} when is_list(opt) -> opt
+      _ -> []
+    end
+  end
+
+  defp check_incompatible(%__MODULE__{spec: spec}, active) do
+    pairs =
+      case spec do
+        %{"modop_set" => %{"incompatible" => p}} when is_list(p) -> p
+        _ -> []
+      end
+
+    active_set = MapSet.new(active)
+
+    Enum.find_value(pairs, :ok, fn
+      [a, b] ->
+        if a in active_set and b in active_set, do: {:error, {:modops_incompatible, [a, b]}}, else: nil
+
+      _ ->
+        nil
+    end)
   end
 
   @doc """
