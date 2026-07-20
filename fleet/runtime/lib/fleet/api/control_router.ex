@@ -166,7 +166,16 @@ defmodule Fleet.API.ControlRouter do
       Plug.Cowboy.child_spec(
         scheme: :http,
         plug: __MODULE__,
-        options: [ip: {:local, sock}, port: 0, ref: __MODULE__.Ref]
+        # Unique per start, never a stable name: ranch keys transport options by ref in the
+        # global `ranch_server` and clears them from an async 'DOWN' — a same-ref restart can
+        # lose its own options to its predecessor's cleanup and bind elsewhere. The bind is
+        # synchronous, so waiting for the socket to appear would hide that, not fix it.
+        # Nothing addresses this listener by ref (the embedded tree stops through its owner).
+        options: [
+          ip: {:local, sock},
+          port: 0,
+          ref: {__MODULE__, System.unique_integer([:positive])}
+        ]
       )
 
     case apply(m, f, a) do
