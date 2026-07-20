@@ -158,6 +158,19 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:broadcast_failed, :forced_broadcast_fail}} = result
   end
 
+  test "CI-09: Broadcast.lossy LOGS the PubSub {:error} delivery failure (was silently discarded), still :ok" do
+    ev = Fleet.Event.new(:spawner, :"pod.failed", payload: %{"pod_id" => "p1"})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        # Fire-and-forget contract preserved (:ok), but the delivery loss is now VISIBLE — this path
+        # bypasses Bus.safe_emit (event already built), so it logs its own lossy loss.
+        assert :ok = Fleet.TaskQueue.Broadcast.lossy(FailBus, "t.x", ev)
+      end)
+
+    assert log =~ "lossy" and log =~ "NOT delivered" and log =~ "forced_broadcast_fail"
+  end
+
   # MA-04 — variant: the broadcast RAISES (UnregisteredError / PubSub down). `required_broadcast` rescues
   # and propagates `{:error,{:broadcast_failed,_}}`, never a mute `:ok` (the rescue does not re-swallow lifecycle).
   test "3c. MA-04: work_item.completed broadcast that RAISES → {:error,{:broadcast_failed,_}}, not {:ok}",

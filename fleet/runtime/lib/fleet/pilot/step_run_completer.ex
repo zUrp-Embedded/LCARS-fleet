@@ -855,26 +855,26 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp emit_step_unlocked(repo, n, role, milestone) do
-    event =
-      Fleet.Event.new(:pilot, :"step.unlocked",
-        payload: %{
-          "repo" => repo,
-          "number" => n,
-          "role" => role,
-          "milestone" => milestone && Atom.to_string(milestone)
-        }
+    # CI-09 (audit intégrité 2026-07-20): the lossy arch-feed line now goes through the UNIFIED lossy
+    # publisher `Bus.safe_emit/4` (construction bugs AND the PubSub delivery-error tuple both logged there
+    # with context) — it replaces the local `broadcast_main` + rescue that discarded the `{:error, _}` tuple.
+    _ =
+      Fleet.EventRouter.Bus.safe_emit(
+        :pilot,
+        :"step.unlocked",
+        [
+          payload: %{
+            "repo" => repo,
+            "number" => n,
+            "role" => role,
+            "milestone" => milestone && Atom.to_string(milestone)
+          }
+        ],
+        context:
+          "StepRunCompleter: step.unlocked (#{repo}##{n}) NOT emitted — unlock unaffected, arch feed misses a line"
       )
 
-    _ = Fleet.EventRouter.Bus.broadcast_main(event)
     :ok
-  rescue
-    e ->
-      Logger.warning(
-        "StepRunCompleter: step.unlocked emit failed for #{repo}##{n} " <>
-          "(#{Exception.message(e)}) — unlock unaffected, the arch feed misses one line"
-      )
-
-      :ok
   end
 
   # Closes the producer's BUILD stopwatch (on the ISSUE), at its hand-off to the review — DECOUPLED from

@@ -36,7 +36,7 @@ defmodule Fleet.Coord.Emitter do
   (task.id UUID of the original work item, nil outside a work item) is
   propagated on every broadcast to tie the event back to its work item.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -107,27 +107,20 @@ defmodule Fleet.Coord.Emitter do
     do: :"coord.escalation_triggered"
 
   # Strict canonical broadcast (source :coord) via the protected core `Bus.safe_emit/4` — the
-  # protected-emission policy has ONE substrate authority). `:silent`: UnregisteredError tolerated without
-  # noise (boot order); malformed event logged ERROR by safe_emit then neutralized (cf. moduledoc).
-  # A PubSub `{:error, _}` passes THROUGH safe_emit unlogged (its passthrough contract) — logged
-  # HERE: a lost coord event (escalation_triggered / notification_routed) has NO re-derive rail;
-  # the only durable trace is the upstream Cat5 audit log, and only on the escalation path.
+  # protected-emission policy has ONE substrate authority. `:silent`: UnregisteredError tolerated without
+  # noise (boot order); a malformed event AND a PubSub `{:error, _}` delivery failure are both logged by
+  # safe_emit (CI-09 — it is THE single lossy publisher). The emitter's context (no re-derive rail,
+  # durable trace = Cat5 audit log) travels via `:context` instead of a duplicated local rescue.
   defp safe_canon_broadcast(type, opts) do
-    case Bus.safe_emit(:coord, type, opts,
-           on_unregistered: :silent,
-           context: "Coord.Emitter: action NOT broadcast"
-         ) do
-      :ok ->
-        :ok
+    _ =
+      Bus.safe_emit(:coord, type, opts,
+        on_unregistered: :silent,
+        context:
+          "Coord.Emitter: coord event NOT broadcast (notification lost, no re-derive rail; " <>
+            "durable trace = Cat5 audit log, escalation path only)"
+      )
 
-      {:error, reason} ->
-        Logger.warning(
-          "Emitter: coord event #{inspect(type)} NOT broadcast (#{inspect(reason)}) — " <>
-            "notification lost, no re-derive rail (durable trace = Cat5 audit log, escalation path only)"
-        )
-
-        :ok
-    end
+    :ok
   end
 
   defp extract_pod_id(%{pod_id: pid}) when is_binary(pid), do: pid

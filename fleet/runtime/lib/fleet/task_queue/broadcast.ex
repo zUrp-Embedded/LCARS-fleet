@@ -40,7 +40,7 @@ defmodule Fleet.TaskQueue.Broadcast do
   `safe_emit` (cf. its moduledoc: it flattens every failure into `:ok`, indistinguishable from a
   success) — same exclusion as `Fleet.Spawner.Pod.Events.required_broadcast/2`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -69,12 +69,23 @@ defmodule Fleet.TaskQueue.Broadcast do
   `Fleet.EventRouter.Bus`: task events have the same guard as the others).
 
   ALWAYS returns `:ok` (fire-and-forget contract): an exception is rescued + logged
-  warning; an `{:error, _}` PubSub passthrough is discarded — no caller FINISHES a
-  step_run on these events, a failure is merely an observability loss.
+  warning; an `{:error, _}` PubSub delivery failure is LOGGED then dropped (CI-09 — it used to be
+  silently discarded; this path bypasses `Bus.safe_emit` since the `%Fleet.Event{}` is already built, so
+  it logs its OWN lossy loss). No caller FINISHES a step_run on these events — a failure is an
+  observability loss, but a VISIBLE one.
   """
   @spec lossy(module(), String.t(), Fleet.Event.t()) :: :ok
   def lossy(bus, topic, %Fleet.Event{} = ev) do
-    _ = bus.broadcast(topic, ev)
+    case bus.broadcast(topic, ev) do
+      {:error, reason} ->
+        Logger.warning(
+          "Broadcast: lossy #{ev.type} NOT delivered (pod=#{ev.pod_id}): #{inspect(reason)}"
+        )
+
+      _ ->
+        :ok
+    end
+
     :ok
   rescue
     e ->

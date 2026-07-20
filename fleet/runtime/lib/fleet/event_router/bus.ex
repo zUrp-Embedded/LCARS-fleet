@@ -42,7 +42,7 @@ defmodule Fleet.EventRouter.Bus do
   `true` (default) = let through (intended init safety-net); `false` = fail-closed
   (raise while the registry is not loaded). See `assert_authorized!/1`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -165,12 +165,29 @@ defmodule Fleet.EventRouter.Bus do
   `Fleet.Spawner.Pod.Events.required_broadcast/2`, deliberately OUTSIDE this core.
 
   Return: `:ok` (emitted, or a tolerated/logged failure) | `{:error, reason}` (passthrough
-  of `Phoenix.PubSub.broadcast/3`).
+  of `Phoenix.PubSub.broadcast/3` — now ALSO `Logger.error`-ed with context, CI-09: the single
+  lossy publisher logs DELIVERY errors, not only construction bugs; each wrapper stops re-implementing it).
   """
   @spec safe_emit(Fleet.Event.source(), atom() | String.t(), keyword(), keyword()) ::
           :ok | {:error, term()}
   def safe_emit(source, type, opts \\ [], safe_opts \\ []) do
-    emit(source, coerce_type(type), opts)
+    case emit(source, coerce_type(type), opts) do
+      {:error, reason} = err ->
+        # CI-09 (audit intégrité 2026-07-20): the PubSub broadcast `{:error, reason}` was PASSED THROUGH
+        # UNLOGGED — each lossy wrapper handled it differently (logged locally, dropped, or let its caller
+        # drop it; "failure logged" was a LIE for this branch). safe_emit is THE single lossy publisher: it
+        # now logs BOTH the construction exceptions (rescue below) AND this DELIVERY error, with the
+        # emitter's context. Return kept (passthrough) — a caller that genuinely acts on it still can.
+        Logger.error(
+          "#{log_context(safe_opts)} — event #{inspect(type)} (source=#{inspect(source)}) broadcast " <>
+            "FAILED (lossy, not delivered): #{inspect(reason)}"
+        )
+
+        err
+
+      :ok ->
+        :ok
+    end
   rescue
     e in Fleet.Event.UnregisteredError ->
       case Keyword.get(safe_opts, :on_unregistered, :log) do
