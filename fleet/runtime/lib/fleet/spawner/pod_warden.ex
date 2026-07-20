@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.PodWarden do
   > ephemeral. It is anchored in the PROJECT via `Fleet.Pilot.IncidentRegistry` (`work/ops` registry,
   > cross-session). PodWarden remains the guardian of the SUBSTRATE (reaping orphans).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   use GenServer
@@ -201,7 +201,19 @@ defmodule Fleet.Spawner.PodWarden do
     )
 
     PodTmux.kill_holder(pod_id)
-    PodTmux.remove_sock_dir(pod_id)
+
+    # CI-05 (audit intégrité 2026-07-20): erase the sock-dir (the orphan PROOF this warden enumerates) ONLY
+    # after CONFIRMED death. `kill_holder` returns `:ok` regardless of the OS kill outcome, so a refused
+    # kill would leave claude alive AND erase the only trace that brings us back here. Verify liveness;
+    # still alive → keep the proof, retry on the next tick.
+    if PodTmux.confirm_dead?(pod_id) do
+      PodTmux.remove_sock_dir(pod_id)
+    else
+      Logger.error(
+        "PodWarden: pod #{pod_id} STILL ALIVE after reap kill — keeping the sock-dir, retry next tick"
+      )
+    end
+
     :ok
   rescue
     e -> Logger.warning("PodWarden: reap #{pod_id} failed (non-blocking): #{inspect(e)}")

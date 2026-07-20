@@ -35,7 +35,7 @@ defmodule Fleet.Spawner.Pod.Backend do
   `sock_path`, `alive?`); fully qualified `Fleet.Spawner.LaunchBackend` and `Application`. No
   dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -88,16 +88,27 @@ defmodule Fleet.Spawner.Pod.Backend do
         :ok
     end
 
-    # Remove the sock-dir AFTER the kill. The kill is reliable (both terminate_pod_port AND kill_holder kill
-    # claude+namespace) → no need to keep the sock-dir "until the kill is certain". Without this
-    # cleanup, the sock-dir would linger after a graceful teardown → the PodWarden would pick it up ~60s
-    # later, logging a FALSE "persistent orphan" (noise that masks the real ones). The PodWarden
-    # stays the safety net for the REAL orphans (pod gen_statem process crashed → teardown never ran → sock-dir + claude
-    # survive → reap). Kept `tmux_session`: real pods (bwrap/host), not StubBackend (nominal sock_path,
-    # rm_rf a no-op anyway).
+    # Remove the sock-dir — the PodWarden's ONLY reconciliation proof — but ONLY after CONFIRMED death
+    # (CI-05, audit intégrité 2026-07-20). The old code erased it unconditionally on the CLAIM "the kill is
+    # reliable", while `kill_holder`/`terminate_pod_port` return `:ok` regardless of the OS kill outcome: a
+    # refused/ineffective kill left claude alive AND erased the proof that would have triggered a warden
+    # retry (OAuth kept consuming, invisibly). Now gated on `confirm_dead?` (liveness verification). Still
+    # alive → KEEP the sock-dir so the warden re-detects the orphan and retries (the audit's "keep the proof
+    # on uncertainty"); the transient false-orphan noise the old comment optimized away is the SAFE trade.
+    # `tmux_session` binary = real pods (bwrap/host), not StubBackend (nominal sock_path, rm_rf a no-op).
     _ =
-      if is_binary(state.tmux_session) do
-        PodTmux.remove_sock_dir(state.pod_id)
+      cond do
+        not is_binary(state.tmux_session) ->
+          :ok
+
+        PodTmux.confirm_dead?(state.pod_id) ->
+          PodTmux.remove_sock_dir(state.pod_id)
+
+        true ->
+          Logger.error(
+            "pod #{state.pod_id} STILL ALIVE after teardown kill — KEEPING the sock-dir so the PodWarden " <>
+              "re-detects the orphan and retries (never erase the reconciliation proof of a live pod)"
+          )
       end
 
     :ok

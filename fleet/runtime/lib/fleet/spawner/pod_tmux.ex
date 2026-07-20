@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PodTmux do
   Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
   the rescue gesture (tmux kill-server + anchored `pkill -f`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   require Logger
@@ -164,6 +164,33 @@ defmodule Fleet.Spawner.PodTmux do
       {_, 0} -> true
       _ -> false
     end
+  end
+
+  # CI-05 (audit intégrité 2026-07-20): the teardown/warden must CONFIRM the holder is dead before
+  # erasing the sock-dir (the ONLY reconciliation proof the PodWarden enumerates). `kill_holder`/
+  # `terminate_pod_port` return `:ok` regardless of the OS kill outcome, so their return is not a death
+  # verdict — we verify LIVENESS instead. `kill_holder`'s SIGKILL (`pkill -9`, uncatchable) is near-instant
+  # (first check false); a graceful SIGTERM needs a moment for the bwrap namespace to collapse, hence a
+  # SHORT bounded poll (~200 ms max). Still alive after the budget → the kill was refused/ineffective →
+  # KEEP the proof so the warden re-detects and retries. Only used on real (bwrap/host) pods; a StubBackend
+  # session is nil (the caller skips this whole path).
+  @dead_confirm_attempts 5
+  @dead_confirm_sleep_ms 40
+  @spec confirm_dead?(String.t(), (String.t() -> boolean())) :: boolean()
+  def confirm_dead?(pod_id, alive_fun \\ &alive?/1) when is_binary(pod_id) do
+    Enum.reduce_while(1..@dead_confirm_attempts, false, fn attempt, _acc ->
+      cond do
+        not alive_fun.(pod_id) ->
+          {:halt, true}
+
+        attempt < @dead_confirm_attempts ->
+          Process.sleep(@dead_confirm_sleep_ms)
+          {:cont, false}
+
+        true ->
+          {:halt, false}
+      end
+    end)
   end
 
   @doc """
