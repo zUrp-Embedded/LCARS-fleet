@@ -505,7 +505,22 @@ defmodule Fleet.Pilot.StepRunCompleter do
       forge_opts = Keyword.get(opts, :forge_opts, [])
       repo = Map.fetch!(step_run, :repo)
       n = Map.fetch!(step_run, :issue_number)
-      _ = forge.set_stage(repo, n, Fleet.Labels.stage_review(), forge_opts)
+
+      # `stage/review` is a BEST-EFFORT forge projection (CI-13, audit intégrité 2026-07-20): the open PR
+      # + its review requests carry the AUTHORITATIVE progress, so a lost label never blocks delivery. But
+      # a SILENT swallow left it in an implicit limbo (an incoherent `get_route` for human/tool readers) —
+      # we log any loss LOUD instead of declaring nothing.
+      case forge.set_stage(repo, n, Fleet.Labels.stage_review(), forge_opts) do
+        {:ok, _} ->
+          :ok
+
+        other ->
+          Logger.warning(
+            "StepRunCompleter: #{repo}##{n} stage/review projection NOT set (#{inspect(other)}) — " <>
+              "best-effort (PR + review requests carry the authoritative progress); get_route may read stale"
+          )
+      end
+
       _ = Emissions.deliverable_published(step_run, pr)
       route(step_run, pr, opts)
     end
