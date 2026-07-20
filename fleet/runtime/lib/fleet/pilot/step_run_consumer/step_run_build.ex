@@ -28,9 +28,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
   `Seams` (narrow struct) carries the only 6 authorized reads — not the consumer's
   state. The producer/judge classification delegates to the single authority
-  `GateEngine.producer?/2` (same criterion as the gate decision).
+  `GateEngine.producer?/3` (same criterion as the gate decision), preferring the payload's effective
+  `deliverable_mode` (C-03) and falling back to the base-role seam.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-20
   """
 
   alias Fleet.Pilot.StepRunConsumer.GateEngine
@@ -145,7 +146,9 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   # DR-013: closed classification — `{:producer,_}` | `{:judge,_}` | `{:error, reason}` (the cap-profile
   # was unloadable → the producer/judge property is UNKNOWN, never a silent judge).
   defp classify_pr_role(payload, n, role, seams) do
-    case GateEngine.producer?(role, seams.deliverable_mode_fun) do
+    # C-03: prefer the EFFECTIVE deliverable_mode the pod ran with (carried in the payload from the
+    # resolved profile at spawn); `nil` (bare/legacy payload) → the seam re-derives from the base role.
+    case GateEngine.producer?(role, seams.deliverable_mode_fun, payload["deliverable_mode"]) do
       {:ok, true} ->
         # feature-branch format = single source `Fleet.Pilot.ForgeProtocol.feature_branch/2` (glued to its
         # parser `parse_feature_branch/1`) — no hardcoded `lcars/issue-...` construction here.

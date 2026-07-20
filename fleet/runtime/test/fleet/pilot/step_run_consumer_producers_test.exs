@@ -16,6 +16,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Pilot.StepRunConsumer
+  alias Fleet.Pilot.StepRunConsumer.GateEngine
 
   # Loader: "bad-q2" raises (not found → :workflow_map_load_failed); "judgemap-q2" = 1 JUDGE step.
   defmodule Loader do
@@ -168,6 +169,27 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       # Human escalation (freeze_to_arch → await_arch), NEVER a silent completion as a judge.
       assert_receive {:await_arch, _step_run, _opts}, 500
       refute_received {:step_run, _, _}
+    end
+  end
+
+  describe "C-03 — the effective deliverable_mode travels, it is not re-derived from the base role" do
+    test "producer?/3 prefers the payload's effective mode → the base-role seam is NOT consulted" do
+      # The pod ran a RESOLVED profile whose deliverable_mode is carried in the pod.completed payload.
+      # The completion consumes THAT — a since-vanished/edited base profile (the DR-013 trigger) is
+      # irrelevant when the effective fact already travelled. The seam MUST NOT be called.
+      raising = fn _role -> raise "deliverable_mode_fun must not be consulted when the payload carries the mode" end
+
+      assert {:ok, true} = GateEngine.producer?("engineer", raising, "git_native")
+      assert {:ok, false} = GateEngine.producer?("qualifier", raising, "payload")
+    end
+
+    test "producer?/3 with nil effective mode falls back to the seam (DR-013 fail-loud preserved)" do
+      # Bare/legacy payload (no `deliverable_mode`) → re-derive from the base role via the seam, keeping
+      # the DR-013 closed classification: {:ok, _} resolves, {:error, _} fails loud (never a silent judge).
+      assert {:ok, true} = GateEngine.producer?("engineer", fn _ -> {:ok, "git_native"} end, nil)
+      assert {:ok, false} = GateEngine.producer?("qualifier", fn _ -> {:ok, "payload"} end, nil)
+      assert {:error, :cap_profile_unloadable} =
+               GateEngine.producer?("engineer", fn _ -> {:error, :cap_profile_unloadable} end, nil)
     end
   end
 end

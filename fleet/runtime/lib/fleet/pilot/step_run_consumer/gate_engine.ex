@@ -146,21 +146,32 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   Is the finishing role a PRODUCER (deliverable_mode `"git_native"`)?
   Producer = pushes code, opens the PR. Judge (`"payload"`) = review, doesn't push.
 
+  `effective_mode` (C-03, sonde convergence 2026-07-20): the deliverable_mode the pod ACTUALLY ran with,
+  carried in the `pod.completed` payload from the spawn-time RESOLVED profile. Preferred when present —
+  the completion consumes the effective fact, it does NOT re-derive it from the base role (a structural
+  modop overlay could differ). Absent (legacy/bare payload) → the `deliverable_mode_fun` seam re-loads the
+  role, preserving the DR-013 fail-loud on an unloadable profile.
+
   Returns a CLOSED result (DR-013): `{:ok, true|false}` when the mode RESOLVES, `{:error, reason}` when the
-  cap-profile is unloadable (the `deliverable_mode_fun` seam surfaces it) — the classification never
-  consumes an unloadable profile as a silent judge. Non-binary role → `{:ok, false}` (fail-safe: never a
-  producer by accident; a distinct anomaly from an unloadable profile).
+  cap-profile is unloadable — the classification never consumes an unloadable profile as a silent judge.
+  Non-binary role → `{:ok, false}` (fail-safe: never a producer by accident).
   """
-  @spec producer?(term(), (String.t() -> {:ok, String.t()} | {:error, term()})) ::
+  @spec producer?(term(), (String.t() -> {:ok, String.t()} | {:error, term()}), String.t() | nil) ::
           {:ok, boolean()} | {:error, term()}
-  def producer?(role, deliverable_mode_fun) when is_binary(role) do
+  def producer?(role, deliverable_mode_fun, effective_mode \\ nil)
+
+  # Effective mode carried in the payload (the resolved profile at spawn) → consumed directly.
+  def producer?(_role, _deliverable_mode_fun, mode) when is_binary(mode),
+    do: {:ok, mode == "git_native"}
+
+  def producer?(role, deliverable_mode_fun, _mode) when is_binary(role) do
     case deliverable_mode_fun.(role) do
       {:ok, mode} -> {:ok, mode == "git_native"}
       {:error, _} = err -> err
     end
   end
 
-  def producer?(_role, _deliverable_mode_fun), do: {:ok, false}
+  def producer?(_role, _deliverable_mode_fun, _mode), do: {:ok, false}
 
   @doc """
   Advances in the workflow_map + tags the terminal intent according to the ROLE that finishes.

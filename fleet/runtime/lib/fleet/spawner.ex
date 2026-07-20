@@ -218,7 +218,10 @@ defmodule Fleet.Spawner do
         {:error, :no_seed}
 
       {:ok, %{uuid: uuid, jsonl: jsonl}} ->
-        with {:ok, cap_profile} <- Fleet.CapProfile.load(role) do
+        # C-03 (sonde convergence 2026-07-20): `resolve` (base + default modops), NOT bare `load` — a
+        # recalled pod must come back with the SAME effective profile a fresh spawn composes, else a
+        # structural modop overlay would be silently dropped on recall.
+        with {:ok, cap_profile} <- Fleet.CapProfile.resolve(Fleet.CapProfile, role) do
           spawn_pod(cap_profile, "recall-#{projet}-#{role}",
             pod_id: "recall-#{projet}-#{role}",
             session_id: uuid,
