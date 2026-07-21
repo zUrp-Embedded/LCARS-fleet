@@ -21,12 +21,17 @@ defmodule Fleet.Spawner.PodTmux do
   Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
   the rescue gesture (tmux kill-server + anchored `pkill -f`).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
 
   @tmux_bin "tmux"
+  # WALL bound for tmux/pkill: these are load-bearing on teardown/wake/health paths. A wedged tmux server
+  # (or a `pkill` that hangs on a stuck process) under a bare System.cmd would block the CALLING GenServer
+  # (Pod/PodWarden/health) indefinitely. Fleet.Credentials.Shell.run runs the command in its own
+  # process-GROUP and SIGKILLs the whole group at the deadline. tmux ops are sub-second nominally.
+  @tmux_timeout_ms 5_000
 
   @doc """
   Base of the pod sockets. Config `:fleet_spawner, :tmux_sock_base` (default `~/.lcars/run/tmux-sock`).
@@ -84,11 +89,13 @@ defmodule Fleet.Spawner.PodTmux do
   @spec kill_holder(String.t()) :: :ok
   def kill_holder(pod_id) when is_binary(pod_id) do
     sock = sock_path(pod_id)
-    _ = System.cmd(@tmux_bin, ["-S", sock, "kill-server"], stderr_to_stdout: true)
+    # Bounded (Shell.run: process-group SIGKILL at the deadline) — a wedged tmux/pkill must NOT hang the
+    # teardown's owner. Return discarded (the death VERDICT is a separate liveness re-check, cf. CI-05).
+    _ = Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock, "kill-server"], timeout_ms: @tmux_timeout_ms)
 
     case pkill_pattern(pod_id) do
       {:ok, pattern} ->
-        _ = System.cmd("pkill", ["-9", "-f", pattern], stderr_to_stdout: true)
+        _ = Fleet.Credentials.Shell.run("pkill", ["-9", "-f", pattern], timeout_ms: @tmux_timeout_ms)
         :ok
 
       :unsafe ->
@@ -248,7 +255,17 @@ defmodule Fleet.Spawner.PodTmux do
     end
   end
 
+  # Bounded tmux (Shell.run: setsid + SIGKILL of the process-group at the deadline; stderr merged into
+  # stdout by construction). Maps back to the `{out, exit_code}` shape the callers expect. A timeout /
+  # exec failure yields a NON-ZERO code (124/125), so `alive?` reads it as "not alive" and the other
+  # callers see a failure — never a silent hang of the owner.
   defp tmux(pod_id, args) do
-    System.cmd(@tmux_bin, ["-S", sock_path(pod_id) | args], stderr_to_stdout: true)
+    case Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock_path(pod_id) | args],
+           timeout_ms: @tmux_timeout_ms
+         ) do
+      {:ok, {out, code}} -> {out, code}
+      {:error, {:timeout, ms}} -> {"tmux timeout (#{ms}ms)", 124}
+      {:error, {:exit, reason}} -> {"tmux exec error: #{inspect(reason)}", 125}
+    end
   end
 end
