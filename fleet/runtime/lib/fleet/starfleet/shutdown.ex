@@ -215,11 +215,22 @@ defmodule Fleet.Starfleet.Shutdown do
   @default_grace_ms 45_000
   @default_poll_ms 500
 
-  # CI-02 debounce: `in_flight` must read 0 on N CONSECUTIVE polls before concluding `:drained`. Covers
-  # the `pod.completed` → offload HANDOFF window — the work-item is already `:completed` but the completion
-  # `Task` has not started yet (incl. a synchronous forge read in `resolve_next` before the offload), which
-  # the work-item/Task aggregate momentarily misses. Without it, a single racy 0-read would conclude the
-  # drain mid-handoff and `:init.stop()` would cut the completion. Default 3 × 500ms ≈ 1.5s of stable 0.
+  # CI-02 debounce: `in_flight` must read 0 on N CONSECUTIVE polls before concluding `:drained`. It
+  # MITIGATES the `pod.completed` → offload HANDOFF window — the work-item is already `:completed` but
+  # the completion `Task` has not started yet, so the work-item/Task aggregate momentarily reads 0.
+  # Without it, a single racy 0-read would conclude the drain mid-handoff and `:init.stop()` would cut
+  # the completion. Default 3 × 500ms ≈ 1.5s of stable 0.
+  #
+  # IT DOES NOT COVER THE WINDOW, and the two numbers are not commensurable. The window contains
+  # `GateEngine.resolve_next/3`, which can issue a SYNCHRONOUS forge read (`count_step_runs` →
+  # `count_signed_step_runs`) before the offload; that read is bounded by the transport's
+  # `receive_timeout: 10_000`. So a legitimate handoff can last ~10s against 1.5s of debounce — and on
+  # a slow forge the drain concludes `:drained` and cuts a completion mid-push. The debounce is a
+  # wall-clock heuristic sized against a network-latency window; raising the confirmation count would
+  # buy the same heuristic, slower, at the price of every clean shutdown.
+  #
+  # What would actually close it: a LEASE taken BEFORE the work-item flips to `:completed`, so the
+  # drain counts the lease instead of an aggregate that misses the window by construction. Open.
   @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real
@@ -301,7 +312,8 @@ defmodule Fleet.Starfleet.Shutdown do
 
   # `zero_streak` = number of CONSECUTIVE `in_flight == 0` reads so far. Conclude `:drained` only when it
   # reaches `state.confirmations` (the debounce, CI-02): a lone transitory 0 (handoff window) does not end
-  # the drain. Any non-zero read RESETS the streak.
+  # the drain. Any non-zero read RESETS the streak. NB the streak bounds only SHORT handoffs — see the
+  # `@default_drain_confirmations` note: a handoff stretched by a slow forge read outlasts it.
   defp do_wait_drain(state, deadline, zero_streak) do
     in_flight = state.backend.in_flight_count()
     zero_streak = if in_flight == 0, do: zero_streak + 1, else: 0

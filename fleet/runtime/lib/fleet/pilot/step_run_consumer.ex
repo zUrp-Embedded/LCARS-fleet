@@ -194,6 +194,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
   it mid-push. Wired into the drain via the `:completion_inflight_fun` seam (`runtime.exs`) — Starfleet must
   NOT reference Pilot at compile time (no boundary dep), so this crosses as a runtime fun, not a call.
 
+  COUNTS FROM THE TASK'S BIRTH, NOT FROM THE WORK-ITEM'S DEATH. Between the work-item flipping to
+  `:completed` and this Task being spawned, the completion is invisible to every counter — and that gap
+  contains `GateEngine.resolve_next/3`, which can issue a synchronous forge read bounded by the
+  transport's 10s `receive_timeout`. The drain's debounce mitigates that gap at ~1.5s and therefore does
+  not close it (cf. `@default_drain_confirmations` in `Shutdown`). Closing it means taking a LEASE here,
+  BEFORE the flip, so that what the drain counts starts when the completion is DECIDED rather than when
+  it is SCHEDULED. This module is where such a lease would live.
+
   Counts the LIVE children (self-correcting: a Task gone/crashed leaves the supervisor → no leak, unlike a
   RAM inc/dec). Two distinct outcomes, NEVER conflated:
     * supervisor ABSENT (step off) → `0`: its Tasks are dead with it (work already lost, independent of
