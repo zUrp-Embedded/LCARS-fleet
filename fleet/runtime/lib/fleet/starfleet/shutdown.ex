@@ -221,13 +221,15 @@ defmodule Fleet.Starfleet.Shutdown do
   # Without it, a single racy 0-read would conclude the drain mid-handoff and `:init.stop()` would cut
   # the completion. Default 3 × 500ms ≈ 1.5s of stable 0.
   #
-  # IT DOES NOT COVER THE WINDOW, and the two numbers are not commensurable. The window contains
-  # `GateEngine.resolve_next/3`, which can issue a SYNCHRONOUS forge read (`count_step_runs` →
-  # `count_signed_step_runs`) before the offload; that read is bounded by the transport's
-  # `receive_timeout: 10_000`. So a legitimate handoff can last ~10s against 1.5s of debounce — and on
-  # a slow forge the drain concludes `:drained` and cuts a completion mid-push. The debounce is a
-  # wall-clock heuristic sized against a network-latency window; raising the confirmation count would
-  # buy the same heuristic, slower, at the price of every clean shutdown.
+  # IT DOES NOT COVER THE WINDOW — and the count was never sized to. `3` answers "not a SINGLE racy
+  # 0-read" (it is clamped to ≥1 because 0 would be fail-open); it is not a duration derived from the
+  # window's length. The window contains `GateEngine.resolve_next/3`, which can issue a SYNCHRONOUS
+  # forge read (`count_step_runs` → `count_signed_step_runs`) before the offload, bounded by the
+  # transport's `receive_timeout: 10_000`. So a legitimate handoff can reach ~10s against 1.5s of
+  # debounce, and on a slow forge the drain concludes `:drained` and cuts a completion mid-push.
+  # The window is real: `submit_result` broadcasts then COMMITS `:completed` (broadcast-before-commit),
+  # so the item leaves `list_active` before this consumer has even decided, let alone offloaded.
+  # Raising the count would buy the same instrument, slower, at the price of every clean shutdown.
   #
   # What would actually close it: a LEASE taken BEFORE the work-item flips to `:completed`, so the
   # drain counts the lease instead of an aggregate that misses the window by construction. Open.
