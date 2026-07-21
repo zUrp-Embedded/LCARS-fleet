@@ -63,6 +63,34 @@ atomic_swap_file() {
   mv "$tmp" "$dst"
 }
 
+# Builds the prod release, TIED to the full gate on the SAME source tree. `mix release` only replays
+# the contracts lock (mix.exs step) — the SHA in build-info identifies the artifact, it does not
+# QUALIFY it (compile-strict / ExUnit / bats / topology / Dialyzer are not re-run at build). So this
+# runs `mix gate` FIRST, a direct gate→build continuation: the bits installed are the bits the gate
+# passed. LCARS_INSTALL_SKIP_GATE=1 is an explicit escape (an operator who just ran the gate) — it
+# must be a stated choice, never the default. Runs in `runtime_dir`; dies on a red gate or build.
+build_release() {
+  local runtime_dir="$1"
+
+  # `set -e` explicit in the subshell: bats' `run` disables errexit in the caller and a subshell
+  # inherits that, so each critical command is ALSO guarded with `|| exit` — a red gate must stop the
+  # build regardless of the caller's errexit state.
+  (
+    set -e
+    cd "$runtime_dir"
+    MIX_ENV=prod mix deps.get >/dev/null || exit 1
+
+    if [[ "${LCARS_INSTALL_SKIP_GATE:-0}" == "1" ]]; then
+      echo "install: ATTENTION — gate saute (LCARS_INSTALL_SKIP_GATE=1) : la release n'est PAS attestee par le gate de ce commit" >&2
+    else
+      echo "install: gate complet sur l'arbre source (compile-strict + tests + bats + topologie + dialyzer)…" >&2
+      MIX_ENV=test mix gate || exit 1
+    fi
+
+    MIX_ENV=prod mix release --overwrite || exit 1
+  )
+}
+
 # Source guard (standard idiom): sourcing loads the functions WITHOUT running the deploy — the bats
 # suite drives atomic_swap_dir / atomic_swap_file directly, without a mix build.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
@@ -77,14 +105,10 @@ SRC_BIN="$RUNTIME_DIR/bin"
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
 
-# --- 1. Build the prod release (self-contained, bundled ERTS). The contracts lock runs as a release
-#        STEP (mix.exs `contracts_gate/1`, first in `steps:`), so a red contract fails the build here.
-say "build release prod (MIX_ENV=prod mix release --overwrite)…"
-(
-  cd "$RUNTIME_DIR"
-  MIX_ENV=prod mix deps.get >/dev/null
-  MIX_ENV=prod mix release --overwrite
-) || die "mix release n'a pas abouti (verrou contracts rouge ? warnings ?)"
+# --- 1. Build the prod release (self-contained, bundled ERTS), TIED to the full gate on the same
+#        source tree (build_release: gate → release). A red gate or a failed build dies here.
+say "build release prod (gate complet puis MIX_ENV=prod mix release)…"
+build_release "$RUNTIME_DIR" || die "gate rouge ou build KO — la release n'est PAS posee (arbre source non atteste)"
 REL_SRC="$RUNTIME_DIR/_build/prod/rel/fleet_umbrella"
 [[ -x "$REL_SRC/bin/fleet_umbrella" ]] || die "release introuvable une fois le build fini ($REL_SRC)"
 

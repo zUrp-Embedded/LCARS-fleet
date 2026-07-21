@@ -49,6 +49,67 @@ teardown() { rm -rf "$TMP"; }
   [ ! -e "$TMP/dst.new.$$" ]
 }
 
+@test "build_release runs the GATE before the release (gate->build continuation)" {
+  # A fake mix on PATH records the order of subcommands. The release must be TIED to the gate:
+  # `mix gate` before `mix release`, on the same tree — the SHA identifies the artifact, the gate
+  # qualifies it.
+  mkdir -p "$TMP/binstub"
+  cat > "$TMP/binstub/mix" << 'MIX'
+#!/usr/bin/env bash
+echo "$@" >> "$MIX_CALL_LOG"
+exit 0
+MIX
+  chmod +x "$TMP/binstub/mix"
+
+  export MIX_CALL_LOG="$TMP/mix-calls.log"
+  PATH="$TMP/binstub:$PATH" run build_release "$TMP"
+  [ "$status" -eq 0 ]
+
+  # Order: deps.get, then gate, then release.
+  grep -n gate "$MIX_CALL_LOG"
+  gate_line="$(grep -n 'gate' "$MIX_CALL_LOG" | head -1 | cut -d: -f1)"
+  rel_line="$(grep -n 'release' "$MIX_CALL_LOG" | head -1 | cut -d: -f1)"
+  [ -n "$gate_line" ]
+  [ -n "$rel_line" ]
+  [ "$gate_line" -lt "$rel_line" ]
+}
+
+@test "build_release: LCARS_INSTALL_SKIP_GATE=1 skips the gate (explicit escape, stated)" {
+  mkdir -p "$TMP/binstub"
+  cat > "$TMP/binstub/mix" << 'MIX'
+#!/usr/bin/env bash
+echo "$@" >> "$MIX_CALL_LOG"
+exit 0
+MIX
+  chmod +x "$TMP/binstub/mix"
+
+  export MIX_CALL_LOG="$TMP/mix-calls.log"
+  LCARS_INSTALL_SKIP_GATE=1 PATH="$TMP/binstub:$PATH" run build_release "$TMP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gate saute"* ]]
+  ! grep -q ' gate$' "$MIX_CALL_LOG"
+  grep -q release "$MIX_CALL_LOG"
+}
+
+@test "build_release: a RED gate stops the build (no release built)" {
+  mkdir -p "$TMP/binstub"
+  cat > "$TMP/binstub/mix" << 'MIX'
+#!/usr/bin/env bash
+echo "$@" >> "$MIX_CALL_LOG"
+case "$*" in
+  *gate*)    exit 1 ;;   # red gate
+  *release*) echo "RELEASE-RAN" >> "$MIX_CALL_LOG"; exit 0 ;;
+  *)         exit 0 ;;
+esac
+MIX
+  chmod +x "$TMP/binstub/mix"
+
+  export MIX_CALL_LOG="$TMP/mix-calls.log"
+  PATH="$TMP/binstub:$PATH" run build_release "$TMP"
+  [ "$status" -ne 0 ]
+  ! grep -q RELEASE-RAN "$MIX_CALL_LOG"
+}
+
 @test "sourcing install.sh never runs the deploy (source guard)" {
   run bash -c "source '$SCRIPT'; echo sourced-ok"
   [ "$status" -eq 0 ]
