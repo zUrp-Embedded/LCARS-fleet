@@ -2,8 +2,10 @@ defmodule Fleet.Spawner.PermanentBoot do
   @moduledoc """
   Boot of the fleet-level Type 1 permanent pods **at startup of the fleet_v2
   runtime launched by the human** (`bin/fleet_v2 start` starts the BEAM under
-  the human's UID then boots the permanent architect pod — the human-launches
-  model, no system service).
+  the human's UID, then this module boots every pod whose cap-profile declares
+  `boot_at_start: true` — the human-launches model, no system service). WHICH
+  roles are permanent is the CATALOGUE's declaration, never this module's: the
+  architect, in particular, is per-project (spawned at onboarding), not a Type 1.
 
 
   ## CRITICAL anti-violation guard
