@@ -1,7 +1,7 @@
 # Fleet.Credentials — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-21
 **Status**: active — domain card
 **Referenced by**: —
 
@@ -20,9 +20,7 @@ credential precedence, the `NEVER` invariants) is canonical in the doc lineage
 — this domain does not re-own it.
 
 ## Modules
-- `Fleet.Credentials.Gate` — the single spawn-boundary entry point (`validate/2` = scope then plan); where the claudeDir read physically lives; consumed by `Fleet.Spawner.Pod` (`LaunchEnv`)
-- `Fleet.Credentials.ScopeValidator` — scope-coverage gate (`oauth_scopes ⊇ role_required_scopes`, per cap-profile flags)
-- `Fleet.Credentials.PlanValidator` — paid-plan gate (`claudeAiOauth.subscriptionType`, no SDK/network)
+- `Fleet.Credentials.Gate` — the single spawn-boundary entry point (`validate/1` = login-validity check: is the human logged in to Claude Code? `{:credentials_invalid, _}` on no login); where the claudeDir read physically lives; consumed by `Fleet.Spawner.Pod` (`LaunchEnv`)
 - `Fleet.Credentials.ForgeAuth` — `git_env/0`: system-side git auth env (forge token off the argv, unconditional anti-prompt)
 - `Fleet.Credentials.Shell` — `run/3`+`git/2`: external command bounded by construction (kill process-group + wall deadline) + `git_safe_config_args/0` (system-side git config neutralization)
 - `Fleet.Credentials.ForgeIdentity` — deliverable git identity (author = human, role = verified `Co-authored-by` trailer); plus the commit-identity gate's `allowed_emails/2` and the system/role identity accessors
