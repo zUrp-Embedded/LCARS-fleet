@@ -50,6 +50,33 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
   end
 
+  test "step_status probes EXACTLY the rail step_children! starts (no hollow-green drift)" do
+    # The readiness rail (step_rail_processes) must equal the processes actually started (step_children!):
+    # a started-but-unprobed process reads operational while dead; a probed-but-unstarted one reads
+    # degraded forever. A new rail child added to step_children! without step_rail_processes fails HERE.
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+
+    started =
+      Fleet.Pilot.Application.step_children_for_test()
+      |> Enum.map(&child_name/1)
+      |> MapSet.new()
+
+    probed =
+      Fleet.Pilot.Application.step_rail_processes()
+      |> Enum.map(fn {_key, name} -> name end)
+      |> MapSet.new()
+
+    assert started == probed,
+           "readiness drift — started but not probed: #{inspect(MapSet.difference(started, probed) |> MapSet.to_list())}; " <>
+             "probed but not started: #{inspect(MapSet.difference(probed, started) |> MapSet.to_list())}"
+  end
+
+  # Registered name of a supervisor child-spec (the name step_status probes via Process.whereis).
+  defp child_name({Task.Supervisor, opts}) when is_list(opts), do: Keyword.fetch!(opts, :name)
+  defp child_name({mod, _opts}) when is_atom(mod), do: mod
+  defp child_name(mod) when is_atom(mod), do: mod
+
   # F-C061 Vector 2, re-seated on the CARDS: the jury lives in each workflow map
   # (spec.jury — no engine config). The schema guards the shape, the boot guard the
   # CONTENT: every jury role of every canon card must resolve to a judge cap-profile —

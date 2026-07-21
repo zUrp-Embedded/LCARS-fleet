@@ -97,17 +97,39 @@ defmodule Fleet.Pilot.Application do
   @spec step_status() :: {:inactive | :operational | :degraded, map()}
   def step_status do
     if Application.get_env(:fleet_pilot, :step_dispatch?, false) do
-      poller? = is_pid(Process.whereis(Fleet.Pilot.Poller))
-      step_run? = is_pid(Process.whereis(Fleet.Pilot.StepRunConsumer))
+      detail =
+        Map.new(step_rail_processes(), fn {key, name} ->
+          {key, is_pid(Process.whereis(name))}
+        end)
 
-      if poller? and step_run? do
-        {:operational, %{poller: true, step_run_consumer: true}}
-      else
-        {:degraded, %{poller: poller?, step_run_consumer: step_run?}}
-      end
+      # The rail is operational ONLY if EVERY essential process is up. Probing two names (Poller +
+      # StepRunConsumer) while IncidentRegistry / the two Task.Supervisors / IncidentConsumer /
+      # WorktreeSync / ArchFeed were dead read hollow-green: the rail NAMED in readiness was not the rail
+      # MEASURED. `step_rail_processes/0` IS that rail (locked to `step_children!` by a drift test).
+      if Enum.all?(detail, fn {_key, up?} -> up? end),
+        do: {:operational, detail},
+        else: {:degraded, detail}
     else
       {:inactive, %{note: "step_dispatch? off"}}
     end
+  end
+
+  @doc false
+  # The registered names of the STEP rail's essential processes — the readiness DEFINITION owned HERE,
+  # beside their single start site `step_children!`. EVERY process `step_children!` starts must appear
+  # here (a rail with any of them dead is degraded, not a hollow "operational"); the drift test
+  # `step_rail_processes ⇔ step_children!` fails if a new child is added there but not here.
+  def step_rail_processes do
+    [
+      poller: Fleet.Pilot.Poller,
+      step_run_consumer: Fleet.Pilot.StepRunConsumer,
+      step_run_task_supervisor: Fleet.Pilot.StepRunConsumer.task_supervisor(),
+      incident_registry: Fleet.Pilot.IncidentRegistry,
+      incident_consumer: Fleet.Pilot.IncidentConsumer,
+      incident_task_supervisor: Fleet.Pilot.IncidentConsumer.task_supervisor(),
+      worktree_sync: Fleet.Pilot.WorktreeSync,
+      arch_feed: Fleet.Pilot.ArchFeed
+    ]
   end
 
   # Processes of the STEP rail (the forge IS the state machine). Started iff `:step_dispatch?` is
