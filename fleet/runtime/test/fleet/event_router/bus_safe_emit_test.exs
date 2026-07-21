@@ -2,7 +2,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
   @moduledoc """
   Locks the `Bus.safe_emit/3-4` contract — the SINGLE core of the
   "protected-Bus-emission" family (dedup of the local rescues of coord/starfleet/spawner).
-  Three paths:
+  Four paths:
 
     * OK — registered type → emitted, the subscriber receives the canonical struct
       (atom OR binary).
@@ -11,6 +11,9 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
     * malformed event (CONSTRUCTION bug: source outside the enum, type name never
       preregistered) — ALWAYS Logger.error + `:ok`: never swallowed mute, never a
       crash of the emitter.
+    * DELIVERY error (CI-09: Phoenix.PubSub.broadcast → `{:error, reason}`) — Logger.error
+      + the tuple PASSED THROUGH (a caller that acts on delivery still can). This branch was
+      in the code but UNPROVEN — the "complete contract" claim omitted it.
 
   Covered regression: re-swallowing a malformed event in silence (the per-site
   inconsistency this core deduplicates) fails the "malformed event" cases; propagating
@@ -117,6 +120,34 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
 
       assert log =~ "MyEmitter: alert NOT emitted"
       assert log =~ "malformed event"
+    end
+  end
+
+  describe "delivery error (CI-09) — Phoenix.PubSub.broadcast {:error, reason}" do
+    setup do
+      # Force the rare delivery failure via the broadcast seam (default = the real PubSub).
+      Application.put_env(:fleet_event_router, :broadcast_fun, fn _name, _topic, _event ->
+        {:error, :no_such_topic}
+      end)
+
+      on_exit(fn -> Application.delete_env(:fleet_event_router, :broadcast_fun) end)
+      :ok
+    end
+
+    test "a broadcast {:error, reason} is Logger.error-ed AND the tuple is passed through (not a fake :ok)" do
+      log =
+        capture_log(fn ->
+          # A REGISTERED type (so construction succeeds), whose DELIVERY then fails — the CI-09 branch.
+          assert {:error, :no_such_topic} =
+                   Bus.safe_emit(:spawner, :"pod.completed", [payload: %{}],
+                     context: "MyEmitter: pod.completed"
+                   )
+        end)
+
+      assert log =~ "[error]"
+      assert log =~ "broadcast FAILED (lossy, not delivered)"
+      assert log =~ "no_such_topic"
+      assert log =~ "MyEmitter: pod.completed"
     end
   end
 end

@@ -42,7 +42,7 @@ defmodule Fleet.EventRouter.Bus do
   `true` (default) = let through (intended init safety-net); `false` = fail-closed
   (raise while the registry is not loaded). See `assert_authorized!/1`.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -80,7 +80,18 @@ defmodule Fleet.EventRouter.Bus do
   @spec broadcast(String.t(), Fleet.Event.t()) :: :ok | {:error, term()}
   def broadcast(topic, %Fleet.Event{} = event) when is_binary(topic) do
     assert_authorized!(event)
-    Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
+    pubsub_broadcast(topic, event)
+  end
+
+  # Seam (test-only): Phoenix.PubSub.broadcast rarely returns {:error, reason} in practice, yet
+  # safe_emit's CI-09 delivery-error branch (log LOUD + passthrough) is load-bearing and MUST be
+  # provable. Default = the real broadcast; a test injects a failing fun via
+  # `:fleet_event_router, :broadcast_fun` (arity 3, `(pubsub_name, topic, event) -> :ok | {:error, _}`).
+  defp pubsub_broadcast(topic, event) do
+    case Application.get_env(:fleet_event_router, :broadcast_fun) do
+      fun when is_function(fun, 3) -> fun.(@pubsub_name, topic, event)
+      _ -> Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
+    end
   end
 
   @doc """
