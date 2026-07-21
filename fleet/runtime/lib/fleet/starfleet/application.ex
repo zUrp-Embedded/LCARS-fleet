@@ -112,5 +112,4 @@ defmodule Fleet.Starfleet.Application do
                 "malformed boot config must not silently change the supervision topology (fail-closed at boot)"
     end
   end
-
 end
