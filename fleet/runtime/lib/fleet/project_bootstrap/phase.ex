@@ -47,7 +47,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
       case project["repo_path"] do
         nil ->
-          ws = Path.join(pod_dir, "workspace")
+          ws = Fleet.Layout.pod_workspace_path(pod_dir)
 
           case File.mkdir_p(ws) do
             :ok -> {:ok, ws, nil}
@@ -55,11 +55,10 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         repo_url ->
-          # `fleet_project_bootstrap` CANNOT depend on `fleet_spawner` (compile cycle), so
-          # `"workspace"` is re-encoded here — it MUST stay in sync with `@pod_workspace_subdir` in
-          # `Fleet.Spawner.Pod.Paths` (authority of the convention). This module is the
-          # PRODUCER (it creates and returns the workspace); Pod RECOMPUTES it via pod_workspace_path/1.
-          ws = Path.join(pod_dir, "workspace")
+          # This module is the PRODUCER (it creates and returns the workspace); Pod RECOMPUTES it.
+          # Both read `Fleet.Layout` — the foundation owns the literal because neither consumer may
+          # depend on the other (Spawner already deps ProjectBootstrap; the reverse edge cycles).
+          ws = Fleet.Layout.pod_workspace_path(pod_dir)
 
           # Idempotence of the deterministic re-dispatch: a DEAD predecessor pod (timeout/crash) leaves its
           # workspace on disk; since the pod_id is deterministic (`<repo-slug>-issue-N-role`), the
@@ -147,7 +146,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
             {:ok, Path.t(), String.t()} | {:error, term()}
     def reset_in_place(pod_dir, %Fleet.CapProfile{spec: spec}, opts \\ []) do
       project = spec["project"] || %{}
-      ws = Path.join(pod_dir, "workspace")
+      ws = Fleet.Layout.pod_workspace_path(pod_dir)
       slug = Keyword.get(opts, :slug, "work")
       feature = "feature/#{slug}"
 

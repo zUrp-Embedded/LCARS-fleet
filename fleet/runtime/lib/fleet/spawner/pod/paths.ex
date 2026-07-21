@@ -25,27 +25,26 @@ defmodule Fleet.Spawner.Pod.Paths do
     (`initial_state`, `clear_terminal_snapshot`) and `Pod.LaunchEnv` (`claude_dir` → `runtime_home/0`);
     public because they are crossed from those modules.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
 
   # A pod's deliverable workspace = `<pod_dir>/workspace` (under `$POD_DIR`, bwrap-bound RW).
-  # Subdir centralized HERE — single authority for the placement convention (the
-  # `Fleet.Spawner.pod_workspace_path/1` facade delegates; the `Pod.*` islands call it directly).
-  # `ProjectBootstrap.Clone` keeps its copy (ProjectBootstrap cannot depend on spawner without a
-  # spawner⇄bootstrap cycle) BUT it RETURNS the computed workspace → authoritative producer.
-  @pod_workspace_subdir "workspace"
+  # The literal lives in the FOUNDATION (`Fleet.Layout.pod_workspace_path/1`), not here: its other
+  # user is `ProjectBootstrap.Phase`, which cannot depend on Spawner (Spawner already deps
+  # ProjectBootstrap — the reverse edge closes a cycle). Both depend DOWN onto Layout instead, so the
+  # producer and the recomputers read one source rather than two literals kept in sync by hand.
 
   @doc """
-  Deliverable workspace from a known `pod_dir`: `<pod_dir>/workspace`. PURE computation — single
-  authority for the placement convention (the `"workspace"` literal lives only here on the spawner side).
+  Deliverable workspace from a known `pod_dir`: `<pod_dir>/workspace`. Spawner-side name for
+  `Fleet.Layout.pod_workspace_path/1`, which holds the convention.
   Called by the facade (`Fleet.Spawner.pod_workspace_path/1`),
   `Pod.LaunchSpec` (cwd bind) and `Pod.CompletedPayload` (payload's `workspace` key).
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
-    do: Path.join(pod_dir, @pod_workspace_subdir)
+    do: Fleet.Layout.pod_workspace_path(pod_dir)
 
   @doc """
   A pod's pod_dir: `<pod_dir_root>/pod_<pod_id>` (full git clone + `.lcars`/`.claude`/`issues`).

@@ -20,12 +20,17 @@ defmodule Fleet.Layout do
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   @projects_root "/home/projects"
   @work_root "/home/projects.work"
   @state_dirname ".lcars"
+
+  # A pod's deliverable workspace subfolder. It lives HERE and not in either consumer because BOTH
+  # need it and neither may depend on the other: Spawner already deps ProjectBootstrap, so the reverse
+  # edge would close a cycle. The foundation is the third way — both already depend down onto it.
+  @pod_workspace_subdir "workspace"
 
   # work/ops artifact layout — the SINGLE truth of where brief/provenance objects live and
   # what a valid object name looks like. Producer (Fleet.Workflow.BriefArtifact/Provenance)
@@ -42,6 +47,16 @@ defmodule Fleet.Layout do
   @doc "Root of the working repos (`/home/projects`) — imposed container layout."
   @spec projects_root() :: Path.t()
   def projects_root, do: @projects_root
+
+  @doc """
+  A pod's deliverable workspace: `<pod_dir>/workspace`. PURE computation, SINGLE authority for the
+  placement convention — the PRODUCER (`ProjectBootstrap.Phase`, which creates and returns it) and the
+  RECOMPUTERS (`Spawner.Pod.Paths` and through it the facade, the cwd bind, the completion payload)
+  read the same literal instead of keeping it in sync by hand across a boundary they cannot cross.
+  """
+  @spec pod_workspace_path(Path.t()) :: Path.t()
+  def pod_workspace_path(pod_dir) when is_binary(pod_dir),
+    do: Path.join(pod_dir, @pod_workspace_subdir)
 
   @doc "Meta/ops root (`/home/projects.work`) — journals, seeds, resume folders."
   @spec work_root() :: Path.t()
