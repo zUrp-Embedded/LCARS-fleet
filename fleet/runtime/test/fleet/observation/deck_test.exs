@@ -56,6 +56,17 @@ defmodule Fleet.Observation.DeckTest do
     assert body =~ "dashboard aveugle"
   end
 
+  test "error_page/1 escapes the interpolated reason (no raw markup from an internal error term)" do
+    # The catalogue-error page interpolates inspect(reason). The module contract is "every server-side
+    # value goes through h/1" — a reason carrying < > & \" must be ESCAPED, never rendered as live markup.
+    html = Fleet.Observation.Deck.View.error_page({:invalid, ~s|<script>alert(1)</script>&"|})
+
+    refute html =~ "<script>alert(1)</script>"
+    assert html =~ "&lt;script&gt;"
+    assert html =~ "&amp;"
+    assert html =~ "&quot;"
+  end
+
   test "GET /api/pods → 200 JSON {pods, count} (read-only, JSON-safe)" do
     conn = call(:get, "/api/pods")
     assert %Plug.Conn{status: 200} = conn

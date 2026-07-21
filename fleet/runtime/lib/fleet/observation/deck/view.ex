@@ -222,7 +222,7 @@ defmodule Fleet.Observation.Deck.View do
     </head>
     <body>
     <p style="color:#c00"><strong>⚠ catalogue de rôles illisible</strong></p>
-    <p>#{inspect(reason)}</p>
+    <p>#{h(inspect(reason))}</p>
     <p>(cap-profile catalogue error — ce n'est PAS « aucun rôle » : le déploiement cap-profile est cassé.)</p>
     </body>
     </html>
