@@ -230,6 +230,20 @@ defmodule Fleet.CapProfileTest do
                Fleet.CapProfile.compose("engineer", [])
     end
 
+    test "STRUCT form composes from the loaded base — the catalogue is not re-read", %{
+      tmp_dir: tmp_dir
+    } do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+      assert {:ok, base} = Fleet.CapProfile.load("engineer")
+
+      # The catalogue disappears between load and compose: the epoch pinned at load must
+      # still compose (the two-read shape came back :not_found here — or, live, another epoch).
+      File.rm!(Path.join(tmp_dir, "engineer.yaml"))
+
+      assert {:ok, %Fleet.CapProfile{kind: "CapabilityProfile"}} =
+               Fleet.CapProfile.compose(base, [])
+    end
+
     test "applies modop deep-merge last-wins", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
 
@@ -1179,11 +1193,12 @@ defmodule Fleet.CapProfileTest do
              }
            }}
 
-      def compose(role, modops) do
-        send(self(), {:composed, role, modops})
+      # The seam receives the loaded BASE (same epoch as the guard's checks), never the
+      # role name — a name would mean a second catalogue read.
+      def compose(%Fleet.CapProfile{} = base, modops) do
+        send(self(), {:composed, base, modops})
 
-        {:ok,
-         %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
+        {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: base.metadata, spec: %{}}}
       end
     end
 
@@ -1197,12 +1212,16 @@ defmodule Fleet.CapProfileTest do
 
     test "composes default modops (no extra)" do
       assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer")
-      assert_received {:composed, "engineer", ["rubber-duck"]}
+
+      assert_received {:composed, %Fleet.CapProfile{metadata: %{"name" => "engineer"}},
+                       ["rubber-duck"]}
     end
 
     test "composes default ++ extra step-modops (order preserved)" do
       assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
-      assert_received {:composed, "engineer", ["rubber-duck", "tdd"]}
+
+      assert_received {:composed, %Fleet.CapProfile{metadata: %{"name" => "engineer"}},
+                       ["rubber-duck", "tdd"]}
     end
 
     # THE regression this closes. `compose/2` returns a profile that no longer says WHICH modops were
@@ -1236,7 +1255,9 @@ defmodule Fleet.CapProfileTest do
     # B-01 guard: a step can only activate a modop the ROLE declares in its `optional`.
     test "extra modop IN the role's optional → allowed (engineer + tdd)" do
       assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
-      assert_received {:composed, "engineer", ["rubber-duck", "tdd"]}
+
+      assert_received {:composed, %Fleet.CapProfile{metadata: %{"name" => "engineer"}},
+                       ["rubber-duck", "tdd"]}
     end
 
     test "extra modop OUTSIDE the role's optional → refused (no silent role-mixing)" do

@@ -133,14 +133,21 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Composes a cap-profile from a base role and an ordered list of modops.
+  Composes a cap-profile from a base and an ordered list of modops.
   Deep-merge last-wins, declared order = precedence.
+
+  Two forms. The STRUCT form is the resolve path: it composes from the base ALREADY
+  loaded — no second catalogue read, so the returned profile is the same EPOCH as the
+  base whose defaults/optional/incompatible were just validated (the two-read shape
+  could mix two epochs under a concurrent catalogue redeploy). The STRING form is the
+  direct/tooling convenience: it loads the role first, then delegates — two reads of a
+  live catalogue are two epochs, don't use it where an epoch was already pinned.
 
   The result is re-validated against the cap-profile schema post-merge.
 
   ## Exit codes
     * `{:ok, %Fleet.CapProfile{}}` — composition OK
-    * `{:error, :not_found}` — base role absent
+    * `{:error, :not_found}` — base role absent (string form)
     * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
       distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
     * `{:error, :name_collision}` — two catalogue files carry the same `metadata.name`
@@ -152,15 +159,24 @@ defmodule Fleet.CapProfile do
     * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
   """
   @impl Fleet.CapProfile.Loader
-  @spec compose(String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
-  def compose(role, modop_set) when is_binary(role) and is_list(modop_set) do
-    with {:ok, base} <- Catalog.read_role(role),
-         :ok <- Schema.validate(base, :cap_profile),
-         {:ok, modops} <- Catalog.read_modops(modop_set),
-         merged <- Enum.reduce(modops, base, &deep_merge_last_wins(&2, &1)),
+  @spec compose(t() | String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
+  def compose(role_or_base, modop_set)
+
+  def compose(%__MODULE__{} = base, modop_set) when is_list(modop_set) do
+    # The base was schema-validated at load (`to_struct/1` is the single construction
+    # boundary); only the post-merge result needs validating here. The raw form is the
+    # struct's three faces — the schema root admits nothing else.
+    raw = %{"kind" => base.kind, "metadata" => base.metadata, "spec" => base.spec}
+
+    with {:ok, modops} <- Catalog.read_modops(modop_set),
+         merged <- Enum.reduce(modops, raw, &deep_merge_last_wins(&2, &1)),
          :ok <- Schema.validate(merged, :cap_profile) do
       {:ok, to_struct(merged)}
     end
+  end
+
+  def compose(role, modop_set) when is_binary(role) and is_list(modop_set) do
+    with {:ok, base} <- load(role), do: compose(base, modop_set)
   end
 
   @doc """
@@ -226,7 +242,10 @@ defmodule Fleet.CapProfile do
       active = default_modops(base) ++ extra_modops
 
       if function_exported?(loader, :compose, 2) do
-        with {:ok, composed} <- loader.compose(role, active),
+        # Composed from the BASE just loaded and validated — never from the role name:
+        # a second catalogue read could return a different epoch than the one whose
+        # optional/incompatible sets the guard above just checked.
+        with {:ok, composed} <- loader.compose(base, active),
              do: {:ok, %{composed | active_modops: active}}
       else
         {:ok, %{base | active_modops: active}}
