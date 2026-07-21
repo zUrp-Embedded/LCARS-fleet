@@ -62,8 +62,6 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
         strategy: :one_for_one
       )
 
-    on_exit(fn -> if Process.alive?(sup), do: Supervisor.stop(sup) end)
-
     pid1 = Process.whereis(name)
     assert is_pid(pid1)
 
@@ -89,6 +87,8 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
       Bus.broadcast_main(ev())
       assert wait_count(name, 1), "restarted AuditConsumer consumed NOTHING (deaf-but-green)"
     end)
+
+    Supervisor.stop(sup)
   end
 
   defp wait_count(name, min) do
