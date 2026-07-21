@@ -4,7 +4,7 @@
 # STARDATE: 2026-06-22
 # STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
 #         /local/LCARS_v2). Self-contained: the runtime runs WITHOUT the repo (bundled priv, embedded
-#         ERTS). Idempotent.
+#         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
 # Three-zone model: SOURCE (this repo, build only) → INSTALL ($PREFIX, RO, system-owned) → STATE
 # (~/.lcars, per-human, RW). `v2` means cohabiting with the v1 runtime (/local/LCARS); eventually
@@ -17,10 +17,55 @@
 # (kept at the app collapse, cf. mix.exs), the two symlink names, and the list of non-BEAM scripts
 # copied into bin/.
 #
+# ATOMICITY: the old flow did `rm -rf $PREFIX/rel` then a multi-second `cp -a`, and overwrote each
+# launcher in place. An error mid-copy lost the last good build; a reader mid-copy saw a mixed
+# assembly. Now every replacement stages a sibling on the SAME filesystem, verifies it, then `mv`s it
+# into place (an atomic rename at the directory-entry level) — keeping the previous generation as
+# `<name>.prev` for rollback. The live target is never a half-copied tree.
+#
 # Usage: etc/install.sh                        # → /local/LCARS_v2
 #        LCARS_INSTALL_PREFIX=/x etc/install.sh
 #        LCARS_INSTALL_LINK_DIR=~/bin etc/install.sh
 set -euo pipefail
+
+say() { echo "install: $*" >&2; }
+die() { echo "install: ERREUR — $*" >&2; exit 1; }
+
+# Atomic directory replace: stage `src` into a sibling of `dst` (same FS → rename is atomic), verify
+# it holds `probe` (a relative path that must exist + be executable), then swap — moving any live `dst`
+# aside to `dst.prev` first (rollback kept). A reader sees the OLD tree or the NEW tree under `dst`,
+# never a partial one; a verify failure leaves the live install untouched.
+atomic_swap_dir() {
+  local src="$1" dst="$2" probe="$3"
+  local stage="${dst}.staging.$$" prev="${dst}.prev"
+
+  rm -rf "$stage"
+  cp -a "$src" "$stage" || { rm -rf "$stage"; die "copie du build vers le staging echouee ($stage)"; }
+
+  [[ -x "$stage/$probe" ]] || { rm -rf "$stage"; die "build stage invalide : $probe absent ou non-executable"; }
+
+  # Two renames, ordered so `dst` is never a partial tree: move the old aside, move the new in. The
+  # sliver between them is a clean absence (ENOENT), not a mixed assembly. rm the prior .prev first so
+  # the rollback slot always holds exactly the generation we just replaced.
+  rm -rf "$prev"
+  [[ -e "$dst" ]] && mv "$dst" "$prev"
+  mv "$stage" "$dst"
+}
+
+# Atomic file replace: copy to a sibling temp, then rename over `dst` (a single atomic rename — a reader
+# sees the old file or the new file, never a truncated copy). No .prev for the small scripts (the
+# release dir is the one worth a rollback slot).
+atomic_swap_file() {
+  local src="$1" dst="$2"
+  local tmp="${dst}.new.$$"
+
+  cp -a "$src" "$tmp" || { rm -f "$tmp"; die "copie de $(basename "$dst") vers le staging echouee"; }
+  mv "$tmp" "$dst"
+}
+
+# Source guard (standard idiom): sourcing loads the functions WITHOUT running the deploy — the bats
+# suite drives atomic_swap_dir / atomic_swap_file directly, without a mix build.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 PREFIX="${LCARS_INSTALL_PREFIX:-/local/LCARS_v2}"
 
@@ -28,9 +73,6 @@ SELF="$(readlink -f "$0")"
 ETC_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$ETC_DIR")"          # etc/.. = the source runtime root
 SRC_BIN="$RUNTIME_DIR/bin"
-
-say() { echo "install: $*" >&2; }
-die() { echo "install: ERREUR — $*" >&2; exit 1; }
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
@@ -48,26 +90,25 @@ REL_SRC="$RUNTIME_DIR/_build/prod/rel/fleet_umbrella"
 
 # --- 2. $PREFIX layout (idempotent) ----------------------------------------------------------------
 say "pose sous $PREFIX…"
-mkdir -p "$PREFIX/bin" "$PREFIX/etc"
+mkdir -p "$PREFIX/bin" "$PREFIX/etc" "$PREFIX/rel"
 
-# The release goes under `$PREFIX/rel/fleet_umbrella/` (EXPLICIT destination: `cp -a src dir/` would
-# rename if dir did not exist). rm + cp -a = a clean replacement, no leftovers from an earlier version.
-rm -rf "$PREFIX/rel"
-mkdir -p "$PREFIX/rel"
-cp -a "$REL_SRC" "$PREFIX/rel/fleet_umbrella"
+# The release lands under `$PREFIX/rel/fleet_umbrella/` via a staged, verified, atomic swap — the live
+# tree is never destroyed before the new one is proven good, and the previous stays as `.prev`.
+atomic_swap_dir "$REL_SRC" "$PREFIX/rel/fleet_umbrella" "bin/fleet_umbrella"
 
 # NON-BEAM scripts (outside the release): the human launcher + the CLI + the pod launchers + the MCP
 # bridge. The bridge is NOT chmod +x below and does not need to be: it is invoked as `python3 <path>`
 # (config/runtime.exs mcp_server_spec) after pod.ex copies it per-pod. It does need to be READABLE by
-# the human's BEAM, which is what the group-read in step 3 provides.
+# the human's BEAM, which is what the group-read in step 3 provides. Each is swapped atomically so a
+# reader never catches a half-written launcher.
 for f in fleet_v2 lcars bwrap_launch.sh host_launch.sh claude_launch.sh fleet_mcp_stdio_bridge.py; do
   [[ -e "$SRC_BIN/$f" ]] || die "manquant dans le source bin/: $f"
-  cp -a "$SRC_BIN/$f" "$PREFIX/bin/$f"
+  atomic_swap_file "$SRC_BIN/$f" "$PREFIX/bin/$f"
 done
 chmod +x "$PREFIX/bin/"*.sh "$PREFIX/bin/fleet_v2" "$PREFIX/bin/lcars" 2>/dev/null || true
 
-# Template d'env humain.
-cp -a "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/"
+# Template d'env humain (swap atomique aussi — un lecteur ne voit jamais un template tronque).
+atomic_swap_file "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/fleet_v2.env.template"
 
 # --- 3. Perms: RO for humans (group fleet r-x), owner = the installer (system) ----------------------
 # The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet_v2), so the install stays RO.
