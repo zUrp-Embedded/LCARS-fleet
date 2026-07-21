@@ -307,21 +307,12 @@ if config_env() != :test do
   config :fleet_observation, start_listener: true
 
   # ============================================================
-  # fleet_pilot — only the forge-state-machine rail exists
-  # (config `LCARS_PILOT_STEP` / `LCARS_PILOT_POLL_REPO`, below). There is no
-  # label-routing knob and no legacy dispatcher knob.
+  # fleet_pilot — only the forge-state-machine rail exists (config `LCARS_PILOT_STEP`). There is no
+  # label-routing knob, no legacy dispatcher knob, and no fixed-repo knob: MULTI-PROJECT, the Poller
+  # DISCOVERS its projects by org-membership (`list_org_repos`, WS3); repo+remote travel in the
+  # `pod.completed` event. (`LCARS_PILOT_POLL_REPO` is REMOVED — it was parsed into `:poll_repo` with NO
+  # runtime reader, a false ops contract: setting it did nothing. Do not reintroduce it as a dead knob.)
   # ============================================================
-
-  # F-037 MULTI-PROJECT: the Poller does not scan a fixed repo — it DISCOVERS its projects by
-  # org-membership (`list_org_repos`, WS3). `LCARS_PILOT_POLL_REPO` is therefore NOT required for
-  # the rail to run (the fail-loud boot guard is on FORGE_BASE_URL, cf. Fleet.Pilot.Application).
-  # TRUE STATE: this config is set WITHOUT a runtime reader (no
-  # `get_env(:fleet_pilot, :poll_repo)` in the code; tests inject repo/remote via direct opts).
-  # KEPT deliberately as an ops contract (the env var stays recognized — no surprise no-op if a
-  # deployment sets it). In multi-project prod, repo+remote travel in the `pod.completed` event.
-  if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
-    config :fleet_pilot, poll_repo: repo
-  end
 
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
     config :fleet_pilot,
@@ -371,8 +362,7 @@ if config_env() != :test do
   # OFF by default. `LCARS_PILOT_STEP=true` starts Poller(step) + StepRunConsumer
   # (cf. Fleet.Pilot.Application.step_children!). F-037: requires ONLY FORGE_BASE_URL — the
   # single fail-loud guard of the step boot (org-membership project discovery + per-step-run push).
-  # LCARS_PILOT_POLL_REPO is NOT required (legacy/test override only; the real discovery is by
-  # forge org-membership, not a fixed repo).
+  # No fixed-repo knob: the Poller discovers by org-membership, not a configured repo.
   if Fleet.EnvParse.bool("LCARS_PILOT_STEP", System.get_env("LCARS_PILOT_STEP"), false) do
     config :fleet_pilot, step_dispatch?: true
   end
