@@ -205,12 +205,21 @@ defmodule Fleet.Spawner.PodWarden do
     # CI-05 (audit intégrité 2026-07-20): erase the sock-dir (the orphan PROOF this warden enumerates) ONLY
     # after CONFIRMED death. `kill_holder` returns `:ok` regardless of the OS kill outcome, so a refused
     # kill would leave claude alive AND erase the only trace that brings us back here. Verify liveness;
-    # still alive → keep the proof, retry on the next tick.
+    # still alive → keep the proof so a later tick comes back to it.
+    #
+    # CADENCE, exactly: the retry lands in TWO ticks, not one. `reconcile_decision` computes the new
+    # suspects BEFORE this reap and without its outcome, so a refused kill still leaves `suspects` —
+    # the kept sock-dir makes the id a candidate again next tick, and the 2-tick grace then re-applies
+    # from scratch. That is slower than immediate, never lossy (the proof is what brings it back), and
+    # it keeps the grace's own guarantee: an id that a live pod reclaimed in between is cleared by the
+    # liveness check before any second kill. Feeding failures back into `suspects` to honour a
+    # one-tick retry is possible, but it buys one tick on a cleanup path at the cost of touching the
+    # loop whose whole job is to never reap a LIVE pod.
     if PodTmux.confirm_dead?(pod_id) do
       PodTmux.remove_sock_dir(pod_id)
     else
       Logger.error(
-        "PodWarden: pod #{pod_id} STILL ALIVE after reap kill — keeping the sock-dir, retry next tick"
+        "PodWarden: pod #{pod_id} STILL ALIVE after reap kill — keeping the sock-dir, retry in 2 ticks"
       )
     end
 
