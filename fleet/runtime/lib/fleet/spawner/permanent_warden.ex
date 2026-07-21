@@ -11,7 +11,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   1. **Event** (`pod.failed` of a `permanent-*` pod) → respawn SCHEDULED with capped exponential
      backoff, via `PermanentBoot.respawn/2` (the SAME path as boot: deterministic idempotent
-     pod_id + boot-from-base = FRESH context from the versioned base — never the dead pod's
+     pod_id + a FRESH context (recreated from scratch, no base seed) — never the dead pod's
      accumulated session).
   2. **Reconciliation tick** — the event rail is BLIND to a permanent that dies WITHOUT emitting:
      a restart of the spawner sub-tree terminates its `:temporary` pods CLEANLY (no `pod.failed`),
@@ -54,7 +54,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer

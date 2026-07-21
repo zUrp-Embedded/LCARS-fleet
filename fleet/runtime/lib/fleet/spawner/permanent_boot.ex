@@ -177,7 +177,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Re-spawn ONE dead permanent pod (rebuildable cattle) — called by `Fleet.Spawner.PermanentWarden`
   on `pod.failed` of a `permanent-<role>` pod. Reuses EXACTLY the boot path (`spawn_one`):
   deterministic idempotent pod_id (`{:already_started}` = no-op if the pod came back in the meantime) +
-  boot-from-base if a base exists (stable UUID + FRESH context restored from the base — the respawn
+  a stable UUID + a FRESH context (recreated from scratch, no base seed — the respawn
   NEVER resumes the dead pod's accumulated session, consistent with the fresh-reroll recovery).
 
   Safeguard: the loaded cap-profile must be a PERMANENT (`boot_at_start?`) — fail-loud refusal otherwise
