@@ -121,6 +121,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # pattern itself post-strip: an `"event_type" =>` mention in a COMMENT (doc of the legacy-tuple
   # removal) does not count as a violation (otherwise the gate would flag its own documentation).
   # NB `executor.ex`/`task_monitor.ex` are no longer targets (rails/apps removed).
+  # SCOPE: a TARGETED residue check — it scans ONLY api/ws.ex (the `files:` below), the WS boundary
+  # consumer. NOT a global consumer sweep: the id's "canon" is the canonical `%Fleet.Event{}` SHAPE,
+  # not exhaustive coverage. A legacy "event_type" tuple reappearing in a Pilot/Starfleet/Observation
+  # consumer is NOT caught here — those files are not scanned. Broadening the scan is a separate change;
+  # this check's contract is the single file it lists.
   defp check_event_consumers_canon(root) do
     residue_check(root, %{
       id: "event.consumers.canon",
@@ -128,7 +133,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       files: ["lib/fleet/api/ws.ex"],
       pattern: ~r/"event_type"\s*=>/,
       confirm: ~r/"event_type"\s*=>/,
-      note: "consumers still on the legacy \"event_type\" tuple"
+      note: "the WS boundary consumer (api/ws.ex) still on the legacy \"event_type\" tuple"
     })
   end
 
