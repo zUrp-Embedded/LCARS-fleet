@@ -3,35 +3,37 @@
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
 # STATUS: salvage v2-functional
-# fleet_mcp_stdio_bridge.py — pont MCP stdio→socket AF_UNIX (transport pod ↔ central).
+# fleet_mcp_stdio_bridge.py — MCP bridge, stdio→AF_UNIX socket (pod ↔ central transport).
 #
-# RAISON D'ÊTRE (vérifié empiriquement) : un pod claude one-shot NE PEUT PAS se connecter en direct à
-# un serveur MCP réseau (au turn-1 le serveur est encore "still connecting", tools déférés → abandon).
-# Seul stdio marche (claude spawne le serveur → connexion synchrone → tools inline turn-1). Mais un
-# serveur stdio par-pod aurait un état ISOLÉ. Ce pont résout les deux : claude le spawne en stdio
-# (synchrone, OK), et lui forwarde chaque tool-call vers le VRAI fleet_mcp central, état partagé, hors
-# du chemin critique turn-1.
+# WHY IT EXISTS (measured, not assumed): a one-shot claude pod CANNOT connect straight to a networked
+# MCP server — at turn 1 the server is still "still connecting", the tools are deferred and the pod
+# gives up. Only stdio works (claude spawns the server → synchronous connection → tools inline at
+# turn 1). But a per-pod stdio server would hold ISOLATED state. This bridge gets both: claude spawns
+# it over stdio (synchronous, fine) and it forwards every tool-call to the REAL central fleet_mcp —
+# shared state, off the turn-1 critical path.
 #
-# IRON LAW : c'est le mécanisme de comm pod UNIQUE (MCP/stdio côté pod). Pas une variante — le pont
-# EST le canal. Le central (fleet_mcp) est le backend d'état, jamais joint en direct par le pod.
-# Transport-shim quasi-pur (zéro logique FLEET — la logique métier vit côté Elixir central) : le pont termine seulement le handshake `initialize` localement (protocolVersion épinglé) et forwarde tout le reste.
+# IRON LAW: this is the ONE pod comm mechanism (MCP/stdio on the pod side). Not a variant — the bridge
+# IS the channel. Central (fleet_mcp) is the state backend, never reached directly by the pod.
+# Near-pure transport shim (ZERO fleet logic — the business logic lives in central, on the Elixir
+# side): the bridge only terminates the `initialize` handshake locally (pinned protocolVersion) and
+# forwards everything else.
 #
-# IDENTITÉ = LE CANAL : chaque pod a SA propre socket AF_UNIX, montée dans son seul sandbox. Le central
-# dérive le pod_id de la socket sur laquelle il reçoit ; le pont n'injecte plus AUCUNE identité dans les
-# arguments. (L'ancien transport HTTP loopback était partagé par tous les pods, le pod_id y était
-# devinable → il fallait alors présenter une capability secrète dans les args ; la socket per-pod ferme
-# ce trou par construction — il n'y a plus rien à présenter, le canal discrimine.)
+# IDENTITY IS THE CHANNEL: each pod has ITS OWN AF_UNIX socket, mounted in its sandbox alone. Central
+# derives the pod_id from the socket it received on; the bridge injects NO identity into the arguments.
+# (The old loopback HTTP transport was shared by every pod and the pod_id was guessable there, so a
+# secret capability had to be presented in the args. The per-pod socket closes that hole by
+# construction — there is nothing left to present, the channel discriminates.)
 #
-# Transport-shim mono-thread, tools-only (get_work_item IN / submit_result OUT). Le push channel a été
-# retiré — drive 100% par pull `get_work_item`.
+# Single-threaded transport shim, tools-only (get_work_item IN / submit_result OUT). The push channel
+# was removed — 100% pull-driven through `get_work_item`.
 #
-# ENV :
-#   LCARS_FLEET_MCP_SOCKET : chemin de la socket AF_UNIX du central pour CE pod (un fichier socket
-#                            per-pod, monté dans le sandbox). REQUIS.
-# (F-C138 — plus de LCARS_ROLE : le filtrage par rôle est fait par le central depuis la socket per-pod,
-#  le pont ne sélectionne plus aucune surface localement.)
-# Protocole : JSON-RPC newline-framed sur stdin/stdout (côté claude) ; même JSON-RPC newline-framed sur
-# la socket AF_UNIX (côté central) — une requête = une ligne, une réponse = une ligne.
+# ENV:
+#   LCARS_FLEET_MCP_SOCKET: path of central's AF_UNIX socket for THIS pod (one socket file per pod,
+#                           mounted in the sandbox). REQUIRED.
+# (F-C138 — no more LCARS_ROLE: role filtering is done by central from the per-pod socket, the bridge
+#  no longer selects any surface locally.)
+# Protocol: newline-framed JSON-RPC on stdin/stdout (claude side); the same newline-framed JSON-RPC on
+# the AF_UNIX socket (central side) — one request = one line, one response = one line.
 import json
 import os
 import socket
@@ -54,19 +56,19 @@ def send(o):
 
 
 def central_call(method, params):
-    # Forwarde un appel JSON-RPC au fleet_mcp central via la socket AF_UNIX per-pod : une connexion
-    # PAR appel (connect → envoie une ligne → lit une ligne → close), sans état entre appels — le
-    # central accepte connexion par connexion. Newline-framed : on envoie exactement `json + "\n"`
-    # (json.dumps sans indent tient sur UNE ligne, aucun `\n` interne) et on lit la réponse jusqu'au
-    # premier `\n`. Retourne le champ result (ou lève : socket absente / connexion refusée / timeout /
-    # réponse vide remontent comme exception — l'appelant tools/call la traduit en erreur JSON-RPC
-    # propre vers claude, jamais un crash silencieux).
+    # Forwards a JSON-RPC call to central fleet_mcp over the per-pod AF_UNIX socket: one connection PER
+    # call (connect → write one line → read one line → close), no state between calls — central accepts
+    # connection by connection. Newline-framed: we send exactly `json + "\n"` (json.dumps without indent
+    # fits on ONE line, no internal `\n`) and read the response up to the first `\n`. Returns the result
+    # field, or raises: missing socket / connection refused / timeout / empty response all surface as an
+    # exception, and the tools/call caller turns it into a clean JSON-RPC error for claude — never a
+    # silent crash.
     #
-    # INSTRUMENTATION (diagnostic timeout) : chaque étape (connect/send/readline) est chronométrée et
-    # l'étape courante gardée dans `stage`. Un échec loggue DONC où ça a bloqué — `connect` lent = le
-    # central n'accepte pas la connexion (accepteur occupé/sérialisé) ; `readline` lent = il a accepté
-    # mais ne répond pas. Sans ça le pod ne voit qu'un « timed out » muet, indistinguable. Un appel
-    # réussi mais lent (>1s) est aussi loggué avec le détail par étape.
+    # INSTRUMENTATION (timeout diagnosis): each step (connect/send/readline) is timed and the current one
+    # kept in `stage`, so a failure logs WHERE it blocked — a slow `connect` means central is not
+    # accepting (busy/serialized acceptor); a slow `readline` means it accepted but is not answering.
+    # Without this the pod sees only a mute "timed out", indistinguishable either way. A successful but
+    # slow call (>1s) is logged too, with the same per-step breakdown.
     _req_id[0] += 1
     rpc = {"jsonrpc": "2.0", "id": _req_id[0], "method": method, "params": params}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -83,15 +85,15 @@ def central_call(method, params):
         resp_line = s.makefile("rb").readline()
         t_recv = time.monotonic()
         if t_recv - t0 > 1.0:
-            log(f"central_call {method} LENT {t_recv-t0:.2f}s "
+            log(f"central_call {method} SLOW {t_recv-t0:.2f}s "
                 f"(connect={t_conn-t0:.3f}s send={t_send-t_conn:.3f}s readline={t_recv-t_send:.3f}s)")
     except Exception as e:
-        log(f"central_call {method} ECHEC etape='{stage}' apres {time.monotonic()-t0:.2f}s : {e!r}")
+        log(f"central_call {method} FAILED at stage='{stage}' after {time.monotonic()-t0:.2f}s: {e!r}")
         raise
     finally:
         s.close()
     if not resp_line:
-        raise RuntimeError("central: réponse vide (connexion fermée sans ligne)")
+        raise RuntimeError("central: empty response (connection closed without a line)")
     payload = json.loads(resp_line.decode())
     if "error" in payload:
         raise RuntimeError(f"central error: {payload['error']}")
@@ -100,13 +102,14 @@ def central_call(method, params):
 
 
 
-# F-C138 — le pont ne porte PLUS aucun catalogue de tools : `tools/list` ET `tools/call` sont forwardés au
-# central, source UNIQUE des schémas (`deftool`) et du filtrage par rôle (dérivé du cap-profile, indexé sur
-# la socket per-pod = l'identité par le canal). Transport-shim pur enfin tenu : zéro logique, zéro liste —
-# fini la dérive Python↔Elixir (dont `import_project` invisible aux pods était le symptôme).
+# F-C138 — the bridge carries NO tool catalogue any more: `tools/list` AND `tools/call` are both
+# forwarded to central, the SINGLE source of the schemas (`deftool`) and of role filtering (derived from
+# the cap-profile, indexed on the per-pod socket = identity through the channel). That is what makes the
+# "pure transport shim" claim true: zero logic, zero list, and no Python↔Elixir drift (whose symptom was
+# `import_project` being invisible to the pods).
 def main():
     if not SOCKET_PATH:
-        log("FATAL: LCARS_FLEET_MCP_SOCKET non défini — le pont n'a pas de socket central à joindre")
+        log("FATAL: LCARS_FLEET_MCP_SOCKET unset — the bridge has no central socket to reach")
         sys.exit(1)
     log(f"start → central socket {SOCKET_PATH}")
 
@@ -126,9 +129,9 @@ def main():
         elif method == "notifications/initialized":
             pass
         elif method == "tools/list":
-            # F-C138 — FORWARD au central (comme tools/call), plus de catalogue local : le central est la
-            # source unique des schémas (deftool) ET du filtrage par rôle (dérivé du cap-profile, indexé
-            # sur la socket per-pod). Le pont ne connaît plus aucun tool par cœur.
+            # F-C138 — FORWARD to central (like tools/call), no local catalogue: central is the single
+            # source of the schemas (deftool) AND of role filtering (derived from the cap-profile,
+            # indexed on the per-pod socket). The bridge knows no tool by heart any more.
             try:
                 result = central_call("tools/list", msg.get("params", {}))
                 send({"jsonrpc": "2.0", "id": mid, "result": result})
@@ -138,9 +141,9 @@ def main():
         elif method == "tools/call":
             p = msg.get("params", {})
             try:
-                # Forward au central TEL QUEL : AUCUNE identité injectée dans les arguments. Le central
-                # dérive le pod_id de la socket per-pod sur laquelle il reçoit (l'identité EST le canal) ;
-                # le wire ne porte plus rien à prouver. La réponse du central est renvoyée telle quelle.
+                # Forward to central AS-IS: NO identity injected into the arguments. Central derives the
+                # pod_id from the per-pod socket it received on (identity IS the channel); the wire no
+                # longer carries anything to prove. Central's answer goes back untouched.
                 result = central_call("tools/call", p)
                 send({"jsonrpc": "2.0", "id": mid, "result": result})
             except Exception as e:
