@@ -34,7 +34,7 @@ defmodule Fleet.CapProfile.Invariants do
   `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile.validate/1`
   calls `violations/1` (runtime-dep).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.CapProfile
@@ -47,6 +47,18 @@ defmodule Fleet.CapProfile.Invariants do
   # are denied by construction. Not "the sandbox does not contain them" (containment framing): "they live
   # outside the world we project FOR the agent".
   # Strict entries = equality, prefix entries = `String.starts_with?/2`.
+  #
+  # DECLARED then VALIDATED, not copied — the distinction matters when reading the catalogue. Every
+  # canon cap-profile repeats these entries in its own `spec.scope.disallowedTools`, and this list is
+  # what MAKES that repetition safe rather than duplicated: `check_disallowed_strict/1` requires each
+  # profile to contain every strict entry, so a profile that drops one FAILS validation. The seven
+  # lists cannot drift apart, and reading any single cap-profile shows what its pod is denied.
+  #
+  # Do not confuse this with the OTHER mechanism on the same field: the git denials are INJECTED at
+  # resolve time (`CapProfile.DisallowedTools.with_resolved/1`, from `_baseline-git-denied.yaml`) and
+  # appear in no cap-profile. Same key, two mechanisms — one declared and checked here, one injected
+  # and absent from the source. Adding the server-tools minimum to the injection instead would make the
+  # catalogue stop stating its own denials.
   @disallowed_minimum_strict ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution)
   @disallowed_minimum_prefix ~w(tool_search_)
 
