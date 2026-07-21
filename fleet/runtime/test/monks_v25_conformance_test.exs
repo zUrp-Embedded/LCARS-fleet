@@ -14,7 +14,7 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
   use ExUnit.Case, async: true
 
   # FROZEN (BL — Memory-X frozen): v2.5 conformance of the monk cap-profiles, now ARCHIVED
-  # (`priv/canon/_frozen-monks/`, out of the boot loop). Re-enable when Memory-X is re-homed
+  # (`priv/cap_profile/canon/_frozen-monks/`, out of the boot loop). Re-enable when Memory-X is re-homed
   # (per-project + system-wide under lcars). cf. work/backlog.md.
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at per-project re-home"

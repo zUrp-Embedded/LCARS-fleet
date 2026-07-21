@@ -1,6 +1,6 @@
 defmodule Fleet.CapProfile.V25ConformanceTest do
   @moduledoc """
-  Conformance of the 7 canon cap-profiles `priv/canon/cap-profiles/` against the
+  Conformance of the 7 canon cap-profiles `priv/cap_profile/canon/cap-profiles/` against the
   schema `priv/schema/cap-profile-v2.5.json`. Pattern (PROVEN): canon YAML →
   ex_json_schema validate. `async: true`.
 
