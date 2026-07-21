@@ -210,9 +210,10 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
           {:ok, boolean()} | {:error, term()}
   def team_member?(org, team, username, opts \\ [])
       when is_binary(org) and is_binary(team) and is_binary(username) do
+    # PAGINATED: the org's teams — a single page HID team 51+, so the membership check for a team past
+    # the first page (onboarding's "humans" gate, project_onboard) would falsely read "not a member".
     with {:ok, config} <- resolve_config(opts),
-         {:ok, teams} when is_list(teams) <-
-           http_get(config, "/orgs/#{encode_seg(org)}/teams") do
+         {:ok, teams} <- paginated_teams(config, org) do
       case Enum.find(teams, &(is_map(&1) and &1["name"] == team)) do
         nil ->
           {:ok, false}
@@ -224,8 +225,15 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
             {:error, _} = err -> err
           end
       end
-    else
-      {:ok, other} -> {:error, {:unexpected_teams_shape, other}}
+    end
+  end
+
+  # `paginate` fail-louds a non-list page as `:unexpected_page_shape`; map it to the team-specific
+  # `:unexpected_teams_shape` (never `{:ok, []}` — an empty team view here would wrongly deny membership).
+  defp paginated_teams(config, org) do
+    case paginate(config, "/orgs/#{encode_seg(org)}/teams", "") do
+      {:ok, teams} -> {:ok, teams}
+      {:error, {:unexpected_page_shape, _p, _page, body}} -> {:error, {:unexpected_teams_shape, body}}
       {:error, _} = err -> err
     end
   end

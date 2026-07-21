@@ -1074,6 +1074,29 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "team_member?/4 (onboarding: org-team membership gate)" do
+    test "paginates the org's teams — a team on page 2 (org has >50 teams) is found" do
+      # page 1 = a FULL page (50) of other teams → paginate continues; page 2 = the "humans" team (partial
+      # → stop). A single `?limit=50` page would have missed team 51 → a FALSE "not a member", which at
+      # onboarding (project_onboard's "humans" gate) would wrongly deny a legitimate human.
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      page1 = for n <- 1..50, do: %{"id" => n, "name" => "team-#{n}"}
+      page2 = [%{"id" => 999, "name" => "humans"}]
+
+      handlers = %{
+        {"GET", "/api/v1/orgs/fleet/teams"} => fn ->
+          page = Agent.get_and_update(counter, &{&1, &1 + 1})
+          {200, if(page == 0, do: page1, else: page2)}
+        end,
+        {"GET", "/api/v1/teams/999/members/alice"} => {200, %{"login" => "alice"}}
+      }
+
+      assert {:ok, true} =
+               ForgeClient.Repo.team_member?("fleet", "humans", "alice", opts(handlers))
+    end
+  end
+
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
     test "protect_branch → POST branch_protections, :ok" do
       handlers = %{
