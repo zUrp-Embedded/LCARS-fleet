@@ -21,9 +21,10 @@ defmodule Fleet.Workflow.Git do
   producer duplicate/race put there is surfaced, never destroyed. A protected-branch
   or server-hook rejection is NEVER force-retried (fail-closed).
 
-  Distinct identities: `author_*` reflects the worker (role) identity;
-  `committer_*` reflects the system identity. Native git
-  (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
+  Distinct identities (whatever the caller threads in `opts`; the authority is `ForgeIdentity`):
+  `author_*` is the HUMAN of the brief — never the role, which rides the `Co-authored-by:` trailer;
+  `committer_*` is the human (git_native: author=committer) or the system (payload commits, e.g.
+  onboard). Native git honours `GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`.
 
   **Last revised**: 2026-07-21
   """
