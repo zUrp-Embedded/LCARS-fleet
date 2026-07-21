@@ -79,15 +79,37 @@ defmodule Fleet.Spawner.Pod.Publishing do
   (otherwise the pod would stay never-`:ready` hence never re-briefed — a wedge), with a WARNING on
   the handler side.
 
-  LOAD-BEARING INVARIANT (why the deadline lift is safe, not just wedge-breaking): clearing the flag
-  re-enables the workspace reset, so it MUST NOT fire while the pilot is still reading the workspace.
-  It doesn't, because the read — `StepRunCompleter` → `Fleet.Workflow.Deliverable.publish` (rev-parse
-  + commit + push, via `Fleet.Workflow.Git`) — is spawned CONCURRENTLY on `pod.completed` (no queue)
-  and EACH op is hard-bounded + SIGKILL-enforced (`:fleet_workflow, :git_local_timeout_ms` /
-  `:git_push_timeout_ms`, 30_000 each). Worst-case serial (~90s) is under this 120_000 deadline, so by
-  the time it fires no live git process is reading the workspace → the reset cannot race one. The two
-  domains' configs are COUPLED by this: shrinking `:publish_deadline_ms` below the git-op ceiling (or
-  raising the git timeouts above it) re-opens the read/reset race.
+  WHY THE LIFT IS ASSERTED SAFE, AND WHY THAT ASSERTION DOES NOT HOLD AS WRITTEN. Clearing the flag
+  re-enables the workspace reset, so it must not fire while the pilot is still reading the workspace.
+  The argument was: the read — `StepRunCompleter` → `Fleet.Workflow.Deliverable.publish` — is spawned
+  CONCURRENTLY on `pod.completed` (no queue) and each git op is hard-bounded + SIGKILL-enforced, for a
+  worst-case serial under this 120_000 deadline.
+
+  The bound was counted wrong. `publish` chains SIX bounded ops, not three, and the count omitted
+  `DeliverableGate.verify` entirely — which also carries a THIRD timeout knob the argument never
+  mentions, its own `@git_timeout_ms` (15_000, a module attribute, not config):
+
+      Git.ancestor?        (verify)   :fleet_workflow, :git_local_timeout_ms   30_000
+      check_identity       (verify)   DeliverableGate @git_timeout_ms          15_000
+      maybe_check_trailer  (verify)   DeliverableGate @git_timeout_ms          15_000
+      scan_secrets         (verify)   DeliverableGate @git_timeout_ms          15_000
+      head_sha                        :fleet_workflow, :git_local_timeout_ms   30_000
+      push_deliverable                :fleet_workflow, :git_push_timeout_ms    30_000
+                                                                              -------
+                                                                              135_000
+
+  135s against a 120_000 deadline — and that is a floor: it excludes `materialize_content`'s commit on
+  the non-git_native path and the `--force-with-lease` branch of the push. Without the role trailer it
+  lands on 120s exactly, i.e. zero margin. So the lift is NOT established safe by this reasoning; it is
+  asserted.
+
+  What is NOT established either is that the race bites: nobody has shown the reset actually landing on
+  a live git process. Do not read the numbers above as a bug report — read them as: this invariant is
+  unproven in both directions, and the timing argument is the wrong instrument. The pod cannot observe
+  the publisher (different domain, Spawner ∌ Pilot; the flag is the only channel), which is why a
+  budget comparison stands in for a fact. The side that PERFORMS the reset is Pilot, and it does hold
+  that fact — `StepRunConsumer.inflight_completions/0` counts the live completion Tasks. Wiring those
+  two is what would replace arithmetic with observation.
   """
   @spec publish_deadline_ms() :: non_neg_integer()
   def publish_deadline_ms,

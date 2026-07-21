@@ -604,12 +604,17 @@ defmodule Fleet.Spawner.Pod do
   def handle_event({:timeout, :liveness}, :tick, _state, _data), do: :keep_state_and_data
 
   # SLOT-FREEZE fail-safe: deliverable.published did not arrive within the deadline. NOT "a role with no git
-  # deliverable" — those never arm this deadline (Publishing.maybe_enter_publishing gates on git_native). The
-  # real triggers are a LOST emission (the workspace read already happened → safe) or a crashed/stuck completion.
-  # Either way the pilot's workspace-git ops are hard-bounded + SIGKILL'd under the deadline (cf. the invariant
-  # on Publishing.publish_deadline_ms), so no live reader survives → clearing :publishing and re-enabling reset
-  # is safe. We clear anyway — otherwise the pod stays never-:ready thus never re-briefed (wedge). Logs WARNING:
-  # a missed confirmation must be visible.
+  # deliverable" — those never arm this deadline (Publishing.maybe_enter_publishing gates on git_native).
+  # TWO triggers, and only one of them is a question:
+  #   - a LOST emission → the workspace read already happened, so clearing is safe outright;
+  #   - a crashed or STUCK completion → a git op may still be reading the workspace when we clear.
+  # The second case used to be argued away by a timing bound ("the git ops are SIGKILL'd under the
+  # deadline, so no live reader survives"). That bound was counted wrong — see
+  # `Publishing.publish_deadline_ms`, which now carries the real 135_000 against a 120_000 deadline.
+  # We clear ANYWAY, and that part is not in question: otherwise the pod stays never-:ready hence never
+  # re-briefed, which is a certain wedge against an unproven race. What is NOT established is the
+  # safety, in either direction — nobody has shown the reset landing on a live git process either.
+  # Logs WARNING: a missed confirmation must be visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     if Publishing.publishing?(data) do
       Logger.warning(
