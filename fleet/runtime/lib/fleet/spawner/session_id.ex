@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.SessionId do
   valid inputs — no role refusal (those decisions live at the spawn level, not here), no `{:error, _}`.
   An out-of-bounds input = caller bug → function-clause/raise.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
   import Bitwise
 
@@ -48,7 +48,7 @@ defmodule Fleet.Spawner.SessionId do
   @uuid_v4_re ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
 
   @doc """
-  Validates an EXPLICIT session id (recall seed / permanent boot-from-base / admin override) as a legal
+  Validates an EXPLICIT session id (recall seed / admin override) as a legal
   RFC4122 v4 UUID — the shape `encode/5` produces and the shape the vendor's `--session-id`/`--resume`
   accept. `{:ok, uuid}` | `{:error, :not_uuid_shaped}`.
 

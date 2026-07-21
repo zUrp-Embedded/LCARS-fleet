@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -1083,7 +1083,7 @@ defmodule Fleet.Spawner.Pod do
       issue_id: args.issue_id,
       # Session UUID PRE-ALLOCATED at spawn: `--session-id <uuid>` on the 1st creation. Recovery
       # from state.json does NOT reuse this sid (recreate = fresh session). The explicit seed
-      # (`opts[:session_id]`, e.g. arch recall / permanent boot-from-base) TAKES PRECEDENCE over the
+      # (`opts[:session_id]`, e.g. arch recall) TAKES PRECEDENCE over the
       # mint (`Pod.SessionMint`) — but is CAST as a valid UUID first (see resolve_session_id/1).
       session_id: resolve_session_id(args),
       # ISO8601 timestamp frozen at creation, persisted as-is in state.json.
@@ -1149,7 +1149,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # The explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
-  # recall / permanent boot-from-base resume a real vendor session, and the value is exported to the
+  # an arch recall resumes a real vendor session, and the value is exported to the
   # launcher + persisted for recovery. A present-but-non-UUID seed is a caller/seed corruption: we REFUSE
   # it loud (raise → `init/1` rescue → `{:error, _}` at start_link, no launch), never accept an arbitrary
   # binary as identity nor silently fall back to the mint (that would MASK the corrupt seed with a mint id
