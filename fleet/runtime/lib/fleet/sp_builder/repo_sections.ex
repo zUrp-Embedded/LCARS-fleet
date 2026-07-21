@@ -9,15 +9,25 @@ defmodule Fleet.SPBuilder.RepoSections do
   header. Everything else in the file is ignored (the repo CLAUDE.md also carries
   human sections with no value for a pod).
 
-  **Pure** functions (FS read only for `read/1`, no process).
+  **Pure** functions (FS read only for `read/1`, no process) — except the "nothing matched" warning,
+  which `read/1` emits (never `extract/1`, which stays a pure parser).
 
-  **Last revised**: 2026-07-18
+  The kept list is a BET, not a convention LCARS imposes: `priv/project_template` ships no `CLAUDE.md`,
+  so a target repo is free to name its sections otherwise and then contributes nothing. That outcome is
+  legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching with zero repo context
+  used to be indistinguishable from a pod that was given no repo file at all.
+
+  **Last revised**: 2026-07-21
   """
+
+  require Logger
 
   # Closed list of the sections carried over into the pod. The `\b` bounds the name on a
   # word boundary: `## Test suite` matches (space after `Test`), `## Testing` or
   # `## Stackoverflow` do not match (the word continues).
   @repo_section_re ~r/^##\s+(Stack|Build|Test|Conventions|Commands|Gotchas)\b/m
+  # Same list, readable — quoted in the "nothing matched" warning so the operator sees WHAT was expected.
+  @repo_section_names ~w(Stack Build Test Conventions Commands Gotchas)
 
   @doc """
   Reads the repo `CLAUDE.md` and extracts the named sections from it.
@@ -32,10 +42,30 @@ defmodule Fleet.SPBuilder.RepoSections do
 
   def read(path) when is_binary(path) do
     case File.read(path) do
-      {:ok, content} -> {:ok, extract(content)}
+      {:ok, content} -> {:ok, warn_if_no_section(extract(content), path)}
       {:error, reason} -> {:error, {:repo_claude_md_unreadable, path, reason}}
     end
   end
+
+  # THIRD state, previously folded into the first. This module already separates "no path supplied"
+  # ({:ok, ""} — legitimate, the template renders an empty zone) from "path supplied but unreadable"
+  # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections was silently
+  # indistinguishable from the first: the pod launched with no repo context at all and nothing said so.
+  # The closed list is a BET on the target repo's headings — LCARS does not impose them (its
+  # `priv/project_template` ships no CLAUDE.md), so a repo naming its sections `## Setup` /
+  # `## Architecture` contributes nothing, legitimately and invisibly. Not an error (a repo owes us no
+  # heading), so `{:ok, ""}` stands — but it is now VISIBLE. `extract/1` stays pure: the log lives here,
+  # on the side that already does I/O.
+  defp warn_if_no_section("", path) do
+    Logger.warning(
+      "RepoSections: #{path} read but NO section matched #{inspect(@repo_section_names)} — the pod's " <>
+        "CLAUDE.md carries no repo context. Either the repo names its sections differently, or it has none."
+    )
+
+    ""
+  end
+
+  defp warn_if_no_section(sections, _path), do: sections
 
   @doc """
   Extracts from the markdown content the sections in the closed list (pure parser):
