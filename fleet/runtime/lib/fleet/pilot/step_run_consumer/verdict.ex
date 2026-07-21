@@ -25,12 +25,28 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   `Fleet.Workflow.GateDecision` (this module recompiles if the canon list changes). Fail-closed:
   absent/unknown decision → `"halt_invalid"` (never `"continue"` on a malformed verdict).
 
-  **Last revised**: 2026-07-18
+  ## The wire schema is EXECUTED at this frontier
+
+  The GateBrief demands the strict JSON of `gate-decision-v1.json`; `gate_decision/1`
+  validates the FULL envelope against it (resolved once via `Fleet.SchemaCache`,
+  boot-loaded by the rail through `load_schema!/0`). A schema-invalid verdict — e.g. a
+  mistyped `details`/`chain` — fail-closes to `halt_invalid` (refusal logged) instead of
+  crossing with a silently truncated trace. The compiled enum+reason check stays the
+  floor: the module list is the compile-time authority, the schema its wire mirror
+  (equality pinned by `GateDecisionTest`). The only side effect in this module is that
+  refusal warning — no state is carried.
+
+  **Last revised**: 2026-07-21
   """
+
+  require Logger
 
   # Canon vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile → literal list,
   # usable in the `in` guard below; this module recompiles if the canon list changes).
   @gate_decisions Fleet.Workflow.GateDecision.decisions()
+
+  # Wire contract of the judge verdict — validated integrally on ingest (see moduledoc).
+  @schema_file "gate-decision-v1.json"
 
   # ============================================================
   # Decoding — reading the decision buried in the envelopes
@@ -56,17 +72,51 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # verdict trace is what sank v1 by its absence). We require BOTH: a valid decision AND a non-empty
   # reason, else fail-closed `halt_invalid` (→ human escalation). A judge is instructed to justify (GateBrief
   # `gate-decision-v1` contract); a decision without a reason is a malformed verdict, not a silent approval.
+  #
+  # Beyond enum+reason, the FULL `gate-decision-v1` envelope validates here: `details` must be an
+  # object, `chain` an array of strings. A schema-invalid verdict used to cross (and its rich trace
+  # was silently dropped at rendering) — now it fail-closes like every other malformation, with the
+  # refusal logged so the operator sees WHY the verdict reads "illisible".
   def gate_decision(result) when is_map(result) do
     reason = result["reason"]
 
     if result["decision"] in @gate_decisions and is_binary(reason) and reason != "" do
-      result["decision"]
+      case ExJsonSchema.Validator.validate(resolved_schema(), result) do
+        :ok ->
+          result["decision"]
+
+        {:error, errors} ->
+          Logger.warning(
+            "StepRunConsumer: verdict #{inspect(result["decision"])} refused — " <>
+              "#{@schema_file} envelope invalid (#{inspect(errors)}); fail-closed halt_invalid"
+          )
+
+          "halt_invalid"
+      end
     else
       "halt_invalid"
     end
   end
 
   def gate_decision(_), do: "halt_invalid"
+
+  @doc false
+  # Rail boot hook: resolves the wire schema once, fail-loud. A broken/absent schema file is a
+  # broken deploy artifact — it must refuse at rail boot, not crash the StepRunConsumer singleton
+  # on the first verdict ingest.
+  def load_schema! do
+    _ = resolved_schema()
+    :ok
+  end
+
+  # Resolved via the foundation authority `Fleet.SchemaCache` (cached in :persistent_term),
+  # keyed by the resolved path.
+  defp resolved_schema do
+    path =
+      :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{@schema_file}")
+
+    Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
+  end
 
   @doc false
   # Unwraps the worker envelope `%{"status","result"}`. The worker returns either directly

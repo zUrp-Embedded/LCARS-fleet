@@ -616,6 +616,53 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:label, "lcars-awaits-arch"}
   end
 
+  test "wire envelope EXECUTED at the frontier: mistyped details/chain → halt_invalid, logged" do
+    # gate-decision-v1.json types `details: object` and `chain: array[string]`. The decoder used
+    # to check only enum+reason: a schema-invalid approval crossed and its rich trace was silently
+    # dropped at rendering. The full envelope now validates on ingest, fail-closed.
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert "halt_invalid" ==
+                 Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+                   "decision" => "continue",
+                   "reason" => "criterion ok",
+                   "details" => "oops",
+                   "chain" => "oops"
+                 })
+
+        assert "halt_invalid" ==
+                 Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+                   "decision" => "continue",
+                   "reason" => "criterion ok",
+                   "chain" => [%{"step" => "reading"}, 42]
+                 })
+      end)
+
+    # The refusal names its cause on the operator rail — "illisible" alone is not diagnosable.
+    assert log =~ "envelope invalid"
+
+    # Well-typed optional fields still cross.
+    assert "continue" ==
+             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+               "decision" => "continue",
+               "reason" => "criterion ok",
+               "details" => %{"critere" => "ok"},
+               "chain" => ["read", "checked"]
+             })
+
+    # End-to-end: a schema-invalid `continue` does NOT advance — await_arch, never a merge.
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, :awaiting_arch} =
+               StepRunConsumer.resume_gate(
+                 soft_ctx(),
+                 %{"result" => %{"decision" => "continue", "reason" => "ok", "chain" => "oops"}},
+                 hc()
+               )
+    end)
+
+    assert_received {:label, "lcars-awaits-arch"}
+  end
+
   test "redirect verdict -> await_arch (deferred A2.x, no off-DAG routing)" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(

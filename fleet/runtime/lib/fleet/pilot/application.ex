@@ -167,6 +167,12 @@ defmodule Fleet.Pilot.Application do
     validate_card_juries!()
     validate_card_steps!()
 
+    # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
+    # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
+    # refuses at rail boot instead of crashing the StepRunConsumer singleton on the
+    # first verdict.
+    Fleet.Pilot.StepRunConsumer.Verdict.load_schema!()
+
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
     [
