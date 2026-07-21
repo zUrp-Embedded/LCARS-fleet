@@ -20,12 +20,22 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   (pollers, consumers, listener bind) next to the live one. Run on the deploy host:
   `set -a; . ~/.lcars/fleet_v2.env; set +a; mix lcars.project_template.sync`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use Mix.Task
 
   @template_dir "priv/project_template"
+
+  # Every git op runs on the WORLD side (outside any sandbox) — compose the runtime's SINGLE-SOURCE
+  # config neutralization (hooks/fsmonitor/sshCommand/diff.external) so a `.gitattributes`/config
+  # shipped in the template tree cannot execute code here. Same invariant as Fleet.Workflow.Git.
+  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
+
+  # WALL bounds (setsid + SIGKILL of the OS process-group at the deadline, via Shell.git). Local ops
+  # are sub-second; the NETWORK push is the one that could hang a deploy forever without a bound.
+  @local_timeout_ms 30_000
+  @push_timeout_ms 60_000
 
   @impl true
   def run(_args) do
@@ -81,24 +91,34 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   # branch (pure blueprint: `generate` ignores non-default branches — verified live — the
   # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
   # forge are the honest blueprint, expansion happens at write time).
-  defp push_template(repo, fc) do
-    creds_url = authed_url(Keyword.fetch!(fc, :base_url), Keyword.fetch!(fc, :token), repo)
+  @doc false
+  def push_template(repo, fc) do
+    # The token rides the git ENVIRON (extraheader via GIT_CONFIG_*), NEVER the argv/URL:
+    # /proc/<pid>/cmdline is world-readable (another human's `ps` would read a token-in-URL), the
+    # environ is owner-only. We reuse the runtime's SINGLE SOURCE (Fleet.Credentials.ForgeAuth) rather
+    # than hand-composing the header — but `app.start` is skipped here (by design), so we set the same
+    # :forge_auth config config/runtime.exs sets at boot, from the env this task already read.
+    base_prefix = String.trim_trailing(Keyword.fetch!(fc, :base_url), "/")
 
-    with :ok <- push_face(creds_url, "main", "main") do
-      push_face(creds_url, "work-ops", "work/ops")
+    Application.put_env(:fleet_credentials, :forge_auth, %{
+      url_prefix: base_prefix,
+      token: Keyword.fetch!(fc, :token)
+    })
+
+    # PLAIN url (no userinfo) — the auth is the env header, matched by git on the `url_prefix`.
+    url = base_prefix <> "/" <> repo <> ".git"
+
+    with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result(),
+         :ok <- push_face(url, auth_env, "main", "main") do
+      push_face(url, auth_env, "work-ops", "work/ops")
     end
   end
 
-  # Token-in-URL for the one-shot push (the URL never leaves this process; same channel
-  # the runtime's own pushes use).
-  defp authed_url(base, token, repo) do
-    uri = URI.parse(String.trim_trailing(base, "/"))
-    %{uri | userinfo: "oauth2:#{token}"} |> URI.to_string() |> Kernel.<>("/" <> repo <> ".git")
-  end
-
   # Each face is its own throwaway git repo → the two pushed branches share no ancestor
-  # (work/ops is orphan by construction, exactly like the runtime's add_work_ops).
-  defp push_face(url, face, branch) do
+  # (work/ops is orphan by construction, exactly like the runtime's add_work_ops). Force-push is the
+  # projection semantic (overwrite the forge copy, never merge — L13); a lease would need a
+  # remote-tracking ref this fresh `git init` never had, so the blind force is correct HERE.
+  defp push_face(url, auth_env, face, branch) do
     src = Application.app_dir(:lcars_fleet, Path.join(@template_dir, face))
     tmp = Path.join(System.tmp_dir!(), "lcars-tpl-#{face}-#{System.unique_integer([:positive])}")
 
@@ -106,11 +126,12 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
       File.mkdir_p!(tmp)
       _ = File.cp_r!(src, tmp)
 
-      with {_, 0} <- System.cmd("git", ["init", "-q", "-b", branch], cd: tmp),
-           {_, 0} <- System.cmd("git", ["add", "-A"], cd: tmp),
-           {_, 0} <-
-             System.cmd(
-               "git",
+      # All ops via Fleet.Credentials.Shell.git: BOUNDED (a hung network push no longer suspends the
+      # deploy forever) + hooks-off; the push carries the token through `env`, never the argv.
+      with {:ok, {_, 0}} <- git(["init", "-q", "-b", branch], cd: tmp, timeout_ms: @local_timeout_ms),
+           {:ok, {_, 0}} <- git(["add", "-A"], cd: tmp, timeout_ms: @local_timeout_ms),
+           {:ok, {_, 0}} <-
+             git(
                [
                  "-c",
                  "user.name=lcars-system",
@@ -121,15 +142,31 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
                  "-m",
                  "chore(template): sync #{face} face from priv/project_template"
                ],
-               cd: tmp
+               cd: tmp,
+               timeout_ms: @local_timeout_ms
              ),
-           {_, 0} <- System.cmd("git", ["push", "-q", "--force", url, branch], cd: tmp) do
+           {:ok, {_, 0}} <-
+             git(["push", "-q", "--force", url, branch],
+               cd: tmp,
+               env: auth_env,
+               timeout_ms: @push_timeout_ms
+             ) do
         :ok
       else
-        {out, rc} -> {:error, {:git, face, rc, out}}
+        {:ok, {out, rc}} -> {:error, {:git, face, rc, out}}
+        {:error, reason} -> {:error, {:git, face, reason}}
       end
     after
       _ = File.rm_rf(tmp)
     end
+  end
+
+  # Git runner seam (default = the bounded, hooks-off Fleet.Credentials.Shell.git). A test overrides it
+  # to capture the exact argv and prove the forge token never rides it.
+  defp git(args, opts) do
+    runner =
+      Application.get_env(:lcars_fleet, :template_sync_git_runner, &Fleet.Credentials.Shell.git/2)
+
+    runner.(@hooks_off ++ args, opts)
   end
 end
