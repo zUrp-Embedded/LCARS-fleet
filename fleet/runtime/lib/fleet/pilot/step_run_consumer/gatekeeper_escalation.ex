@@ -56,7 +56,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   (hardened boundary: `@enforce_keys` forces the fields, an access `seams.<other>` does not
   compile).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
   # Spawns the ONE-SHOT gatekeeper for this eval — the judge mold: composed cap, repo binding,
   # numeric repo id (deterministic UUID → its stable per-project Desktop slot), the brief in the
-  # spawn opts (R18: a one-shot without brief is refused at the spawner). Already alive (previous
+  # spawn opts (a one-shot without brief is refused at the spawner). Already alive (previous
   # eval closing / re-dispatch) → plain wake: the pod pulls the enqueued brief when free.
   defp spawn_gatekeeper(%Seams{} = seams, pod_id, brief) do
     loader = seams.loader || Fleet.CapProfile

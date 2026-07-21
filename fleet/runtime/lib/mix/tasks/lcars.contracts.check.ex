@@ -367,7 +367,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     )
   end
 
-  # `Fleet.Spawner.spawn_pod/3` must enforce R18's REAL invariant, not merely NAME it (DR-030): the
+  # `Fleet.Spawner.spawn_pod/3` must enforce the one-shot-brief REAL invariant, not merely NAME it (DR-030): the
   # earlier marker-only `:brief_required` presence passed on the @doc prose alone. We now assert the
   # EXECUTABLE clauses (doc blocks excluded by `code_match?`, BND-111):
   #   1. one-shot without brief → refused: the executable tuple `{:error, :brief_required}` on its line.
@@ -383,7 +383,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         id: "spawn.has_brief",
         remediation: "keep spawn_pod guards: {:error, :brief_required} for a one-shot without brief AND {:error, :cap_profile_no_lifetime_scope} for a missing lifetime_scope",
         note:
-          "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}) AND refuses a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) — the real R18 invariant, not a marker"
+          "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}) AND refuses a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) — the real one-shot-brief invariant, not a marker"
       },
       [
         {code_match?(root, spawner, ~r/:brief_required/, [

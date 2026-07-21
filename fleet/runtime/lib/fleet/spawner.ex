@@ -68,7 +68,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Spawner.Pod
@@ -97,7 +97,7 @@ defmodule Fleet.Spawner do
   def valid_pod_id?(_), do: false
 
   @doc """
-  Rule R18: a one-shot cap-profile requires a brief. Shared authority (brief_guard +
+  A one-shot cap-profile requires a brief. Shared authority (brief_guard +
   the boundaries that validate at admission, e.g. the API). Reads only the EXPLICIT
   `"one-shot"`; a missing lifetime_scope → false, but that is now a dead-safe default —
   the spawn choke point (`spawn_pod`) refuses a no-scope profile via `fetch_lifetime_scope/1`
@@ -143,7 +143,7 @@ defmodule Fleet.Spawner do
           {:ok, pid()} | {:error, term()}
   def spawn_pod(%Fleet.CapProfile{} = cap_profile, issue_id, opts \\ [])
       when is_binary(issue_id) and is_list(opts) do
-    # DR-019 (R18 structural): `lifetime_scope` is schema-REQUIRED — it decides brief-required, slot
+    # DR-019 — the STRUCTURAL guard: `lifetime_scope` is schema-REQUIRED — it decides brief-required, slot
     # scope, state-fs scope AND release. A %CapProfile{} without it is an INVALID state the struct type
     # still allows (an unvalidated/hand-forged struct); letting it spawn gave it DIVERGENT downstream
     # reads (brief-exempt at the guard, yet "one-shot" at extraction → releases). We refuse it at THE

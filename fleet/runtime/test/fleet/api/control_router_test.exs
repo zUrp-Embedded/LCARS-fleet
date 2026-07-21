@@ -446,7 +446,7 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   # ============================================================
-  # flow-02 — one-shot without brief forbidden (R18 mirror at admission)
+  # flow-02 — one-shot without brief forbidden (brief-guard mirror at admission)
   # ============================================================
   #
   # A one-shot cap-profile (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave with

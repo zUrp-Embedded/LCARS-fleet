@@ -124,7 +124,7 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  describe "R18 — refuse one-shot spawn without brief" do
+  describe "one-shot spawn without brief is refused (brief guard)" do
     test "valid_pod_id?/1 is the public authority on the pod_id charset" do
       # "p1" (short) is ACCEPTED: admission does NOT impose a minimum length — the len≥4 is
       # pkill's LOCAL over-armour (PodTmux.pkill_pattern), not an admission rule.

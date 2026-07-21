@@ -34,7 +34,7 @@ defmodule Fleet.API.SpawnAdmission do
        out-of-band path (`bin/host_launch.sh`, an off-fleet interactive session).
        Fail-closed — a defensive guard even though no canon profile is host-native
        since the 2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator).
-    5. **Brief required for a one-shot** — MIRROR of R18
+    5. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`
        (`Fleet.Spawner.brief_guard`): a one-shot without `brief` would leave
        without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
        `Fleet.Spawner.brief_required?/1` IS the shared authority (no copied
@@ -44,7 +44,7 @@ defmodule Fleet.API.SpawnAdmission do
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.EventRouter.Bus
@@ -194,7 +194,7 @@ defmodule Fleet.API.SpawnAdmission do
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing_cap_profile}`; load KO →
   # `{:error, {:cap_profile, name, reason}}`; HOST-NATIVE (`containment != bwrap`) →
   # `{:error, {:host_native_forbidden, name}}`; loaded + sandboxed → `{:ok, cap}` (admission
-  # continues; the loaded cap feeds the R18 one-shot brief guard, without a re-load). Same loader +
+  # continues; the loaded cap feeds the one-shot brief guard (`Fleet.Spawner.brief_guard`), without a re-load). Same loader +
   # same containment read as the spawner (single source `Fleet.CapProfile`) → no
   # verdict divergence between the API and the real launch.
   defp validate_cap_profile(payload) do
@@ -223,7 +223,7 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  # MIRROR of R18 (Fleet.Spawner.brief_guard) at ADMISSION: a one-shot cap-profile
+  # MIRROR of the one-shot brief guard (Fleet.Spawner.brief_guard) at ADMISSION: a one-shot cap-profile
   # (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave without work → the spawner
   # refuses it (`brief_required`, ZERO pod). Without this guard, the "queued" 202 would be a
   # lying 202 (exact twin of the lying cap-profile). `Fleet.Spawner.brief_required?/1` IS

@@ -25,11 +25,11 @@ defmodule Fleet.API.ControlRouter do
   ## Contract
 
   All the admission POLICY lives in `Fleet.API.SpawnAdmission.admit/1` (DTO allowlist, path-safe
-  pod_id, loadable cap-profile, host-native refused, one-shot brief R18). This router only maps
+  pod_id, loadable cap-profile, host-native refused, one-shot brief required). This router only maps
   each verdict to an HTTP status + JSON body. A refusal = NOTHING was broadcast (admission
   precedes emission by construction). Quiescing (shutdown drain) → 503.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use Plug.Router
@@ -100,7 +100,7 @@ defmodule Fleet.API.ControlRouter do
           Jason.encode!(%{
             error: "brief required (one-shot cap-profile)",
             reason:
-              "one-shot lifetime_scope without `brief`: the pod would leave with no work (R18). Provide `brief`."
+              "one-shot lifetime_scope without `brief`: the pod would leave with no work. Provide `brief`."
           })
         )
 
