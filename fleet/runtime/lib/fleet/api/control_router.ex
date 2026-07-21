@@ -128,10 +128,42 @@ defmodule Fleet.API.ControlRouter do
   end
 
   defp do_broadcast_spawn(conn, payload) do
-    case Fleet.API.SpawnAdmission.broadcast(payload) do
-      :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
-      {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
+    # The 202 must not LIE. `broadcast/1` goes over the lossy Bus (D1) and returns `:ok` even with
+    # NO subscriber — so a dead/unsubscribed PublishConsumer (its restart window, a crash loop, the
+    # gate off) made this door answer `202 queued` into the void: the operator believed a pod was on
+    # the way, nothing took the command, and there is NO forge net for the admin-spawn path (unlike
+    # the step rail's reconciliation). Unlike the work-item/pod.completed broadcasts, this command has
+    # no durable backing, so we PRE-FLIGHT the rail's readiness (the same authority the readiness probe
+    # reads) and refuse with 503 when the subscriber is not live — the 202 now means a live consumer
+    # exists to take it. The residual TOCTOU (the consumer dying in the microseconds between the check
+    # and the broadcast) is negligible against the real failure mode it closes (a consumer down for a
+    # whole restart window). Seam `:spawn_dispatch_status_fun` for tests.
+    case dispatch_status_fun().() do
+      {:degraded, info} ->
+        Logger.warning(
+          "ControlRouter: /api/admin/spawn refused 503 — spawn rail degraded (#{inspect(info)})"
+        )
+
+        send_resp(
+          conn,
+          503,
+          Jason.encode!(%{error: "spawn dispatch rail unavailable", detail: info})
+        )
+
+      {:operational, _} ->
+        case Fleet.API.SpawnAdmission.broadcast(payload) do
+          :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
+          {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
+        end
     end
+  end
+
+  defp dispatch_status_fun do
+    Application.get_env(
+      :fleet_api,
+      :spawn_dispatch_status_fun,
+      &Fleet.Spawner.Application.spawn_dispatch_status/0
+    )
   end
 
   # ── AF_UNIX control-socket listener ──

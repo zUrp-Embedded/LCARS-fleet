@@ -13,6 +13,17 @@ defmodule Fleet.API.ControlRouterTest do
 
   setup do
     Bus.subscribe()
+
+    # The spawn rail's readiness is now pre-flighted before the 202 (the 202 must not lie into
+    # a dead PublishConsumer). In :test the consumer is deliberately off (hermeticity), so inject an
+    # OPERATIONAL status by default — the routing tests below isolate the router from the consumer's
+    # presence; the degraded path has its own test that overrides this seam.
+    Fleet.TestEnv.put_env_restoring(
+      :fleet_api,
+      :spawn_dispatch_status_fun,
+      fn -> {:operational, %{consumer: true, subscribed: true}} end
+    )
+
     :ok
   end
 
@@ -147,6 +158,38 @@ defmodule Fleet.API.ControlRouterTest do
                ControlRouter.start_control_listener(sock, chmod_fun: failing_chmod)
 
       refute File.exists?(sock)
+    end
+  end
+
+  describe "POST /api/admin/spawn — spawn rail readiness (the 202 must not lie)" do
+    test "503 + NO broadcast when the dispatch rail is DEGRADED (PublishConsumer down)" do
+      # The 202 used to go out over the lossy Bus even with no subscriber — a lie: the operator
+      # believed a pod was queued, nothing took it, and there is no forge net for this path.
+      Fleet.TestEnv.put_env_restoring(
+        :fleet_api,
+        :spawn_dispatch_status_fun,
+        fn -> {:degraded, %{consumer: false, note: "PublishConsumer not alive"}} end
+      )
+
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
+        |> put_req_header("content-type", "application/json")
+        |> ControlRouter.call(@opts)
+
+      assert conn.status == 503
+      # The command was NOT broadcast into the void.
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+    end
+
+    test "202 + broadcast when the rail is operational (a live consumer will take it)" do
+      # The default setup injects operational; the broadcast goes out and the 202 is truthful.
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
+        |> put_req_header("content-type", "application/json")
+        |> ControlRouter.call(@opts)
+
+      assert conn.status == 202
+      assert_receive %Fleet.Event{type: :"admin.spawn.request"}, 500
     end
   end
 
