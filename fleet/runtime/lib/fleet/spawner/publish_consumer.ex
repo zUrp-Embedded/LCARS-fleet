@@ -94,7 +94,7 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   # `payload` = application map (the canonical %Fleet.Event{} carries issue_id IN the payload).
   defp handle_spawn_request(payload, state) do
-    # Single-source `cap_profile_name || role` resolution (C-04): the Bus is no-auth (SpawnAdmission
+    # Single-source `cap_profile_name || role` resolution: the Bus is no-auth (SpawnAdmission
     # broadcasts a parsed DTO, but any process can emit on fleet.events) — this consumer is a REAL
     # boundary, not defensive re-validation, so it re-parses, but from the SAME authority as admission
     # (`CapProfile.name_from_request`, blank-normalized: a truthy "" never masks a valid `role`).

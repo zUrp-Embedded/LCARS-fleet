@@ -204,7 +204,7 @@ defmodule Fleet.API.SpawnAdmission do
     # `:missing_cap_profile`. Fail-closed by luck, wrong verdict by construction.
     case Fleet.CapProfile.name_from_request(payload) do
       name when is_binary(name) ->
-        # C-03 (sonde convergence 2026-07-20): validate the EFFECTIVE profile (`resolve` = base + default
+        # validate the EFFECTIVE profile (`resolve` = base + default
         # modops), the SAME one `PublishConsumer` spawns — not the bare `load`. A structural modop overlay
         # that flipped `containment` to host-native would otherwise pass admission (base is bwrap) then
         # launch out-of-sandbox: admission must gate on what actually runs.

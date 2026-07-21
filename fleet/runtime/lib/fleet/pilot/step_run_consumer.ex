@@ -584,7 +584,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_step_run(payload, n, state) do
     role = payload["role"]
 
-    # Producer/judge property = the EFFECTIVE deliverable_mode the pod ran with (payload, C-03), consumed
+    # Producer/judge property = the EFFECTIVE deliverable_mode the pod ran with (payload), consumed
     # directly — resolve_next reads producer? on the SAME role+mode, so both decisions classify this pod
     # IDENTICALLY (no since-spawn skew). Only when the payload OMITS the mode (legacy) do we re-derive via
     # the cap-profile — and DR-013 then applies: an UNLOADABLE profile makes it UNKNOWN → never a silent
@@ -767,7 +767,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # Producer/judge classification — SINGLE AUTHORITY `GateEngine.producer?/3` (shared with the gate
-  # decision and StepRunBuild). Consumes the EFFECTIVE deliverable_mode the pod ran with (payload, C-03):
+  # decision and StepRunBuild). Consumes the EFFECTIVE deliverable_mode the pod ran with (payload):
   # the completion never re-derives a fact it already carries (a since-spawn profile change could skew it).
   # Only a legacy/bare payload (mode absent) falls back to the state's `deliverable_mode_fun` seam.
   defp producer?(role, effective_mode, state),

@@ -1209,7 +1209,7 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  describe "name_from_request/1 — the shared admin-spawn name parser (C-04)" do
+  describe "name_from_request/1 — the shared admin-spawn name parser" do
     test "cap_profile_name takes precedence over role" do
       assert Fleet.CapProfile.name_from_request(%{
                "cap_profile_name" => "engineer",

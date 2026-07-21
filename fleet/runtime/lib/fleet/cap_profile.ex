@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -456,7 +456,7 @@ defmodule Fleet.CapProfile do
   Resolves the requested cap-profile NAME from an admin-spawn request DTO (string-keyed map):
   `cap_profile_name` takes precedence, `role` is the fallback; both blank-normalized (`""` / non-string
   → `nil`, so a truthy `""` never masks a valid `role`). SINGLE SOURCE of the `cap_profile_name || role`
-  interpretation (C-03/C-04, sonde convergence 2026-07-20), shared by the API admission
+  interpretation, shared by the API admission
   (`Fleet.API.SpawnAdmission`) and the async consumer (`Fleet.Spawner.PublishConsumer`) — the Bus is NOT
   a trust boundary, so both parse, but from ONE parser: the DTO interpretation cannot drift between what
   admission validates and what the consumer executes.

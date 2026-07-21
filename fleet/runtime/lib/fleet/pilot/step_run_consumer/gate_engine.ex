@@ -146,7 +146,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   Is the finishing role a PRODUCER (deliverable_mode `"git_native"`)?
   Producer = pushes code, opens the PR. Judge (`"payload"`) = review, doesn't push.
 
-  `effective_mode` (C-03, sonde convergence 2026-07-20): the deliverable_mode the pod ACTUALLY ran with,
+  `effective_mode`: the deliverable_mode the pod ACTUALLY ran with,
   carried in the `pod.completed` payload from the spawn-time RESOLVED profile. Preferred when present —
   the completion consumes the effective fact, it does NOT re-derive it from the base role (a structural
   modop overlay could differ). Absent (legacy/bare payload) → the `deliverable_mode_fun` seam re-loads the
@@ -273,7 +273,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
         :pass ->
           # The terminal intent depends on the ROLE that finishes (cf. advance_intent/3). We consume the
           # EFFECTIVE deliverable_mode the pod ran with (payload) — not a re-derivation that a since-spawn
-          # profile change could skew (C-03). Absent (legacy payload) → re-derive, and DR-013 fail-loud on
+          # profile change could skew. Absent (legacy payload) → re-derive, and DR-013 fail-loud on
           # an unloadable cap-profile (never a blind advance under an unknown producer property).
           case producer?(payload["role"], seams.deliverable_mode_fun, payload["deliverable_mode"]) do
             {:ok, prod?} -> advance_intent(workflow_map, step, prod?)

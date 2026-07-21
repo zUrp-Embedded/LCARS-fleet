@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   `pod.completed` is load-bearing LIFECYCLE: `Fleet.Pilot.StepRunConsumer` depends on it to finish
   the step_run. The payload KEYS (`pod_id`/`issue_id`/`result`/`workspace`/`base_sha`/`gate_base_sha`/
   `role`/`deliverable_mode`/`repository`/`remote`/`workflow_map`/`step`) are a contract — this module is
-  the single source of their construction. (`deliverable_mode` = the EFFECTIVE mode at spawn, C-03.)
+  the single source of their construction. (`deliverable_mode` = the EFFECTIVE mode at spawn.)
 
   ## Contract (called by `Pod`)
 
@@ -30,7 +30,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   - `Fleet.Spawner.Pod.Paths.pod_workspace_path/1` (single authority over the workspace subfolder),
   - `Fleet.CapProfile.name/1` (single source of the role carved at spawn).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -69,7 +69,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
           # equals it to `base_sha`. Fallback `base_sha`.
           "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
           "role" => Fleet.CapProfile.name(data.cap_profile),
-          # C-03 (sonde convergence 2026-07-20): the EFFECTIVE deliverable_mode the pod ran with (from the
+          # the EFFECTIVE deliverable_mode the pod ran with (from the
           # RESOLVED profile at spawn). The completion's producer/judge classification consumes THIS, rather
           # than re-deriving it from the base role — the effective fact travels, it is not recomputed.
           "deliverable_mode" => Fleet.CapProfile.deliverable_mode(data.cap_profile)

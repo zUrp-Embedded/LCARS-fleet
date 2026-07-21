@@ -172,7 +172,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
     end
   end
 
-  describe "C-03 — the effective deliverable_mode travels, it is not re-derived from the base role" do
+  describe "the effective deliverable_mode travels, it is not re-derived from the base role" do
     test "producer?/3 prefers the payload's effective mode → the base-role seam is NOT consulted" do
       # The pod ran a RESOLVED profile whose deliverable_mode is carried in the pod.completed payload.
       # The completion consumes THAT — a since-vanished/edited base profile (the DR-013 trigger) is
