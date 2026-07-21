@@ -68,6 +68,7 @@ defmodule Fleet.Pilot do
       # Foundation drain flag (CI-01): dispatch_issue refuses to open a new producer while the daemon
       # quiesces — the poller-side reader, added to the two existing ones (ControlRouter, PermanentWarden).
       Fleet.Shutdown.Quiesce,
+      Fleet.Publish.InFlight,
       # — external wire surface (lib fencing: every reference is declared) —
       Req,
       Req.Response

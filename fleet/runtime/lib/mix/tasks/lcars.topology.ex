@@ -77,6 +77,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Labels" => "foundation",
     "Fleet.Decision" => "foundation",
     "Fleet.Shutdown.Quiesce" => "foundation",
+    "Fleet.Publish.InFlight" => "foundation",
     "Fleet.EventRouter" => "substrate",
     "Fleet.CapProfile" => "substrate",
     "Fleet.Credentials" => "pod primitives",
