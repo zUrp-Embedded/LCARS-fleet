@@ -93,10 +93,23 @@ defmodule Fleet.Spawner.Pod.Liveness do
   Has the pod MOVED since the previous sample? Movement = at least ONE of the two signals has grown.
   No baseline (1st tick, `prev = nil`) → alive (benefit of the doubt). Called by the same tick handler
   as `liveness_sample/1`.
+
+  TRI-STATE, not binary: a NEW sample of `{nil, nil}` means BOTH signals were UNOBSERVABLE
+  this tick (no jsonl yet AND the holder's /proc unreadable) — that is UNKNOWN, not proven
+  silence. Counting it as "not moved" would let an observation failure accumulate toward the
+  kill, destroying a pod we simply could not measure. So `{nil, nil}` reads as moved (re-arm +
+  re-probe next tick), the same benefit-of-the-doubt as the missing baseline; only a sample
+  where at least one signal IS readable, and neither grew, is genuine silence.
   """
   @spec liveness_moved?(term(), term()) :: boolean()
   def liveness_moved?(nil, _now), do: true
+  def liveness_moved?(_prev, {nil, nil}), do: true
   def liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
+
+  @doc "Is this sample fully UNOBSERVABLE (both signals nil)? The tick handler logs the degrade."
+  @spec unobservable?(term()) :: boolean()
+  def unobservable?({nil, nil}), do: true
+  def unobservable?(_), do: false
 
   defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
   defp grew?(_, _), do: false

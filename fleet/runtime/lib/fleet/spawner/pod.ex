@@ -598,6 +598,18 @@ defmodule Fleet.Spawner.Pod do
   def handle_event({:timeout, :liveness}, :tick, :monitoring, data) do
     sample = Liveness.liveness_sample(data)
     moved? = Liveness.liveness_moved?(Map.get(data, :liveness_sample), sample)
+
+    # An UNOBSERVABLE sample re-arms the deadline (moved? = true) but is NOT silence proven
+    # alive — it is a measurement gap. Logged so a pod that is repeatedly unmeasurable is
+    # visible (a persistent gap is a probe/mount problem, not a healthy pod), never a silent
+    # benefit-of-the-doubt that masks it.
+    if Liveness.unobservable?(sample) do
+      Logger.warning(
+        "pod #{data.pod_id} liveness UNOBSERVABLE this tick (no jsonl + /proc unreadable) — " <>
+          "deadline re-armed (re-probe), not counted as silence"
+      )
+    end
+
     data = Map.put(data, :liveness_sample, sample)
 
     actions =
