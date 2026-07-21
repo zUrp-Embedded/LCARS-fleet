@@ -80,8 +80,23 @@ bash test/integration/sandbox_notrace_test.sh
 # Un wrapper qui compte doit distinguer 77 : un skip n'est JAMAIS un vert.
 ```
 
-*(`test/integration/boot_test.sh` testait le hardening/readiness systemd — obsolète avec le retrait,
-à re-cibler ou retirer.)*
+### Sondes manuelles (hors `mix gate`, non-CI)
+
+Ces scripts se déclarent `SONDE MANUELLE` dans leur en-tête : ils ne sont invoqués par RIEN — ni
+`mix gate`, ni `test/shell_gate.sh` (qui ne lance que le test python du bridge et les `.bats`). Sans
+cette liste, une sonde vivante que personne ne sait lancer pourrit sans bruit.
+
+```bash
+bash test/gate-r0.1-bwrap.sh          # isolation e2e RÉELLE (bwrap+tmux+vendor). 0 = prouvé, 3 = SKIP
+                                      # explicite (bwrap/userns indispo) — jamais un PASS déguisé.
+bash test/gate-r0.2-otp.sh            # lifecycle BEAM / superviseur OTP.
+bash test/gate-r0.6-tooling.sh        # outillage statique (Credo/Sobelow/Dialyzer).
+bash test/gate-r-core-comm-inc3b1.sh  # couche tool MCP, pur Elixir.
+```
+
+*(Il n'y a pas de sonde de boot/readiness hors-mix : `test/integration/boot_test.sh` visait le
+hardening systemd et a été retiré avec lui. Le besoin n'est pas en attente d'un « re-ciblage » — il
+n'existe plus sous cette forme ; une sonde de readiness serait à écrire, pas à récupérer.)*
 
 ## À reprendre (notes)
 - **Graceful shutdown façon fleet_v2** : avec systemd parti, le drain coordonné (`Fleet.Starfleet.Shutdown`)
