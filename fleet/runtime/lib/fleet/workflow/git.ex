@@ -391,10 +391,79 @@ defmodule Fleet.Workflow.Git do
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
 
       {:error, {:timeout, _ms}} ->
-        {:error, {:git_push_timeout, push_timeout_ms()}}
+        # A push TIMEOUT killed the LOCAL git at the deadline — but the network effect is not undone:
+        # the ref may have landed on the remote before the SIGKILL, git just never reported success. A
+        # blind redispatch would redo the work / conflict / duplicate. READ BACK the remote: if the
+        # target ref holds the exact SHA we pushed, the push SUCCEEDED despite the timeout.
+        confirm_push_after_timeout(workspace, remote, refspec, auth_env)
 
       {:error, {:exit, reason}} ->
         {:error, {:git_push_exit, reason}}
+    end
+  end
+
+  # Readback after a push timeout (the seal's post-merge readback move, on the push path): compare
+  # the SHA we tried to push (the refspec's SOURCE ref, resolved locally) to the remote target ref
+  # (`ls-remote`). Equal → the push landed → `{:ok, true}`; different / unresolvable → the timeout
+  # stands (`:git_push_timeout`). The readback is bounded; a readback failure is fail-closed to the
+  # timeout (never claim a success we could not confirm).
+  defp confirm_push_after_timeout(workspace, remote, refspec, auth_env) do
+    target = target_of_refspec(refspec)
+    src = source_of_refspec(refspec)
+
+    with {:ok, local} <- read_local_sha(workspace, src),
+         {:ok, remote_sha} when is_binary(remote_sha) <-
+           read_remote_ref_sha(workspace, remote, target, auth_env),
+         true <- local == remote_sha do
+      Logger.warning(
+        "Workflow.Git: push #{refspec} timed out but the remote target holds our SHA " <>
+          "(#{String.slice(local, 0, 12)}) — the push LANDED before the local kill; confirmed by readback"
+      )
+
+      {:ok, true}
+    else
+      _ -> {:error, {:git_push_timeout, push_timeout_ms()}}
+    end
+  end
+
+  # Source ref of a `push` refspec (`src:target`): the part BEFORE the first `:`, with a leading `+`
+  # (in-refspec force) stripped. A bare `main` reads as `main:main` → source `main`.
+  defp source_of_refspec(refspec) do
+    refspec |> String.split(":") |> List.first() |> String.trim_leading("+")
+  end
+
+  # Local SHA of a ref/commit-ish (bounded, hooks-off). Through the push runner seam so a simulated
+  # timeout test drives the whole readback.
+  defp read_local_sha(workspace, ref) do
+    case git_runner().(@hooks_off ++ ["rev-parse", "--verify", "#{ref}^{commit}"],
+           cd: workspace,
+           timeout_ms: git_local_timeout_ms()
+         ) do
+      {:ok, {sha, 0}} -> {:ok, String.trim(sha)}
+      {:ok, {err, rc}} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
+      {:error, reason} -> {:error, {:rev_parse_exit, reason}}
+    end
+  end
+
+  # Remote target ref SHA via `ls-remote <remote> <target>` (auth, bounded). `{:ok, nil}` when the
+  # remote has no such ref (the push did not land). Output: `<sha>\t<ref>`.
+  defp read_remote_ref_sha(workspace, remote, target, auth_env) do
+    case git_runner().(@hooks_off ++ ["ls-remote", remote, target],
+           cd: workspace,
+           timeout_ms: push_timeout_ms(),
+           env: auth_env
+         ) do
+      {:ok, {out, 0}} ->
+        case out |> String.split(~r/\s+/, parts: 2) |> List.first() do
+          sha when is_binary(sha) and byte_size(sha) >= 7 -> {:ok, sha}
+          _ -> {:ok, nil}
+        end
+
+      {:ok, {err, rc}} ->
+        {:error, {:ls_remote_failed, rc, String.trim(err)}}
+
+      {:error, reason} ->
+        {:error, {:ls_remote_exit, reason}}
     end
   end
 
@@ -478,12 +547,18 @@ defmodule Fleet.Workflow.Git do
   defp run_push(workspace, remote, refspec, extra, auth_env) do
     # Forge token via env (out of argv/cmdline) — resolved ONCE at `push/3` via `ForgeAuth.git_env_result/0`
     # (fail-loud on a malformed credential, DR-024) and threaded here explicitly.
-    Fleet.Credentials.Shell.git(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
+    git_runner().(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
       cd: workspace,
       timeout_ms: push_timeout_ms(),
       env: auth_env
     )
   end
+
+  # Git runner seam for the push + its post-timeout readback (default the bounded Shell authority).
+  # A real push timeout that lands on the remote is impractical to induce; the seam lets a test
+  # simulate `{:error, {:timeout, _}}` while returning matching/mismatching readback SHAs.
+  defp git_runner,
+    do: Application.get_env(:fleet_workflow, :git_push_runner, &Fleet.Credentials.Shell.git/2)
 
   # "non-fast-forward" rejection ONLY (the remote history has diverged from the local one — here a resolution
   # rebase rewrites the SYSTEM-owned feature-branch → `--force` safe). Detected on the git output (merged

@@ -1,5 +1,7 @@
 defmodule Fleet.GitTest do
-  use ExUnit.Case, async: true
+  # async: false — the push timeout-readback tests mutate the GLOBAL :git_push_runner seam; a
+  # concurrent real-git push test in this file would otherwise pick up the stub runner.
+  use ExUnit.Case, async: false
 
   @moduletag :tmp_dir
 
@@ -192,6 +194,66 @@ defmodule Fleet.GitTest do
       assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "main:main")
       {bare_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(bare_sha) == sha
+    end
+  end
+
+  describe "push/3 — timeout readback (a push that landed before the local kill is confirmed)" do
+    # A real push timeout that lands on the remote is impractical to induce; the git_push_runner seam
+    # simulates the timeout while the readback (rev-parse local + ls-remote) is answered by the same
+    # stub. The SHA is the idempotency key: match → landed, mismatch → the timeout stands.
+    setup do
+      on_exit(fn -> Application.delete_env(:fleet_workflow, :git_push_runner) end)
+      :ok
+    end
+
+    test "push TIMES OUT but the remote target holds our SHA → {:ok, true} (confirmed by readback)" do
+      sha = "abcdef0123456789abcdef0123456789abcdef01"
+
+      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+        cond do
+          "push" in args -> {:error, {:timeout, 100}}
+          "rev-parse" in args -> {:ok, {"#{sha}\n", 0}}
+          "ls-remote" in args -> {:ok, {"#{sha}\trefs/heads/main\n", 0}}
+          true -> {:ok, {"", 0}}
+        end
+      end)
+
+      assert {:ok, true} = Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
+    end
+
+    test "push TIMES OUT and the remote holds a DIFFERENT SHA → the timeout stands" do
+      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+        cond do
+          "push" in args ->
+            {:error, {:timeout, 100}}
+
+          "rev-parse" in args ->
+            {:ok, {"aaaaaaa0000000000000000000000000000000000\n", 0}}
+
+          "ls-remote" in args ->
+            {:ok, {"bbbbbbb1111111111111111111111111111111111\trefs/heads/main\n", 0}}
+
+          true ->
+            {:ok, {"", 0}}
+        end
+      end)
+
+      assert {:error, {:git_push_timeout, _}} =
+               Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
+    end
+
+    test "push TIMES OUT and the remote has NO such ref → the timeout stands (push did not land)" do
+      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+        cond do
+          "push" in args -> {:error, {:timeout, 100}}
+          "rev-parse" in args -> {:ok, {"aaaaaaa0000000000000000000000000000000000\n", 0}}
+          "ls-remote" in args -> {:ok, {"", 0}}
+          true -> {:ok, {"", 0}}
+        end
+      end)
+
+      assert {:error, {:git_push_timeout, _}} =
+               Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
     end
   end
 
