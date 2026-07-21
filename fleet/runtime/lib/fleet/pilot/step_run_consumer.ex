@@ -196,10 +196,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
   NOT reference Pilot at compile time (no boundary dep), so this crosses as a runtime fun, not a call.
 
   Counts the LIVE children (self-correcting: a Task gone/crashed leaves the supervisor → no leak, unlike a
-  RAM inc/dec). Supervisor absent (step off) or unreachable → `0`: its Tasks are dead with it (work already
-  lost, independent of the drain) — an HONEST 0, NOT the broker's fail-closed sentinel.
+  RAM inc/dec). Two distinct outcomes, NEVER conflated:
+    * supervisor ABSENT (step off) → `0`: its Tasks are dead with it (work already lost, independent of
+      the drain) — an HONEST 0.
+    * supervisor PRESENT but `count_children` raises/exits → `:unknown`: we canNOT count the in-flight
+      completions → the drain must stay fail-closed (a fake `0` here could cut a live completion
+      mid-push), exactly like the broker's present-but-unreachable sentinel.
   """
-  @spec inflight_completions() :: non_neg_integer()
+  @spec inflight_completions() :: non_neg_integer() | :unknown
   def inflight_completions do
     if is_pid(Process.whereis(@step_run_task_supervisor)) do
       %{active: n} = DynamicSupervisor.count_children(@step_run_task_supervisor)
@@ -208,9 +212,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
       0
     end
   rescue
-    _ -> 0
+    _ -> :unknown
   catch
-    :exit, _ -> 0
+    :exit, _ -> :unknown
   end
 
   # ASYNC runner (prod, injected as `:step_run_runner`) — offloads the completion into the

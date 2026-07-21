@@ -69,10 +69,26 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
     assert AggregateDispatcher.in_flight_count() > 0
   end
 
-  test "completion seam that RAISES → treated as 0 (asymmetry: dead completion supervisor ⇒ dead Tasks, honest 0)" do
+  test "completion count 0 (supervisor genuinely absent) → contributes an honest 0" do
+    # The kept asymmetry: a DOWN completion supervisor ⇒ its Tasks are dead with it ⇒ honest 0 (the seam
+    # returns 0), so step-off does not make every stop time out.
+    inject_broker(EmptyBroker)
+    inject_completion(fn -> 0 end)
+    assert AggregateDispatcher.in_flight_count() == 0
+  end
+
+  test "completion count that RAISES → in_flight_count > 0 (fail-closed: present-but-uncountable, not a fake 0)" do
+    # A RAISING count is NOT a dead supervisor: the Tasks may be alive (completions mid-push) and we just
+    # could not count them → fail-closed, never a fake 0 that would cut a live completion.
     inject_broker(EmptyBroker)
     inject_completion(fn -> raise "count boom" end)
-    assert AggregateDispatcher.in_flight_count() == 0
+    assert AggregateDispatcher.in_flight_count() > 0
+  end
+
+  test "completion count :unknown (supervisor present but uncountable) → in_flight_count > 0 (fail-closed)" do
+    inject_broker(EmptyBroker)
+    inject_completion(fn -> :unknown end)
+    assert AggregateDispatcher.in_flight_count() > 0
   end
 
   test "drain with a RAISING broker → does NOT conclude :drained (fail-closed sentinel → timeout)" do

@@ -10,7 +10,7 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
     * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
       aggregates the real in-flight + activates quiescence
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
   @callback refuse_new_jobs(opts :: keyword()) :: :ok
   @callback in_flight_count() :: non_neg_integer()
@@ -68,9 +68,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   (a `0` would be fail-open: under-count ⇒ stop WHILE work is in flight). Broker GENUINELY absent
   (isolated test) → honest `0`, decided on the live PROCESS (`Process.whereis`), not the code path.
 
-  **ASYMMETRY on the completion seam**: if that supervisor is DOWN, its Tasks are already dead WITH
-  it (the work is already lost, independent of the drain) → the seam returns `0` (honest), NOT the
-  broker's `> 0` sentinel. A `> 0` there would make every stop time out whenever step is off.
+  **ASYMMETRY on the completion seam** — ONLY for a genuinely DOWN supervisor: its Tasks are already
+  dead WITH it (the work is already lost, independent of the drain) → the seam returns an honest `0`,
+  NOT the broker's `> 0` sentinel (a `> 0` there would make every stop time out whenever step is off).
+  But a supervisor PRESENT whose count FAILS is `:unknown` → the fail-CLOSED sentinel, same as the
+  broker: we never fake a `0` we could not measure.
 
   ## Boundary — why the completion count is a runtime seam
 
@@ -137,22 +139,38 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     :exit, _ -> :error
   end
 
-  # In-flight completion offloads via the runtime seam (cf. ## Boundary). ASYMMETRIC vs the broker: a
-  # dead/absent completion supervisor means its Tasks are ALREADY dead (work lost, not the drain's
-  # concern) → 0 is HONEST here, not a fail-open. The seam fun itself guards `Process.whereis` → 0; this
-  # rescue is only a backstop for a fun that raises (bug) — still 0 (a raising counter is not "work in
-  # flight" we can protect).
+  # In-flight completion offloads via the runtime seam (cf. ## Boundary). ASYMMETRIC vs the broker ONLY
+  # for a genuinely dead/absent completion supervisor: its Tasks are ALREADY dead (work lost, not the
+  # drain's concern) → the seam returns an honest integer 0. But a supervisor PRESENT whose count could
+  # not run returns `:unknown`, and a raising seam fun is caught here — BOTH map to the fail-CLOSED
+  # sentinel, never a fake 0 we could not measure (the Tasks may be alive mid-push).
   defp completion_phases do
-    Application.get_env(:fleet_starfleet, :completion_inflight_fun, fn -> 0 end).()
+    case Application.get_env(:fleet_starfleet, :completion_inflight_fun, fn -> 0 end).() do
+      n when is_integer(n) and n >= 0 ->
+        n
+
+      # The completion supervisor is PRESENT but its count failed: we do NOT know how many
+      # completions are in flight → fail-CLOSED sentinel, never a fake 0 that could cut a live
+      # completion mid-push. The genuinely-absent supervisor returns an honest 0 (integer) above.
+      :unknown ->
+        Logger.error(
+          "Shutdown: completion count :unknown (supervisor present but uncountable) — drain stays cautious"
+        )
+
+        @count_unavailable
+
+      _other ->
+        @count_unavailable
+    end
   rescue
     e ->
       Logger.error(
-        "Shutdown: completion-phase count raised (#{Exception.message(e)}) — treating as 0"
+        "Shutdown: completion-phase count raised (#{Exception.message(e)}) — fail-closed sentinel"
       )
 
-      0
+      @count_unavailable
   catch
-    :exit, _ -> 0
+    :exit, _ -> @count_unavailable
   end
 end
 
