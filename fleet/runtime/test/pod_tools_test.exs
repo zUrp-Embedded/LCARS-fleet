@@ -197,6 +197,10 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def list_pulls(_repo, _opts), do: {:ok, []}
 
+    # Idempotency readback: no open issue carries a marker → create proceeds (baseline behavior).
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
+
     # Finding D1 (incomplete stub): these two contract callbacks were missing — a test whose
     # `list_pulls` returned a PR would have crashed UndefinedFunctionError instead of showing
     # stub behavior. Completed minimal-honest: no fleet feature-branch, no verdicts.
@@ -251,6 +255,9 @@ defmodule Fleet.MCP.PodToolsTest do
              "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
            }
          ]}
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
 
     @impl true
     def parse_feature_branch(_head), do: :error
@@ -310,6 +317,8 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     defdelegate list_pulls(repo, opts), to: MergedMarkerForge
     @impl true
+    defdelegate list_open_issues(repo, opts), to: MergedMarkerForge
+    @impl true
     defdelegate parse_feature_branch(head), to: MergedMarkerForge
     @impl true
     defdelegate merged_pr_of_issue(repo, n, opts), to: MergedMarkerForge
@@ -345,6 +354,9 @@ defmodule Fleet.MCP.PodToolsTest do
              "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}
            }
          ]}
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
 
     @impl true
     def parse_feature_branch("lcars/issue-5-engineer"), do: {:ok, {5, "engineer"}}
@@ -384,6 +396,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @impl true
     def list_pulls(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
 
     @impl true
     def parse_feature_branch(_head), do: :error
@@ -500,6 +515,9 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_pulls(_repo, _opts), do: {:ok, []}
 
     @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
+
+    @impl true
     def parse_feature_branch(_head), do: :error
 
     @impl true
@@ -524,6 +542,59 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def close_issue(_repo, _n, _opts),
       do: raise("RecordingForge is read-only — unexpected close_issue in these tests")
+  end
+
+  # Idempotency — a STATEFUL forge (state in the caller's process dict; the stub runs INLINE in
+  # the test process, like the others). `create_issue` records the numbered issue WITH its
+  # marker-bearing body; `list_open_issues` replays them. A second create with the SAME inputs must
+  # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
+  defmodule IdempotencyForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def create_issue(_repo, title, body, _opts) do
+      issues = Process.get(:idem_issues, [])
+      number = 100 + length(issues)
+
+      Process.put(
+        :idem_issues,
+        issues ++
+          [
+            %{
+              "number" => number,
+              "title" => title,
+              "body" => body,
+              "state" => "open",
+              "assignees" => [%{"login" => "starfleet"}]
+            }
+          ]
+      )
+
+      send(self(), {:idem_create, number})
+      {:ok, number}
+    end
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, Process.get(:idem_issues, [])}
+
+    @impl true
+    def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+    @impl true
+    def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
+    @impl true
+    def list_pulls(_repo, _opts), do: {:ok, []}
+    @impl true
+    def parse_feature_branch(_head), do: :error
+    @impl true
+    def pr_review_state(_repo, _index, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    @impl true
+    def merged_pr_of_issue(_repo, _n, _opts), do: :none
+    @impl true
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, %{}}
+    @impl true
+    def close_issue(_repo, _n, _opts), do: {:ok, %{}}
   end
 
   describe "get_issue_status (arch tracking — repo from the POD BINDING, no wire param)" do
@@ -776,6 +847,40 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["supersedes"] == 5
     end
 
+    test "a re-emitted create_issue (bridge timed out at 30s) reuses its prior issue by marker, no duplicate" do
+      # The stdio bridge times out a mutation at 30s while the forge write completes; the agent then
+      # re-emits the SAME tool call. The readback on the content-derived `lcars-op` marker must find the
+      # first issue and REUSE it — one issue across two identical calls, not two.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, IdempotencyForge)
+
+      # A pointer (brief_ref + 40-hex brief_sha) short-circuits physicalize — the marker is derived from
+      # the stable inputs, so both calls compute the SAME marker.
+      args = %{
+        "title" => "Brique idempotente",
+        "brief" => "le meme brief a chaque tentative",
+        "brief_ref" => "briefs/brique.md",
+        "brief_sha" => String.duplicate("a", 40)
+      }
+
+      assert {:ok, %{content: [%{"text" => t1}]}, _} =
+               PodTools.handle_tool_call("create_issue", args, pod_state(uniq("pod-arch")))
+
+      assert {:ok, r1} = Jason.decode(t1)
+      assert r1["issue"] == 100
+      refute r1["idempotent"]
+
+      assert {:ok, %{content: [%{"text" => t2}]}, _} =
+               PodTools.handle_tool_call("create_issue", args, pod_state(uniq("pod-arch")))
+
+      assert {:ok, r2} = Jason.decode(t2)
+      assert r2["issue"] == 100
+      assert r2["idempotent"] == true
+
+      # Exactly ONE create across the two tool calls (old code, no readback, would create #101 too).
+      assert_received {:idem_create, 100}
+      refute_received {:idem_create, _}
+    end
+
     test "inline brief is ALWAYS materialized: doc committed in work/ops, ticket = dedicated summary + pinned pointer",
          %{tmp_dir: tmp} do
       # Seam: work_root → tmp; the project's work/ops is a real git dir (physicalize commits there).
@@ -848,7 +953,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert log != ""
       assert_received {:create_issue, _, _, body, _}
-      assert body == "tout le brief inline"
+      # Inline brief (degraded, no work/ops) — followed by the idempotency marker (an HTML
+      # comment, invisible in the rendered issue).
+      assert String.starts_with?(body, "tout le brief inline")
+      assert body =~ ~r/<!-- lcars-op:[0-9a-f]{16} -->/
       assert :none = Fleet.Layout.parse_brief_pointer(body)
     end
 
@@ -864,7 +972,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
       # The repo is the SPAWN BINDING (resolver) — never a wire field. assignee = the human owner
       # (fixed point). No labels INSIDE create_issue (Gitea wants IDs).
-      assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
+      assert_received {:create_issue, "fleet/demo", "T", body, opts}
+      assert String.starts_with?(body, "fais X")
       human = Fleet.Credentials.Human.current!()
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
@@ -892,7 +1001,8 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       # Extra args are inert: the issue landed in the BOUND repo, never the wire value.
-      assert_received {:create_issue, "fleet/demo", "T", "fais X", _opts}
+      assert_received {:create_issue, "fleet/demo", "T", body, _opts}
+      assert String.starts_with?(body, "fais X")
     end
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default routing)" do
@@ -972,7 +1082,8 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{pod_id: "p-arch"}
                )
 
-      assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
+      assert_received {:create_issue, "fleet/demo", "T", body, opts}
+      assert String.starts_with?(body, "fais X")
       assert opts[:token] == "ARCH_TOKEN"
     end
 

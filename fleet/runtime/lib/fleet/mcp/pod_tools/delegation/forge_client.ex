@@ -5,9 +5,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   The contract belongs to the CONSUMER: the callbacks are EXACTLY the
   functions that `Delegation` calls (create_issue, add_label, get_issue,
-  list_pulls, parse_feature_branch, pr_review_state, post_comment,
-  close_issue, merged_pr_of_issue) — not the full surface of the pilot's
-  forge client.
+  list_pulls, list_open_issues, parse_feature_branch, pr_review_state,
+  post_comment, close_issue, merged_pr_of_issue) — not the full surface of the
+  pilot's forge client.
 
   ## Why a RUNTIME seam (and not a compile dep)
 
@@ -28,7 +28,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
     * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
       adopt the behaviour (the compiler checks conformance, anti lying-stub).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-22
   """
 
   @doc "Creates an issue → `{:ok, number}` (author/assignee/token passed in `opts`)."
@@ -61,6 +61,16 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   review trail must survive the merge in `get_issue_status`.
   """
   @callback list_pulls(repo :: String.t(), opts :: keyword()) ::
+              {:ok, [map()]} | {:error, term()}
+
+  @doc """
+  OPEN issues of the repo (raw Gitea API maps — Delegation reads `\"number\"`/`\"title\"`/`\"body\"`).
+  Paginated. Delegation call site: the create_issue idempotency readback — a delegation act carries
+  an `<!-- lcars-op:<sig> -->` marker in its body; before creating, we list the open issues and reuse
+  one already bearing this marker (a prior attempt that the stdio bridge timed out on at 30s while the
+  forge write completed). No assignee scoping here (we dedup across the whole repo).
+  """
+  @callback list_open_issues(repo :: String.t(), opts :: keyword()) ::
               {:ok, [map()]} | {:error, term()}
 
   @doc """

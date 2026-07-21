@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -107,15 +107,35 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
          {:ok, target_state} <- supersedes_preflight(forge, repo, supersedes) do
-      {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
-      full_body = body |> with_pointer(pointer) |> with_supersedes(supersedes)
+      # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
+      # forge POST CONTINUE — a physicalize (push work/ops) + create_issue can exceed it. The agent then
+      # re-emits the SAME tool call and a bare create would post a DUPLICATE issue (the forge enforces no
+      # uniqueness on issues). Idempotency by READBACK (same family as the incident dedup marker): the act
+      # carries a content-derived `<!-- lcars-op:<sig> -->` marker; we look for an open issue already
+      # bearing it BEFORE physicalizing (so a retry re-pushes no brief doc either) and reuse it. The
+      # supersede retirement still runs on the reuse path — it is itself idempotent via the preflight state
+      # (an already-closed target is a no-op), so a first attempt that timed out AFTER the create but
+      # BEFORE the retirement is completed by the retry.
+      marker = op_marker(title, brief, summary, supersedes, brief_pointer)
 
-      case do_create_issue(forge, repo, title, full_body, token: identity.token) do
-        {:ok, result} ->
-          {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
+      case find_open_issue_with_marker(forge, repo, marker) do
+        {:ok, existing} ->
+          {:ok,
+           retire_superseded(forge, repo, supersedes, target_state, idempotent_result(existing))}
 
-        err ->
-          err
+        :none ->
+          {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
+
+          full_body =
+            body |> with_pointer(pointer) |> with_supersedes(supersedes) |> with_op_marker(marker)
+
+          case do_create_issue(forge, repo, title, full_body, token: identity.token) do
+            {:ok, result} ->
+              {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
+
+            err ->
+              err
+          end
       end
     else
       {:error, :role_token_unavailable} = err ->
@@ -728,6 +748,75 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp with_supersedes(body, n),
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
+
+  # Idempotency marker — content-derived signature of the delegation ACT (the inputs a retry
+  # repeats verbatim: title, brief, summary, supersedes, pointer). Deterministic on this VM (same
+  # term → same binary → same digest), so a re-emitted tool call yields the SAME marker. An HTML
+  # comment: invisible in the rendered issue but present in the raw body the readback greps. Mirror
+  # of the incident marker (`lcars-incident:<sig>`), same wire idiom.
+  defp op_marker(title, brief, summary, supersedes, brief_pointer) do
+    sig =
+      :crypto.hash(
+        :sha256,
+        :erlang.term_to_binary({title, brief, summary, supersedes, brief_pointer})
+      )
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
+
+    "<!-- lcars-op:#{sig} -->"
+  end
+
+  defp with_op_marker(body, marker), do: body <> "\n" <> marker
+
+  # Readback for the idempotency marker: an OPEN issue of the repo whose raw body carries `marker`.
+  # A failed list is FAIL-SAFE — we do NOT block a legitimate first delegation on a transient forge
+  # blip; the dedup is best-effort over today's bare-create baseline, so we log and fall through to
+  # create (a rare duplicate beats a delegation the arch cannot place at all).
+  defp find_open_issue_with_marker(forge, repo, marker) do
+    case forge.list_open_issues(repo, []) do
+      {:ok, issues} ->
+        case Enum.find(issues, fn issue ->
+               String.contains?(Map.get(issue, "body") || "", marker)
+             end) do
+          nil -> :none
+          issue -> {:ok, issue}
+        end
+
+      err ->
+        Logger.warning(
+          "Delegation: create_issue idempotency readback on #{repo} failed (#{inspect(err)}) — " <>
+            "proceeding to create (dedup is best-effort)"
+        )
+
+        :none
+    end
+  end
+
+  # Same shape as `do_create_issue`'s success (the arch chains on issue+title), tagged `idempotent`
+  # so the reuse is honest on the wire. Assignee is echoed from the found issue (defensive extraction
+  # across Gitea's `assignees`/`assignee` shapes), not re-resolved.
+  defp idempotent_result(issue) do
+    %{
+      "status" => "issue_created",
+      "issue" => Map.get(issue, "number"),
+      "title" => Map.get(issue, "title"),
+      "assignee" => issue_assignee(issue),
+      "idempotent" => true
+    }
+  end
+
+  defp issue_assignee(issue) do
+    case Map.get(issue, "assignees") do
+      [%{"login" => login} | _] ->
+        login
+
+      _ ->
+        case Map.get(issue, "assignee") do
+          %{"login" => login} -> login
+          _ -> nil
+        end
+    end
+  end
 
   # Supersede pre-flight — BEFORE any write, fail-loud on anything unverifiable: the retirement
   # is a destructive gesture executed by the SYSTEM on the arch's intent. A target with a LIVE
