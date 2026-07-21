@@ -84,8 +84,12 @@ defmodule Fleet.Coord.Policies do
   # `escalation_path`, key outside the pattern, additional property…) would load silently and then
   # break every lookup. FAIL-LOUD at boot, the SAME dead-man's-switch contract as an absent/unreadable
   # file (the BEAM exits non-zero, the launcher escalates) — never a structurally broken routing table
-  # kept alive. The schema is STRUCTURAL-ONLY (cf. its `$id`): the resolvability of action handlers and
-  # the existence of escalation targets stay verified at runtime by Fleet.Coord, not here.
+  # kept alive. The schema is STRUCTURAL-ONLY (cf. its `$id`): it does NOT validate action NAMES or
+  # escalation_path TARGETS — and nothing else does either. By DESIGN (`Fleet.Coord.Emitter`), any action
+  # string dispatches generically (`coord.action_dispatched`, extensible without recompile) and the
+  # escalation_path is relayed as-is into the payload. So a catalogue action typo becomes a generic
+  # dispatch, NOT a load error — the accepted trade-off for open extensibility, not a runtime check we
+  # promise. (No action/target registry: adding one would break the extensible-without-recompile design.)
   defp validate_against_schema!(data, path) do
     schema_path =
       :code.priv_dir(:lcars_fleet)

@@ -129,4 +129,27 @@ defmodule Fleet.Coord.PoliciesTest do
                Policies.handle_escalation(:totally_unknown, %{}, nil)
     end
   end
+
+  describe "open action dispatch (no action/target registry — extensible without recompile)" do
+    test "a non-standard action dispatches generically as coord.action_dispatched, never a load/validation error" do
+      # The schema is structural-only and NOTHING validates action names (by design): a custom/typo'd
+      # action is not rejected — it dispatches as the generic coord.action_dispatched (action in the
+      # payload). This backs the corrected contract wording (no false "handlers verified at runtime").
+      assert :ok =
+               Fleet.Coord.Emitter.dispatch_action(
+                 "some_unregistered_custom_action",
+                 ["dashboard", "operator"],
+                 %{"decision" => "x", "reason" => "y"},
+                 "corr-1"
+               )
+
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.action_dispatched",
+                       correlation_id: "corr-1",
+                       payload: %{"action" => "some_unregistered_custom_action"}
+                     },
+                     500
+    end
+  end
 end
