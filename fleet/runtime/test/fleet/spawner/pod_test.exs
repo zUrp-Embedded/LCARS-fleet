@@ -1490,7 +1490,11 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "kill_pod (gatekeeper promote/abandon) → pod releases cleanly" do
+    test "a pipe pod stays :monitoring after a submit, then a brutal Process.exit(:kill) terminates it" do
+      # NOT a kill_pod / clean-release proof — this test never calls Fleet.Spawner.kill_pod nor exercises
+      # the release path (the DynamicSupervisor is not started here). The real kill_pod clean-release is
+      # proven in spawner_test.exs ("kill_pod does a clean release", LIFE-003). Here we only prove the
+      # pipe LIFECYCLE: it survives a submit at :monitoring and dies with :killed on a brutal exit.
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe-kill"))
 
@@ -1511,9 +1515,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.sleep(50)
       assert GenServer.call(pid, :info).phase == :monitoring
 
-      # Not via Fleet.Spawner.kill_pod (DynamicSupervisor not started in
-      # this test; existing tests use direct Process.exit). Surface test:
-      # the pod accepts a brutal kill without a state.json race.
+      # Brutal kill (Process.exit, not kill_pod — cf. the header): the pod terminates with :killed.
       Process.exit(pid, :kill)
       assert_receive {:EXIT, ^pid, :killed}, 2_000
     end
