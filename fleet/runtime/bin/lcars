@@ -39,8 +39,8 @@ else
   exit 1
 fi
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
-# `spawn` (écriture) passe par la socket AF_UNIX per-humaine (ControlRouter), hors du réseau que
-# le pod partage (A-21). Les lectures restent sur $API_URL (TCP loopback).
+# `spawn` (write) goes through the per-human AF_UNIX socket (ControlRouter), off the network the
+# pod shares. Reads stay on $API_URL (TCP loopback).
 API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
@@ -71,7 +71,7 @@ USAGE
 
 ENV
   LCARS_API_URL=$API_URL       (lectures REST, TCP loopback)
-  LCARS_API_SOCK=$API_SOCK     (écriture spawn, socket AF_UNIX host-only — A-21)
+  LCARS_API_SOCK=$API_SOCK     (spawn, socket AF_UNIX host-only)
   LCARS_TMUX_SOCK_BASE=$SOCK_BASE
 EOF
 }
@@ -111,10 +111,10 @@ cmd_spawn() {
   # fait échouer le spawn en 422. L'API reconstruit elle-même l'`opts` interne du spawner à partir de
   # `brief` (cf. SpawnAdmission).
   local body http
-  # `--unix-socket` : la porte d'écriture vit sur la socket AF_UNIX per-humaine (ControlRouter),
-  # PAS sur le TCP loopback — le pod (netns hôte partagé) ne peut pas l'atteindre (A-21). Le host
-  # dans l'URL est ignoré avec --unix-socket ; on garde un host bidon. curl SANS -f : un 4xx/5xx
-  # ne fait pas échouer curl (on lit le code via -w) ; seul un échec transport (exit ≠ 0) → `|| die`.
+  # `--unix-socket`: the write door lives on the per-human AF_UNIX socket (ControlRouter), NOT on
+  # the TCP loopback - the pod (shared host netns) cannot reach it. The host in the URL is ignored
+  # with --unix-socket; we keep a dummy host. curl WITHOUT -f: a 4xx/5xx does not make curl fail
+  # (we read the code via -w); only a transport failure (exit != 0) -> `|| die`.
   body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \

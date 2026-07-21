@@ -281,7 +281,7 @@ if config_env() != :test do
   config :fleet_api, start_listener: true
 
   # AF_UNIX control socket for the write door (POST /api/admin/spawn, ControlRouter) —
-  # off the network the pod shares (A-21). Default: ~/.lcars/run/api.sock (per-human, real
+  # off the network the pod shares. Default: ~/.lcars/run/api.sock (per-human, real
   # home never bound into the pod → unreachable). Override LCARS_API_SOCK (set by bin/fleet_v2).
   config :fleet_api,
     control_socket:

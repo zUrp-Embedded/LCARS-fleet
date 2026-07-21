@@ -1,6 +1,6 @@
 defmodule Fleet.API.ControlRouterTest do
   # async: false — the PubSub bus is global (admin.spawn broadcast + assert_receive) → serialize.
-  # ControlRouter serves POST /api/admin/spawn on the AF_UNIX socket (outside the pod's network, A-21);
+  # ControlRouter serves POST /api/admin/spawn on the AF_UNIX socket (outside the pod's network);
   # here we test the ROUTING + the admission mapping via Plug.Test (the real socket bind is proven elsewhere).
   use ExUnit.Case, async: false
   import Plug.Test
@@ -25,7 +25,7 @@ defmodule Fleet.API.ControlRouterTest do
     # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
     defp short_sock, do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
 
-    # Embedded-tree cleanup (F-20): the TEST process is the tree's parent (start_link) — when
+    # Embedded-tree cleanup: the TEST process is the tree's parent (start_link) — when
     # ExUnit tears the test down (:shutdown), the tree may ALREADY be dying as this on_exit
     # runs. An already-dying tree is a clean outcome (that death-by-parent IS the fixed
     # behavior); we still wait for the DOWN so the ranch ref is free for the next test.
@@ -55,7 +55,7 @@ defmodule Fleet.API.ControlRouterTest do
         sock = short_sock()
         on_exit(fn -> File.rm(sock) end)
         {:ok, pid} = ControlRouter.start_control_listener(sock)
-        # Embedded tree (F-20): stopped via its OWNER, not `:cowboy.stop_listener` (the ref
+        # Embedded tree: stopped via its OWNER, not `:cowboy.stop_listener` (the ref
         # is not under the ranch application's supervisor → `{:error, :not_found}` there).
         on_exit(fn -> stop_tree(pid) end)
 
@@ -104,7 +104,7 @@ defmodule Fleet.API.ControlRouterTest do
       assert File.exists?(sock)
     end
 
-    test "F-20 — the listener tree is EMBEDDED: linked to the caller, never parked under ranch_sup" do
+    test "the listener tree is EMBEDDED: linked to the caller, never parked under ranch_sup" do
       # The old `Plug.Cowboy.http` start parked the listener under the ranch APPLICATION's
       # supervisor: the pid composed as a child had a FOREIGN parent, its shutdown exit was
       # ignored, and every graceful stop hung until the launcher's fallback kill. The two

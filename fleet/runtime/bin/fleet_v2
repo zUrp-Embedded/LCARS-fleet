@@ -150,9 +150,9 @@ setup_env() {
   # dans le sandbox : UNE seule source pour les deux côtés.
   export LCARS_FLEET_MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-$HOME/.lcars/run/mcp}"
 
-  # CLI `lcars` → API per-humain. Les LECTURES passent par le port TCP loopback ; l'ÉCRITURE
-  # (spawn) passe par une socket AF_UNIX per-humaine (ControlRouter) — hors du réseau que le pod
-  # partage (A-21). Le fichier vit sous ~/.lcars/run/ (home réel jamais bindé dans le pod).
+  # CLI `lcars` -> per-human API. READS go through the TCP loopback port; the WRITE (spawn) goes
+  # through a per-human AF_UNIX socket (ControlRouter) - off the network the pod shares. The file
+  # lives under ~/.lcars/run/ (the real home is never bound into the pod).
   export LCARS_API_URL="${LCARS_API_URL:-http://localhost:$API_PORT}"
   export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
   # Nettoie une socket résiduelle d'une instance précédente (AF_UNIX n'est pas auto-supprimé à la
