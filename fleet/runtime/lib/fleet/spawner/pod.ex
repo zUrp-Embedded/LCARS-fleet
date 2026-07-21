@@ -490,8 +490,16 @@ defmodule Fleet.Spawner.Pod do
 
   # SLOT-FREEZE: COLD in-place reset of a RESIDENT pipe's workspace for the next issue. NO
   # rm_rf (live bind mount) — reset --hard base + clean + checkout -B feature/work via
-  # ProjectBootstrap.reset_in_place, then /clear the REPL. Called when the pod is :ready (the previous
-  # issue's deliverable confirmed on the forge -> the push already READ the workspace: reset is safe).
+  # ProjectBootstrap.reset_in_place, then /clear the REPL. Destructive by design: `--hard` moves HEAD
+  # and overwrites tracked content, `clean -fdx` removes everything untracked including ignored files.
+  #
+  # Gated on the pod reading `:ready`, which means `:publishing` is absent (`StepDispatcher.Spawn`:
+  # `:publishing in conds -> :busy`). That flag is the ONLY gate. It falls on TWO paths, and the
+  # safety argument only covers one:
+  #   - `deliverable.published` confirmed on the forge → the push already READ the workspace, so the
+  #     reset cannot race it. This is the path the guarantee is written for.
+  #   - the `:publish_deadline` fail-safe → the flag is cleared WITHOUT that confirmation, precisely
+  #     because it never came. The premise above does not hold here; see the deadline handler.
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
     # cap_profile carrying the EFFECTIVE project (the call's, not the static one) for reset_in_place.
     eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
@@ -617,6 +625,16 @@ defmodule Fleet.Spawner.Pod do
   # Logs WARNING: a missed confirmation must be visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     if Publishing.publishing?(data) do
+      # THIS WARNING IS THE ONLY TRACE, AND IT IS NOT RECOVERABLE. There is no file backend on the
+      # logger (`config :logger, level:` only), so it lands in the daemon's tmux pane — a 2000-line
+      # ring buffer that dies with the daemon. The durable NDJSON (`Starfleet.AuditLog.write/1`) is
+      # written by `Cat5Escalator` and `DriftMonitor` alone: Cat-5 forensics, not this.
+      #
+      # Consequence, and it is the reason the safety question above stays open: nobody can find out
+      # AFTER THE FACT whether this ever fired. Not for lack of access — because nothing records it.
+      # So "does the reset ever land on a live git process?" is unanswerable as the code stands, in
+      # both directions. Making it answerable is a design call (Cat-5 rail? a durable audit rail? or
+      # accept the log?), deliberately not taken here.
       Logger.warning(
         "pod #{data.pod_id} :publishing -> :ready by DEADLINE (deliverable.published not received in time)"
       )
