@@ -2,18 +2,18 @@
 # SOURCE: test/gate-r-core-comm-inc3b2.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
-# gate-r-core-comm-inc3b2.sh — R-CORE.comm inc3b.2 (transport HTTP-SSE réel). exit 0 ssi
-# Fleet.MCP.PodTools démarré en transport :sse (Cowboy, port OS-assigné) + un client MCP
-# (ExMCP.Client) round-trip get_task (IN) / submit_result (OUT) sur le VRAI fil HTTP : SSE établi,
-# POST pour les requêtes. PUR Elixir (client+serveur BEAM, pas de claude) — c'est le wire que le
-# pod réel empruntera en inc3b.3 (bwrap --share-net → http://localhost:PORT/mcp).
-# ── GATE RETIRÉ (Z7 migration 2026-07-13) ─────────────────────────────────────
-# Ciblait pod_tools_http_test.exs, SUPPRIMÉ avec le transport HTTP loopback (pré-migration).
-# Découvert stale pendant la migration : il ne pouvait plus être vert depuis des
-# semaines. Conservé comme ARCHIVE d'incrément ; exit 3 EXPLICITE — jamais un
-# faux-vert silencieux (famille F-C166/167). Le re-cibler = décision produit.
-echo "GATE RETIRÉ — ciblait un test supprimé avec le transport HTTP (cf. header). Archive, exit 3." >&2
+# STATUS: RETIRE / ARCHIVE (DR-032) — court-circuite (exit non-zero) ; NON execute par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRE » plus bas).
+# gate-r-core-comm-inc3b2.sh — R-CORE.comm inc3b.2 (transport HTTP-SSE reel). exit 0 ssi
+# Fleet.MCP.PodTools demarre en transport :sse (Cowboy, port OS-assigne) + un client MCP
+# (ExMCP.Client) round-trip get_task (IN) / submit_result (OUT) sur le VRAI fil HTTP : SSE etabli,
+# POST pour les requetes. PUR Elixir (client+serveur BEAM, pas de claude) — c'est le wire que le
+# pod reel empruntera en inc3b.3 (bwrap --share-net → http://localhost:PORT/mcp).
+# ── GATE RETIRE (Z7 migration 2026-07-13) ─────────────────────────────────────
+# Ciblait pod_tools_http_test.exs, SUPPRIME avec le transport HTTP loopback (pre-migration).
+# Decouvert stale pendant la migration : il ne pouvait plus etre vert depuis des
+# semaines. Conserve comme ARCHIVE d'increment ; exit 3 EXPLICITE — jamais un
+# faux-vert silencieux (famille F-C166/167). Le re-cibler = decision produit.
+echo "GATE RETIRE — ciblait un test supprime avec le transport HTTP (cf. header). Archive, exit 3." >&2
 exit 3
 
 set -uo pipefail

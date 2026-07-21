@@ -2,27 +2,27 @@
 # SOURCE: test/gate-r-core-comm-inc3c2.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
+# STATUS: RETIRE / ARCHIVE (DR-032) — court-circuite (exit non-zero) ; NON execute par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRE » plus bas).
 # gate-r-core-comm-inc3c2.sh — R-CORE.comm inc3c.2 (e2e : pod claude → pont stdio → fleet_mcp central).
 # exit 0 ssi un VRAI pod claude (bwrap --share-net) spawne le pont stdio `fleet_mcp_stdio_bridge.py`
-# (connexion SYNCHRONE → tools inline turn-1, le seul transport viable one-shot), PULL sa tâche via
+# (connexion SYNCHRONE → tools inline turn-1, le seul transport viable one-shot), PULL sa tache via
 # get_task (canal IN) — le pont forwarde au VRAI fleet_mcp central HTTP (PodTools :http + TaskQueue) —
-# l'exécute, et soumet via submit_result (OUT) → le résultat atterrit dans la TaskQueue CENTRALE.
+# l'execute, et soumet via submit_result (OUT) → le resultat atterrit dans la TaskQueue CENTRALE.
 # PREUVE forte : le nonce n'existe QUE dans la TaskQueue centrale (host), JAMAIS dans le brief → s'il
-# ressort côté central, le pod l'a forcément récupéré via get_task → pont → central. C'est la
-# résolution du blocage inc3b.3 (HTTP direct mort) faite proprement : un seul mécanisme (MCP/stdio),
-# état CENTRAL via le pont. Iron Law respectée. Bin+pont+launchers hors /home,/tmp (bwrap tmpfs).
+# ressort cote central, le pod l'a forcement recupere via get_task → pont → central. C'est la
+# resolution du blocage inc3b.3 (HTTP direct mort) faite proprement : un seul mecanisme (MCP/stdio),
+# etat CENTRAL via le pont. Iron Law respectee. Bin+pont+launchers hors /home,/tmp (bwrap tmpfs).
 set -uo pipefail
 
-# ── SUPERSEDED (Fable F168-F178) — archi coffre + file MCP-channel globale RETIRÉE ──
-# Cette gate e2e teste un modèle DISPARU : coffre credentials (pré-ADR-F : on bind le claudeDir
-# natif), file globale Fleet.MCP.TaskQueue.push/results (pré-per-pod Fleet.TaskQueue), listener
-# channel HTTP (purgé ADR-G C5.1). Réécriture contre l'archi courante (per-pod + bwrap/RC) = exige
-# un vrai claude+bwrap → chantier deploy-env, non faisable en sandbox. Round-trip MCP per-pod prouvé
+# ── SUPERSEDED (Fable F168-F178) — archi coffre + file MCP-channel globale RETIREE ──
+# Cette gate e2e teste un modele DISPARU : coffre credentials (pre-ADR-F : on bind le claudeDir
+# natif), file globale Fleet.MCP.TaskQueue.push/results (pre-per-pod Fleet.TaskQueue), listener
+# channel HTTP (purge ADR-G C5.1). Reecriture contre l'archi courante (per-pod + bwrap/RC) = exige
+# un vrai claude+bwrap → chantier deploy-env, non faisable en sandbox. Round-trip MCP per-pod prouve
 # par test/pod_socket_test.exs (mix test — get_work_item/submit_result sur la socket AF_UNIX per-pod ;
-# pointeur réaligné audit lot 6 2026-07-12 : gate-r4-mcp-boot.sh est lui-même SUPERSEDED, script mort
-# sur l'app unique). Corps historique conservé ci-dessous (archive).
-echo "SUPERSEDED — gate e2e archi coffre/MCP-channel (pré-ADR-F/ADR-G). Réécriture = deploy-env. Preuve vivante : test/pod_socket_test.exs (mix test)"
+# pointeur realigne audit lot 6 2026-07-12 : gate-r4-mcp-boot.sh est lui-meme SUPERSEDED, script mort
+# sur l'app unique). Corps historique conserve ci-dessous (archive).
+echo "SUPERSEDED — gate e2e archi coffre/MCP-channel (pre-ADR-F/ADR-G). Reecriture = deploy-env. Preuve vivante : test/pod_socket_test.exs (mix test)"
 exit 2
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"; BIN="$RT/bin"
 WORK="$(mktemp -d)"; POD="$WORK/pod"
@@ -44,8 +44,8 @@ N'ecris aucun fichier toi-meme. Le brief ne contient PAS les taches — recupere
 EOF
 
 cat > "$WORK/driver.exs" <<'EXS'
-# Driver inc3c.2 — possède le VRAI fleet_mcp central (PodTools :http + TaskQueue), seed le nonce,
-# écrit .mcp-fleet.json pointant le PONT stdio (command python3, env LCARS_FLEET_MCP_URL=central),
+# Driver inc3c.2 — possede le VRAI fleet_mcp central (PodTools :http + TaskQueue), seed le nonce,
+# ecrit .mcp-fleet.json pointant le PONT stdio (command python3, env LCARS_FLEET_MCP_URL=central),
 # shelle le vrai pod claude, juge sur la TaskQueue CENTRALE.
 Application.put_env(:fleet_mcp, :boot_environment, :host)
 {:ok, _} = Application.ensure_all_started(:fleet_mcp)
@@ -57,7 +57,7 @@ port = :ranch.get_port(ref)
 nonce = System.get_env("NONCE"); pod = System.get_env("POD"); binv = System.get_env("BINV")
 Fleet.MCP.TaskQueue.push(%{"id" => 1, "ask" => "Reponds EXACTEMENT et UNIQUEMENT le mot : " <> nonce})
 
-# Le pod spawne le PONT (stdio, synchrone → tools inline turn-1). alwaysLoad:true = tools dé-déférés.
+# Le pod spawne le PONT (stdio, synchrone → tools inline turn-1). alwaysLoad:true = tools de-deferes.
 # Le pont forwarde vers le central HTTP (LCARS_FLEET_MCP_URL). bwrap --share-net → localhost joignable.
 bridge = Path.join(binv, "fleet_mcp_stdio_bridge.py")
 File.write!(Path.join(pod, ".mcp-fleet.json"), Jason.encode!(%{
@@ -86,10 +86,10 @@ end)
 
 if hit? do
   IO.puts("PASS e2e   pod claude → pont stdio → get_task/submit_result → TaskQueue CENTRALE : #{inspect(results)}")
-  IO.puts("           nonce présent côté central ⇒ pod a parlé au fleet_mcp central VIA le pont stdio")
+  IO.puts("           nonce present cote central ⇒ pod a parle au fleet_mcp central VIA le pont stdio")
   System.halt(0)
 else
-  IO.puts("FAIL e2e   aucun résultat avec le nonce côté central. results=#{inspect(results)}")
+  IO.puts("FAIL e2e   aucun resultat avec le nonce cote central. results=#{inspect(results)}")
   IO.puts("  --- pod out (tail) ---")
   out |> String.split("\n") |> Enum.take(-18) |> Enum.join("\n") |> IO.puts()
   System.halt(1)
@@ -103,7 +103,7 @@ cd "$RT" && NONCE="$NONCE" POD="$POD" BINV="$BINV" timeout 260 mix run --no-star
 RC=$?
 echo "---"
 if [ "$RC" -eq 0 ]; then
-  echo "GATE R-CORE.comm inc3c.2 : exit 0 — e2e pod→pont→central, état CENTRAL via stdio (Iron Law OK)"
+  echo "GATE R-CORE.comm inc3c.2 : exit 0 — e2e pod→pont→central, etat CENTRAL via stdio (Iron Law OK)"
 else
   echo "GATE R-CORE.comm inc3c.2 : exit 1 (rc=$RC)"
 fi

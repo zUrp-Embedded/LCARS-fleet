@@ -2,18 +2,18 @@
 # SOURCE: test/gate-r-core-comm-inc3c1.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: RETIRÉ / ARCHIVE (DR-032) — court-circuite (exit non-zéro) ; NON exécuté par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRÉ » plus bas).
+# STATUS: RETIRE / ARCHIVE (DR-032) — court-circuite (exit non-zero) ; NON execute par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRE » plus bas).
 # gate-r-core-comm-inc3c1.sh — R-CORE.comm inc3c.1 (pont stdio→HTTP, pur). exit 0 ssi le pont
 # `bin/fleet_mcp_stdio_bridge.py` forwarde get_task (IN) / submit_result (OUT) d'un client MCP stdio
-# (piloté par Port, PAS claude) vers le VRAI fleet_mcp central (PodTools :http + TaskQueue). Nonce
-# déposé QUE dans la TaskQueue centrale → ressort via get_task à travers le pont → submit_result le
-# renvoie au central. Valide le transport-shim (état CENTRAL via stdio) avant l'e2e pod (inc3c.2).
-# ── GATE RETIRÉ (Z7 migration 2026-07-13) ─────────────────────────────────────
-# Ciblait bridge_stdio_http_test.exs, SUPPRIMÉ avec le transport HTTP loopback (pré-migration).
-# Découvert stale pendant la migration : il ne pouvait plus être vert depuis des
-# semaines. Conservé comme ARCHIVE d'incrément ; exit 3 EXPLICITE — jamais un
-# faux-vert silencieux (famille F-C166/167). Le re-cibler = décision produit.
-echo "GATE RETIRÉ — ciblait un test supprimé avec le transport HTTP (cf. header). Archive, exit 3." >&2
+# (pilote par Port, PAS claude) vers le VRAI fleet_mcp central (PodTools :http + TaskQueue). Nonce
+# depose QUE dans la TaskQueue centrale → ressort via get_task a travers le pont → submit_result le
+# renvoie au central. Valide le transport-shim (etat CENTRAL via stdio) avant l'e2e pod (inc3c.2).
+# ── GATE RETIRE (Z7 migration 2026-07-13) ─────────────────────────────────────
+# Ciblait bridge_stdio_http_test.exs, SUPPRIME avec le transport HTTP loopback (pre-migration).
+# Decouvert stale pendant la migration : il ne pouvait plus etre vert depuis des
+# semaines. Conserve comme ARCHIVE d'increment ; exit 3 EXPLICITE — jamais un
+# faux-vert silencieux (famille F-C166/167). Le re-cibler = decision produit.
+echo "GATE RETIRE — ciblait un test supprime avec le transport HTTP (cf. header). Archive, exit 3." >&2
 exit 3
 
 set -uo pipefail
