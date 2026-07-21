@@ -167,7 +167,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert order =~ String.slice(sha, 0, 7)
     assert order =~ "LIS-le EN PREMIER"
     assert order =~ "${LCARS_PROJECT_OPS}/briefs/issue-9-engineer.md"
-    # SHORT is the point: a pointer, not a pavé.
+    # SHORT is the point: a pointer, not an inline blob.
     assert String.length(order) < 400
   end
 

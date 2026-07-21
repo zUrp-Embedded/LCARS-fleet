@@ -9,7 +9,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   presence + well-formedness of the bundle/template catalogue. `async: true`.
 
   (The old `profile` reference test died 2026-07-20: `workflow.step.profile` was
-  removed — Décision A of the catalogue chantier; a step no longer names a cap-profile file.)
+  removed — Decision A of the catalogue chantier; a step no longer names a cap-profile file.)
   """
   use ExUnit.Case, async: true
 

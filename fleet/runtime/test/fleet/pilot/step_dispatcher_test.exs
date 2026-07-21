@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def count_change_request_rounds(_repo, _index, opts),
       do: Keyword.get(opts, :_test_rework_rounds, {:ok, 0})
 
-    # Étage 1 (conflict-rework budget): counts the `[conflict-rework:pr-N` markers. Seam
+    # Tier 1 (conflict-rework budget): counts the `[conflict-rework:pr-N` markers. Seam
     # `_test_conflict_rounds` (default {:ok, 0} = first conflict → producer rework, not escalation).
     def count_comments_marked(_repo, _index, _prefix, opts),
       do: Keyword.get(opts, :_test_conflict_rounds, {:ok, 0})
@@ -1113,8 +1113,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # forge-blind → live dead end). The failure is re-read from the PR object (MergeOutcome) and
     # routed to its REAL cause.
 
-    test "merge failure + REAL git conflict, budget available → producer CONFLICT-REWORK (étage 1), no escalation" do
-      # Étage 1 (fleet/hello#3 retex 2026-07-19): the producer resolves ON its PR — bounded by
+    test "merge failure + REAL git conflict, budget available → producer CONFLICT-REWORK (tier 1), no escalation" do
+      # Tier 1 (fleet/hello#3 retex 2026-07-19): the producer resolves ON its PR — bounded by
       # max_rework_rounds, counted via the [conflict-rework:pr-N markers posted by this path.
       pr =
         pr(%{
@@ -1144,7 +1144,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:merged, _}
     end
 
-    test "merge failure + REAL conflict, budget EXHAUSTED → honest arch escalation (étage 3)" do
+    test "merge failure + REAL conflict, budget EXHAUSTED → honest arch escalation (tier 3)" do
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
