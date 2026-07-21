@@ -4,7 +4,8 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   gate that funnels concurrent git transactions (briefs from several MCP connections + the poller,
   provenance from up to 16 completion Tasks) ONE at a time onto the shared worktree, against the
   `.git/index.lock` + moving-HEAD race. Real temp git repo (`git init`) — the gate commits for real,
-  through the always-on singleton the app boots.
+  through an ISOLATED instance the setup starts: the app's always-on singleton is OFF in `:test` for
+  hermeticity (see the setup note), so each test drives its own named server via `commit_object/5`.
   """
   use ExUnit.Case, async: true
 
