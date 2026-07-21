@@ -6,10 +6,8 @@
 #
 # Launcher vendor-spécifique pour `claude` REPL interactif LCARS v2 sous ADR-G
 # (Ring 1 pod primitive, frontière vendor niveau 1, préfixe `claude_*`).
-# Déroule la DN `beyond_#5/design-notes/spawn/launcher-claude.md` (PROMOTED 9/10,
-# validation user 2026-05-30, amendement M.F.5 2026-05-31 : RC-at-startup = flag
-# `--remote-control` PROVEN sous PTY). Supersède le modèle `script(1)`-PTY one-shot
-# (brief = prompt CLI) — interdit par ADR-G IV.1/IV.2.
+# RC-at-startup passe par le flag `--remote-control`, PROUVÉ sous PTY. Le modèle `script(1)`-PTY
+# one-shot (brief = prompt CLI) est INTERDIT par ADR-G IV.1/IV.2.
 #
 # Invoqué comme COMMAND par un launcher N0 — `bin/bwrap_launch.sh` (containment: bwrap)
 # OU `bin/host_launch.sh` (containment: none, host sans sandbox — LAUNCH-Q). Le PTY est
