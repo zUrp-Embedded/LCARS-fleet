@@ -330,6 +330,9 @@ defmodule Fleet.Workflow.DeliverableGate do
       {:ok, {out, code}} -> {out, code}
       {:error, {:timeout, ms}} -> {"git timeout (#{ms}ms)", 124}
       {:error, {:exit, reason}} -> {"git exec error: #{inspect(reason)}", 125}
+      # TOTAL over the Shell error union (output_overflow, bad_opt, future members):
+      # an unmatched member crashed the gate's owner instead of reading as a hard rc.
+      {:error, reason} -> {"git shell error: #{inspect(reason)}", 125}
     end
   end
 

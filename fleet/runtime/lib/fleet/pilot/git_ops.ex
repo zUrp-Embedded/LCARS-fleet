@@ -65,6 +65,10 @@ defmodule Fleet.Pilot.GitOps do
 
         {:error, {:exit, reason}} ->
           {:error, {:git_exit, Enum.take(args, 3), reason}}
+
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} ->
+          {:error, {:git_exit, Enum.take(args, 3), reason}}
       end
     end
   end

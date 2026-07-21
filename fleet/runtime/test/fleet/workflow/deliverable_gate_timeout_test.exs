@@ -25,4 +25,19 @@ defmodule Fleet.Workflow.DeliverableGateTimeoutTest do
 
     assert msg =~ "timeout"
   end
+
+  test "an UNMATCHED Shell union member (output_overflow) reads as a hard rc, never a crash" do
+    # The Shell union grew (output_overflow, bad_opt) after the adapters were written: an
+    # unmatched member raised CaseClauseError in the gate's OWNER — the guard killed the OS
+    # process and then crashed the BEAM process that owed the verdict. Total matching maps
+    # it to the exec-error rc: a typed failure the caller classifies, never a crash.
+    Application.put_env(:fleet_workflow, :deliverable_gate_git_runner, fn _args, _opts ->
+      {:error, {:output_overflow, 9_999_999, 4_194_304}}
+    end)
+
+    assert {:error, {:git_error, msg}} =
+             Gate.check_identity("ws-irrelevant", "cafe1234", ["engineer@lcars.local"])
+
+    assert msg =~ "output_overflow"
+  end
 end

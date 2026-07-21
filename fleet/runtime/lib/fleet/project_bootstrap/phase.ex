@@ -163,6 +163,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
             {:ok, {out, code}} -> {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
             {:error, {:timeout, ms}} -> {:error, {:reset_failed, {:git_timeout, ms}}}
             {:error, {:exit, reason}} -> {:error, {:reset_failed, {:git_exit, reason}}}
+            # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+            {:error, reason} -> {:error, {:reset_failed, {:git_exit, reason}}}
           end
 
         _ ->

@@ -139,6 +139,9 @@ defmodule Fleet.Workflow.Git do
           {:ok, {out, rc}} -> {:error, {:git_add_failed, rc, String.trim(out)}}
           {:error, {:timeout, ms}} -> {:error, {:git_add_timeout, ms}}
           {:error, {:exit, reason}} -> {:error, {:git_add_exit, reason}}
+          # TOTAL over the Shell error union (output_overflow, bad_opt, future members):
+          # an unmatched member crashed the completion owner instead of failing the step.
+          {:error, reason} -> {:error, {:git_add_exit, reason}}
         end
 
       {:error, _} = err ->
@@ -187,6 +190,7 @@ defmodule Fleet.Workflow.Git do
           {:ok, {out, rc}} -> {:error, {:git_commit_failed, rc, String.trim(out)}}
           {:error, {:timeout, ms}} -> {:error, {:git_commit_timeout, ms}}
           {:error, {:exit, reason}} -> {:error, {:git_commit_exit, reason}}
+          {:error, reason} -> {:error, {:git_commit_exit, reason}}
         end
     end
   end
@@ -234,6 +238,7 @@ defmodule Fleet.Workflow.Git do
       {:ok, {err, rc}} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
       {:error, {:timeout, ms}} -> {:error, {:rev_parse_timeout, ms}}
       {:error, {:exit, reason}} -> {:error, {:rev_parse_exit, reason}}
+      {:error, reason} -> {:error, {:rev_parse_exit, reason}}
     end
   end
 
@@ -254,6 +259,8 @@ defmodule Fleet.Workflow.Git do
         {:ok, {err, rc}} -> {:error, {:git_log_failed, rc, String.trim(err)}}
         {:error, {:timeout, ms}} -> {:error, {:git_log_timeout, ms}}
         {:error, {:exit, reason}} -> {:error, {:git_log_exit, reason}}
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} -> {:error, {:git_log_exit, reason}}
       end
     end
   end
@@ -275,6 +282,8 @@ defmodule Fleet.Workflow.Git do
         {:ok, {_, _rc}} -> {:ok, false}
         {:error, {:timeout, ms}} -> {:error, {:git_timeout, ms}}
         {:error, {:exit, reason}} -> {:error, {:git_exit, reason}}
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} -> {:error, {:git_exit, reason}}
       end
     end
   end
@@ -306,6 +315,8 @@ defmodule Fleet.Workflow.Git do
         {:ok, {out, rc}} -> {:error, {:git_error, "merge-base rc#{rc}: #{String.trim(out)}"}}
         {:error, {:timeout, ms}} -> {:error, {:git_timeout, ms}}
         {:error, {:exit, reason}} -> {:error, {:git_exit, reason}}
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} -> {:error, {:git_exit, reason}}
       end
     end
   end
@@ -329,6 +340,8 @@ defmodule Fleet.Workflow.Git do
         {:ok, {err, rc}} -> {:error, {:git_show_failed, rc, String.trim(err)}}
         {:error, {:timeout, ms}} -> {:error, {:git_show_timeout, ms}}
         {:error, {:exit, reason}} -> {:error, {:git_show_exit, reason}}
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} -> {:error, {:git_show_exit, reason}}
       end
     end
   end
@@ -445,6 +458,8 @@ defmodule Fleet.Workflow.Git do
       {:ok, {err, rc}} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
       {:error, {:timeout, ms}} -> {:error, {:rev_parse_timeout, ms}}
       {:error, {:exit, reason}} -> {:error, {:rev_parse_exit, reason}}
+      # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+      {:error, reason} -> {:error, {:rev_parse_exit, reason}}
     end
   end
 

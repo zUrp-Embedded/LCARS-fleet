@@ -286,6 +286,8 @@ defmodule Fleet.Spawner.PodTmux do
       {:ok, {out, code}} -> {out, code}
       {:error, {:timeout, ms}} -> {"tmux timeout (#{ms}ms)", 124}
       {:error, {:exit, reason}} -> {"tmux exec error: #{inspect(reason)}", 125}
+      # TOTAL over the Shell error union: an unmatched member crashed the pod owner.
+      {:error, reason} -> {"tmux shell error: #{inspect(reason)}", 125}
     end
   end
 end
