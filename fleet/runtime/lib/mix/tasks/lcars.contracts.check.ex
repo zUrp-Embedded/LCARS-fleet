@@ -973,8 +973,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # class: a name in the .sh that is not a pod role — e.g. an external agent, which by
   # construction has no vendor bridge and thus no canon entry → exit 2 on an unknown role).
   # Minimal verifiable SSOT: every role in the .sh EXISTS in the canon catalogue.
-  # (The full SSOT — a needs_role_token flag deriving the list — is pending the user's
-  # A-03 arbitration; this check catches the lived bug class meanwhile.)
+  # The FULL SSOT would be a `needs_role_token` flag in the canon, from which the .sh list is derived
+  # rather than maintained beside it. That is an open decision, not a scheduled change: it adds a field
+  # to the cap-profile schema (whose root is `additionalProperties: false`) for one consumer. Until it
+  # is made, this check covers the direction that has actually bitten.
   # Boundary can NEVER see this: the .sh is outside the BEAM — exactly THIS checker's job.
   defp check_roles_provisioning_in_catalogue(root) do
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
