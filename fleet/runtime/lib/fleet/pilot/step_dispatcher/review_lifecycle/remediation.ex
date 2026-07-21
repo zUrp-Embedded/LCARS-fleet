@@ -129,7 +129,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   def route_merge_failure(pr_number, head, reason, %Ctx{} = ctx) do
     case classify_merge_failure(pr_number, ctx) do
       :merged ->
-        {:ok, {:merged, pr_number}}
+        # Merged OUT-OF-BAND (another actor, or our own seal whose readback failed
+        # transiently). The bare no-op left the merged brick OPEN without `stage/merged`:
+        # reclaimable by the reconciliation, then re-dispatched — double-delivery. Converge
+        # the attribution-neutral terminal guards (never the seal comment — this path did
+        # not merge). A head that does not parse (adopted human PR) keeps the historical
+        # no-op: its issue linkage is not ours to guess.
+        converge_out_of_band(pr_number, head, ctx)
 
       :closed ->
         Logger.info(
@@ -237,6 +243,25 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp producer_of!(head) do
     {:ok, {_issue_n, producer}} = Fleet.Pilot.ForgeProtocol.parse_feature_branch(head)
     producer
+  end
+
+  defp converge_out_of_band(pr_number, head, %Ctx{} = ctx) do
+    case RoleDispatch.parse_feature_branch_or_skip(head) do
+      {:ok, {issue_n, _producer}} ->
+        case Fleet.Pilot.GatekeeperSeal.converge_out_of_band_merge(
+               ctx.forge,
+               ctx.repo,
+               pr_number,
+               issue_n,
+               ctx.forge_opts
+             ) do
+          :ok -> {:ok, {:merged, pr_number}}
+          {:error, _} = err -> err
+        end
+
+      {:skipped, _} ->
+        {:ok, {:merged, pr_number}}
+    end
   end
 
   # Re-reads the FRESH PR object and classifies it (source of truth = the forge fields, not the merge

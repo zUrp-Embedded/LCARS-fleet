@@ -249,6 +249,33 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
+  @doc """
+  Converges the ATTRIBUTION-NEUTRAL terminal guards of an issue whose PR turned out merged
+  OUT-OF-BAND (another actor, or a seal whose own readback failed transiently): `stage/merged`
+  (durable anti-redispatch guard) + explicit close + worktree sync — but NOT the gatekeeper
+  seal comment: this path did not merge, claiming the ceremony would be an attribution lie.
+  System-signed close (the ceremony is already broken by the out-of-band merge; the log says
+  so). `{:error, {:close_after_merge, _}}` keeps the F-C066 semantics — the caller must skip
+  its unlock.
+  """
+  @spec converge_out_of_band_merge(module(), String.t(), integer(), integer(), keyword()) ::
+          :ok | {:error, {:close_after_merge, term()}}
+  def converge_out_of_band_merge(forge, repo, pr_number, issue_n, forge_opts) do
+    Logger.warning(
+      "GatekeeperSeal: #{repo} PR ##{pr_number} found merged OUT-OF-BAND — converging the " <>
+        "terminal guards (stage/merged + close) without the seal comment (no attribution lie)"
+    )
+
+    _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
+    close_result = close_with_retry(forge, repo, issue_n, forge_opts, pr_number)
+    _ = worktree_sync().sync(repo)
+
+    case close_result do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:close_after_merge, reason}}
+    end
+  end
+
   # Post-error readback: is the PR merged ON THE SERVER? Same classification authority as the
   # remediation rail (`MergeOutcome.classify/1` on the fresh PR object) — never a second
   # vocabulary. Seam stubs without `get_pull/3`, an unreadable PR, or any non-merged state
