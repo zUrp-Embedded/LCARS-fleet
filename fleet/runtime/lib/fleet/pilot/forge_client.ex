@@ -429,15 +429,17 @@ defmodule Fleet.Pilot.ForgeClient do
   def get_pr_for_branch(repo, head, base, opts \\ [])
       when is_binary(repo) and is_binary(head) and is_binary(base) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_get(config, "/repos/#{encode_repo(repo)}/pulls?state=open&limit=50") do
-        {:ok, pulls} when is_list(pulls) ->
+      # PAGINATED: a single `?limit=50` page HID the PR for a branch once a repo carried >50 open
+      # PRs (number 51+ invisible → `:pr_not_found` for a branch that DOES have a PR → the producer is
+      # re-dispatched as if unstarted / the completion routes on a phantom-absent PR). `paginate` loops
+      # `page=1,2,…` until a partial page, then `Enum.find` scans the full set. `paginate` always yields
+      # `{:ok, list}` (accumulated) | `{:error, _}` — no local non-list guard needed.
+      case paginate(config, "/repos/#{encode_repo(repo)}/pulls", "state=open") do
+        {:ok, pulls} ->
           case Enum.find(pulls, &pr_matches_head?(&1, head, base)) do
             %{"number" => number} -> {:ok, number}
             _ -> {:error, :pr_not_found}
           end
-
-        {:ok, _} ->
-          {:error, :pr_not_found}
 
         {:error, _} = err ->
           err

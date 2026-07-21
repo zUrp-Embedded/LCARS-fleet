@@ -1031,6 +1031,29 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:error, :pr_not_found} =
                ForgeClient.get_pr_for_branch("fleet/proj", "feature/x", "main", opts(handlers))
     end
+
+    test "get_pr_for_branch: paginates — a match on page 2 (repo has >50 open PRs) is found" do
+      # page 1 = a FULL page (50) of non-matching PRs → paginate continues; page 2 = the match (partial
+      # → stop). A single `?limit=50` page would have returned only page 1 and missed number 77 → a
+      # FALSE `:pr_not_found` for a branch that DOES have an open PR.
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      page1 =
+        for n <- 1..50,
+            do: %{"number" => n, "head" => %{"ref" => "other-#{n}"}, "base" => %{"ref" => "main"}}
+
+      page2 = [%{"number" => 77, "head" => %{"ref" => "feature/x"}, "base" => %{"ref" => "main"}}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/pulls"} => fn ->
+          page = Agent.get_and_update(counter, &{&1, &1 + 1})
+          {200, if(page == 0, do: page1, else: page2)}
+        end
+      }
+
+      assert {:ok, 77} =
+               ForgeClient.get_pr_for_branch("fleet/proj", "feature/x", "main", opts(handlers))
+    end
   end
 
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
