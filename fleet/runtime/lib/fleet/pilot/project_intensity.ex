@@ -195,11 +195,12 @@ defmodule Fleet.Pilot.ProjectIntensity do
       %{}
   end
 
+  # Resolved via the foundation authority `Fleet.SchemaCache` (read+decode+resolve,
+  # cached in :persistent_term), keyed by the resolved path. Fail-loud on an absent or
+  # malformed schema file — a broken deploy artifact, same contract as the workflow
+  # loader's schema; an error is never cached, the next call retries.
   defp schema do
-    [to_string(:code.priv_dir(:lcars_fleet)), @schema_rel]
-    |> Path.join()
-    |> File.read!()
-    |> Jason.decode!()
-    |> ExJsonSchema.Schema.resolve()
+    path = Path.join([to_string(:code.priv_dir(:lcars_fleet)), @schema_rel])
+    Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
   end
 end

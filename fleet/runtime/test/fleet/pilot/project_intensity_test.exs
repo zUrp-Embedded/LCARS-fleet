@@ -63,6 +63,26 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
              ProjectIntensity.write(tmp, intensity_level: "C9")
   end
 
+  test "the intensity schema resolves through the SchemaCache authority, not a local pipeline copy",
+       %{tmp_dir: tmp} do
+    assert :ok = ProjectIntensity.write(tmp, [])
+
+    path =
+      Path.join([
+        to_string(:code.priv_dir(:lcars_fleet)),
+        "cap_profile",
+        "schema",
+        "intensity-v1.json"
+      ])
+
+    key = {ProjectIntensity, :schema, path}
+
+    # A validation that re-reads the file through a private pipeline leaves this key
+    # unpopulated — the assertion pins the authority, not just the outcome.
+    assert %ExJsonSchema.Schema.Root{} = :persistent_term.get(key, :not_cached),
+           "validation did not go through Fleet.SchemaCache (key not populated)"
+  end
+
   test "off-matrix explicit override: ACCEPTED + logged LOUD (the human has the last word)",
        %{tmp_dir: tmp} do
     # audit-only claims [C0..C4]... use a card whose matrix excludes the level: brief-gate
