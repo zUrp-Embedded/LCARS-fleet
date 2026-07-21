@@ -472,6 +472,45 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "change_request_feedback — an objection lifted by a later APPROVED does not resurface" do
+    test "reviewer who did REQUEST_CHANGES then APPROVED is EXCLUDED; a still-RC reviewer is kept" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             # reviewer-a: objected, then approved on the next round → objection LIFTED (not in force).
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "reviewer-a"},
+               "body" => "fix the naming",
+               "dismissed" => false
+             },
+             %{
+               "state" => "APPROVED",
+               "user" => %{"login" => "reviewer-a"},
+               "body" => "looks good now",
+               "dismissed" => false
+             },
+             # reviewer-b: still requesting changes → in force.
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "reviewer-b"},
+               "body" => "handle the empty case",
+               "dismissed" => false
+             }
+           ]}
+      }
+
+      assert {:ok, feedback} = ForgeClient.change_request_feedback("fleet/lcars", 6, opts(handlers))
+
+      logins = Enum.map(feedback, & &1["login"])
+      # reviewer-a's lifted objection must NOT be in the rework brief; reviewer-b's must.
+      assert "reviewer-b" in logins
+      refute "reviewer-a" in logins
+      assert [%{"login" => "reviewer-b", "body" => "handle the empty case"}] = feedback
+    end
+  end
+
   describe "F-C069 — non-list 2xx on /reviews → fail-loud (paginate twin), never an {:ok, empty}" do
     # A 2xx with a NON-LIST body (proxy/gateway returning an HTML page or an object envelope with
     # 200) fell on `{:ok, _non_list} -> {:ok, <empty>}` → silently EMPTY jury/feedback/budget. The

@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
   not the requested field. Details in each `@doc`.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, paginate: 3]
@@ -312,10 +312,17 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   defp change_requests_by_reviewer(reviews) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
-    |> Enum.filter(&(&1["state"] == "REQUEST_CHANGES"))
+    # Keep BOTH decisive states, then take each reviewer's LAST review, THEN keep only those whose last
+    # state is REQUEST_CHANGES — same ordering as `verdicts_by_reviewer`. Filtering REQUEST_CHANGES FIRST
+    # (before the per-reviewer last) resurrected an objection a later APPROVED had already lifted: the
+    # rework brief then cited feedback the judge no longer stands behind. No commit-scoping (cf. @doc: we
+    # want the last feedback per reviewer, not the current-code verdict).
+    |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
     |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
-    |> Enum.map(fn {login, revs} ->
-      %{"login" => login, "body" => (List.last(revs)["body"] || "") |> to_string()}
+    |> Enum.map(fn {login, revs} -> {login, List.last(revs)} end)
+    |> Enum.filter(fn {_login, last} -> last["state"] == "REQUEST_CHANGES" end)
+    |> Enum.map(fn {login, last} ->
+      %{"login" => login, "body" => (last["body"] || "") |> to_string()}
     end)
     |> Enum.reject(&(String.trim(&1["body"]) == ""))
   end
