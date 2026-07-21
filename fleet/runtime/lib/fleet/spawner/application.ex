@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.Application do
   + `:boot_permanent_at_start` (does it boot the permanent pods?). This app, for its
   part, never boots a permanent pod (no boot hook here).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   use Supervisor
@@ -36,6 +36,15 @@ defmodule Fleet.Spawner.Application do
     # between a pod crash (same epoch → fresh-reroll) and a fleet restart (stale epoch → unified
     # seed decision). Cf. Fleet.Spawner.BootEpoch.
     :ok = Fleet.Spawner.BootEpoch.init()
+
+    # CANON PROOF before readiness: every canon role must be spawn-ready (resolve + G24 +
+    # SP assets — the same functions the spawn calls) BEFORE this supervisor reports
+    # started, i.e. before the fleet can say ready. A broken catalogue or asset refuses
+    # the boot HERE, not at the first post-ready spawn. Gated for the hermetic test
+    # baseline only (tests call CanonProof.prove_all!/0 directly).
+    if Application.get_env(:fleet_spawner, :prove_canon_at_boot, true) do
+      :ok = Fleet.Spawner.CanonProof.prove_all!()
+    end
 
     base = [
       {Registry, keys: :unique, name: Fleet.Spawner.Registry},

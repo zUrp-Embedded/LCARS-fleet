@@ -36,6 +36,11 @@ config :fleet_observation, start_readmodel: false
 # les tests le re-settent en setup, ne le delete plus en on_exit.
 config :fleet_spawner, launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 
+# Canon proof OFF in the hermetic baseline: the boot-time proof reads the real priv
+# catalogue and SP assets — a spawn-readiness concern, not one every test boot should
+# pay. CanonProof tests call prove_all!/0 directly.
+config :fleet_spawner, prove_canon_at_boot: false
+
 # R9 — seam du provisionneur de socket MCP per-pod. Mirror de launch_backend: StubBackend : le stub rend
 # un chemin SANS créer de vrai socket `/run/lcars/...` (les tests spawner ne polluent pas le FS système ni
 # ne dépendent de fleet_mcp). Le vrai provisionneur est `Fleet.MCP.PodSocketSupervisor`, résolu au runtime.
