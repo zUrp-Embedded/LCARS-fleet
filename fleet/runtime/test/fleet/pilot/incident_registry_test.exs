@@ -669,4 +669,65 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert body =~ "Écran capturé"
     end
   end
+
+  describe "Escalation idempotency (create is not idempotent, readback is)" do
+    alias Fleet.Pilot.IncidentRegistry.Escalation
+
+    test "an OPEN issue already carrying this occurrence's marker → reused, NO duplicate create" do
+      me = self()
+      sig = "wake:issue-7-engineer:dead"
+
+      # The forge already holds the issue (a create that timed-out-after-commit, or a concurrent
+      # escalation): the marker in its body is the idempotency key. create_issue must NOT be called.
+      marker = "<!-- lcars-incident:#{sig} -->"
+
+      result =
+        Escalation.escalate(:reroll_failed, "issue-7-engineer", :dead, sig,
+          list_issues_fun: fn _repo, _opts ->
+            {:ok, [%{"number" => 42, "body" => "prior incident\n#{marker}\n"}]}
+          end,
+          create_issue_fun: fn _r, _t, _b, _o ->
+            send(me, :created) && {:ok, 999}
+          end,
+          add_label_fun: fn _r, num, _lbl, _o -> send(me, {:label, num}) && {:ok, :added} end
+        )
+
+      assert {:ok, 42} = result
+      refute_received :created
+      assert_received {:label, 42}
+    end
+
+    test "no open issue carries the marker → create as before" do
+      me = self()
+      sig = "wake:issue-9-engineer:dead"
+
+      result =
+        Escalation.escalate(:reroll_failed, "issue-9-engineer", :dead, sig,
+          list_issues_fun: fn _repo, _opts -> {:ok, [%{"number" => 1, "body" => "unrelated"}]} end,
+          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 7} end,
+          add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
+        )
+
+      assert {:ok, 7} = result
+      assert_received :created
+    end
+
+    test "an UNREADABLE listing does NOT suppress the alarm → create (fail-closed toward escalating)" do
+      me = self()
+
+      result =
+        Escalation.escalate(
+          :reroll_failed,
+          "issue-3-engineer",
+          :dead,
+          "wake:issue-3-engineer:dead",
+          list_issues_fun: fn _repo, _opts -> {:error, :forge_down} end,
+          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 5} end,
+          add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
+        )
+
+      assert {:ok, 5} = result
+      assert_received :created
+    end
+  end
 end

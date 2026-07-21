@@ -42,6 +42,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   def escalate(kind, subject, reason, sig, opts \\ []) do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
     add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Pilot.ForgeClient.add_label/4)
+    list_fun = Keyword.get(opts, :list_issues_fun, &Fleet.Pilot.ForgeClient.list_open_issues/2)
     repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo) || ops_repo()
 
     label =
@@ -53,6 +54,13 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
 
+    # STABLE machine key of THIS incident occurrence, hidden in the body. create_issue is not
+    # idempotent: a create that TIMES OUT after the forge committed, then a retry (or a recurrence
+    # before the cooldown stamp is written — the stamp only lands on a successful escalation), would
+    # open a SECOND issue for the same occurrence. Before creating, we read back the open issues and
+    # reuse the one already carrying this marker — the forge's own state is the idempotency key.
+    marker = incident_marker(sig)
+
     body = """
     Incident `#{sig}` sur `#{subject}`.
     Raison : `#{inspect(reason)}`.
@@ -62,35 +70,80 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
     (Issue auto — durcissement #5.2.)
     #{detail_block(opts[:reason_detail])}#{correlation_block(opts[:correlation_id])}#{pane_block(opts[:pane])}
+    #{marker}
     """
 
+    case find_open_incident(list_fun, repo, marker) do
+      {:ok, existing} ->
+        # An open issue already carries this occurrence's marker — the create either landed and its
+        # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
+        # a duplicate. `nil` = readback said "none" (or was unreadable → create, fail-closed toward
+        # having an issue rather than suppressing an alarm).
+        Logger.info(
+          "IncidentRegistry: incident #{inspect(sig)} already open as ##{existing} — reusing (idempotent), no duplicate"
+        )
+
+        finalize_escalation(add_label_fun, repo, existing, label)
+
+      nil ->
+        create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label)
+    end
+  end
+
+  defp create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label) do
     # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
     # established pattern (`PodTools.do_create_issue`): create the issue (with the assignee) THEN set the label by
     # NAME via `add_label` (name->id resolution + org-label auto-creation on the ForgeClient side). Passing
     # `labels: [name-string]` to the POST -> 422 Gitea "cannot unmarshal string into int64" — the
     # sysadmin escalation would create NO issue (silent dead rail).
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
-      # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
-      # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log).
-      case add_discovery_label(add_label_fun, repo, number, label) do
-        :ok ->
-          {:ok, number}
+      finalize_escalation(add_label_fun, repo, number, label)
+    end
+  end
 
-        {:error, reason} ->
-          # F-C075 — a PERSISTENTLY failing discovery label (after retries) leaves the sysadmin issue
-          # INVISIBLE to label-filtered discovery. We do NOT report a clean `{:ok, number}` (which
-          # `record_or_escalate` turns into a LYING `{:escalated}` — the alarm looks delivered while the
-          # incident is unfindable). We SURFACE it → mapped to `{:escalation_failed, _}`: the alarm keeps
-          # firing on recurrence, an operator must act. The issue EXISTS (created + usually assigned); its
-          # number rides in the reason for cleanup / label-repair.
-          Logger.error(
-            "IncidentRegistry: sysadmin issue ##{number} created but discovery label " <>
-              "#{inspect(label)} NOT added after retries (#{inspect(reason)}) — NOT label-discoverable, " <>
-              "escalation SURFACED as failed (never a lying {:escalated})"
-          )
+  defp finalize_escalation(add_label_fun, repo, number, label) do
+    # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
+    # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log).
+    case add_discovery_label(add_label_fun, repo, number, label) do
+      :ok ->
+        {:ok, number}
 
-          {:error, {:discovery_label_failed, number, reason}}
-      end
+      {:error, reason} ->
+        # F-C075 — a PERSISTENTLY failing discovery label (after retries) leaves the sysadmin issue
+        # INVISIBLE to label-filtered discovery. We do NOT report a clean `{:ok, number}` (which
+        # `record_or_escalate` turns into a LYING `{:escalated}` — the alarm looks delivered while the
+        # incident is unfindable). We SURFACE it → mapped to `{:escalation_failed, _}`: the alarm keeps
+        # firing on recurrence, an operator must act. The issue EXISTS (created + usually assigned); its
+        # number rides in the reason for cleanup / label-repair.
+        Logger.error(
+          "IncidentRegistry: sysadmin issue ##{number} created but discovery label " <>
+            "#{inspect(label)} NOT added after retries (#{inspect(reason)}) — NOT label-discoverable, " <>
+            "escalation SURFACED as failed (never a lying {:escalated})"
+        )
+
+        {:error, {:discovery_label_failed, number, reason}}
+    end
+  end
+
+  # Hidden, stable per-occurrence marker (an HTML comment — invisible in the rendered issue, exact in
+  # the body text). The idempotency key of the create.
+  defp incident_marker(sig), do: "<!-- lcars-incident:#{sig} -->"
+
+  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number;
+  # `nil` if none, OR if the listing is unreadable — a readback failure must NOT suppress an alarm,
+  # so we fall through to create (fail-closed toward having an issue, the duplicate risk is the lesser
+  # evil than a silent non-escalation). The `body` field is present on Gitea's issue-list payloads.
+  defp find_open_incident(list_fun, repo, marker) do
+    case list_fun.(repo, []) do
+      {:ok, issues} when is_list(issues) ->
+        Enum.find_value(issues, fn issue ->
+          body = Map.get(issue, "body") || ""
+          num = Map.get(issue, "number")
+          if is_integer(num) and String.contains?(body, marker), do: {:ok, num}
+        end)
+
+      _ ->
+        nil
     end
   end
 
