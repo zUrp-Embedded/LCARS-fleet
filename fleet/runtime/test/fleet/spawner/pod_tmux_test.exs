@@ -80,28 +80,36 @@ defmodule Fleet.Spawner.PodTmuxTest do
     end
   end
 
-  describe "confirm_dead?/2 (CI-05 — death verdict gating the sock-dir erase)" do
-    test "holder already gone → dead (true), immediately (no poll)" do
-      # `alive_fun` seam (default `&alive?/1`): the erase-proof gate NEVER false-positives "dead".
-      assert PodTmux.confirm_dead?("pod-x", fn _ -> false end)
+  describe "confirm_dead?/2 (death verdict gating the sock-dir erase)" do
+    test "holder explicitly ABSENT → dead (true), immediately (no poll)" do
+      # `state_fun` seam (default `&session_state/1`): the erase-proof gate NEVER
+      # false-positives "dead".
+      assert PodTmux.confirm_dead?("pod-x", fn _ -> :absent end)
     end
 
     test "holder STILL ALIVE after the bounded poll → NOT dead (false) → the caller keeps the proof" do
       # A refused/ineffective kill: the holder stays alive → confirm_dead? returns false → the teardown/
       # warden KEEP the sock-dir (never erase the reconciliation proof of a live pod).
-      refute PodTmux.confirm_dead?("pod-x", fn _ -> true end)
+      refute PodTmux.confirm_dead?("pod-x", fn _ -> :alive end)
     end
 
-    test "dies mid-poll (alive then dead) → dead (true)" do
-      # SIGTERM async / namespace collapse: alive on the first check, dead by the second → confirmed.
+    test "tmux UNREACHABLE (timeout/exec failure) is NOT a death proof → NOT dead (false)" do
+      # A tmux timeout proves nothing about the holder: erasing the sock-dir on it would
+      # orphan a LIVING holder (the warden loses its only reconciliation proof). Death
+      # requires the explicit :absent ("no such session"), never the absence of an answer.
+      refute PodTmux.confirm_dead?("pod-x", fn _ -> :unknown end)
+    end
+
+    test "dies mid-poll (alive then absent) → dead (true)" do
+      # SIGTERM async / namespace collapse: alive on the first check, absent by the second → confirmed.
       {:ok, agent} = Agent.start_link(fn -> 0 end)
 
-      alive_fun = fn _ ->
+      state_fun = fn _ ->
         n = Agent.get_and_update(agent, fn n -> {n, n + 1} end)
-        n < 1
+        if n < 1, do: :alive, else: :absent
       end
 
-      assert PodTmux.confirm_dead?("pod-x", alive_fun)
+      assert PodTmux.confirm_dead?("pod-x", state_fun)
     end
   end
 end

@@ -172,30 +172,42 @@ defmodule Fleet.Spawner.PodTmux do
     :ok
   end
 
-  @doc "Live session? (`tmux -S <sock> has-session`). Health + recovery."
-  @spec alive?(String.t()) :: boolean()
-  def alive?(pod_id) when is_binary(pod_id) do
+  @doc """
+  Session state, TRI-STATE: `:alive` (has-session exit 0), `:absent` (exit 1 — tmux
+  answered "no such session", the one genuine death proof), `:unknown` (timeout /
+  exec failure — tmux itself was unreachable, which proves NOTHING about the holder).
+  Destructive consumers (`confirm_dead?`) must never read `:unknown` as death.
+  """
+  @spec session_state(String.t()) :: :alive | :absent | :unknown
+  def session_state(pod_id) when is_binary(pod_id) do
     case tmux(pod_id, ["has-session", "-t", session_name(pod_id)]) do
-      {_, 0} -> true
-      _ -> false
+      {_, 0} -> :alive
+      {_, 1} -> :absent
+      {_out, _rc} -> :unknown
     end
   end
 
-  # CI-05 (audit integrite 2026-07-20): the teardown/warden must CONFIRM the holder is dead before
-  # erasing the sock-dir (the ONLY reconciliation proof the PodWarden enumerates). `kill_holder`/
-  # `terminate_pod_port` return `:ok` regardless of the OS kill outcome, so their return is not a death
-  # verdict — we verify LIVENESS instead. `kill_holder`'s SIGKILL (`pkill -9`, uncatchable) is near-instant
-  # (first check false); a graceful SIGTERM needs a moment for the bwrap namespace to collapse, hence a
-  # SHORT bounded poll (~200 ms max). Still alive after the budget → the kill was refused/ineffective →
-  # KEEP the proof so the warden re-detects and retries. Only used on real (bwrap/host) pods; a StubBackend
-  # session is nil (the caller skips this whole path).
+  @doc "Live session? Boolean convenience for the NON-destructive callers (kick/health): `:unknown` reads false (skip this round, retry next). Death verdicts go through `confirm_dead?/2`."
+  @spec alive?(String.t()) :: boolean()
+  def alive?(pod_id) when is_binary(pod_id), do: session_state(pod_id) == :alive
+
+  # The teardown/warden must CONFIRM the holder is dead before erasing the sock-dir (the ONLY
+  # reconciliation proof the PodWarden enumerates). `kill_holder`/`terminate_pod_port` return `:ok`
+  # regardless of the OS kill outcome, so their return is not a death verdict — we verify LIVENESS
+  # instead. `kill_holder`'s SIGKILL (`pkill -9`, uncatchable) is near-instant (first check absent);
+  # a graceful SIGTERM needs a moment for the bwrap namespace to collapse, hence a SHORT bounded
+  # poll (~200 ms max). Still alive after the budget → the kill was refused/ineffective → KEEP the
+  # proof so the warden re-detects and retries. Death requires an EXPLICIT `:absent` from tmux
+  # ("no such session", exit 1): `:unknown` (tmux timeout/exec failure) proves nothing about the
+  # holder and NEVER counts — erasing the sock-dir on it would orphan a living holder. Only used on
+  # real (bwrap/host) pods; a StubBackend session is nil (the caller skips this whole path).
   @dead_confirm_attempts 5
   @dead_confirm_sleep_ms 40
-  @spec confirm_dead?(String.t(), (String.t() -> boolean())) :: boolean()
-  def confirm_dead?(pod_id, alive_fun \\ &alive?/1) when is_binary(pod_id) do
+  @spec confirm_dead?(String.t(), (String.t() -> :alive | :absent | :unknown)) :: boolean()
+  def confirm_dead?(pod_id, state_fun \\ &session_state/1) when is_binary(pod_id) do
     Enum.reduce_while(1..@dead_confirm_attempts, false, fn attempt, _acc ->
       cond do
-        not alive_fun.(pod_id) ->
+        state_fun.(pod_id) == :absent ->
           {:halt, true}
 
         attempt < @dead_confirm_attempts ->

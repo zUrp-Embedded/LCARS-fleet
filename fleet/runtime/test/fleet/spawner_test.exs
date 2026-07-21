@@ -321,6 +321,26 @@ defmodule Fleet.SpawnerTest do
            "the brutal fallback should have released the task, status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
+  test "pod_info: a registered-but-silent pod is UNREACHABLE, never absent (timeout is not death)" do
+    pod_id = "pod-slow-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    {:ok, pid} =
+      Task.start(fn ->
+        {:ok, _} = Registry.register(Fleet.Spawner.Registry, pod_id, nil)
+        send(parent, :registered)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :registered
+
+    # The old catch-all read this TIMEOUT as {:error, :not_found}: a live-but-slow pod
+    # classed absent — the exact false death proof the compensations killed on.
+    assert {:error, :unreachable} = Fleet.Spawner.pod_info(pod_id, 50)
+
+    Process.exit(pid, :kill)
+  end
+
   test "pod_info returns :not_found when pod doesn't exist" do
     assert {:error, :not_found} = Fleet.Spawner.pod_info("nonexistent-pod-id")
   end

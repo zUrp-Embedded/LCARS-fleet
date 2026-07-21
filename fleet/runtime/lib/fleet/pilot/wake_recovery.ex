@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.WakeRecovery do
 
   Seams (functions) for testing; defaults = the real fns. `wake/3` API unchanged for the callers.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
   require Logger
 
@@ -37,8 +37,22 @@ defmodule Fleet.Pilot.WakeRecovery do
     wake_fun = Keyword.get(opts, :wake_fun, &Fleet.Spawner.wake_pod/1)
 
     case wake_fun.(pod_id) do
-      :ok -> :ok
-      {:error, reason} -> handle_fail(pod_id, reason, respawn_fun, wake_fun, opts)
+      :ok ->
+        :ok
+
+      # UNREACHABLE (the pod's info call timed out) is not a dead pod: re-rolling here was
+      # the destructive path — a fresh spawn on the deterministic id, then the reap of a
+      # maybe-LIVING agent mid-work. DEFER: a slow pod self-corrects at the next tick, and
+      # a truly stuck one is the response-deadline's job, never a blind respawn.
+      {:error, :unreachable} = err ->
+        Logger.warning(
+          "WakeRecovery: #{pod_id} UNREACHABLE (slow, not proven absent) → deferred, no re-roll"
+        )
+
+        err
+
+      {:error, reason} ->
+        handle_fail(pod_id, reason, respawn_fun, wake_fun, opts)
     end
   end
 

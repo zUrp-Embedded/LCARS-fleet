@@ -378,19 +378,29 @@ defmodule Fleet.Spawner do
 
   @doc """
   Returns a pod's current state (`%{phase, conditions, ...}`).
+
+  THREE outcomes, kept distinct up to every destructive decision: `{:ok, info}` (alive),
+  `{:error, :not_found}` (genuinely absent), `{:error, :unreachable}` (info call TIMED
+  OUT or exited oddly — the pod may be ALIVE and slow). Flattening `:unreachable` into
+  `:not_found` let compensations kill a living pod and reset a workspace mid-write;
+  destructive consumers must DEFER on `:unreachable`, never treat it as death.
+  (`timeout` is a test seam — prod callers use the default.)
   """
-  @spec pod_info(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def pod_info(pod_id) when is_binary(pod_id) do
+  @spec pod_info(String.t(), timeout()) :: {:ok, map()} | {:error, :not_found | :unreachable}
+  def pod_info(pod_id, timeout \\ 5_000) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # The pid may be dead but still briefly in the Registry (async cleanup
-        # via monitor) — a `GenServer.call` would raise `EXIT` there. A dead pod =
-        # absent → `{:error, :not_found}` (consistent with the try/catch pattern of
-        # `kill_pod/1`; removes a race exposed by the release's fast stop).
+        # The pid may be dead but still briefly in the Registry (async cleanup via
+        # monitor) — a `GenServer.call` exits there. A DEAD pid (noproc/normal/shutdown)
+        # is genuinely absent; a TIMEOUT (or any other exit) is NOT a death proof.
         try do
-          {:ok, GenServer.call(pid, :info)}
+          {:ok, GenServer.call(pid, :info, timeout)}
         catch
-          :exit, _reason -> {:error, :not_found}
+          :exit, {:noproc, _} -> {:error, :not_found}
+          :exit, {:normal, _} -> {:error, :not_found}
+          :exit, {:shutdown, _} -> {:error, :not_found}
+          :exit, {{:shutdown, _}, _} -> {:error, :not_found}
+          :exit, _other -> {:error, :unreachable}
         end
 
       [] ->
@@ -414,7 +424,9 @@ defmodule Fleet.Spawner do
     |> Enum.flat_map(fn pod_id ->
       case pod_info(pod_id) do
         {:ok, info} -> [info]
-        {:error, :not_found} -> []
+        # Absent AND unreachable both drop from the listing (display seam, read-only —
+        # the destructive paths read the TYPED error, never this enumeration).
+        {:error, _} -> []
       end
     end)
   end
@@ -483,7 +495,7 @@ defmodule Fleet.Spawner do
   Both `{:error, _}` = STRUCTURAL failure (we could not even trigger) → the caller (cf. `WakeRecovery`)
   re-rolls/escalates. A 2nd path, complementary to the loop's async escalation (no-ACK).
   """
-  @spec wake_pod(String.t()) :: :ok | {:error, :not_found | :not_a_tmux_pod}
+  @spec wake_pod(String.t()) :: :ok | {:error, :not_found | :not_a_tmux_pod | :unreachable}
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->

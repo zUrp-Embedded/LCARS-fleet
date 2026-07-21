@@ -5,6 +5,28 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
   alias Fleet.Pilot.WakeRecovery
 
+  test "fail :unreachable (slow, not proven absent) → DEFER: no re-roll, no registry, no escalation" do
+    # The spawner's contract split: an info-call timeout is :unreachable, never :not_found.
+    # Re-rolling here was the destructive path — a fresh spawn on the deterministic id, then
+    # the reap of a maybe-LIVING agent mid-work. seen_before_fun flunks to prove the failure
+    # handler is never even entered.
+    log =
+      capture_log(fn ->
+        assert {:error, :unreachable} =
+                 WakeRecovery.wake(
+                   "pod-slow",
+                   fn -> send(self(), :respawned) end,
+                   wake_fun: fn _ -> {:error, :unreachable} end,
+                   seen_before_fun: fn _ ->
+                     flunk("the incident registry must not be consulted")
+                   end
+                 )
+      end)
+
+    refute_received :respawned
+    assert log =~ "UNREACHABLE"
+  end
+
   test "wake :ok → :ok, no re-roll, no note, no escalation" do
     pid = self()
 

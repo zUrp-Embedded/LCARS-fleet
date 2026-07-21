@@ -377,7 +377,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # `pod_alive?` defaults to `false` if the spawner does not expose `pod_info/1` (test stubs) → spawn
   # path unchanged.
   defp pod_alive?(spawner, pod_id) do
-    function_exported?(spawner, :pod_info, 1) and match?({:ok, _}, spawner.pod_info(pod_id))
+    function_exported?(spawner, :pod_info, 1) and
+      case spawner.pod_info(pod_id) do
+        {:ok, _} -> true
+        # UNREACHABLE (info call timed out): may be ALIVE and slow — same fail-closed
+        # posture as the RAISE below (assume alive; a wrong "alive" wastes a rebrief,
+        # a wrong "dead" double-spawns then reaps the living eng).
+        {:error, :unreachable} -> true
+        {:error, _} -> false
+      end
   rescue
     e ->
       # A RAISE from pod_info leaves aliveness UNKNOWN. Defaulting to `false` (dead) is UNSAFE: a live pod
@@ -492,14 +500,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:ok, _partial} ->
         :busy
 
-      # F-C059 — aliveness UNKNOWN (pod_info RAISED): fail-CLOSED -> :busy (DEFER), NEVER :dead. Classing an
-      # uncertain pod dead -> serialize `:ok` -> fresh spawn on the deterministic id -> reap/`safe_kill` of a
-      # maybe-LIVING pipe eng + its context (the exact destructive path `pod_alive?` guards with "assume ALIVE").
-      # A transient raise self-corrects next tick; a persistent one defers visibly (Logger.warning) rather than
-      # acting destructively.
-      # LIMIT: only the RAISE case is closed here — the deeper `pod_info` conflation (a live-but-slow pod whose
-      # GenServer.call times out into `{:error, :not_found}`, indistinguishable from a genuinely-absent pod at
-      # THIS layer) needs a pod_info contract split at the spawner.
+      # F-C059 — aliveness UNKNOWN (pod_info RAISED or UNREACHABLE): fail-CLOSED -> :busy (DEFER), NEVER
+      # :dead. Classing an uncertain pod dead -> serialize `:ok` -> fresh spawn on the deterministic id ->
+      # reap/`safe_kill` of a maybe-LIVING pipe eng + its context (the exact destructive path `pod_alive?`
+      # guards with "assume ALIVE"). A transient failure self-corrects next tick; a persistent one defers
+      # visibly rather than acting destructively. The spawner's pod_info contract keeps the three states
+      # distinct (absent / alive / unreachable) — `:unreachable` (a live-but-slow pod whose info call
+      # timed out) maps HERE to :unknown, never to :dead.
       :unknown ->
         :busy
 
@@ -513,6 +520,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     if function_exported?(spawner, :pod_info, 1) do
       case spawner.pod_info(pod_id) do
         {:ok, info} -> {:ok, info}
+        {:error, :unreachable} -> :unknown
         _ -> :error
       end
     else

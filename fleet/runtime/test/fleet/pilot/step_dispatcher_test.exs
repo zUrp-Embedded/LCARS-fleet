@@ -298,6 +298,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         :publishing -> {:ok, %{conditions: [:publishing], has_active_task: false}}
         # F-C059: probe that RAISES (transient failure on a LIVE-but-slow pipe) → UNKNOWN state.
         :raise -> raise "F-C059: pod_info RAISED (transient probe failure on a LIVE pipe)"
+        # Contract split at the spawner: a TIMED-OUT info call is :unreachable, never :not_found.
+        :unreachable -> {:error, :unreachable}
       end
     end
   end
@@ -880,6 +882,26 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # guards with "assume ALIVE"). Fail-closed: uncertainty (raise) → DEFERS (mirror of
       # pod_alive?), never reset/kill.
       Process.put(:pipe_state, :raise)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:skipped, :role_busy} = StepDispatcher.dispatch_issue(eng_issue(), opts)
+
+      refute_received {:reprovisioned, _, _, _}
+      refute_received {:spawned, _, _}
+    end
+
+    test "GATE pipe pod_info UNREACHABLE (info call timed out, pod maybe ALIVE): DEFERS :role_busy, NO destructive spawn" do
+      # The spawner's contract split: a live-but-slow pod whose info call times out is
+      # :unreachable — the old flattening into :not_found read it as DEAD → fresh spawn on
+      # the deterministic id → reap of the LIVING pipe eng + its context. Fail-closed like
+      # the RAISE case: defer, never reset/kill.
+      Process.put(:pipe_state, :unreachable)
 
       opts =
         dispatch_opts(
