@@ -2,79 +2,93 @@
 # SOURCE: etc/provision-role-tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — pose idempotente des role-tokens forge (fix A4) : mint + écriture <dir>/<role>.gitea_token + vérification
+# STATUS: PROTO-V2 — pose idempotente des role-tokens forge (A4) : mint + ecriture <dir>/<role>.gitea_token + sonde
 #
-# LE trou A4 (vécu live 2026-07-05) : les tokens des comptes de rôle (architect, engineer, qualifier,
-# reviewer, gatekeeper, consultant, vulcan) n'avaient AUCUN script de pose. Conséquence : un humain
-# NEUF ne peut pas faire tourner la chaîne (create_issue signe as-architect → 401), la « réinstall
-# 10 min » est une prétention, et le jeu de tokens vivant n'existe que dans l'env privé du premier
-# opérateur. Ce script EST le mécanisme : il mint les tokens sur UNE forge et les écrit dans UN
-# dossier (un jeu par forge — cf. FORGE_ROLE_TOKENS_DIR côté runtime), rejouable à l'infini.
+# LE trou A4 : les tokens des comptes de role (architect, engineer, qualifier, reviewer, gatekeeper,
+# consultant) n'avaient AUCUN script de pose. Consequence : un humain NEUF ne peut pas faire tourner
+# la chaine (create_issue signe as-architect, donc 401), la « reinstall en 10 min » est une pretention,
+# et le jeu de tokens vivant n'existe que dans l'env prive du premier operateur. Ce script EST le
+# mecanisme : il mint les tokens sur UNE forge et les ecrit dans UN dossier (un jeu par forge, cf.
+# FORGE_ROLE_TOKENS_DIR cote runtime), rejouable a volonte.
 #
-# PRIVILÈGE (doctrine POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC
-# AUTH de ce compte (`--passwords-file`). ⚠ Gitea REFUSE la création de token par header token —
-# même un token site-admin, même sur soi-même (`POST /users/{u}/tokens` → "auth required" ; vérifié
-# starfleet 2026-07-05). Il n'existe donc PAS de voie « admin-token » équivalente : un opérateur qui
-# n'a que le token admin doit d'abord poser un password (`PATCH /admin/users/{u}`) PUIS basic-auth —
-# hors scope de ce script (surface + non-idempotent). Le password est un SCALPEL (fichier
-# opérateur-only) : ce script se lance UNE fois par un privilégié ; le runtime, lui, ne lit que les
-# fichiers posés (0640, groupe fleet). Le script n'invente aucun privilège : il échoue proprement
-# s'il n'a pas le sien.
+# DROIT DE MINT (POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC AUTH de ce
+# compte (`--passwords-file`). Gitea REFUSE la creation de token par header token — meme un token
+# site-admin, meme sur soi-meme (`POST /users/{u}/tokens` rend "auth required"). Il n'existe donc PAS de
+# voie « admin-token » equivalente : un operateur qui n'a que le token admin doit d'abord poser un
+# password (`PATCH /admin/users/{u}`) PUIS basic-auth — hors scope de ce script (surface, et non
+# idempotent). Le password est un SCALPEL (fichier operateur-only) : ce script se lance UNE fois par
+# quelqu'un qui a ce droit ; le runtime, lui, ne lit que les fichiers poses (0640, groupe fleet). Le
+# script n'invente aucun droit : il echoue proprement s'il n'a pas le sien.
 #
-# IDEMPOTENCE (provisioning brutal) : un token local DÉJÀ VALIDE sur la forge → skip (aucune
-# écriture). Invalide/absent → l'ancien token remote du même nom est supprimé puis re-minté, le
-# fichier est réécrit. Appliquer N fois = appliquer 1 fois. `--check` = vérification seule
-# (exit≠0 si un token est invalide) — c'est la sonde du futur nuke-drill.
+# IDEMPOTENCE (provisioning brutal) : un token local DEJA VALIDE sur la forge est saute (aucune
+# ecriture). Invalide ou absent : l'ancien token remote du meme nom est supprime puis re-minte, et le
+# fichier est reecrit. Appliquer N fois = appliquer 1 fois. `--check` = sonde seule (exit non nul si un
+# token est invalide) — c'est le controle du nuke-drill.
 #
 # USAGE :
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
-#       --extra-token lcars-system:system.gitea_token        # les 6 rôles + le token système = A4 complet
+#       --extra-token lcars-system:system.gitea_token        # les 6 roles + le token systeme = A4 complet
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
-# Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 6) ·
-#           --extra-token COMPTE:FICHIER (répétable — pour un token où le compte ≠ le nom de fichier,
-#             ex. le système `lcars-system:system.gitea_token`) · --group GRP (défaut fleet) ·
-#           --token-name NAME (défaut lcars-fleet)
-# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte système
-#   y a sa clé, ex. "lcars-system"). Clé insensible à la casse (Gitea résout les comptes
-#   case-insensitive : `Architect` matche le rôle `architect`).
-# EXIT : 0 = toutes entrées posées/valides · 1 = usage/dépendance · 2 = au moins une entrée en échec.
+#   provision-role-tokens.sh --help                          # cette aide
+# Options : --tokens-dir DIR (defaut /home/private) · --roles "a b c" (defaut : les 6) ·
+#           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
+#             fichier, ex. le systeme `lcars-system:system.gitea_token`) · --group GRP (defaut fleet) ·
+#           --token-name NAME (defaut lcars-fleet) · -h|--help
+# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte systeme
+#   y a sa cle, ex. "lcars-system"). Cle insensible a la casse (Gitea resout les comptes
+#   case-insensitive : `Architect` matche le role `architect`).
+# EXIT : 0 = tous les tokens poses ou valides · 1 = usage/dependance manquante · 2 = au moins un token
+#   en echec.
+
+# NOTE FOR SOURCE READERS (deliberately below line 40, so `--help` does not print it): the header above
+# is in French while the rest of this file's comments are in English, and that is not an oversight.
+# `usage()` renders lines 2..40 verbatim — that header IS the --help output, i.e. text the box says to
+# its operator. Translating it would translate the CLI. Everything from here down is source prose and
+# follows the English rule. If you ever split the two (a separate heredoc for --help), the header goes
+# English with the rest.
 
 set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="/home/private"
-# vulcan ABSENT du provisioning, à raison : vulcan = l'agent Codex (OpenAI), EXTERNE à la fleet
-# PAR CONSTRUCTION — la frontière vendor N1 n'a qu'un launcher Claude (bin/claude_launch.sh), pas
-# de bridge OpenAI (CLAUDE.md : « futur OpenAI », non construit). Il ne tourne donc JAMAIS comme
-# pod fleet → ni cap-profile, ni role-token. ⚠ Le commentaire précédent « rôle fantôme renommé
-# starfleet » était une CONFUSION propagée : un agent a pris l'agent EXTERNE vulcan pour le rôle
-# gatekeeper `starfleet` (corrigée 2026-07-13 ; vérifié : aucun vulcan.yaml, aucun launcher OpenAI).
-# starfleet, LUI, est un vrai rôle fleet mais host-native → 0 conso token, absent aussi.
-# Le check contracts `roles.provisioning_in_catalogue` verrouille cette liste au canon.
+# vulcan is ABSENT from the provisioning, rightly: vulcan is the Codex (OpenAI) agent, EXTERNAL to the
+# fleet BY CONSTRUCTION — the N1 vendor frontier has only a Claude launcher (bin/claude_launch.sh), no
+# OpenAI bridge. It therefore NEVER runs as a fleet pod: no cap-profile, no role token. (An earlier
+# comment called it a "phantom role renamed starfleet"; that was a propagated confusion between the
+# EXTERNAL vulcan agent and the `starfleet` gatekeeper role. Verified: no vulcan.yaml, no OpenAI
+# launcher.) starfleet IS a real fleet role, but host-native → zero token consumption, also absent.
+#
+# The `roles.provisioning_in_catalogue` contract check guards this list in ONE direction only: it fails
+# on a role listed here that has no canon cap-profile (a phantom). It CANNOT catch the reverse — drop a
+# canon role from ROLES below and the check stays green, because it is a subset test. Closing that
+# direction needs a `needs_role_token` flag in the canon, which is not built.
 ROLES="architect consultant engineer gatekeeper qualifier reviewer"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
-# Le compte SYSTÈME crée les repos d'org (create_project → onboard) : POST /orgs/<org>/repos exige
-# write:organization EN PLUS (vérifié live 2026-07-06 : sans lui, token valide mais 403 à la création ;
-# avec, 201). Les rôles ne créent JAMAIS de repo d'org → ils restent au scope minimal (least-privilege :
-# un token de rôle détourné ne doit pas pouvoir gérer l'org). Le nom du compte système est un fait connu.
-# `read:user` est réservé au SYSTÈME (audit A4 2026-07-07) : SEUL `forge_bot_login` (GET /user, résolution
-# du login bot pour vérifier les marqueurs bot-authored route/step_run/result) en a besoin — et lui SEUL,
-# car les tokens de RÔLE ne servent JAMAIS à ce GET (les rôles écrivent via `as_role`, posts/reviews/merge ;
-# les LECTURES forge — dont forge_bot_login — passent TOUJOURS par le token système, jamais un rôle).
-# Un rôle avec `write:user` (ancien scope) pouvait éditer son propre profil compte — capacité inutile à
-# son job, gardée seulement parce que l'ancienne sonde token_valid l'exigeait (cf. token_valid ci-dessous).
+# The SYSTEM account creates the org repos (create_project → onboard): POST /orgs/<org>/repos ALSO
+# requires write:organization (measured: without it the token is valid but the creation 403s; with it,
+# 201). Roles NEVER create an org repo, so they stay at the minimal scope — least privilege: a hijacked
+# role token must not be able to administer the org.
+# `read:user` is reserved for the SYSTEM account: only `forge_bot_login` (GET /user, resolving the bot
+# login to check the bot-authored markers on route/step_run/result) needs it, and it alone — ROLE tokens
+# are NEVER used for that GET. Roles WRITE through `as_role` (posts/reviews/merge); forge READS,
+# forge_bot_login included, ALWAYS go through the system token, never a role.
+# A role with `write:user` (the old scope) could edit its own account profile — useless to its job, and
+# kept only because the old token_valid probe demanded it (cf. token_valid below).
 SYSTEM_ACCOUNT="lcars-system"
 SYSTEM_SCOPES="$SCOPES,write:organization,read:user"
 PASSWORDS_FILE=""
 CHECK_ONLY=0
-# Tokens hors-rôle où le compte ≠ le nom de fichier (le mapping est une DONNÉE, pas un cas spécial) :
-# le token SYSTÈME est le compte `lcars-system` mais le runtime lit `system.gitea_token`. Rempli par
-# `--extra-token <compte>:<fichier>` (répétable). Sans lui, A4 laisse le system token en geste manuel.
+# Non-role tokens whose account is not the filename (the mapping is DATA, not a special case): the
+# SYSTEM token is the `lcars-system` account but the runtime reads `system.gitea_token`. Filled by
+# `--extra-token <account>:<file>` (repeatable). Without it, A4 leaves the system token a manual step.
 declare -a EXTRA_ENTRIES
 
-usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
+# --help renders the header block above verbatim. It stops at the FIRST BLANK LINE rather than at a
+# hardcoded line number: the previous `2,40p` silently truncated the last sentence the moment the header
+# grew by one line, and a usage text that ends mid-sentence is worse than no usage text.
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -85,7 +99,7 @@ while [[ $# -gt 0 ]]; do
     --token-name) TOKEN_NAME="$2"; shift 2 ;;
     --passwords-file) PASSWORDS_FILE="$2"; shift 2 ;;
     --extra-token)
-      [[ "$2" == *:* ]] || { echo "provision-role-tokens: --extra-token attend <compte>:<fichier> (reçu: $2)" >&2; exit 1; }
+      [[ "$2" == *:* ]] || { echo "provision-role-tokens: --extra-token attend <compte>:<fichier> (vu: $2)" >&2; exit 1; }
       EXTRA_ENTRIES+=("$2"); shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -98,35 +112,37 @@ command -v jq >/dev/null || { echo "provision-role-tokens: jq requis" >&2; exit 
 [[ -n "$FORGE" ]] || { echo "provision-role-tokens: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
 FORGE="${FORGE%/}"
 
-# En mode POSE, la basic auth (passwords-file) est requise — seule voie que Gitea accepte pour créer
-# un token (cf. header : le token admin ne peut PAS minter).
+# In POSE mode the basic auth (passwords-file) is required — the only route Gitea accepts to create a
+# token (cf. the header: an admin token CANNOT mint).
 if [[ "$CHECK_ONLY" -eq 0 && -z "$PASSWORDS_FILE" ]]; then
-  echo "provision-role-tokens: mode pose sans autorité — --passwords-file requis (--check pour sonder seul)" >&2
+  echo "provision-role-tokens: mode pose sans droit de mint — --passwords-file requis (--check pour sonder seul)" >&2
   exit 1
 fi
 if [[ -n "$PASSWORDS_FILE" && ! -r "$PASSWORDS_FILE" ]]; then
-  echo "provision-role-tokens: passwords-file illisible: $PASSWORDS_FILE (lance avec le privilège qui le lit)" >&2
+  echo "provision-role-tokens: passwords-file illisible: $PASSWORDS_FILE (lance-le avec le compte qui peut le lire)" >&2
   exit 1
 fi
 
-# Sonde de validité d'un token : GET /user AVEC ce token. Fix A4 (2026-07-07, faux-négatif débusqué) :
-# un token scopé étroit (rôle, SANS read:user) rend 403 sur /user — VIVANT, juste hors-scope pour CET
-# endpoint précis. Seul 401 = mort/révoqué (Gitea authentifie le token puis refuse le SCOPE en 403,
-# distinct du 401 « le token n'existe pas / a expiré »). Vérifié empiriquement 2026-07-07 : token
-# minimal (write:repository,write:issue) → GET /user = 403 ; token read:user → 200 ; token révoqué →
-# 401. Sonde correcte : {200,403} = vivant, 401 (ou tout le reste : 500/timeout/connexion) = invalide/
-# indéterminé → re-pose (fail-safe : on ne suppose jamais valide sur un doute).
+# Token validity probe: GET /user WITH that token. A4 fix (a false negative that was caught in the
+# field): a narrowly-scoped token (a role, WITHOUT read:user) answers 403 on /user — ALIVE, merely
+# out-of-scope for THAT endpoint. Only 401 means dead/revoked (Gitea authenticates the token, then
+# refuses the SCOPE with a 403, distinct from the 401 "this token does not exist / has expired").
+# Measured: minimal token (write:repository,write:issue) → GET /user = 403; read:user token → 200;
+# revoked token → 401. So the correct probe is: {200,403} = alive; 401 — or anything else, 5xx /
+# timeout / connection failure — = invalid or undetermined → re-provision (fail-safe: never assume
+# valid on a doubt).
 token_valid() { # $1=token
   local code
   code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $1" "$FORGE/api/v1/user")"
   [[ "$code" == "200" || "$code" == "403" ]]
 }
 
-# Auth d'ACTION sur le compte $1 : basic auth (password du rôle). Écrit les args curl dans le tableau
-# global CURL_AUTH (pas d'échappement fragile en string). Lookup de clé INSENSIBLE À LA CASSE : Gitea
-# résout les comptes case-insensitive → un password-file avec `Architect` matche le rôle `architect`
-# (on s'aligne sur le système sous-jacent, on n'impose pas une contrainte plus stricte que lui). La
-# valeur = string nue OU objet `{password: ...}`. `-u user:pass` en basic auth (le seul mint accepté).
+# ACTION auth on account $1: basic auth (the role's password). Writes the curl args into the global
+# CURL_AUTH array (no fragile string escaping). The key lookup is CASE-INSENSITIVE: Gitea resolves
+# accounts case-insensitively, so a password-file with `Architect` matches the `architect` role — we
+# align with the underlying system rather than imposing a stricter constraint than it does. The value is
+# either a bare string OR an object `{password: ...}`. `-u user:pass` basic auth is the only mint Gitea
+# accepts.
 declare -a CURL_AUTH
 set_auth_for() { # $1=role
   local role="$1" pwd
@@ -140,9 +156,9 @@ set_auth_for() { # $1=role
   CURL_AUTH=(-u "$role:$pwd")
 }
 
-# UNE entrée à provisionner = une paire `compte:fichier` (le mapping est une DONNÉE). Les rôles
-# produisent `<role>:<role>.gitea_token` ; `--extra-token` ajoute les paires où compte ≠ fichier
-# (le système : `lcars-system:system.gitea_token`). Une seule mécanique de mint pour tous.
+# ONE entry to provision = one `account:file` pair (the mapping is DATA). Roles produce
+# `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file (the system:
+# `lcars-system:system.gitea_token`). One mint mechanism for all of them.
 declare -a ENTRIES
 for role in $ROLES; do ENTRIES+=("$role:$role.gitea_token"); done
 ENTRIES+=("${EXTRA_ENTRIES[@]}")
@@ -153,12 +169,12 @@ for entry in "${ENTRIES[@]}"; do
   filename="${entry#*:}"
   file="$TOKENS_DIR/$filename"
 
-  # Scope différencié (least-privilege) : le compte système crée des repos d'org → write:organization en
-  # plus ; les rôles restent au scope minimal. Match insensible à la casse (Gitea résout ainsi les comptes).
+  # Differentiated scope (least privilege): the system account creates org repos → write:organization on
+  # top; roles stay at the minimal scope. Case-insensitive match (that is how Gitea resolves accounts).
   entry_scopes="$SCOPES"
   [[ "${account,,}" == "${SYSTEM_ACCOUNT,,}" ]] && entry_scopes="$SYSTEM_SCOPES"
 
-  # Idempotence : token local présent ET valide → rien à faire.
+  # Idempotence: a local token that is present AND valid → nothing to do.
   if [[ -r "$file" ]]; then
     tok="$(tr -d '[:space:]' < "$file")"
     if [[ -n "$tok" ]] && token_valid "$tok"; then
@@ -174,13 +190,13 @@ for entry in "${ENTRIES[@]}"; do
   fi
 
   if ! set_auth_for "$account"; then
-    echo "FAIL  $account — pas d'autorité (password absent du passwords-file)" >&2
+    echo "FAIL  $account — pas de droit de mint (password absent du passwords-file)" >&2
     fail=1
     continue
   fi
 
-  # Re-pose : supprime l'éventuel token remote du même nom (le nom est unique par compte), puis mint.
-  # Le DELETE 404/422 est normal (pas de token de ce nom) — seul le POST fait foi.
+  # Re-provision: delete any remote token of the same name (names are unique per account), then mint.
+  # A 404/422 on the DELETE is normal (no token of that name) — only the POST is authoritative.
   curl -s -o /dev/null -m 15 "${CURL_AUTH[@]}" -X DELETE \
     "$FORGE/api/v1/users/$account/tokens/$TOKEN_NAME" || true
 
@@ -191,32 +207,32 @@ for entry in "${ENTRIES[@]}"; do
   tok="$(printf '%s' "$resp" | jq -r '.sha1 // empty')"
 
   if [[ -z "$tok" ]]; then
-    echo "FAIL  $account — mint refusé par la forge : $(printf '%s' "$resp" | head -c 160)" >&2
+    echo "FAIL  $account — la forge ne rend pas de token : $(printf '%s' "$resp" | head -c 160)" >&2
     fail=1
     continue
   fi
 
   if ! token_valid "$tok"; then
-    echo "FAIL  $account — token minté mais sonde /user KO (scopes ?)" >&2
+    echo "FAIL  $account — token obtenu mais sonde /user KO : 401, 5xx ou timeout (un scope restreint rend 403, qui compte comme vivant)" >&2
     fail=1
     continue
   fi
 
-  # Écriture atomique (tmp+mv) + droits POSIX : 0640, groupe fleet (le BEAM per-humain lit via
-  # le groupe ; personne d'autre). chgrp exige le privilège sur le dossier : un refus n'annule PAS
-  # la pose du token mais est signalé WARN sur stderr (« à poser à la main ») — tant que le groupe
-  # n'est pas corrigé, le BEAM ne lit pas le fichier et RoleToken le loggue warning à l'usage.
+  # Atomic write (tmp+mv) + POSIX rights: 0640, group fleet — the per-human BEAM reads through the
+  # group, nobody else. chgrp needs the right on the directory: a refusal does NOT cancel the token
+  # write, it is reported WARN on stderr. Until the group is fixed the BEAM cannot read the file, and
+  # RoleToken logs a warning when it tries.
   install -d -m 0750 "$TOKENS_DIR" 2>/dev/null || true
   tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$GROUP" "$tmp" 2>/dev/null || echo "WARN  $account — chgrp $GROUP refusé (à poser à la main)" >&2
+  chgrp "$GROUP" "$tmp" 2>/dev/null || echo "WARN  $account — chgrp $GROUP impossible (geste manuel requis)" >&2
   mv -f "$tmp" "$file"
-  echo "POSÉ  $account — token minté + validé → $file"
+  echo "POSE  $account — nouveau token, sonde OK → $file"
 done
 
 if [[ "$fail" -ne 0 ]]; then
-  echo "provision-role-tokens: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)" >&2
+  echo "provision-role-tokens: AU MOINS UN TOKEN N'EST PAS EN PLACE (forge $FORGE)" >&2
   exit 2
 fi
-echo "provision-role-tokens: toutes les entrées valides sur $FORGE"
+echo "provision-role-tokens: tous les tokens sont valides sur $FORGE"

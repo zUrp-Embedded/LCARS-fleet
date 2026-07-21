@@ -1016,8 +1016,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             []
         end,
       note:
-        "provisioning .sh ⊆ canon catalogue (#{length(catalogue)} roles) — the second list " <>
-          "cannot drift silently"
+        "provisioning .sh ⊆ canon catalogue (#{length(catalogue)} roles) — ONE direction: a " <>
+          "phantom in the .sh fails; a canon role DROPPED from the .sh does not (subset test)"
     }
   end
 

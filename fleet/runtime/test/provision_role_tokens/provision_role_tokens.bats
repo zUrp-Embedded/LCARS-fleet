@@ -2,11 +2,11 @@
 # SOURCE: test/provision_role_tokens/provision_role_tokens.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: tests bats etc/provision-role-tokens.sh (fix A4) — usage, check, pose idempotente, échecs
+# STATUS: bats tests for etc/provision-role-tokens.sh (A4) — usage, check, idempotent provisioning, failures
 #
-# La forge est stubée par un SHIM curl (PATH prepended) : la sonde de validité (`-w %{http_code}`)
-# lit $MOCK/probe_code ; le POST de mint rend $MOCK/post_response et se COMPTE dans $MOCK/calls.log
-# (l'idempotence s'asserte sur « zéro POST au 2e run », pas sur une impression). jq = le vrai.
+# The forge is stubbed by a curl SHIM (prepended to PATH): the validity probe (`-w %{http_code}`) reads
+# $MOCK/probe_code; the mint POST returns $MOCK/post_response and is COUNTED in $MOCK/calls.log — so
+# idempotence is asserted on "zero POST on the second run", not on a printed line. jq is the real one.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../etc/provision-role-tokens.sh"
@@ -14,8 +14,8 @@ setup() {
   MOCK="$TMP/mock"; mkdir -p "$MOCK"
   TOKDIR="$TMP/tokens"; mkdir -p "$TOKDIR"
 
-  # Shim curl : trié par forme d'appel (sonde -w / DELETE / POST), pas par URL (assemblage testé
-  # ailleurs ; ici on teste la LOGIQUE du script). Chaque appel est journalisé.
+  # curl shim: dispatched by call SHAPE (probe -w / DELETE / POST), not by URL — the URL assembly is
+  # tested elsewhere; here we test the script's LOGIC. Every call is logged.
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/curl" <<SHIM
 #!/usr/bin/env bash
@@ -36,7 +36,7 @@ SHIM
 
 teardown() { rm -rf "$TMP"; }
 
-@test "header LCARS présent (SOURCE/AUTHOR/STARDATE/STATUS)" {
+@test "LCARS header present (SOURCE/AUTHOR/STARDATE/STATUS)" {
   head -5 "$SCRIPT" | grep -q "SOURCE: etc/provision-role-tokens.sh"
   head -5 "$SCRIPT" | grep -q "STATUS:"
 }
@@ -47,32 +47,32 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"USAGE"* ]]
 }
 
-@test "sans --forge ni FORGE_BASE_URL → exit 1 fail-loud" {
+@test "no --forge and no FORGE_BASE_URL → exit 1 fail-loud" {
   run env -u FORGE_BASE_URL "$SCRIPT" --check
   [ "$status" -eq 1 ]
   [[ "$output" == *"--forge"* ]]
 }
 
-@test "mode pose SANS --passwords-file → exit 1, jamais un mint aveugle" {
+@test "provisioning mode WITHOUT --passwords-file → exit 1, never a blind mint" {
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer
   [ "$status" -eq 1 ]
-  [[ "$output" == *"autorité"* ]]
+  [[ "$output" == *"droit de mint"* ]]
   [ ! -f "$MOCK/calls.log" ]
 }
 
-@test "--admin-token-file RETIRÉ (mode mort-né : Gitea refuse le mint par token admin)" {
+@test "--admin-token-file REMOVED (stillborn mode: Gitea refuses minting by admin token)" {
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"option inconnue"* ]]
 }
 
-@test "passwords-file illisible → exit 1 (le privilège manquant est DIT, pas contourné)" {
+@test "unreadable passwords-file → exit 1 (the missing right is STATED, not worked around)" {
   run "$SCRIPT" --forge http://f --passwords-file "$TMP/inexistant.json" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"illisible"* ]]
 }
 
-@test "--check : token local valide (sonde 200) → OK, exit 0" {
+@test "--check: valid local token (probe 200) → OK, exit 0" {
   printf 'tok-ok\n' > "$TOKDIR/engineer.gitea_token"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer --check
@@ -80,7 +80,7 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"OK    engineer"* ]]
 }
 
-@test "--check : token invalide (sonde 401) → FAIL, exit 2, fichier INTACT (check n'écrit jamais)" {
+@test "--check: invalid token (probe 401) → FAIL, exit 2, file INTACT (--check never writes)" {
   printf 'tok-mort\n' > "$TOKDIR/engineer.gitea_token"
   printf '401' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer --check
@@ -89,38 +89,38 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
 }
 
-@test "pose happy-path : mint (sha1) + sonde 200 → fichier écrit 0640, exit 0" {
+@test "happy path: mint (sha1) + probe 200 → file written 0640, exit 0" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
-  [[ "$output" == *"POSÉ  engineer"* ]]
+  [[ "$output" == *"POSE  engineer"* ]]
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-frais" ]
   [ "$(stat -c %a "$TOKDIR/engineer.gitea_token")" = "640" ]
   grep -q "POST" "$MOCK/calls.log"
 }
 
-@test "idempotence : 2e run sur token déjà valide → OK skip, ZÉRO nouveau POST" {
+@test "idempotence: second run on an already-valid token → OK skip, ZERO new POST" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
-  posts_avant="$(grep -c POST "$MOCK/calls.log")"
+  posts_before="$(grep -c POST "$MOCK/calls.log")"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    engineer"* ]]
-  [ "$(grep -c POST "$MOCK/calls.log")" = "$posts_avant" ]
+  [ "$(grep -c POST "$MOCK/calls.log")" = "$posts_before" ]
 }
 
-@test "password absent du fichier pour le rôle → FAIL ce rôle, exit 2 (pas de mint des autres masqué)" {
+@test "password missing from the file for a role → FAIL that role, exit 2 (the others' mint is not masked)" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "architect engineer"
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  architect"* ]]
-  [[ "$output" == *"POSÉ  engineer"* ]]
+  [[ "$output" == *"POSE  engineer"* ]]
 }
 
-@test "mint refusé (POST sans sha1) → FAIL, exit 2, aucun fichier écrit" {
+@test "mint refused (POST without sha1) → FAIL, exit 2, no file written" {
   printf '{"message":"forbidden"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
@@ -129,7 +129,7 @@ teardown() { rm -rf "$TMP"; }
   [ ! -f "$TOKDIR/engineer.gitea_token" ]
 }
 
-@test "passwords-file : les DEUX formes JSON acceptées (string nue et {password:...})" {
+@test "passwords-file: BOTH JSON shapes accepted (bare string and {password:...})" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "engineer qualifier"
@@ -138,9 +138,9 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$TOKDIR/qualifier.gitea_token" ]
 }
 
-@test "passwords-file : clé CAPITALISÉE matche le rôle minuscule (Gitea case-insensitive, finding starfleet)" {
-  # Un humain écrit les comptes comme il les voit sur la forge (`Architect`) ; le rôle interne est
-  # `architect`. Le lookup doit matcher — sinon FAIL alors que le password EXISTE (le format-piège vécu).
+@test "passwords-file: a CAPITALIZED key matches the lowercase role (Gitea is case-insensitive)" {
+  # A human writes the accounts as they see them on the forge (`Architect`); the internal role is
+  # `architect`. The lookup must match — otherwise it FAILs while the password EXISTS.
   printf '{"Architect":"pw-arch"}' > "$TMP/caps.json"
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
@@ -149,25 +149,25 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TOKDIR/architect.gitea_token")" = "tok-frais" ]
 }
 
-@test "--extra-token COMPTE:FICHIER : mint le compte système, écrit le fichier (compte ≠ fichier)" {
+@test "--extra-token ACCOUNT:FILE: mints the system account, writes the file (account is not file)" {
   printf '{"lcars-system":"pw-sys"}' > "$TMP/syspw.json"
   printf '{"sha1":"tok-sys"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
       --roles "" --extra-token lcars-system:system.gitea_token
   [ "$status" -eq 0 ]
-  [[ "$output" == *"POSÉ  lcars-system"* ]]
+  [[ "$output" == *"POSE  lcars-system"* ]]
   [ "$(cat "$TOKDIR/system.gitea_token")" = "tok-sys" ]
   [ ! -f "$TOKDIR/lcars-system.gitea_token" ]
 }
 
-@test "--extra-token sans ':' → exit 1 fail-loud (format compte:fichier requis)" {
+@test "--extra-token without ':' → exit 1 fail-loud (account:file format required)" {
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
   [ "$status" -eq 1 ]
   [[ "$output" == *"compte>:<fichier"* ]]
 }
 
-@test "A4 complet : 1 rôle + le système en UN geste (l'appel canonique)" {
+@test "A4 complete: 1 role + the system account in ONE gesture (the canonical call)" {
   printf '{"engineer":"pw-eng","lcars-system":"pw-sys"}' > "$TMP/full.json"
   printf '{"sha1":"tok-x"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
