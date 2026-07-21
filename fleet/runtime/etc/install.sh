@@ -59,8 +59,13 @@ cp -a "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/"
 # --- 3. Perms : RO pour les humains (group fleet r-x), owner = installeur (système) -----------------
 # Le BEAM écrit son tmp/état dans ~/.lcars (RELEASE_TMP, posé par fleet_v2) → l'install reste RO.
 if chgrp -R fleet "$PREFIX" 2>/dev/null; then
-  chmod -R g-w,o-rwx "$PREFIX" 2>/dev/null || true
-  say "perms : group fleet r-x, others none (RO humains)"
+  # On ANNONCE la politique RO seulement si le chmod l'a VRAIMENT appliquée. Un `|| true` masquait un
+  # chmod échoué derrière un message de succès → politique d'accès annoncée mais non appliquée.
+  if chmod -R g-w,o-rwx "$PREFIX" 2>/dev/null; then
+    say "perms : group fleet r-x, others none (RO humains)"
+  else
+    say "⚠ chmod perms ÉCHOUÉ — la politique RO (group r-x, others none) n'est PAS appliquée ; à régler au deploy système"
+  fi
 else
   say "chgrp fleet sauté (droits ?) — à régler au deploy système"
 fi
