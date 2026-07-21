@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   @moduledoc """
   B-#3 / C-02 — arch escalation sets the `lcars-awaits-arch` lock (THE throttle: `decide/1`/
   `dispatch_review` skip on it). If `add_label` FAILS, the lock does not take → the PR is re-dispatched
-  every tick (the EXACT churn the escalation exists to stop). C-02 (sonde convergence 2026-07-20): the
+  every tick (the EXACT churn the escalation exists to stop). C-02: the
   return must NOT stay a lying `{:skipped, _escalated}` — it becomes `{:error, {:escalation_incomplete,
   pr, reason}}` so the poller folds an HONEST `tally.errors` and re-attempts next tick, AND we log LOUD.
 

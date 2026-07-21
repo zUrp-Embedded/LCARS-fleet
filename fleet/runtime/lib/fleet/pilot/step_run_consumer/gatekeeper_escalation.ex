@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   `apply_verdict`) stays the SINGLE-AUTHORITY of the root module, which calls `dispatch/7` on the
   sole `{:dispatch_gatekeeper, _}` path.
 
-  ## Distinct dispatch rail — DELIBERATE, verified, DO NOT merge (L1b, sonde convergence 2026-07-20)
+  ## Distinct dispatch rail — DELIBERATE, verified, DO NOT merge
 
   This dispatch shares a SKELETON with the poller-driven producer/judge dispatch
   (`StepDispatcher.Spawn.spawn_step`) — resolve profile → opts → spawn/reuse → pull → wake — but the

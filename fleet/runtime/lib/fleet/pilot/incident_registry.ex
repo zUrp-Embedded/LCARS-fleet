@@ -682,7 +682,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")
 
-  # C-07 (sonde convergence 2026-07-20): the recurrence category IS the FIRST projection of the canonical
+  # The recurrence category IS the FIRST projection of the canonical
   # `Fleet.Event.reason_fields/1` (the single source of the atom/tuple/binary/other split, used on the
   # broadcast path). A local copy of the clauses would silently drift the incident dedup key from the
   # event category — same split, two owners. Consume the canonical projection instead.

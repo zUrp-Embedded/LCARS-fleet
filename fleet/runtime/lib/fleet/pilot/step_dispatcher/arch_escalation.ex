@@ -190,7 +190,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
     # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
     # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP). We SURFACE it
-    # (C-02, sonde convergence 2026-07-20): return `{:error, ...}` so the caller reports an error tally,
+    # (C-02): return `{:error, ...}` so the caller reports an error tally,
     # NOT a lying `{:skipped, _escalated}` (the escalation did NOT durably take). The poller folds this as
     # `tally.errors` (`step_process_pulls`, F-037: telemetry only, never a backoff) and re-attempts next
     # tick (idempotent: dedup comment + idempotent add_label). LOG LOUD stays — the operator sees the churn.

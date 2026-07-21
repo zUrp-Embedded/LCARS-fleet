@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
   dependency on fleet_pilot.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   # ============================================================
@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @doc """
   Selects the Fleet PRs from a list of raw forge pull maps: every pull whose `head.ref` parses as a
   feature-branch (`lcars/issue-N-<role>`) yields `{issue_number, pull}` — the SINGLE loop behind the
-  in-Pilot issue↔PR correlations (C-05, sonde convergence 2026-07-20). Callers keep their LOCAL
+  in-Pilot issue↔PR correlations (C-05). Callers keep their LOCAL
   projection: `Poller` → the set of issue numbers; `StepRunBuild` → the head.ref of issue N's PR. The
   MCP `Delegation` correlation is NOT wired here (a `fleet_mcp` compile dep on Pilot is forbidden, and
   extending the forge seam with the selector would force every forge stub to implement it) — it keeps a

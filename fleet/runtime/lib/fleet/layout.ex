@@ -65,7 +65,7 @@ defmodule Fleet.Layout do
   @doc """
   Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory
   under `projects_root`/`work_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
-  derivation (C-06, sonde convergence 2026-07-20) — copied across ~8 sites before.
+  derivation (C-06) — copied across ~8 sites before.
   """
   @spec project_name(String.t()) :: String.t()
   def project_name(repo) when is_binary(repo), do: repo |> String.split("/") |> List.last()
