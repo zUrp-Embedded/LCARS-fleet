@@ -12,7 +12,11 @@ defmodule Fleet.Application do
       Fleet.Starfleet,
       Fleet.Pilot,
       Fleet.API,
-      Fleet.Observation
+      Fleet.Observation,
+      # Deliberate API widening: the root materializes the drain's activity counter at
+      # boot (`Quiesce.init_busy!` — single-threaded spot, before any concurrent first
+      # use) — a foundation primitive, reachable by design.
+      Fleet.Shutdown.Quiesce
     ],
     exports: []
 

@@ -300,42 +300,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     Fleet.Shutdown.Quiesce.busy(fn -> handle_pod_completed(p, state) end)
   end
 
-  defp handle_pod_completed(p, state) do
-    case maybe_complete(p, state) do
-      # The outcome is logged by `run_completion` (in the task when async), not here.
-      {:ok, _outcome} ->
-        {:noreply, state}
-
-      # Undecidable gate: the eval brief is enqueued to the permanent
-      # gatekeeper; we hold the resume context until the correlated `work_item.completed`.
-      # The issue stays locked (in-flight) → the poller does not re-spawn (no blind
-      # advance before the verdict).
-      {:escalate, corr, eval_ctx} ->
-        Logger.info(
-          "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
-        )
-
-        # `stored_at` (monotonic) = the TTL clock of the sweep backstop. Stamped HERE, at the
-        # single insertion point, so no context can enter the map without a deadline.
-        eval_ctx = Map.put(eval_ctx, :stored_at, System.monotonic_time(:millisecond))
-
-        {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
-
-      {:skip, reason} ->
-        # `reason` can be a tuple ({:bad_issue_id, id}) — bare interpolation would crash the
-        # singleton the moment the operator flips to :debug to diagnose (twin of :285 below).
-        Logger.debug("StepRunConsumer: skip #{p["issue_id"]} (#{inspect(reason)})")
-        {:noreply, state}
-
-      {:error, reason} ->
-        Logger.warning(
-          "StepRunConsumer: end-of-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
-        )
-
-        {:noreply, state}
-    end
-  end
-
   # Gatekeeper decision received: the eval brief (correlated by
   # `correlation_id` = task.id of the enqueue) is completed. We process ONLY the corr
   # we have pending (the other work_item.completed — other pods — are ignored).
@@ -413,6 +377,42 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # carries ONLY step-run completion, not the incident policy (distinct concern, isolated blast-radius).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
+
+  defp handle_pod_completed(p, state) do
+    case maybe_complete(p, state) do
+      # The outcome is logged by `run_completion` (in the task when async), not here.
+      {:ok, _outcome} ->
+        {:noreply, state}
+
+      # Undecidable gate: the eval brief is enqueued to the permanent
+      # gatekeeper; we hold the resume context until the correlated `work_item.completed`.
+      # The issue stays locked (in-flight) → the poller does not re-spawn (no blind
+      # advance before the verdict).
+      {:escalate, corr, eval_ctx} ->
+        Logger.info(
+          "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
+        )
+
+        # `stored_at` (monotonic) = the TTL clock of the sweep backstop. Stamped HERE, at the
+        # single insertion point, so no context can enter the map without a deadline.
+        eval_ctx = Map.put(eval_ctx, :stored_at, System.monotonic_time(:millisecond))
+
+        {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
+
+      {:skip, reason} ->
+        # `reason` can be a tuple ({:bad_issue_id, id}) — bare interpolation would crash the
+        # singleton the moment the operator flips to :debug to diagnose (twin of :285 below).
+        Logger.debug("StepRunConsumer: skip #{p["issue_id"]} (#{inspect(reason)})")
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.warning(
+          "StepRunConsumer: end-of-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
+        )
+
+        {:noreply, state}
+    end
+  end
 
   # A context with no `stored_at` predates the stamping (or came from a test fixture): treated as
   # fresh — the sweep never drops what it cannot date (it bounds growth, it does not police).
