@@ -31,7 +31,10 @@ defmodule Fleet.Workflow.DeliverableTest do
     {ws, bare, String.trim(out)}
   end
 
-  # System-side identity of the payload commit (D-04: author=role, committer=system).
+  # Payload-commit identity FIXTURE — arbitrary author/committer values to exercise the gate's
+  # allowed-emails check generically (the low-level API takes whatever it is handed). NOT the
+  # production policy: there the author is the HUMAN and the role rides the `Co-authored-by:` trailer
+  # (`Fleet.Credentials.ForgeIdentity`, proven in ForgeIdentityTest).
   defp payload_identity do
     %{
       author_name: "LCARS-engineer",
@@ -70,7 +73,8 @@ defmodule Fleet.Workflow.DeliverableTest do
       {main, 0} = g(bare, ["rev-parse", "main"])
       assert String.trim(main) == base
 
-      # D-04: author=role, committer=system.
+      # The commit records the passed author|committer verbatim — a generic fixture, not the
+      # production identity policy (author=HUMAN, role in trailer; cf. `ForgeIdentity`).
       {who, 0} = g(ws, ["log", "-1", "--format=%ae|%ce"])
       assert String.trim(who) == "engineer@lcars.local|committer@fixture.test"
     end
