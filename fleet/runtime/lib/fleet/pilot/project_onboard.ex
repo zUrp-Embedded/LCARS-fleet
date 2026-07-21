@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -228,9 +228,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
   `opts`: `:force` (required-true to act), `:org`, `:projects_root`/`:work_root`, `:forge_opts`; seams
   `:forge_repo` (default `ForgeClient.Repo`) / `:spawner` (default `Fleet.Spawner`) for test isolation.
   A forge check that does not cleanly resolve (outage) → REFUSED (never delete on an unverifiable state).
-  Returns `{:ok, %{repo, forge, architect, project_dir, work_dir}}` (`forge` = `:deleted` | `:absent`;
-  `architect` = `:stopped` | `:none` | `:error`) or `{:error, term()}`. The local removals + the
-  architect stop are best-effort (logged, never fail the delete once the forge teardown is decided).
+  The IRREVERSIBLE local teardown is identity-gated: proj_dir/work_dir/architect all derive from the
+  BASENAME, so a dir is removed ONLY if its git origin proves it IS `full_name` (never a same-basename
+  project of another owner), and the architect is stopped only once a local dir is so proven.
+  Returns `{:ok, %{repo, forge, architect, project_dir, work_dir, local}}` (`forge` = `:deleted` |
+  `:absent`; `architect` = `:stopped` | `:none` | `:error` | `:skipped_identity`; `local` =
+  `%{project, work}`, each `:removed` | `:kept_identity_unproven` | `:absent`) or `{:error, term()}`.
+  The local removals + the architect stop are best-effort (logged, never fail the delete once the forge
+  teardown is decided).
   """
   @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, opts \\ []) when is_binary(full_name) do
@@ -241,13 +246,22 @@ defmodule Fleet.Pilot.ProjectOnboard do
     with :ok <- validate_name(name),
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- delete_forge(full_name, opts) do
-      # Forge teardown decided → the rest is best-effort cattle cleanup (never fails the delete).
-      architect = stop_architect(full_name, opts)
-      nuke_dir(proj_dir)
-      nuke_dir(work_dir)
+      # Forge teardown decided → the rest is best-effort cattle cleanup (never fails the delete). But the
+      # local teardown is IRREVERSIBLE and keyed by BASENAME (proj_dir/work_dir/architect all derive from
+      # `name`), while `full_name` carries the OWNER. Deleting `other/demo` must NEVER nuke the local
+      # `demo` when it belongs to `fleet/demo` (a homonym): a dir is removed ONLY if its recorded git
+      # origin proves it IS `full_name`, and the architect is stopped ONLY once a dir is so proven.
+      proj = nuke_if_is(full_name, proj_dir, opts)
+      work = nuke_if_is(full_name, work_dir, opts)
+
+      architect =
+        if proj == :removed or work == :removed,
+          do: stop_architect(full_name, opts),
+          else: :skipped_identity
 
       Logger.info(
-        "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, local dirs nuked"
+        "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, " <>
+          "project_dir #{proj}, work_dir #{work}"
       )
 
       {:ok,
@@ -256,9 +270,52 @@ defmodule Fleet.Pilot.ProjectOnboard do
          forge: forge,
          architect: architect,
          project_dir: proj_dir,
-         work_dir: work_dir
+         work_dir: work_dir,
+         local: %{project: proj, work: work}
        }}
     end
+  end
+
+  # Removes `dir` ONLY if its git origin resolves to `full_name` — the identity proof against a basename
+  # homonym. `:absent` (nothing there) | `:removed` (proven + nuked) | `:kept_identity_unproven` (present
+  # but its origin does not resolve to `full_name`, or is unreadable → KEPT, loud: never destroy a project
+  # we cannot prove is the target).
+  defp nuke_if_is(full_name, dir, opts) do
+    cond do
+      not File.exists?(dir) ->
+        :absent
+
+      origin_full_name(dir, opts) == {:ok, full_name} ->
+        nuke_dir(dir)
+        :removed
+
+      true ->
+        Logger.warning(
+          "ProjectOnboard: DELETE #{full_name} — KEPT #{dir}: its git origin does not resolve to " <>
+            "#{full_name} (homonym or unprovable). A basename collision must never nuke another project."
+        )
+
+        :kept_identity_unproven
+    end
+  end
+
+  # `full_name` (`owner/name`) recorded in the local dir's `remote.origin.url` (set at clone/onboard).
+  # Base-host agnostic: the last two PATH segments ARE the forge identity.
+  defp origin_full_name(dir, _opts) do
+    case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
+      {:ok, url} -> {:ok, origin_to_full_name(url)}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp origin_to_full_name(url) do
+    url
+    |> String.trim()
+    |> String.trim_trailing("/")
+    |> String.replace_suffix(".git", "")
+    |> String.split("/")
+    |> Enum.take(-2)
+    |> Enum.join("/")
   end
 
   # Destruction is deliberate: no `force: true` → refuse, touch nothing (cf. moduledoc — no reliable

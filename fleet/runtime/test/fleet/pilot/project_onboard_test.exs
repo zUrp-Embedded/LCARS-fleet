@@ -56,13 +56,23 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       def kill_pod(_pod_id), do: {:error, :not_found}
     end
 
+    # Onboarded dirs are git repos whose `remote.origin.url` records the FULL identity (owner/name) —
+    # the marker delete uses to prove a local dir IS the target and is not a same-basename homonym.
+    defp init_repo_with_origin(dir, origin_url) do
+      File.mkdir_p!(dir)
+      {_out, 0} = System.cmd("git", ["init", "-q", dir])
+      {_out, 0} = System.cmd("git", ["-C", dir, "remote", "add", "origin", origin_url])
+      :ok
+    end
+
     setup %{tmp_dir: tmp} do
       proj_root = Path.join(tmp, "projects")
       work_root = Path.join(tmp, "work")
       proj_dir = Path.join(proj_root, "demo")
       work_dir = Path.join(work_root, "demo")
-      File.mkdir_p!(proj_dir)
-      File.mkdir_p!(work_dir)
+      # The local `demo` belongs to fleet/demo (origin says so).
+      init_repo_with_origin(proj_dir, "https://forge.test/fleet/demo.git")
+      init_repo_with_origin(work_dir, "https://forge.test/fleet/demo.git")
       {:ok, proj_root: proj_root, work_root: work_root, proj_dir: proj_dir, work_dir: work_dir}
     end
 
@@ -115,6 +125,48 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
       refute_received {:delete_repo, _}
       assert File.exists?(ctx.proj_dir)
+    end
+
+    @tag :tmp_dir
+    test "force + WRONG owner (homonym) + forge 404 → local dirs KEPT, architect untouched", ctx do
+      # The owner-typo footgun: `other/demo` does not exist on the forge (404), and the local `demo`
+      # dirs belong to `fleet/demo` (their git origin says so). Deleting `other/demo` must NOT destroy
+      # fleet/demo's local project just because it shares the basename.
+      assert {:ok,
+              %{
+                repo: "other/demo",
+                forge: :absent,
+                architect: :skipped_identity,
+                local: %{project: :kept_identity_unproven, work: :kept_identity_unproven}
+              }} =
+               ProjectOnboard.delete_project(
+                 "other/demo",
+                 projects_root: ctx.proj_root,
+                 work_root: ctx.work_root,
+                 force: true,
+                 forge_repo: AbsentRepo,
+                 spawner: OkSpawner
+               )
+
+      # The homonym's architect is NEVER stopped, and fleet/demo's local project survives intact.
+      refute_received {:kill_pod, _}
+      assert File.exists?(ctx.proj_dir)
+      assert File.exists?(ctx.work_dir)
+    end
+
+    @tag :tmp_dir
+    test "force + right owner but local origin is a DIFFERENT project → that dir KEPT (basename collision)",
+         ctx do
+      # proj_dir's origin is another owner's repo (a stale/mis-provisioned dir sharing the basename).
+      # Even with the correct target and force, a dir whose origin ≠ target is never nuked.
+      File.rm_rf!(ctx.proj_dir)
+      init_repo_with_origin(ctx.proj_dir, "https://forge.test/someone-else/demo.git")
+
+      assert {:ok, %{forge: :deleted, local: %{project: :kept_identity_unproven, work: :removed}}} =
+               del(ctx, force: true, forge_repo: OkRepo)
+
+      assert File.exists?(ctx.proj_dir)
+      refute File.exists?(ctx.work_dir)
     end
   end
 end

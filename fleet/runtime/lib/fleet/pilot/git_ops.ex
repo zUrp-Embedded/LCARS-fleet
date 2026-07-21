@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.GitOps do
   Shared by `Fleet.Pilot.ProjectOnboard` (clone/scaffold/commit/push) and `Fleet.Pilot.WorktreeSync`
   (fetch/reset): a single place where a pilot `git` runs — not two wrappers to keep in sync.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Credentials.ForgeAuth
@@ -29,12 +29,33 @@ defmodule Fleet.Pilot.GitOps do
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
   def run(args, opts \\ []) do
+    case exec(args, opts) do
+      {:ok, _out} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Like `run/2` but RETURNS the captured (trimmed) stdout on exit 0 — for local READ ops
+  (`config --get`, `rev-parse`…) where the output IS the answer. Same `opts`/bound/typed errors as `run/2`.
+  """
+  @spec read([String.t()], keyword()) :: {:ok, String.t()} | {:error, term()}
+  def read(args, opts \\ []) do
+    case exec(args, opts) do
+      {:ok, out} -> {:ok, String.trim(out)}
+      {:error, _} = err -> err
+    end
+  end
+
+  # Single source of the bounded git call (auth/identity env + typed error mapping); `run/2` discards the
+  # stdout, `read/2` keeps it. On exit 0 → `{:ok, raw_out}`.
+  defp exec(args, opts) do
     with {:ok, forge_env} <- forge_env(Keyword.get(opts, :auth, false)) do
       env = forge_env ++ identity_env(Keyword.get(opts, :author))
 
       case Fleet.Credentials.Shell.git(args, env: env) do
-        {:ok, {_out, 0}} ->
-          :ok
+        {:ok, {out, 0}} ->
+          {:ok, out}
 
         {:ok, {out, code}} ->
           {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
