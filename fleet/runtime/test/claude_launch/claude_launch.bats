@@ -84,7 +84,7 @@ teardown() {
 @test "args: exit 1 quand role est string vide" {
   run "$SCRIPT" "" pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
-  [[ "$output" == *"non-vides"* ]]
+  [[ "$output" == *"must be non-empty"* ]]
 }
 
 @test "args: exit 1 quand le fichier SP (.lcars/system-prompt.md) est absent ou vide" {
@@ -93,7 +93,7 @@ teardown() {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"SP file"* ]]
-  [[ "$output" == *"absent ou vide"* ]]
+  [[ "$output" == *"missing or empty"* ]]
 }
 
 # =============================================================
@@ -104,14 +104,14 @@ teardown() {
   unset LCARS_POD_SESSION_ID
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"UUID de session requis"* ]]
+  [[ "$output" == *"session UUID required"* ]]
 }
 
 @test "session: exit non-zéro + message quand LCARS_POD_SESSION_NAME_PREFIX absent" {
   unset LCARS_POD_SESSION_NAME_PREFIX
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"préfixe nom RC requis"* ]]
+  [[ "$output" == *"RC name prefix required"* ]]
 }
 
 # =============================================================
