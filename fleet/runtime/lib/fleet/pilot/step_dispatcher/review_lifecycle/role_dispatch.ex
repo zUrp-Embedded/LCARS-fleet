@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -237,7 +237,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
     do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker"}
 
-  # Conflict-rework (étage 1 — Remediation.conflict_rework): the SAME producer rework, with the
+  # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
   # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
   # APPROVED — main simply moved under the branch).
   defp review_brief(:conflict_rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),

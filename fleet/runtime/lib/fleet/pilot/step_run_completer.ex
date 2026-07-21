@@ -847,7 +847,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       {:ok, _} = ok ->
         # EVERY lock release IS a step crossed — the arch's progress ping rides THE gesture
-        # (user design 2026-07-18: "on a déjà la mécanique fiable"). Emitted AFTER the forge
+        # (user design 2026-07-18: the reliable mechanism is already there). Emitted AFTER the forge
         # reflects the step (the unlock is a step's LAST act), so the feed can never announce
         # ahead of reality — the structural cure of the brick.sealed race. Best-effort, lossy
         # by doctrine; `milestone` (caller-known) types the line: `:delivered` alone also

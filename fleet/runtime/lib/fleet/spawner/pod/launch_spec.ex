@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
     `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -270,7 +270,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # (engineer) EXISTS to hold this context across tickets ; a judge needs it to weigh completeness. Projecting
   # ONLY ITS OWN project (never `/home/projects.work` entire — that is the arch's RW mount, the whole fleet) is
   # the sanctuary rule: give the agent ITS world so it KNOWS, not the neighbours' (noise + over-exposure), and
-  # not nothing (famine → it GUESSES the à-côtés = the poison). RO — it reads its doctrine, never corrupts it.
+  # not nothing (famine → it GUESSES the surroundings = the poison). RO — it reads its doctrine, never corrupts it.
   # Absent for a pod with no project (rc_project nil) or before onboarding (dir missing) → no mount.
   defp project_ops_mount(opts, cap_profile) do
     case project_ops_path(opts, cap_profile) do

@@ -164,8 +164,9 @@ defmodule Fleet.Workflow.Git do
 
   defp run_commit(opts) do
     # No classification by grepping "nothing to commit" on stderr: that would be
-    # i18n-dependent (LC_ALL=fr_FR → "rien à valider" → grep misses → wrong
-    # classification). Pre-check via `git diff --cached --quiet` (RC codes stable
+    # i18n-dependent — under a non-English LC_ALL git says it in that locale, the
+    # grep misses, and the classification is wrong. Pre-check via
+    # `git diff --cached --quiet` instead (RC codes stable
     # across locales: 0 = no staged diff, 1 = staged diff). Avoids the commit
     # entirely when `:nothing_to_commit`.
     case has_staged_changes?(opts.workspace) do

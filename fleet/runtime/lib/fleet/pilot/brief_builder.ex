@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     })
   end
 
-  # Conflict-rework lead section (`conflict: true` — Remediation étage 1): the jury APPROVED,
+  # Conflict-rework lead section (`conflict: true` — Remediation tier 1): the jury APPROVED,
   # main simply moved under the branch (sibling bricks landed). FR: agent-facing work-order
   # prose, same stance as the feedback sections. HONEST about the refs: the pod cannot fetch
   # (forge-blind) — if its workspace's `origin/main` is stale and un-refreshable, the doctrine

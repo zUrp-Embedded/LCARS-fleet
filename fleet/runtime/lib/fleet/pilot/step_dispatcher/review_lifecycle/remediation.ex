@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -144,10 +144,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       :policy ->
         reconverge_policy(pr_number, head, ctx)
 
-      # A REAL git conflict is mechanically recoverable by the PRODUCER (étage 1, live retex
+      # A REAL git conflict is mechanically recoverable by the PRODUCER (tier 1, live retex
       # fleet/hello#3 2026-07-19: a full re-delegated chain — 4 agent passes, ~7 min — for what a
       # local merge-resolve on the SAME PR handles): bounded conflict-rework, budget exhausted →
-      # honest escalation (étage 3). `:unknown` stays a straight escalation (we don't guess).
+      # honest escalation (tier 3). `:unknown` stays a straight escalation (we don't guess).
       :conflict ->
         conflict_rework(pr_number, head, reason, ctx)
 
@@ -156,12 +156,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # Étage 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
+  # Tier 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
-  # dedup makes the count replay-safe). Beyond budget, or any unreadable read → étage 3, the
-  # honest arch escalation (never a blind loop). NOTE the étage 2 (gatekeeper-agent diagnosis
+  # dedup makes the count replay-safe). Beyond budget, or any unreadable read → tier 3, the
+  # honest arch escalation (never a blind loop). NOTE the tier 2 (gatekeeper-agent diagnosis
   # mechanical-vs-semantic before the arch) is a LATER increment — it needs a workspace for the
   # gatekeeper one-shot; today budget-exhausted goes straight to the arch.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do

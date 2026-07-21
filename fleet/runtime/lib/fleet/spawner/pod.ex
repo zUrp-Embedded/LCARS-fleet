@@ -1112,7 +1112,7 @@ defmodule Fleet.Spawner.Pod do
     }
   end
 
-  # UNIFIED seed decision (socle Décision 1, reorg 2026-07-19) — FRESH first-boot only (the caller
+  # UNIFIED seed decision (core Decision 1, reorg 2026-07-19) — FRESH first-boot only (the caller
   # gates on :enoent). Precedence:
   #   1. explicit recall/resume (opts) → untouched (the deliberate paths stay authoritative);
   #   2. non-RC pod → fresh create (it never captured, nothing to resume);

@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
   rails — not a physical merge.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
@@ -211,7 +211,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         # "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also shields
         # the brick's pods from the quiesced-pod reap for the whole (human-timescale) park. The throttle
         # took, so we now maintain the invariant: remove in-flight. VERIFIED, no more silent `_ =` (CI-04:
-        # the audit flagged "retire in-flight sans vérifier ce retrait" while the comment ASSERTS the
+        # the audit flagged "removes in-flight without verifying that removal" while the comment ASSERTS
         # invariant). Same standard as `StepRunCompleter.await_arch` (which verifies its remove in the
         # `with`). `remove_label` is idempotent (`{:ok, :already_absent}`); on failure we SURFACE — both
         # labels present contradicts the invariant AND the stale in-flight leaks the reap-shield — so the

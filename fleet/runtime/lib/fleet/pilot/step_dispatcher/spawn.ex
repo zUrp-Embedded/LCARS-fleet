@@ -303,7 +303,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # the pod reads it in its RO work/ops mount — the SP instructs it, and a non-nil sha proves
     # work/ops exists so the mount is projected). Degraded → the full text keeps the pod
     # autonomous (legacy path; physicalize already warned LOUD). Ends the transitional
-    # pavé+pointer cohabitation (user arbitration 2026-07-18).
+    # inline-blob + pointer cohabitation (user arbitration 2026-07-18).
     payload =
       if is_binary(brief_ref) and is_binary(brief_sha),
         do: Fleet.Workflow.BriefArtifact.pointer_brief(brief_ref, brief_sha),

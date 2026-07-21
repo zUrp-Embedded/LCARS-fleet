@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -120,7 +120,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
             LaunchSpec.pod_mounts_env(state.cap_profile, state.opts, claude_launch_path)
           )
           # LCARS_PROJECT_OPS = the pod's PROJECT work/ops (RO-mounted just above) — the SP tells the worker to
-          # consult ITS project's context/doctrine there instead of GUESSING the à-côtés. Set only when the
+          # consult ITS project's context/doctrine there instead of GUESSING the surroundings. Set only when
           # mount was added (project pod, dir present); absent otherwise → the SP block no-ops on it.
           |> maybe_put_project_ops(state.opts, state.cap_profile)
 
