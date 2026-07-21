@@ -31,6 +31,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
         name: name,
         human: "test-human",
         start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
         step_dispatch?: true,
         forge_client: EmptyOrgForge,
         forge_opts: []
@@ -113,6 +114,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
         name: name,
         human: "test-human",
         start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
         step_dispatch?: true,
         forge_client: OneOrphanForge,
         forge_opts: [_test_pid: self()],

@@ -263,7 +263,13 @@ defmodule Fleet.Pilot.PollerTest do
       # `Human.current!()`).
       name = :"P_no_repo_#{System.unique_integer([:positive])}"
 
-      {:ok, pid} = Poller.start_link(name: name, human: "lordzurp", start_tick?: false)
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          human: "lordzurp",
+          start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end
+        )
 
       assert Process.alive?(pid)
       assert %{poll_count: 0, error_count: 0, err_streak: 0} = Poller.stats(name)
@@ -570,6 +576,7 @@ defmodule Fleet.Pilot.PollerTest do
         repo: "lordzurp/lcars-test",
         human: "lordzurp",
         start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
         step_dispatch?: true,
         forge_client: StepStubForge,
         forge_opts: [
@@ -672,6 +679,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -711,6 +719,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -748,6 +757,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -776,6 +786,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, []}, _test_pid: self()],
@@ -814,6 +825,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -851,6 +863,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -887,6 +900,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -937,6 +951,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pulls: {:ok, pulls}, _test_pid: self()],
@@ -987,6 +1002,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           # NO _test_pulls → no PR: the publication was lost BEFORE open_pr.
@@ -1033,6 +1049,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -1072,6 +1089,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
@@ -1124,6 +1142,7 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_discover: {:error, {:http, 503, "down"}}],
@@ -1153,6 +1172,7 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [
@@ -1190,6 +1210,7 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [
@@ -1233,6 +1254,7 @@ defmodule Fleet.Pilot.PollerTest do
         repo: "lordzurp/lcars-test",
         human: "lordzurp",
         start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
         step_dispatch?: true,
         forge_client: StepStubForge,
         forge_opts: [_test_issues: issues_response, _test_routes: routes],
@@ -1613,6 +1635,7 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: MultiRepoForge,
           forge_opts: [
