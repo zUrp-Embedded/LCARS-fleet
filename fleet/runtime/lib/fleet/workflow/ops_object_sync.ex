@@ -22,9 +22,13 @@ defmodule Fleet.Workflow.OpsObjectSync do
   per project), but the serializer is ONE node-global process — `work_dir` travels as payload, never as
   a routing key. So a commit for project B queues behind project A's even though they share no lock. It
   is a chosen simplicity (no Registry, no per-project process lifecycle); its price is cross-project
-  head-of-line blocking, bounded by `@call_timeout` and widened by the push below staying inside the
-  transaction. Sharding per `work_dir` (`:via` a Registry) is the exit if it ever bites — and note that
-  NO test pins the node-wide scope, so a green suite would not by itself prove such a change safe.
+  head-of-line blocking, bounded by the caller's call budget and widened by the push staying inside
+  the transaction. A queue whose composed budget exceeds that call timeout no longer loses its
+  result: on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`,
+  no lock) and returns the sha if the transaction landed — a false-negative timeout can no longer make
+  a landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
+  head-of-line blocking ever bites; NO test pins the node-wide scope, so a green suite would not by
+  itself prove such a change safe.
 
   ## SYNCHRONOUS (unlike WorktreeSync)
 
@@ -60,7 +64,13 @@ defmodule Fleet.Workflow.OpsObjectSync do
 
   # Generous: a single transaction is write + local commit + a best-effort push (network to the forge);
   # under a burst, callers queue behind it. Mirrors WorktreeSync's 60s call budget.
-  @call_timeout 60_000
+  @default_call_timeout 60_000
+
+  # Configurable for tests (a tiny value + a non-responding server exercises the timeout readback);
+  # prod keeps the 60s budget. A LONGER budget would only defer, not remove, the composed-budget
+  # overrun the readback now handles safely.
+  defp call_timeout,
+    do: Application.get_env(:fleet_workflow, :ops_sync_call_timeout, @default_call_timeout)
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -102,7 +112,30 @@ defmodule Fleet.Workflow.OpsObjectSync do
         OpsObject.commit_object(work_dir, ref, content, opts)
 
       pid ->
-        GenServer.call(pid, {:commit, work_dir, ref, content, opts}, @call_timeout)
+        try do
+          GenServer.call(pid, {:commit, work_dir, ref, content, opts}, call_timeout())
+        catch
+          # A caller TIMEOUT does not undo the server's work: our transaction may be mid-flight (or
+          # queued behind others whose composed budget exceeds @call_timeout), and the server keeps
+          # going after our exit. A blind retry would either duplicate or — worse — race the live
+          # server on the same work_dir (the very `.git/index.lock` collision this serializer
+          # prevents). So we do a READ-ONLY readback (`committed_sha`, no lock): if our exact content
+          # is already committed at `ref`, the transaction LANDED — return its sha (idempotent, no
+          # duplicate). Otherwise the timeout is real (still queued, or genuinely stuck) → surface it.
+          :exit, {:timeout, _} = reason ->
+            case OpsObject.committed_sha(work_dir, ref, content) do
+              {:ok, sha} ->
+                Logger.warning(
+                  "OpsObjectSync: call timed out but #{ref} is already committed (#{String.slice(sha, 0, 12)}) " <>
+                    "— transaction LANDED, confirmed by read-only readback (no retry, no race)"
+                )
+
+                {:ok, sha}
+
+              :not_committed ->
+                {:error, {:ops_sync_timeout, reason}}
+            end
+        end
     end
   end
 

@@ -16,7 +16,7 @@ defmodule Fleet.Workflow.OpsObject do
   a push failure logs LOUD and keeps the local success — the branch catches up whole at the
   next successful push. Local commit failure remains a real failure.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -58,6 +58,27 @@ defmodule Fleet.Workflow.OpsObject do
 
       true ->
         materialize(work_dir, abs, ref, content, opts)
+    end
+  end
+
+  @doc """
+  READ-ONLY probe: is `content` already committed at `ref` with a real sha? `{:ok, sha}` if yes,
+  `:not_committed` otherwise. Takes NO index.lock (only `File.read` + `git log`, both read-only), so a
+  caller that TIMED OUT waiting on the serializer can confirm whether its transaction landed WITHOUT
+  reintroducing the concurrent-git race the serializer exists to prevent. Never materializes.
+  """
+  @spec committed_sha(Path.t(), String.t(), String.t()) :: {:ok, String.t()} | :not_committed
+  def committed_sha(work_dir, ref, content)
+      when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
+    abs = Path.join(work_dir, ref)
+
+    with true <- File.dir?(work_dir),
+         true <- File.exists?(abs),
+         {:ok, ^content} <- File.read(abs),
+         {:ok, sha} when sha != "" <- Git.last_commit_sha(work_dir, ref) do
+      {:ok, sha}
+    else
+      _ -> :not_committed
     end
   end
 

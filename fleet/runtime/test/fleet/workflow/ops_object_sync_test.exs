@@ -47,6 +47,51 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     assert sha == String.trim(head)
   end
 
+  describe "call timeout — read-only readback confirms a landed transaction (no retry, no race)" do
+    setup do
+      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_call_timeout, 30)
+      :ok
+    end
+
+    # A process that receives the $gen_call but NEVER replies → the caller's GenServer.call times out,
+    # exactly like a server still grinding through a composed-budget queue.
+    defp dead_air_server do
+      spawn(fn -> Process.sleep(:infinity) end)
+    end
+
+    test "timeout but the object IS already committed → {:ok, sha} via readback", %{tmp_dir: tmp} do
+      git_init(tmp)
+
+      # Pre-commit directly (as if the server had landed our transaction just before we timed out).
+      {:ok, sha} =
+        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "landed\n", label: "t")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, ^sha} =
+                   OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/x.md", "landed\n",
+                     label: "t"
+                   )
+        end)
+
+      assert log =~ "confirmed by read-only readback"
+      assert commit_count(tmp) == "1"
+    end
+
+    test "timeout and the object is NOT committed → {:error, {:ops_sync_timeout, _}}", %{
+      tmp_dir: tmp
+    } do
+      git_init(tmp)
+
+      assert {:error, {:ops_sync_timeout, _}} =
+               OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/y.md", "never\n",
+                 label: "t"
+               )
+
+      refute File.exists?(Path.join(tmp, "briefs/y.md"))
+    end
+  end
+
   test "idempotent through the gate: same path + same content → same identity, no new commit",
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
