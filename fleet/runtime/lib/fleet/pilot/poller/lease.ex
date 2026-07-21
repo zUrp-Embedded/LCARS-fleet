@@ -22,8 +22,9 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   The canonical order of the spawn is lock → pod → enqueue → WAKE (the wake LAST):
   `{:error, {:wake_unreached, …}}` means the workflow_run IS started (lease TAKEN)
-  but the anomaly is still counted in `errors` (partial backoff + telemetry — an unreachable
-  kick is never swallowed as a silent success). Hence the internal return
+  but the anomaly is still counted in `errors` (surfaced via `last_tally_errors`/telemetry — an
+  unreachable kick is never swallowed as a silent success; per-item errors do NOT feed the poller's
+  `err_streak` backoff, which counts whole-tick failures only). Hence the internal return
   `{tally, started?}`: `started?` drives the lease INDEPENDENTLY of the error.
 
   ## Hardened boundary
@@ -35,7 +36,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   This module also owns the **tally** vocabulary (`zero_tally/0`, `merge_tally/2`)
   — the observability currency of the tick, produced here and aggregated by the poller.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -160,8 +161,9 @@ defmodule Fleet.Pilot.Poller.Lease do
   #     `{:error, {:wake_unreached, …}}` means: the workflow_run IS started (lock + pod + brief in place),
   #     ONLY the tmux wake failed. The workflow_run therefore holds the repo-serialized lease — otherwise a 2nd issue of the same
   #     repo in the same tick would start a 2nd workflow_run (two concurrent feature-branches → merge conflict).
-  #   * TALLY/backoff — is there an anomaly to SURFACE? The missed wake is still counted in `errors` (it feeds
-  #     `err_streak`/telemetry → partial backoff): an unreachable kick must NOT be swallowed as a silent
+  #   * TALLY/telemetry — is there an anomaly to SURFACE? The missed wake is still counted in `errors` (it
+  #     surfaces via `last_tally_errors`/telemetry, NOT the `err_streak` backoff — per-item dispatch errors
+  #     do not feed it, only whole-tick failures do): an unreachable kick must NOT be swallowed as a silent
   #     success (the pod does not run until it is woken).
   #
   # Hence the 3rd case `wake_unreached` = (started for the LEASE, anomaly for the TALLY). We return
@@ -173,7 +175,8 @@ defmodule Fleet.Pilot.Poller.Lease do
         {%{acc | dispatched: acc.dispatched + 1}, true}
 
       # workflow_run STARTED (lock + pod + brief placed) but wake unreachable. The lease is TAKEN (started?
-      # = true); the anomaly is still counted in `errors` (honest backoff + telemetry, never swallowed).
+      # = true); the anomaly is still counted in `errors` (surfaced via `last_tally_errors`/telemetry,
+      # never swallowed — it does NOT feed the `err_streak` backoff).
       {:error, {:wake_unreached, _pod_id, _role, _reason}} ->
         {%{acc | errors: acc.errors + 1}, true}
 
