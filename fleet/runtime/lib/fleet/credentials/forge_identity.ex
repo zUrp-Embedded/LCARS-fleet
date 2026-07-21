@@ -62,9 +62,10 @@ defmodule Fleet.Credentials.ForgeIdentity do
   ## Identity destination
 
   These identities are those of the LOCAL FORGE (real role accounts, emails mapped → avatars/traceability).
-  The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (which sets
-  GIT_AUTHOR/COMMITTER `<role>@lcars.local` in env at launch) — a divergence is caught
-  STRUCTURALLY by the commit-identity gate (push rejected fail-closed).
+  The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (which sets GIT_AUTHOR/COMMITTER to the
+  HUMAN of the brief in env at launch — cf. its Z4 identity block; the role rides the `Co-authored-by:
+  <role>@lcars.local` TRAILER, never the author) — a divergence is caught STRUCTURALLY by the
+  commit-identity gate (push rejected fail-closed).
 
   GitHub PUBLISH: the LCARS role steps aside at publish, the CO-AUTHOR becomes THE
   VENDOR (not a role, never hardcoded — Claude today, another vendor tomorrow), derived from the
@@ -74,7 +75,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   rewrite itself lives outside Elixir (`etc/publish-to-github.sh`, `git filter-repo`): this module
   stays the authority for the LOCAL forge identities, not the executor of the publish transformation.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @role_email_domain "lcars.local"
