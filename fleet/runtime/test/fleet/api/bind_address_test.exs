@@ -3,8 +3,9 @@ defmodule Fleet.API.BindAddressTest do
   Bind contract of the REST/WS listener `:8080`.
 
   The Cowboy child-spec MUST carry `ip: {127,0,0,1}` by default: the surface is
-  no-auth (boundary = network isolation, cf. Rest § Auth) and its only remaining
-  write, `/api/admin/spawn`, is guarded but unauthenticated — exposing it on 0.0.0.0
+  no-auth (boundary = network isolation, cf. Rest § Auth). The admin write
+  (`/api/admin/spawn`) has MOVED off this TCP surface to the AF_UNIX socket (ControlRouter — 404 on
+  TCP now), but the no-auth read/WS surface remains — exposing it on 0.0.0.0
   by default would be a hole. Public exposure is a named opt-in (`LCARS_BIND_HOST`),
   never the default. This test catches any future regression that would forget to thread the ip.
   """

@@ -71,7 +71,7 @@ defmodule Fleet.API.RestTest do
 
 
   describe "POST /api/admin/spawn — REMOVED from TCP (moved to the AF_UNIX socket)" do
-    test "POST /api/admin/spawn on TCP → 404 (the write is no longer on this surface, A-21)" do
+    test "POST /api/admin/spawn on TCP → 404 (the write is no longer on this surface)" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "engineer"}))
         |> put_req_header("content-type", "application/json")
