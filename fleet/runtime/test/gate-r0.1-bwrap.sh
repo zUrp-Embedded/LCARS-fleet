@@ -2,55 +2,71 @@
 # SOURCE: test/gate-r0.1-bwrap.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: RÉÉCRIT (audit transverse lot 6, 2026-07-12) — sonde d'isolation e2e RÉELLE, modèle détaché ADR-G
+# STATUS: REAL e2e isolation probe, ADR-G detached model
 #
-# gate-r0.1-bwrap.sh — R0.1 (kernel mechanic: bwrap primitive). exit 0 ssi le VRAI bin/bwrap_launch.sh,
-# invoqué au CONTRAT COURANT (env spawner complet), projette un sandbox où — vu DE L'INTÉRIEUR :
-#   env_home        HOME intra-pod = le pod home (--setenv HOME, side-channel indépendant de HOME)
-#   iso_home        le home host est MASQUÉ (--tmpfs /home : sentinelle posée dans ~ INVISIBLE)
-#   iso_tmp         /tmp host est MASQUÉ (--tmpfs /tmp : canari host INVISIBLE)
-#   iso_env         l'env est CLOS (--clearenv : var ambiante exportée au launch INVISIBLE)
-#   env_forward     l'env CONTRACTUEL passe (--setenv : GIT_AUTHOR_NAME == valeur posée)
-#   env_git_global  GIT_CONFIG_GLOBAL=/dev/null (identité git = env forwardé, jamais le global)
-#   env_pod_id      LCARS_POD_ID câblé (--setenv = le pod_id passé au launcher)
-#   creds_bind      les creds bindés sont LES BONS octets (nonce round-trip — creds FACTICES,
-#                   jamais les vrais : le gate ne touche PAS ~/.claude)
-#   creds_rw_pod    append EN PLACE sur les creds accepté in-pod (bind single-file RW)…
-#   vendor_native   le vendor est provisionné à son emplacement natif ($HOME/.local/bin/<vendor>)
-#   vendor_exec     ... et s'EXÉCUTE dans le pod (--version, zéro réseau/token)
-#   ro_vendor_bind  le bind vendor est RO (touch refusé)
-#   ro_usr          /usr est RO (écriture refusée — les roots système ne sont pas RW)
-#   etc_shadow      /etc SÉLECTIF : /etc/shadow ABSENT du monde projeté (pas de bind /etc en bloc)
-#   etc_dns         ... mais resolv.conf PRÉSENT (DNS projeté, sinon claude hang sur l'API)
-#   pid_ns          le PID host du gate est INVISIBLE dans /proc (--unshare-all → PID namespace)
-#   rw_home         le $HOME pod est RW
-# + HOLDER : le launcher (bwrap-PID1) est encore VIVANT après la sonde (modèle détaché tient).
-# + creds_rw_host (jugé HOST-SIDE, hors compte sonde) : …et l'append in-pod est PROPAGÉ au fichier
-#   host — c'est LE chemin du refresh OAuth ADR-F (écriture en place qui survit au bind).
+# gate-r0.1-bwrap.sh — R0.1 (kernel mechanic: the bwrap primitive). exit 0 iff the REAL
+# bin/bwrap_launch.sh projects a sandbox where, seen FROM THE INSIDE:
+#   env_home        the intra-pod HOME is the pod home (--setenv HOME, a side channel independent of HOME)
+#   iso_home        the host home is MASKED (--tmpfs /home: a sentinel dropped in ~ is INVISIBLE)
+#   iso_tmp         the host /tmp is MASKED (--tmpfs /tmp: a host canary is INVISIBLE)
+#   iso_env         the env is CLOSED (--clearenv: a var exported at launch is INVISIBLE)
+#   env_forward     the CONTRACTUAL env crosses (--setenv: GIT_AUTHOR_NAME == the value set)
+#   env_git_global  GIT_CONFIG_GLOBAL=/dev/null (git identity = the forwarded env, never the global)
+#   env_pod_id      LCARS_POD_ID is wired (--setenv = the pod_id passed to the launcher)
+#   creds_bind      the bound creds are THE RIGHT BYTES (nonce round-trip — FAKE creds, never the real
+#                   ones: this gate does NOT touch ~/.claude)
+#   creds_rw_pod    an IN-PLACE append on the creds is accepted in-pod (RW single-file bind)…
+#   vendor_native   the vendor is provisioned at its native location ($HOME/.local/bin/<vendor>)
+#   vendor_exec     ... and EXECUTES in the pod (--version, zero network, zero token)
+#   ro_vendor_bind  the vendor bind is RO (touch refused) — see the note on discriminating power below
+#   ro_usr          /usr is not writable from inside — see the note below, this one is WEAK
+#   etc_shadow      SELECTIVE /etc: /etc/shadow is ABSENT from the projected world (no wholesale bind)
+#   etc_dns         ... but resolv.conf IS present (DNS projected, or claude hangs on the API)
+#   pid_ns          the gate's host PID is INVISIBLE in /proc (--unshare-all → PID namespace)
+#   rw_home         the pod $HOME is RW
+# + HOLDER: the launcher (bwrap-PID1) is still ALIVE after the probe (the detached model holds).
+# + creds_rw_host (judged HOST-SIDE, outside the probe count): …and the in-pod append PROPAGATES to
+#   the host file — that IS the ADR-F OAuth refresh path (an in-place write that survives the bind).
 #
-# POURQUOI une sonde INTÉRIEURE (side-channel) et pas l'exit code : le launcher fait
-# `exec bwrap … tmux new-session -d … exec sleep infinity` et NE REND JAMAIS la main (holder
-# ADR-G) — le stdout de la COMMAND va dans le pane tmux, son exit n'est jamais propagé. L'ancien
-# gate (pré-ADR-G) jugeait sur l'exit du launcher : il prenait « launcher mort en setup » pour
-# « sentinelle masquée » → PASS ISO mensonger (famille faux-vert F-C166/167, audit transverse #24).
-# Ici la COMMAND lancée DANS le pod EST la sonde : elle inspecte le monde de l'intérieur et écrit
-# son verdict dans $POD_DIR (bindé RW) → lisible host-side. Le gate juge sur ce rapport, avec un
-# COMPTE DE CHECKS EXIGÉ (jamais vert sur rapport vide/partiel), puis kill le launcher.
+# HOW MUCH EACH CHECK DISCRIMINATES — two of them look alike and are not:
+#   ro_vendor_bind is STRONG. The host vendor file is owned by the invoking user and writable on the
+#     host, so a refusal inside can only come from --ro-bind. Flip that bind to --bind and it goes red.
+#   ro_usr is WEAK, and is kept as a floor rather than as a bind-mode test. bwrap_launch.sh passes no
+#     --uid/--gid, so the probe runs as the same unprivileged user as the gate, for whom /usr is
+#     unwritable anyway. Measured: with `--bind /usr /usr` (READ-WRITE) the write is STILL refused.
+#     So this check establishes "the agent cannot scribble on /usr", NOT "the bind is read-only" —
+#     ro_vendor_bind is the one that establishes that.
 #
-# Les bats (test/bwrap_launch/bwrap_launch.bats) stubent bwrap et ne testent QUE l'assemblage des
-# flags : CE gate est la preuve e2e de l'isolation réelle (bwrap + tmux + namespace vrais).
-# Prérequis : bwrap + tmux UTILISABLES (syscalls unshare/mount — préflight ci-dessous) ; vendor
-# résolvable (claude sur PATH, ou LCARS_VENDOR_BIN/_SHARE), à défaut un STUB --version est
-# substitué (la sonde prouve le SANDBOX, pas le vendor).
-# Debug : KEEP=1 conserve le workdir. Manuel/opt-in (hors mix gate : exige les syscalls bwrap).
+# SCOPE OF THE ENV CONTRACT: the mandatory inputs are served in full, but the OPTIONAL spawner inputs
+# are deliberately neutralised below (LCARS_POD_MOUNTS, LCARS_SKILLS_PLUGINS, LCARS_POD_HOME,
+# LCARS_POD_CWD…). They are part of the real contract, and each of them legitimately re-shapes the
+# projected world — catalogue mounts restore masked paths, LCARS_POD_HOME moves SANDBOX_HOME and would
+# hide the side-channel report. So what is proven here is the isolation of the BASE world. Catalogue
+# binds, plugin binds and the relocated SANDBOX_HOME are NOT covered by this gate.
 #
-# 3 ÉTATS — un environnement incapable ne fabrique JAMAIS un vert :
-#   exit 0  PASS — sonde exécutée DANS bwrap, rapport COMPLET, tous checks verts (+ holder + rw host)
-#   exit 1  FAIL — isolation KO : un check rouge (même sur rapport partiel), compte incomplet,
-#           holder cassé, ou propagation creds host absente — le vrai signal d'alerte
-#   exit 3  SKIP — bwrap/tmux/syscalls indisponibles (WSL/container sans cap-add), launcher mort en
-#           setup, ou sonde sans verdict ni constat : isolation NON VÉRIFIÉE — état EXPLICITE,
-#           jamais un PASS déguisé (l'ancien gate prenait exactement ce chemin pour du vert)
+# WHY AN INSIDE PROBE (side channel) rather than the exit code: the launcher does
+# `exec bwrap … tmux new-session -d … exec sleep infinity` and NEVER returns (the ADR-G holder) — the
+# COMMAND's stdout goes to the tmux pane and its exit is never propagated. The old gate judged on the
+# launcher's exit: it took "launcher died during setup" for "sentinel masked" → a lying ISO PASS (the
+# false-green family, F-C166). Here the COMMAND launched INSIDE the pod IS the probe: it inspects the
+# world from within and writes its verdict into $POD_DIR (bound RW) → readable host-side. The gate
+# judges on that report, with a REQUIRED CHECK COUNT (never green on an empty or partial report), then
+# kills the launcher.
+#
+# The bats (test/bwrap_launch/bwrap_launch.bats) stub bwrap and test ONLY the flag assembly: THIS gate
+# is the e2e proof of real isolation (real bwrap + tmux + namespaces).
+# Requirements: bwrap + tmux USABLE (unshare/mount syscalls — preflight below); a resolvable vendor
+# (claude on PATH, or LCARS_VENDOR_BIN/_SHARE), otherwise a --version STUB is substituted (the probe
+# proves the SANDBOX, not the vendor).
+# Debug: KEEP=1 keeps the workdir. Manual/opt-in (outside mix gate: it needs the bwrap syscalls).
+#
+# 3 STATES — an incapable environment NEVER manufactures a green:
+#   exit 0  PASS — probe ran INSIDE bwrap, report COMPLETE, every check green (+ holder + host rw)
+#   exit 1  FAIL — isolation broken: a red check (even on a partial report), an incomplete count, a
+#           broken holder, or no host creds propagation — the real alarm
+#   exit 3  SKIP — bwrap/tmux/syscalls unavailable (WSL or a container without cap-add), launcher died
+#           during setup, or a probe with neither verdict nor finding: isolation NOT VERIFIED — an
+#           EXPLICIT state, never a disguised PASS (the old gate took exactly this path for green)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BWRAP_LAUNCH="$HERE/../bin/bwrap_launch.sh"
@@ -58,27 +74,27 @@ BWRAP_BIN="${LCARS_BWRAP_BIN:-/usr/bin/bwrap}"
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
 
 skip3() {
-  echo "GATE R0.1 : SKIP — $*"
-  echo "GATE R0.1 : exit 3 — isolation NON VÉRIFIÉE (SKIP explicite, jamais un PASS)"
+  echo "GATE R0.1: SKIP — $*"
+  echo "GATE R0.1: exit 3 — isolation NOT VERIFIED (explicit SKIP, never a PASS)"
   exit 3
 }
 
-echo "== Gate R0.1 — bwrap primitive (vrai bwrap_launch.sh, sonde d'isolation intérieure) =="
+echo "== Gate R0.1 — bwrap primitive (real bwrap_launch.sh, inside isolation probe) =="
 echo "   launcher: $BWRAP_LAUNCH"
 
 # ---------------------------------------------------------------------------
-# Préflight matériel : bwrap PRÉSENT ne suffit pas — il lui faut les syscalls (unshare/mount/
-# pivot_root), que WSL/un container sans cap-add refusent. Sonde impossible = SKIP explicite,
-# jamais un verdict d'isolation dans un sens ou dans l'autre.
+# Hardware preflight: bwrap being PRESENT is not enough — it needs the syscalls (unshare/mount/
+# pivot_root), which WSL or a container without cap-add refuse. An impossible probe is an explicit
+# SKIP, never an isolation verdict in either direction.
 # ---------------------------------------------------------------------------
-[[ -x "$BWRAP_LAUNCH" ]] || skip3 "launcher introuvable/non-x: $BWRAP_LAUNCH"
-[[ -x "$BWRAP_BIN" ]] || skip3 "bwrap indisponible ($BWRAP_BIN) — installer bubblewrap"
-[[ -x "$TMUX_BIN" ]] || skip3 "tmux indisponible ($TMUX_BIN) — PTY N0 requis dans le sandbox"
+[[ -x "$BWRAP_LAUNCH" ]] || skip3 "launcher missing/not-x: $BWRAP_LAUNCH"
+[[ -x "$BWRAP_BIN" ]] || skip3 "bwrap unavailable ($BWRAP_BIN) — install bubblewrap"
+[[ -x "$TMUX_BIN" ]] || skip3 "tmux unavailable ($TMUX_BIN) — the N0 PTY is required in the sandbox"
 "$BWRAP_BIN" --ro-bind / / true >/dev/null 2>&1 \
-  || skip3 "bwrap présent mais syscalls sandbox refusés (unshare/mount — container sans cap-add/seccomp ?)"
+  || skip3 "bwrap present but the sandbox syscalls are refused (unshare/mount — container without cap-add/seccomp?)"
 "$BWRAP_BIN" --unshare-all --share-net --die-with-parent --ro-bind / / --tmpfs /home --tmpfs /tmp \
   --dev /dev --proc /proc true >/dev/null 2>&1 \
-  || skip3 "bwrap sans namespaces complets (--unshare-all/--proc) — sandboxing réel impossible ici"
+  || skip3 "bwrap without full namespaces (--unshare-all/--proc) — real sandboxing is impossible here"
 
 WORK="$(mktemp -d)"
 POD_ID="gate-r01-$$"
@@ -96,18 +112,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# iso_home s'appuie sur `--tmpfs /home` : un $HOME hors /home rendrait le check vide de sens.
-# Environnement non probant ≠ isolation cassée → SKIP explicite (3-états), pas un FAIL.
-[[ "$HOME" == /home/* ]] || skip3 "\$HOME=$HOME hors /home — iso_home (tmpfs /home) ne prouverait rien ici"
+# iso_home rests on `--tmpfs /home`: a $HOME outside /home would make the check meaningless.
+# An inconclusive environment is not broken isolation → explicit SKIP (3 states), not a FAIL.
+[[ "$HOME" == /home/* ]] || skip3 "\$HOME=$HOME is outside /home — iso_home (tmpfs /home) would prove nothing here"
 
 # ---------------------------------------------------------------------------
-# Monde host minimal au CONTRAT du launcher (chaque :?/guard de bwrap_launch.sh servi,
-# TOUT sous $WORK — rien du vrai ~/.lcars ni ~/.claude n'est utilisé).
+# Minimal host world matching the launcher's CONTRACT (every :?/guard of bwrap_launch.sh served,
+# EVERYTHING under $WORK — nothing from the real ~/.lcars or ~/.claude is used).
 # ---------------------------------------------------------------------------
 mkdir -p "$POD_DIR" "$WORK/claude-dir" "$WORK/mirror" "$WORK/sock" "$WORK/mcp/$POD_ID"
 CREDS_NONCE="creds-nonce-$$-$RANDOM"
-CREDS_RW_NONCE="creds-rw-$$-$RANDOM"     # appendé in-pod, cherché HOST-side (propagation ADR-F)
-printf '%s' "$CREDS_NONCE" > "$WORK/claude-dir/.credentials.json"   # FACTICE — jamais les vrais creds
+CREDS_RW_NONCE="creds-rw-$$-$RANDOM"     # appended in-pod, looked for HOST-side (ADR-F propagation)
+printf '%s' "$CREDS_NONCE" > "$WORK/claude-dir/.credentials.json"   # FAKE — never the real creds
 echo "gate-r01-secret" > "$SENTINEL"
 
 export CLAUDE_DIR="$WORK/claude-dir"
@@ -118,31 +134,32 @@ export LCARS_POD_SESSION_ID="gate-r01-session-$$"
 export LCARS_POD_SESSION_NAME_PREFIX="gate_r01"
 export GIT_AUTHOR_NAME="gate-r01" GIT_AUTHOR_EMAIL="gate-r01@lcars.local"
 export GIT_COMMITTER_NAME="gate-r01" GIT_COMMITTER_EMAIL="gate-r01@lcars.local"
-export LCARS_BWRAP_NO_CLEANUP=1          # échec setup → diagnostics conservés (cleanup = notre trap)
-export LCARS_ISO_ENV_CANARY="leak-$$"    # DOIT être invisible dans le pod (--clearenv)
+export LCARS_BWRAP_NO_CLEANUP=1          # setup failure → diagnostics kept (cleanup is OUR trap)
+export LCARS_ISO_ENV_CANARY="leak-$$"    # MUST be invisible in the pod (--clearenv)
 
-# Ambient hostile neutralisé : ces vars re-shaperaient le monde projeté sous la sonde — et
-# LCARS_POD_HOME déplacerait SANDBOX_HOME, rendant le side-channel $POD_DIR/iso-report invisible.
+# Optional spawner inputs, neutralised: each would legitimately re-shape the projected world under the
+# probe — and LCARS_POD_HOME would move SANDBOX_HOME, hiding the $POD_DIR/iso-report side channel.
+# This is what scopes the gate to the BASE world (cf. the header).
 unset LCARS_POD_MOUNTS LCARS_SKILLS_PLUGINS LCARS_POD_HOME LCARS_POD_CWD LCARS_POD_CWD_SRC \
       LCARS_POD_RESUME LCARS_AUTH_MODE LCARS_POD_DISABLE_TELEMETRY
 
-# Vendor : le vrai claude si résolvable (probe la vraie relocation native-install) ; sinon STUB
-# répondant à --version — machine sans claude ≠ SKIP, la sonde teste le sandbox, pas le vendor.
+# Vendor: the real claude if resolvable (this probes the actual native-install relocation); otherwise a
+# STUB answering --version — a machine without claude is not a SKIP, the probe tests the sandbox.
 VENDOR_NAME="${LCARS_VENDOR_NAME:-claude}"
 if [[ -z "${LCARS_VENDOR_BIN:-}" ]] && ! command -v "$VENDOR_NAME" >/dev/null 2>&1; then
   export LCARS_VENDOR_BIN="$WORK/vendor/bin/$VENDOR_NAME" LCARS_VENDOR_SHARE="$WORK/vendor/share"
   mkdir -p "$WORK/vendor/bin" "$WORK/vendor/share"
   printf '#!/bin/sh\necho "gate-r01 vendor-stub 0.0.0"\n' > "$LCARS_VENDOR_BIN"
   chmod +x "$LCARS_VENDOR_BIN"
-  echo "   vendor '$VENDOR_NAME' non résolvable → stub --version substitué"
+  echo "   vendor '$VENDOR_NAME' not resolvable → --version stub substituted"
 fi
 
 # ---------------------------------------------------------------------------
-# La sonde intérieure (POSIX sh — c'est la COMMAND du pod). Heredoc NON quoté : les chemins/nonces
-# host ($SENTINEL, $TMP_CANARY, $CREDS_NONCE, $POD_ID, PID du gate, vendor) sont FIGÉS dans le
-# script au moment du write ; les \$ échappés sont évalués DANS le sandbox. Rapport ANCRÉ sur le
-# chemin $POD_DIR EMBARQUÉ (= même chemin in-sandbox, bind identité) et PAS sur \$HOME : un HOME
-# cassé doit devenir un FAIL enregistré (env_home), jamais un rapport perdu dégradé en SKIP.
+# The inside probe (POSIX sh — it IS the pod's COMMAND). UNQUOTED heredoc: the host paths and nonces
+# ($SENTINEL, $TMP_CANARY, $CREDS_NONCE, $POD_ID, the gate's PID, the vendor) are FROZEN into the script
+# at write time; the escaped \$ are evaluated INSIDE the sandbox. The report is ANCHORED on the EMBEDDED
+# $POD_DIR path (= the same path in-sandbox, identity bind) and NOT on \$HOME: a broken HOME must become
+# a RECORDED FAIL (env_home), never a lost report degraded into a SKIP.
 # ---------------------------------------------------------------------------
 EXPECTED_CHECKS=17
 cat > "$POD_DIR/.iso-probe.sh" <<PROBE
@@ -152,36 +169,41 @@ R="$POD_DIR/iso-report"
 ck() { s=\$1; shift; if [ "\$s" = 0 ]; then echo "PASS \$1" >> "\$R"; else shift; echo "FAIL \$*" >> "\$R"; fi; }
 
 [ "\${HOME:-}" = "$POD_DIR" ];            ck \$? env_home env_home "HOME='\${HOME:-}' != pod home $POD_DIR"
-[ ! -e "$SENTINEL" ];                     ck \$? iso_home iso_home "sentinelle host LISIBLE: $SENTINEL"
-[ ! -e "$TMP_CANARY" ];                   ck \$? iso_tmp iso_tmp "canari /tmp host LISIBLE: $TMP_CANARY"
-[ -z "\${LCARS_ISO_ENV_CANARY:-}" ];      ck \$? iso_env iso_env "env ambiant FUITÉ malgré --clearenv"
+[ ! -e "$SENTINEL" ];                     ck \$? iso_home iso_home "host sentinel READABLE: $SENTINEL"
+[ ! -e "$TMP_CANARY" ];                   ck \$? iso_tmp iso_tmp "host /tmp canary READABLE: $TMP_CANARY"
+[ -z "\${LCARS_ISO_ENV_CANARY:-}" ];      ck \$? iso_env iso_env "ambient env LEAKED despite --clearenv"
 [ "\${GIT_AUTHOR_NAME:-}" = "gate-r01" ]; ck \$? env_forward env_forward "GIT_AUTHOR_NAME='\${GIT_AUTHOR_NAME:-}'"
 [ "\$(cat "\$HOME/.claude/.credentials.json" 2>/dev/null)" = "$CREDS_NONCE" ]; \
-                                          ck \$? creds_bind creds_bind "contenu creds != nonce attendu"
+                                          ck \$? creds_bind creds_bind "creds content != expected nonce"
 printf 'rw:%s' "$CREDS_RW_NONCE" >> "\$HOME/.claude/.credentials.json" 2>/dev/null; \
-                                          ck \$? creds_rw_pod creds_rw_pod "append creds refusé in-pod (bind pas RW)"
-[ -x "\$HOME/.local/bin/$VENDOR_NAME" ];  ck \$? vendor_native vendor_native "\$HOME/.local/bin/$VENDOR_NAME absent/non-x"
+                                          ck \$? creds_rw_pod creds_rw_pod "creds append refused in-pod (bind not RW)"
+[ -x "\$HOME/.local/bin/$VENDOR_NAME" ];  ck \$? vendor_native vendor_native "\$HOME/.local/bin/$VENDOR_NAME missing/not-x"
 V="\$(timeout 20 "\$HOME/.local/bin/$VENDOR_NAME" --version 2>&1)"; \
                                           ck \$? vendor_exec vendor_exec "--version KO: \$V"
 echo "INFO vendor_version: \$V" >> "\$R"
 ! touch "\$HOME/.local/bin/$VENDOR_NAME" 2>/dev/null; \
-                                          ck \$? ro_vendor_bind ro_vendor_bind "bind vendor ÉCRIVABLE (RO cassé)"
+                                          ck \$? ro_vendor_bind ro_vendor_bind "vendor bind WRITABLE (RO broken)"
+# WEAK check, deliberately kept as a floor: the probe runs unprivileged (bwrap_launch passes no --uid),
+# so /usr is unwritable regardless of the bind mode — measured, a read-write bind of /usr is refused
+# too. This says "the agent cannot scribble on /usr". ro_vendor_bind above tests the bind MODE.
+# (No backticks in this heredoc: it is UNQUOTED, so a backtick would be command substitution at write
+# time — shellcheck caught exactly that when this comment was first written.)
 if ( : > /usr/.gate-r01-ro ) 2>/dev/null; then rm -f /usr/.gate-r01-ro; false; else true; fi; \
-                                          ck \$? ro_usr ro_usr "/usr ÉCRIVABLE dans le pod (roots système pas RO)"
-[ ! -e /etc/shadow ];                     ck \$? etc_shadow etc_shadow "/etc/shadow VISIBLE (bind /etc trop large)"
-[ -e /etc/resolv.conf ];                  ck \$? etc_dns etc_dns "resolv.conf ABSENT (DNS du pod mort)"
+                                          ck \$? ro_usr ro_usr "/usr WRITABLE from inside the pod"
+[ ! -e /etc/shadow ];                     ck \$? etc_shadow etc_shadow "/etc/shadow VISIBLE (/etc bind too wide)"
+[ -e /etc/resolv.conf ];                  ck \$? etc_dns etc_dns "resolv.conf ABSENT (the pod's DNS is dead)"
 [ "\${GIT_CONFIG_GLOBAL:-}" = "/dev/null" ]; \
                                           ck \$? env_git_global env_git_global "GIT_CONFIG_GLOBAL='\${GIT_CONFIG_GLOBAL:-}'"
 [ "\${LCARS_POD_ID:-}" = "$POD_ID" ];     ck \$? env_pod_id env_pod_id "LCARS_POD_ID='\${LCARS_POD_ID:-}'"
-[ ! -d /proc/$$ ];                        ck \$? pid_ns pid_ns "PID host $$ VISIBLE dans /proc (unshare-pid KO)"
-touch "\$HOME/.rw-check" 2>/dev/null;     ck \$? rw_home rw_home "write \$HOME refusé (bind pod pas RW)"
+[ ! -d /proc/$$ ];                        ck \$? pid_ns pid_ns "host PID $$ VISIBLE in /proc (unshare-pid KO)"
+touch "\$HOME/.rw-check" 2>/dev/null;     ck \$? rw_home rw_home "write to \$HOME refused (pod bind not RW)"
 
 echo "END $EXPECTED_CHECKS" >> "\$R"
 PROBE
 chmod +x "$POD_DIR/.iso-probe.sh"
 
 # ---------------------------------------------------------------------------
-# Launch détaché : bwrap_launch ne rend PAS la main (holder) → background + poll du rapport.
+# Detached launch: bwrap_launch does NOT return (holder) → background + poll the report.
 # ---------------------------------------------------------------------------
 "$BWRAP_LAUNCH" gate-r01-role "$POD_ID" "$POD_DIR" /bin/sh "$POD_DIR/.iso-probe.sh" \
   > "$WORK/launch.log" 2>&1 &
@@ -200,58 +222,58 @@ for _ in $(seq 1 60); do
 done
 
 # ---------------------------------------------------------------------------
-# Verdict 3-états sur RAPPORT — compte exigé, jamais vert sur rapport vide/partiel (F-C166/167).
+# 3-state verdict on the REPORT — the count is required, never green on an empty/partial report (F-C166).
 # ---------------------------------------------------------------------------
 FAIL=0
 if grep -q '^END ' "$REPORT" 2>/dev/null; then
-  # HOLDER : le launcher doit être encore vivant (bwrap-PID1 tient le namespace, ADR-G).
+  # HOLDER: the launcher must still be alive (bwrap-PID1 holds the namespace, ADR-G).
   if [[ "$LAUNCHER_DIED" -eq 0 ]] && kill -0 "$LAUNCH_PID" 2>/dev/null; then
-    echo "PASS HOLDER  bwrap-PID1 vivant après la sonde (modèle détaché tient)"
+    echo "PASS HOLDER  bwrap-PID1 alive after the probe (the detached model holds)"
   else
-    echo "FAIL HOLDER  launcher mort après la sonde (holder ADR-G cassé)"; FAIL=1
+    echo "FAIL HOLDER  launcher died after the probe (ADR-G holder broken)"; FAIL=1
   fi
   sed 's/^/   | /' "$REPORT"
   PASS_N="$(grep -c '^PASS ' "$REPORT" || true)"
   FAIL_N="$(grep -c '^FAIL ' "$REPORT" || true)"
   END_N="$(sed -n 's/^END //p' "$REPORT" | head -1)"
   if [[ "$FAIL_N" -gt 0 ]]; then
-    echo "FAIL ISO     $FAIL_N check(s) rouges dans le pod"; FAIL=1
+    echo "FAIL ISO     $FAIL_N red check(s) in the pod"; FAIL=1
   fi
   if [[ "$PASS_N" -ne "$EXPECTED_CHECKS" || "${END_N:-0}" -ne "$EXPECTED_CHECKS" ]]; then
-    echo "FAIL COUNT   $PASS_N/$EXPECTED_CHECKS PASS (END=${END_N:-absent}) — rapport partiel ≠ vert"; FAIL=1
+    echo "FAIL COUNT   $PASS_N/$EXPECTED_CHECKS PASS (END=${END_N:-missing}) — a partial report is not green"; FAIL=1
   fi
-  # creds_rw_host — jugé HOST-SIDE : l'append fait DANS le pod doit être visible dans le fichier
-  # creds host (bind single-file RW = LE chemin du refresh OAuth ADR-F ; sans propagation, un pod
-  # long perdrait son auth en silence).
+  # creds_rw_host — judged HOST-SIDE: the append made INSIDE the pod must be visible in the host creds
+  # file (RW single-file bind = THE ADR-F OAuth refresh path; without propagation, a long-running pod
+  # would silently lose its auth).
   if grep -q "rw:$CREDS_RW_NONCE" "$WORK/claude-dir/.credentials.json" 2>/dev/null; then
-    echo "PASS creds_rw_host  append in-pod propagé au fichier creds host (refresh ADR-F viable)"
+    echo "PASS creds_rw_host  in-pod append propagated to the host creds file (ADR-F refresh viable)"
   else
-    echo "FAIL creds_rw_host  append in-pod NON propagé au fichier creds host"; FAIL=1
+    echo "FAIL creds_rw_host  in-pod append NOT propagated to the host creds file"; FAIL=1
   fi
 elif grep -q '^FAIL ' "$REPORT" 2>/dev/null; then
-  # Rapport INACHEVÉ mais constat rouge déjà gravé : un FAIL ne se dégrade JAMAIS en SKIP.
-  echo "FAIL PROBE   sonde interrompue avec invariant(s) déjà KO :"
+  # UNFINISHED report but a red finding already recorded: a FAIL NEVER degrades into a SKIP.
+  echo "FAIL PROBE   probe interrupted with invariant(s) already broken:"
   sed 's/^/   | /' "$REPORT"
   FAIL=1
 elif [[ "$LAUNCHER_DIED" -eq 1 ]]; then
-  # Mort AVANT le détachement = échec de setup du launcher (guards :?/exit 1|2) : l'isolation n'a
-  # été NI prouvée NI infirmée → SKIP avec la cause réelle. L'ancien gate prenait exactement ce
-  # chemin pour un PASS ISO ; le déguiser en FAIL d'isolation serait l'autre mensonge.
-  echo "   bwrap_launch mort en setup (aucune isolation testée) — launch.log :"
+  # Dying BEFORE the detach = a launcher setup failure (the :? guards / exit 1|2): isolation was NEITHER
+  # proven NOR disproven → SKIP with the real cause. The old gate took exactly this path for an ISO
+  # PASS; dressing it as an isolation FAIL would be the opposite lie.
+  echo "   bwrap_launch died during setup (no isolation tested) — launch.log:"
   sed 's/^/   | /' "$WORK/launch.log" 2>/dev/null || true
-  skip3 "launcher mort AVANT bwrap (contrat env/provisioning — cf. log ci-dessus, KEEP=1 pour investiguer)"
+  skip3 "launcher died BEFORE bwrap (env/provisioning contract — see the log above, KEEP=1 to investigate)"
 else
-  # Ni verdict, ni constat, launcher vivant : la sonde n'a pas pu tourner (tmux/sonde KO dans le
-  # sandbox ?) → SKIP explicite, jamais un vert.
-  echo "   sonde sans verdict après 30s — launch.log :"
+  # No verdict, no finding, launcher alive: the probe could not run (tmux or the probe broken inside the
+  # sandbox?) → explicit SKIP, never a green.
+  echo "   probe with no verdict after 30s — launch.log:"
   sed 's/^/   | /' "$WORK/launch.log" 2>/dev/null || true
-  skip3 "la sonde n'a pas rendu de verdict (rapport absent, aucun FAIL gravé) — KEEP=1 pour investiguer"
+  skip3 "the probe returned no verdict (no report, no FAIL recorded) — KEEP=1 to investigate"
 fi
 
 echo "---"
 if [[ "$FAIL" -eq 0 ]]; then
-  echo "GATE R0.1 : exit 0 — bwrap primitive porte (isolation prouvée de l'intérieur, vrai launcher)"
+  echo "GATE R0.1: exit 0 — the bwrap primitive holds (isolation proven from the inside, real launcher)"
 else
-  echo "GATE R0.1 : exit 1 — ne porte pas"
+  echo "GATE R0.1: exit 1 — it does not hold"
 fi
 exit "$FAIL"
