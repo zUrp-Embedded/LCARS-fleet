@@ -634,8 +634,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     dir = "priv/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
 
-    evidence =
-      ((File.dir?(abs) && Path.wildcard(Path.join(abs, "*.yaml"))) || [])
+    # Anti-hollow-green (mirror of `check_verdict_envelope_unwrapped`): an ABSENT/empty workflow-map
+    # corpus must NOT let this rail pass vacuously — a deleted catalogue would silently green a check
+    # that vouches for the content of files that are no longer there. So :pass REQUIRES at least one
+    # yaml AND no `role: gatekeeper` step.
+    yaml_files = (File.dir?(abs) && Path.wildcard(Path.join(abs, "*.yaml"))) || []
+
+    gatekeeper_steps =
+      yaml_files
       |> Enum.flat_map(fn path ->
         rel = Path.relative_to(path, root)
 
@@ -654,8 +660,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "gatekeeper.not_an_ordering_step",
       remediation: "R-gatekeeper-exception",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
+      status: if(yaml_files != [] and gatekeeper_steps == [], do: :pass, else: :fail),
+      evidence:
+        if(yaml_files == [],
+          do: ["#{dir}: no workflow-map yaml found — corpus absent, this check cannot vouch (fail-closed)"],
+          else: gatekeeper_steps
+        ),
       note:
         "gatekeeper = exception judge (dispatched on a non-adjudicable gate), never a step role:gatekeeper (§L441; GATE-D1)"
     }
