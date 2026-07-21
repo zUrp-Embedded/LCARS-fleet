@@ -27,7 +27,7 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
       the compiler checks conformance). Returns a path under tmp WITHOUT creating
       a socket; set by `config/test.exs` (mirror of `launch_backend: StubBackend`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -42,9 +42,11 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   @doc """
   RELEASE (teardown): stops the listener AND removes the socket file (closing the
   socket frees the FD, NOT the file). Idempotent — releasing an already-freed
-  pod returns `:ok`.
+  pod returns `:ok`; a release that could NOT fully clean up (terminate/rm failed)
+  returns `{:error, {:release_incomplete, _}}` so the failure is not silently lost
+  (the SocketWarden still reaps the residual at runtime).
   """
-  @callback release_pod_socket(pod_id :: String.t()) :: :ok
+  @callback release_pod_socket(pod_id :: String.t()) :: :ok | {:error, term()}
 
   # Canonical default: the real impl on the fleet_mcp side. Literal atom (not a
   # literal remote call) → no compile-time dep. Set HERE once.

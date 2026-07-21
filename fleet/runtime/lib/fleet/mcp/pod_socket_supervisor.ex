@@ -44,7 +44,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   (108 bytes) even for a long `pod_id` — same structure as the pods' tmux
   socket-dir (`<base>/<pod_id>/pod.sock`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use DynamicSupervisor
@@ -93,35 +93,73 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   @doc """
-  Stops `pod_id`'s acceptor and removes the socket file, then its per-pod dir. The FS results are
-  discarded: a leftover socket file is visible as "file without acceptor" in
-  `Fleet.MCP.Supervisor.pod_facing_status/0` (degraded) and reaped, warning-logged, by
-  `sweep_stale_sockets/0` at the next boot. Idempotent.
+  Stops `pod_id`'s acceptor and removes the socket file, then its per-pod dir. Idempotent. Returns `:ok`
+  on a clean release (or a safely-refused unsafe pod_id, a no-op); a socket-file removal that FAILS is
+  surfaced as `{:error, {:release_incomplete, _}}` (logged LOUD), never a blind `:ok`: the residual file
+  reads as "file without acceptor" in `Fleet.MCP.Supervisor.pod_facing_status/0` (degraded) and is reaped
+  by the `SocketWarden` at runtime or `sweep_stale_sockets/0` at the next boot.
   """
-  @spec release_pod_socket(String.t()) :: :ok
+  @spec release_pod_socket(String.t()) :: :ok | {:error, term()}
   def release_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
     if safe_pod_id?(pod_id) do
-      _ =
-        case Registry.lookup(@registry, pod_id) do
-          [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
-          [] -> :ok
-        end
+      # terminate_child is :ok | {:error, :not_found} (already gone) — neither leaves a lingering
+      # acceptor, so there is no failure to surface here: the residual that matters is the socket FILE.
+      _ = terminate_acceptor(pod_id)
 
       path = socket_path(pod_id)
       # Closing the socket frees the FD, NOT the file → we remove it explicitly.
-      _ = File.rm(path)
-      # rmdir only removes an EMPTY dir — the discarded value carries nothing: if the rm above
-      # failed, the dir stays and the next boot's sweep_stale_sockets/0 reaps file + dir.
+      socket_file = remove_socket_file(path)
+      # rmdir only removes an EMPTY dir: if the rm above FAILED, the dir stays non-empty and rmdir fails
+      # too — but that failure is already carried by `socket_file`, so the residual dir is reaped by the
+      # SocketWarden (runtime) or `sweep_stale_sockets/0` (cold boot). No need to surface it twice.
       _ = File.rmdir(Path.dirname(path))
-      :ok
+
+      # The release OWNS its outcome instead of always announcing `:ok`. A failed rm leaves a residual
+      # socket file without a Registry entry (a false "deaf pod" to the readiness probe) → we surface it
+      # (logged LOUD above) so it is not silently forgotten; the SocketWarden still reaps it at runtime.
+      case socket_file do
+        :ok -> :ok
+        {:error, _} = err -> {:error, {:release_incomplete, %{socket_file: err}}}
+      end
     else
-      # A `..`/`/` pod_id would make File.rm escape the base → refuse the FS gesture (idempotent :ok).
+      # A `..`/`/` pod_id would make File.rm escape the base → refuse the FS gesture. Nothing to release
+      # for a malformed id (no socket was ever created under it): a SAFE no-op, honestly `:ok`.
       Logger.warning(
         "PodSocketSupervisor: release_pod_socket refused unsafe pod_id #{inspect(pod_id)} — no FS action"
       )
-    end
 
-    :ok
+      :ok
+    end
+  end
+
+  # Terminates the pod's acceptor if one is registered. `terminate_child` returns :ok (terminated) or
+  # {:error, :not_found} (already gone) — both mean the acceptor is down; there is no "could not
+  # terminate" outcome to surface (a present child is force-killed after its shutdown timeout).
+  defp terminate_acceptor(pod_id) do
+    case Registry.lookup(@registry, pod_id) do
+      [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
+      [] -> :ok
+    end
+  end
+
+  # Removes the socket file. `:ok` on success OR already-gone (`:enoent`, idempotent); a real removal
+  # failure is surfaced (LOUD) — a residual socket file without a Registry entry reads as a deaf pod.
+  defp remove_socket_file(path) do
+    case File.rm(path) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "PodSocketSupervisor: release could NOT remove socket file #{path} (#{inspect(reason)}) — " <>
+            "residual socket without a Registry entry; SocketWarden (runtime) or cold-boot sweep will reap it"
+        )
+
+        {:error, reason}
+    end
   end
 
   @doc """
