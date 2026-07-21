@@ -50,8 +50,9 @@ defmodule Fleet.Spawner do
   **observation snapshot** (where the pod was), not a reconstruction state.
   On (re)spawn, `recover_or_init` reads the snapshot and applies `recovery_action(phase)`
   (`Pod.Recovery`): terminal phase → `:release` (nothing to relaunch), everything else →
-  `:recreate` (from scratch, FRESH session). Resurrection is a **deliberate** act
-  of the boot-orchestrator; recovery NEVER attempts `--resume` on a session dead
+  `:recreate` (from scratch, FRESH session). Resurrection is a **deliberate** act from the desired
+  state — by the boot-orchestrator (initial boot) OR the `PermanentWarden` (recovery respawn of a dead
+  permanent), never the supervisor; recovery NEVER attempts `--resume` on a session dead
   server-side (claude exits → zombie pod) — the task left in the queue
   re-drives a fresh REPL. Only a deliberate RECALL (`recall/2`) resumes a session.
 
