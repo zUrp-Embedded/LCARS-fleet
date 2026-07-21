@@ -56,6 +56,7 @@ flowchart TB
         Fleet_EventRouter["Fleet.EventRouter"]
     end
     Fleet_API --> Fleet_CapProfile
+    Fleet_API --> Fleet_Credentials
     Fleet_API --> Fleet_EventRouter
     Fleet_API --> Fleet_MCP
     Fleet_API --> Fleet_Pilot
