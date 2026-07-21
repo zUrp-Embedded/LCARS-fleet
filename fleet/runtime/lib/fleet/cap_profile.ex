@@ -223,6 +223,21 @@ defmodule Fleet.CapProfile do
   # run its own role in an optional mode (`role: engineer, modops: [tdd]`). And no `incompatible`
   # pair may end up both active (default ∪ extra). A modop outside `optional` = LOUD refusal, never
   # a silent mix.
+  #
+  # KNOWN GAP — what this guard admits does NOT reach the pod's system prompt. Read this before
+  # declaring `modops:` on a step and expecting an effect. The selection is validated here, then
+  # `compose/2` deep-merges the named overlays — and every selectable overlay under
+  # `canon/cap-profiles/modop/*/profile.yaml` is literally `{}`, so the merge is a no-op. The resolved
+  # struct keeps NO record of what was activated, and `Spawner.Pod` re-derives the list it hands to
+  # `SPBuilder.compose` from `default_modops/1` of that resolved profile. So an `extra_modops` entry
+  # survives validation and then vanishes: its bundle's `sp.md` is never injected.
+  #
+  # It is INERT today (no canon workflow_map declares `modops:` on a step, so `extra_modops` is always
+  # `[]`, and with `[]` the re-derivation returns exactly the active list). It stops being inert the
+  # day someone declares one. Closing it is a design call, not a patch: the active list has to survive
+  # `resolve/3` → `Pod`, and neither route is free — recording it in the spec needs a SCHEMA change
+  # (`modop_set` and the root are both `additionalProperties: false`), while returning it from
+  # `resolve/3` changes a signature with ~8 call sites.
   defp validate_extra_modops(_base, []), do: :ok
 
   defp validate_extra_modops(%__MODULE__{} = base, extra) do

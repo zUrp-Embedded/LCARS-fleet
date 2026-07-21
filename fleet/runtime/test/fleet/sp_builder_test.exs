@@ -168,7 +168,15 @@ defmodule Fleet.SPBuilderTest do
       # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
       # app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles") (where the bundles live).
       # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
-      # default, like sp_role_root — this is what makes modop overlays actually applied at spawn.
+      # default, like sp_role_root.
+      #
+      # SCOPE of this proof, since the default is easy to over-read: it shows that `SPBuilder.compose`
+      # RESOLVES its bundle root without an explicit config. It does NOT show that a step's modops
+      # reach a pod — this calls `compose` DIRECTLY with a list, while the spawn path is
+      # `CapProfile.resolve/3` → `Pod`, which re-derives the list from `default_modops/1` and drops
+      # any step-selected optional modop on the way (see the KNOWN GAP note on the B-01 guard in
+      # `Fleet.CapProfile`). "The root resolves" and "the overlay reaches the pod" are two claims;
+      # only the first is tested here.
       Application.delete_env(:fleet_sp_builder, :modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
