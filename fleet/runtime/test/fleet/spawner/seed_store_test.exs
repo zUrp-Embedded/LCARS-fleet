@@ -397,4 +397,27 @@ defmodule Fleet.Spawner.SeedStoreTest do
       assert {:ok, ^path} = SeedStore.slot_seed(@uuid)
     end
   end
+
+  describe "JSONL scan budget (the capture/teardown callback must never scan unbounded)" do
+    test "a MARKER-LESS enormous transcript is scanned only up to the budget, not to EOF", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+
+      # No `assistant` line anywhere → first_round's content-halt never fires; only the byte/
+      # line budget stops the walk. Well over the 8 MB / 50k-line caps.
+      line = ~s({"type":"user","message":"#{String.duplicate("x", 400)}"}\n)
+      huge = String.duplicate(line, 60_000)
+      make_jsonl(pod_dir, "-home-x-poc9-engineer", "uuid-huge", huge)
+
+      # The checkpoint completes (never hangs) and writes a bounded seed — well under the
+      # full input, capped at the budget.
+      assert :ok = SeedStore.checkpoint(pod_dir, "poc-9", "engineer", "builder-det")
+
+      seed = File.read!(Path.join([root, "poc-9", "pods", "engineer.jsonl"]))
+      assert byte_size(seed) <= 8_000_000
+      assert byte_size(seed) < byte_size(huge)
+    end
+  end
 end

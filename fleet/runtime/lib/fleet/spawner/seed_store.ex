@@ -26,6 +26,29 @@ defmodule Fleet.Spawner.SeedStore do
   """
   require Logger
 
+  # Budget for the JSONL scans (`first_round/1`, `seed_records/1`): these run in the pod's
+  # GenStatem callback during CAPTURE and BEFORE teardown — an enormous, malformed or
+  # marker-less file (a runaway agent, a corrupt transcript) would hold the mailbox, delay
+  # the kill and grow memory without a bound. The seed we actually need lives in the first
+  # rounds; past the budget the scan STOPS best-effort (a partial seed still resumes; a
+  # missing marker degrades to no-seed, never a hang). Bytes cap first (a single pathological
+  # line), lines cap second.
+  @scan_max_bytes 8_000_000
+  @scan_max_lines 50_000
+
+  # Lazy line stream bounded by BOTH a byte budget and a line budget: whichever trips first
+  # halts the scan. `File.stream!` is already lazy (one line at a time); this only caps how
+  # far it walks, so a 2 GB transcript never fully loads.
+  defp bounded_lines(jsonl_path) do
+    jsonl_path
+    |> File.stream!()
+    |> Stream.transform(0, fn line, bytes ->
+      next = bytes + byte_size(line)
+      if next > @scan_max_bytes, do: {:halt, bytes}, else: {[line], next}
+    end)
+    |> Stream.take(@scan_max_lines)
+  end
+
   @doc """
   Checkpoints the seed of a dying PROJECT-pod. `session_id` = the DETERMINISTIC BUILDER of the Desktop
   slot (the `session_id` pre-allocated at spawn): it is the `uuid` stored in the seed map, SINGLE SOURCE
@@ -115,7 +138,7 @@ defmodule Fleet.Spawner.SeedStore do
   # This is the minimal resumable seed; the rest of the session is dropped (forge re-derivable).
   defp first_round(jsonl_path) do
     jsonl_path
-    |> File.stream!()
+    |> bounded_lines()
     |> Enum.reduce_while([], fn line, acc ->
       acc = [line | acc]
 
@@ -292,7 +315,7 @@ defmodule Fleet.Spawner.SeedStore do
   # `system/bridge_status`, both formats seen live 2026-07-19).
   defp seed_records(jsonl_path) do
     jsonl_path
-    |> File.stream!()
+    |> bounded_lines()
     |> Enum.reduce(%{}, fn line, acc ->
       case Jason.decode(line) do
         {:ok, %{"type" => "mode"}} ->
