@@ -27,9 +27,10 @@ defmodule Fleet.Pilot.ForgeStubs do
       :ok
     end
 
-    # WS2: the seal sets stage/merged post-merge — a system trace whose failure is dropped
-    # WITHOUT a log by seal_and_merge (no rail re-sets it; cf. gatekeeper_seal.ex). No-op
-    # (the stub proves the merge↔comment order).
+    # WS2: the seal sets stage/merged post-merge — a load-bearing system trace. Its failure is NOT
+    # dropped silently: `seal_and_merge` RETRIES it (bounded, `set_stage_merged_with_retry`) and logs
+    # loud, since a lost stage/merged left the arch waiting forever on a merged brick (cf.
+    # gatekeeper_seal.ex). This stub always succeeds — No-op (it proves the merge↔comment order).
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
     # Explicit close: last act of seal_and_merge. SIGNALS (opts included): a test
