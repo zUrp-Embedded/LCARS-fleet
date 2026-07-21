@@ -9,6 +9,13 @@ defmodule Mix.Tasks.Lcars.Topology do
   enforces it, this task only PROJECTS it) and writes it as a markdown table between
   markers in `lib/fleet/README.md`.
 
+  The projection reads the `use Boundary` declarations by REGEX over the source, not Boundary's
+  compiled metadata — so it assumes their standard formatting. An unusual-but-valid declaration (an
+  alias, a `deps:` layout the regex misses) could diverge from the COMPILED boundary, and `--check`
+  (which compares the committed map to the SAME regex re-projection) would catch a stale README, not
+  such a misparse. Projecting from Boundary's compiled metadata would close that gap — a tooling
+  follow-up, not a guarantee this task makes today.
+
   Height is mechanical: `H(domain) = 1 + max(H(deps))`, 0 for `deps: []` (a DAG —
   boundary forbids cycles — always induces this ladder). The layer NAMES are editorial
   and live in ONE place: `@layers` below. A new or moved domain without a matching
@@ -19,7 +26,7 @@ defmodule Mix.Tasks.Lcars.Topology do
       mix lcars.topology            # regenerate the section in lib/fleet/README.md
       mix lcars.topology --check    # exit 1 if the committed map diverges (gate step)
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use Mix.Task
