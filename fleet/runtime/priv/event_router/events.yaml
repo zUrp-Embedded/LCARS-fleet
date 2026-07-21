@@ -127,6 +127,12 @@ events:
   # the raze. To re-add WITH a producer AND a consumer if git publication becomes observable again.
 
   # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
+  # TRANSITIVELY DORMANT, two of the three: `Cat5Escalator.escalate/3` is called ONLY by the
+  # DriftMonitor, one call per upstream type. So a Cat 5 broadcast can only fire if its TRIGGER can.
+  # `pod.drift` and `oauth.refresh.failed` are both marked dormant above (no producer) — therefore
+  # `audit_cat5_pod_drift` and `audit_cat5_oauth_refresh_failed` cannot be emitted either, however
+  # wired their consumers are. Only `audit_cat5_workflow_map_failed` has a live path (draft producer,
+  # see the CAT-5 CHAIN note above). The three keys read symmetrically; their reachability does not.
   starfleet.audit_cat5_pod_drift: []
   starfleet.audit_cat5_workflow_map_failed: []
   starfleet.audit_cat5_oauth_refresh_failed: []
