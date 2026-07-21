@@ -2,40 +2,42 @@
 # SOURCE: bin/lcars
 # AUTHOR: starfleet
 # STARDATE: 2026-06-14
-# STATUS: PROTO-V2 — CLI opérateur fleet : spawn / list / attach (LAUNCH-1/2/2b, « jouer avec la fleet »)
+# STATUS: PROTO-V2 — operator CLI for the fleet: spawn / list / attach (LAUNCH-1/2/2b)
 #
-# Outil opérateur host-side pour piloter le daemon LCARS v2. Trois gestes pour la boucle « lancer un pod,
-# le voir, s'y attacher » :
-#   - `lcars spawn <role>`     POST /api/admin/spawn (control path HTTP établi, no-auth loopback). Le spawn
-#                              est dispatché ASYNC (event admin.spawn.request → spawn_pod) : la réponse 202
-#                              = « mis en file », PAS « pod vivant ». Vérifier ensuite avec `lcars list`.
-#   - `lcars list`             pods VIVANTS lus directement sur la substrate (socks tmux par-pod = la
-#                              liveness réelle ; /api/pods de fleet_api renvoie 501 not_implemented, F-C118). Dependency-free, marche même API down.
-#   - `lcars attach <pod_id>`  attache le terminal à la session tmux du pod (`tmux -S <sock> attach`).
-#                              Ctrl-b d pour détacher SANS tuer le pod.
+# Host-side operator tool for driving the LCARS v2 daemon. Three gestures covering the "launch a pod,
+# see it, attach to it" loop:
+#   - `lcars spawn <role>`     POST /api/admin/spawn (established control path, no-auth loopback). The
+#                              spawn is dispatched ASYNC (event admin.spawn.request → spawn_pod), so the
+#                              202 means "queued", NOT "pod alive". Confirm with `lcars list`.
+#   - `lcars list`             LIVE pods read straight off the substrate (the per-pod tmux socks ARE the
+#                              real liveness; fleet_api's /api/pods answers 501 not_implemented, F-C118).
+#                              Dependency-free — works even with the API down.
+#   - `lcars attach <pod_id>`  attaches the terminal to the pod's tmux session (`tmux -S <sock> attach`).
+#                              Ctrl-b d detaches WITHOUT killing the pod.
 #
-# `attach` requiert que l'opérateur ait le MÊME UID que le daemon (les sock-dirs par-pod sont `0700`).
-# Modèle courant : chaque humain lance SA fleet via `bin/fleet_v2` → la BEAM et les pods tournent sous SON
-# UID → il attache directement ses propres pods, sans privilège ni passe-droit. (Plus de service système
-# `User=lcars` : le modèle systemd est retiré.) Vaut pour les pods bwrap (sock bind-monté host-side) comme
-# host (LAUNCH-Q).
+# `attach` requires the operator to have the SAME UID as the daemon (the per-pod sock dirs are `0700`).
+# Current model: each human launches THEIR fleet through `bin/fleet_v2` → the BEAM and the pods run under
+# THEIR UID → they attach their own pods directly, with no privilege and no special case. (There is no
+# `User=lcars` system service any more: the systemd model is gone.) Holds for bwrap pods (sock
+# bind-mounted host-side) as well as host pods (LAUNCH-Q).
 #
-# Config (env) :
-#   LCARS_API_URL         base REST du daemon (défaut : lu de ~/.lcars/run/api_url, posé par
-#                         fleet_v2 au start — les ports sont per-humain/UID, aucun défaut statique
-#                         n'est juste ; fleet non démarrée → erreur claire, pas un port au pif)
-#   LCARS_TMUX_SOCK_BASE  base des socks par-pod (défaut ~/.lcars/run/tmux-sock ; = défaut Elixir, c368f89d)
-#   LCARS_TMUX_BIN        binaire tmux (défaut tmux dans le PATH)
+# Config (env):
+#   LCARS_API_URL         the daemon's REST base (default: read from ~/.lcars/run/api_url, written by
+#                         fleet_v2 at start — the ports are per-human/UID, so no static default can be
+#                         right; fleet not started → a clear error, never a guessed port)
+#   LCARS_TMUX_SOCK_BASE  base of the per-pod socks (default ~/.lcars/run/tmux-sock; = the Elixir
+#                         default, c368f89d)
+#   LCARS_TMUX_BIN        tmux binary (default: tmux from the PATH)
 
 set -euo pipefail
 
-# A7 : env explicite > état runtime posé par fleet_v2 > fail-loud (jamais un port deviné).
+# A7: explicit env > runtime state written by fleet_v2 > fail-loud (never a guessed port).
 if [[ -n "${LCARS_API_URL:-}" ]]; then
   API_URL="$LCARS_API_URL"
 elif [[ -r "$HOME/.lcars/run/api_url" ]]; then
   API_URL="$(cat "$HOME/.lcars/run/api_url")"
 else
-  echo "lcars: LCARS_API_URL absent et ~/.lcars/run/api_url introuvable — la fleet est-elle démarrée (fleet_v2 start) ?" >&2
+  echo "lcars: LCARS_API_URL absent et ~/.lcars/run/api_url introuvable — la fleet tourne-t-elle (fleet_v2 start) ?" >&2
   exit 1
 fi
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
@@ -50,20 +52,21 @@ die() { echo "lcars: $*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<EOF
-$PROG — CLI opérateur fleet LCARS v2
+$PROG — CLI fleet LCARS v2
 
 USAGE
   $PROG spawn <role> [--issue <id>] [--brief <texte>]
-      Demande au daemon de lancer un pod du rôle <role> (= nom de cap-profile,
-      ex: architect, engineer, consultant). Dispatch ASYNC → vérifier
-      avec « $PROG list ». NB : les rôles boot_at_start (arch) démarrent seuls au
-      boot de la fleet — spawn sert surtout aux rôles à la demande / au test.
+      Demande au daemon de lancer un pod du role <role> (= nom de cap-profile,
+      ex: architect, engineer, consultant). Dispatch ASYNC : le pod n'est pas
+      vivant au retour — « $PROG list » pour le voir. NB : les roles
+      boot_at_start (starfleet) montent seuls au boot de la fleet ; spawn sert
+      surtout aux roles ponctuels et au test.
 
   $PROG list
-      Liste les pods VIVANTS (socks tmux par-pod) + l'état de leur session tmux.
+      Liste les pods VIVANTS (socks tmux par-pod) + le statut de leur session tmux.
 
   $PROG attach <pod_id>
-      Attache ce terminal à la session tmux du pod (Ctrl-b d pour détacher sans
+      Attache ce terminal sur la session tmux du pod (Ctrl-b d rend la main sans
       tuer le pod).
 
   $PROG help
@@ -80,10 +83,10 @@ EOF
 
 cmd_spawn() {
   local role="" issue="" brief="" have_brief=0
-  [[ $# -ge 1 && "$1" != --* ]] || die "spawn: rôle requis (ex: $PROG spawn architect)"
+  [[ $# -ge 1 && "$1" != --* ]] || die "spawn: role requis (ex: $PROG spawn architect)"
   role="$1"; shift
-  # Rôle = slug cap-profile (anti-injection JSON quand jq absent).
-  [[ "$role" =~ ^[a-z][a-z0-9-]*$ ]] || die "spawn: rôle '$role' invalide (slug [a-z0-9-] attendu)"
+  # The role is a cap-profile slug (JSON anti-injection for the jq-less payload path below).
+  [[ "$role" =~ ^[a-z][a-z0-9-]*$ ]] || die "spawn: role '$role' invalide (slug [a-z0-9-] attendu)"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -94,10 +97,10 @@ cmd_spawn() {
   done
   [[ -z "$issue" || "$issue" =~ ^[A-Za-z0-9._-]+$ ]] || die "spawn: --issue '$issue' invalide"
 
-  # Payload JSON. Champ brief = texte libre → jq pour un échappement correct ; sinon printf (slugs sûrs).
+  # JSON payload. The brief field is free text → jq, for correct escaping; otherwise printf (safe slugs).
   local payload
   if [[ "$have_brief" -eq 1 ]]; then
-    command -v jq >/dev/null 2>&1 || die "spawn: --brief exige jq (échappement JSON du texte libre)"
+    command -v jq >/dev/null 2>&1 || die "spawn: --brief exige jq (pour le quoting JSON du texte libre)"
     payload="$(jq -nc --arg r "$role" --arg t "$issue" --arg m "$brief" \
       '{cap_profile_name:$r} + (if $t=="" then {} else {issue_id:$t} end) + {brief:$m}')"
   elif [[ -n "$issue" ]]; then
@@ -106,10 +109,10 @@ cmd_spawn() {
     payload="$(printf '{"cap_profile_name":"%s"}' "$role")"
   fi
 
-  # NB contrat : `/api/admin/spawn` n'accepte qu'un DTO PLAT allowlisté (`cap_profile_name` + `issue_id`
-  # + `brief`) — PAS d'`opts` brut : toute clé hors allowlist (y compris un `opts` fourni par le client)
-  # fait échouer le spawn en 422. L'API reconstruit elle-même l'`opts` interne du spawner à partir de
-  # `brief` (cf. SpawnAdmission).
+  # Contract: `/api/admin/spawn` accepts only a FLAT allowlisted DTO (`cap_profile_name` + `issue_id` +
+  # `brief`) — NO raw `opts`: any key outside the allowlist (including an `opts` supplied by the client)
+  # fails the spawn with a 422. The API rebuilds the spawner's internal `opts` itself from `brief`
+  # (cf. SpawnAdmission).
   local body http
   # `--unix-socket`: the write door lives on the per-human AF_UNIX socket (ControlRouter), NOT on
   # the TCP loopback - the pod (shared host netns) cannot reach it. The host in the URL is ignored
@@ -118,24 +121,25 @@ cmd_spawn() {
   body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \
-    || die "control socket injoignable ($API_SOCK) — fleet_v2 démarrée pour cet utilisateur ?"
+    || die "control socket injoignable ($API_SOCK) — fleet_v2 tourne pour cet utilisateur ?"
 
   http="${body##*$'\n'}"; body="${body%$'\n'*}"
   case "$http" in
-    202) echo "spawn $role : mis en file (202). Le pod démarre en async — « $PROG list » pour le voir." ;;
-    503) die "fleet en drain de shutdown (503) — réessayer après le redémarrage" ;;
-    # MA-18 : le cap-profile est validé AVANT l'ACK. 422 = rôle inconnu (cap-profile absent), 400 = requête
-    # mal formée. Plus de 202 menteur (jadis : 202 puis warning silencieux côté daemon, zéro pod).
-    422) die "spawn refusé : cap-profile '$role' inconnu (422) — vérifie le nom de rôle. $body" ;;
-    400) die "spawn refusé : requête invalide (400). $body" ;;
-    *)   die "spawn refusé (HTTP $http) : $body" ;;
+    202) echo "spawn $role : mis en file (202). Le pod monte en async — « $PROG list » pour le voir." ;;
+    503) die "fleet en drain de shutdown (503) — retente quand la fleet sera repartie" ;;
+    # MA-18: the cap-profile is validated BEFORE the ACK. 422 = unknown role (no such cap-profile),
+    # 400 = malformed request. No more lying 202 (it used to ACK, then warn silently daemon-side and
+    # spawn nothing).
+    422) die "spawn KO : cap-profile '$role' inconnu (422) — le nom de role est faux. $body" ;;
+    400) die "spawn KO : appel invalide (400). $body" ;;
+    *)   die "spawn KO (HTTP $http) : $body" ;;
   esac
 }
 
 # --- list ------------------------------------------------------------------
 
 cmd_list() {
-  [[ -d "$SOCK_BASE" ]] || { echo "(aucun pod : $SOCK_BASE absent — fleet démarrée ?)"; return 0; }
+  [[ -d "$SOCK_BASE" ]] || { echo "(aucun pod : $SOCK_BASE absent — la fleet tourne ?)"; return 0; }
   shopt -s nullglob
   local socks=("$SOCK_BASE"/*/pod.sock) found=0
   if [[ ${#socks[@]} -eq 0 ]]; then echo "(aucun pod vivant)"; return 0; fi
@@ -160,16 +164,16 @@ cmd_list() {
 cmd_attach() {
   local pod_id="${1:-}"
   [[ -n "$pod_id" ]] || die "attach: pod_id requis (cf. « $PROG list »)"
-  # Anti path-traversal : pod_id = composant de chemin (sock = $SOCK_BASE/$pod_id/pod.sock). Pas de / ni `..`.
+  # Anti path-traversal: pod_id is ONE path component (sock = $SOCK_BASE/$pod_id/pod.sock). No `/`, no `..`.
   [[ "$pod_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$pod_id" != *..* ]] \
     || die "attach: pod_id '$pod_id' invalide"
   local sock="$SOCK_BASE/$pod_id/pod.sock"
   [[ -S "$sock" ]] || die "attach: pas de sock pour '$pod_id' ($sock) — pod vivant ? (cf. « $PROG list »)"
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "attach: tmux introuvable ($TMUX_BIN)"
-  echo "attach $pod_id (Ctrl-b d pour détacher sans tuer le pod)…" >&2
-  # UI : molette = scroll du scrollback tmux (pas l'historique shell). `set -g mouse on` sur le serveur du pod,
-  # juste avant l'attache → couvre TOUS les pods par config tmux RUNTIME (aucune édition de bwrap_launch.sh requise). (NB : mouse ON change
-  # la sélection — maintenir Shift pour copier vers le presse-papier de l'OS.)
+  echo "attach $pod_id (Ctrl-b d rend la main sans tuer le pod)…" >&2
+  # UI: the wheel scrolls the tmux scrollback (not the shell history). `set -g mouse on` on the pod's
+  # own server, right before attaching → covers EVERY pod through RUNTIME tmux config, with no launcher
+  # edit. Mouse ON does change selection: hold Shift to copy to the OS clipboard.
   "$TMUX_BIN" -S "$sock" set -g mouse on 2>/dev/null || true
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
