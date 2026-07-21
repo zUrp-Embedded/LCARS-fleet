@@ -1,7 +1,7 @@
 # Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-07-20
+**Last revised**: 2026-07-21
 **Status**: active — domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: —
 
@@ -39,6 +39,5 @@ boundary at `lib/fleet/git_ref.ex`, reachable from any domain.
 
 ## Config & deps
 - Knobs `:workflow_maps_root`, `:schema_path` — read by `Loader` (opts override for async tests), set by `runtime.exs` from `LCARS_WORKFLOW_MAPS_ROOT`.
-- Knobs `:gatekeeper_autoboot`, `:gatekeeper_pod_id` — read by `Gatekeeper` (`test.exs` disables autoboot for hermeticity).
 - Knobs `:git_push_timeout_ms`, `:git_local_timeout_ms` — read by `Git`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/workflow.ex`).
