@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   #   judge (payload) → `:reviewed`: `complete_pr` posts the native review (verdict read from the gate-decision,
   #     carried further via `:review_event`) + unlocks the PR. The merge/rework = poller (dispatch_review).
   defp no_workflow_map_resolve(payload, seams) do
-    case producer?(payload["role"], seams.deliverable_mode_fun) do
+    case producer?(payload["role"], seams.deliverable_mode_fun, payload["deliverable_mode"]) do
       {:ok, true} -> {:ok, :review, {nil, nil}}
       {:ok, false} -> {:ok, :reviewed, {nil, nil}}
       {:error, _} = err -> err
@@ -271,9 +271,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     else
       case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
         :pass ->
-          # The terminal intent depends on the ROLE that finishes (cf. advance_intent/3). DR-013:
-          # an unloadable cap-profile → fail-loud, never a blind advance under an unknown producer property.
-          case producer?(payload["role"], seams.deliverable_mode_fun) do
+          # The terminal intent depends on the ROLE that finishes (cf. advance_intent/3). We consume the
+          # EFFECTIVE deliverable_mode the pod ran with (payload) — not a re-derivation that a since-spawn
+          # profile change could skew (C-03). Absent (legacy payload) → re-derive, and DR-013 fail-loud on
+          # an unloadable cap-profile (never a blind advance under an unknown producer property).
+          case producer?(payload["role"], seams.deliverable_mode_fun, payload["deliverable_mode"]) do
             {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
             {:error, _} = err -> err
           end

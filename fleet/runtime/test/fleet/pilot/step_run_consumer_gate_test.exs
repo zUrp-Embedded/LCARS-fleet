@@ -191,7 +191,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       forge_client: StubForge,
       loader: WorkflowMap,
       deliverable: DelivStub,
-      deliverable_mode_fun: dmode(),
+      deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, dmode()),
       task_queue: StubTaskQueue,
       spawner: Keyword.get(opts, :spawner, StubSpawner),
       # MA-17 — wake recovery seam (default = the real fn; a test injects it to simulate escalation).
@@ -239,6 +239,21 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     # The ISSUE lock is NOT lifted at advance anymore — persists until the final :promote.
     refute_received :unlocked
+  end
+
+  test "producer/judge classification consumes the EFFECTIVE payload mode, not a since-spawn re-derivation" do
+    # The pod ran as a PRODUCER (payload carries deliverable_mode: git_native). Since spawn, a modop/profile
+    # change would make the seam RE-DERIVE "payload" (judge). The completion must classify by the mode the
+    # pod ACTUALLY ran with (producer → opens the PR), never the drifted re-derivation (which would treat a
+    # producer as a judge → the code deliverable would never open a PR).
+    payload = Map.put(build_done("gated", %{"ok" => true}), "deliverable_mode", "git_native")
+    drifted = hc(deliverable_mode_fun: fn _role -> {:ok, "payload"} end)
+
+    assert {:ok, :review_requested} = StepRunConsumer.maybe_complete(payload, drifted)
+
+    # Classified as PRODUCER from the payload mode, despite the seam disagreeing.
+    assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
+    assert_received {:request_review, 7, ["reviewer"]}
   end
 
   test "no gate on the step -> advance (unchanged behavior)" do

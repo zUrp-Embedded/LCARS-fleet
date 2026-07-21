@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -580,12 +580,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_step_run(payload, n, state) do
     role = payload["role"]
 
-    # DR-013: the producer/judge property is resolved via the cap-profile. An UNLOADABLE profile (corrupt/
-    # deleted since spawn) makes it UNKNOWN → we NEVER classify silently as judge. Checked HERE (before
-    # resolve_next, which also reads producer? on the SAME role → it then only ever sees a loadable
-    # profile) and ESCALATED to the arch (freeze + await_arch): bubbling would let the reaper re-dispatch a
-    # persistently broken profile forever (G2 churn) without notifying a human.
-    case producer?(role, state) do
+    # Producer/judge property = the EFFECTIVE deliverable_mode the pod ran with (payload, C-03), consumed
+    # directly — resolve_next reads producer? on the SAME role+mode, so both decisions classify this pod
+    # IDENTICALLY (no since-spawn skew). Only when the payload OMITS the mode (legacy) do we re-derive via
+    # the cap-profile — and DR-013 then applies: an UNLOADABLE profile makes it UNKNOWN → never a silent
+    # judge → ESCALATED to the arch (freeze + await_arch), never bubbled (G2 churn without a human).
+    case producer?(role, payload["deliverable_mode"], state) do
       {:error, reason} ->
         TerminalEscalation.escalate_terminal_error(reason, n, role, terminal_seams(state))
 
@@ -762,9 +762,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
   end
 
-  # Producer/judge classification — SINGLE AUTHORITY `GateEngine.producer?/2` (shared with the
-  # gate decision and StepRunBuild); local wrapper that reads the `deliverable_mode_fun` seam of the state.
-  defp producer?(role, state), do: GateEngine.producer?(role, state.deliverable_mode_fun)
+  # Producer/judge classification — SINGLE AUTHORITY `GateEngine.producer?/3` (shared with the gate
+  # decision and StepRunBuild). Consumes the EFFECTIVE deliverable_mode the pod ran with (payload, C-03):
+  # the completion never re-derives a fact it already carries (a since-spawn profile change could skew it).
+  # Only a legacy/bare payload (mode absent) falls back to the state's `deliverable_mode_fun` seam.
+  defp producer?(role, effective_mode, state),
+    do: GateEngine.producer?(role, state.deliverable_mode_fun, effective_mode)
 
   @doc false
   # Seam default: resolves the role's deliverable_mode via the cap-profile catalogue (single source).
@@ -860,7 +863,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # a next step → `:advance`. A single source of truth for the terminal intent.
         # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
         # cap-profile fails-loud, never a blind terminal intent under an unknown property.
-        with {:ok, is_producer?} <- producer?(role, state),
+        with {:ok, is_producer?} <- producer?(role, payload["deliverable_mode"], state),
              {:ok, intent, {next_assignee, next_step}} <-
                GateEngine.advance_intent(workflow_map, step, is_producer?) do
           complete_business_step_run(
