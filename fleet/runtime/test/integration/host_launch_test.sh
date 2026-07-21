@@ -8,7 +8,10 @@
 # Datum de RÉALITÉ pour host_launch.sh : l'exécute vraiment contre tmux (pas de gate-vert seul). Command
 # FACTICE (pas de claude/OAuth/agent réel) → safe en CI/dev. Vérifie le mécanisme tmux-holder-sans-bwrap :
 #   1. host_launch crée le sock-dir par-pod (0700) + une session tmux `lcars-pod-<id>`.
-#   2. Le COMMAND opaque reçoit l'argv EXACT (<role> <pod_id> <pod_dir> <sp>) — contrat de bout en bout.
+#   2. host_launch forwards its opaque COMMAND array VERBATIM ("$@"). The real command is
+#      `claude_launch <role> <pod_id> <pod_dir>` (3 args) — the SP is OUT of argv (read from
+#      pod_dir/.lcars/system-prompt.md via --system-prompt-file), NOT a 4th positional. We append a
+#      synthetic trailing token to PROVE verbatim passthrough (arg count + spaces preserved).
 #   3. Le holder reste vivant (handle de vie du pod).
 #   4. SIGTERM au holder → trap → `tmux kill-server` : session ET sock-dir disparaissent (teardown
 #      self-contained, pas de cascade namespace sur l'hôte).
@@ -55,18 +58,19 @@ trap cleanup EXIT
 
 mkdir -p "$SOCK_BASE" "$POD_DIR"
 
-# COMMAND factice : à la place de claude_launch.sh. Écrit un marqueur prouvant qu'il a reçu l'argv EXACT
-# (<role> <pod_id> <pod_dir> <sp>), puis reste vivant (sinon tmux ferme la session aussitôt).
+# Fake COMMAND standing in for claude_launch.sh. Writes a marker proving it received the opaque argv
+# VERBATIM, then stays alive (else tmux closes the session at once). The real vendor command is 3 args
+# (role/pod_id/pod_dir); $4 here is the synthetic passthrough probe, NOT the SP (SP is out of argv).
 FAKE_CMD="$WORK/fake_claude_launch.sh"
 cat > "$FAKE_CMD" <<'FAKE'
 #!/bin/sh
-# argv attendu : $1=role $2=pod_id $3=pod_dir $4=sp
+# expected argv: $1=role $2=pod_id $3=pod_dir $4=probe (synthetic passthrough token, not the SP)
 {
   echo "argc=$#"
   echo "role=$1"
   echo "pod_id=$2"
   echo "pod_dir=$3"
-  echo "sp=$4"
+  echo "probe=$4"
 } > "$ITEST_MARKER"
 exec sleep 30
 FAKE
@@ -77,15 +81,17 @@ chmod +x "$FAKE_CMD"
 # ------------------------------------------------------------------
 step "1. host_launch.sh (containment: none) — launch"
 
-# Argv = celui produit par LauncherPortBackend.build_spawn :
-#   host_launch <role> <pod_id> <pod_dir>  <COMMAND = fake_cmd role pod_id pod_dir sp>
+# Argv mirrors the shape assembled in Pod's :launching transition (launcher + opaque command):
+#   host_launch <role> <pod_id> <pod_dir>  <COMMAND = claude_launch role pod_id pod_dir>
+# Here COMMAND = fake_cmd role pod_id pod_dir <probe>: the 4th token is the synthetic passthrough
+# probe (spaces preserved), NOT the SP — prod's command is 3 args, SP read from a file out of argv.
 ITEST_MARKER="$MARKER" \
 LCARS_TMUX_SOCK_BASE="$SOCK_BASE" \
 LCARS_TMUX_BIN="$TMUX_BIN" \
 LCARS_POD_SESSION_ID="sess-$$" \
 LCARS_POD_SESSION_NAME_PREFIX="tester_role" \
   "$LAUNCHER" "role" "$POD_ID" "$POD_DIR" \
-              "$FAKE_CMD" "role" "$POD_ID" "$POD_DIR" "SP inline de test" &
+              "$FAKE_CMD" "role" "$POD_ID" "$POD_DIR" "passthrough probe with spaces" &
 HOLDER_PID=$!
 
 # Attendre l'apparition de la session (le serveur tmux frais se crée au new-session).
@@ -108,9 +114,9 @@ perms="$(stat -c '%a' "$SOCK_BASE/$POD_ID" 2>/dev/null)"
 kill -0 "$HOLDER_PID" 2>/dev/null && ok "holder vivant (handle Port)" || ko "holder mort après launch"
 
 # ------------------------------------------------------------------
-# 2. Contrat argv — le COMMAND opaque a reçu exactement <role> <pod_id> <pod_dir> <sp>
+# 2. Argv contract — the opaque COMMAND was forwarded VERBATIM: <role> <pod_id> <pod_dir> <probe>
 # ------------------------------------------------------------------
-step "2. Contrat argv transmis au COMMAND"
+step "2. Opaque COMMAND argv forwarded verbatim"
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$MARKER" ] && break; sleep 0.3; done
 
@@ -120,7 +126,7 @@ if [ -f "$MARKER" ]; then
   grep -qx "role=role" "$MARKER"           && ok "argv[1]=role"     || ko "role: $(grep '^role=' "$MARKER")"
   grep -qx "pod_id=$POD_ID" "$MARKER"      && ok "argv[2]=pod_id"   || ko "pod_id: $(grep '^pod_id=' "$MARKER")"
   grep -qx "pod_dir=$POD_DIR" "$MARKER"    && ok "argv[3]=pod_dir"  || ko "pod_dir: $(grep '^pod_dir=' "$MARKER")"
-  grep -qx "sp=SP inline de test" "$MARKER" && ok "argv[4]=sp (inline, espaces préservés)" || ko "sp: $(grep '^sp=' "$MARKER")"
+  grep -qx "probe=passthrough probe with spaces" "$MARKER" && ok "argv[4]=probe (opaque tail, spaces preserved)" || ko "probe: $(grep '^probe=' "$MARKER")"
 else
   ko "COMMAND jamais exécuté (marqueur absent) — argv non transmis ?"
 fi
