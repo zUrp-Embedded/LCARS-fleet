@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   A merge can fail for NATURALLY distinct reasons (`Fleet.Pilot.MergeOutcome`, re-read from
   the PR object): already-merged / cancelled (human close) / draft / policy (human re-request) / real git
   conflict / unknown. Each has its own routing. A REAL conflict goes to `conflict_rework`
-  (étage 1: the producer resolves LOCALLY on its PR — a local merge needs no forge credentials;
+  (tier 1: the producer resolves LOCALLY on its PR — a local merge needs no forge credentials;
   bounded by the same `max_rework_rounds`, counted via the `[conflict-rework:pr-N` markers).
   The throttle for escalated cases = the `lcars-awaits-arch` lock laid by `ArchEscalation` (the poller
   SKIPS the issue), not an IncidentRegistry (there is no resolution loop to bound here).
@@ -118,9 +118,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     * `:policy`   → git-mergeable but branch-protection refuses (approvals cleared by a
                     human RE-REQUEST, CI…) → we re-converge: re-dispatch the re-requested judge (timeline).
                     No re-requested = policy block we can't lift mechanically → honest escalation.
-    * `:conflict` → BOUNDED producer conflict-rework (étage 1, `conflict_rework/4`: local
+    * `:conflict` → BOUNDED producer conflict-rework (tier 1, `conflict_rework/4`: local
                     resolution on the same PR — needs no forge credentials); budget exhausted or
-                    unreadable → honest arch escalation (étage 3). Étage 2 (gatekeeper-agent
+                    unreadable → honest arch escalation (tier 3). Tier 2 (gatekeeper-agent
                     diagnosis before the arch) is a later increment.
     * `:unknown`  → not classifiable → HONEST arch escalation (we don't guess).
   """

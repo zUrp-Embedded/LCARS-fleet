@@ -61,7 +61,7 @@ defmodule Fleet.Spawner do
   `UUID.uuid4()` caller-side is only the FALLBACK, used when no `:pod_id` is supplied (statistically
   collision-free without a central coordinator). Every real rail passes a DETERMINISTIC, meaningful id
   instead — `<repo-slug>-issue-N-role` (step dispatch), `permanent-<role>` (permanent boot), and
-  `recall-<projet>-<role>` — because determinism is what makes a re-boot or a respawn land back on the
+  `recall-<project>-<role>` — because determinism is what makes a re-boot or a respawn land back on the
   SAME pod instead of forking a twin. Reading this section as "pod_ids are uuids" would invert that.
 
   ## Exit codes
@@ -208,19 +208,19 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Deliberate RECALL: brings the `(projet, role)` agent back alive from its checkpointed seed
-  (`<seed_root>/<projet>/pods/`, cf. `SeedStore`). Reads the SEED descriptor `<role>.json` (uuid + jsonl) —
+  Deliberate RECALL: brings the `(project, role)` agent back alive from its checkpointed seed
+  (`<seed_root>/<project>/pods/`, cf. `SeedStore`). Reads the SEED descriptor `<role>.json` (uuid + jsonl) —
   NOT a `workflow_map`, which is the step-pipeline map the dispatcher reads and has nothing to do with
   recall. Spawns a pod in resume mode:
   `session_id` = the seed's uuid, `resume: true`, the seed is restored into the pod BEFORE the launch
   (state :projecting → maybe_recall_restore) → claude `--resume <uuid>` picks up the context. Desktop name
-  `<projet>_<role>`. `allow_no_brief` (the pod resumes its context, not idle; no fresh brief).
+  `<project>_<role>`. `allow_no_brief` (the pod resumes its context, not idle; no fresh brief).
 
   `{:ok, pid}` | `{:error, :no_seed}` (no seed) | `{:error, term}`.
   """
   @spec recall(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
-  def recall(projet, role) when is_binary(projet) and is_binary(role) do
-    case Fleet.Spawner.SeedStore.read_map(projet, role) do
+  def recall(project, role) when is_binary(project) and is_binary(role) do
+    case Fleet.Spawner.SeedStore.read_map(project, role) do
       :none ->
         {:error, :no_seed}
 
@@ -229,12 +229,12 @@ defmodule Fleet.Spawner do
         # recalled pod must come back with the SAME effective profile a fresh spawn composes, else a
         # structural modop overlay would be silently dropped on recall.
         with {:ok, cap_profile} <- Fleet.CapProfile.resolve(Fleet.CapProfile, role) do
-          spawn_pod(cap_profile, "recall-#{projet}-#{role}",
-            pod_id: "recall-#{projet}-#{role}",
+          spawn_pod(cap_profile, "recall-#{project}-#{role}",
+            pod_id: "recall-#{project}-#{role}",
             session_id: uuid,
             resume: true,
             recall_seed_jsonl: jsonl,
-            rc_name: "#{projet}_#{role}",
+            rc_name: "#{project}_#{role}",
             allow_no_brief: true
           )
         end

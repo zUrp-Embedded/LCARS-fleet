@@ -16,7 +16,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   - `pod.drift` — DORMANT: the handler is wired + tested but NO
     producer emits it. The claimed `Fleet.Spawner.PermanentBoot` producer does not exist,
     and the "corrupt versioned base seed" it targeted disappeared with the boot-from-base nuke
-    (unified graine flow). If a real drift signal is ever needed, whoever wires it MUST add its
+    (unified seed flow). If a real drift signal is ever needed, whoever wires it MUST add its
     `source:` here (anti-spoof rule). Escalates on `drift_count >= 3` once a producer emits.
   - `oauth.refresh.failed` — DORMANT: no producer on the launcher/credentials side yet.
 

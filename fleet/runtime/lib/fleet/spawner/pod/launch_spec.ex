@@ -73,7 +73,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @spec pod_cwd(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t()
   def pod_cwd(opts, cap_profile, pod_dir) do
     cond do
-      # Worker projet → /home/<project>.
+      # Worker project → /home/<project>.
       project = rc_project(opts, cap_profile) ->
         "/home/#{project}"
 

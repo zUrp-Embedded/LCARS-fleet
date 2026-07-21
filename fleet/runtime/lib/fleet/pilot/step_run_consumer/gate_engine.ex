@@ -32,7 +32,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     * INHERITED route (no-workflow_map judge carrying the producer's step) → no-workflow_map
       resolution, NEVER the step's gate (otherwise a qualifier carrying `build`
       would fall into a non-producer terminal → merge on 1 judge, quorum short-circuited).
-    * BOUNDED bounce: budget = nb_steps × (max_rework_rounds + 1) signed step_runs;
+    * BOUNDED bounce: budget = `step_count` × (max_rework_rounds + 1) signed step_runs;
       unreadable budget → `{:error, {:rework_budget_unreadable, _}}` surfaced, NEVER a
       blind bounce (an infinite rework loop must not be representable).
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
@@ -369,7 +369,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # Bounded bounce. Budget = nb_steps * (max_rework_rounds + 1) signed step_runs. The
+  # Bounded bounce. Budget = `step_count` * (`max_rework_rounds` + 1) signed step_runs. The
   # forge-native counter = the `[step_run:role:sha]` comments already posted (monotonic). Read ONLY here
   # (fail branch) → zero I/O on the happy path. Unreadable budget → we do NOT bounce
   # blindly (an unverifiable bounce could loop): we surface.

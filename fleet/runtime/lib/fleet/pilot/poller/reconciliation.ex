@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -185,7 +185,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # after the verdict the session sits at the prompt indefinitely (no lifetime cap since
   # `max_alive_sec` was nuked 2026-07-20) and re-briefed by the next dispatch (the #5 zombie loop
   # fed on this). No reason to live → reaped; a later re-dispatch re-spawns fresh (idempotent
-  # dispatch, graine/seed resume).
+  # dispatch, seed resume).
   # Fail-safe: enumeration failure → empty set (never kill blindly).
   defp quiesced_brick_pods(issues, pulls, %Seams{} = seams) do
     locked_issues = for i <- issues, locked?(i), into: MapSet.new(), do: i["number"]

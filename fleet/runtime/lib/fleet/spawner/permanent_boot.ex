@@ -261,7 +261,7 @@ defmodule Fleet.Spawner.PermanentBoot do
     pod_id = @permanent_prefix <> name
 
     # No boot-from-base anymore (reorg 2026-07-19): the pod itself runs the UNIFIED seed decision
-    # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured graine →
+    # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured seed →
     # resume from it; else fresh). PermanentBoot only names the pod — one seed authority, in the pod.
     case spawner.(cp, pod_id, pod_id: pod_id) do
       {:ok, _pid} ->
@@ -282,7 +282,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   # There is no boot-from-base branch here: the pod's unified seed decision (`Pod.maybe_slot_resume` —
-  # live jsonl / captured graine / fresh) is the ONLY resume authority, and the corrupt-seed rail died
+  # live jsonl / captured seed / fresh) is the ONLY resume authority, and the corrupt-seed rail died
   # with the artifact it guarded (reorg 2026-07-19). The absence is LOCKED and explained where it is
   # enforced — `permanent_boot_test.exs`, "the boot-from-base branch is GONE" — so read it there.
 end

@@ -351,7 +351,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
   test "the boot-from-base branch is GONE (reorg 2026-07-19 — one seed authority, in the pod)" do
     # Base seeds died with the reorg: the pod's unified seed decision (`maybe_slot_resume`: live
-    # jsonl / captured graine / fresh) replaced them, and the F-C043 corrupt-seed rail died with
+    # jsonl / captured seed / fresh) replaced them, and the F-C043 corrupt-seed rail died with
     # the artifact it guarded.
     refute function_exported?(PermanentBoot, :escalate_corrupt_seed, 3)
 

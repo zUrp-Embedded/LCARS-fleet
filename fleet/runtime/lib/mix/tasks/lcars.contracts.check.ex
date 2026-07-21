@@ -138,8 +138,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # The Loader must unwrap the v2.5 ENVELOPE (kind/metadata/spec.steps) into the single internal
-  # FLAT form. There is NO v1: a flat/enveloppe-less YAML fails the v2.5 schema before `normalize`.
-  # « v1/v2.5 » = external envelope vs internal flat (same version, two shapes), NOT two versions.
+  # FLAT form. There is NO v1: a flat/envelope-less YAML fails the v2.5 schema before `normalize`.
+  # "v1/v2.5" = external envelope vs internal flat (same version, two shapes), NOT two versions.
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   defp check_pipeline_v25_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
@@ -721,7 +721,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       id: "runtime.no_root_boot_guard",
       remediation: "R-no-root-runtime",
       file: "config/runtime.exs",
-      pattern: ~r/R-no-root-runtime|refuse de tourner en root/,
+      pattern: ~r/R-no-root-runtime/,
       confirm: ~r/root/,
       missing: "no anti-root self-check at boot (FORGE-D1)",
       note:

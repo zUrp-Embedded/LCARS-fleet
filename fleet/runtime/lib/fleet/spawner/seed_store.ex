@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.SeedStore do
   @moduledoc """
   Pod seed-store. When a PROJECT-pod dies, the FIRST ROUND of its ACTIVE session JSONl
-  (its memory) is checkpointed to `<seed_root>/<projet>/pods/<role>.jsonl` + a seed map
+  (its memory) is checkpointed to `<seed_root>/<project>/pods/<role>.jsonl` + a seed map
   `<role>.json` (`{uuid, slug}`) for later recall (`--resume`).
   A checkpoint failure NEVER kills the pod: every failure lands as a logged warning + `{:error, _}`
   (which the dying `Pod` discards) and the teardown proceeds. What is lost is only the
@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.SeedStore do
   NB git: the `cp` drops the seed; putting the work repo under git is a SEPARATE gesture (outside the
   teardown hot-path — no `git` in a pod's death).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
   require Logger
 
@@ -37,22 +37,22 @@ defmodule Fleet.Spawner.SeedStore do
   """
   @spec checkpoint(Path.t(), String.t(), String.t(), String.t()) ::
           :ok | :none | {:error, term()}
-  def checkpoint(pod_dir, projet, role, session_id)
-      when is_binary(pod_dir) and is_binary(projet) and is_binary(role) and is_binary(session_id) do
-    # `projet` AND `role` are path COMPONENTS of the seed-store (`<root>/<projet>/pods/<role>.jsonl`).
+  def checkpoint(pod_dir, project, role, session_id)
+      when is_binary(pod_dir) and is_binary(project) and is_binary(role) and is_binary(session_id) do
+    # `project` AND `role` are path COMPONENTS of the seed-store (`<root>/<project>/pods/<role>.jsonl`).
     # They come from `rc_name` (a dispatch/recall input, uncontrolled by construction): a `..`/`/`
     # would traverse outside the store (writing an arbitrary host `.jsonl`). We cast both into a slug and
     # confine the destination directory under the root BEFORE any `mkdir_p!`/`write!` — a malformed name
     # never reaches the FS (refusal = logged warning + `{:error, _}`; the checkpoint is a non-fatal
     # memory bonus, the dying pod proceeds).
-    with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
+    with {:ok, project_slug} <- Fleet.Slug.cast(project),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
-         {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug) do
-      do_checkpoint(pod_dir, projet_slug, role_slug, session_id, Path.join(projet_dir, "pods"))
+         {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug) do
+      do_checkpoint(pod_dir, project_slug, role_slug, session_id, Path.join(project_dir, "pods"))
     else
       {:error, reason} ->
         Logger.warning(
-          "SeedStore: checkpoint refused (unconfined name) projet=#{inspect(projet)} role=#{inspect(role)}: #{inspect(reason)}"
+          "SeedStore: checkpoint refused (unconfined name) project=#{inspect(project)} role=#{inspect(role)}: #{inspect(reason)}"
         )
 
         {:error, reason}
@@ -63,13 +63,13 @@ defmodule Fleet.Spawner.SeedStore do
     # kill the dying pod — same downgrade as `do_checkpoint` (logged warning + `{:error, _}`).
     e ->
       Logger.warning(
-        "SeedStore: checkpoint #{inspect(projet)}/#{inspect(role)} FAILED (non-fatal): #{inspect(e)}"
+        "SeedStore: checkpoint #{inspect(project)}/#{inspect(role)} FAILED (non-fatal): #{inspect(e)}"
       )
 
       {:error, e}
   end
 
-  defp do_checkpoint(pod_dir, projet, role, session_id, dest_dir) do
+  defp do_checkpoint(pod_dir, project, role, session_id, dest_dir) do
     # Active JSONl = the most recent under .claude/projects/*/*.jsonl (shared authority of the glob:
     # `Pod.SessionFiles.latest_jsonl/1`, robust to volatile files).
     case Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir) do
@@ -90,20 +90,24 @@ defmodule Fleet.Spawner.SeedStore do
         # This subset `--resume`s correctly with only the round-1 context.
         File.write!(Path.join(dest_dir, "#{role}.jsonl"), first_round(jsonl))
 
+        # Sidecar descriptor. `read_map/2` reads ONLY `uuid` and `slug`; `project` and `role` are
+        # there for a human opening the seed store by hand. Nothing parses them, which is why
+        # renaming the key from its earlier French spelling cannot break a seed already on disk —
+        # an old file keeps resuming, the extra key is simply never looked at.
         File.write!(
           Path.join(dest_dir, "#{role}.json"),
-          Jason.encode!(%{"uuid" => uuid, "slug" => slug, "projet" => projet, "role" => role})
+          Jason.encode!(%{"uuid" => uuid, "slug" => slug, "project" => project, "role" => role})
         )
 
         Logger.info(
-          "SeedStore: checkpoint #{projet}/#{role} (uuid=#{uuid} = deterministic builder) → #{dest_dir}"
+          "SeedStore: checkpoint #{project}/#{role} (uuid=#{uuid} = deterministic builder) → #{dest_dir}"
         )
 
         :ok
     end
   rescue
     e ->
-      Logger.warning("SeedStore: checkpoint #{projet}/#{role} FAILED (non-fatal): #{inspect(e)}")
+      Logger.warning("SeedStore: checkpoint #{project}/#{role} FAILED (non-fatal): #{inspect(e)}")
       {:error, e}
   end
 
@@ -129,14 +133,14 @@ defmodule Fleet.Spawner.SeedStore do
   store) if the seed map AND the JSONl exist; otherwise `:none`.
   """
   @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
-  def read_map(projet, role) when is_binary(projet) and is_binary(role) do
-    # Leaf-read of the seed-store: `projet`/`role` are path components. Same casts as
-    # `checkpoint/4` (an exposed `recall(projet, role)` takes these two args from a caller) → an
+  def read_map(project, role) when is_binary(project) and is_binary(role) do
+    # Leaf-read of the seed-store: `project`/`role` are path components. Same casts as
+    # `checkpoint/4` (an exposed `recall(project, role)` takes these two args from a caller) → an
     # unconfined name yields `:none` (seed not found) rather than reading an arbitrary host `.json`/`.jsonl`.
-    with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
+    with {:ok, project_slug} <- Fleet.Slug.cast(project),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
-         {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug),
-         dir = Path.join(projet_dir, "pods"),
+         {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug),
+         dir = Path.join(project_dir, "pods"),
          jsonl = Path.join(dir, "#{role_slug}.jsonl"),
          {:ok, raw} <- File.read(Path.join(dir, "#{role_slug}.json")),
          {:ok, %{"uuid" => uuid} = m} <- Jason.decode(raw),
@@ -218,11 +222,11 @@ defmodule Fleet.Spawner.SeedStore do
   the most recent GRAINE record of each type — `mode` / `permission-mode` / `bridge-session` /
   `system/bridge_status` — the F5 minimal-seed set (proven 2026-07-19: those records alone resume
   cleanly, re-attach the slot, and start on an EMPTY context). The sidecar therefore IS a resumable
-  graine, not just the identity lines. Captures only once RC-registered (identity lines present).
+  seed, not just the identity lines. Captures only once RC-registered (identity lines present).
 
   MERGE-BY-TYPE with the existing sidecar: a resumed session may not re-emit every record type
   (e.g. `mode`) — a type absent from the live jsonl keeps its previously-captured line, so the
-  graine never thins across boots.
+  seed never thins across boots.
 
   `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
   Best-effort: never raises to the caller (a miss = the slot is re-minted + re-captured next boot).
@@ -231,10 +235,10 @@ defmodule Fleet.Spawner.SeedStore do
   def capture_slot_bridge(pod_dir, uuid) when is_binary(pod_dir) and is_binary(uuid) do
     with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
          {:ok, jsonl} <- Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir),
-         %{} = live <- graine_records(jsonl),
+         %{} = live <- seed_records(jsonl),
          true <- rc_registered?(live) || :none do
       File.mkdir_p!(slot_dir())
-      merged = Map.merge(existing_graine_records(slot_path(uuid)), live)
+      merged = Map.merge(existing_seed_records(slot_path(uuid)), live)
       File.write!(slot_path(uuid), (merged |> Map.values() |> Enum.join("\n")) <> "\n")
       :ok
     else
@@ -248,11 +252,11 @@ defmodule Fleet.Spawner.SeedStore do
   @doc """
   The identity's slot GRAINE, if one was captured: `{:ok, path}` (non-empty sidecar for this
   deterministic `uuid`) | `:none`. THE probe of the unified seed decision (reorg 2026-07-19,
-  socle Décision 1): an RC pod with no live jsonl but a graine resumes FROM it — slot back,
+  core Decision 1): an RC pod with no live jsonl but a seed resumes FROM it — slot back,
   context empty — instead of minting a new Desktop slot.
   """
-  @spec slot_graine(String.t()) :: {:ok, Path.t()} | :none
-  def slot_graine(uuid) when is_binary(uuid) do
+  @spec slot_seed(String.t()) :: {:ok, Path.t()} | :none
+  def slot_seed(uuid) when is_binary(uuid) do
     with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
          path = slot_path(uuid),
          {:ok, %{size: size}} when size > 0 <- File.stat(path) do
@@ -286,7 +290,7 @@ defmodule Fleet.Spawner.SeedStore do
   # Most recent GRAINE record of EACH type present, keyed by type — the F5 minimal-seed set:
   # `mode` + `permission-mode` (session posture) and the RC-identity pair (`bridge-session` /
   # `system/bridge_status`, both formats seen live 2026-07-19).
-  defp graine_records(jsonl_path) do
+  defp seed_records(jsonl_path) do
     jsonl_path
     |> File.stream!()
     |> Enum.reduce(%{}, fn line, acc ->
@@ -301,14 +305,14 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   # The sidecar's previously-captured records (same keying) — `%{}` if absent/unreadable.
-  defp existing_graine_records(path) do
-    if File.exists?(path), do: graine_records(path), else: %{}
+  defp existing_seed_records(path) do
+    if File.exists?(path), do: seed_records(path), else: %{}
   rescue
     _ -> %{}
   end
 
   # Captured only once the session is RC-REGISTERED (an identity line present): a pre-registration
-  # capture would store mode/permission alone — a graine that resumes but re-attaches NO slot.
+  # capture would store mode/permission alone — a seed that resumes but re-attaches NO slot.
   defp rc_registered?(records), do: Map.has_key?(records, :session) or Map.has_key?(records, :status)
 
   defp dest_has_rc_identity?(dest) do

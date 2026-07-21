@@ -427,8 +427,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # ── `main` lock: the new repo is born READY for the agent workflow with a forge-enforced GATE ──
   # The role accounts (producer/judges/gatekeeper) ALREADY have **write** on any repo of the org via the
   # tofu teams (`writers`/`judges`, `include_all_repositories`) → no more redundant per-repo grant here (their
-  # reviews count at the gate + the gatekeeper merges). LEFT is THE gesture: protect `main` — N approvals (= nb of
-  # judges) + dismiss-stale (re-review on rework) + block-on-rejected (a REQUEST_CHANGES blocks) + no direct
+  # reviews count at the gate + the gatekeeper merges). LEFT is THE gesture: protect `main` — N approvals (= one per
+  # judge) + dismiss-stale (re-review on rework) + block-on-rejected (a REQUEST_CHANGES blocks) + no direct
   # push (merge via PR). Mechanical (this step, not a human action) → every onboarded project has the arbiter on the
   # FORGE side. `work/ops` + feature-branches NOT protected (zones of direct system movement).
   defp lock_main(full_name, opts), do: protect_main(full_name, opts)

@@ -125,7 +125,7 @@ defmodule Fleet.Pilot.Poller do
     error_count: 0,
     err_streak: 0,
     last_error: nil,
-    # nb of DISPATCH errors (per item) of the last tick. The forge list
+    # Number of DISPATCH errors (per item) on the last tick. The forge list
     # (`list_open_*`) can succeed while some `dispatch_*` fail — these errors are surfaced
     # here for observability (`stats/1`) + telemetry; they do NOT feed `err_streak` (the
     # multi-project `do_poll` resets the streak to 0 each successful tick, keeping only

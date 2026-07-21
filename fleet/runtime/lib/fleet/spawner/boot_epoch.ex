@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.BootEpoch do
       never resume a dead pod's accumulated session);
     * a snapshot from a PREVIOUS epoch (clean `fleet_v2 stop`, fleet crash — the whole BEAM was
       down) = a STALE snapshot: nothing was mid-flight in this fleet life, so the unified seed
-      decision (`Pod.maybe_slot_resume`: live jsonl → resume in place; graine → resume from it)
+      decision (`Pod.maybe_slot_resume`: live jsonl → resume in place; seed → resume from it)
       applies exactly as on a first boot. Without this discriminator, a clean stop left a
       non-terminal `state.json` (`monitoring`) and EVERY reboot fell into `:recreate` — the slot
       and the context never came back (proven live 2026-07-19: starfleet rebooted `resume=0`).
@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.BootEpoch do
   `id/0` is a cheap `:persistent_term` read. Old snapshots without the field compare `nil` ≠
   current → stale epoch (correct: they predate this fleet life by construction).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   @key {__MODULE__, :id}

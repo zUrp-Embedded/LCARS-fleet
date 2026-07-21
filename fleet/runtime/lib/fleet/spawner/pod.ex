@@ -1001,11 +1001,11 @@ defmodule Fleet.Spawner.Pod do
       nil ->
         :ok
 
-      projet ->
+      project ->
         _ =
           Fleet.Spawner.SeedStore.checkpoint(
             data.pod_dir,
-            projet,
+            project,
             cap_profile_name(data.cap_profile),
             data.session_id
           )
@@ -1023,7 +1023,7 @@ defmodule Fleet.Spawner.Pod do
 
     case File.read(base.state_fs_path) do
       # No prior state.json = a FRESH pod (first boot for this pod_id) → the UNIFIED seed decision
-      # (maybe_slot_resume): an RC identity with a live jsonl or a captured graine RESUMES it; else
+      # (maybe_slot_resume): an RC identity with a live jsonl or a captured seed RESUMES it; else
       # fresh create. ONLY on this branch — a crash-recovery (snapshot below) keeps the fresh-reroll
       # doctrine (never resume a dead pod's accumulated session).
       {:error, :enoent} ->
@@ -1040,7 +1040,7 @@ defmodule Fleet.Spawner.Pod do
             else
               # PREVIOUS fleet life (clean stop / fleet crash — the whole BEAM was down): the
               # snapshot is STALE, nothing was mid-flight in THIS life → the unified seed decision
-              # applies exactly as on a first boot (live jsonl → resume in place; graine → resume;
+              # applies exactly as on a first boot (live jsonl → resume in place; seed → resume;
               # else fresh). Live scar 2026-07-19: without this, every clean reboot fell into
               # :recreate and the slot/context never came back.
               Logger.info(
@@ -1121,7 +1121,7 @@ defmodule Fleet.Spawner.Pod do
   #      identity) — THE per-project arch continuity story, zero restore needed;
   #   4. a captured GRAINE exists for the identity → resume FROM it via the recall machinery
   #      (restore copies it under the uuid): slot back, context empty (F5) — judges/one-shots;
-  #   5. nothing → fresh create (first boot ever; the capture seeds the graine for next time).
+  #   5. nothing → fresh create (first boot ever; the capture seeds the seed for next time).
   defp maybe_slot_resume(base) do
     cond do
       base.resume or Keyword.has_key?(base.opts, :recall_seed_jsonl) ->
@@ -1134,9 +1134,9 @@ defmodule Fleet.Spawner.Pod do
         %{base | resume: true}
 
       true ->
-        case Fleet.Spawner.SeedStore.slot_graine(base.session_id) do
-          {:ok, graine} ->
-            %{base | resume: true, opts: Keyword.put(base.opts, :recall_seed_jsonl, graine)}
+        case Fleet.Spawner.SeedStore.slot_seed(base.session_id) do
+          {:ok, seed} ->
+            %{base | resume: true, opts: Keyword.put(base.opts, :recall_seed_jsonl, seed)}
 
           :none ->
             base

@@ -867,7 +867,7 @@ defmodule Fleet.Pilot.ForgeClient do
   `{:error, _}` on HTTP/config failure — the caller does NOT bounce blindly if the
   budget is not verifiable (an unverifiable bounce could loop).
 
-  PAGINATED: even though the rework budget (`nb_steps * (max_rounds+1)`) generally
+  PAGINATED: even though the rework budget (`step_count * (max_rework_rounds+1)`, GateEngine) generally
   stays under 50, the counter is the source-of-truth of the anti-runaway bound — a signed step_run
   lost beyond 50 would undercount the budget (over-permissive). So we read ALL the pages.
   """

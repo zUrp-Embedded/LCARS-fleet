@@ -748,13 +748,13 @@ defmodule Fleet.Spawner.PodTest do
       assert content["session_id"] == expected
     end
 
-    test "graine decision: a captured sidecar for the identity → resume-FROM-GRAINE (slot back)",
+    test "seed decision: a captured sidecar for the identity → resume-FROM-SEED (slot back)",
          %{tmp_dir: tmp_dir} do
-      pod_id = "pod-graine-#{System.unique_integer([:positive])}"
+      pod_id = "pod-seed-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
       uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
-      # The identity's graine sits in the seed store (captured by a previous life).
+      # The identity's seed sits in the seed store (captured by a previous life).
       Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
       on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
@@ -767,7 +767,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, _pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _largs, env}, 2_000
 
-      # The pod flipped itself to resume (unified seed decision) and the graine was RESTORED
+      # The pod flipped itself to resume (unified seed decision) and the seed was RESTORED
       # under its identity (the --resume will find it → slot re-attached).
       assert env["LCARS_POD_RESUME"] == "1"
 
@@ -778,12 +778,12 @@ defmodule Fleet.Spawner.PodTest do
         end)
         |> Enum.find(&File.exists?/1)
 
-      assert restored, "the graine should be restored under the identity's jsonl path"
+      assert restored, "the seed should be restored under the identity's jsonl path"
       assert File.read!(restored) =~ "cse_01GRAINE"
     end
 
-    test "graine decision: NO sidecar, NO live jsonl → fresh create (resume 0)", %{tmp_dir: tmp_dir} do
-      pod_id = "pod-nograine-#{System.unique_integer([:positive])}"
+    test "seed decision: NO sidecar, NO live jsonl → fresh create (resume 0)", %{tmp_dir: tmp_dir} do
+      pod_id = "pod-noseed-#{System.unique_integer([:positive])}"
       Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
       on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
 
@@ -792,7 +792,7 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_POD_RESUME"] == "0"
     end
 
-    test "boot-epoch: a snapshot from a PREVIOUS fleet life + graine → RESUME (not a crash recovery)",
+    test "boot-epoch: a snapshot from a PREVIOUS fleet life + seed → RESUME (not a crash recovery)",
          %{tmp_dir: tmp_dir} do
       # Live scar 2026-07-19: a clean `fleet_v2 stop` leaves a non-terminal state.json — without the
       # epoch discriminator every reboot fell into :recreate and the slot never came back.
@@ -816,7 +816,7 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # The identity's graine exists.
+      # The identity's seed exists.
       Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
       on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
@@ -853,7 +853,7 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # Even WITH a graine present, a same-life crash NEVER resumes (fresh-reroll).
+      # Even WITH a seed present, a same-life crash NEVER resumes (fresh-reroll).
       Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
       on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
