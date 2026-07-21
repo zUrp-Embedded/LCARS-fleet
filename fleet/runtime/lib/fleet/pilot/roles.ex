@@ -82,6 +82,25 @@ defmodule Fleet.Pilot.Roles do
             "(#{Exception.message(e)}) — falling back to the delegation default card"
         )
 
+        # Same stance as the intensity fallback: the never-stall substitution stays, but
+        # swapping a project's DECLARED card for the default is a judgment-layer change —
+        # recorded as an incident (recurrence → sysadmin issue), never only a warning.
+        incident =
+          Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+        _ =
+          try do
+            incident.("card", repo, :declared_card_unloadable,
+              reason_detail: "#{inspect(name)}: #{Exception.message(e)}"
+            )
+          catch
+            # An incident that cannot record must not break the burn (never-stall) — loud, not silent.
+            kind, why ->
+              Logger.warning(
+                "Roles: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
+              )
+          end
+
         Fleet.Workflow.Loader.load!(delegation_workflow_map(opts), loader_opts)
     end
   end

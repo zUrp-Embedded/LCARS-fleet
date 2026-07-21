@@ -95,6 +95,57 @@ defmodule Fleet.Pilot.RolesTest do
 
       assert log =~ "does not load"
     end
+
+    @tag :tmp_dir
+    test "the card substitution records a durable INCIDENT (judgment-layer change, never a whisper)",
+         %{tmp_dir: tmp} do
+      proj = Path.join(tmp, "demo")
+      File.mkdir_p!(proj)
+
+      :ok =
+        Fleet.Pilot.ProjectIntensity.write(proj,
+          intensity_level: "C2",
+          intensity_justification: "x",
+          workflow_map: "standard-qa"
+        )
+
+      # A tmp catalogue holding ONLY the fallback card: the DECLARED one (standard-qa) no
+      # longer loads, the never-stall fallback swaps the judgment layer — the swap must
+      # land in the incident rail (the fallback card itself still loads: never-stall held).
+      maps = Path.join(tmp, "maps")
+      File.mkdir_p!(maps)
+
+      File.write!(Path.join(maps, "brief-gate.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: brief-gate
+      spec:
+        max_rework_rounds: 1
+        jury: [qualifier]
+        steps:
+          only:
+            role: engineer
+      """)
+
+      me = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert ["qualifier"] ==
+                   Roles.project_jury("fleet/demo",
+                     projects_root: tmp,
+                     workflow_maps_root: maps,
+                     incident_fun: fn op, subject, reason, opts ->
+                       send(me, {:incident, op, subject, reason, opts})
+                       :recorded
+                     end
+                   )
+        end)
+
+      assert_received {:incident, "card", "fleet/demo", :declared_card_unloadable, iopts}
+      assert iopts[:reason_detail] =~ "standard-qa"
+      assert log =~ "does not load"
+    end
   end
 
   test "delegation_workflow_map: single accessor of the default card name" do

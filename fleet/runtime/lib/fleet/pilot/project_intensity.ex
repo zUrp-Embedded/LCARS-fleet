@@ -93,6 +93,28 @@ defmodule Fleet.Pilot.ProjectIntensity do
             "falling back to the delegation default card (re-declare to repair)"
         )
 
+        # The fallback is the documented never-stall design — but it CHANGES the project's
+        # judgment layer (an audit-only project burns as a producing rail). A warning is
+        # not a durable fact: the substitution is recorded as an INCIDENT (recurrence →
+        # sysadmin issue on the forge), so a policy silently replaced cannot stay a
+        # whisper. Seam `:incident_fun` (tests, zero forge).
+        incident =
+          Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+        _ =
+          try do
+            incident.("intensity", repo, :declaration_invalid,
+              reason_detail: "#{path}: #{inspect(other)}"
+            )
+          catch
+            # An incident that cannot record must not break the burn (never-stall) — but it
+            # says so loud instead of vanishing.
+            kind, why ->
+              Logger.warning(
+                "ProjectIntensity: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
+              )
+          end
+
         Fleet.Pilot.Roles.delegation_workflow_map(opts)
     end
   end

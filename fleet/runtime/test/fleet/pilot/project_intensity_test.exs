@@ -132,4 +132,33 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
 
     assert log =~ "unreadable/invalid"
   end
+
+  test "an invalid declaration records a durable INCIDENT, never only a warning", %{
+    tmp_dir: tmp
+  } do
+    # The never-stall fallback swaps the project's judgment layer (an audit-only project
+    # would burn as a producing rail): the substitution must become a durable fact
+    # (recurrence → sysadmin issue), not a whisper in a log nobody tails.
+    broken = Path.join(tmp, "broken")
+    File.mkdir_p!(broken)
+    File.write!(Path.join(broken, "intensity.json"), "{not json")
+
+    me = self()
+
+    log =
+      capture_log(fn ->
+        assert "brief-gate" ==
+                 ProjectIntensity.pipeline_default("fleet/broken",
+                   projects_root: tmp,
+                   incident_fun: fn op, subject, reason, opts ->
+                     send(me, {:incident, op, subject, reason, opts})
+                     :recorded
+                   end
+                 )
+      end)
+
+    assert_received {:incident, "intensity", "fleet/broken", :declaration_invalid, iopts}
+    assert iopts[:reason_detail] =~ "intensity.json"
+    assert log =~ "unreadable/invalid"
+  end
 end
