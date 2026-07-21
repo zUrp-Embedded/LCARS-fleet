@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
   are called directly by `Fleet.Pilot.ProjectOnboard`.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -256,10 +256,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   `block_on_rejected_reviews`, `enable_push`, …). It's the **forge-enforced gate**: on the sandbox
   repo, the forge refuses the merge as long as the guards (N approvals, no REQUEST_CHANGES) are
   not green → the arbiter is the forge, not the runtime. Requires repo-admin.
-  Idempotent: an already-placed rule → `:ok`. Gitea returns
-  **403** `"Branch protection already exist"` for this precise case — NOT 409/422 (the codes its
-  docs suggest; both are accepted too). We CANNOT swallow every 403 (a real permission refusal
-  would be masked) → we match the precise MESSAGE, not just the code.
+  Idempotent: an already-placed rule → `:ok`. Gitea signals it with the precise message
+  `"Branch protection already exist"` — carried across **403 / 409 / 422** depending on the version.
+  We match on that MESSAGE, NEVER on the code alone: a 422 for an INVALID rule (bad payload) or a 403
+  for a real permission refusal must NOT be announced as a protection that never took — those return a
+  precise error and `lock_main` fails loud.
   """
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
@@ -268,13 +269,14 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
         {:ok, _} ->
           :ok
 
-        {:error, {:http, code, _}} when code in [409, 422] ->
-          :ok
-
-        {:error, {:http, 403, %{"message" => msg}}} when is_binary(msg) ->
+        # Idempotent ONLY on the "already exist" MESSAGE (403/409/422 across versions), never on the
+        # code alone — an invalid-payload 422 or a permission-refusal 403 falls through to a precise
+        # error, so we never claim a protection the forge rejected.
+        {:error, {:http, code, %{"message" => msg}}}
+        when code in [403, 409, 422] and is_binary(msg) ->
           if String.contains?(msg, "already exist"),
             do: :ok,
-            else: {:error, {:http, 403, %{"message" => msg}}}
+            else: {:error, {:http, code, %{"message" => msg}}}
 
         {:error, _} = err ->
           err

@@ -1005,13 +1005,36 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", rule, opts(handlers))
     end
 
-    test "protect_branch idempotent: rule already set (422) → :ok" do
+    test "protect_branch idempotent: rule already set (422 with the 'already exist' message) → :ok" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
           {422, %{"message" => "branch protection already exists"}}
       }
 
       assert :ok =
+               ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
+    end
+
+    test "protect_branch: a 422 that is NOT 'already exist' (rejected payload) → precise error, never a false :ok" do
+      # The dangerous case: the forge REJECTED the rule (invalid payload) → the branch is NOT protected.
+      # Flattening every 422 to :ok announced a gate that never took; now only the 'already exist' message
+      # is idempotent, an invalid-rule 422 surfaces so lock_main fails loud.
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "required_approvals must be >= 0"}}
+      }
+
+      assert {:error, {:http, 422, %{"message" => "required_approvals must be >= 0"}}} =
+               ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
+    end
+
+    test "protect_branch: a 403 permission refusal (not 'already exist') → precise error, not swallowed" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {403, %{"message" => "insufficient permission"}}
+      }
+
+      assert {:error, {:http, 403, %{"message" => "insufficient permission"}}} =
                ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
     end
   end
