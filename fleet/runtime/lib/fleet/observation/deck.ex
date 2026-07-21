@@ -29,7 +29,7 @@ defmodule Fleet.Observation.Deck do
   (routing + role-catalogue derivation + live snapshots) and passes the
   data to the view as an argument. The view reads no source itself.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   use Plug.Router
@@ -173,11 +173,17 @@ defmodule Fleet.Observation.Deck do
 
   def roles_for_display({:error, _reason} = err), do: err
 
-  # Temporary HARD-CODED guard (user-validated): `CapProfile.list/0` also picks up the Memory-X profiles
-  # from the `monks/` / `archivistes/` subfolders — these are not agent roles to display. Absent
-  # from THIS repo today (so inert here) but `list/0` really scans these subfolders, so this
-  # is not a guard over emptiness: it bites as soon as one of these profiles exists. Clean in the long run = a
-  # semantic field (non-null `monk_registry`/`monk_instance`), not a name prefix.
+  # Temporary HARD-CODED guard (user-validated): the Memory-X profiles are not agent roles to display.
+  # What the catalogue actually scans (`Catalog.name_index/1`) is `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`
+  # — so the two halves of this guard are NOT in the same state:
+  #   * `archivist*` — reachable by construction: the `archivistes/` glob exists. The directory does not
+  #     exist on disk today, so the branch is inert for now, but it bites the day a profile lands there.
+  #   * `monk*` — NOT reachable from the catalogue: there is no `monks/` scan, deliberately (the monks are
+  #     frozen under `canon/_frozen-monks/`, out of the boot loop — `Catalog` says so at its glob). This
+  #     half is kept for the thaw that re-adds the scan; until then nothing can produce such a name here.
+  # Keeping it is cheap and closes the hole at thaw time; what it must NOT do is read as "the catalogue
+  # yields monks today". Clean in the long run = a semantic field (non-null `monk_registry`/`monk_instance`),
+  # not a name prefix.
   defp memory_x_role?(name),
     do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
 
