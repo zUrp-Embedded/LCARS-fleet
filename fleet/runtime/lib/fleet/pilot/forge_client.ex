@@ -676,6 +676,16 @@ defmodule Fleet.Pilot.ForgeClient do
   Returns `{:ok, raw_pr}` | `:none` (no marker: not merged, or pre-marker legacy) |
   `{:error, term}` — the caller must never read an outage as "none". The LAST marker wins
   (a re-merged/reworked brick keeps its latest seal).
+
+  TRUST BOUNDARY — the marker is read AUTHOR-AGNOSTICALLY: this scans every comment on the issue,
+  so anyone able to comment there (a human, a pod) can post a `[merge:pr-N]` and steer which PR
+  resolves as merged. That is accepted, not overlooked, because nothing is GATED on it: the sole
+  consumer is `Delegation.find_issue_pr` → `get_issue_status`, an observability read by which the
+  architect TRACKS a delegation. No merge, stage or gate consults it; the authorization rails are
+  the labels and the native review states. Author-filtering is deliberately NOT applied: the seal is
+  posted by the gatekeeper ROLE account (not the system bot, so the bot-only filter used for the
+  COUNTED `[step_run:role:sha]` markers does not fit), and a filter that missed the real author would
+  make a delivered brick read as NEVER-BUILT — a strictly worse failure than a misleading status.
   """
   @spec merged_pr_of_issue(String.t(), integer(), Keyword.t()) ::
           {:ok, map()} | :none | {:error, term()}
