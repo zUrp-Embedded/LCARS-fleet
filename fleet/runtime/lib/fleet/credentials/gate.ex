@@ -14,12 +14,12 @@ defmodule Fleet.Credentials.Gate do
   the plan check was literally "did you pay", already enforced by the binary. Only the honest
   "is there a login?" survives.
 
-  Backlog: a proper shared AUTH HELPER (token read / refresh / status report) — cf. `BACKLOG.md`.
+  Backlog: a proper shared AUTH HELPER (token read / refresh / status report) is still to be built.
 
   Pure transformer: file read + decode, no state, no process. The claudeDir is resolved by the
   caller (per-human) and passed as an argument.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   @doc """
