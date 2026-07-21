@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   defmodule Clone do
@@ -279,11 +279,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # workflow⇄bootstrap compile cycle): forge auth has a single source `Fleet.Credentials.ForgeAuth.git_env/0`
     # (fleet_credentials is below both apps → no cycle), token via env outside argv.
 
-    # No `set_git_identity/2`: setting the role's identity via `git config` in the workspace's
+    # No `set_git_identity/2`: setting the pod's commit identity via `git config` in the workspace's
     # `.git/config` would be MUTABLE — the pod could overwrite it (`git config user.email …`) → forgeable
     # identity. The identity is set in env at launch (bwrap_launch.sh: GIT_AUTHOR_*/GIT_COMMITTER_*
-    # = LCARS-<role> / <role>@lcars.local + GIT_CONFIG_GLOBAL=/dev/null), a deterministic cooperative
-    # default the pod cannot override. The guarantee lives on the world side:
+    # = the HUMAN of the brief, the role riding the `Co-authored-by:` trailer, cf. `ForgeIdentity`; +
+    # GIT_CONFIG_GLOBAL=/dev/null), a deterministic cooperative default the pod cannot override. The guarantee lives on the world side:
     # `Fleet.Workflow.DeliverableGate.check_identity/3` rejects at push any commit outside the
     # authorized identity (the pod CANNOT push a spoofed deliverable).
   end
