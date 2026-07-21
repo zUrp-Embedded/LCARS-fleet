@@ -110,6 +110,80 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     refute_received {:comment, _, _, _, _}
   end
 
+  # The merge POST times out — but the SERVER committed the merge before the reply was cut.
+  # The old seal skipped every postcondition on any merge error: the merged brick kept no
+  # stage/merged, stayed open with an orphaned lock, and the reconciliation re-dispatched an
+  # already-merged brick (double-delivery).
+  defmodule TimeoutButMergedForge do
+    def merge_pr(_r, _pr, _o), do: {:error, {:http, :timeout, "reply cut mid-flight"}}
+    def get_pull(_r, _pr, _o), do: {:ok, %{"merged" => true, "state" => "closed"}}
+
+    def post_comment(r, n, b, o) do
+      send(self(), {:comment, r, n, b, o})
+      {:ok, :posted}
+    end
+
+    def set_stage(r, n, s, o) do
+      send(self(), {:set_stage, r, n, s, o})
+      {:ok, :posted}
+    end
+
+    def close_issue(r, n, o) do
+      send(self(), {:close_issue, r, n, o})
+      {:ok, :closed}
+    end
+  end
+
+  # Same timeout, but the readback says the PR is NOT merged → the error must propagate
+  # untouched (fail-closed), and nothing may post.
+  defmodule TimeoutNotMergedForge do
+    def merge_pr(_r, _pr, _o), do: {:error, {:http, :timeout, "reply cut mid-flight"}}
+
+    def get_pull(_r, _pr, _o),
+      do: {:ok, %{"merged" => false, "state" => "open", "mergeable" => true}}
+
+    def post_comment(r, n, b, o), do: send(self(), {:comment, r, n, b, o}) && {:ok, :posted}
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
+    def close_issue(_r, _n, _o), do: {:ok, :closed}
+  end
+
+  test "merge POST errors but the SERVER says merged → the seal CONVERGES its postconditions" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok =
+                 GatekeeperSeal.seal_and_merge(
+                   TimeoutButMergedForge,
+                   "fleet/p",
+                   7,
+                   42,
+                   "engineer",
+                   token: "system-token"
+                 )
+      end)
+
+    # The full postcondition queue ran from the readback proof: seal comment, stage/merged,
+    # explicit close — the merged brick can neither stay open nor be re-dispatched.
+    assert_received {:comment, "fleet/p", 42, body, _}
+    assert body =~ "[merge:pr-7]"
+    assert_received {:set_stage, "fleet/p", 42, _, _}
+    assert_received {:close_issue, "fleet/p", 42, _}
+    assert log =~ "SERVER says merged"
+  end
+
+  test "merge POST errors and the readback says NOT merged → error propagates, nothing posts" do
+    assert {:error, {:merge, {:http, :timeout, _}}} =
+             GatekeeperSeal.seal_and_merge(
+               TimeoutNotMergedForge,
+               "fleet/p",
+               7,
+               42,
+               "engineer",
+               token: "system-token"
+             )
+
+    refute_received {:comment, _, _, _, _}
+  end
+
   # The merge is the act that counts; the comment is a POST-merge trace, best-effort: a failed seal
   # comment does NOT block the seal (the merge stays authoritative), but it is LOGGED loud — nothing
   # re-posts it (the dedup only guards against replays), so the loss is visible in the log, never

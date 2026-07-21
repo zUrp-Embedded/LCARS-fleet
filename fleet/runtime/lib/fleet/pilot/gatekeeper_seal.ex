@@ -116,80 +116,149 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
-        # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
-        # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
-        # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
-        # seal comment lands strictly AFTER the delete's second, and again before the close —
-        # read bottom-up the feed then tells: merged, branch deleted, sealed, closed.
-        Fleet.Pilot.WriteSpacing.gap(opts)
-
-        # POST-merge trace. A failed seal comment does not block the sequence (the merge stays
-        # the authoritative truth) but is LOGGED: nothing re-posts it (the dedup only guards
-        # against replays), so a silent loss left the issue without its human-readable seal.
-        case comment(forge, repo, issue_n, body, comment_opts) do
-          {:ok, _} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "GatekeeperSeal: #{repo}##{issue_n} seal comment NOT posted (#{inspect(reason)}) — " <>
-                "merge done (authoritative), human-readable trace missing on the issue, nothing re-posts it"
-            )
-        end
-
-        # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
-        # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
-        # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
-        # `{:skip, :merged}` guard (F-C066) when the close below fails. CI-06 (audit integrite
-        # 2026-07-20): a load-bearing projection MUST have a reconciliation — a discarded, un-retried
-        # failure left the arch waiting FOREVER on a merged brick. Now RETRIED (below), and its
-        # delivery role is ALSO derived from the authoritative merged PR by `Delegation.issue_status`.
-        _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
-
-        # EXPLICIT close, as the LAST visible act on the issue (coherent chronology): never a
-        # `Closes #N` in the PR body (Gitea would auto-close AT MERGE, before even this comment — a
-        # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
-        # AFTER the comment AND the stage/merged: nothing else posts
-        # on the issue once closed. Without `Closes #N`, THIS close is the gesture that
-        # takes the merged brick out of `list_open_issues` — a FAILED close is NOT harmless: the merged brick
-        # re-appears as an OPEN issue and `decide/1` re-engages it every tick (churn / double-delivery). So we
-        # LOG LOUD on failure (the merge is authoritative + done; the stuck-open issue must be visible).
-        #
-        # SIGNED GATEKEEPER (`gk_opts`), NOT system: the merge
-        # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
-        # in the SAME sealing ceremony ("who finished this brick?" two different answers
-        # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
-        # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
-        # else in the pipeline) — not concerned by this inconsistency.
-        # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
-        # the close action (a same-second tie renders inverted in the feed).
-        Fleet.Pilot.WriteSpacing.gap(opts)
-
-        close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
-
-        # Projects the deliverable onto the local clone `/home/projects/<name>` — a MIRROR: the truth is
-        # the merged `main` on the forge; the sync is convergent (`reset --hard origin/main` — the next
-        # merge's sync catches up any missed one) and a failure is logged warning by WorktreeSync. The SERIALIZATION
-        # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
-        # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
-        # a failed alignment = disk behind, never a loss (the deliverable is on the forge). Independent of the
-        # close (the brick is merged either way).
-        _ = worktree_sync().sync(repo)
-
-        case close_result do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            # F-C066 — the merge SUCCEEDED but the explicit close FAILED after retries. We do NOT return a
-            # lying `:ok`: `{:error, {:close_after_merge, reason}}` → the caller SKIPS the unlock (the issue
-            # keeps `lcars-in-flight` = immediate guard) and `decide/1` skips `stage/merged` (durable guard)
-            # → the merged brick is NEVER re-dispatched (no double-delivery).
-            {:error, {:close_after_merge, reason}}
-        end
+        converge_postconditions(
+          forge,
+          repo,
+          pr_number,
+          issue_n,
+          body,
+          comment_opts,
+          forge_opts,
+          gk_opts,
+          opts
+        )
 
       {:error, _} = err ->
-        err
+        # A merge POST that errors does NOT prove the merge did not happen: a timeout can
+        # cut the reply AFTER the server committed it. The postcondition queue used to be
+        # skipped on ANY merge error — a server-merged brick then kept no `stage/merged`,
+        # stayed open with an orphaned lock, and the reconciliation re-dispatched an
+        # already-merged brick (double-delivery). So: READ BACK the real PR state, same
+        # classification authority as the remediation rail (`MergeOutcome`). Server says
+        # merged → converge the SAME postconditions as the nominal path (the forge is the
+        # truth; the wire's verdict is not). Unreadable or not merged → propagate the
+        # error, fail-closed as before.
+        if merged_on_server?(forge, repo, pr_number, forge_opts) do
+          Logger.warning(
+            "GatekeeperSeal: #{repo} PR ##{pr_number} merge call errored but the SERVER says " <>
+              "merged — converging the seal postconditions from the forge state (the POST's " <>
+              "verdict was a lie of the wire, not of the merge)"
+          )
+
+          converge_postconditions(
+            forge,
+            repo,
+            pr_number,
+            issue_n,
+            body,
+            comment_opts,
+            forge_opts,
+            gk_opts,
+            opts
+          )
+        else
+          err
+        end
+    end
+  end
+
+  # The whole POST-merge queue — seal comment, stage/merged, explicit close, worktree sync —
+  # in ONE place, reached from the two proofs of a done merge: the nominal `:ok` of the POST,
+  # and the server readback after an ambiguous error. Nothing here can un-merge anything.
+  defp converge_postconditions(
+         forge,
+         repo,
+         pr_number,
+         issue_n,
+         body,
+         comment_opts,
+         forge_opts,
+         gk_opts,
+         opts
+       ) do
+    # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
+    # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
+    # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
+    # seal comment lands strictly AFTER the delete's second, and again before the close —
+    # read bottom-up the feed then tells: merged, branch deleted, sealed, closed.
+    Fleet.Pilot.WriteSpacing.gap(opts)
+
+    # POST-merge trace. A failed seal comment does not block the sequence (the merge stays
+    # the authoritative truth) but is LOGGED: nothing re-posts it (the dedup only guards
+    # against replays), so a silent loss left the issue without its human-readable seal.
+    case comment(forge, repo, issue_n, body, comment_opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "GatekeeperSeal: #{repo}##{issue_n} seal comment NOT posted (#{inspect(reason)}) — " <>
+            "merge done (authoritative), human-readable trace missing on the issue, nothing re-posts it"
+        )
+    end
+
+    # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
+    # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
+    # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
+    # `{:skip, :merged}` guard (F-C066) when the close below fails. A load-bearing projection
+    # MUST have a reconciliation — a discarded, un-retried failure left the arch waiting
+    # FOREVER on a merged brick. RETRIED below, and its delivery role is ALSO derived from
+    # the authoritative merged PR by `Delegation.issue_status`.
+    _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
+
+    # EXPLICIT close, as the LAST visible act on the issue (coherent chronology): never a
+    # `Closes #N` in the PR body (Gitea would auto-close AT MERGE, before even this comment — a
+    # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
+    # AFTER the comment AND the stage/merged: nothing else posts
+    # on the issue once closed. Without `Closes #N`, THIS close is the gesture that
+    # takes the merged brick out of `list_open_issues` — a FAILED close is NOT harmless: the merged brick
+    # re-appears as an OPEN issue and `decide/1` re-engages it every tick (churn / double-delivery). So we
+    # LOG LOUD on failure (the merge is authoritative + done; the stuck-open issue must be visible).
+    #
+    # SIGNED GATEKEEPER (`gk_opts`), NOT system: the merge
+    # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
+    # in the SAME sealing ceremony ("who finished this brick?" two different answers
+    # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
+    # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
+    # else in the pipeline) — not concerned by this inconsistency.
+    # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
+    # the close action (a same-second tie renders inverted in the feed).
+    Fleet.Pilot.WriteSpacing.gap(opts)
+
+    close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
+
+    # Projects the deliverable onto the local clone `/home/projects/<name>` — a MIRROR: the truth is
+    # the merged `main` on the forge; the sync is convergent (`reset --hard origin/main` — the next
+    # merge's sync catches up any missed one) and a failure is logged warning by WorktreeSync. The SERIALIZATION
+    # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
+    # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
+    # a failed alignment = disk behind, never a loss (the deliverable is on the forge). Independent of the
+    # close (the brick is merged either way).
+    _ = worktree_sync().sync(repo)
+
+    case close_result do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        # F-C066 — the merge SUCCEEDED but the explicit close FAILED after retries. We do NOT return a
+        # lying `:ok`: `{:error, {:close_after_merge, reason}}` → the caller SKIPS the unlock (the issue
+        # keeps `lcars-in-flight` = immediate guard) and `decide/1` skips `stage/merged` (durable guard)
+        # → the merged brick is NEVER re-dispatched (no double-delivery).
+        {:error, {:close_after_merge, reason}}
+    end
+  end
+
+  # Post-error readback: is the PR merged ON THE SERVER? Same classification authority as the
+  # remediation rail (`MergeOutcome.classify/1` on the fresh PR object) — never a second
+  # vocabulary. Seam stubs without `get_pull/3`, an unreadable PR, or any non-merged state
+  # read as `false` (the ambiguous error then propagates, fail-closed).
+  defp merged_on_server?(forge, repo, pr_number, forge_opts) do
+    with true <- Code.ensure_loaded?(forge) and function_exported?(forge, :get_pull, 3),
+         {:ok, pull} <- forge.get_pull(repo, pr_number, forge_opts) do
+      Fleet.Pilot.MergeOutcome.classify(pull) == :merged
+    else
+      _ -> false
     end
   end
 
