@@ -218,10 +218,9 @@ defmodule Fleet.Spawner.PermanentBoot do
   # --- private ---
 
   defp cap_profiles_dir do
-    # SINGLE source aligned on the LOADER (`Fleet.CapProfile.root_dir`) — otherwise
-    # PermanentBoot ENUMERATES one dir (`05_data-canon/cap-profiles`) while `Fleet.CapProfile.load`
-    # LOADS from another (`cap-profiles`) → a listed profile is not loadable (enum/load
-    # mismatched). The override `:fleet_spawner, :cap_profiles_dir` stays (tests/non-standard deployment).
+    # SINGLE source aligned on the LOADER (`Fleet.CapProfile.root_dir`) — otherwise PermanentBoot
+    # ENUMERATES one directory while `Fleet.CapProfile.load` LOADS from another, and a profile that
+    # `list/1` returns is not loadable (enum/load mismatched). The override `:fleet_spawner, :cap_profiles_dir` stays (tests/non-standard deployment).
     Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
