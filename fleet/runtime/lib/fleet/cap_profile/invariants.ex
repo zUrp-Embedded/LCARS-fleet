@@ -128,25 +128,23 @@ defmodule Fleet.CapProfile.Invariants do
   # the destructive patterns (`push --force`, `reset --hard`, `--no-verify`, …) are universally
   # denied without forbidding `push` wholesale.
 
-  defp check_modop_incompatible(%CapProfile{spec: spec}) do
-    # `modop_set` is a MAP (schema v2.5: default/optional/incompatible), not a
-    # list. The incompatible pairs are under `spec.modop_set.incompatible`; the
-    # ACTIVE modops = `default` ++ `optional`. Do NOT read `spec.modop_incompatible`
-    # (missing key → always []) nor treat `spec.modop_set` as a list, otherwise the
-    # invariant never fires.
+  defp check_modop_incompatible(%CapProfile{spec: spec} = profile) do
+    # `modop_set` is a MAP (schema v2.5: default/optional/incompatible), not a list; the
+    # incompatible pairs live under `spec.modop_set.incompatible`. The ACTIVE set is
+    # `CapProfile.active_modops/1` — the resolve decision (role defaults ++ the step's
+    # validated extras), falling back to the declared defaults for a profile that never
+    # went through resolve. Do NOT widen this to `default ++ optional`: an
+    # available-but-unactivated option is not active, and two mutually exclusive
+    # OPTIONALS are a coherent catalogue shape — B-01 already refuses their real
+    # co-activation at resolve; this invariant re-checks the SAME definition of active
+    # at the spawn boundary, never a broader one.
     modop_set = Map.get(spec, "modop_set", %{})
 
-    # Canon modop_set = a MAP (default/optional/incompatible). A legacy/empty profile may carry it as a
-    # LIST (`[]`) → `Map.get` would crash (BadMapError). We treat the non-map form as "no incompatible
-    # pair declared" → no conflict, no crash at the spawn boundary (the wrong type is made harmless, not
-    # caught by a rescue).
-    {pairs, active} =
-      if is_map(modop_set) do
-        {Map.get(modop_set, "incompatible", []),
-         MapSet.new(Map.get(modop_set, "default", []) ++ Map.get(modop_set, "optional", []))}
-      else
-        {[], MapSet.new()}
-      end
+    # Canon modop_set = a MAP. A legacy/empty profile may carry it as a LIST (`[]`) →
+    # `Map.get` would crash (BadMapError). The non-map form reads as "no incompatible
+    # pair declared" — made harmless by construction, not caught by a rescue.
+    pairs = if is_map(modop_set), do: Map.get(modop_set, "incompatible", []), else: []
+    active = MapSet.new(Fleet.CapProfile.active_modops(profile))
 
     conflict? =
       Enum.any?(pairs, fn pair ->

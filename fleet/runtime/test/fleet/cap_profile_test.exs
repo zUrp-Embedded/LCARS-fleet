@@ -379,7 +379,8 @@ defmodule Fleet.CapProfileTest do
     # replaces it: forbids destructive patterns without blocking push.
 
     # R13: canonical v2.5 structure — `modop_set` is a MAP
-    # (default/optional/incompatible); active modops = default ++ optional.
+    # (default/optional/incompatible); the invariant reads the ACTIVE set
+    # (`active_modops/1`: the resolve decision, declared defaults as fallback).
     test "G24-6 fails when both modops in incompatible pair are active" do
       profile =
         put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
@@ -404,6 +405,36 @@ defmodule Fleet.CapProfileTest do
         :ok -> :ok
         {:error, codes} -> refute :g24_6 in codes
       end
+    end
+
+    test "G24-6: two mutually exclusive OPTIONALS are a coherent catalogue — no phantom refusal" do
+      # Available ≠ active: neither is in the default set and no step activated them. B-01
+      # refuses their real co-activation at resolve; the profile itself must stay spawnable.
+      profile =
+        put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
+          "default" => [],
+          "optional" => ["a", "b"],
+          "incompatible" => [["a", "b"]]
+        })
+
+      case Fleet.CapProfile.validate(profile) do
+        :ok -> :ok
+        {:error, codes} -> refute :g24_6 in codes
+      end
+    end
+
+    test "G24-6 bites on a RESOLVED co-activation (active_modops stamped by resolve)" do
+      profile =
+        put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
+          "default" => [],
+          "optional" => ["a", "b"],
+          "incompatible" => [["a", "b"]]
+        })
+
+      resolved = %{profile | active_modops: ["a", "b"]}
+
+      assert {:error, codes} = Fleet.CapProfile.validate(resolved)
+      assert :g24_6 in codes
     end
 
     # R0.8-brick4: G24-7 (check_budget) removed — no API = no budget in
