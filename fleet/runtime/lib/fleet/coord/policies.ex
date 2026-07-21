@@ -30,7 +30,7 @@ defmodule Fleet.Coord.Policies do
   lookup and the wire-event construction share no helper). The
   actions → event-types table lives over there.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Coord.Emitter
@@ -116,7 +116,9 @@ defmodule Fleet.Coord.Policies do
   `%Fleet.Event{source: :coord, type, correlation_id, …}`.
 
   Returns:
-    * `:ok` — policy match + broadcast done
+    * `:ok` — policy matched and the decision was DISPATCHED. The emit itself is a LOSSY
+      fire-and-forget broadcast (`Emitter`, CI-09): a drop is logged by `safe_emit`, never
+      surfaced here — so `:ok` means the policy DECIDED, not that the event was delivered.
     * `{:error, {:no_policy_match, {decision, reason}}}` — no policy match.
       STRUCTURED tuple (pattern-matchable by consumers); the human message
       lives in the consumers' logs (`DriftMonitor`), not in the tuple.
@@ -153,7 +155,9 @@ defmodule Fleet.Coord.Policies do
   event that triggered the escalation, nil outside a work item.
 
   Returns:
-    * `:ok` — policy match + broadcast done
+    * `:ok` — policy matched and the escalation was DISPATCHED. The emit is a LOSSY fire-and-forget
+      broadcast (`Emitter`, CI-09): a drop is logged by `safe_emit`, never surfaced here — `:ok` means
+      the policy DECIDED, not that the event was delivered.
     * `{:error, {:no_escalation_policy, source}}` — no policy for this
       source (`source` normalized to a string = the lookup key). STRUCTURED tuple,
       pattern-matchable; the human message lives in the consumers' logs
