@@ -15,6 +15,7 @@ config :fleet_mcp, boot_environment: :host
 # résiduels sous :sock_base. Sans cet override il taperait `/run/lcars/mcp` réel (fleet vivante
 # même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
 config :fleet_mcp, sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test")
+
 # Hermétisme : le SocketWarden réconcilie les sockets contre les pods VIVANTS du spawner — en test
 # il verrait les sockets posées à la main par les cases (aucun pod réel derrière) et les réclamerait
 # sous le nez des tests. Un test qui en a besoin le démarre avec des seams explicites.
@@ -68,6 +69,7 @@ config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_starfleet, start_drift_monitor: false
 config :fleet_starfleet, start_shutdown: false
 config :fleet_spawner, start_publish_consumer: false
+
 # (ArchFeed : déménagé côté pilot, démarré par le rail step — `:step_dispatch?` off en test le coupe.)
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_pod_warden: false

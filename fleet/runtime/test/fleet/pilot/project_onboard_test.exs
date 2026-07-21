@@ -87,7 +87,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     end
 
     @tag :tmp_dir
-    test "WITHOUT force → {:error, force_required}, touches NOTHING (fail-closed, no valueless heuristic)", ctx do
+    test "WITHOUT force → {:error, force_required}, touches NOTHING (fail-closed, no valueless heuristic)",
+         ctx do
       # An imported repo has real content but ZERO fleet issues/PRs → any "0 activity = nuke" guard would
       # DESTROY it. So delete is fail-closed: no force, no destruction, no forge call, dirs intact.
       assert {:error, {:force_required, "fleet/demo"}} = del(ctx, forge_repo: OkRepo)
@@ -128,7 +129,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     end
 
     @tag :tmp_dir
-    test "force + WRONG owner (homonym) + forge 404 → local dirs KEPT, architect untouched", ctx do
+    test "force + WRONG owner (homonym) + forge 404 → local dirs KEPT, architect untouched",
+         ctx do
       # The owner-typo footgun: `other/demo` does not exist on the forge (404), and the local `demo`
       # dirs belong to `fleet/demo` (their git origin says so). Deleting `other/demo` must NOT destroy
       # fleet/demo's local project just because it shares the basename.

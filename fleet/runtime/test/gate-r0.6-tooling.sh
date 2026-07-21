@@ -2,9 +2,8 @@
 # SOURCE: test/gate-r0.6-tooling.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
-# STATUS: MANUAL PROBE v2 — standalone, outside `mix gate` (non-CI). `mix gate` is:
-#         compile --warnings-as-errors + test + shell_gate[python+bats] + lcars.contracts.check +
-#         lcars.topology --check + dialyzer.
+# STATUS: MANUAL PROBE v2 — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
+#         mix.exs (alias `gate:`); do not re-list it here, it drifts — this line has been wrong twice.
 # gate-r0.6-tooling.sh — R0.6. exit 0 iff the static tooling is usable from the runtime root.
 #
 # WHAT IS ACTUALLY ESTABLISHED, per tool — the three are NOT the same strength, and the difference is

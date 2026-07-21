@@ -19,9 +19,10 @@ defmodule Fleet.Credentials.GateTest do
   end
 
   @tag :tmp_dir
-  test "no scope/plan check anymore: a free plan with NO scopes still passes (login is enough)", %{
-    tmp_dir: dir
-  } do
+  test "no scope/plan check anymore: a free plan with NO scopes still passes (login is enough)",
+       %{
+         tmp_dir: dir
+       } do
     # Regression of the nuke: the old gate refused this (no scopes / unpaid). Now login-only.
     write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":"tok-abc","subscriptionType":"free"}}))
     assert :ok = Gate.validate(dir)

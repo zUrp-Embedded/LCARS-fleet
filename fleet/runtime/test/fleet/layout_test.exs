@@ -39,7 +39,10 @@ defmodule Fleet.LayoutTest do
     test "brief_ref: worker → briefs/, judge → gate-briefs/, name sanitized" do
       assert Layout.brief_ref(nil, "issue-3-engineer") == "briefs/issue-3-engineer.md"
       assert Layout.brief_ref("worker", "issue-3-engineer") == "briefs/issue-3-engineer.md"
-      assert Layout.brief_ref("judge", "issue-3-consultant") == "gate-briefs/issue-3-consultant.md"
+
+      assert Layout.brief_ref("judge", "issue-3-consultant") ==
+               "gate-briefs/issue-3-consultant.md"
+
       assert Layout.brief_ref(nil, "a/b c") == "briefs/a-b-c.md"
     end
 
@@ -81,6 +84,7 @@ defmodule Fleet.LayoutTest do
 
     test "parse_brief_pointer: full pointer shape with an out-of-scheme ref → LOUD error, never prose" do
       sha = String.duplicate("a", 40)
+
       assert {:error, {:invalid_pointer_ref, "../evil.md"}} =
                Layout.parse_brief_pointer("Brief: ../evil.md @ #{sha}")
     end

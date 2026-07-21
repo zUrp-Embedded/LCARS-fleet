@@ -127,13 +127,17 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     test "unresolvable pointer (wrong sha) → DEFER via the criterion rail, never a guessed brief",
          %{tmp_dir: tmp} do
       {ref, _sha} = authored_workops(tmp)
-      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40))
+
+      body =
+        "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40))
 
       assert {:error, {:criterion_unavailable, {:brief_pointer, _}}} =
                build_worker(%{"number" => 42, "body" => body}, work_root: tmp)
     end
 
-    test "no pointer → inline body IS the brief (both channels honest, same downstream)", %{tmp_dir: tmp} do
+    test "no pointer → inline body IS the brief (both channels honest, same downstream)", %{
+      tmp_dir: tmp
+    } do
       assert {:ok, brief, "worker"} =
                build_worker(%{"number" => 42, "body" => "inline brief"}, work_root: tmp)
 

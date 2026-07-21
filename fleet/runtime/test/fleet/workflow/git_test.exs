@@ -221,9 +221,10 @@ defmodule Fleet.GitTest do
     # NB naming (as above): the tmp_dir path embeds the test name into git's output; the name must avoid
     # every substring the classifiers key on — `non_fast_forward?` (non-fast-forward / fetch first) AND
     # `lease_stale?` (stale info / rejected) — hence "declines" / "kept", not "rejected"/"stale".
-    test "a racing producer advanced the remote: the leased force declines, the other commit is kept", %{
-      tmp_dir: tmp
-    } do
+    test "a racing producer advanced the remote: the leased force declines, the other commit is kept",
+         %{
+           tmp_dir: tmp
+         } do
       bare = init_bare_repo(Path.join(tmp, "remote.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws, "C1")

@@ -20,7 +20,7 @@ mix compile --warnings-as-errors    # gate obligatoire — inclut BOUNDARY (viol
 mix test                            # suite complète (plus d'umbrella : un seul projet, un seul mix test)
 mix test test/fleet/api/rest_test.exs:42    # un seul test (n° de ligne) — le footgun `mix test apps/…` est MORT avec apps/
 
-mix gate                            # gate complet : compile strict + suite + shell_gate + contracts + dialyzer
+mix gate                            # gate complet — la CHAÎNE fait autorité dans `mix.exs` (alias `gate:`), pas ici
 MIX_ENV=prod mix release            # _build/prod/rel/fleet_umbrella (self-contained, ERTS bundlé)
 ```
 

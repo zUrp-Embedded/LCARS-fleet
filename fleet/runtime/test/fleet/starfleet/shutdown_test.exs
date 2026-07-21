@@ -35,8 +35,13 @@ defmodule Fleet.Starfleet.ShutdownTest do
 
   defp start_sd(opts) do
     name = :"sd_#{System.unique_integer([:positive])}"
+
     # Fast poll for tests (prod default 500ms); the debounce (drain_confirmations, default 3) still applies.
-    {:ok, _} = start_supervised({Fleet.Starfleet.Shutdown, [name: name] ++ Keyword.put_new(opts, :poll_ms, 10)})
+    {:ok, _} =
+      start_supervised(
+        {Fleet.Starfleet.Shutdown, [name: name] ++ Keyword.put_new(opts, :poll_ms, 10)}
+      )
+
     name
   end
 

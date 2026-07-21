@@ -467,7 +467,10 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           task_queue: FailTaskQueue,
-          forge_opts: [_test_route: {:ok, {"g", "build"}}, _test_remove_label: {:error, :forge_down}]
+          forge_opts: [
+            _test_route: {:ok, {"g", "build"}},
+            _test_remove_label: {:error, :forge_down}
+          ]
         )
 
       log =
@@ -1031,6 +1034,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # The merge happened — the promote succeeded despite the unlock failure.
       assert_received {:merged, 6}
+
       # Verdict-following honest log (bleed-proof: scoped to THIS test's issue #42 + the new phrase).
       assert log =~ "issue=#42 MERGED+SEALED+CLOSED but issue lock NOT released"
       # The bounded retry was attempted (last-chance reconciliation).
@@ -1139,6 +1143,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         )
 
       assert {:ok, _} = StepDispatcher.dispatch_review(pr, opts)
+
       # The PRODUCER is (re)spawned on its brick — the conflict is production work, not arbitrage.
       assert_received {:spawned, _, _}
       refute_received {:merged, _}

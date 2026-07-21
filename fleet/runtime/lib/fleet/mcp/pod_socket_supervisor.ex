@@ -109,6 +109,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
       path = socket_path(pod_id)
       # Closing the socket frees the FD, NOT the file → we remove it explicitly.
       socket_file = remove_socket_file(path)
+
       # rmdir only removes an EMPTY dir: if the rm above FAILED, the dir stays non-empty and rmdir fails
       # too — but that failure is already carried by `socket_file`, so the residual dir is reaped by the
       # SocketWarden (runtime) or `sweep_stale_sockets/0` (cold boot). No need to surface it twice.

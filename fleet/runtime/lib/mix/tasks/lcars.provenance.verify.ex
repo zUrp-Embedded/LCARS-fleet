@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
 
   Phase 1 tool: NOT wired as a hard gate (Phase 2 = a separate user decision).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
   use Mix.Task
 
@@ -29,11 +29,16 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
     case args do
       [name] ->
         work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
-        project_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
+
+        project_dir =
+          Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
+
         verify_all(name, work_dir, project_dir)
 
       _ ->
-        Mix.raise("usage: mix lcars.provenance.verify <project-name> [--work-root …] [--projects-root …]")
+        Mix.raise(
+          "usage: mix lcars.provenance.verify <project-name> [--work-root …] [--projects-root …]"
+        )
     end
   end
 
@@ -53,7 +58,12 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
     else
       results =
         Enum.map(refs, fn ref ->
-          verdict = Fleet.Workflow.Provenance.Verifier.verify(ref, work_dir: work_dir, project_dir: project_dir)
+          verdict =
+            Fleet.Workflow.Provenance.Verifier.verify(ref,
+              work_dir: work_dir,
+              project_dir: project_dir
+            )
+
           Mix.shell().info("  #{format(verdict)}  #{ref}")
           verdict
         end)

@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   delegated to `Fleet.Pilot.StepDispatcher.ReviewLifecycle`. The modules
   `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` are **seams** (defaults = real modules).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -403,7 +403,8 @@ defmodule Fleet.Pilot.StepDispatcher do
             # human review must not DoS the pipe).
             # Jury source = THE CARD (the project's declared card, `Roles.project_jury`);
             # `:reviewer_roles` opt = test seam.
-            jury_roles = MapSet.new(Fleet.Pilot.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
+            jury_roles =
+              MapSet.new(Fleet.Pilot.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
 
             {requested, foreign} =
               Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))

@@ -292,7 +292,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
            spec: %{
              "brief_kind" => "judge",
              "invocation" => %{
-               "lifetime_scope" => if(role in ["gatekeeper", "architect"], do: "pipe", else: "one-shot")
+               "lifetime_scope" =>
+                 if(role in ["gatekeeper", "architect"], do: "pipe", else: "one-shot")
              }
            }
          }}

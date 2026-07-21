@@ -56,9 +56,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
-    test "sync: forge getter UNREADABLE (not a 404) → NO put (never overwrite an unread forge)", %{
-      tmp_dir: tmp
-    } do
+    test "sync: forge getter UNREADABLE (not a 404) → NO put (never overwrite an unread forge)",
+         %{
+           tmp_dir: tmp
+         } do
       pid = self()
 
       name =
@@ -116,7 +117,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name = start_reg_wal_broken(tmp)
 
       assert {:recorded_volatile, _} =
-               Reg.record_or_escalate("pod", "p1", :dead, server: name, now: "2026-06-20T10:00:00Z")
+               Reg.record_or_escalate("pod", "p1", :dead,
+                 server: name,
+                 now: "2026-06-20T10:00:00Z"
+               )
     end
 
     test "multi-line WAL: one incident per line (readable git diff), stays valid JSON",
@@ -258,20 +262,18 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          start_supervised!(
-            {Reg,
-             [
-               name: name,
-               wal_path: Path.join(tmp, "incidents.json"),
-               sync_debounce_ms: 5,
-               retry_ms: 50,
-               # The forge ALSO carries a non-map entry for the same signature: the boot's
-               # WAL ∪ forge merge must not raise on either side.
-               get_file_fun: fn _r, _p, _o ->
-                 {:ok, %{content: Jason.encode!(%{"wake:p:bad" => 42}), sha: "s"}}
-               end
-             ]}
-          )
+          start_supervised!({Reg,
+           [
+             name: name,
+             wal_path: Path.join(tmp, "incidents.json"),
+             sync_debounce_ms: 5,
+             retry_ms: 50,
+             # The forge ALSO carries a non-map entry for the same signature: the boot's
+             # WAL ∪ forge merge must not raise on either side.
+             get_file_fun: fn _r, _p, _o ->
+               {:ok, %{content: Jason.encode!(%{"wake:p:bad" => 42}), sha: "s"}}
+             end
+           ]})
 
           _ = :sys.get_state(name)
         end)
@@ -590,9 +592,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                )
     end
 
-    test "record_or_escalate escalate_kind :sp_suspect → issue points at the SP (recurring wake)", %{
-      tmp_dir: tmp
-    } do
+    test "record_or_escalate escalate_kind :sp_suspect → issue points at the SP (recurring wake)",
+         %{
+           tmp_dir: tmp
+         } do
       pid = self()
       sig = Reg.signature("wake", "issue-7-engineer", {:no_ack, :wake})
 
@@ -616,6 +619,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                )
 
       assert_received {:issue, title, body}
+
       # "SP suspect" / "Écran capturé" pin the FR user-facing sysadmin issue title/body (Escalation).
       assert title =~ "SP suspect"
       assert body =~ "PROMPT"

@@ -155,7 +155,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
            ) do
         {:ok, brief, brief_kind} ->
           spawn_opts =
-            [brief: brief, brief_kind: brief_kind, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
+            [
+              brief: brief,
+              brief_kind: brief_kind,
+              pod_id: pod_id,
+              rc_name: Spawn.rc_name(repo, role)
+            ]
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
@@ -240,8 +245,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
   # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
   # APPROVED — main simply moved under the branch).
-  defp review_brief(:conflict_rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
-    do:
-      {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: true),
-       "worker"}
+  defp review_brief(
+         :conflict_rework,
+         _profile,
+         role,
+         forge,
+         repo,
+         _issue_n,
+         forge_opts,
+         route,
+         pr
+       ),
+       do:
+         {:ok,
+          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: true),
+          "worker"}
 end

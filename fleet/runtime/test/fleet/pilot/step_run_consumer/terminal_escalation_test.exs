@@ -31,6 +31,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
 
   defmodule StubSpawner do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+
     # ProjectArchitect.ensure (default, on-demand) → best-effort spawn; captured, never blocking.
     def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
   end
@@ -50,10 +51,17 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
   test "await_arch COMMITS → offer-then-wake fires (mandate enqueued THEN wake), outcome bubbles up" do
     capture_log(fn ->
       assert {:ok, :awaiting_arch} =
-               TerminalEscalation.freeze_to_arch(7, "engineer", :terminal_error, "body", seams(OkCompleter))
+               TerminalEscalation.freeze_to_arch(
+                 7,
+                 "engineer",
+                 :terminal_error,
+                 "body",
+                 seams(OkCompleter)
+               )
     end)
 
     assert_received {:await_arch, %{issue_number: 7}}
+
     # ArchWake enqueues the arbitration mandate BEFORE waking (per-project arch pod "architect-r").
     assert_received {:enqueued, "architect-r", _attrs}
     assert_received {:wake, "architect-r"}
@@ -62,10 +70,17 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
   test "await_arch FAILS → NO offer, NO wake (arch never woken onto a non-existent mandate), error bubbles up" do
     capture_log(fn ->
       assert {:error, {:await_arch, {:http, 500, "comment boom"}}} =
-               TerminalEscalation.freeze_to_arch(7, "engineer", :terminal_error, "body", seams(FailCompleter))
+               TerminalEscalation.freeze_to_arch(
+                 7,
+                 "engineer",
+                 :terminal_error,
+                 "body",
+                 seams(FailCompleter)
+               )
     end)
 
     assert_received {:await_arch, %{issue_number: 7}}
+
     # The escalation did NOT commit → the offer-then-wake is suppressed entirely (CI-04): the Poller
     # net re-derives a wake next tick from the durable forge state, if any took.
     refute_received {:enqueued, "architect-r", _attrs}

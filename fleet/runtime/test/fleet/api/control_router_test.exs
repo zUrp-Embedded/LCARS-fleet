@@ -23,7 +23,8 @@ defmodule Fleet.API.ControlRouterTest do
   describe "AF_UNIX socket (real bind)" do
     # SHORT path under the system tmp_dir (the AF_UNIX sun_path is capped at 108 bytes — ExUnit's
     # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
-    defp short_sock, do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
+    defp short_sock,
+      do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
 
     # Embedded-tree cleanup: the TEST process is the tree's parent (start_link) — when
     # ExUnit tears the test down (:shutdown), the tree may ALREADY be dying as this on_exit
@@ -413,7 +414,9 @@ defmodule Fleet.API.ControlRouterTest do
     # this 422 true; without it, the profile loads (`CapProfile.load` OK) and admission passed. The fixture
     # lives in a tmp catalogue (`:root_dir` repointed, restored after) so no canon change is required.
     @tag :tmp_dir
-    test "containment none (host-native fixture) → 422 BEFORE spawn, no broadcast", %{tmp_dir: tmp} do
+    test "containment none (host-native fixture) → 422 BEFORE spawn, no broadcast", %{
+      tmp_dir: tmp
+    } do
       write_hostnative_fixture(tmp)
       prev = Application.get_env(:fleet_cap_profile, :root_dir)
       Application.put_env(:fleet_cap_profile, :root_dir, tmp)

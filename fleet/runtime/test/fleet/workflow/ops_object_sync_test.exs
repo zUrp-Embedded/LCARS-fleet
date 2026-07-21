@@ -36,7 +36,9 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
 
-    assert {:ok, sha} = OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "content\n", label: "test")
+    assert {:ok, sha} =
+             OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "content\n", label: "test")
+
     assert File.read!(Path.join(tmp, "briefs/x.md")) == "content\n"
     assert sha =~ ~r/\A[0-9a-f]{40}\z/
     {head, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
@@ -46,17 +48,26 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   test "idempotent through the gate: same path + same content → same identity, no new commit",
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
-    assert {:ok, sha1} = OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
-    assert {:ok, sha2} = OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
+
+    assert {:ok, sha1} =
+             OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
+
+    assert {:ok, sha2} =
+             OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
+
     assert sha1 == sha2
     assert commit_count(tmp) == "1"
   end
 
-  test "fallback: an unregistered server routes DIRECT to OpsObject (still commits)", %{tmp_dir: tmp} do
+  test "fallback: an unregistered server routes DIRECT to OpsObject (still commits)", %{
+    tmp_dir: tmp
+  } do
     git_init(tmp)
     # No process registered under this name → whereis nil → direct OpsObject call.
     assert {:ok, sha} =
-             OpsObjectSync.commit_object(:ops_sync_absent, tmp, "briefs/y.md", "z\n", label: "test")
+             OpsObjectSync.commit_object(:ops_sync_absent, tmp, "briefs/y.md", "z\n",
+               label: "test"
+             )
 
     assert sha =~ ~r/\A[0-9a-f]{40}\z/
   end
@@ -72,7 +83,9 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       1..n
       |> Task.async_stream(
         fn i ->
-          OpsObjectSync.commit_object(srv, tmp, "briefs/obj-#{i}.md", "content #{i}\n", label: "test")
+          OpsObjectSync.commit_object(srv, tmp, "briefs/obj-#{i}.md", "content #{i}\n",
+            label: "test"
+          )
         end,
         max_concurrency: n,
         timeout: 60_000

@@ -23,7 +23,7 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   `mix lcars.provenance.verify` for manual/CI use. NOT wired as a hard gate (Phase 2 =
   a separate user decision at the seal).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Workflow.Git
@@ -97,7 +97,9 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   end
 
   defp typed(%{"_type" => @statement_type, "predicateType" => @predicate_type}), do: :ok
-  defp typed(json), do: {:error, {:malformed, {:unexpected_type, json["_type"], json["predicateType"]}}}
+
+  defp typed(json),
+    do: {:error, {:malformed, {:unexpected_type, json["_type"], json["predicateType"]}}}
 
   # ── E2 — the deliverable is a real commit ─────────────────────
   defp subject_sha(%{"subject" => [%{"digest" => %{"gitCommit" => sha}} | _]})

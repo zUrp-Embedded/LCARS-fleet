@@ -126,11 +126,33 @@ defmodule Fleet.Pilot.BriefBuilder do
     # rail; never a guessed brief). `:none` → the body IS the brief (inline PoC path, both
     # channels honest, same downstream).
     with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
-      do_build_brief(profile, role, forge, repo, number, issue, forge_opts, route, step_spec, opts)
+      do_build_brief(
+        profile,
+        role,
+        forge,
+        repo,
+        number,
+        issue,
+        forge_opts,
+        route,
+        step_spec,
+        opts
+      )
     end
   end
 
-  defp do_build_brief(profile, role, forge, repo, number, issue, forge_opts, route, step_spec, opts) do
+  defp do_build_brief(
+         profile,
+         role,
+         forge,
+         repo,
+         number,
+         issue,
+         forge_opts,
+         route,
+         step_spec,
+         opts
+       ) do
     # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — reuses
     # a worker (consultant) profile as a JUDGE without a duplicate profile. ABSENT at the step → profile default
     # (itself "worker" by default, fail-safe) via the `||`: absence is NOT an anomaly. What
@@ -146,7 +168,8 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts), "judge"}
+        {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts),
+         "judge"}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
@@ -212,7 +235,12 @@ defmodule Fleet.Pilot.BriefBuilder do
         {:ok, issue}
 
       {:ok, {ref, sha}} ->
-        case Fleet.Workflow.BriefArtifact.resolve(repo, ref, sha, Keyword.take(opts, [:work_root])) do
+        case Fleet.Workflow.BriefArtifact.resolve(
+               repo,
+               ref,
+               sha,
+               Keyword.take(opts, [:work_root])
+             ) do
           # F-25 — the resolved pointer is KEPT alongside the pinned content: the work order
           # cites its source doc (`ref @ commit`) instead of consuming the link silently.
           {:ok, content} ->

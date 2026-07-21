@@ -24,7 +24,7 @@ defmodule Fleet.Workflow.Provenance do
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
@@ -57,7 +57,8 @@ defmodule Fleet.Workflow.Provenance do
   `{:error, term()}`: work_dir missing / write failure / git failure — propagated (fail-loud,
   non-fatal caller-side).
   """
-  @spec emit(Path.t(), attrs(), keyword()) :: {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
+  @spec emit(Path.t(), attrs(), keyword()) ::
+          {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
   def emit(work_dir, %{livrable_sha: livrable_sha} = attrs, opts \\ [])
       when is_binary(work_dir) and is_binary(livrable_sha) and livrable_sha != "" do
     cond do
@@ -74,7 +75,12 @@ defmodule Fleet.Workflow.Provenance do
 
         with {:ok, json} <- encode(statement(attrs)),
              {:ok, _commit_sha} <-
-               OpsObjectSync.commit_object(work_dir, ref, json, Keyword.put(opts, :label, "provenance")) do
+               OpsObjectSync.commit_object(
+                 work_dir,
+                 ref,
+                 json,
+                 Keyword.put(opts, :label, "provenance")
+               ) do
           {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
         end
     end
@@ -91,7 +97,10 @@ defmodule Fleet.Workflow.Provenance do
       "subject" => [
         # `gitCommit` (not `sha256`): the deliverable is the published git commit (SHA-1), not a
         # content sha256 — an honest label, without which an in-toto verifier would fail on the algorithm.
-        %{"name" => Map.get(a, :subject_name, "deliverable"), "digest" => %{"gitCommit" => livrable_sha}}
+        %{
+          "name" => Map.get(a, :subject_name, "deliverable"),
+          "digest" => %{"gitCommit" => livrable_sha}
+        }
       ],
       "predicateType" => "https://slsa.dev/provenance/v1.0",
       "predicate" => %{

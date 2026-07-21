@@ -295,11 +295,20 @@ defmodule Fleet.Spawner.SeedStore do
     |> File.stream!()
     |> Enum.reduce(%{}, fn line, acc ->
       case Jason.decode(line) do
-        {:ok, %{"type" => "mode"}} -> Map.put(acc, :mode, String.trim_trailing(line))
-        {:ok, %{"type" => "permission-mode"}} -> Map.put(acc, :permission, String.trim_trailing(line))
-        {:ok, %{"type" => "bridge-session"}} -> Map.put(acc, :session, String.trim_trailing(line))
-        {:ok, %{"type" => "system", "subtype" => "bridge_status"}} -> Map.put(acc, :status, String.trim_trailing(line))
-        _ -> acc
+        {:ok, %{"type" => "mode"}} ->
+          Map.put(acc, :mode, String.trim_trailing(line))
+
+        {:ok, %{"type" => "permission-mode"}} ->
+          Map.put(acc, :permission, String.trim_trailing(line))
+
+        {:ok, %{"type" => "bridge-session"}} ->
+          Map.put(acc, :session, String.trim_trailing(line))
+
+        {:ok, %{"type" => "system", "subtype" => "bridge_status"}} ->
+          Map.put(acc, :status, String.trim_trailing(line))
+
+        _ ->
+          acc
       end
     end)
   end
@@ -313,7 +322,8 @@ defmodule Fleet.Spawner.SeedStore do
 
   # Captured only once the session is RC-REGISTERED (an identity line present): a pre-registration
   # capture would store mode/permission alone — a seed that resumes but re-attaches NO slot.
-  defp rc_registered?(records), do: Map.has_key?(records, :session) or Map.has_key?(records, :status)
+  defp rc_registered?(records),
+    do: Map.has_key?(records, :session) or Map.has_key?(records, :status)
 
   defp dest_has_rc_identity?(dest) do
     case File.read(dest) do

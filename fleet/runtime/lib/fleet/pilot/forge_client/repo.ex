@@ -232,9 +232,14 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   # `:unexpected_teams_shape` (never `{:ok, []}` — an empty team view here would wrongly deny membership).
   defp paginated_teams(config, org) do
     case paginate(config, "/orgs/#{encode_seg(org)}/teams", "") do
-      {:ok, teams} -> {:ok, teams}
-      {:error, {:unexpected_page_shape, _p, _page, body}} -> {:error, {:unexpected_teams_shape, body}}
-      {:error, _} = err -> err
+      {:ok, teams} ->
+        {:ok, teams}
+
+      {:error, {:unexpected_page_shape, _p, _page, body}} ->
+        {:error, {:unexpected_teams_shape, body}}
+
+      {:error, _} = err ->
+        err
     end
   end
 

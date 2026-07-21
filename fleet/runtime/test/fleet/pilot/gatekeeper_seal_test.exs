@@ -159,7 +159,6 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert_received {:close_attempt, 42, 3}
   end
 
-
   # ── Provenance wall (Phase 2) — systematic, card-independent ──────────────
   defmodule WallForge do
     # branch_head exported → the wall RUNS (stubs without it exercise the skip path,
@@ -185,7 +184,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     work = Path.join([tmp, "w", "demo"])
     File.mkdir_p!(proj)
     File.mkdir_p!(work)
-    g = fn dir, args -> {out, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true); out end
+
+    g = fn dir, args ->
+      {out, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
+      out
+    end
 
     for dir <- [proj, work] do
       {_, 0} = System.cmd("git", ["init", "-q", dir], stderr_to_stdout: true)

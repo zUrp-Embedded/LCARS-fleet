@@ -636,7 +636,12 @@ defmodule Fleet.Spawner.PodTest do
           }
       }
 
-      %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: Keyword.put_new(opts, :repo_id, 7)}
+      %{
+        cap_profile: gk,
+        issue_id: "issue-1",
+        pod_id: pod_id,
+        opts: Keyword.put_new(opts, :repo_id, 7)
+      }
     end
 
     test "fleet-scope role (role_index 0) → deterministic hexspeak session_id, repo 0000 (v2)" do
@@ -670,8 +675,11 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+
       # role 2, class from the fixture's lifetime_scope, uid 4242, repo 7 — the per-project identity.
-      expected = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+      expected =
+        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
       assert content["session_id"] == expected
     end
 
@@ -742,6 +750,7 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+
       expected =
         Fleet.Spawner.SessionId.encode(3, Fleet.CapProfile.kill_class(valid_profile()), 4242, 161)
 
@@ -752,7 +761,9 @@ defmodule Fleet.Spawner.PodTest do
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-seed-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
-      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      uuid =
+        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # The identity's seed sits in the seed store (captured by a previous life).
       Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
@@ -798,7 +809,9 @@ defmodule Fleet.Spawner.PodTest do
       # epoch discriminator every reboot fell into :recreate and the slot never came back.
       pod_id = "pod-epoch-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
-      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      uuid =
+        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # Snapshot of a PREVIOUS fleet life (stale/absent boot_id) — non-terminal phase.
       state_path = state_fs_path(pod_id)
@@ -835,7 +848,9 @@ defmodule Fleet.Spawner.PodTest do
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-epoch-same-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
-      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+
+      uuid =
+        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       state_path = state_fs_path(pod_id)
       File.mkdir_p!(Path.dirname(state_path))
@@ -872,8 +887,10 @@ defmodule Fleet.Spawner.PodTest do
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
+
       # the pod's deterministic v2 uuid (class from fixture, uid injected, ITS repo) — the GC targets THIS name.
-      uuid = Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+      uuid =
+        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # simulates a surviving pod_dir (failed teardown): the deterministic UUID's jsonl already lingers.
       stale =
@@ -1210,7 +1227,9 @@ defmodule Fleet.Spawner.PodTest do
       # {:error, {:launch_env_unresolved,_}} → transition_failed. PROOF that the R1-21 reversal
       # (refusal instead of drop) fails the pod cleanly, WITHOUT crashing the gen_statem (the clean
       # {:EXIT, :shutdown, _}, not an {:EXIT, _, {%ArgumentError{}}}).
-      profile = put_in(valid_profile().metadata["mounts"], [%{"mode" => "ro", "path" => "/x\nrw:/etc"}])
+      profile =
+        put_in(valid_profile().metadata["mounts"], [%{"mode" => "ro", "path" => "/x\nrw:/etc"}])
+
       pod_id = "pod-mount-inject-#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -1262,8 +1281,7 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-nologin-#{System.unique_integer([:positive])}"
       {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
 
-      assert_receive {:EXIT, ^pid,
-                      {:shutdown, {:credentials_invalid, {:not_logged_in, _}}}},
+      assert_receive {:EXIT, ^pid, {:shutdown, {:credentials_invalid, {:not_logged_in, _}}}},
                      2_000
 
       refute_received {:launch_called, _, _}

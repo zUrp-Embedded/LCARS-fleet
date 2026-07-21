@@ -83,7 +83,10 @@ defmodule Fleet.Observation.ReadModelTest do
   test "DR-027: a failed subscribe → :deaf (read-model alive but DEAF, not a false :live)" do
     # A failed subscribe leaves the read-model ALIVE but DEAF (no event will arrive): the old
     # projection_status returned :live (indistinguishable from a quiet fleet = hollow-green). Now :deaf.
-    start_supervised!({ReadModel, subscribe: true, subscribe_fun: fn _topic -> {:error, :nope} end})
+    start_supervised!(
+      {ReadModel, subscribe: true, subscribe_fun: fn _topic -> {:error, :nope} end}
+    )
+
     assert :deaf = ReadModel.projection_status()
   end
 

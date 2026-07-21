@@ -127,7 +127,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   defp task_queue_running?, do: is_pid(Process.whereis(Fleet.TaskQueue.Server))
 
-  defp task_queue_mod, do: Application.get_env(:fleet_starfleet, :task_queue_mod, @task_queue_default)
+  defp task_queue_mod,
+    do: Application.get_env(:fleet_starfleet, :task_queue_mod, @task_queue_default)
 
   # The nominal return IS a list (`list_active/0` spec) — the real "broker down mid-quiesce" protection
   # is the rescue/catch (noproc/exit → `:error` → sentinel), never a mask as `0`.
@@ -290,7 +291,8 @@ defmodule Fleet.Starfleet.Shutdown do
        # `confirmations` clamped to ≥ 1: 0 would make `zero_streak >= 0` conclude `:drained` on the FIRST
        # poll regardless of `in_flight` (fail-OPEN, the exact opposite of the debounce's purpose).
        poll_ms: Keyword.get(opts, :poll_ms, @default_poll_ms),
-       confirmations: max(1, Keyword.get(opts, :drain_confirmations, @default_drain_confirmations))
+       confirmations:
+         max(1, Keyword.get(opts, :drain_confirmations, @default_drain_confirmations))
      }}
   end
 

@@ -408,7 +408,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # cannot merge on a raw system token without a comment (merge attributed to `lcars-system`).
     seal_opts = Keyword.put(opts, :head_branch, Map.get(step_run, :producer_branch))
 
-    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts, seal_opts) do
+    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
+           forge,
+           repo,
+           pr,
+           issue_n,
+           producer,
+           forge_opts,
+           seal_opts
+         ) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
       # F-C066 — merge OK but close failed: the NON-`:ok` propagates → the `with` of `route/3`
@@ -673,7 +681,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with {:ok, _} <-
            post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
-         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role, :rework) do
+         {:ok, _} <-
+           unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role, :rework) do
       {:ok, :rework_requested}
     end
   end
@@ -715,7 +724,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     with {:ok, _} <-
-           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role, :verdict) do
+           unlock(
+             forge,
+             step_run.repo,
+             lock_number(step_run, pr),
+             forge_opts,
+             step_run.role,
+             :verdict
+           ) do
       {:ok, :reviewed}
     end
   end

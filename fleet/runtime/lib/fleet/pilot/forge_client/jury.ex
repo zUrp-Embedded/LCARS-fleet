@@ -109,9 +109,14 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     path = "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews"
 
     case paginate(config, path, "") do
-      {:ok, reviews} -> {:ok, reviews}
-      {:error, {:unexpected_page_shape, p, _page, body}} -> {:error, {:unexpected_review_shape, p, body}}
-      {:error, _} = err -> err
+      {:ok, reviews} ->
+        {:ok, reviews}
+
+      {:error, {:unexpected_page_shape, p, _page, body}} ->
+        {:error, {:unexpected_review_shape, p, body}}
+
+      {:error, _} = err ->
+        err
     end
   end
 

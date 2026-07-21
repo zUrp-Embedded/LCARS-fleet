@@ -132,7 +132,11 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
         # NO issue opened → the return SAYS the failure, not a reassuring `:escalated`; the caller
         # does not believe a sysadmin was notified when the alarm never went through.
         assert {:error, {:escalation_failed, :forge_down}} =
-                 WakeRecovery.wake("pod-down", fn -> flunk("no re-roll when already seen") end, opts)
+                 WakeRecovery.wake(
+                   "pod-down",
+                   fn -> flunk("no re-roll when already seen") end,
+                   opts
+                 )
       end)
 
     assert log =~ "escalation"

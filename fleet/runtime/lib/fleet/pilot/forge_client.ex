@@ -1082,7 +1082,11 @@ defmodule Fleet.Pilot.ForgeClient do
   defp label_description("wfmap/" <> map) do
     case card_description(map) do
       {:ok, desc} ->
-        String.slice("Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc, 0, 240)
+        String.slice(
+          "Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc,
+          0,
+          240
+        )
 
       :error ->
         "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."

@@ -129,7 +129,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_event_consumers_canon(root) do
     residue_check(root, %{
       id: "event.consumers.canon",
-      remediation: "migrate the flagged consumer(s) off the legacy `event_type` tuple to `%Fleet.Event{}` matching",
+      remediation:
+        "migrate the flagged consumer(s) off the legacy `event_type` tuple to `%Fleet.Event{}` matching",
       files: ["lib/fleet/api/ws.ex"],
       pattern: ~r/"event_type"\s*=>/,
       confirm: ~r/"event_type"\s*=>/,
@@ -163,7 +164,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     %{
       id: "pipeline.v25.normalized",
-      remediation: "add the v2.5 `normalize` unwrap clause for spec.steps so a workflow_map consumer does not read steps=nil",
+      remediation:
+        "add the v2.5 `normalize` unwrap clause for spec.steps so a workflow_map consumer does not read steps=nil",
       status: if(ok?, do: :pass, else: :fail),
       evidence:
         cond do
@@ -209,7 +211,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     %{
       id: "events.handlers.exist",
-      remediation: "remove the phantom handler ref(s) from events.yaml, or add the missing subscriber(s)",
+      remediation:
+        "remove the phantom handler ref(s) from events.yaml, or add the missing subscriber(s)",
       status: if(missing == [], do: :pass, else: :fail),
       evidence: Enum.map(missing, &"events.yaml → #{&1} (missing)"),
       note: "phantom handlers referenced in events.yaml (dispatch table vs direct subscribers)"
@@ -251,7 +254,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     %{
       id: "coord.backend.wired_or_pure",
-      remediation: "keep the LLM gate on the gatekeeper (pure Gates) — no residual NotWiredYet nor coord delegation",
+      remediation:
+        "keep the LLM gate on the gatekeeper (pure Gates) — no residual NotWiredYet nor coord delegation",
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
@@ -269,7 +273,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_capprofile_lifetime_scope_path(root) do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
-      remediation: "read spec.invocation.lifetime_scope (v2.5), not the pre-v2.5 spec.lifetime_scope, in compose_claude_md",
+      remediation:
+        "read spec.invocation.lifetime_scope (v2.5), not the pre-v2.5 spec.lifetime_scope, in compose_claude_md",
       files: ["lib/fleet/sp_builder.ex"],
       pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
@@ -286,7 +291,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_capprofile_modop_incompatible_path(root) do
     residue_check(root, %{
       id: "capprofile.modop_incompatible_path",
-      remediation: "keep the modop-incompatibility guard (check_modop_incompatible) in cap_profile.ex / invariants.ex",
+      remediation:
+        "keep the modop-incompatibility guard (check_modop_incompatible) in cap_profile.ex / invariants.ex",
       # The guarded function (check_modop_incompatible) was EXTRACTED to invariants.ex — the rail
       # watches BOTH (the wrong path can come back in either one).
       files: [
@@ -316,7 +322,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     evidence_check(
       %{
         id: "launch.backend_containment_coherent",
-        remediation: "keep host containment:none on host_launch.sh; do not reintroduce TmuxBackend (bare remote-control)",
+        remediation:
+          "keep host containment:none on host_launch.sh; do not reintroduce TmuxBackend (bare remote-control)",
         note:
           "TmuxBackend (bare remote-control, broken control-path) removed; must not reappear. The host containment:none path = host_launch.sh (proven tmux-holder), not TmuxBackend (LAUNCH-Q)"
       },
@@ -354,7 +361,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     evidence_check(
       %{
         id: "mcp.required_for_real_backend",
-        remediation: "keep both MCP levels: pod.ex maybe_provision_mcp_config AND mcp_provision.ex fail-loud :mcp_server_spec_required for a real backend without a spec",
+        remediation:
+          "keep both MCP levels: pod.ex maybe_provision_mcp_config AND mcp_provision.ex fail-loud :mcp_server_spec_required for a real backend without a spec",
         note:
           "pod.ex wires McpProvision.maybe_provision_mcp_config (level 1) AND mcp_provision.ex refuses fail-loud :mcp_server_spec_required a real backend without a spec (level 2) — both required"
       },
@@ -386,7 +394,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     evidence_check(
       %{
         id: "spawn.has_brief",
-        remediation: "keep spawn_pod guards: {:error, :brief_required} for a one-shot without brief AND {:error, :cap_profile_no_lifetime_scope} for a missing lifetime_scope",
+        remediation:
+          "keep spawn_pod guards: {:error, :brief_required} for a one-shot without brief AND {:error, :cap_profile_no_lifetime_scope} for a missing lifetime_scope",
         note:
           "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}) AND refuses a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) — the real one-shot-brief invariant, not a marker"
       },
@@ -394,7 +403,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {code_match?(root, spawner, ~r/:brief_required/, [
            ~r/:brief_required/,
            ~r/^\s*\{:error, :brief_required\}/
-         ]), "#{spawner}: no executable {:error, :brief_required} guard at the spawn_pod boundary"},
+         ]),
+         "#{spawner}: no executable {:error, :brief_required} guard at the spawn_pod boundary"},
         {code_match?(root, spawner, ~r/fetch_lifetime_scope/),
          "#{spawner}: spawn_pod does not gate on CapProfile.fetch_lifetime_scope (DR-019 source-fix unwired)"},
         {code_match?(root, spawner, ~r/:cap_profile_no_lifetime_scope/, [
@@ -413,11 +423,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_skills_declared_present(root) do
     presence_check(root, %{
       id: "skills.declared_present",
-      remediation: "make filter_skills fail-loud {:error, {:skills_missing, _}} on a missing plain skill",
+      remediation:
+        "make filter_skills fail-loud {:error, {:skills_missing, _}} on a missing plain skill",
       file: "lib/fleet/sp_builder.ex",
       pattern: ~r/:skills_missing/,
       confirm: [~r/:skills_missing/, ~r/\{:error, \{:skills_missing,/],
-      missing: "filter_skills silently filters out missing skills (no executable {:error, {:skills_missing,} fail-loud)",
+      missing:
+        "filter_skills silently filters out missing skills (no executable {:error, {:skills_missing,} fail-loud)",
       note: "filter_skills must fail-loud {:error, {:skills_missing, _}} on a missing plain skill"
     })
   end
@@ -442,7 +454,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     %{
       id: "events.registry.keys_aligned",
-      remediation: "add the consumed type(s) to events.yaml (every handle_info %Fleet.Event{type:} must be a registry key)",
+      remediation:
+        "add the consumed type(s) to events.yaml (every handle_info %Fleet.Event{type:} must be a registry key)",
       status: if(unregistered == [], do: :pass, else: :fail),
       evidence: Enum.map(unregistered, &"consumed type outside registry: #{&1}"),
       note: "every consumed type (handle_info %Fleet.Event{type:}) must be an events.yaml key"
@@ -663,7 +676,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(yaml_files != [] and gatekeeper_steps == [], do: :pass, else: :fail),
       evidence:
         if(yaml_files == [],
-          do: ["#{dir}: no workflow-map yaml found — corpus absent, this check cannot vouch (fail-closed)"],
+          do: [
+            "#{dir}: no workflow-map yaml found — corpus absent, this check cannot vouch (fail-closed)"
+          ],
           else: gatekeeper_steps
         ),
       note:
@@ -951,8 +966,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           "children order (offsets in the block): event_router=#{er} mcp=#{mcp} " <>
             "spawner=#{spw} — constraints: er<mcp, mcp<spw"
         ],
-        note:
-          "boot-order lock (the deps DIRECTION is enforced by boundary at compile time, Z4)"
+        note: "boot-order lock (the deps DIRECTION is enforced by boundary at compile time, Z4)"
       }
     else
       _ ->
@@ -1044,7 +1058,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # each on its own code line (absent test file → code_match? false → fail, hollow-green guard).
     asserts? =
       code_match?(root, test, ~r/"inputSchema"/, [~r/assert\s+Map\.has_key\?/, ~r/"inputSchema"/]) and
-        code_match?(root, test, ~r/"input_schema"/, [~r/refute\s+Map\.has_key\?/, ~r/"input_schema"/])
+        code_match?(root, test, ~r/"input_schema"/, [
+          ~r/refute\s+Map\.has_key\?/,
+          ~r/"input_schema"/
+        ])
 
     %{
       id: "mcp.wire_inputschema",

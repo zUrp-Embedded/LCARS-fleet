@@ -575,7 +575,11 @@ defmodule Fleet.CapProfileTest do
     test "NON-conformant map (empty spec) → {:error, :invalid_schema} — never a silently forged profile" do
       # THIS is the BND-001 hole: without from_map this shape gets hand-built as `%CapProfile{spec: %{}}`,
       # schema short-circuited. The constructor REJECTS it (same verdict as load), it does not normalize it.
-      raw = %{"kind" => "CapabilityProfile", "metadata" => %{"name" => "x", "containment" => "bwrap"}, "spec" => %{}}
+      raw = %{
+        "kind" => "CapabilityProfile",
+        "metadata" => %{"name" => "x", "containment" => "bwrap"},
+        "spec" => %{}
+      }
 
       assert {:error, :invalid_schema} = Fleet.CapProfile.from_map(raw)
     end
@@ -587,7 +591,8 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "support builder: canonical profile + override → schema-conformant, override applied" do
-      profile = Fleet.Support.CapProfileFixture.build(%{"metadata" => %{"name" => "engineer-test"}})
+      profile =
+        Fleet.Support.CapProfileFixture.build(%{"metadata" => %{"name" => "engineer-test"}})
 
       assert Fleet.CapProfile.name(profile) == "engineer-test"
       assert :ok = Fleet.CapProfile.validate(profile)
@@ -909,6 +914,7 @@ defmodule Fleet.CapProfileTest do
 
       # one-shot = cold, independent → fan-out → instance
       assert Fleet.CapProfile.slot_scope(life.("one-shot")) == "instance"
+
       # context-long (pipe/run/forever) = one instance keeping its context → unique/serialized → project
       assert Fleet.CapProfile.slot_scope(life.("pipe")) == "project"
       assert Fleet.CapProfile.slot_scope(life.("run")) == "project"
@@ -1100,7 +1106,11 @@ defmodule Fleet.CapProfileTest do
 
   describe "has_capability?/2 (catalogue chantier L3, B-03 — gates resolve a capability, not a name)" do
     defp cp_caps(caps),
-      do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{"capabilities" => caps}}
+      do: %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{},
+        spec: %{"capabilities" => caps}
+      }
 
     test "declared capability → true (atom or string)" do
       cp = cp_caps(["onboarder", "project_delegate"])
@@ -1140,7 +1150,9 @@ defmodule Fleet.CapProfileTest do
 
       def compose(role, modops) do
         send(self(), {:composed, role, modops})
-        {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
+
+        {:ok,
+         %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
       end
     end
 
@@ -1219,7 +1231,8 @@ defmodule Fleet.CapProfileTest do
              }
            }}
 
-      def compose(_role, _modops), do: {:ok, %Fleet.CapProfile{kind: "x", metadata: %{}, spec: %{}}}
+      def compose(_role, _modops),
+        do: {:ok, %Fleet.CapProfile{kind: "x", metadata: %{}, spec: %{}}}
     end
 
     test "activating an incompatible pair (default a + optional b, a⊥b) → refused" do

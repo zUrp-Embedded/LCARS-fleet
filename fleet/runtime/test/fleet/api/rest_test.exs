@@ -69,7 +69,6 @@ defmodule Fleet.API.RestTest do
     end
   end
 
-
   describe "POST /api/admin/spawn — REMOVED from TCP (moved to the AF_UNIX socket)" do
     test "POST /api/admin/spawn on TCP → 404 (the write is no longer on this surface)" do
       conn =

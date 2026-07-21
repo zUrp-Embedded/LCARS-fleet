@@ -47,7 +47,10 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert ref == "briefs/issue-3-engineer.md"
     assert File.read!(Path.join(tmp, ref)) == content
     n = commit_count(tmp)
-    assert {:ok, %{ref: ^ref, sha: ^sha}} = BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
+
+    assert {:ok, %{ref: ^ref, sha: ^sha}} =
+             BriefArtifact.commit(tmp, content, name_hint: "issue-3-engineer")
+
     assert commit_count(tmp) == n
   end
 
@@ -56,7 +59,9 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     git_init(tmp)
 
     {:ok, %{ref: ref, sha: c1}} = BriefArtifact.commit(tmp, "v1\n", name_hint: "issue-3-engineer")
-    {:ok, %{ref: ^ref, sha: c2}} = BriefArtifact.commit(tmp, "v2\n", name_hint: "issue-3-engineer")
+
+    {:ok, %{ref: ^ref, sha: c2}} =
+      BriefArtifact.commit(tmp, "v2\n", name_hint: "issue-3-engineer")
 
     refute c1 == c2
     assert File.read!(Path.join(tmp, ref)) == "v2\n"
@@ -69,12 +74,17 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     git_init(tmp)
 
     assert {:ok, %{ref: ref}} =
-             BriefArtifact.commit(tmp, "judge order\n", name_hint: "issue-3-consultant", kind: "judge")
+             BriefArtifact.commit(tmp, "judge order\n",
+               name_hint: "issue-3-consultant",
+               kind: "judge"
+             )
 
     assert ref == "gate-briefs/issue-3-consultant.md"
   end
 
-  test "name_hint sanitized (Layout truth): path-unsafe chars never reach the object path", %{tmp_dir: tmp} do
+  test "name_hint sanitized (Layout truth): path-unsafe chars never reach the object path", %{
+    tmp_dir: tmp
+  } do
     git_init(tmp)
 
     assert {:ok, %{ref: ref}} = BriefArtifact.commit(tmp, "x\n", name_hint: "issue-3-a/b c")
@@ -105,7 +115,9 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert String.trim(out) == "#{expected.name} <#{expected.email}>"
   end
 
-  test "idempotence: same content re-committed → same {ref, sha}, ZERO new commit", %{tmp_dir: tmp} do
+  test "idempotence: same content re-committed → same {ref, sha}, ZERO new commit", %{
+    tmp_dir: tmp
+  } do
     git_init(tmp)
     content = "identical\n"
 
@@ -131,13 +143,18 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert {:error, {:work_dir_missing, ^ghost}} = BriefArtifact.commit(ghost, "x")
   end
 
-  test "physicalize_attrs: commits the object + adds brief_ref/brief_sha, attrs preserved", %{tmp_dir: tmp} do
+  test "physicalize_attrs: commits the object + adds brief_ref/brief_sha, attrs preserved", %{
+    tmp_dir: tmp
+  } do
     # the 'fleet/demo' project work/ops = <work_root>/demo
     work_dir = Path.join(tmp, "demo")
     File.mkdir_p!(work_dir)
     git_init(work_dir)
 
-    out = BriefArtifact.physicalize_attrs(%{brief: "do X\n", role: "engineer"}, "fleet/demo", work_root: tmp)
+    out =
+      BriefArtifact.physicalize_attrs(%{brief: "do X\n", role: "engineer"}, "fleet/demo",
+        work_root: tmp
+      )
 
     assert out.role == "engineer"
     # brief_sha = the introducing COMMIT (40 hex); the hintless ref is named by content sha256.
@@ -147,7 +164,8 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert File.read!(Path.join(work_dir, out.brief_ref)) == "do X\n"
   end
 
-  test "physicalize_attrs: DEGRADES (attrs unchanged) when the project work/ops does not exist", %{tmp_dir: tmp} do
+  test "physicalize_attrs: DEGRADES (attrs unchanged) when the project work/ops does not exist",
+       %{tmp_dir: tmp} do
     attrs = %{brief: "x\n", role: "engineer"}
     # <work_root>/demo missing → degrades, dispatch preserved, no brief_ref/brief_sha.
     assert BriefArtifact.physicalize_attrs(attrs, "fleet/demo", work_root: tmp) == attrs
@@ -160,7 +178,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
   end
 
   test "pointer_brief: the SHORT payload order — names the doc, the sha7, and commands READ-first" do
-    sha = String.duplicate("a1b2c3d", 5) <> "a1b2c" |> String.slice(0, 40)
+    sha = (String.duplicate("a1b2c3d", 5) <> "a1b2c") |> String.slice(0, 40)
     order = BriefArtifact.pointer_brief("briefs/issue-9-engineer.md", sha)
 
     assert order =~ "briefs/issue-9-engineer.md"
@@ -179,7 +197,11 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     # walks the REAL case, not the plausible one.
     main = Path.join(tmp, "main")
     File.mkdir_p!(main)
-    g = fn args -> System.cmd("git", ["-c", "user.name=t", "-c", "user.email=t@t" | args], cd: main) end
+
+    g = fn args ->
+      System.cmd("git", ["-c", "user.name=t", "-c", "user.email=t@t" | args], cd: main)
+    end
+
     {_, 0} = g.(["init", "-q"])
     File.write!(Path.join(main, "README"), "x")
     {_, 0} = g.(["add", "."])

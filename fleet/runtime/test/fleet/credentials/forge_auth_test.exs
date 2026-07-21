@@ -84,7 +84,11 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
     test "PRESENT but malformed (empty token) → {:error, :forge_auth_malformed} (never a silent no-auth env)" do
       capture_log(fn ->
-        Application.put_env(:fleet_credentials, :forge_auth, %{url_prefix: "https://f/", token: ""})
+        Application.put_env(:fleet_credentials, :forge_auth, %{
+          url_prefix: "https://f/",
+          token: ""
+        })
+
         assert {:error, :forge_auth_malformed} = ForgeAuth.git_env_result()
       end)
     end

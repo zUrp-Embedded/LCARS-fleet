@@ -177,7 +177,9 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       # The pod ran a RESOLVED profile whose deliverable_mode is carried in the pod.completed payload.
       # The completion consumes THAT — a since-vanished/edited base profile (the DR-013 trigger) is
       # irrelevant when the effective fact already travelled. The seam MUST NOT be called.
-      raising = fn _role -> raise "deliverable_mode_fun must not be consulted when the payload carries the mode" end
+      raising = fn _role ->
+        raise "deliverable_mode_fun must not be consulted when the payload carries the mode"
+      end
 
       assert {:ok, true} = GateEngine.producer?("engineer", raising, "git_native")
       assert {:ok, false} = GateEngine.producer?("qualifier", raising, "payload")
@@ -188,8 +190,13 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       # the DR-013 closed classification: {:ok, _} resolves, {:error, _} fails loud (never a silent judge).
       assert {:ok, true} = GateEngine.producer?("engineer", fn _ -> {:ok, "git_native"} end, nil)
       assert {:ok, false} = GateEngine.producer?("qualifier", fn _ -> {:ok, "payload"} end, nil)
+
       assert {:error, :cap_profile_unloadable} =
-               GateEngine.producer?("engineer", fn _ -> {:error, :cap_profile_unloadable} end, nil)
+               GateEngine.producer?(
+                 "engineer",
+                 fn _ -> {:error, :cap_profile_unloadable} end,
+                 nil
+               )
     end
   end
 end

@@ -359,7 +359,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   rescue
     e ->
-      Logger.warning("ProjectOnboard: delete could not stop architect #{full_name}: #{inspect(e)}")
+      Logger.warning(
+        "ProjectOnboard: delete could not stop architect #{full_name}: #{inspect(e)}"
+      )
+
       :error
   catch
     :exit, _ ->
@@ -508,7 +511,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
               :ok
             else
-              {:error, {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
+              {:error,
+               {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
             end
 
           {:error, reason} ->
@@ -591,7 +595,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
             "(run `mix lcars.project_template.sync` to restore the native path)"
         )
 
-        result = ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
+        result =
+          ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
 
         with {:ok, full_name} <- classify_create_repo(result, org, name) do
           {:ok, full_name, :bare}
@@ -605,7 +610,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp maybe_scaffold_main(:generated, _proj_dir, _name, _opts), do: :ok
   defp maybe_scaffold_main(:bare, proj_dir, name, opts), do: Scaffold.main(proj_dir, name, opts)
 
-  defp onboard_commit_msg(:generated), do: "chore(onboard): déclaration de criticité (intensity.json)"
+  defp onboard_commit_msg(:generated),
+    do: "chore(onboard): déclaration de criticité (intensity.json)"
+
   defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 
   @doc """

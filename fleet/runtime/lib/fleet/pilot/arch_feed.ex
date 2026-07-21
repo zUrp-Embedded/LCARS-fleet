@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.ArchFeed do
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
   `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -200,7 +200,9 @@ defmodule Fleet.Pilot.ArchFeed do
           :ok
 
         {:error, reason} ->
-          Logger.warning("ArchFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)")
+          Logger.warning(
+            "ArchFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)"
+          )
       end
     else
       # This project's arch is not up (not opened yet / test) → drop, lossy by doctrine.
@@ -208,7 +210,10 @@ defmodule Fleet.Pilot.ArchFeed do
     end
   rescue
     e ->
-      Logger.warning("ArchFeed: append raised (#{Exception.message(e)}) — line dropped (lossy by doctrine)")
+      Logger.warning(
+        "ArchFeed: append raised (#{Exception.message(e)}) — line dropped (lossy by doctrine)"
+      )
+
       :ok
   end
 end

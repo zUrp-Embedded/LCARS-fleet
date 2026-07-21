@@ -297,7 +297,9 @@ defmodule Fleet.CapProfile do
 
     Enum.find_value(pairs, :ok, fn
       [a, b] ->
-        if a in active_set and b in active_set, do: {:error, {:modops_incompatible, [a, b]}}, else: nil
+        if a in active_set and b in active_set,
+          do: {:error, {:modops_incompatible, [a, b]}},
+          else: nil
 
       _ ->
         nil

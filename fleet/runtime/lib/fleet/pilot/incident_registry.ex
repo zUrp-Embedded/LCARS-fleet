@@ -643,6 +643,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     opts[:escalation_cooldown_ms] ||
       Application.get_env(:fleet_pilot, :incident_escalation_cooldown_ms, @escalation_cooldown_ms)
   end
+
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 

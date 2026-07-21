@@ -448,11 +448,18 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, %WorkItem{brief_sha: nil, brief_ref: nil}} = WorkItem.new("p1", %{})
     # out-of-shape sha (too short = not a commit sha, uppercase, non-hex) → rejected
     assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: "def"})
-    assert {:error, {:bad_attr, {:brief_sha, _}}} = WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
+
+    assert {:error, {:bad_attr, {:brief_sha, _}}} =
+             WorkItem.new("p1", %{brief_sha: String.upcase(valid_sha)})
+
     # out-of-shape ref (traversal, foreign subdir, nested path) → rejected
-    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "../escape.md"})
+    assert {:error, {:bad_attr, {:brief_ref, _}}} =
+             WorkItem.new("p1", %{brief_ref: "../escape.md"})
+
     assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "other/x.md"})
-    assert {:error, {:bad_attr, {:brief_ref, _}}} = WorkItem.new("p1", %{brief_ref: "briefs/a/b.md"})
+
+    assert {:error, {:bad_attr, {:brief_ref, _}}} =
+             WorkItem.new("p1", %{brief_ref: "briefs/a/b.md"})
   end
 
   test "6g. enqueue propagates the smart-constructor error + casts the ISO deadline", %{

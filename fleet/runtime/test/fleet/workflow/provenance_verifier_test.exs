@@ -15,7 +15,11 @@ defmodule Fleet.Workflow.Provenance.VerifierTest do
   # commit, a deliverable on top, and a DIVERGENT branch commit (shares no descent with
   # the deliverable → the base_not_ancestor fixture).
   defp harness(tmp) do
-    g = fn args -> {out, 0} = System.cmd("git", ["-C", tmp] ++ args, stderr_to_stdout: true); out end
+    g = fn args ->
+      {out, 0} = System.cmd("git", ["-C", tmp] ++ args, stderr_to_stdout: true)
+      out
+    end
+
     {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", tmp], stderr_to_stdout: true)
     g.(["config", "user.email", "t@lcars.local"])
     g.(["config", "user.name", "test"])
@@ -65,9 +69,12 @@ defmodule Fleet.Workflow.Provenance.VerifierTest do
     harness(tmp)
     File.mkdir_p!(Path.join(tmp, "provenance"))
     File.write!(Path.join(tmp, "provenance/bad.json"), "{not json")
-    assert {:error, {:malformed, :invalid_json}} = Verifier.verify("provenance/bad.json", work_dir: tmp)
+
+    assert {:error, {:malformed, :invalid_json}} =
+             Verifier.verify("provenance/bad.json", work_dir: tmp)
 
     File.write!(Path.join(tmp, "provenance/typed.json"), Jason.encode!(%{"_type" => "nope"}))
+
     assert {:error, {:malformed, {:unexpected_type, "nope", nil}}} =
              Verifier.verify("provenance/typed.json", work_dir: tmp)
 
@@ -92,21 +99,37 @@ defmodule Fleet.Workflow.Provenance.VerifierTest do
     assert {:error, {:base_not_ancestor, ^alien, ^livrable}} = Verifier.verify(ref, work_dir: tmp)
   end
 
-  test "E4 FAIL — claimed brief commit unknown / mismatching the dispatched pointer", %{tmp_dir: tmp} do
+  test "E4 FAIL — claimed brief commit unknown / mismatching the dispatched pointer", %{
+    tmp_dir: tmp
+  } do
     %{base: base, livrable: livrable} = harness(tmp)
     fake = String.duplicate("e", 40)
 
-    ref = write_statement(tmp, nil, %{livrable_sha: livrable, input_sha: base, brief_sha: fake, issue: 9})
+    ref =
+      write_statement(tmp, nil, %{
+        livrable_sha: livrable,
+        input_sha: base,
+        brief_sha: fake,
+        issue: 9
+      })
+
     assert {:error, {:unknown_brief_commit, ^fake}} = Verifier.verify(ref, work_dir: tmp)
 
     ref2 =
-      write_statement(tmp, nil, %{livrable_sha: livrable, input_sha: base, brief_sha: base, issue: 10})
+      write_statement(tmp, nil, %{
+        livrable_sha: livrable,
+        input_sha: base,
+        brief_sha: base,
+        issue: 10
+      })
 
     assert {:error, {:brief_mismatch, ^base, ^livrable}} =
              Verifier.verify(ref2, work_dir: tmp, expected_brief_sha: livrable)
   end
 
-  test "C-DEGRADED — absent claims PASS (verify what is CLAIMED, never completeness)", %{tmp_dir: tmp} do
+  test "C-DEGRADED — absent claims PASS (verify what is CLAIMED, never completeness)", %{
+    tmp_dir: tmp
+  } do
     %{base: base, livrable: livrable} = harness(tmp)
 
     # no brief_sha (degraded 2/3 statement — the emitter produces it on purpose) → :ok

@@ -89,13 +89,21 @@ defmodule Fleet.Spawner.PodTmux do
   @spec kill_holder(String.t()) :: :ok
   def kill_holder(pod_id) when is_binary(pod_id) do
     sock = sock_path(pod_id)
+
     # Bounded (Shell.run: process-group SIGKILL at the deadline) — a wedged tmux/pkill must NOT hang the
     # teardown's owner. Return discarded (the death VERDICT is a separate liveness re-check, cf. CI-05).
-    _ = Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock, "kill-server"], timeout_ms: @tmux_timeout_ms)
+    _ =
+      Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock, "kill-server"],
+        timeout_ms: @tmux_timeout_ms
+      )
 
     case pkill_pattern(pod_id) do
       {:ok, pattern} ->
-        _ = Fleet.Credentials.Shell.run("pkill", ["-9", "-f", pattern], timeout_ms: @tmux_timeout_ms)
+        _ =
+          Fleet.Credentials.Shell.run("pkill", ["-9", "-f", pattern],
+            timeout_ms: @tmux_timeout_ms
+          )
+
         :ok
 
       :unsafe ->

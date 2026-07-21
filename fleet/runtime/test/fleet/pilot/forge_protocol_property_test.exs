@@ -102,7 +102,8 @@ defmodule Fleet.Pilot.ForgeProtocolPropertyTest do
   # EMPTY outputs → silent fail-closed, pipeline blocked on a proof that was actually provided.
   property "result_block/1 + parse_result_block/1: parse . build == identity (under the limit)" do
     check all(
-            outputs <- filter(outputs_gen(), &(byte_size(Jason.encode!(&1)) <= @result_fence_limit)),
+            outputs <-
+              filter(outputs_gen(), &(byte_size(Jason.encode!(&1)) <= @result_fence_limit)),
             prefix <- body_prefix(),
             max_runs: 200
           ) do

@@ -60,7 +60,13 @@ defmodule Fleet.Pilot.IssueIdPropertyTest do
   property "totality — a non-string term returns :error (never a raise)" do
     check all(
             term <-
-              one_of([constant(nil), integer(), boolean(), atom(:alphanumeric), list_of(integer())])
+              one_of([
+                constant(nil),
+                integer(),
+                boolean(),
+                atom(:alphanumeric),
+                list_of(integer())
+              ])
           ) do
       assert IssueId.parse(term) == :error
     end

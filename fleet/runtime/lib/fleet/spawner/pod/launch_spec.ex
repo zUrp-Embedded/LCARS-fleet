@@ -253,7 +253,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     # the arch's dynamic work/ops RW was re-bound RO by the derived project_ops mount → doc-authoring
     # blocked). Explicit intent (catalogue, then per-spawn opts) precedes the derived default.
     (system_mounts(claude_launch_path) ++
-       cap_profile_mounts(cap_profile) ++ opts_mounts(opts) ++ project_ops_mount(opts, cap_profile))
+       cap_profile_mounts(cap_profile) ++
+       opts_mounts(opts) ++ project_ops_mount(opts, cap_profile))
     |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
     |> mounts_env()
   end

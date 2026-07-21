@@ -51,7 +51,14 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     the event, multi-project). `run_completion` = the consumer's `(label, fun) -> outcome`
     closure (sync/offload discipline, single source consumer-side).
     """
-    @enforce_keys [:repo, :step_run_completer, :completer_opts, :spawner, :task_queue, :run_completion]
+    @enforce_keys [
+      :repo,
+      :step_run_completer,
+      :completer_opts,
+      :spawner,
+      :task_queue,
+      :run_completion
+    ]
     defstruct [
       # Repo "owner/name" of the step_run (per-step-run, derived from the event).
       :repo,
@@ -112,6 +119,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def terminal_escalate?({:rework_budget_unreadable, _}), do: true
   def terminal_escalate?({:gate_fail_unsigned, _}), do: true
   def terminal_escalate?({:human_approval_required, _}), do: true
+
   # DR-013: an unloadable cap-profile at completion is a TERMINAL config anomaly (the producer/judge
   # property is unknown). ESCALATE, never bubble: bubbling would let the reaper re-dispatch a persistently
   # broken profile forever (G2 churn) without notifying a human.
@@ -192,7 +200,14 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   # on the forge at this point): any raise is demoted to a loud warning — the Poller net
   # covers the latency.
   defp safe_offer_then_wake(%Seams{} = seams, n) do
-    _ = Fleet.Pilot.ArchWake.offer_then_wake(seams.task_queue, seams.spawner, {seams.repo, n}, "immediate")
+    _ =
+      Fleet.Pilot.ArchWake.offer_then_wake(
+        seams.task_queue,
+        seams.spawner,
+        {seams.repo, n},
+        "immediate"
+      )
+
     :ok
   rescue
     e ->

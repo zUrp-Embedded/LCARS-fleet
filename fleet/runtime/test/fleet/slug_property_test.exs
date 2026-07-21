@@ -34,7 +34,17 @@ defmodule Fleet.SlugPropertyTest do
     gen all(
           segs <- list_of(seg(), max_length: 3),
           shape <-
-            member_of([:abs, :rel, :dot, :dotdot, :climb, :double_slash, :trailing, :empty, :root])
+            member_of([
+              :abs,
+              :rel,
+              :dot,
+              :dotdot,
+              :climb,
+              :double_slash,
+              :trailing,
+              :empty,
+              :root
+            ])
         ) do
       base = Enum.join(segs, "/")
 

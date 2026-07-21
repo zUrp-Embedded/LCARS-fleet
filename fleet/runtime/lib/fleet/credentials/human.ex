@@ -9,7 +9,7 @@ defmodule Fleet.Credentials.Human do
   divergent failure policy (`ForgeIdentity.resolve_human` → `{:error}`; `Fleet.Spawner.Pod.LaunchEnv.runtime_user` → raise);
   if the rule evolves, spawn-ownership (pod_dir/UID) and commit-identity (git author) diverge.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   @doc "The current human (`id -un`). `{:ok, login}` | `{:error, reason}`."
@@ -56,8 +56,11 @@ defmodule Fleet.Credentials.Human do
   @spec current_uid!() :: non_neg_integer()
   def current_uid! do
     case current_uid() do
-      {:ok, uid} -> uid
-      {:error, reason} -> raise "Fleet.Credentials.Human: current UID unresolvable (#{inspect(reason)})"
+      {:ok, uid} ->
+        uid
+
+      {:error, reason} ->
+        raise "Fleet.Credentials.Human: current UID unresolvable (#{inspect(reason)})"
     end
   end
 end

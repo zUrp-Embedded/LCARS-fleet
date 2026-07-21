@@ -37,7 +37,13 @@ defmodule Fleet.Workflow.ProvenanceTest do
   end
 
   test "DEGRADED statement: absent brief_sha → configSource WITHOUT digest (never an invented brief_sha)" do
-    s = Provenance.statement(%{livrable_sha: "LSHA", input_sha: "ISHA", brief_ref: "briefs/unknown.md"})
+    s =
+      Provenance.statement(%{
+        livrable_sha: "LSHA",
+        input_sha: "ISHA",
+        brief_ref: "briefs/unknown.md"
+      })
+
     cs = get_in(s, ["predicate", "invocation", "configSource"])
 
     refute Map.has_key?(cs, "digest")
@@ -58,14 +64,23 @@ defmodule Fleet.Workflow.ProvenanceTest do
   test "emit: writes provenance/<livrable_sha>.json (valid in-toto) + commits, idempotent",
        %{tmp_dir: tmp} do
     git_init(tmp)
-    attrs = %{livrable_sha: "abc123", brief_sha: "def", input_sha: "ghi", subject_name: "report-engineer.md"}
+
+    attrs = %{
+      livrable_sha: "abc123",
+      brief_sha: "def",
+      input_sha: "ghi",
+      subject_name: "report-engineer.md"
+    }
 
     assert {:ok, %{ref: ref, path: path}} = Provenance.emit(tmp, attrs)
     assert ref == "provenance/abc123.json"
 
     decoded = path |> File.read!() |> Jason.decode!()
     assert decoded["_type"] == "https://in-toto.io/Statement/v0.1"
-    assert [%{"name" => "report-engineer.md", "digest" => %{"gitCommit" => "abc123"}}] = decoded["subject"]
+
+    assert [%{"name" => "report-engineer.md", "digest" => %{"gitCommit" => "abc123"}}] =
+             decoded["subject"]
+
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
 
     {n1, 0} = System.cmd("git", ["rev-list", "--count", "HEAD"], cd: tmp)

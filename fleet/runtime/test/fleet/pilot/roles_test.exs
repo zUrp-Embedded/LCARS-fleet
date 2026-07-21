@@ -89,7 +89,8 @@ defmodule Fleet.Pilot.RolesTest do
 
       log =
         capture_log(fn ->
-          assert ["qualifier", "reviewer"] == Roles.project_jury("fleet/broken", projects_root: tmp)
+          assert ["qualifier", "reviewer"] ==
+                   Roles.project_jury("fleet/broken", projects_root: tmp)
         end)
 
       assert log =~ "does not load"

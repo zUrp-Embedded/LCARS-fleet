@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
   default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -44,7 +44,10 @@ defmodule Fleet.Pilot.ProjectIntensity do
 
     with :ok <- validate(declaration),
          :ok <- warn_off_matrix(declaration, opts) do
-      atomic_write(Path.join(proj_dir, @file_name), Jason.encode!(declaration, pretty: true) <> "\n")
+      atomic_write(
+        Path.join(proj_dir, @file_name),
+        Jason.encode!(declaration, pretty: true) <> "\n"
+      )
     end
   end
 
@@ -199,5 +202,4 @@ defmodule Fleet.Pilot.ProjectIntensity do
     |> Jason.decode!()
     |> ExJsonSchema.Schema.resolve()
   end
-
 end

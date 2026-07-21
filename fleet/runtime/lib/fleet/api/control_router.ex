@@ -187,7 +187,10 @@ defmodule Fleet.API.ControlRouter do
         # (a host-readable admin door is NEVER announced ready).
         case chmod_fun.(sock, 0o600) do
           :ok ->
-            Logger.info("ControlRouter: admin control socket bound at #{sock} (AF_UNIX, host-only)")
+            Logger.info(
+              "ControlRouter: admin control socket bound at #{sock} (AF_UNIX, host-only)"
+            )
+
             ok
 
           {:error, reason} ->
@@ -206,7 +209,10 @@ defmodule Fleet.API.ControlRouter do
         end
 
       {:error, reason} = err ->
-        Logger.error("ControlRouter: FAILED to bind admin control socket #{sock}: #{inspect(reason)}")
+        Logger.error(
+          "ControlRouter: FAILED to bind admin control socket #{sock}: #{inspect(reason)}"
+        )
+
         err
     end
   end

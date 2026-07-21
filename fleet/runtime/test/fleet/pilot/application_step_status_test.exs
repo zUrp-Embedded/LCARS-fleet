@@ -37,8 +37,11 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
 
   test "degraded when step on but ANY rail process is dead (hollow-green caught)" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
+
     # Start the whole rail EXCEPT WorktreeSync — probing only two names, this read :operational (unprobed).
-    for {key, name} <- PilotApp.step_rail_processes(), key != :worktree_sync, do: spawn_named(name)
+    for {key, name} <- PilotApp.step_rail_processes(),
+        key != :worktree_sync,
+        do: spawn_named(name)
 
     assert {:degraded, detail} = PilotApp.step_status()
     assert detail.worktree_sync == false

@@ -59,7 +59,7 @@ defmodule Fleet.Slug do
       BIT FOR BIT (vendor compat); replacing it with `Fleet.Slug` would
       break resume. See the comment over there.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   # Canonical path-safe charset: lowercase/digit/`_`/`-`, first position never `-`/`_`.
@@ -144,7 +144,8 @@ defmodule Fleet.Slug do
     # would otherwise become the `//` prefix that no expanded path starts with — the guard
     # would refuse its own legal case (`under_root?("/x", "/")` false, `confined_join("/", _)`
     # unusable) while promising "== root or under root".
-    prefix = if String.ends_with?(expanded_root, "/"), do: expanded_root, else: expanded_root <> "/"
+    prefix =
+      if String.ends_with?(expanded_root, "/"), do: expanded_root, else: expanded_root <> "/"
 
     expanded_dest == expanded_root or String.starts_with?(expanded_dest, prefix)
   end

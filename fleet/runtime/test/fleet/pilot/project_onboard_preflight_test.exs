@@ -62,7 +62,9 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   end
 
   @tag :tmp_dir
-  test "account present but outside the humans team → exact admin gestures (team)", %{tmp_dir: tmp} do
+  test "account present but outside the humans team → exact admin gestures (team)", %{
+    tmp_dir: tmp
+  } do
     assert {:error, {:human_not_provisioned, "ghost-human", gestures}} =
              ProjectOnboard.onboard("poc-f2", opts(tmp, NoTeamUsers))
 

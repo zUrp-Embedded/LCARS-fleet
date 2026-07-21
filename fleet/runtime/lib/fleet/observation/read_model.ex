@@ -141,6 +141,7 @@ defmodule Fleet.Observation.ReadModel do
     _ = :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
     :ets.insert(@table, {:projection, empty()})
     subscribe? = Keyword.get(opts, :subscribe, true)
+
     # DR-027: `:subscribed` gates the :live status. A REAL subscribe (subscribe? true) starts PESSIMISTIC
     # (false) and flips true only once the Bus subscribe SUCCEEDS (handle_continue) — an alive-but-deaf
     # read-model then reads :deaf, never a lying :live. The deliberate no-subscribe mode (subscribe? false,

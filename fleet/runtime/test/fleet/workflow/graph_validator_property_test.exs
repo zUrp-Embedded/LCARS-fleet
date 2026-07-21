@@ -54,10 +54,15 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
   # caller can permute the insertion order.
   defp chain_pairs(names) do
     [root | rest] = names
-    [{root, spec([])} | Enum.map(Enum.zip(names, rest), fn {prev, cur} -> {cur, spec([prev])} end)]
+
+    [
+      {root, spec([])}
+      | Enum.map(Enum.zip(names, rest), fn {prev, cur} -> {cur, spec([prev])} end)
+    ]
   end
 
-  defp chain_names(min_length), do: uniq_list_of(step_name(), min_length: min_length, max_length: 6)
+  defp chain_names(min_length),
+    do: uniq_list_of(step_name(), min_length: min_length, max_length: 6)
 
   # ── P1 — TOTALITY ──
 
@@ -76,6 +81,7 @@ defmodule Fleet.Workflow.GraphValidatorPropertyTest do
         {:error, {kind, detail}} ->
           assert kind in @kinds, "kind outside @type: #{inspect(kind)}"
           assert is_map(detail)
+
           # describe/1 must know how to speak of EVERYTHING validate/1 returns (the Loader calls it).
           assert is_binary(GraphValidator.describe({kind, detail}))
       end

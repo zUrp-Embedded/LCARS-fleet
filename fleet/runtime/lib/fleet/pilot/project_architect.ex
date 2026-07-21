@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:projects_root` / `:work_root` — FS roots (defaults `Fleet.Layout`), same keys as
       `ProjectOnboard` (the onboard opts thread through unchanged).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -81,7 +81,10 @@ defmodule Fleet.Pilot.ProjectArchitect do
       is_nil(repo_id) ->
         # The numeric id IS the arch's identity (`<REPO4>` of the deterministic UUID). Refused early
         # and clearly rather than letting SessionMint raise inside the pod init (same fact, worse trace).
-        Logger.error("ProjectArchitect: repo id unresolved for #{repo} — arch NOT ensured (forge down?)")
+        Logger.error(
+          "ProjectArchitect: repo id unresolved for #{repo} — arch NOT ensured (forge down?)"
+        )
+
         {:error, {:repo_id_unresolved, repo}}
 
       true ->
@@ -104,7 +107,10 @@ defmodule Fleet.Pilot.ProjectArchitect do
 
           case spawner.spawn_pod(cap, pod_id, spawn_opts) do
             {:ok, _pid} ->
-              Logger.info("ProjectArchitect: architect ensured for #{repo} (pod #{pod_id}, spawned)")
+              Logger.info(
+                "ProjectArchitect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
+              )
+
               {:ok, pod_id}
 
             {:error, {:already_started, _pid}} ->

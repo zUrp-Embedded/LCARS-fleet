@@ -32,7 +32,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -148,7 +148,8 @@ defmodule Fleet.Workflow.BriefArtifact do
   """
   @spec resolve(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
-  def resolve(repo, ref, sha, opts \\ []) when is_binary(repo) and is_binary(ref) and is_binary(sha) do
+  def resolve(repo, ref, sha, opts \\ [])
+      when is_binary(repo) and is_binary(ref) and is_binary(sha) do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
     work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
 

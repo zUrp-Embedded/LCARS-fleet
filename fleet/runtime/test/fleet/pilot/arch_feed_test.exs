@@ -128,9 +128,17 @@ defmodule Fleet.Pilot.ArchFeedTest do
 
   test "the feed is BOUNDED: trimmed to the last 200 lines", %{tmp_dir: tmp} do
     pid = start_feed(tmp)
-    File.write!(Path.join(tmp, "fleet.feed"), Enum.map_join(1..250, "\n", &"old line #{&1}") <> "\n")
 
-    send(pid, event(:"pod.completed", %{"repo" => "fleet/demo", "pod_id" => "p", "issue_id" => "i"}))
+    File.write!(
+      Path.join(tmp, "fleet.feed"),
+      Enum.map_join(1..250, "\n", &"old line #{&1}") <> "\n"
+    )
+
+    send(
+      pid,
+      event(:"pod.completed", %{"repo" => "fleet/demo", "pod_id" => "p", "issue_id" => "i"})
+    )
+
     :sys.get_state(pid)
 
     lines = tmp |> feed() |> String.split("\n", trim: true)
@@ -155,7 +163,9 @@ defmodule Fleet.Pilot.ArchFeedTest do
     def get_issue(_repo, _n, _opts), do: {:error, :not_found}
   end
 
-  test "the line carries the issue TITLE read at the forge — self-sufficient message", %{tmp_dir: tmp} do
+  test "the line carries the issue TITLE read at the forge — self-sufficient message", %{
+    tmp_dir: tmp
+  } do
     pid = start_feed(tmp, forge: TitleForge)
 
     send(
@@ -173,7 +183,8 @@ defmodule Fleet.Pilot.ArchFeedTest do
     assert feed(tmp) =~ "brique #12 « Script chifoumi (CLI) » LIVRÉE"
   end
 
-  test "title unreadable at the forge → line renders WITHOUT it (best-effort, pre-title shape)", %{tmp_dir: tmp} do
+  test "title unreadable at the forge → line renders WITHOUT it (best-effort, pre-title shape)",
+       %{tmp_dir: tmp} do
     pid = start_feed(tmp, forge: TitleForge)
 
     send(

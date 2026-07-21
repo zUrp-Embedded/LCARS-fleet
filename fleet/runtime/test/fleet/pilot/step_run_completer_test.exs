@@ -344,7 +344,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       json = prov |> File.read!() |> Jason.decode!()
       # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
       assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
-      assert get_in(json, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) == brief_sha
+
+      assert get_in(json, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) ==
+               brief_sha
+
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
       # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)

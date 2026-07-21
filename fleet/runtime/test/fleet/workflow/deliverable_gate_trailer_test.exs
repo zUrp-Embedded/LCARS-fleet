@@ -36,7 +36,9 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "commit WITHOUT trailer → fail-loud {:missing_coauthor_trailer, role, [sha]}", %{tmp_dir: dir} do
+  test "commit WITHOUT trailer → fail-loud {:missing_coauthor_trailer, role, [sha]}", %{
+    tmp_dir: dir
+  } do
     base = init_repo(dir)
     commit!(dir, "a.txt", "feat: a (no trailer)")
 
@@ -72,7 +74,9 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "F-03 (codex audit): PROSE quoting the marker is NOT a trailer → fail-loud", %{tmp_dir: dir} do
+  test "F-03 (codex audit): PROSE quoting the marker is NOT a trailer → fail-loud", %{
+    tmp_dir: dir
+  } do
     base = init_repo(dir)
     # The marker appears in the BODY as prose (an audit note), never in the trailer block.
     commit!(

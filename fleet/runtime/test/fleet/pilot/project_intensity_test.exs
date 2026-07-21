@@ -12,7 +12,9 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
 
   @moduletag :tmp_dir
 
-  test "declared: writes a schema-valid intensity.json relaying the human's level", %{tmp_dir: tmp} do
+  test "declared: writes a schema-valid intensity.json relaying the human's level", %{
+    tmp_dir: tmp
+  } do
     assert :ok =
              ProjectIntensity.write(tmp,
                intensity_level: "C3",
@@ -84,7 +86,14 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
        %{tmp_dir: tmp} do
     proj = Path.join(tmp, "demo")
     File.mkdir_p!(proj)
-    :ok = ProjectIntensity.write(proj, intensity_level: "C2", intensity_justification: "x", workflow_map: "standard-qa")
+
+    :ok =
+      ProjectIntensity.write(proj,
+        intensity_level: "C2",
+        intensity_justification: "x",
+        workflow_map: "standard-qa"
+      )
+
     assert "standard-qa" == ProjectIntensity.pipeline_default("fleet/demo", projects_root: tmp)
 
     # absent (legacy project) → the delegation default, no log requirement
@@ -97,7 +106,8 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
 
     log =
       capture_log(fn ->
-        assert "brief-gate" == ProjectIntensity.pipeline_default("fleet/broken", projects_root: tmp)
+        assert "brief-gate" ==
+                 ProjectIntensity.pipeline_default("fleet/broken", projects_root: tmp)
       end)
 
     assert log =~ "unreadable/invalid"

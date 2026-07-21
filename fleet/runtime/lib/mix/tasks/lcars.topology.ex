@@ -89,7 +89,11 @@ defmodule Mix.Tasks.Lcars.Topology do
     check? = "--check" in args
 
     graph = parse_boundaries()
-    outputs = [{@readme, render_section(compute_heights(graph))}, {@root_readme, render_mermaid(graph)}]
+
+    outputs = [
+      {@readme, render_section(compute_heights(graph))},
+      {@root_readme, render_mermaid(graph)}
+    ]
 
     if check? do
       stale =
@@ -186,7 +190,10 @@ defmodule Mix.Tasks.Lcars.Topology do
       |> Enum.group_by(fn m ->
         Map.get(@layers, m) || raise "no layer declared in @layers for #{m}"
       end)
-      |> Enum.sort_by(fn {_l, ms} -> ms |> Enum.map(&Map.fetch!(heights, &1)) |> Enum.max() end, :desc)
+      |> Enum.sort_by(
+        fn {_l, ms} -> ms |> Enum.map(&Map.fetch!(heights, &1)) |> Enum.max() end,
+        :desc
+      )
       |> Enum.flat_map(fn {layer, mods} ->
         mods
         |> Enum.sort_by(&{Map.fetch!(heights, &1), &1})
@@ -215,7 +222,12 @@ defmodule Mix.Tasks.Lcars.Topology do
   # domains (foundation edges omitted for readability — every domain may depend down on
   # foundation), dotted edges = the runtime seams declared in @seams.
   defp render_mermaid(graph) do
-    heights = graph |> compute_heights() |> Enum.flat_map(fn {h, ms} -> Enum.map(ms, &{&1, h}) end) |> Map.new()
+    heights =
+      graph
+      |> compute_heights()
+      |> Enum.flat_map(fn {h, ms} -> Enum.map(ms, &{&1, h}) end)
+      |> Map.new()
+
     foundation = for {m, []} <- graph, do: m
     id = fn m -> String.replace(m, ".", "_") end
 
@@ -228,7 +240,10 @@ defmodule Mix.Tasks.Lcars.Topology do
       |> Map.keys()
       |> Enum.reject(&(&1 in hidden))
       |> Enum.group_by(&Map.fetch!(@layers, &1))
-      |> Enum.sort_by(fn {_l, ms} -> ms |> Enum.map(&Map.fetch!(heights, &1)) |> Enum.max() end, :desc)
+      |> Enum.sort_by(
+        fn {_l, ms} -> ms |> Enum.map(&Map.fetch!(heights, &1)) |> Enum.max() end,
+        :desc
+      )
 
     subgraphs =
       Enum.flat_map(layer_groups, fn {layer, mods} ->

@@ -72,9 +72,10 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 422
     end
 
-    test "M20: without action, event_type comes from the X-Gitea-Event header (no 'push' default)", %{
-      secret: secret
-    } do
+    test "M20: without action, event_type comes from the X-Gitea-Event header (no 'push' default)",
+         %{
+           secret: secret
+         } do
       body = %{"ref" => "refs/heads/main"}
 
       conn =
@@ -153,9 +154,10 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
-    test "non-MAP repository (forged body) → `unknown` sentinel, NOT a 500 crash outside the 422 discipline", %{
-      secret: secret
-    } do
+    test "non-MAP repository (forged body) → `unknown` sentinel, NOT a 500 crash outside the 422 discipline",
+         %{
+           secret: secret
+         } do
       # `Plug.Parsers` guarantees `body` is a map, NOT that `repository` is one. A forged body
       # `{"repository": "x"}` would make `get_in("x", ["full_name"])` raise (FunctionClauseError
       # in Access) INSIDE extract_issue, BEFORE the `try` → Cowboy 500, outside the module's
@@ -265,6 +267,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
+
       # D1: structured reason (:secret_missing) — Jason encodes the atom as a string on the wire.
       assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
     end
@@ -288,6 +291,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
+
       # D1: structured reason (:secret_missing) — Jason encodes the atom as a string on the wire.
       assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
       refute_receive %Fleet.Event{source: :event_router}, 200

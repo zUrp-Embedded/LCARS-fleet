@@ -50,10 +50,15 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(tmp, "prose_only.ex", ~r/:brief_required/, [
+      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+               tmp,
+               "prose_only.ex",
                ~r/:brief_required/,
-               ~r/^\s*\{:error, :brief_required\}/
-             ]),
+               [
+                 ~r/:brief_required/,
+                 ~r/^\s*\{:error, :brief_required\}/
+               ]
+             ),
              "a tuple present only in @moduledoc/@doc must NOT count as code"
     end
 
@@ -73,10 +78,15 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.code_match?(tmp, "real_guard.ex", ~r/:brief_required/, [
+      assert Mix.Tasks.Lcars.Contracts.Check.code_match?(
+               tmp,
+               "real_guard.ex",
                ~r/:brief_required/,
-               ~r/^\s*.*\{:error, :brief_required\}/
-             ]),
+               [
+                 ~r/:brief_required/,
+                 ~r/^\s*.*\{:error, :brief_required\}/
+               ]
+             ),
              "the tuple on the guard's executable line must count"
     end
   end

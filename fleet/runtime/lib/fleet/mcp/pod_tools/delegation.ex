@@ -77,7 +77,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   posting under the system account would mask traceability and bypass
   least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge).
   """
-  @spec create_issue(String.t(), String.t(), map(), {String.t(), String.t()} | nil, String.t() | nil) ::
+  @spec create_issue(
+          String.t(),
+          String.t(),
+          map(),
+          {String.t(), String.t()} | nil,
+          String.t() | nil
+        ) ::
           {:ok, map()} | {:error, term()}
   def create_issue(title, brief, state, brief_pointer \\ nil, summary \\ nil, supersedes \\ nil)
       when is_binary(title) and is_binary(brief) do
@@ -504,6 +510,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       org =
         Application.get_env(:fleet_mcp, :delegation_org) ||
           Application.get_env(:fleet_pilot, :fleet_org, "fleet")
+
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
       # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
@@ -641,7 +648,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
         Map.put(
           rendered,
           "architect",
-          %{"status" => status, "pod_id" => Map.get(arch, :pod_id), "reason" => Map.get(arch, :reason)}
+          %{
+            "status" => status,
+            "pod_id" => Map.get(arch, :pod_id),
+            "reason" => Map.get(arch, :reason)
+          }
           |> Enum.reject(fn {_k, v} -> is_nil(v) end)
           |> Map.new()
         )
@@ -666,8 +677,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp ensure_pointer(repo, title, brief, nil, summary) do
     opts =
       case Application.get_env(:fleet_mcp, :brief_work_root) do
-        nil -> [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops]
-        root -> [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops, work_root: root]
+        nil ->
+          [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops]
+
+        root ->
+          [
+            name_hint: Fleet.Layout.sanitize_artifact_name(title),
+            kind: "worker",
+            push: :work_ops,
+            work_root: root
+          ]
       end
 
     case Fleet.Workflow.BriefArtifact.physicalize(brief, repo, opts) do

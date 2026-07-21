@@ -61,10 +61,13 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   end
 
   defp forge_opts!() do
-    base = System.get_env("FORGE_BASE_URL") || Mix.raise("FORGE_BASE_URL missing (source ~/.lcars/fleet_v2.env)")
+    base =
+      System.get_env("FORGE_BASE_URL") ||
+        Mix.raise("FORGE_BASE_URL missing (source ~/.lcars/fleet_v2.env)")
 
     token_file =
-      System.get_env("FORGE_TOKEN_FILE") || Mix.raise("FORGE_TOKEN_FILE missing (source ~/.lcars/fleet_v2.env)")
+      System.get_env("FORGE_TOKEN_FILE") ||
+        Mix.raise("FORGE_TOKEN_FILE missing (source ~/.lcars/fleet_v2.env)")
 
     [base_url: base, token: token_file |> File.read!() |> String.trim()]
   end
@@ -128,7 +131,8 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
 
       # All ops via Fleet.Credentials.Shell.git: BOUNDED (a hung network push no longer suspends the
       # deploy forever) + hooks-off; the push carries the token through `env`, never the argv.
-      with {:ok, {_, 0}} <- git(["init", "-q", "-b", branch], cd: tmp, timeout_ms: @local_timeout_ms),
+      with {:ok, {_, 0}} <-
+             git(["init", "-q", "-b", branch], cd: tmp, timeout_ms: @local_timeout_ms),
            {:ok, {_, 0}} <- git(["add", "-A"], cd: tmp, timeout_ms: @local_timeout_ms),
            {:ok, {_, 0}} <-
              git(

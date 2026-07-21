@@ -133,6 +133,7 @@ defmodule Fleet.MCP.PodSocketTest do
   test "release surfaces a socket-file removal failure (structured verdict, not a silent :ok)" do
     pod = uniq("stuck")
     path = PodSocketSupervisor.socket_path(pod)
+
     # Make the socket "file" a DIRECTORY → File.rm fails (:eperm/:eisdir): the removal cannot succeed.
     File.mkdir_p!(path)
     on_exit(fn -> File.rm_rf(Path.dirname(path)) end)
@@ -140,6 +141,7 @@ defmodule Fleet.MCP.PodSocketTest do
     # This once returned a blind :ok; now the removal failure is OWNED (surfaced), not forgotten.
     assert {:error, {:release_incomplete, detail}} = PodSocketSupervisor.release_pod_socket(pod)
     assert match?({:error, _}, detail.socket_file)
+
     # the suspect remains on disk for the SocketWarden / cold-boot sweep to reap — never silently lost
     assert File.exists?(path)
   end

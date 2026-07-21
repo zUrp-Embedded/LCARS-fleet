@@ -25,6 +25,7 @@ defmodule Fleet.MCP.PodToolsTest do
   describe "deftool descriptions match the real contract (agent-facing, read at call time)" do
     test "create_issue does NOT promise an ALWAYS-commit, and states the inline degradation" do
       desc = tool_description("create_issue")
+
       # ensure_pointer/5 delivers the brief INLINE when physicalization cannot complete → the old
       # "ALWAYS commits" mis-guided the agent's mental model of where its brief lands.
       refute desc =~ "ALWAYS commits"
@@ -34,6 +35,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "create_project does NOT tell the agent to pass a `project` param that no longer exists" do
       desc = tool_description("create_project")
+
       # `project` was removed from create_issue's schema+handler (the repo comes from the pod binding).
       refute desc =~ "project: <the returned repo>"
       refute desc =~ "passing it `project:"
@@ -299,7 +301,11 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
-         %{"state" => "closed", "labels" => [%{"name" => "lcars-onboarded"}], "title" => "Livrée sans label"}}
+         %{
+           "state" => "closed",
+           "labels" => [%{"name" => "lcars-onboarded"}],
+           "title" => "Livrée sans label"
+         }}
 
     @impl true
     defdelegate list_pulls(repo, opts), to: MergedMarkerForge
@@ -329,7 +335,16 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @impl true
     def list_pulls(_repo, _opts),
-      do: {:ok, [%{"number" => 9, "state" => "open", "merged" => false, "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}}]}
+      do:
+        {:ok,
+         [
+           %{
+             "number" => 9,
+             "state" => "open",
+             "merged" => false,
+             "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}
+           }
+         ]}
 
     @impl true
     def parse_feature_branch("lcars/issue-5-engineer"), do: {:ok, {5, "engineer"}}
@@ -814,7 +829,9 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _} = Fleet.Layout.parse_brief_pointer(body)
     end
 
-    test "degraded materialization (no work/ops) → full inline body, the legacy behavior", %{tmp_dir: tmp} do
+    test "degraded materialization (no work/ops) → full inline body, the legacy behavior", %{
+      tmp_dir: tmp
+    } do
       # work_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
       # (The binding repo is fleet/demo but tmp/demo was NOT created in this test → degraded path.)
       TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
@@ -1172,7 +1189,11 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_open_issues("fleet/alpha", _opts) do
       {:ok,
        [
-         %{"number" => 4, "title" => "sonde retour", "labels" => [%{"name" => "lcars-awaits-arch"}]},
+         %{
+           "number" => 4,
+           "title" => "sonde retour",
+           "labels" => [%{"name" => "lcars-awaits-arch"}]
+         },
          %{"number" => 5, "title" => "vraie feature", "labels" => [%{"name" => "type:feature"}]}
        ]}
     end
@@ -1185,7 +1206,10 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok,
        [
          %{"body" => "commentaire de route (plus ancien)"},
-         %{"body" => "décision escalate_user — PING-RETOUR-OK [step_run:consultant:await:escalate_user]"}
+         %{
+           "body" =>
+             "décision escalate_user — PING-RETOUR-OK [step_run:consultant:await:escalate_user]"
+         }
        ]}
     end
 

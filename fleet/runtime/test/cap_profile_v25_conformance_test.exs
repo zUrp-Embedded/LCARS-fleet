@@ -131,7 +131,9 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "negative — MISSING spec.brief_kind rejected (judge-ness never inferred)", %{schema: schema} do
+  test "negative — MISSING spec.brief_kind rejected (judge-ness never inferred)", %{
+    schema: schema
+  } do
     # Upstream lock of soft-fallback #2: brief_kind absent → code default `worker` = EXECUTES (raw issue).
     # A JUDGE role that forgets `brief_kind: judge` would fall back to worker → it would execute the
     # attacker content instead of judging it. "judge-ness = security property, never inferred": brief_kind
@@ -220,7 +222,13 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     # split — this proves the canon carries the split, no Python↔Elixir drift, ever.
     tools = fn role ->
       canon = @canon_dir |> Path.join("#{role}.yaml") |> YamlElixir.read_from_file!()
-      cp = %Fleet.CapProfile{kind: canon["kind"], metadata: canon["metadata"], spec: canon["spec"]}
+
+      cp = %Fleet.CapProfile{
+        kind: canon["kind"],
+        metadata: canon["metadata"],
+        spec: canon["spec"]
+      }
+
       Fleet.CapProfile.mcp_fleet_tools(cp)
     end
 
@@ -282,7 +290,10 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   end
 
   test "B-03 (catalogue L3): the canon roles carry the RIGHT capabilities (data, not magic names)" do
-    cap = fn role -> {:ok, p} = Fleet.CapProfile.load(role); p end
+    cap = fn role ->
+      {:ok, p} = Fleet.CapProfile.load(role)
+      p
+    end
 
     assert Fleet.CapProfile.has_capability?(cap.("architect"), :onboarder)
     assert Fleet.CapProfile.has_capability?(cap.("architect"), :project_delegate)

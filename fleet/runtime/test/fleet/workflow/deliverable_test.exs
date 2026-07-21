@@ -279,6 +279,7 @@ defmodule Fleet.Workflow.DeliverableTest do
     test "F081 — checked-in symlink in the workspace → BLOCKS (no escape via File.write)",
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-symlink")
+
       # Vector: a cloned repo with a trap symlink `out` -> outside the workspace. The lexical check
       # (Path.expand) passes; File.write WOULD follow the link → escape. Must be blocked.
       escape = Path.join(tmp, "escape-target")

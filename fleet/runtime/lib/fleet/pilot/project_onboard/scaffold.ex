@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   The only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -117,7 +117,4 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
       {:error, reason} -> {:error, {:scaffold_write, path, reason}}
     end
   end
-
-
-
 end

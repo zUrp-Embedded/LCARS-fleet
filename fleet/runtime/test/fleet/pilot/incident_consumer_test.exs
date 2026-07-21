@@ -56,6 +56,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert_receive {:rec, "wake", "pod_2", "no_ack", opts}
     assert Keyword.get(opts, :escalate_kind) == :sp_suspect
     assert Keyword.get(opts, :pane) == "sess:1.2"
+
     # Payload without reason_detail (pre-normalization producer or forged event) → nil, never a crash.
     assert Keyword.get(opts, :reason_detail) == nil
   end

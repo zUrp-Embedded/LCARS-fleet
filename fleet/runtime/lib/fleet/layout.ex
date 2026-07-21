@@ -101,7 +101,8 @@ defmodule Fleet.Layout do
 
   @doc "work/ops-relative ref of a provenance statement: `provenance/<name>.json` (sanitized)."
   @spec provenance_ref(String.t()) :: String.t()
-  def provenance_ref(name), do: Path.join(@provenance_subdir, sanitize_artifact_name(name) <> ".json")
+  def provenance_ref(name),
+    do: Path.join(@provenance_subdir, sanitize_artifact_name(name) <> ".json")
 
   @doc """
   Validates a brief ref SHAPE (BND-123 defensive twin of `brief_ref/2` — same truth, one
@@ -142,8 +143,13 @@ defmodule Fleet.Layout do
 
   def parse_brief_pointer(body) when is_binary(body) do
     case Regex.run(@brief_pointer_re, body) do
-      nil -> :none
-      [_, ref, sha] -> if valid_brief_ref?(ref), do: {:ok, {ref, sha}}, else: {:error, {:invalid_pointer_ref, ref}}
+      nil ->
+        :none
+
+      [_, ref, sha] ->
+        if valid_brief_ref?(ref),
+          do: {:ok, {ref, sha}},
+          else: {:error, {:invalid_pointer_ref, ref}}
     end
   end
 end

@@ -216,7 +216,9 @@ defmodule Fleet.Spawner.SeedStoreTest do
       assert line =~ "session_01ABC"
     end
 
-    test "capture: :none when the live jsonl has NO bridge_status (not registered yet)", %{tmp: tmp} do
+    test "capture: :none when the live jsonl has NO bridge_status (not registered yet)", %{
+      tmp: tmp
+    } do
       pod_dir = Path.join(tmp, "pod")
       make_jsonl(pod_dir, "-home-x-arch", @uuid, ~s({"type":"system","subtype":"mode"}\n))
       assert :none = SeedStore.capture_slot_bridge(pod_dir, @uuid)
@@ -236,7 +238,12 @@ defmodule Fleet.Spawner.SeedStoreTest do
       File.write!(Path.join([root, "_slots", "#{@uuid}.jsonl"]), @bridge <> "\n")
 
       seed = Path.join(tmp, "base.jsonl")
-      File.write!(seed, ~s({"type":"system","subtype":"mode"}\n{"type":"user","message":"setup"}\n))
+
+      File.write!(
+        seed,
+        ~s({"type":"system","subtype":"mode"}\n{"type":"user","message":"setup"}\n)
+      )
+
       pod_dir = Path.join(tmp, "recallpod")
 
       {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallpod", @uuid)

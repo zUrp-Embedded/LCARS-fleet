@@ -11,7 +11,10 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # consumer → invisible to the test. A registered observer (set only by that test) receives the
       # delegation effect so it can be OBSERVED, not merely assumed from Process.alive?.
       send(self(), {:step_run, step_run, opts})
-      if obs = Process.whereis(:step_run_delegation_observer), do: send(obs, {:delegated, step_run})
+
+      if obs = Process.whereis(:step_run_delegation_observer),
+        do: send(obs, {:delegated, step_run})
+
       {:ok, :captured}
     end
 
@@ -445,7 +448,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       {:ok, pid} =
         StepRunConsumer.start_link(
           name: name,
-          subscribe: false,
+          subscribe: false
         )
 
       assert Process.alive?(pid)
@@ -492,6 +495,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
     test "handle_info pod.completed -> delegates (via real Event, subscribe: false)" do
       name = :"HC_live_#{System.unique_integer([:positive])}"
+
       # Observe the delegation EFFECT (CaptureCompleter sends {:delegated, _} here), not just liveness —
       # the old test only checked Process.alive? with no FIFO barrier, so it could pass BEFORE the event
       # was even handled (it proved nothing about the "delegates" it claimed).

@@ -61,12 +61,18 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "project but work/ops ABSENT → nil (the STRICT ro-bind launcher would crash on a missing source)" do
-      assert LaunchSpec.project_ops_path([rc_name: "ghost_test"], cap_with_mounts([]), "/tmp/nexiste-pas-42") ==
+      assert LaunchSpec.project_ops_path(
+               [rc_name: "ghost_test"],
+               cap_with_mounts([]),
+               "/tmp/nexiste-pas-42"
+             ) ==
                nil
     end
 
     @tag :tmp_dir
-    test "project + work/ops present → the scoped path <work_root>/<project> (ITS world)", %{tmp_dir: tmp} do
+    test "project + work/ops present → the scoped path <work_root>/<project> (ITS world)", %{
+      tmp_dir: tmp
+    } do
       File.mkdir_p!(Path.join(tmp, "myproj"))
 
       assert LaunchSpec.project_ops_path([rc_name: "myproj_test"], cap_with_mounts([]), tmp) ==

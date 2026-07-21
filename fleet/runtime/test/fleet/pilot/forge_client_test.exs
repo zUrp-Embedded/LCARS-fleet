@@ -501,7 +501,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
            ]}
       }
 
-      assert {:ok, feedback} = ForgeClient.change_request_feedback("fleet/lcars", 6, opts(handlers))
+      assert {:ok, feedback} =
+               ForgeClient.change_request_feedback("fleet/lcars", 6, opts(handlers))
 
       logins = Enum.map(feedback, & &1["login"])
       # reviewer-a's lifted objection must NOT be in the rework brief; reviewer-b's must.
@@ -1167,7 +1168,13 @@ defmodule Fleet.Pilot.ForgeClientTest do
     test "201 → :ok" do
       handlers = %{{"POST", "/api/v1/repos/fleet/proj/branches"} => {201, %{"name" => "b"}}}
 
-      assert :ok = ForgeClient.create_branch("fleet/proj", "lcars/issue-9-eng", "cafe", opts(handlers))
+      assert :ok =
+               ForgeClient.create_branch(
+                 "fleet/proj",
+                 "lcars/issue-9-eng",
+                 "cafe",
+                 opts(handlers)
+               )
     end
 
     test "409 (already born — replay) → {:error, :branch_exists}, typed for the idempotent skip" do
@@ -1181,7 +1188,9 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
 
     test "other HTTP error propagates as-is (caller decides the fallback)" do
-      handlers = %{{"POST", "/api/v1/repos/fleet/proj/branches"} => {404, %{"message" => "no ref"}}}
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branches"} => {404, %{"message" => "no ref"}}
+      }
 
       assert {:error, {:http, 404, _}} =
                ForgeClient.create_branch("fleet/proj", "b", "dead", opts(handlers))
@@ -1296,11 +1305,10 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}},
         {"GET", "/api/v1/repos/fleet/proj/pulls/9"} =>
           {200, %{"head" => %{"ref" => "lcars/issue-9-eng"}}},
-        {"DELETE", "/api/v1/repos/fleet/proj/branches/lcars%2Fissue-9-eng"} =>
-          fn ->
-            Agent.update(probe, fn _ -> true end)
-            {204, %{}}
-          end
+        {"DELETE", "/api/v1/repos/fleet/proj/branches/lcars%2Fissue-9-eng"} => fn ->
+          Agent.update(probe, fn _ -> true end)
+          {204, %{}}
+        end
       }
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))

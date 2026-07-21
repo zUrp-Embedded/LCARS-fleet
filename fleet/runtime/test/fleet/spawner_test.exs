@@ -421,7 +421,9 @@ defmodule Fleet.SpawnerTest do
     @tag :tmp_dir
     test "TurnFlag.write with MESSAGE: typed info wake — '<token> <message>', one line, newlines flattened",
          %{tmp_dir: tmp} do
-      assert :ok = Fleet.Spawner.Pod.TurnFlag.write(tmp, "info : brique fleet/x#12 LIVRÉE\nsur main")
+      assert :ok =
+               Fleet.Spawner.Pod.TurnFlag.write(tmp, "info : brique fleet/x#12 LIVRÉE\nsur main")
+
       content = tmp |> Path.join("turn.flag") |> File.read!() |> String.trim()
 
       [_token, msg] = String.split(content, " ", parts: 2)

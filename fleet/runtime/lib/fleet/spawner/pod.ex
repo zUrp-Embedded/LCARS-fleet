@@ -1149,7 +1149,13 @@ defmodule Fleet.Spawner.Pod do
   defp live_jsonl_exists?(base) do
     cwd = LaunchSpec.pod_cwd(base.opts, base.cap_profile, base.pod_dir)
 
-    [base.pod_dir, ".claude", "projects", Fleet.Spawner.SeedStore.slugify(cwd), "#{base.session_id}.jsonl"]
+    [
+      base.pod_dir,
+      ".claude",
+      "projects",
+      Fleet.Spawner.SeedStore.slugify(cwd),
+      "#{base.session_id}.jsonl"
+    ]
     |> Path.join()
     |> File.exists?()
   end

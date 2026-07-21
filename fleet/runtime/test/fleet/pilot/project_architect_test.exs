@@ -47,7 +47,9 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       work = Path.join([tmp, "projects.work", "demo"])
       File.mkdir_p!(proj)
       File.mkdir_p!(work)
-      {proj, work, [projects_root: Path.join(tmp, "projects"), work_root: Path.join(tmp, "projects.work")]}
+
+      {proj, work,
+       [projects_root: Path.join(tmp, "projects"), work_root: Path.join(tmp, "projects.work")]}
     end
 
     test "spawns the architect PROJECT-BOUND: composed cap + repo_id + repo + rc_name + MOUNTS (no clone)",
@@ -66,6 +68,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       assert Fleet.CapProfile.name(cap) == "architect"
       # Deterministic per-project pod_id (relaunch-idempotent), via the single authority.
       assert opts[:pod_id] == "architect-demo"
+
       # Identity: numeric repo id → the <REPO4> of the deterministic UUID; `repo` = the channel-side
       # binding pod_info exposes (the repo-implicit MCP tools resolve "the project" from it).
       assert opts[:repo_id] == 4242
@@ -74,6 +77,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       assert opts[:rc_name] == "demo_architect"
       # NO CLONE (§14.d): the arch is not a producer — its world is the two live host dirs.
       refute Keyword.has_key?(opts, :project)
+
       assert opts[:mounts] == [
                %{"mode" => "ro", "path" => proj},
                %{"mode" => "rw", "path" => work}

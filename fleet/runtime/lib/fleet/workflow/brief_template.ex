@@ -14,7 +14,7 @@ defmodule Fleet.Workflow.BriefTemplate do
   calibration edit must take effect immediately — a cache would freeze the human's
   adjustment until reboot, the exact opposite of the surface's purpose.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @templates_subdir Path.join("workflow", "brief_templates")
@@ -29,7 +29,9 @@ defmodule Fleet.Workflow.BriefTemplate do
       priv_path(name)
       |> File.read!()
       |> strip_header()
-      |> then(&Regex.replace(~r/\{\{(\w+)\}\}/, &1, fn _, token -> Map.fetch!(assigns, token) end))
+      |> then(
+        &Regex.replace(~r/\{\{(\w+)\}\}/, &1, fn _, token -> Map.fetch!(assigns, token) end)
+      )
 
     if rendered =~ ~r/\{\{\w+\}\}/ do
       raise ArgumentError,

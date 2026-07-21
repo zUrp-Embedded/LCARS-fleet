@@ -73,12 +73,17 @@ defmodule LcarsFleet.MixProject do
     [preferred_envs: [gate: :test]]
   end
 
-  # Composable CI/dev gate: strict compile + suite + shell_gate (out-of-mix tests) +
+  # Composable CI/dev gate: format + strict compile + suite + shell_gate (out-of-mix tests) +
   # inter-module contracts + topology freshness + strict Dialyzer. `mix gate` exits ≠0
   # if any step is red.
   defp aliases do
     [
       gate: [
+        # FIRST because it is the cheapest signal in the chain (seconds, no compile) and because a
+        # formatting drift is the one failure that is fixed by running one command. Locked here rather
+        # than left to discipline: the tree was 86 files out of format before this step existed, which
+        # is what an unenforced convention converges to.
+        "format --check-formatted",
         "compile --warnings-as-errors",
         "test",
         &shell_gate/1,

@@ -62,7 +62,7 @@ defmodule Fleet.TaskQueue.Server do
       selection (`find_active`), supersession and the deadline guard — extracting it
       would force either a duplication of that authority, or a dedicated module for 20 LOC.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -171,7 +171,9 @@ defmodule Fleet.TaskQueue.Server do
     # the producer so the payload stays JSON-safe end-to-end (WS edge encodes it raw).
     lossy_broadcast(
       state,
-      Fleet.Event.new(:task_queue, :"state.corrupt", payload: %{expected: 1, found: inspect(found)})
+      Fleet.Event.new(:task_queue, :"state.corrupt",
+        payload: %{expected: 1, found: inspect(found)}
+      )
     )
 
     {:noreply, state}
