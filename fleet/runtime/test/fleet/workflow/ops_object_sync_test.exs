@@ -7,7 +7,9 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   through an ISOLATED instance the setup starts: the app's always-on singleton is OFF in `:test` for
   hermeticity (see the setup note), so each test drives its own named server via `commit_object/5`.
   """
-  use ExUnit.Case, async: true
+  # async: false — the bypass-visibility tests mutate the GLOBAL :start_ops_object_sync
+  # knob (put_env_restoring); a concurrent suite hitting the fallback would log-bleed.
+  use ExUnit.Case, async: false
 
   alias Fleet.Workflow.OpsObjectSync
 
@@ -97,5 +99,43 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
     # N distinct objects, serialized → N commits (no lost/failed write, no corrupt index).
     assert commit_count(tmp) == "#{n}"
+  end
+
+  test "the PROD-config bypass is LOUD: serializer absent while config starts it → warning per call" do
+    # The optional-layer posture is documented; what could not stand is the SILENT bypass in
+    # a booted daemon (restart window / crash loop): the gate's absence must be visible.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :start_ops_object_sync, true)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        _ =
+          Fleet.Workflow.OpsObjectSync.commit_object(
+            :absent_serializer_name,
+            "/nonexistent-workdir",
+            "ref",
+            "content",
+            []
+          )
+      end)
+
+    assert log =~ "serializer NOT registered"
+  end
+
+  test "the deliberate no-serializer mode (config off) stays QUIET" do
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :start_ops_object_sync, false)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        _ =
+          Fleet.Workflow.OpsObjectSync.commit_object(
+            :absent_serializer_name,
+            "/nonexistent-workdir",
+            "ref",
+            "content",
+            []
+          )
+      end)
+
+    refute log =~ "serializer NOT registered"
   end
 end

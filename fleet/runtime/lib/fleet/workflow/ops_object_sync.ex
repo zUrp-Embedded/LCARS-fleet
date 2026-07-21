@@ -54,6 +54,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   """
 
   use GenServer
+  require Logger
 
   alias Fleet.Workflow.OpsObject
 
@@ -86,6 +87,18 @@ defmodule Fleet.Workflow.OpsObjectSync do
       when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
     case resolve(server) do
       nil ->
+        # The direct path is the DOCUMENTED optional-layer posture (moduledoc) — but in a
+        # booted daemon whose config STARTS the serializer, reaching it means the gate is
+        # DOWN (supervised restart window, crash loop): said loud, per call — bypassing a
+        # serialization gate must never be silent. The deliberate no-serializer modes
+        # (:test hermeticity, standalone tooling) configure it off and stay quiet.
+        if Application.get_env(:fleet_pilot, :start_ops_object_sync, true) do
+          Logger.warning(
+            "OpsObjectSync: serializer NOT registered — direct OpsObject write " <>
+              "(cross-writer serialization skipped; restart window or crash loop)"
+          )
+        end
+
         OpsObject.commit_object(work_dir, ref, content, opts)
 
       pid ->
