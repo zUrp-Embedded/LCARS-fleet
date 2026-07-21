@@ -58,13 +58,17 @@ defmodule Fleet.Spawner do
 
   ## pod_id generation
 
-  `UUID.uuid4()` generation caller-side (statistically collision-free
-  without a central coordinator).
+  `UUID.uuid4()` caller-side is only the FALLBACK, used when no `:pod_id` is supplied (statistically
+  collision-free without a central coordinator). Every real rail passes a DETERMINISTIC, meaningful id
+  instead — `<repo-slug>-issue-N-role` (step dispatch), `permanent-<role>` (permanent boot), and
+  `recall-<projet>-<role>` — because determinism is what makes a re-boot or a respawn land back on the
+  SAME pod instead of forking a twin. Reading this section as "pod_ids are uuids" would invert that.
 
   ## Exit codes
 
     * `{:ok, pid}` — pod started
-    * `{:error, :cap_profile_invalid, reason}` — invalid struct
+    * `{:error, {:cap_profile_invalid, violations}}` — profile rejected by `CapProfile.validate/1`
+      (the tag is NESTED in the reason: matching a flat `{:error, :cap_profile_invalid, _}` never fires)
     * `{:error, {:already_started, pid}}` — pod_id collision
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
@@ -205,7 +209,9 @@ defmodule Fleet.Spawner do
 
   @doc """
   Deliberate RECALL: brings the `(projet, role)` agent back alive from its checkpointed seed
-  (`<seed_root>/<projet>/pods/`, cf. `SeedStore`). Reads the workflow_map (uuid+jsonl), spawns a pod in resume mode:
+  (`<seed_root>/<projet>/pods/`, cf. `SeedStore`). Reads the SEED descriptor `<role>.json` (uuid + jsonl) —
+  NOT a `workflow_map`, which is the step-pipeline map the dispatcher reads and has nothing to do with
+  recall. Spawns a pod in resume mode:
   `session_id` = the seed's uuid, `resume: true`, the seed is restored into the pod BEFORE the launch
   (state :projecting → maybe_recall_restore) → claude `--resume <uuid>` picks up the context. Desktop name
   `<projet>_<role>`. `allow_no_brief` (the pod resumes its context, not idle; no fresh brief).
