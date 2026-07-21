@@ -471,9 +471,16 @@ defmodule Fleet.Pilot.IncidentRegistry do
             drop_non_map_entries(reg, "WAL #{path}")
 
           other ->
+            # A present-but-unparseable WAL is CORRUPTED CONTENT, and the next `write_wal` would
+            # rename a fresh registry over it — erasing the only forensic trace of what corrupted the
+            # cross-machine memory. QUARANTINE it aside first (never auto-replaced): the evidence is
+            # kept, the fresh WAL lands on a clean path. Boot proceeds from empty, LOUD.
+            quarantined = quarantine_corrupt_wal(path)
+
             Logger.error(
               "IncidentRegistry: WAL #{path} present but UNPARSEABLE (#{inspect(other)}) — cross-session " <>
-                "incident memory LOST (recurrences won't be detected until it is rebuilt). Starting from empty."
+                "incident memory LOST (recurrences won't be detected until it is rebuilt). Corrupt file " <>
+                "quarantined at #{inspect(quarantined)}; starting from empty."
             )
 
             %{}
@@ -489,6 +496,27 @@ defmodule Fleet.Pilot.IncidentRegistry do
         )
 
         %{}
+    end
+  end
+
+  # Moves a corrupt WAL aside to `<path>.corrupt-<unix>` so the fresh registry never overwrites it
+  # (the evidence of the corruption is preserved for inspection). `os_time` collides only within the
+  # same second — acceptable for a forensic artifact; a rename failure is itself logged and returns nil
+  # (boot must not crash on a quarantine hiccup — the corruption is already the reported condition).
+  defp quarantine_corrupt_wal(path) do
+    dest = "#{path}.corrupt-#{System.os_time(:second)}"
+
+    case File.rename(path, dest) do
+      :ok ->
+        dest
+
+      {:error, reason} ->
+        Logger.error(
+          "IncidentRegistry: could not quarantine corrupt WAL #{path} (#{inspect(reason)}) — " <>
+            "the next write may overwrite it; move it aside by hand before it is lost"
+        )
+
+        nil
     end
   end
 

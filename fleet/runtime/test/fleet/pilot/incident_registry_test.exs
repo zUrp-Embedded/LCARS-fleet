@@ -247,6 +247,47 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       refute Reg.seen_before?("wake:whatever:x", server: name)
     end
 
+    test "boot: CORRUPT WAL is QUARANTINED, never overwritten by the fresh registry", %{
+      tmp_dir: tmp
+    } do
+      # The old flow logged the corruption then let the next write rename a fresh WAL over it —
+      # erasing the only forensic trace of what corrupted the cross-machine memory. Now the corrupt
+      # file is moved aside to a `.corrupt-<ts>` sibling BEFORE booting empty, and a subsequent write
+      # lands on the clean path.
+      wal = Path.join(tmp, "incidents.json")
+      File.write!(wal, "this is not JSON {{{")
+
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!(
+            {Reg,
+             [
+               name: name,
+               wal_path: wal,
+               sync_debounce_ms: 5,
+               retry_ms: 50,
+               get_file_fun: fn _r, _p, _o -> {:error, :not_found} end
+             ]}
+          )
+
+          _ = :sys.get_state(name)
+
+          # A write happens (an incident is noted): it must NOT clobber the corrupt evidence.
+          :ok = Reg.note("wake:p:x", :dead, server: name)
+          _ = :sys.get_state(name)
+        end)
+
+      assert log =~ "quarantined"
+
+      # The corrupt content is preserved in a sibling; the live WAL is fresh (parseable).
+      quarantined = Path.wildcard(wal <> ".corrupt-*")
+      assert [q] = quarantined
+      assert File.read!(q) == "this is not JSON {{{"
+      assert {:ok, %{}} = Jason.decode(File.read!(wal))
+    end
+
     test "boot: NON-MAP entry in the WAL/forge (hand-edited file) → LOUD drop, NEVER a boot-loop",
          %{tmp_dir: tmp} do
       # The forge file (work/ops) and the WAL are hand-editable: a non-map VALUE under a signature
