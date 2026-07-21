@@ -2,43 +2,42 @@
 # SOURCE: bin/fleet_v2
 # AUTHOR: starfleet
 # STARDATE: 2026-06-15
-# STATUS: PROTO-V2 — launcher humain. `fleet_v2 start` démarre la fleet SOUS l'humain (détachée) ;
-#         starfleet (front-desk) monte en permanent et est joignable via Claude Desktop, PAS un
-#         terminal (reorg 2026-07-19 : plus d'attache-arch — l'arch est per-projet, spawné on-open).
+# STATUS: PROTO-V2 — human launcher. `fleet_v2 start` runs the fleet AS the human, detached;
+#         starfleet (front-desk) comes up permanent and is reachable through Claude Desktop, NOT a
+#         terminal (reorg 2026-07-19: no arch attach any more — the arch is per-project, spawned
+#         when a project is opened).
 #
-# Modèle (ADR-E / doctrine 2026-06-11) : la BEAM tourne *as* l'humain qui lance → le Port spawn les pods,
-# qui HÉRITENT son UID (pas de systemd, pas de drop d'UID, pas de /var/lib/lcars). Les chemins d'état
-# défautent déjà sous le home côté Elixir (state_fs_root / sock tmux / task-queue / audit → ~/.lcars/*,
-# commit c368f89d). Ce launcher ne pose donc QUE le non-defaultable :
-#   - les PORTS per-humain (offset déterministe sur l'UID → N fleets coexistent dans UN conteneur) ;
-#   - la spec MCP (3 env requis sinon le pod ne lance pas : :mcp_server_spec_required) ;
-#   - les on-switches (starfleet permanent front-desk + machine step-mode forge-driven).
+# Model (ADR-E): the BEAM runs *as* the human who launches it → the Port spawns the pods, which
+# INHERIT its UID (no systemd, no UID drop, no /var/lib/lcars). The state paths already default under
+# the home on the Elixir side (state_fs_root / tmux sock / task-queue / audit → ~/.lcars/*, commit
+# c368f89d). So this launcher posts ONLY what cannot be defaulted:
+#   - the per-human PORTS (deterministic offset on the UID → N fleets coexist in ONE container);
+#   - the MCP spec (3 env vars required, or the pod does not launch: :mcp_server_spec_required);
+#   - the on-switches (starfleet permanent front-desk + forge-driven step-mode machine).
 #
-# Config humaine : ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (les projets sont
-#         découverts par topic `lcars-fleet-<humain>`, plus de repo fixe surveillé).
-# Gestes : fleet_v2 {start|stop|status}.
+# Human config: ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (projects are discovered
+#         by topic `lcars-fleet-<human>`, no fixed watched repo).
+# Gestures: fleet_v2 {start|stop|restart|status|version|forge}.
 
 set -euo pipefail
 
 SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
-RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = la racine du runtime
+RUNTIME_DIR="$(dirname "$BIN_DIR")"
 
-# CWD sûr, INCONDITIONNEL (bug vécu 2026-07-07 : lancé depuis /root — un humain root sans accès au
-# home lordzurp — le node Erlang TEMPORAIRE de `cmd_stop` (`fleet_umbrella rpc`, un node de connexion
-# séparé du daemon principal, PAS en mode embedded) retombe sur une recherche de code path incluant
-# `.` (le CWD) pour charger les modules du compilateur nécessaires à l'eval de l'expression RPC ; `/root`
-# inaccessible à l'humain → rafale d'erreurs `eacces` de code_server). Principe : ce script ne doit JAMAIS
-# dépendre du CWD de l'appelant — tout chemin qu'il écrit est déjà absolu (sous $HOME) ; le PROCESS
-# lui-même doit aussi démarrer depuis un répertoire garanti accessible. `cd` AVANT tout calcul relatif
-# (SELF/BIN_DIR/RUNTIME_DIR sont déjà résolus en absolu ci-dessus, donc intacts après ce `cd`).
-cd "$HOME" || { echo "fleet_v2: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD sûr" >&2; exit 1; }
+# This script must NEVER depend on the caller's CWD: every path it writes is already absolute (under
+# $HOME), but the PROCESS itself must also start from a directory it is guaranteed to be able to read.
+# `cmd_stop` spins up a TEMPORARY Erlang node (`fleet_umbrella rpc`, not embedded) whose code path
+# search includes `.` to load the compiler modules the RPC eval needs — from an unreadable CWD that is
+# a burst of `eacces` from code_server. `cd` BEFORE any relative computation (SELF/BIN_DIR/RUNTIME_DIR
+# are already resolved to absolute above, so they survive this `cd`).
+cd "$HOME" || { echo "fleet_v2: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD fiable" >&2; exit 1; }
 
-# Distribution Erlang (opt-in via LCARS_FLEET_V2_ERL_NODE) — dérivation UNIQUE, partagée
-# start (lancement distribué) / stop (RPC graceful F7). ⚠ Le flag/cookie viennent de l'ENV FILE
-# (~/.lcars/fleet_v2.env) : compute_dist() doit tourner APRÈS load_env() — un calcul au top-level
-# du script lisait des vars pas encore chargées (bug attrapé au boot réel 2026-07-05 : release
-# démarrée SANS distribution, RPC/stop-graceful morts).
+# Erlang distribution (opt-in through LCARS_FLEET_V2_ERL_NODE) — ONE derivation, shared by start
+# (distributed launch) and stop (graceful RPC, F7). The flag and cookie come from the ENV FILE
+# (~/.lcars/fleet_v2.env), so the derivation MUST run after load_env(): computing it at the script's
+# top level reads vars that are not loaded yet, and the release then starts with NO distribution —
+# RPC and graceful stop silently dead.
 ERL_NODE="fleet_$(id -un)@127.0.0.1"
 ERL_COOKIE=""
 DIST_ON=""
@@ -61,36 +60,35 @@ MIX_ENV_DEFAULT="${LCARS_FLEET_V2_MIX_ENV:-prod}"
 die() { echo "fleet_v2: $*" >&2; exit 1; }
 dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
 
-# Bloc de ports per-humain (D2). Déterministe sur l'UID : bloc de 10 ports à partir de 21000.
-# (uid % 500) → jusqu'à 500 humains avant collision de bloc ; au-delà, override explicite des ports.
+# Per-human port block (D2). Deterministic on the UID: a block of 10 ports from 21000 up.
+# (uid % 500) → up to 500 humans before two blocks collide; past that, override the ports explicitly.
 compute_ports() {
   local uid base
   uid="$(id -u)"
   base=$(( 21000 + (uid % 500) * 10 ))
   API_PORT="${FLEET_API_PORT:-$base}"
   OBS_PORT="${LCARS_OBSERVATION_PORT:-$(( base + 1 ))}"
-  # base+2 RÉSERVÉ (ex-port HTTP MCP pod-facing, retiré) : le transport MCP n'est plus un listener HTTP
-  # partagé mais une socket AF_UNIX par pod (cf. LCARS_FLEET_MCP_SOCK_BASE). Slot laissé vide pour ne pas
-  # décaler le port webhook ci-dessous.
+  # base+2 is RESERVED (the pod-facing MCP HTTP port, removed): the MCP transport is no longer a shared
+  # HTTP listener but one AF_UNIX socket per pod (cf. LCARS_FLEET_MCP_SOCK_BASE). The slot is left empty
+  # so the webhook port below does not shift.
   WEBHOOK_PORT="${LCARS_FLEET_WEBHOOK_PORT:-$(( base + 3 ))}"
 }
 
 setup_env() {
-  # Env humaine + flag distribution : dérivation UNIQUE load_env() (partagée avec cmd_stop).
   load_env
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
 
-  # Profil forge : brancher entre forges SANS tout éditer. Un profil vit dans ~/.lcars/forge.d/<nom>.env
-  # et pose les FORGE_* de CETTE forge (URL + token système + dir des role-tokens). Le runtime reste
-  # MONO-FORGE : il lit les FORGE_* résolus ci-dessous (runtime.exs ; « pas de multi-forge simultané »).
-  # Le nom n'est qu'un handle — la seule vraie variable d'une forge est son URL ip:port.
+  # Forge profile: switch between forges WITHOUT editing anything. A profile lives in
+  # ~/.lcars/forge.d/<name>.env and posts the FORGE_* of THAT forge (URL + system token + role-token
+  # dir). The runtime stays SINGLE-FORGE: it reads the FORGE_* resolved below (runtime.exs). The name
+  # is only a handle — a forge's one real variable is its ip:port URL.
   #
-  # Résolution de la forge active, 3 niveaux (le plus fort gagne) :
-  #   1. LCARS_FORGE explicite dans l'env         → OVERRIDE ONE-SHOT (un test ponctuel sans rien changer)
-  #   2. ~/.lcars/forge.active (posé par `fleet_v2 forge <nom>`) → LE SWITCH PERSISTANT (façon git checkout)
-  #   3. sinon                                     → `work` (le défaut dur = la forge principale)
-  # Sourcé APRÈS l'env plat → le profil fait foi. Défaut `work` sans fichier de profil → rétro-compat :
-  # les FORGE_* du fleet_v2.env plat restent honorés (aucun switch, aucun profil = comportement historique).
+  # Active forge, 3 levels (strongest wins):
+  #   1. LCARS_FORGE explicit in the env                        → ONE-SHOT override (a spot test)
+  #   2. ~/.lcars/forge.active (written by `fleet_v2 forge <n>`) → the PERSISTENT switch (git-checkout style)
+  #   3. otherwise                                              → `work` (the hard default)
+  # Sourced AFTER the flat env → the profile wins. Default `work` with no profile file keeps the flat
+  # fleet_v2.env's FORGE_* honoured: no switch and no profile is the historical behaviour.
   local _forge_deliberate="${LCARS_FORGE+set}"
   local forge_active_file="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
   if [[ -z "$_forge_deliberate" && -r "$forge_active_file" ]]; then
@@ -105,49 +103,50 @@ setup_env() {
     . "$forge_file"
     set +a
   elif [[ -n "$_forge_deliberate" ]]; then
-    die "profil forge inconnu : « $LCARS_FORGE » — $forge_file absent (« fleet_v2 forge <nom> » vers un profil existant, ou crée le fichier)"
+    die "profil forge inconnu : « $LCARS_FORGE » — $forge_file absent (« fleet_v2 forge <nom> » vers un profil existant, ou ajoute le fichier)"
   fi
 
-  # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
-  # LCARS_PILOT_POLL_REPO requis. La garde fail-loud porte désormais sur FORGE_BASE_URL (découverte +
-  # push per-step-run), alignée sur la garde Elixir `Fleet.Pilot.Application.step_children!`.
-  : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour la découverte + le push}"
+  # F-037 multi-project: the poller DISCOVERS its repos by topic (lcars-fleet-<human>), so no
+  # LCARS_PILOT_POLL_REPO is required any more. The fail-loud guard is on FORGE_BASE_URL (discovery +
+  # per-step-run push), matching the Elixir guard `Fleet.Pilot.Application.step_children!`.
+  : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour le scan des projets + le push}"
 
   compute_ports
 
-  # Ports per-humain (lus par runtime.exs : fleet_api / fleet_observation / event_router).
+  # Per-human ports (read by runtime.exs: fleet_api / fleet_observation / event_router).
   export FLEET_API_PORT="$API_PORT"
   export LCARS_OBSERVATION_PORT="$OBS_PORT"
   export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
 
-  # A7 (accord des ports) : l'URL API de CETTE fleet, posée dans l'état runtime — le CLI `lcars`
-  # (et tout outil hors-env fleet) la LIT au lieu de deviner un port (l'ancien défaut statique :8080
-  # ne pouvait être juste pour personne : les ports sont per-humain, calculés sur l'UID ci-dessus).
+  # A7 (port agreement): THIS fleet's API URL, written into the runtime state — the `lcars` CLI (and
+  # any tool outside the fleet env) READS it instead of guessing a port. A static default like :8080
+  # could not be right for anyone: the ports are per-human, computed on the UID above.
   mkdir -p "$HOME/.lcars/run"
   printf 'http://localhost:%s\n' "$API_PORT" > "$HOME/.lcars/run/api_url"
 
-  # Spec MCP — chemin du bridge stdio du pod (co-localisé avec ce launcher). Le transport pod↔central
-  # n'est plus une URL HTTP loopback partagée mais une socket AF_UNIX per-pod (base posée plus bas,
-  # LCARS_FLEET_MCP_SOCK_BASE) ; seul le chemin du bridge reste un env de spec MCP.
+  # MCP spec — path of the pod's stdio bridge (co-located with this launcher). The pod↔central
+  # transport is no longer a shared loopback HTTP URL but a per-pod AF_UNIX socket (base set below,
+  # LCARS_FLEET_MCP_SOCK_BASE); only the bridge path is still an MCP-spec env var.
   export LCARS_FLEET_MCP_BRIDGE_PATH="${LCARS_FLEET_MCP_BRIDGE_PATH:-$BIN_DIR/fleet_mcp_stdio_bridge.py}"
 
-  # Launchers pod (N0/N1) : depuis $BIN_DIR (= l'install /local/LCARS_v2/bin, OU le source en dev). Tout
-  # sous l'install, ZÉRO copie éparpillée dans /usr/local/bin. Le dir parent est bindé RO dans le sandbox
-  # (pod.ex `system_mounts`, dérivé de claude_launch_path). cap-profiles : PAS posé ici → la release lit
-  # son priv bundlé (`:code.priv_dir`) ; le mode dev pointe le source (cf. cmd_start) — étanchéité prod.
+  # Pod launchers (N0/N1), taken from $BIN_DIR (= the install /local/LCARS_v2/bin, OR the source tree in
+  # dev). Everything under the install, ZERO copies scattered in /usr/local/bin. The parent dir is bound
+  # RO into the sandbox (pod.ex `system_mounts`, derived from claude_launch_path). cap-profiles are NOT
+  # set here → the release reads its bundled priv (`:code.priv_dir`) and dev mode points at the source
+  # (cf. cmd_start): that is what keeps prod self-contained.
   export LCARS_BWRAP_LAUNCH_PATH="${LCARS_BWRAP_LAUNCH_PATH:-$BIN_DIR/bwrap_launch.sh}"
   export LCARS_HOST_LAUNCH_PATH="${LCARS_HOST_LAUNCH_PATH:-$BIN_DIR/host_launch.sh}"
   export LCARS_CLAUDE_LAUNCH_PATH="${LCARS_CLAUDE_LAUNCH_PATH:-$BIN_DIR/claude_launch.sh}"
 
-  # Sock tmux per-pod : défaut Elixir = ~/.lcars/run/tmux-sock (home, c368f89d). Exporté explicitement
-  # pour que le wait + l'attach + le CLI `lcars` calculent le MÊME chemin.
+  # Per-pod tmux sock: the Elixir default is ~/.lcars/run/tmux-sock (under the home, c368f89d). Exported
+  # explicitly so the wait, the attach and the `lcars` CLI all compute the SAME path.
   export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
-  # Base des sockets MCP per-pod (un canal AF_UNIX <base>/<pod_id>/sock par pod). MÊME logique que la
-  # sock tmux ci-dessus : le défaut central (/run/lcars/mcp) n'est pas writable sans privilège quand un
-  # HUMAIN lance la fleet → on pose un chemin sous son home. runtime.exs lit cet env comme base où le
-  # central crée la socket, ET bwrap_launch.sh le lit pour binder le dir per-pod au même chemin absolu
-  # dans le sandbox : UNE seule source pour les deux côtés.
+  # Base of the per-pod MCP sockets (one AF_UNIX channel <base>/<pod_id>/sock per pod). SAME logic as
+  # the tmux sock above: the central default (/run/lcars/mcp) is not writable without privilege when a
+  # HUMAN launches the fleet, so we put the path under their home. runtime.exs reads this env as the
+  # base where central creates the socket, AND bwrap_launch.sh reads it to bind the per-pod dir at the
+  # same absolute path inside the sandbox: ONE source for both sides.
   export LCARS_FLEET_MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-$HOME/.lcars/run/mcp}"
 
   # CLI `lcars` -> per-human API. READS go through the TCP loopback port; the WRITE (spawn) goes
@@ -155,23 +154,23 @@ setup_env() {
   # lives under ~/.lcars/run/ (the real home is never bound into the pod).
   export LCARS_API_URL="${LCARS_API_URL:-http://localhost:$API_PORT}"
   export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
-  # Nettoie une socket résiduelle d'une instance précédente (AF_UNIX n'est pas auto-supprimé à la
-  # fermeture ; le daemon la rebinde au boot). Le rebind runtime sur crash est géré côté BEAM.
+  # Clear a leftover socket from a previous instance (AF_UNIX is not removed on close; the daemon
+  # rebinds it at boot). Rebinding at runtime after a crash is handled on the BEAM side.
   rm -f "$LCARS_API_SOCK"
 
-  # On-switches : l'arch boote (permanent), la machine step-mode tourne (forge-driven).
+  # On-switches: the permanent boots, the forge-driven step-mode machine runs.
   export LCARS_BOOT_PERMANENT_AT_START=true
   export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
 
-  # Distribution Erlang (node nommé, RPC debug) : gérée par MODE dans cmd_start, avec un nom DÉRIVÉ
-  # PER-HUMAIN. ⚠ La release distribue `-sname fleet_umbrella` par DÉFAUT (nom FIXE partagé) → 2 humains =
-  # même node dans l'epmd partagé = 2e BEAM CRASH (vu live lordzurp 2026-06-22). cmd_start force donc soit
-  # un node per-humain (`fleet_<user>`, si LCARS_FLEET_V2_ERL_NODE set = debug), soit `RELEASE_DISTRIBUTION=
-  # none` (normal : pas d'epmd, pas de collision). Per-humain comme les ports.
+  # Erlang distribution (named node, RPC debug) is handled per MODE in cmd_start, under a name DERIVED
+  # PER-HUMAN. The release distributes `-sname fleet_umbrella` by DEFAULT — a FIXED shared name, so two
+  # humans land on the same node in the shared epmd and the second BEAM CRASHES. cmd_start therefore
+  # forces either a per-human node (`fleet_<user>`, when LCARS_FLEET_V2_ERL_NODE is set = debug) or
+  # `RELEASE_DISTRIBUTION=none` (the normal case: no epmd, no collision). Per-human, like the ports.
 
   mkdir -p "$LCARS_TMUX_SOCK_BASE" "$LCARS_FLEET_MCP_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
 
-  # Persiste l'env runtime calculé pour que l'humain pilote `lcars` ensuite (`source` ce fichier).
+  # Persist the computed runtime env so the human can drive `lcars` afterwards (`source` this file).
   cat > "$HOME/.lcars/run/fleet_v2.runtime.env" <<RT
 # Genere par fleet_v2 start — \`source\` pour utiliser lcars (spawn/list/attach) hors de cette session.
 export LCARS_API_URL="$LCARS_API_URL"
@@ -180,25 +179,23 @@ export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
 RT
 }
 
-# Note à l'humain : la fleet est démarrée DÉTACHÉE (daemon tmux). Il n'y a PLUS d'attache automatique
-# vers un pod (reorg 2026-07-19 : l'arch ne boote plus au start — starfleet est le front-desk, joignable
-# via Claude Desktop, PAS un terminal ; l'arch est per-projet, spawné à l'ouverture d'un projet). Pour
-# débugger un pod à la main : `lcars attach <pod_id>` (générique, inchangé) ; pour les logs BEAM : le
-# daemon tmux ci-dessous.
+# The fleet starts DETACHED (tmux daemon) and nothing is attached automatically (reorg 2026-07-19: the
+# arch no longer boots at start — starfleet is the front-desk, reachable through Claude Desktop, NOT a
+# terminal; the arch is per-project, spawned when a project is opened). To debug a pod by hand:
+# `lcars attach <pod_id>`; for the BEAM logs, the tmux daemon below.
 fleet_up_notice() {
-  echo "fleet_v2: fleet up (détachée). starfleet (front-desk) est dans Claude Desktop." >&2
+  echo "fleet_v2: fleet up (daemon tmux). starfleet (front-desk) est dans Claude Desktop." >&2
   echo "fleet_v2: logs BEAM : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION » · un pod : « lcars attach <pod_id> »" >&2
 }
 
 cmd_start() {
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
-    # Fleet DÉJÀ démarrée : on ressource l'env runtime (pour matcher la fleet vivante) et on informe —
-    # plus d'attache automatique (starfleet est dans Desktop, cf. fleet_up_notice).
+    # Fleet ALREADY up: re-source the runtime env (to match the live fleet) and just report.
     local rt="$HOME/.lcars/run/fleet_v2.runtime.env"
     # shellcheck source=/dev/null
     [[ -r "$rt" ]] && { set -a; . "$rt"; set +a; }
-    echo "fleet_v2: fleet déjà démarrée." >&2
+    echo "fleet_v2: la fleet tourne." >&2
     fleet_up_notice
     return 0
   fi
@@ -206,22 +203,22 @@ cmd_start() {
 
   local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
 
-  # Mode selon le déploiement (PARAMÈTRE, dérivé de la position de ce launcher — pas de hardcode) :
-  #   - INSTALL (/local/LCARS_v2) : la RELEASE auto-contenue (`rel/.../bin/fleet_umbrella start`) tourne
-  #     SANS le repo (priv bundlé, ERTS embarqué) → étanche.
-  #   - SOURCE (dev) : `mix run --no-halt` depuis le repo (itération rapide) + cap-profiles LIVE du source.
-  # Distribution Erlang PER-HUMAIN (cf. setup_env) : node `fleet_<user>` (jamais le `fleet_umbrella` fixe
-  # partagé). ON seulement si LCARS_FLEET_V2_ERL_NODE est posé (debug RPC) ; sinon OFF (pas d'epmd).
+  # Mode follows the deployment (derived from where this launcher sits — nothing hardcoded):
+  #   - INSTALL (/local/LCARS_v2): the self-contained RELEASE (`rel/.../bin/fleet_umbrella start`) runs
+  #     WITHOUT the repo (bundled priv, embedded ERTS).
+  #   - SOURCE (dev): `mix run --no-halt` from the repo (fast iteration) + the source's LIVE cap-profiles.
+  # Erlang distribution is PER-HUMAN (cf. setup_env): node `fleet_<user>`, never the shared fixed
+  # `fleet_umbrella`. ON only when LCARS_FLEET_V2_ERL_NODE is set (RPC debug); OFF otherwise (no epmd).
   local erl_node="$ERL_NODE" erl_cookie="$ERL_COOKIE" dist_on="$DIST_ON"
 
   local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
   local mode launch_cmd
   if [[ -x "$rel_bin" ]]; then
     mode="release"
-    # Install RO (owner système) → le BEAM écrit son tmp dans le home de l'humain, pas dans l'install.
+    # The install is RO (system-owned) → the BEAM writes its tmp in the human's home, not the install.
     export RELEASE_TMP="${RELEASE_TMP:-$HOME/.lcars/tmp}"
     mkdir -p "$RELEASE_TMP"
-    # Override le défaut `-sname fleet_umbrella` (partagé → collision multi-humain).
+    # Override the `-sname fleet_umbrella` default (shared → multi-human collision).
     if [[ -n "$dist_on" ]]; then
       export RELEASE_DISTRIBUTION=name RELEASE_NODE="$erl_node" RELEASE_COOKIE="$erl_cookie"
     else
@@ -235,26 +232,27 @@ cmd_start() {
     launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
   fi
 
-  echo "fleet_v2: démarrage du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
+  echo "fleet_v2: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
   echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · webhook $WEBHOOK_PORT" >&2
-  echo "fleet_v2: découverte multi-projet par topic lcars-fleet-<humain> (F-037, plus de repo fixe)" >&2
+  echo "fleet_v2: scan multi-projet par topic lcars-fleet-<humain> (F-037, plus de repo fixe)" >&2
 
-  # Socket tmux DÉDIÉ (serveur frais) → capture l'env exporté ci-dessus. Le BEAM y tourne détaché, survit
-  # à ce terminal. `start` (release) / `mix run --no-halt` (dev) : foreground tenu par le tmux.
+  # DEDICATED tmux socket (fresh server) → it captures the env exported above. The BEAM runs detached
+  # there and survives this terminal. `start` (release) / `mix run --no-halt` (dev): the foreground is
+  # held by tmux.
   MIX_ENV="$mix_env" dtmux new-session -d -s "$SESSION" "$launch_cmd"
-  # UI : molette = scroll du scrollback des logs BEAM (pas l'historique shell). cf. même geste dans `lcars attach`.
+  # UI: the wheel scrolls the BEAM logs' scrollback (not the shell history). Same gesture in `lcars attach`.
   dtmux set -g mouse on 2>/dev/null || true
 
-  # Plus d'attente/attache de l'arch (il ne boote plus au start). Le BEAM boote détaché ; le
-  # BootOrchestrator monte starfleet + la gouvernance en post-readiness. On rend la main tout de suite.
+  # Nothing to wait for or attach to (the arch no longer boots at start). The BEAM boots detached; the
+  # BootOrchestrator brings starfleet + governance up post-readiness. We hand back immediately.
   fleet_up_notice
 }
 
-# F7 (E1 2026-07-04) : stop GRACEFUL d'abord — Shutdown.begin (refuse + drain in-flight) puis
-# :init.stop (arrêt OTP ordonné : terminate des pods tourne, trap_exit F3 → teardown + checkpoint
-# seed). Le kill-server tmux n'est plus que le FALLBACK (BEAM sans distribution, RPC KO, ou
-# graceful qui traîne >30s). Avant : kill-server direct = aucun chemin d'arrêt n'exécutait jamais
-# le rail Shutdown (construit pour ça, zéro caller).
+# F7: GRACEFUL stop first — Shutdown.begin (refuse new work + drain in-flight) then :init.stop (ordered
+# OTP shutdown: the pods' terminate runs, trap_exit F3 → teardown + checkpoint seed). The tmux
+# kill-server is only the FALLBACK (BEAM without distribution, RPC down, or a graceful that drags past
+# 30s). A direct kill-server means NO shutdown path ever executes the Shutdown rail — which is what it
+# was built for.
 cmd_stop() {
   load_env
   if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
@@ -263,7 +261,7 @@ cmd_stop() {
   fi
 
   if [[ -n "$DIST_ON" ]]; then
-    echo "fleet_v2: arrêt graceful (drain + teardown ordonné)…" >&2
+    echo "fleet_v2: stop graceful (drain puis teardown, dans l'ordre)…" >&2
     local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
     local rpc_expr='_ = Fleet.Starfleet.Shutdown.begin(grace_ms: 10_000); :init.stop()'
 
@@ -276,48 +274,49 @@ cmd_stop() {
         2>/dev/null || true
     fi
 
-    # Attend la fin propre du BEAM (la session tmux meurt avec lui) — 30s max.
-    # ⚠ set -e : `((i++))` rend 0 (falsy) au premier tour → tuait le script en silence. Forme sûre.
+    # Wait for the BEAM to finish cleanly (the tmux session dies with it) — 30s max.
+    # Under `set -e`, `((i++))` returns 0 (falsy) on the first round and kills the script silently.
+    # Hence the explicit form below.
     local i=0
     while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < 30 )); do sleep 1; i=$((i + 1)); done
   fi
 
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     dtmux kill-server 2>/dev/null || true
-    echo "fleet_v2: BEAM arrêté (fallback kill — pods éventuels reapés au prochain start)." >&2
+    echo "fleet_v2: BEAM mort (fallback kill — le prochain start reape les pods restants)." >&2
   else
-    echo "fleet_v2: BEAM arrêté proprement (drain + teardown exécutés)." >&2
+    echo "fleet_v2: BEAM mort proprement (drain puis teardown)." >&2
   fi
 }
 
 cmd_status() {
-  # Version EN TÊTE : « quel build tourne ? » constatable d'un coup d'œil, sans aller lire build_info.txt
-  # à la main (réutilise cmd_version, même donnée que `fleet_v2 version` / l'endpoint /api/version).
+  # Version FIRST: "which build is running?" answered at a glance, without reading build_info.txt by
+  # hand (reuses cmd_version — same data as `fleet_v2 version` and the /api/version endpoint).
   cmd_version
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     echo "fleet_v2: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
     LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
       "$BIN_DIR/lcars" list 2>/dev/null || true
   else
-    echo "fleet_v2: arrêtée."
+    echo "fleet_v2: fleet morte."
   fi
 }
 
-# Version du build : constatable (« quel commit tourne ? »), pas déduite. MÊME donnée que
-# l'endpoint REST /api/version et le log de boot (SHA git court + dirty + ref). Source selon le
-# déploiement, comme cmd_start : en RELEASE le SHA est embarqué dans le priv au build (le repo
-# n'est pas là), en SOURCE/dev on interroge git LIVE.
+# Build version: observed ("which commit is running?"), not inferred. SAME data as the REST
+# /api/version endpoint and the boot log (short git SHA + dirty + ref). The source follows the
+# deployment, like cmd_start: in RELEASE the SHA is embedded in the priv at build time (the repo is not
+# there), in SOURCE/dev we ask git LIVE.
 cmd_version() {
   local rel_root="$RUNTIME_DIR/rel/fleet_umbrella"
   local build_file
-  # App UNIQUE post-collapse : le priv vit sous `lcars_fleet-<vsn>`, NAMESPACÉ par domaine
-  # (`priv/api/`, plus de priv par-app umbrella). CE chemin DOIT suivre le writer/reader BEAM
-  # (`Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")`, build_info.ex) — sinon le glob
-  # rate, on tombe sur git (absent au runtime release) et le statut ment « build unknown ».
+  # Single app post-collapse: the priv lives under `lcars_fleet-<vsn>`, NAMESPACED by domain
+  # (`priv/api/`, no more per-app umbrella priv). THIS path MUST follow the BEAM writer/reader
+  # (`Application.app_dir(:lcars_fleet, "priv/api/build_info.txt")`, build_info.ex) — otherwise the glob
+  # misses, we fall through to git (absent at release runtime) and the status lies "build unknown".
   build_file="$(ls -1 "$rel_root"/lib/lcars_fleet-*/priv/api/build_info.txt 2>/dev/null | head -1 || true)"
 
   if [[ -n "$build_file" && -f "$build_file" ]]; then
-    # RELEASE : lire le fichier embarqué (clef=valeur, posé par write_build_info/1).
+    # RELEASE: read the embedded file (key=value, written by write_build_info/1).
     local sha dirty ref dflag=""
     sha="$(sed -n 's/^sha=//p' "$build_file")"
     dirty="$(sed -n 's/^dirty=//p' "$build_file")"
@@ -325,7 +324,7 @@ cmd_version() {
     [[ "$dirty" == "true" ]] && dflag="-dirty"
     echo "fleet_v2: build ${sha:-unknown}${dflag} ref=${ref} (source=release)"
   else
-    # SOURCE/dev : git LIVE dans le repo (échec git → unknown, jamais d'erreur dure).
+    # SOURCE/dev: git LIVE in the repo (git failure → unknown, never a hard error).
     local sha ref dflag=""
     sha="$(git -C "$RUNTIME_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     ref="$(git -C "$RUNTIME_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
@@ -334,16 +333,16 @@ cmd_version() {
   fi
 }
 
-# Forge active : le SWITCH persistant (façon `git checkout` / `kubectl use-context`). Sans argument →
-# affiche l'active + les profils disponibles. Avec un nom → valide que ~/.lcars/forge.d/<nom>.env existe
-# puis l'écrit dans ~/.lcars/forge.active (persistant ; le prochain `start` l'utilise). Un `LCARS_FORGE=`
-# dans l'env reste un override ONE-SHOT au-dessus de ce switch (cf. setup_env).
+# Active forge: the persistent SWITCH (`git checkout` / `kubectl use-context` style). With no argument
+# → print the active one + the available profiles. With a name → check that ~/.lcars/forge.d/<name>.env
+# exists, then write it to ~/.lcars/forge.active (persistent; the next `start` uses it). A `LCARS_FORGE=`
+# in the env stays a ONE-SHOT override above this switch (cf. setup_env).
 cmd_forge() {
   local name="${1:-}"
   local state="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
   local dir="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}"
   if [[ -z "$name" ]]; then
-    local active="work (défaut — aucun switch posé)"
+    local active="work (aucun switch en place)"
     if [[ -r "$state" ]]; then local a; a="$(tr -d '[:space:]' < "$state")"; [[ -n "$a" ]] && active="$a"; fi
     echo "fleet_v2: forge active = $active"
     if [[ -d "$dir" ]]; then
@@ -355,14 +354,14 @@ cmd_forge() {
     fi
     return 0
   fi
-  [[ -f "$dir/$name.env" ]] || die "profil forge « $name » inconnu ($dir/$name.env absent) — crée-le d'abord"
+  [[ -f "$dir/$name.env" ]] || die "profil forge « $name » inconnu ($dir/$name.env absent) — ajoute-le d'abord"
   mkdir -p "$(dirname "$state")"
   printf '%s\n' "$name" > "$state"
   echo "fleet_v2: forge active → $name (persistant ; le prochain « fleet_v2 start » l'utilise)"
 }
 
-# restart = stop (graceful : drain + teardown ordonné ; fallback kill) PUIS start. Le start réattache
-# l'arch à la fin (cf. cmd_start). Un `LCARS_FORGE=` / `fleet_v2 forge <nom>` en amont s'applique au start.
+# restart = stop (graceful: drain + ordered teardown, fallback kill) THEN start. A `LCARS_FORGE=` or a
+# `fleet_v2 forge <name>` beforehand applies to the start.
 cmd_restart() {
   cmd_stop
   cmd_start "$@"
