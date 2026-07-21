@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
   `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -243,7 +243,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # Kill ONLY if fresh spawn (a re-brief NEVER kills the living eng + its context).
         if not alive_before?, do: safe_kill(spawner, pod_id)
 
-        # CI-10 (audit intégrité 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
+        # CI-10 (audit integrite 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
         # return + a flat "lock removed" log LIED when the removal failed (the issue stays in-flight while
         # the message claims the opposite). Capture it and log the FACT. A failed removal is
         # auto-repairable (unlike a teardown that erases its proof, CI-05): the Poller reconciliation

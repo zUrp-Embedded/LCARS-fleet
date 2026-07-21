@@ -173,7 +173,7 @@ defmodule Fleet.Spawner.PodTmux do
     end
   end
 
-  # CI-05 (audit intégrité 2026-07-20): the teardown/warden must CONFIRM the holder is dead before
+  # CI-05 (audit integrite 2026-07-20): the teardown/warden must CONFIRM the holder is dead before
   # erasing the sock-dir (the ONLY reconciliation proof the PodWarden enumerates). `kill_holder`/
   # `terminate_pod_port` return `:ok` regardless of the OS kill outcome, so their return is not a death
   # verdict — we verify LIVENESS instead. `kill_holder`'s SIGKILL (`pkill -9`, uncatchable) is near-instant

@@ -184,7 +184,7 @@ defmodule Fleet.EventRouter.Bus do
   def safe_emit(source, type, opts \\ [], safe_opts \\ []) do
     case emit(source, coerce_type(type), opts) do
       {:error, reason} = err ->
-        # CI-09 (audit intégrité 2026-07-20): the PubSub broadcast `{:error, reason}` was PASSED THROUGH
+        # CI-09 (audit integrite 2026-07-20): the PubSub broadcast `{:error, reason}` was PASSED THROUGH
         # UNLOGGED — each lossy wrapper handled it differently (logged locally, dropped, or let its caller
         # drop it; "failure logged" was a LIE for this branch). safe_emit is THE single lossy publisher: it
         # now logs BOTH the construction exceptions (rescue below) AND this DELIVERY error, with the

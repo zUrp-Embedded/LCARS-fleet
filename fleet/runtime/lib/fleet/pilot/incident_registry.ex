@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   The sysadmin ESCALATION (opening the `error_system` issue) lives in the sub-module
   `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
-  façade (defdelegate) for WakeRecovery and the failure consumers.
+  facade (defdelegate) for WakeRecovery and the failure consumers.
 
   **Last revised**: 2026-07-21
   """
@@ -165,7 +165,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Cat-5 façade: escalates through the registry's cooldown gate while PRESERVING
+  Cat-5 facade: escalates through the registry's cooldown gate while PRESERVING
   "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
   REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
   suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays
@@ -209,7 +209,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @doc """
   Opens a system issue for an incident — DELEGATED to `IncidentRegistry.Escalation`
   (STATELESS act: no read of the GenServer, everything comes from the arguments + config;
-  the registry keeps the MEMORY). Façade kept: **shared** by WakeRecovery and
+  the registry keeps the MEMORY). Facade kept: **shared** by WakeRecovery and
   the failure consumers (DRY). Returns `{:ok, number}` | `{:error, term}`.
   """
   defdelegate escalate(kind, subject, reason, sig, opts \\ []),

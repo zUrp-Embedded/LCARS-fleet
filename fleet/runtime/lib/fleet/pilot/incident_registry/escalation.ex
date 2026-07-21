@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   sync); the escalation is a STATELESS act (no read of the GenServer — everything comes
   from the arguments + config) that builds and posts the issue. Two concerns, two modules.
 
-  Shared by `WakeRecovery` and the failure consumers via the façade
+  Shared by `WakeRecovery` and the failure consumers via the facade
   `IncidentRegistry.escalate/5` (DRY — a single writer of the sysadmin issue).
 
   ## Contract
@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
       SP suspect / Cat-5 max severity) — the diagnosis guides the sysadmin toward the root-cause.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger

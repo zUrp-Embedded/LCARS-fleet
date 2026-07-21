@@ -202,7 +202,7 @@ defmodule Fleet.Spawner.PodWarden do
 
     PodTmux.kill_holder(pod_id)
 
-    # CI-05 (audit intégrité 2026-07-20): erase the sock-dir (the orphan PROOF this warden enumerates) ONLY
+    # CI-05 (audit integrite 2026-07-20): erase the sock-dir (the orphan PROOF this warden enumerates) ONLY
     # after CONFIRMED death. `kill_holder` returns `:ok` regardless of the OS kill outcome, so a refused
     # kill would leave claude alive AND erase the only trace that brings us back here. Verify liveness;
     # still alive → keep the proof so a later tick comes back to it.

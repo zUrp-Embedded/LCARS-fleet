@@ -179,7 +179,7 @@ defmodule Fleet.API.ControlRouter do
 
     case apply(m, f, a) do
       {:ok, pid} = ok ->
-        # CI-12 (audit intégrité 2026-07-20): the chmod is part of the READINESS COMMIT, not an
+        # CI-12 (audit integrite 2026-07-20): the chmod is part of the READINESS COMMIT, not an
         # afterthought. This AF_UNIX socket is the ONLY admin WRITE door; `LCARS_API_SOCK` is overridable
         # and confidentiality vs OTHER host users rests on the 0600 mode (the pod mount-ns isolation covers
         # pods, not host peers). A swallowed chmod would announce "host-only" while the file kept its default

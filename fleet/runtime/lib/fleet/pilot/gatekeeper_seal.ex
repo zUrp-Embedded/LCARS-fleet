@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -132,7 +132,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
             # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
             # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
-            # `{:skip, :merged}` guard (F-C066) when the close below fails. CI-06 (audit intégrité
+            # `{:skip, :merged}` guard (F-C066) when the close below fails. CI-06 (audit integrite
             # 2026-07-20): a load-bearing projection MUST have a reconciliation — a discarded, un-retried
             # failure left the arch waiting FOREVER on a merged brick. Now RETRIED (below), and its
             # delivery role is ALSO derived from the authoritative merged PR by `Delegation.issue_status`.

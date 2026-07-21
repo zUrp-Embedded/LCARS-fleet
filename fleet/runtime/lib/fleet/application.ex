@@ -58,7 +58,7 @@ defmodule Fleet.Application do
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use Application
@@ -103,7 +103,7 @@ defmodule Fleet.Application do
         # processes). Here, if the boot aborts, NO spawn has happened. Via the FAÇADE (the
         # domain owns its `:start_boot_orchestrator` gate — false in test, hermetic — and its
         # trigger; the root only says "now"): boundary refuses a direct call to
-        # Starfleet.Application, rightly — the façade IS the surface.
+        # Starfleet.Application, rightly — the facade IS the surface.
         Fleet.Starfleet.boot_orchestrate()
 
         {:ok, pid}

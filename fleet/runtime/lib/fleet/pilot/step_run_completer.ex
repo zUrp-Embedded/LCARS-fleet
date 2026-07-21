@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -512,7 +512,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       repo = Map.fetch!(step_run, :repo)
       n = Map.fetch!(step_run, :issue_number)
 
-      # `stage/review` is a BEST-EFFORT forge projection (CI-13, audit intégrité 2026-07-20): the open PR
+      # `stage/review` is a BEST-EFFORT forge projection (CI-13, audit integrite 2026-07-20): the open PR
       # + its review requests carry the AUTHORITATIVE progress, so a lost label never blocks delivery. But
       # a SILENT swallow left it in an implicit limbo (an incoherent `get_route` for human/tool readers) —
       # we log any loss LOUD instead of declaring nothing.
@@ -861,7 +861,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp emit_step_unlocked(repo, n, role, milestone) do
-    # CI-09 (audit intégrité 2026-07-20): the lossy arch-feed line now goes through the UNIFIED lossy
+    # CI-09 (audit integrite 2026-07-20): the lossy arch-feed line now goes through the UNIFIED lossy
     # publisher `Bus.safe_emit/4` (construction bugs AND the PubSub delivery-error tuple both logged there
     # with context) — it replaces the local `broadcast_main` + rescue that discarded the `{:error, _}` tuple.
     _ =

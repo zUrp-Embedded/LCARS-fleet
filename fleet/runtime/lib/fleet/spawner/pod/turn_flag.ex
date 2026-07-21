@@ -1,13 +1,13 @@
 defmodule Fleet.Spawner.Pod.TurnFlag do
   @moduledoc """
   Writes the `turn.flag` — the LOAD-BEARING RAIL of the flag-driven wake, an FS-I/O island extracted
-  from the `Fleet.Spawner` façade.
+  from the `Fleet.Spawner` facade.
 
   The in-pod monitor (`watch.sh`, armed by the agent via the native Monitor tool) watches
   `pod_dir/turn.flag` (bind-mounted = `~/turn.flag` on the pod side) and compares its CONTENT
   (`cur != last`): content that changes → "your turn" → the agent wakes WITHOUT send-keys. This
   module carries ONLY the flag write; the wake orchestration (trigger + arming of the ack-driven
-  safety-net) stays in the façade (`Fleet.Spawner.wake_pod/1`), the send-keys fallback in the
+  safety-net) stays in the facade (`Fleet.Spawner.wake_pod/1`), the send-keys fallback in the
   `Pod`'s kick loop.
 
   A mute flag (dir gone, perm, disk) is logged LOUD (warning, in `write/1`) but never fails the
@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   - `write/1` — writes a UNIQUE token into `pod_dir/turn.flag`; tested directly (the "proceed" path
     of `wake_pod` is never reached by StubBackend).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger

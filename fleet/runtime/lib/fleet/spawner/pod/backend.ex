@@ -35,7 +35,7 @@ defmodule Fleet.Spawner.Pod.Backend do
   `sock_path`, `alive?`); fully qualified `Fleet.Spawner.LaunchBackend` and `Application`. No
   dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -89,7 +89,7 @@ defmodule Fleet.Spawner.Pod.Backend do
     end
 
     # Remove the sock-dir — the PodWarden's ONLY reconciliation proof — but ONLY after CONFIRMED death
-    # (CI-05, audit intégrité 2026-07-20). The old code erased it unconditionally on the CLAIM "the kill is
+    # (CI-05, audit integrite 2026-07-20). The old code erased it unconditionally on the CLAIM "the kill is
     # reliable", while `kill_holder`/`terminate_pod_port` return `:ok` regardless of the OS kill outcome: a
     # refused/ineffective kill left claude alive AND erased the proof that would have triggered a warden
     # retry (OAuth kept consuming, invisibly). Now gated on `confirm_dead?` (liveness verification). Still

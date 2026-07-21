@@ -239,7 +239,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #                            delivery with a NON-delivery closure (onboarding marker
   #                            `[lcars-onboarded]` / manual close) → the arch chains N+1 on an
   #                            ABANDONED brick. We prove the merge via the `stage/merged` label
-  #                            (WS1, set by the gatekeeper seal AT MERGE) OR — CI-06, audit intégrité
+  #                            (WS1, set by the gatekeeper seal AT MERGE) OR — CI-06, audit integrite
   #                            2026-07-20 — the AUTHORITATIVE merged PR itself: a closed issue with a
   #                            MERGED fleet PR is a delivery even if the label was lost (the seal's
   #                            projection can fail; it is now retried too). Never a false-positive (a

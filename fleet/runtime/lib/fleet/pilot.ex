@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot do
   @moduledoc """
-  Façade of the pilot domain — the DRIVER of the forge-state-machine. This is the
+  Facade of the pilot domain — the DRIVER of the forge-state-machine. This is the
   fleet's entire business process; everything else in the runtime is machinery.
   Reactive: Poller tick + Bus consumers — nobody calls "into" pilot except the api
   (`step_status`, onboarding) and the operator (delegates below).
@@ -41,9 +41,9 @@ defmodule Fleet.Pilot do
   `IncidentConsumer`→`IncidentRegistry` (WAL + forge sync), blast-radius isolated
   from the completion rail. SINGLE forge HTTP exit: `ForgeClient` (+`Transport`).
 
-  ## Operator entries (delegated here — the façade is the contract)
+  ## Operator entries (delegated here — the facade is the contract)
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
