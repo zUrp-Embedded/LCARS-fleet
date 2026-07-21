@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
       immediate, repeats under the registry cooldown suppressed.
     * `:runner` — offload seam (see above). Default `nil` → sync.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -80,18 +80,43 @@ defmodule Fleet.Pilot.IncidentConsumer do
   def task_supervisor, do: @task_supervisor
 
   # ASYNC runner (prod, injected as `:runner`) — offloads the record/escalate into the consumer's own
-  # `Task.Supervisor`: the registry's forge does not block the mailbox. Returns `{:ok, :offloaded}`; spawn
-  # failure → fail-loud logged (the incident is then NOT recorded — visible, not silent).
-  # Shared skeleton `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor
-  # and its loss consequence ("incident NOT recorded").
+  # `Task.Supervisor`: the registry's forge does not block the mailbox. Shared skeleton
+  # `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor and its consequence.
+  #
+  # Pool SATURATED (`:max_children`) → the work runs INLINE instead of being dropped: the incident
+  # is the durable memory the whole escalation chain rests on (the PermanentWarden's HALT assumes
+  # "sysadmin issue already opened by the incident rail"), and a failure burst is precisely when
+  # the pool saturates — dropping the record there loses the recurrence anchor at the moment it
+  # matters most. Inline cost: the consumer's mailbox waits one registry write (bounded by the
+  # forge timeouts) — acceptable for THIS consumer (separate singleton, its blast-radius is the
+  # point); the completion consumer keeps the drop because its loss is reclaimed out-of-band by
+  # the poller reconciliation — incidents have no such net. The crash isolation the Task gave is
+  # kept by the rescue: a poisoned incident payload must not kill the singleton.
   @doc false
-  def offload_async(fun),
-    do:
-      Fleet.Pilot.Offload.async(
-        @task_supervisor,
-        fun,
-        {"IncidentConsumer", "incident NOT recorded"}
-      )
+  def offload_async(fun) do
+    case Fleet.Pilot.Offload.async(
+           @task_supervisor,
+           fun,
+           {"IncidentConsumer", "incident falls back to INLINE recording"}
+         ) do
+      {:ok, :offloaded} = ok ->
+        ok
+
+      {:error, {:offload_failed, _reason}} ->
+        try do
+          fun.()
+          {:ok, :inline}
+        rescue
+          e ->
+            Logger.error(
+              "IncidentConsumer: INLINE fallback crashed (#{Exception.message(e)}) — " <>
+                "incident NOT recorded"
+            )
+
+            {:error, :inline_crashed}
+        end
+    end
+  end
 
   @impl GenServer
   def init(opts) do

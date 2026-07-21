@@ -184,4 +184,49 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     assert log =~ "escalation FAILED"
     assert Process.alive?(pid)
   end
+
+  describe "offload_async/1 — a saturated pool records INLINE, never drops" do
+    # The incident is the durable memory the escalation chain rests on (the Warden's HALT
+    # assumes the sysadmin issue was opened by this rail) — and a failure burst is exactly
+    # when the pool saturates. max_children: 0 = permanent saturation.
+    test "pool saturated → the work still runs (inline), {:ok, :inline}" do
+      start_supervised!(
+        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 0}
+      )
+
+      me = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :inline} = IncidentConsumer.offload_async(fn -> send(me, :recorded) end)
+        end)
+
+      assert_received :recorded
+      assert log =~ "INLINE"
+    end
+
+    test "inline fallback isolates a crashing record (the singleton must survive)" do
+      start_supervised!(
+        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 0}
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :inline_crashed} =
+                   IncidentConsumer.offload_async(fn -> raise "poisoned payload" end)
+        end)
+
+      assert log =~ "INLINE fallback crashed"
+    end
+
+    test "pool available → offloaded as before, {:ok, :offloaded}" do
+      start_supervised!(
+        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 4}
+      )
+
+      me = self()
+      assert {:ok, :offloaded} = IncidentConsumer.offload_async(fn -> send(me, :recorded) end)
+      assert_receive :recorded, 500
+    end
+  end
 end
