@@ -77,12 +77,12 @@ teardown() { rm -rf "$TMP_BASE"; }
 @test "session: exit non-zéro + message quand LCARS_POD_SESSION_ID absent" {
   unset LCARS_POD_SESSION_ID
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$status" -ne 0 ]]; [[ "$output" == *"UUID de session requis"* ]]
+  [[ "$status" -ne 0 ]]; [[ "$output" == *"session UUID required"* ]]
 }
 @test "session: exit non-zéro + message quand LCARS_POD_SESSION_NAME_PREFIX absent" {
   unset LCARS_POD_SESSION_NAME_PREFIX
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$status" -ne 0 ]]; [[ "$output" == *"préfixe nom RC requis"* ]]
+  [[ "$status" -ne 0 ]]; [[ "$output" == *"RC name prefix required"* ]]
 }
 
 # ======================= Setup checks ========================
