@@ -295,7 +295,11 @@ defmodule Fleet.Workflow.LoaderTest do
       tmp_dir: tmp
     } do
       write_card(tmp, "steady")
-      File.write!(Path.join(tmp, "broken.yaml"), "kind: WorkflowMap\nmetadata:\n  name: broken\nspec: {}\n")
+
+      File.write!(
+        Path.join(tmp, "broken.yaml"),
+        "kind: WorkflowMap\nmetadata:\n  name: broken\nspec: {}\n"
+      )
 
       assert_raise RuntimeError, ~r/schema .*invalid/, fn -> Loader.publish_image!() end
 
