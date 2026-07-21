@@ -905,7 +905,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
         result = close_with_trace(n, role, arch_trace, state)
-        _ = TerminalEscalation.kick_architect(state.spawner, state.repo)
+
+        # Content-carrying notification: the arch SEES the abandon in the wake itself (the issue is
+        # closed — nothing to fetch, no phantom mandate), cf. TerminalEscalation.kick_architect/3.
+        _ = TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
         result
 
       other ->

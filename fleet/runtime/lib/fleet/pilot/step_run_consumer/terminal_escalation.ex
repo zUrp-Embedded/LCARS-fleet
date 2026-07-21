@@ -230,35 +230,42 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   end
 
   @doc """
-  NOTIFIES the arch (the SOLE airlock to the human) that a verdict (escalate/abandon) or a blockage requires
-  its attention. The KICK is a latency accelerator via the UNIVERSAL wake (`wake_pod`: CARRIER/MCP flag →
-  send-keys fallback → log; every pod arms its Monitor at spawn). **NO reboot**: the arch is the human's SESSION,
-  never killed/restarted by the fleet (an unreachable arch = the human restarts ITS session, not us) — hence NO
-  `WakeRecovery.wake` (which carries a respawn). Wake failure → log-loud (warning), non-blocking: the truth is the
-  forge state (label `lcars-awaits-arch` + the arch-addressed comment stay), the arch queries its inbox on the
-  next round, and the Poller (G4) re-kicks every tick while the label is present.
+  NOTIFIES the arch (the SOLE airlock to the human) of a TERMINAL verdict (abandon) — the brief was
+  discarded, the issue is CLOSED, there is nothing for the arch to fetch. The notification CARRIES ITS
+  CONTENT (`message`) through `notify_pod` (typed turn-flag message, the in-pod monitor emits it
+  verbatim), NOT `wake_pod`: a mandate wake arms the ack-driven pull loop expecting a `get_work_item`
+  that will never come (the issue is closed, no `lcars-awaits-arch` label) — a content-less wake whose
+  send-keys fallback eventually types into the human's terminal for nothing. Here the arch SEES what
+  happened in the wake itself, no phantom mandate to re-derive. Seam fallback to `wake_pod` for a
+  spawner that predates `notify_pod`. **NO reboot** (the arch is the human's SESSION), non-blocking.
   """
-  @spec kick_architect(module(), String.t()) :: :ok
-  def kick_architect(spawner, repo) do
+  @spec kick_architect(module(), String.t(), String.t()) :: :ok
+  def kick_architect(spawner, repo, message) do
     # Pod id of THIS project's architect (per-project since the 2026-07-19 reorg) — SINGLE
     # AUTHORITY `Fleet.Pilot.ProjectArchitect.pod_id_for/1` (no rebuilt literal).
     pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(repo)
 
-    case spawner.wake_pod(pod_id) do
-      :ok ->
-        :ok
+    if function_exported?(spawner, :notify_pod, 2) do
+      _ = spawner.notify_pod(pod_id, message)
+      :ok
+    else
+      # Degraded (a spawner seam without notify_pod): a bare wake, content stays on the closed issue.
+      case spawner.wake_pod(pod_id) do
+        :ok ->
+          :ok
 
-      other ->
-        Logger.warning(
-          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch unreachable? the human restarts their " <>
-            "session — the fleet does NOT reboot the arch; label+comment remain)"
-        )
+        other ->
+          Logger.warning(
+            "StepRunConsumer: notify arch #{pod_id} → #{inspect(other)} (arch unreachable? the human restarts " <>
+              "their session — the fleet does NOT reboot the arch; the closing comment remains)"
+          )
 
-        :ok
+          :ok
+      end
     end
   rescue
     e ->
-      Logger.warning("StepRunConsumer: kick arch raised #{inspect(e)} (non-blocking)")
+      Logger.warning("StepRunConsumer: notify arch raised #{inspect(e)} (non-blocking)")
       :ok
   end
 

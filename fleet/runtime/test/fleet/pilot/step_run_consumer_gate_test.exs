@@ -57,6 +57,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   defmodule StubSpawner do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
 
+    # Content-carrying arch notification (terminal abandon): the message rides the wake.
+    def notify_pod(pod_id, message), do: send(self(), {:notify, pod_id, message}) && :ok
+
     # One-shot gatekeeper spawn (reorg 2026-07-19): captured + succeeds.
     def spawn_pod(_cap, pod_id, opts) do
       send(self(), {:spawned, pod_id, opts})
@@ -527,8 +530,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:publish, _}
     refute_received {:assignee, _}
 
-    # #5.2 — abandon NOTIFIES the arch (user airlock): kick + arch-addressed comment (no silent burial).
-    assert_received {:wake, "architect-r"}
+    # abandon NOTIFIES the arch (user airlock) with CONTENT: the terminal wake carries the abandon
+    # message (notify_pod, no phantom mandate on a closed issue), never a content-less wake_pod.
+    assert_received {:notify, "architect-r", notice}
+    assert notice =~ "ABANDONNÉ"
+    refute_received {:wake, "architect-r"}
     assert_received {:comment, abody}
     assert abody =~ "Architecte"
   end
