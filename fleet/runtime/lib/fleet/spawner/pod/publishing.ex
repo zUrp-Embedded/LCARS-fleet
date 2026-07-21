@@ -30,7 +30,7 @@ defmodule Fleet.Spawner.Pod.Publishing do
   Depends on `Fleet.CapProfile.deliverable_mode/1` (single source of the deliverable mode); no
   dependency toward `Fleet.Spawner.Pod` (no cycle).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -78,6 +78,16 @@ defmodule Fleet.Spawner.Pod.Publishing do
   default 120_000. Past this delay with no `deliverable.published`, the flag is lifted anyway
   (otherwise the pod would stay never-`:ready` hence never re-briefed — a wedge), with a WARNING on
   the handler side.
+
+  LOAD-BEARING INVARIANT (why the deadline lift is safe, not just wedge-breaking): clearing the flag
+  re-enables the workspace reset, so it MUST NOT fire while the pilot is still reading the workspace.
+  It doesn't, because the read — `StepRunCompleter` → `Fleet.Workflow.Deliverable.publish` (rev-parse
+  + commit + push, via `Fleet.Workflow.Git`) — is spawned CONCURRENTLY on `pod.completed` (no queue)
+  and EACH op is hard-bounded + SIGKILL-enforced (`:fleet_workflow, :git_local_timeout_ms` /
+  `:git_push_timeout_ms`, 30_000 each). Worst-case serial (~90s) is under this 120_000 deadline, so by
+  the time it fires no live git process is reading the workspace → the reset cannot race one. The two
+  domains' configs are COUPLED by this: shrinking `:publish_deadline_ms` below the git-op ceiling (or
+  raising the git timeouts above it) re-opens the read/reset race.
   """
   @spec publish_deadline_ms() :: non_neg_integer()
   def publish_deadline_ms,

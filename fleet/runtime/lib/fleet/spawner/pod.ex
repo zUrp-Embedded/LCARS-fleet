@@ -601,9 +601,13 @@ defmodule Fleet.Spawner.Pod do
   # Residual tick outside :monitoring (generic timeout not auto-cancelled on state change) → no-op.
   def handle_event({:timeout, :liveness}, :tick, _state, _data), do: :keep_state_and_data
 
-  # SLOT-FREEZE fail-safe: the deliverable.published confirmation did not arrive within the deadline (role
-  # with no git deliverable, or failed push). We clear :publishing anyway — otherwise the pod would stay never-:ready
-  # thus never re-briefed (wedge). Logs WARNING: a missed confirmation must be visible.
+  # SLOT-FREEZE fail-safe: deliverable.published did not arrive within the deadline. NOT "a role with no git
+  # deliverable" — those never arm this deadline (Publishing.maybe_enter_publishing gates on git_native). The
+  # real triggers are a LOST emission (the workspace read already happened → safe) or a crashed/stuck completion.
+  # Either way the pilot's workspace-git ops are hard-bounded + SIGKILL'd under the deadline (cf. the invariant
+  # on Publishing.publish_deadline_ms), so no live reader survives → clearing :publishing and re-enabling reset
+  # is safe. We clear anyway — otherwise the pod stays never-:ready thus never re-briefed (wedge). Logs WARNING:
+  # a missed confirmation must be visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     if Publishing.publishing?(data) do
       Logger.warning(
