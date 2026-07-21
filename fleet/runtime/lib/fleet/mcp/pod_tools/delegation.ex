@@ -284,27 +284,26 @@ defmodule Fleet.MCP.PodTools.Delegation do
     do: Map.put(map, "pr", %{"error" => "forge_unreachable"})
 
   @doc """
-  Reads the validation-card catalogue (canon workflow maps) for the framing interview: for each
-  card `name` (the `workflow_map` value of `create_project`), FR `presentation` (shown to the
-  human VERBATIM — the card's own voice), `applicable_intensity` (level matrix), `jury` (PR
-  judges) and `steps`. Architect gate (framing is the arch's job). Pure priv-data read — no
-  forge, no engine state. A card that fails to parse is SKIPPED loud and reported in
-  `unreadable`: the catalogue never lies silently.
+  Reads the validation-card catalogue for the framing interview — from the ACTIVE authority:
+  `Loader.canon_names!/0` (the configured maps root, never a hardcoded priv path) and
+  `Loader.load!/1` (schema + graph validated — the listing can only offer what the engine can
+  actually load). For each card: `name` (the LOADABLE id — the `workflow_map` value of
+  `create_project`), `declared_name` (the card's self-declared label, for reference — the two
+  identities are distinct, never collapsed), FR `presentation` (shown to the human VERBATIM —
+  the card's own voice), `applicable_intensity` (level matrix), `jury` (PR judges) and `steps`.
+  Architect gate (framing is the arch's job). A card that fails to load is SKIPPED loud and
+  reported in `unreadable` (the catalogue never lies silently); a missing/empty catalogue is an
+  ERROR, never an empty listing — "no cards exist" would be the vacuous lie.
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
-    with {:ok, _role} <- require_onboarder(state) do
-      dir = Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
-
+    with {:ok, _role} <- require_onboarder(state),
+         {:ok, names} <- catalogue_names() do
       {cards, unreadable} =
-        dir
-        |> File.ls!()
-        |> Enum.filter(&String.ends_with?(&1, ".yaml"))
-        |> Enum.sort()
-        |> Enum.reduce({[], []}, fn file, {ok, bad} ->
-          case read_card(Path.join(dir, file)) do
+        Enum.reduce(names, {[], []}, fn name, {ok, bad} ->
+          case read_card(name) do
             {:ok, card} -> {[card | ok], bad}
-            :error -> {ok, [file | bad]}
+            :error -> {ok, ["#{name}.yaml" | bad]}
           end
         end)
 
@@ -317,25 +316,36 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  defp read_card(path) do
-    case YamlElixir.read_from_file(path) do
-      {:ok, %{"metadata" => meta, "spec" => spec}} when is_map(meta) and is_map(spec) ->
-        {:ok,
-         %{
-           "name" => meta["name"],
-           "presentation" => meta["presentation"] || meta["description"],
-           "applicable_intensity" => meta["applicable_intensity"],
-           "jury" => spec["jury"],
-           "steps" => spec["steps"] |> Map.keys() |> Enum.sort()
-         }}
+  # The Loader's guard enumeration raises (boot-guard contract, missing root vs empty catalogue
+  # distinguished); this frontier converts it to a tool error the architect SEES and escalates.
+  defp catalogue_names do
+    {:ok, Fleet.Workflow.Loader.canon_names!()}
+  rescue
+    e in RuntimeError -> {:error, {:workflow_catalogue_unavailable, e.message}}
+  end
 
-      _ ->
-        Logger.warning(
-          "Delegation: workflow card #{Path.basename(path)} unreadable — excluded from the catalogue listing"
-        )
+  defp read_card(name) do
+    card = Fleet.Workflow.Loader.load!(name)
 
-        :error
-    end
+    {:ok,
+     %{
+       "name" => name,
+       "declared_name" => card["name"],
+       "presentation" => card["presentation"] || card["description"],
+       "applicable_intensity" => card["applicable_intensity"],
+       "jury" => card["jury"],
+       "steps" => card["steps"] |> Map.keys() |> Enum.sort()
+     }}
+  rescue
+    # Per-card rescue: one broken card must not kill the listing — skipped LOUD, and the
+    # name lands in `unreadable` so the catalogue never lies silently.
+    e ->
+      Logger.warning(
+        "Delegation: workflow card #{name} does not load (#{Exception.message(e)}) — " <>
+          "excluded from the catalogue listing"
+      )
+
+      :error
   end
 
   @doc """

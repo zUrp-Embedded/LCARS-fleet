@@ -111,7 +111,11 @@ defmodule Fleet.Workflow.Loader do
       # Short self-description of the card (metadata, optional) — the forge tooltip of the
       # `wfmap/<map>` label reads it (the card explains ITSELF to the human; nothing per-map
       # hardcoded in the label layer). nil = the generic tooltip.
-      "description" => get_in(yaml, ["metadata", "description"])
+      "description" => get_in(yaml, ["metadata", "description"]),
+      # Self-presentation for the framing interview (metadata, optional) — the MCP catalogue
+      # listing shows it to the human VERBATIM (the card's own voice). nil = fall back to
+      # "description" at the listing site.
+      "presentation" => get_in(yaml, ["metadata", "presentation"])
     }
   end
 

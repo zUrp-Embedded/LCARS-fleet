@@ -1053,6 +1053,88 @@ defmodule Fleet.MCP.PodToolsTest do
       assert by_name["brief-gate"]["jury"] == ["qualifier", "reviewer"]
       assert map_size(by_name) >= 7
     end
+
+    @tag :tmp_dir
+    test "the listing reads the ACTIVE root and exposes the LOADABLE id, identities distinct",
+         %{tmp_dir: tmp} do
+      # A configured root (the Loader's authority) with one card whose declared name differs
+      # from its basename. The old parallel reader showed the bundled priv catalogue and
+      # offered `metadata.name` — an id `Loader.load!` cannot open.
+      File.write!(Path.join(tmp, "weird-file.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: pretty-name
+        presentation: "Carte de test — la voix de la carte."
+      spec:
+        max_rework_rounds: 1
+        jury: []
+        steps:
+          only:
+            role: noop
+      """)
+
+      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+
+      assert %{"cards" => [card]} = Jason.decode!(txt)
+      assert card["name"] == "weird-file"
+      assert card["declared_name"] == "pretty-name"
+      assert card["presentation"] =~ "la voix de la carte"
+    end
+
+    @tag :tmp_dir
+    test "a schema-invalid card is EXCLUDED and reported unreadable (no shallow parser)",
+         %{tmp_dir: tmp} do
+      # metadata+spec maps present → the old YamlElixir read accepted it; the Loader's schema
+      # refuses it (spec.steps required). It lands in `unreadable`, never in the offer.
+      File.write!(Path.join(tmp, "valid.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: valid
+      spec:
+        max_rework_rounds: 1
+        jury: []
+        steps:
+          only:
+            role: noop
+      """)
+
+      File.write!(Path.join(tmp, "broken.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: broken
+      spec: {}
+      """)
+
+      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{content: [%{"text" => txt}]}, _} =
+                   PodTools.handle_tool_call(
+                     "list_workflow_cards",
+                     %{},
+                     pod_state(uniq("pod-arch"))
+                   )
+
+          assert %{"cards" => [%{"name" => "valid"}], "unreadable" => ["broken.yaml"]} =
+                   Jason.decode!(txt)
+        end)
+
+      assert log =~ "does not load"
+    end
+
+    @tag :tmp_dir
+    test "an EMPTY catalogue is a tool error, never an empty offer", %{tmp_dir: tmp} do
+      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+
+      assert {:error, {:workflow_catalogue_unavailable, msg}, _} =
+               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+
+      assert msg =~ "no *.yaml card"
+    end
   end
 
   describe "onboarding + delegation gates (the arch's two heads, reorg 2026-07-19)" do

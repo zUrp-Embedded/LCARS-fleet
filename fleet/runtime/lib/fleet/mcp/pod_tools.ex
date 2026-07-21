@@ -301,7 +301,8 @@ defmodule Fleet.MCP.PodTools do
           "BEFORE create_project: the card choice IS the criticality declaration (naming a card = declaring), " <>
           "so PRESENT the catalogue to the human and let THEM choose — you may pre-filter or advise from the " <>
           "framing facts (mains voltage? cuts fingers? how long will it live?), you never decide for them. " <>
-          "Each entry carries `name` (pass it as create_project's `workflow_map`), `presentation` (FR, show it " <>
+          "Each entry carries `name` (the LOADABLE id — pass it as create_project's `workflow_map`), " <>
+          "`declared_name` (the card's self-declared label, reference only), `presentation` (FR, show it " <>
           "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
           "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
           "`jury` (the PR judges the card convenes) and `steps`. Cards marked TECHNIQUE are fleet tooling, " <>
