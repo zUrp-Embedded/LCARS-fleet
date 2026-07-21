@@ -1,15 +1,17 @@
 defmodule Fleet.Workflow.ModopsConsumptionTest do
   @moduledoc """
-  LIGHT conformance: fleet_workflow consumes the V2 data
-  (9 SP modop-bundles + 3 subagent-templates).
+  CONSUMER-INTEGRITY conformance of the SP modop-bundles + subagent-templates.
 
-  No over-schematization: modop-bundles are markdown SP fragments
-  (SPBuilder @import), NOT JSON config. The structured schema
-  (modop-profile.json) validates the profile.yaml overlay. Here we check
-  presence + well-formedness of the bundle/template catalogue. `async: true`.
+  modop-bundles are markdown SP fragments (SPBuilder @import), NOT JSON config. The old
+  catalogue check pinned the bundle set by COUNT (== 9) + size — vacuous: it neither proved a
+  bundle is CONSUMABLE nor caught a cap-profile referencing a missing one. It is replaced by
+  two load-bearing checks computed from the real consumers (the cap-profiles' `modop_set`):
+  every referenced bundle EXISTS (no dangling activation), and every existing bundle is either
+  activated by a cap-profile or an EXPLICITLY-named `@known_orphans`. Well-formedness (GO-7
+  header, non-empty) is checked on whatever bundles actually exist. `async: true`.
 
-  (The old `profile` reference test died 2026-07-20: `workflow.step.profile` was
-  removed — Decision A of the catalogue chantier; a step no longer names a cap-profile file.)
+  The orphan-bundle CONTENT cleanup (fossilized architecture in their `sp.md`) rides with the
+  SP-package rewrite — never edited by an agent alone; here we only pin the mechanical fact.
   """
   use ExUnit.Case, async: true
 
@@ -20,15 +22,49 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   # `priv/cap_profile/canon/cap-profiles/` (R0.7). app_dir pattern (brick1/brick5).
   @modop_canon Application.app_dir(:lcars_fleet, "priv/cap_profile/canon")
 
-  @bundles ~w(archive-mode brainstorming dual-review fire-mode long-session-discipline
-              persuasion-discipline rubber-duck subagent-driven tdd)
   @subagent_templates ~w(subagent-code-quality-reviewer subagent-implementer
                          subagent-spec-reviewer)
 
-  test "9 modop-bundles present with well-formed sp.md (GO-7 header + non-empty)" do
-    for b <- @bundles do
-      sp = Path.join([@modop_canon, "modop-bundles", b, "sp.md"])
-      assert File.exists?(sp), "missing modop-bundle: #{sp}"
+  # KNOWN orphan bundles: they EXIST but no canon cap-profile references them in its
+  # `modop_set` (default/optional), so nothing can activate them. Their `sp.md` content also
+  # describes a retired architecture — but the CONTENT cleanup rides with the SP-package rewrite
+  # (never edited by an agent alone); this test only pins the MECHANICAL fact "which bundles have
+  # no consumer", explicitly and by NAME, so a NEW orphan (a bundle added without a consumer)
+  # fails instead of being silently absorbed by a presence/size count. Shrinking this list = the
+  # SP chantier removing the fossil; growing it must be a conscious, named act.
+  @known_orphans ~w(archive-mode fire-mode persuasion-discipline)
+
+  defp bundle_dir, do: Path.join(@modop_canon, "modop-bundles")
+
+  defp existing_bundles do
+    bundle_dir()
+    |> File.ls!()
+    |> Enum.filter(&File.dir?(Path.join(bundle_dir(), &1)))
+    |> Enum.sort()
+  end
+
+  # Bundles ACTIVABLE by the canon = the union of every cap-profile's modop_set default ∪ optional.
+  # Computed from the cap-profiles themselves (the real consumers), never a hardcoded list.
+  defp referenced_bundles do
+    Path.join([@modop_canon, "cap-profiles", "*.yaml"])
+    |> Path.wildcard()
+    |> Enum.flat_map(fn f ->
+      case YamlElixir.read_from_file(f) do
+        {:ok, %{"spec" => %{"modop_set" => set}}} when is_map(set) ->
+          (Map.get(set, "default", []) || []) ++ (Map.get(set, "optional", []) || [])
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  test "every EXISTING modop-bundle has a well-formed sp.md (GO-7 header + non-empty)" do
+    for b <- existing_bundles() do
+      sp = Path.join([bundle_dir(), b, "sp.md"])
+      assert File.exists?(sp), "missing modop-bundle sp.md: #{sp}"
       content = File.read!(sp)
       assert byte_size(content) > 200, "#{b}/sp.md too short (malformed?)"
       assert content =~ ~r/^#\s/, "#{b}/sp.md without markdown title"
@@ -46,14 +82,21 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
     end
   end
 
-  test "modop-bundles catalogue == exactly 9 (no orphan/missing bundle)" do
-    dirs =
-      Path.join([@modop_canon, "modop-bundles"])
-      |> File.ls!()
-      |> Enum.filter(&File.dir?(Path.join([@modop_canon, "modop-bundles", &1])))
-      |> Enum.sort()
+  test "consumer integrity: every bundle a cap-profile REFERENCES actually exists (no dangling activation)" do
+    existing = MapSet.new(existing_bundles())
+    dangling = Enum.reject(referenced_bundles(), &MapSet.member?(existing, &1))
 
-    assert dirs == Enum.sort(@bundles),
-           "modop-bundles catalogue drift: #{inspect(dirs)} ≠ #{inspect(Enum.sort(@bundles))}"
+    assert dangling == [],
+           "cap-profiles reference modop-bundles that do NOT exist (a spawn would fail to compose): #{inspect(dangling)}"
+  end
+
+  test "consumer integrity: an EXISTING bundle is either activated by a cap-profile or a KNOWN orphan" do
+    referenced = MapSet.new(referenced_bundles())
+    orphans = existing_bundles() |> Enum.reject(&MapSet.member?(referenced, &1)) |> Enum.sort()
+
+    # A bundle with no consumer must be an EXPLICITLY-named known orphan — never silently present.
+    assert orphans == Enum.sort(@known_orphans),
+           "orphan-bundle drift: #{inspect(orphans)} ≠ known #{inspect(Enum.sort(@known_orphans))}. " <>
+             "A new activable bundle must have a cap-profile consumer; a removed orphan updates @known_orphans."
   end
 end
