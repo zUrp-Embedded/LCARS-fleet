@@ -7,6 +7,11 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
   leave a restarted consumer silently DEAF: alive, supervised green, but consuming nothing.
   That is the worst failure mode of a pub/sub bus, and it is invisible without this test.
 
+  Scope: the proof runs on a minimal `Counter` that subscribes in `init/1` EXACTLY as the real
+  consumers do — it does NOT boot `AuditConsumer` itself. This file is named for `AuditConsumer` as
+  the exemplar, but what it proves is the init-subscribe contract SHARED by every such consumer
+  (StepRunConsumer, ReadModel, …), reduced to its OTP primitive.
+
   Non-async + DEDICATED topic: we really broadcast on the global Bus; a topic owned by this test
   (`@topic`) isolates the counter from any other stray `fleet.events` broadcast → exact assertion,
   no flake.
