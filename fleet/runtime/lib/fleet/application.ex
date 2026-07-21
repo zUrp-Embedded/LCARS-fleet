@@ -112,4 +112,31 @@ defmodule Fleet.Application do
         error
     end
   end
+
+  @impl Application
+  def prep_stop(state) do
+    # The graceful door of the NOMINAL stop: `fleet_v2 stop` sends SIGTERM, the BEAM turns
+    # it into `:init.stop`, and OTP calls prep_stop BEFORE any supervisor dies — the one
+    # spot where refuse-new + drain-in-flight (`Shutdown.begin`) can run while every
+    # finalizer is still alive. Without this, the drain was reachable only through the
+    # opt-in debug RPC (distribution ON), i.e. never in the operator's normal gesture.
+    # A drain failure must never WEDGE the stop: begin bounds itself (grace + call
+    # timeout), any error is logged and the teardown proceeds. Server absent (hermetic
+    # test boots) → nothing to drain, pass through.
+    if Process.whereis(Fleet.Starfleet.Shutdown) do
+      try do
+        _ = Fleet.Starfleet.Shutdown.begin()
+      catch
+        kind, reason ->
+          require Logger
+
+          Logger.warning(
+            "Application: graceful drain at stop failed (#{inspect(kind)}: " <>
+              "#{inspect(reason)}) — teardown proceeds, in-flight work may be cut"
+          )
+      end
+    end
+
+    state
+  end
 end

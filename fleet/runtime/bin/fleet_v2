@@ -265,25 +265,33 @@ cmd_stop() {
     return 0
   fi
 
-  if [[ -n "$DIST_ON" ]]; then
-    echo "fleet_v2: stop graceful (drain puis teardown, dans l'ordre)…" >&2
-    local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
-    local rpc_expr='_ = Fleet.Starfleet.Shutdown.begin(grace_ms: 10_000); :init.stop()'
+  # GRACEFUL door, NOMINAL path: SIGTERM to the BEAM. OTP turns it into :init.stop and
+  # calls Fleet.Application.prep_stop (refuse-new + drain in-flight, Shutdown.begin)
+  # BEFORE any supervisor dies. Needs NO Erlang distribution — the old graceful path
+  # lived behind the debug-only RPC (LCARS_FLEET_V2_ERL_NODE), so the operator's normal
+  # stop went straight to kill-server and the drain never ran in production. The BEAM is
+  # the direct child of the tmux pane shell (the release script execs down to beam:
+  # same pid). kill-server stays the FALLBACK, for a BEAM that no longer answers.
+  echo "fleet_v2: stop graceful (drain puis teardown, dans l'ordre)..." >&2
+  local pane_pid beam_pid
+  pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
+  beam_pid=""
+  [[ -n "$pane_pid" ]] && beam_pid="$(pgrep -P "$pane_pid" 2>/dev/null | head -1 || true)"
 
-    if [[ -x "$rel_bin" ]]; then
-      RELEASE_DISTRIBUTION=name RELEASE_NODE="$ERL_NODE" RELEASE_COOKIE="$ERL_COOKIE" \
-        "$rel_bin" rpc "$rpc_expr" 2>/dev/null || true
-    else
-      elixir --name "ctl_stop_$$@127.0.0.1" --cookie "$ERL_COOKIE" -e \
-        "true = Node.connect(:\"$ERL_NODE\"); :rpc.call(:\"$ERL_NODE\", Code, :eval_string, [\"$rpc_expr\"])" \
-        2>/dev/null || true
-    fi
+  if [[ -n "$beam_pid" ]]; then
+    kill -TERM "$beam_pid" 2>/dev/null || true
 
-    # Wait for the BEAM to finish cleanly (the tmux session dies with it) — 30s max.
-    # Under `set -e`, `((i++))` returns 0 (falsy) on the first round and kills the script silently.
-    # Hence the explicit form below.
-    local i=0
-    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < 30 )); do sleep 1; i=$((i + 1)); done
+    # Wait for the BEAM to finish cleanly (the tmux session dies with it). Bounded by
+    # FLEET_V2_STOP_WAIT seconds (default 30; tests shrink it). Under `set -e`, `((i++))`
+    # returns 0 (falsy) on the first round and kills the script silently — hence the
+    # explicit form below.
+    local i=0 max_wait="${FLEET_V2_STOP_WAIT:-30}"
+    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < max_wait )); do
+      sleep 1
+      i=$((i + 1))
+    done
+  else
+    echo "fleet_v2: BEAM introuvable sous la session tmux — fallback kill direct." >&2
   fi
 
   if dtmux has-session -t "$SESSION" 2>/dev/null; then

@@ -44,3 +44,51 @@ teardown() { rm -rf "$TMP_BASE"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"sourced-ok"* ]]
 }
+
+# --- cmd_stop: the graceful door of the NOMINAL stop ---
+# Real processes and real signals: a fake pane (bash) parenting a fake beam (sleep).
+# The tmux stub equates "session alive" with "fake beam alive" — exactly the coupling
+# the launcher relies on (the tmux session dies with the BEAM).
+
+make_tmux_stub() {
+  mkdir -p "$TMP_BASE/stubs"
+  cat > "$TMP_BASE/stubs/tmux-stub" << 'STUB'
+#!/usr/bin/env bash
+# tmux stand-in for cmd_stop: -S <sock> <command> ...
+shift 2
+case "$1" in
+  has-session)      kill -0 "$(cat "$STUB_STATE/beam.pid" 2>/dev/null)" 2>/dev/null ;;
+  display-message)  cat "$STUB_STATE/pane.pid" ;;
+  kill-server)      touch "$STUB_STATE/kill-server-called"
+                    kill -9 "$(cat "$STUB_STATE/beam.pid" 2>/dev/null)" 2>/dev/null || true ;;
+  *) true ;;
+esac
+STUB
+  chmod +x "$TMP_BASE/stubs/tmux-stub"
+}
+
+@test "nominal stop is GRACEFUL: SIGTERM reaches the beam, kill-server never fires" {
+  export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
+  make_tmux_stub
+
+  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
+  sleep 0.3
+
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=5; source '$SCRIPT'; cmd_stop"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"proprement"* ]]
+  [ ! -f "$STUB_STATE/kill-server-called" ]
+}
+
+@test "a beam that ignores SIGTERM falls back to kill-server after the bounded wait" {
+  export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
+  make_tmux_stub
+
+  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; bash -c 'trap \"\" TERM; sleep 300' & echo \$! > '$STUB_STATE/beam.pid'; wait" &
+  sleep 0.3
+
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=1; source '$SCRIPT'; cmd_stop"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fallback kill"* ]]
+  [ -f "$STUB_STATE/kill-server-called" ]
+}
