@@ -550,6 +550,24 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:error, {:unexpected_review_shape, _path, _body}} =
                ForgeClient.count_change_request_rounds("fleet/lcars", 6, opts(handlers))
     end
+
+    test "count_change_request_rounds: paginates — reviews past page 1 are counted (>50 reviews)" do
+      # page 1 = a FULL page (50 REQUEST_CHANGES) → paginate continues; page 2 = 1 more (partial → stop).
+      # A single-page read would count 50 and UNDER-count the rework budget (blind re-dispatch instead
+      # of arch escalation); the paginated read sees all 51.
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      page1 = for _ <- 1..50, do: %{"state" => "REQUEST_CHANGES"}
+      page2 = [%{"state" => "REQUEST_CHANGES"}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} => fn ->
+          page = Agent.get_and_update(counter, &{&1, &1 + 1})
+          {200, if(page == 0, do: page1, else: page2)}
+        end
+      }
+
+      assert {:ok, 51} = ForgeClient.count_change_request_rounds("fleet/lcars", 6, opts(handlers))
+    end
   end
 
   describe "add_label/4 — config" do

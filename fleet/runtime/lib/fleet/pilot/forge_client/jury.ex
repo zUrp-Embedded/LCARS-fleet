@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   **Last revised**: 2026-07-21
   """
 
-  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, paginate: 3]
+  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, paginate: 3]
 
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
@@ -91,24 +91,27 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     head_sha = Keyword.get(opts, :head_sha)
 
     with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
+         {:ok, reviews} <- paginated_reviews(config, repo, index) do
       verdicts = verdicts_by_reviewer(reviews, head_sha)
       reviewers = jury_reviewers(reviews)
 
       {:ok,
        %{verdicts: verdicts, reviewers: reviewers, outcome: review_outcome(reviewers, verdicts)}}
-    else
-      # F-C069 — a 2xx with a NON-LIST body (a proxy/gateway serving an HTML page or an object envelope
-      # with 200) is fail-LOUD, NEVER an `{:ok, empty}`: an empty jury here → `dispatch_by_verdicts([], %{})`
-      # → the MERGE branch (merge on a lost/empty jury). Mirror of `paginate`'s `:unexpected_page_shape`.
-      {:ok, non_list} ->
-        {:error,
-         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
-          non_list}}
+    end
+  end
 
-      {:error, _} = err ->
-        err
+  # Reviews of a PR, PAGINATED: a jury verdict/feedback must see EVERY review — a decisive
+  # APPROVED/REQUEST_CHANGES past the forge's default page would flip the outcome (merge on a jury
+  # that actually rejected, or a rework brief missing the change-request). Maps paginate's non-list
+  # fail-loud onto the review-specific `:unexpected_review_shape` (F-C069: NEVER `{:ok, []}` — an empty
+  # jury here → `dispatch_by_verdicts([], %{})` → the MERGE branch, i.e. merge on a lost/empty jury).
+  defp paginated_reviews(config, repo, index) do
+    path = "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews"
+
+    case paginate(config, path, "") do
+      {:ok, reviews} -> {:ok, reviews}
+      {:error, {:unexpected_page_shape, p, _page, body}} -> {:error, {:unexpected_review_shape, p, body}}
+      {:error, _} = err -> err
     end
   end
 
@@ -170,19 +173,8 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   def change_request_feedback(repo, index, opts \\ [])
       when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
+         {:ok, reviews} <- paginated_reviews(config, repo, index) do
       {:ok, change_requests_by_reviewer(reviews)}
-    else
-      # F-C069 — 2xx non-list body → fail-loud (mirror of `paginate`), never `{:ok, []}` (an empty feedback
-      # would silently give the eng a generic "fix per the review" without the review content).
-      {:ok, non_list} ->
-        {:error,
-         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
-          non_list}}
-
-      {:error, _} = err ->
-        err
     end
   end
 
@@ -203,24 +195,13 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   def count_change_request_rounds(repo, index, opts \\ [])
       when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
+         {:ok, reviews} <- paginated_reviews(config, repo, index) do
       count =
         reviews
         |> Enum.reject(&Map.get(&1, "dismissed", false))
         |> Enum.count(&(&1["state"] == "REQUEST_CHANGES"))
 
       {:ok, count}
-    else
-      # F-C069 — 2xx non-list body → fail-loud (mirror of `paginate`), never `{:ok, 0}` (an undercounted
-      # rework budget → blind re-dispatch instead of arch escalation; the caller escalates on `{:error}`).
-      {:ok, non_list} ->
-        {:error,
-         {:unexpected_review_shape, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews",
-          non_list}}
-
-      {:error, _} = err ->
-        err
     end
   end
 
@@ -253,7 +234,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
       when is_binary(repo) and is_integer(index) do
     # `paginate` ALWAYS returns `{:ok, list}` (accumulated) or `{:error, _}` (including
     # `:unexpected_page_shape` on a non-list page — fail-loud, never an {:ok, non_list}): no
-    # `{:ok, non_list}` clause to cover here (unlike single-page reads via `http_get`).
+    # `{:ok, non_list}` clause to cover here (all reads here paginate).
     with {:ok, config} <- resolve_config(opts),
          {:ok, events} <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{index}/timeline", "") do
