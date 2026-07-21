@@ -99,6 +99,40 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)
   end
 
+  # A missing/empty workflow catalogue used to enumerate to `[]`, turning both card
+  # guards into vacuous truths: the rail booted green with zero loadable card and the
+  # first route raised far from the deploy fault. The boot now refuses both states —
+  # and step mode OFF keeps its zero-card-by-design semantics (no enumeration at all).
+
+  test "step rail boot: MISSING workflow maps root → raise (no vacuous green)", %{tmp_dir: tmp} do
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+    Application.put_env(:fleet_workflow, :workflow_maps_root, Path.join(tmp, "nowhere"))
+
+    assert_raise RuntimeError, ~r/does not exist/, fn ->
+      Fleet.Pilot.Application.step_children_for_test()
+    end
+  end
+
+  test "step rail boot: EMPTY workflow catalogue → raise (no vacuous green)", %{tmp_dir: tmp} do
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+    Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)
+
+    assert_raise RuntimeError, ~r/no \*\.yaml card/, fn ->
+      Fleet.Pilot.Application.step_children_for_test()
+    end
+  end
+
+  test "step mode OFF: zero card stays BY DESIGN — no enumeration, no raise, no children", %{
+    tmp_dir: tmp
+  } do
+    Application.put_env(:fleet_pilot, :step_dispatch?, false)
+    Application.put_env(:fleet_workflow, :workflow_maps_root, Path.join(tmp, "nowhere"))
+
+    assert Fleet.Pilot.Application.step_children_for_test() == []
+  end
+
   test "F-C061 V2 (cards): a card jury with a NON-role login (human) → raise at boot",
        %{tmp_dir: tmp} do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)

@@ -214,8 +214,12 @@ defmodule Fleet.Pilot.Application do
   # (Symmetric to the read-frontier filter in `StepDispatcher.dispatch_review`, which
   # restricts the forge-sourced reviewer set to the card's jury: this guards the canon
   # side, that guards the forge side.)
+  # The enumeration is the BANG form: a missing root or an empty catalogue would make
+  # both card guards vacuously true (readiness green with zero loadable card, first
+  # route raises far from the deploy fault) — refused HERE at rail boot, same
+  # dead-man's-switch contract as the base_url guard above.
   defp validate_card_juries! do
-    for map_name <- Fleet.Workflow.Loader.canon_names(),
+    for map_name <- Fleet.Workflow.Loader.canon_names!(),
         role <- Fleet.Workflow.Loader.load!(map_name)["jury"] do
       case Fleet.CapProfile.load(role) do
         {:ok, cp} ->
@@ -244,7 +248,7 @@ defmodule Fleet.Pilot.Application do
   # load = a broken canon, fail-loud HERE. A step without a role (nil) is skipped: it is not a
   # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
   def validate_card_steps!(opts \\ []) do
-    for map_name <- Fleet.Workflow.Loader.canon_names(opts),
+    for map_name <- Fleet.Workflow.Loader.canon_names!(opts),
         {step_name, spec} <- Fleet.Workflow.Loader.load!(map_name, opts)["steps"] || %{},
         role = Map.get(spec, "role"),
         is_binary(role) do

@@ -27,7 +27,7 @@ defmodule Fleet.Workflow.Loader do
   coupling to the global Application env). `load!/1` remains for the prod call
   sites that can live with the Application env (read at boot).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   # The workflow_map carries a single envelope: `kind: WorkflowMap` / `metadata` / `spec`.
@@ -117,8 +117,9 @@ defmodule Fleet.Workflow.Loader do
 
   @doc """
   Names of the canon workflow maps (`*.yaml` basenames under the maps root). Single
-  listing authority — the root derivation is NOT re-derived at callers (boot validation
-  of the card juries walks this).
+  listing authority — the root derivation is NOT re-derived at callers. TOLERANT by
+  design: a missing root and an empty catalogue both enumerate to `[]` — fine for a
+  listing, vacuously true for a guard. Guards use `canon_names!/1`.
   """
   @spec canon_names(keyword()) :: [String.t()]
   def canon_names(opts \\ []) do
@@ -127,6 +128,35 @@ defmodule Fleet.Workflow.Loader do
     |> Path.wildcard()
     |> Enum.map(&Path.basename(&1, ".yaml"))
     |> Enum.sort()
+  end
+
+  @doc """
+  Same enumeration as `canon_names/1`, but REFUSES the two states that make every
+  "for each canon card" check vacuously true: a missing root and an empty catalogue.
+  Boot guards call this — without it a rail can reach readiness with zero loadable
+  card and fail at its first route, far from the deploy fault. Raises with the
+  resolved root and its config sources; distinguishes missing from empty (two
+  different operator mistakes).
+  """
+  @spec canon_names!(keyword()) :: [String.t()]
+  def canon_names!(opts \\ []) do
+    root = workflow_maps_root(opts)
+
+    unless File.dir?(root) do
+      raise "Fleet.Workflow.Loader: workflow maps root #{inspect(root)} does not exist — " <>
+              "broken deploy or misconfiguration (config :fleet_workflow, :workflow_maps_root / " <>
+              "LCARS_WORKFLOW_MAPS_ROOT), fail-loud"
+    end
+
+    case canon_names(opts) do
+      [] ->
+        raise "Fleet.Workflow.Loader: workflow maps root #{inspect(root)} contains no *.yaml card — " <>
+                "an empty catalogue would make every canon validation vacuously true; " <>
+                "broken deploy, fail-loud"
+
+      names ->
+        names
+    end
   end
 
   defp workflow_maps_root(opts) do

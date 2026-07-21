@@ -199,6 +199,32 @@ defmodule Fleet.Workflow.LoaderTest do
     end
   end
 
+  describe "canon_names!/1 — guard enumeration" do
+    # `Path.wildcard` flattens a missing root and an empty catalogue into the same `[]`,
+    # which makes every "for each canon card" guard vacuously true. The bang form keeps
+    # the three states distinct; these tests pin each one.
+    test "missing root → raise naming the root and its config sources", %{tmp_dir: tmp_dir} do
+      missing = Path.join(tmp_dir, "nowhere")
+
+      assert_raise RuntimeError, ~r/does not exist/, fn ->
+        Loader.canon_names!(workflow_maps_root: missing)
+      end
+    end
+
+    test "empty catalogue → raise naming the vacuous-truth consequence", %{tmp_dir: tmp_dir} do
+      assert_raise RuntimeError, ~r/no \*\.yaml card/, fn ->
+        Loader.canon_names!(workflow_maps_root: tmp_dir)
+      end
+    end
+
+    test "populated catalogue → the same names as canon_names/1", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "one.yaml"), "kind: WorkflowMap\n")
+
+      assert Loader.canon_names!(workflow_maps_root: tmp_dir) == ["one"]
+      assert Loader.canon_names(workflow_maps_root: tmp_dir) == ["one"]
+    end
+  end
+
   describe "load!/2 — graph validation" do
     # Schema-VALID (needs = array of strings) but graph-INVALID: `b` refers to a nonexistent
     # step. The schema lets it through (inter-step constraint inexpressible in draft-07);
