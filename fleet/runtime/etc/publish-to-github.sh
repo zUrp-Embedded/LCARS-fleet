@@ -66,6 +66,41 @@ usage() {
   exit 1
 }
 
+# POST-TRANSFORM CERTIFICATION: filter-repo's exit 0 means "the callback ran", NOT "no internal
+# attribution survived". A new identity or trailer format the callback does not match would pass
+# through silently and be announced as a clone ready to publish. So we SCAN the transformed history
+# for any forbidden internal marker (an `@lcars.local` author/committer, a `Co-authored-by: LCARS-<role>`
+# trailer, the system email) and REFUSE if one remains — the certification is a real postcondition, not
+# a trust in the transform's silence. `system_email` is passed so it is checked even when it equals the
+# default. Prints every offending line found; returns non-zero if any.
+scan_forbidden_markers() {
+  local dir="$1" system_email="$2" hits=0
+
+  # Author/committer emails still internal (the transform should have rewritten every one).
+  local ident
+  ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE '@lcars\.local|'"$(printf '%s' "$system_email" | sed 's/[.[\*^$]/\\&/g')"'' || true)"
+  if [[ -n "$ident" ]]; then
+    echo "publish-to-github: CERTIFICATION KO — identite interne survivante dans author/committer :" >&2
+    printf '  %s\n' "$ident" >&2
+    hits=1
+  fi
+
+  # Internal co-author trailers still in the messages.
+  local trailer
+  trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE 'Co-authored-by:\s*LCARS-|@lcars\.local' || true)"
+  if [[ -n "$trailer" ]]; then
+    echo "publish-to-github: CERTIFICATION KO — trailer interne survivant dans les messages :" >&2
+    printf '  %s\n' "$trailer" >&2
+    hits=1
+  fi
+
+  return "$hits"
+}
+
+# Source guard (standard idiom): sourcing loads the functions WITHOUT running the transform — the bats
+# suite drives scan_forbidden_markers directly on a fixture repo, without git-filter-repo.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
@@ -162,8 +197,17 @@ commit.message = re.sub(
 )
 ')
 
+# CERTIFY the transform instead of trusting its exit code (see scan_forbidden_markers). A surviving
+# internal marker = a broken publish that would leak the internal attribution to GitHub — refuse loud
+# (exit 3), the clone is left in place for inspection.
+if ! scan_forbidden_markers "$OUT_DIR" "$SYSTEM_EMAIL"; then
+  echo "publish-to-github: ARRET — le clone transforme porte encore une attribution interne (voir ci-dessus)." >&2
+  echo "  Le clone est laisse dans $OUT_DIR pour inspection ; NE PAS pousser en l'etat." >&2
+  exit 3
+fi
+
 echo ""
-echo "publish-to-github: fin de la passe filter-repo → $OUT_DIR"
+echo "publish-to-github: fin de la passe filter-repo → $OUT_DIR (certifie : zero attribution interne survivante)"
 echo "  Les SHA sont tous neufs (passe one-way : ce n'est PAS un sync avec la forge de travail)."
 echo "  Geste de publish (ce script ne pousse JAMAIS — le push GitHub est ton geste) :"
 echo "    cd $OUT_DIR"
