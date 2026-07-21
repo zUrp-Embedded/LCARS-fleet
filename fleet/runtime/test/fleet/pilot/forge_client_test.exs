@@ -1075,6 +1075,46 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "list_comments/3 — paginated so the NEWEST verdict is the last element" do
+    test "the verdict on page 2 (busy issue >50 comments) is returned, not a stale page-1 comment" do
+      # Comments are oldest-first: a single 50-comment page returns the OLDEST 50, so the newest
+      # comment (the arch's verdict) sits on page 2. A single-page read took a stale comment for the
+      # latest — the exact "last verdict partial" the audit flags.
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      page1 = for n <- 1..50, do: %{"id" => n, "body" => "old ##{n}"}
+      page2 = [%{"id" => 51, "body" => "THE VERDICT"}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/issues/7/comments"} => fn ->
+          page = Agent.get_and_update(counter, &{&1, &1 + 1})
+          {200, if(page == 0, do: page1, else: page2)}
+        end
+      }
+
+      assert {:ok, comments} = ForgeClient.list_comments("fleet/proj", 7, opts(handlers))
+      assert length(comments) == 51
+      assert List.last(comments)["body"] == "THE VERDICT"
+    end
+  end
+
+  describe "paginate budget — a forge returning full pages forever is refused, not looped" do
+    test "a cursor that never ends → {:error, {:pagination_budget_exceeded, _, _}}, bounded" do
+      # A broken forge cursor (a full page every time) would otherwise loop and grow memory holding
+      # the Poller/MCP. The page budget bounds it fail-loud (never a silently truncated view).
+      full =
+        for n <- 1..50,
+            do: %{"number" => n, "head" => %{"ref" => "x"}, "base" => %{"ref" => "main"}}
+
+      handlers = %{{"GET", "/api/v1/repos/fleet/proj/pulls"} => {200, full}}
+
+      assert {:error, {:pagination_budget_exceeded, path, cap}} =
+               ForgeClient.get_pr_for_branch("fleet/proj", "no-match", "main", opts(handlers))
+
+      assert path =~ "/pulls"
+      assert is_integer(cap) and cap > 0
+    end
+  end
+
   describe "team_member?/4 (onboarding: org-team membership gate)" do
     test "paginates the org's teams — a team on page 2 (org has >50 teams) is found" do
       # page 1 = a FULL page (50) of other teams → paginate continues; page 2 = the "humans" team (partial

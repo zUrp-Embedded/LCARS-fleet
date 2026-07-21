@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     * `:token_file` — file path (default `~/.gitea_token`).
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -141,6 +141,12 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   # ============================================================
 
   @page_limit 50
+  # Total-page budget: @page_limit * @max_pages items before we refuse. A real fleet collection
+  # (open issues/PRs of one repo, comments of one issue) never approaches this; a forge bug that
+  # returns a full page forever (a broken cursor, a repeating page) would otherwise loop and grow
+  # memory holding the Poller/MCP. Exceeding it is fail-LOUD (a truncated view is never passed as
+  # complete), never a silent cap.
+  @max_pages 200
 
   @doc false
   # PAGINATED read of a source-of-truth collection (issues / pulls / comments). Gitea
@@ -150,9 +156,15 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   # a full page implies "maybe a continuation"). Behavior identical to the old ≤50 items:
   # a collection ≤50 fits in page 1 (< 50 → stop), a single round-trip. `query` = query-string WITHOUT
   # pagination (e.g. `"state=open&type=issues"` or `""`). Any page with an HTTP/transport error bubbles up
-  # (fail-loud: a source-of-truth caller must NEVER work on a silently truncated view).
+  # (fail-loud: a source-of-truth caller must NEVER work on a silently truncated view). Accumulation is
+  # O(n) (prepend the page lists, concat once at the end — never `acc ++ page` per round, quadratic on a
+  # large collection), and the total pages are BUDGETED (@max_pages) against a runaway forge cursor.
   def paginate(config, path_base, query) do
     do_paginate(config, path_base, query, 1, [])
+  end
+
+  defp do_paginate(_config, path_base, _query, page, _acc) when page > @max_pages do
+    {:error, {:pagination_budget_exceeded, path_base, @max_pages}}
   end
 
   defp do_paginate(config, path_base, query, page, acc) do
@@ -161,11 +173,12 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
     case http_get(config, path) do
       {:ok, items} when is_list(items) ->
-        acc = acc ++ items
+        # Prepend the page (a list) — O(1); the flattening concat happens once, at the stop.
+        acc = [items | acc]
 
         # Full page → there MAY be a continuation; partial/empty page → last page, we stop.
         if length(items) < @page_limit do
-          {:ok, acc}
+          {:ok, acc |> Enum.reverse() |> Enum.concat()}
         else
           do_paginate(config, path_base, query, page + 1, acc)
         end

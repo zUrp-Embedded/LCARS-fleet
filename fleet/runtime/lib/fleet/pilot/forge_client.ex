@@ -155,14 +155,17 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Comments of an issue (Gitea `GET /repos/{repo}/issues/{n}/comments`), oldest-first. Read-only.
   Used by the MCP `list_escalations` tool: the escalation VERDICT of a worker's `escalate_user`
-  is posted as a comment (by `StepRunCompleter`), and the arch must READ it to decide. Single page
-  (an escalated issue carries a handful of comments — the verdict is the most recent); `{:error, _}`
-  on HTTP/transport. NOT a mutation despite living below the write-ops banner — placed by the arch's read path.
+  is posted as a comment (by `StepRunCompleter`), and the arch must READ it to decide — the verdict
+  is the MOST RECENT comment. PAGINATED: a single 50-comment page returns the OLDEST 50, so on a
+  busy issue the newest comment (the verdict) sits on a later page and a single-page read would take
+  a stale comment for the latest. Reading all pages makes "the last element" the true newest.
+  `{:error, _}` on HTTP/transport. NOT a mutation despite living below the write-ops banner — placed
+  by the arch's read path.
   """
   @spec list_comments(String.t(), integer(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_comments(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts) do
-      http_get(config, "/repos/#{encode_repo(repo)}/issues/#{number}/comments")
+      paginate(config, "/repos/#{encode_repo(repo)}/issues/#{number}/comments", "")
     end
   end
 
