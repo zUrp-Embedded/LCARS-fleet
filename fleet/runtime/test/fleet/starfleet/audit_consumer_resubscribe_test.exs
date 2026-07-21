@@ -7,10 +7,10 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
   leave a restarted consumer silently DEAF: alive, supervised green, but consuming nothing.
   That is the worst failure mode of a pub/sub bus, and it is invisible without this test.
 
-  Scope: the proof runs on a minimal `Counter` that subscribes in `init/1` EXACTLY as the real
-  consumers do — it does NOT boot `AuditConsumer` itself. This file is named for `AuditConsumer` as
-  the exemplar, but what it proves is the init-subscribe contract SHARED by every such consumer
-  (StepRunConsumer, ReadModel, …), reduced to its OTP primitive.
+  Scope, TWO proofs: the minimal `Counter` pins the init-subscribe contract SHARED by every
+  such consumer (StepRunConsumer, ReadModel, …), reduced to its OTP primitive; and the REAL
+  `AuditConsumer` is restarted under an isolated supervisor and proven to consume
+  post-restart — a substitute's green would survive a regression of the subject itself.
 
   Non-async + DEDICATED topic: we really broadcast on the global Bus; a topic owned by this test
   (`@topic`) isolates the counter from any other stray `fleet.events` broadcast → exact assertion,
@@ -44,6 +44,66 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
   @topic "fleet.events.resubscribe_test"
 
   defp ev, do: Fleet.Event.new(:spawner, :"pod.completed")
+
+  # The Counter below proves the OTP primitive; THIS proves the REAL subject — a substitute's
+  # green survives any regression of the subject itself (subscribe moved out of init, a
+  # one-shot supervisor-boot subscribe): the exact deaf-but-green failure this file warns about.
+  @tag :resubscribe
+  test "the REAL AuditConsumer, killed under its supervisor, resubscribes and consumes post-restart" do
+    name = :"resub_real_audit_#{System.unique_integer([:positive])}"
+
+    {:ok, sup} =
+      Supervisor.start_link(
+        [
+          Supervisor.child_spec({Fleet.Starfleet.AuditConsumer, name: name, subscribe: true},
+            id: :real_audit
+          )
+        ],
+        strategy: :one_for_one
+      )
+
+    on_exit(fn -> if Process.alive?(sup), do: Supervisor.stop(sup) end)
+
+    pid1 = Process.whereis(name)
+    assert is_pid(pid1)
+
+    # Pre-restart consumption (baseline: the subject hears the Bus at all).
+    ExUnit.CaptureLog.capture_log(fn ->
+      Bus.broadcast_main(ev())
+      assert wait_count(name, 1)
+    end)
+
+    # Kill → OTP restarts → init/1 replays the subscribe (the contract under proof).
+    Process.exit(pid1, :kill)
+
+    assert Enum.reduce_while(1..50, false, fn _, _ ->
+             case Process.whereis(name) do
+               pid when is_pid(pid) and pid != pid1 -> {:halt, true}
+               _ -> Process.sleep(20) && {:cont, false}
+             end
+           end),
+           "supervisor did not restart the real consumer"
+
+    # POST-restart consumption on the FRESH pid: a deaf restart fails here.
+    ExUnit.CaptureLog.capture_log(fn ->
+      Bus.broadcast_main(ev())
+      assert wait_count(name, 1), "restarted AuditConsumer consumed NOTHING (deaf-but-green)"
+    end)
+  end
+
+  defp wait_count(name, min) do
+    Enum.reduce_while(1..50, false, fn _, _ ->
+      case Process.whereis(name) do
+        pid when is_pid(pid) ->
+          if :sys.get_state(pid).events_count >= min,
+            do: {:halt, true},
+            else: Process.sleep(20) && {:cont, false}
+
+        _ ->
+          Process.sleep(20) && {:cont, false}
+      end
+    end)
+  end
 
   @tag :resubscribe
   test "killed consumer → restarted by the supervisor → receives POST-restart events" do

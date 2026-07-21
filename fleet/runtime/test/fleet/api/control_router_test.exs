@@ -46,52 +46,52 @@ defmodule Fleet.API.ControlRouterTest do
       end
     end
 
+    # The curl prerequisite is resolved STRUCTURALLY (test_helper excludes :requires_curl at
+    # runtime when the binary is missing): an in-test `if curl → else IO.puts SKIP` printed a
+    # line and COUNTED GREEN — a machine's verdict silently reported as the code's. Excluded
+    # shows in the bilan; green means the end-to-end actually ran.
+    @tag :requires_curl
     test "bind + curl --unix-socket POST /api/admin/spawn → 202 (host-side reaches the door)" do
-      curl = System.find_executable("curl")
+      curl = System.find_executable("curl") || raise "curl vanished between helper and test"
 
-      if is_nil(curl) do
-        # No hollow-green: we SAY that the end-to-end was not exercised (curl missing).
-        IO.puts("SKIP socket integration: curl missing — routing covered by Plug.Test")
-      else
-        sock = short_sock()
-        on_exit(fn -> File.rm(sock) end)
-        {:ok, pid} = ControlRouter.start_control_listener(sock)
-        # Embedded tree: stopped via its OWNER, not `:cowboy.stop_listener` (the ref
-        # is not under the ranch application's supervisor → `{:error, :not_found}` there).
-        on_exit(fn -> stop_tree(pid) end)
+      sock = short_sock()
+      on_exit(fn -> File.rm(sock) end)
+      {:ok, pid} = ControlRouter.start_control_listener(sock)
+      # Embedded tree: stopped via its OWNER, not `:cowboy.stop_listener` (the ref
+      # is not under the ranch application's supervisor → `{:error, :not_found}` there).
+      on_exit(fn -> stop_tree(pid) end)
 
-        # The file exists and is indeed a socket (the pod will not see it: outside its mount ns).
-        assert File.exists?(sock)
+      # The file exists and is indeed a socket (the pod will not see it: outside its mount ns).
+      assert File.exists?(sock)
 
-        {out, code} =
-          System.cmd(
-            curl,
-            [
-              "-sS",
-              "-m",
-              "10",
-              "--unix-socket",
-              sock,
-              "-X",
-              "POST",
-              "http://localhost/api/admin/spawn",
-              "-H",
-              "content-type: application/json",
-              "-d",
-              Jason.encode!(%{"role" => "engineer"}),
-              "-w",
-              "\n%{http_code}"
-            ],
-            stderr_to_stdout: true
-          )
+      {out, code} =
+        System.cmd(
+          curl,
+          [
+            "-sS",
+            "-m",
+            "10",
+            "--unix-socket",
+            sock,
+            "-X",
+            "POST",
+            "http://localhost/api/admin/spawn",
+            "-H",
+            "content-type: application/json",
+            "-d",
+            Jason.encode!(%{"role" => "engineer"}),
+            "-w",
+            "\n%{http_code}"
+          ],
+          stderr_to_stdout: true
+        )
 
-        assert code == 0, "curl --unix-socket failed: #{out}"
-        [_body, http] = String.split(String.trim(out), "\n") |> Enum.take(-2)
-        assert http == "202", "expected 202 via the socket, got #{http} (#{out})"
-        assert is_pid(pid)
+      assert code == 0, "curl --unix-socket failed: #{out}"
+      [_body, http] = String.split(String.trim(out), "\n") |> Enum.take(-2)
+      assert http == "202", "expected 202 via the socket, got #{http} (#{out})"
+      assert is_pid(pid)
 
-        assert_receive %Fleet.Event{source: :api, type: :"admin.spawn.request"}, 500
-      end
+      assert_receive %Fleet.Event{source: :api, type: :"admin.spawn.request"}, 500
     end
 
     test "rebind on a STALE socket (rm-stale) — no eaddrinuse" do

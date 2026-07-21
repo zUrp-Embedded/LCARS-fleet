@@ -22,4 +22,16 @@ _ =
     _ -> :ok
   end
 
-ExUnit.start()
+# Machine prerequisites resolved at RUNTIME into STRUCTURAL exclusions: an integration test
+# whose binary is missing must show up as excluded in the bilan, never print "SKIP" and count
+# as a green success (a hollow-green is a verdict about a machine, silently reported as a
+# verdict about the code).
+curl_excludes = if System.find_executable("curl"), do: [], else: [:requires_curl]
+
+if curl_excludes != [] do
+  IO.puts(
+    "test_helper: curl missing on this machine — :requires_curl tests are EXCLUDED (visible in the bilan)"
+  )
+end
+
+ExUnit.start(exclude: curl_excludes)
