@@ -3,12 +3,19 @@
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.146
 # STATUS: salvage v2-functional
-# mcp_submit_server.py — FIXTURE DE TEST (pas du code runtime). Serveur MCP stdio minimal, zéro dep,
-# stand-in du futur `fleet_mcp` http_sse. Substrat de comm pod BIDIRECTIONNEL via MCP (jamais scraping) :
-#   - submit_result : canal OUT — le pod retourne un résultat structuré (→ $LCARS_SUBMIT_PATH).
-#   - get_task      : canal IN  — le pod PULL sa prochaine tâche depuis la file fleet ($LCARS_TASK_QUEUE,
-#                     liste JSON) ; pop la 1ère ; {"done": true} quand vide. Multi-turn fleet→pod sans
-#                     injection-clavier ni scraping. Mécanisme prouvé keystone 2026-05-24.
+# mcp_submit_server.py — TEST FIXTURE (not runtime code). Minimal stdio MCP server, zero deps, a
+# stand-in for the real `fleet_mcp`. BIDIRECTIONAL pod comm over MCP (never scraping):
+#   - submit_result: OUT channel — the pod returns a structured result (→ $LCARS_SUBMIT_PATH).
+#   - get_task     : IN channel  — the pod PULLs its next task from the fleet queue ($LCARS_TASK_QUEUE,
+#                    a JSON list); pops the first; {"done": true} when empty. Multi-turn fleet→pod with
+#                    no keyboard injection and no scraping.
+#
+# STATUS OF THIS FILE, stated because its location does not say it: it has NO live consumer. Its only
+# referrer is test/_archived_gates/gate-r-core-comm-inc4.sh, which short-circuits (it is a RETIRED
+# gate). It is kept as the data an archived gate would need if that gate were ever revived — which is
+# also why its tool is still named `get_task`: renaming it to the current `get_work_item` would break
+# the only thing that could ever drive it. Do not read this file as an example of the live protocol;
+# lib/fleet/mcp/pod_tools.ex is.
 import json, os, sys
 
 SUBMIT_PATH = os.environ.get("LCARS_SUBMIT_PATH", "/tmp/lcars-submit.json")
@@ -18,7 +25,7 @@ PROTO = "2024-11-05"
 def send(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 
 def next_task():
-    # Pop la 1ère tâche de la file (read-modify-write). {"done": true} si vide/absente.
+    # Pop the first task off the queue (read-modify-write). {"done": true} if empty or missing.
     if not TASK_QUEUE or not os.path.exists(TASK_QUEUE):
         return {"done": True}
     try:
@@ -35,16 +42,16 @@ def next_task():
 TOOLS = [
     {
         "name": "get_task",
-        "description": "Recupere ta prochaine tache aupres du fleet LCARS. Retourne {\"done\":true} quand "
-                       "il n'y a plus de tache (tu t'arretes alors), sinon {\"done\":false,\"task\":{...}}.",
+        "description": "Fetch your next task from the LCARS fleet. Returns {\"done\":true} when there is "
+                       "no task left (you then stop), otherwise {\"done\":false,\"task\":{...}}.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "submit_result",
-        "description": "Retourne le resultat structure d'une tache au fleet LCARS, dans `payload`.",
+        "description": "Return a task's structured result to the LCARS fleet, in `payload`.",
         "inputSchema": {
             "type": "object",
-            "properties": {"payload": {"type": "object", "description": "Resultat structure (objet libre)."}},
+            "properties": {"payload": {"type": "object", "description": "Structured result (free-form object)."}},
             "required": ["payload"],
         },
     },
@@ -83,7 +90,7 @@ def main():
                     json.dump(payload, f, ensure_ascii=False)
                 print(f"[mcp_submit_server] submit_result -> {SUBMIT_PATH}: {payload}", file=sys.stderr, flush=True)
                 send({"jsonrpc": "2.0", "id": mid, "result": {
-                    "content": [{"type": "text", "text": "Resultat recu par le fleet. Tache close."}]}})
+                    "content": [{"type": "text", "text": "Result received by the fleet. Task closed."}]}})
             else:
                 send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown tool"}})
         elif mid is not None:
