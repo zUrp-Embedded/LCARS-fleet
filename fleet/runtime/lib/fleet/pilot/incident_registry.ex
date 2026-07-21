@@ -408,17 +408,38 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # Read-modify-write with MERGE: absorbs incidents posted by other machines since the last sync
-  # (instead of overwriting). Returns the merge so the owner adopts the cross-machine truth.
+  # (instead of overwriting). Same 3-case DISCIPLINE as `read_wal/1` below — an unreadable forge is NOT an
+  # empty one:
+  #   * read OK           → merge the real forge content, update it (with its sha);
+  #   * genuine 404       → no file yet → CREATE from the local view (empty merge, nil sha);
+  #   * unreadable (5xx/  → we do NOT know the forge's real content → pushing our LOCAL view would
+  #     network/timeout)    OVERWRITE cross-machine incidents we could not read (data loss). Fail-closed:
+  #                         `{:error, _}`, no PUT — the handler retries (data stays safe in the WAL).
   defp sync_forge(registry, opts) do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
     putter = Keyword.get(opts, :put_file_fun, &ForgeClient.Files.put_file/4)
 
-    {forge_reg, sha} =
-      case getter.(repo(opts), path(opts), ref: branch(opts)) do
-        {:ok, %{content: content, sha: sha}} -> {decode(content), sha}
-        _ -> {%{}, nil}
-      end
+    case getter.(repo(opts), path(opts), ref: branch(opts)) do
+      {:ok, %{content: content, sha: sha}} ->
+        put_merged(registry, decode(content), sha, putter, opts)
 
+      {:error, :not_found} ->
+        put_merged(registry, %{}, nil, putter, opts)
+
+      {:error, reason} ->
+        Logger.error(
+          "IncidentRegistry: sync_forge — forge registry UNREADABLE (#{inspect(reason)}) — NOT pushing " <>
+            "(a push over an unread forge could overwrite cross-machine incidents); the sync will retry"
+        )
+
+        {:error, {:forge_unreadable, reason}}
+
+      other ->
+        {:error, {:forge_unexpected_shape, other}}
+    end
+  end
+
+  defp put_merged(registry, forge_reg, sha, putter, opts) do
     merged = registry |> merge(forge_reg) |> prune()
     ident = author(opts)
 

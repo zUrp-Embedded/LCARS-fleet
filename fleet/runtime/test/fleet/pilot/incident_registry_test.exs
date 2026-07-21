@@ -56,6 +56,27 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
+    test "sync: forge getter UNREADABLE (not a 404) → NO put (never overwrite an unread forge)", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, {:http, 503, "down"}} end,
+          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+        )
+
+      assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
+
+      # A failed (non-404) forge READ used to collapse to {%{}, nil} → a PUT that could OVERWRITE the
+      # remote registry (cross-machine incidents we never read = data loss). Now: unreadable → NO put at
+      # all; the local WAL holds the data and the sync retries (retry_ms) until the forge returns.
+      refute_receive {:put, _}, 250
+      # local memory intact (the note is remembered)
+      assert Reg.seen_before?("wake:p:dead", server: name)
+    end
+
     # WAL under a parent that is a FILE → File.write of the .tmp fails :enotdir. The WAL is the ONLY
     # durability of a 1st occurrence (no escalation) → the failure is SURFACED, never swallowed (BND-055).
     defp start_reg_wal_broken(tmp) do
