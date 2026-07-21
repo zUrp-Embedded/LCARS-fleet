@@ -328,7 +328,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     end
   end
 
-  describe "sidecar-as-GRAINE (unified seed, reorg 2026-07-19)" do
+  describe "sidecar-as-SEED (unified seed, reorg 2026-07-19)" do
     @uuid "1badcafe-feed-4dad-babe-9999dec0de04"
     @bridge ~s({"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01ABC","sessionId":"1badcafe-feed-4dad-babe-9999dec0de04"})
     @mode ~s({"type":"mode","mode":"default"})

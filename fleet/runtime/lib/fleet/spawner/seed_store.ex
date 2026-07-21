@@ -219,7 +219,7 @@ defmodule Fleet.Spawner.SeedStore do
   @doc """
   Captures the pod's CURRENT Desktop slot into `<seed_root>/_slots/<uuid>.jsonl`, so the next boot
   re-attaches it. Reads the live jsonl (`SessionFiles.latest_jsonl`, robust to `/clear`) and stores
-  the most recent GRAINE record of each type — `mode` / `permission-mode` / `bridge-session` /
+  the most recent SEED record of each type — `mode` / `permission-mode` / `bridge-session` /
   `system/bridge_status` — the F5 minimal-seed set (proven 2026-07-19: those records alone resume
   cleanly, re-attach the slot, and start on an EMPTY context). The sidecar therefore IS a resumable
   seed, not just the identity lines. Captures only once RC-registered (identity lines present).
@@ -250,7 +250,7 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   @doc """
-  The identity's slot GRAINE, if one was captured: `{:ok, path}` (non-empty sidecar for this
+  The identity's slot seed, if one was captured: `{:ok, path}` (non-empty sidecar for this
   deterministic `uuid`) | `:none`. THE probe of the unified seed decision (reorg 2026-07-19,
   core Decision 1): an RC pod with no live jsonl but a seed resumes FROM it — slot back,
   context empty — instead of minting a new Desktop slot.
@@ -287,7 +287,7 @@ defmodule Fleet.Spawner.SeedStore do
     _ -> :ok
   end
 
-  # Most recent GRAINE record of EACH type present, keyed by type — the F5 minimal-seed set:
+  # Most recent SEED record of EACH type present, keyed by type — the F5 minimal-seed set:
   # `mode` + `permission-mode` (session posture) and the RC-identity pair (`bridge-session` /
   # `system/bridge_status`, both formats seen live 2026-07-19).
   defp seed_records(jsonl_path) do

@@ -1119,7 +1119,7 @@ defmodule Fleet.Spawner.Pod do
   #   3. its LIVE jsonl exists in the pod_dir (clean fleet reboot, pod_dir persisted) →
   #      resume IN PLACE: full context back + slot re-attached (the jsonl carries its own RC
   #      identity) — THE per-project arch continuity story, zero restore needed;
-  #   4. a captured GRAINE exists for the identity → resume FROM it via the recall machinery
+  #   4. a captured SEED exists for the identity → resume FROM it via the recall machinery
   #      (restore copies it under the uuid): slot back, context empty (F5) — judges/one-shots;
   #   5. nothing → fresh create (first boot ever; the capture seeds the seed for next time).
   defp maybe_slot_resume(base) do

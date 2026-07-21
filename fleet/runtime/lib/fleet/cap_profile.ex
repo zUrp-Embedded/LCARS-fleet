@@ -252,20 +252,22 @@ defmodule Fleet.CapProfile do
   # pair may end up both active (default ∪ extra). A modop outside `optional` = LOUD refusal, never
   # a silent mix.
   #
-  # KNOWN GAP — what this guard admits does NOT reach the pod's system prompt. Read this before
-  # declaring `modops:` on a step and expecting an effect. The selection is validated here, then
-  # `compose/2` deep-merges the named overlays — and every selectable overlay under
-  # `canon/cap-profiles/modop/*/profile.yaml` is literally `{}`, so the merge is a no-op. The resolved
-  # struct keeps NO record of what was activated, and `Spawner.Pod` re-derives the list it hands to
-  # `SPBuilder.compose` from `default_modops/1` of that resolved profile. So an `extra_modops` entry
-  # survives validation and then vanishes: its bundle's `sp.md` is never injected.
+  # WHERE WHAT THIS GUARD ADMITS ACTUALLY LANDS. A modop's effect is NOT a cap-profile mutation: every
+  # overlay under `canon/cap-profiles/modop/*/profile.yaml` is a deliberate empty identity overlay (its
+  # own header says so), so `compose/2`'s deep-merge is a no-op BY DESIGN. The behaviour is carried by
+  # the bundle's `canon/modop-bundles/<name>/sp.md`, injected by `SPBuilder.compose/3`.
   #
-  # It is INERT today (no canon workflow_map declares `modops:` on a step, so `extra_modops` is always
-  # `[]`, and with `[]` the re-derivation returns exactly the active list). It stops being inert the
-  # day someone declares one. Closing it is a design call, not a patch: the active list has to survive
-  # `resolve/3` → `Pod`, and neither route is free — recording it in the spec needs a SCHEMA change
-  # (`modop_set` and the root are both `additionalProperties: false`), while returning it from
-  # `resolve/3` changes a signature with ~8 call sites.
+  # The route from here to there is the `active_modops` struct field: `resolve/3` stamps the validated
+  # list (defaults ++ the step's extras), `active_modops/1` reads it back with a fallback to the role's
+  # defaults, and `Spawner.Pod` hands THAT to `SPBuilder.compose`. So a step's `modops:` entry survives
+  # validation and reaches the pod's system prompt.
+  #
+  # This used to be a real hole — the list was validated here and then re-derived from
+  # `default_modops/1` downstream, so an extra silently vanished. It was closed on the struct rather
+  # than in the spec (which would have needed a schema change: `modop_set` and the root are both
+  # `additionalProperties: false`) or through `resolve/3`'s return shape (~8 call sites). Regression:
+  # `cap_profile_test.exs`, via a loader whose `compose/2` returns `spec: %{}` — the exact shape that
+  # used to lose them.
   defp validate_extra_modops(_base, []), do: :ok
 
   defp validate_extra_modops(%__MODULE__{} = base, extra) do

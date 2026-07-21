@@ -40,12 +40,15 @@
 # EXIT : 0 = tous les tokens poses ou valides · 1 = usage/dependance manquante · 2 = au moins un token
 #   en echec.
 
-# NOTE FOR SOURCE READERS (deliberately below line 40, so `--help` does not print it): the header above
-# is in French while the rest of this file's comments are in English, and that is not an oversight.
-# `usage()` renders lines 2..40 verbatim — that header IS the --help output, i.e. text the box says to
-# its operator. Translating it would translate the CLI. Everything from here down is source prose and
-# follows the English rule. If you ever split the two (a separate heredoc for --help), the header goes
-# English with the rest.
+# NOTE FOR SOURCE READERS: the header above is in French while the rest of this file's comments are in
+# English, and that is not an oversight. `usage()` renders that header verbatim — it IS the --help
+# output, i.e. text the box says to its operator. Translating it would translate the CLI. Everything
+# from here down is source prose and follows the English rule. If you ever split the two (a separate
+# heredoc for --help), the header goes English with the rest.
+#
+# THE BLANK LINE ABOVE THIS NOTE IS LOAD-BEARING: `usage()` is `sed -n '2,/^$/p'`, so the range ends at
+# the FIRST blank line. That is what keeps this note out of --help — not its distance from the top.
+# Keep the blank line, and put anything that must NOT be printed below it.
 
 set -euo pipefail
 
