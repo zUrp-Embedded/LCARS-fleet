@@ -6,7 +6,12 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   # StepRunCompleter seam: captures the received PR-native step_run + returns a fixed outcome.
   defmodule CaptureCompleter do
     def complete_pr(step_run, opts) do
+      # `self()` = the caller: the TEST process for the direct maybe_complete tests. But when the
+      # completion runs INSIDE the consumer GenServer (the handle_info delegation test), `self()` is the
+      # consumer → invisible to the test. A registered observer (set only by that test) receives the
+      # delegation effect so it can be OBSERVED, not merely assumed from Process.alive?.
       send(self(), {:step_run, step_run, opts})
+      if obs = Process.whereis(:step_run_delegation_observer), do: send(obs, {:delegated, step_run})
       {:ok, :captured}
     end
 
@@ -487,6 +492,10 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
     test "handle_info pod.completed -> delegates (via real Event, subscribe: false)" do
       name = :"HC_live_#{System.unique_integer([:positive])}"
+      # Observe the delegation EFFECT (CaptureCompleter sends {:delegated, _} here), not just liveness —
+      # the old test only checked Process.alive? with no FIFO barrier, so it could pass BEFORE the event
+      # was even handled (it proved nothing about the "delegates" it claimed).
+      Process.register(self(), :step_run_delegation_observer)
 
       {:ok, pid} =
         StepRunConsumer.start_link(
@@ -498,16 +507,20 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
           subscribe: false
         )
 
-      # The completer does send(self()) INSIDE the GenServer -> we just verify the event is routed
-      # without crash (the step_run is unit-tested via maybe_complete).
       event =
         Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: step_payload())
 
       send(pid, event)
-      assert Process.alive?(pid)
-      # a non-spawner event is ignored without crash
-      send(pid, Fleet.Event.new(:task_queue, :"work_item.completed"))
 
+      # FIFO barrier: :sys.get_state is handled AFTER the pod.completed message (GenServer mailbox order),
+      # so on return the delegation has run — the effect is now provably present, not racily checked.
+      _ = :sys.get_state(pid)
+      assert_received {:delegated, step_run}
+      assert step_run.issue_number == 42
+
+      # a non-spawner event is ignored without crash (barrier again → the ignore path really ran).
+      send(pid, Fleet.Event.new(:task_queue, :"work_item.completed"))
+      _ = :sys.get_state(pid)
       assert Process.alive?(pid)
 
       GenServer.stop(pid)

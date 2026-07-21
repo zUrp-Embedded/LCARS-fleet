@@ -187,7 +187,12 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
                  Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x")
       end)
 
-    # VISIBLE fail-closed (safe_pod_info's warning), never :proceed (destructive reset).
-    assert log != "" or true
+    # VISIBLE fail-closed (safe_pod_info's warning), never :proceed (destructive reset). The old
+    # `assert log != "" or true` was TAUTOLOGICAL (`… or true` can never fail) — it proved nothing about
+    # the claimed visibility. Assert the warning's actual content: the raise is caught AND surfaced.
+    assert log =~ "safe_pod_info"
+    assert log =~ "pod_info RAISED"
+    assert log =~ "fail-closed"
+    assert log =~ "broker down"
   end
 end
