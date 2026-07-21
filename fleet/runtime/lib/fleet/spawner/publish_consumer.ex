@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   Test-seam: `:subscribe` (default true) + `:spawner` backend
   (default `Fleet.Spawner`, overridable for a mock).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -204,7 +204,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   of everything else is what actually doubles the `/api/admin/spawn` admission lock.
   The allowlist mirrors the SOLE producer
   (`Fleet.API.SpawnAdmission.build_admin_opts`, which emits `brief` + `pod_id` + `self_enqueue_brief`).
-  The `self_enqueue_brief` flag (C-01) authorizes the pod's own brief enqueue — legitimate on THIS
+  The `self_enqueue_brief` flag authorizes the pod's own brief enqueue — legitimate on THIS
   (admin, no-dispatcher) rail; a forged bus event that set it would only make the pod self-enqueue its
   brief (the slot check still dedups), never an FS/backend escape. The infrastructure
   opts (`pod_dir_root`/`state_fs_root` = FS redirect out of the confined home, `containment` = host-native

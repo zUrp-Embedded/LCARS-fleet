@@ -482,7 +482,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: valid_profile(),
         issue_id: "issue-mq",
         pod_id: pod_id,
-        # C-01: the admin rail authorizes the pod's own enqueue via `self_enqueue_brief` (no dispatcher).
+        # the admin rail authorizes the pod's own enqueue via `self_enqueue_brief` (no dispatcher).
         opts: [brief: brief, self_enqueue_brief: true, repo_id: @test_repo_id]
       }
 
@@ -497,14 +497,14 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — dispatch spawn (opts[:brief], NO self_enqueue flag) never self-enqueues, even on a FREE slot (C-01 race fix) [F-arch-MCP]" do
+    test "PUSH — dispatch spawn (opts[:brief], NO self_enqueue flag) never self-enqueues, even on a FREE slot (self-enqueue race fix) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
       # The DISPATCHER owns the enqueue (via TaskQueue, AFTER the spawn — canonical order
-      # lock→pod→enqueue→wake). The brief is in opts only for the pod's DATA (SLSA/provenance). Pre-C-01
+      # lock→pod→enqueue→wake). The brief is in opts only for the pod's DATA (SLSA/provenance). Before the fix
       # the pod ALSO self-enqueued from opts[:brief] whenever it booted onto a FREE slot (dispatcher not
       # yet enqueued) → double-enqueue / :cleared mid-run race. Now the self-enqueue is gated on the
       # explicit `self_enqueue_brief` flag (admin rail only). Here the slot is FREE and a brief IS in

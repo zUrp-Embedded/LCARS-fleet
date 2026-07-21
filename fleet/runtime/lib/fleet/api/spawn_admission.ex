@@ -154,8 +154,8 @@ defmodule Fleet.API.SpawnAdmission do
   # Builds the spawn `opts` from the public fields only. `pod_id` is kept only if path-safe.
   defp build_admin_opts(raw) do
     # `self_enqueue_brief`: the admin spawn has NO dispatcher/orchestrator to enqueue its brief, so the
-    # POD self-enqueues it (`Pod.Brief.maybe_enqueue_brief`). This flag is what AUTHORIZES that (C-01,
-    # sonde convergence 2026-07-20): a Fleet dispatch/gatekeeper spawn ALSO carries `brief` in its opts
+    # POD self-enqueues it (`Pod.Brief.maybe_enqueue_brief`). This flag is what AUTHORIZES that: a Fleet
+    # dispatch/gatekeeper spawn ALSO carries `brief` in its opts
     # (for the pod's data), but the DISPATCHER owns the enqueue there — the flag is ABSENT, so the pod
     # never self-enqueues on those paths, killing the spawn→enqueue race structurally (not by slot-timing).
     opts =

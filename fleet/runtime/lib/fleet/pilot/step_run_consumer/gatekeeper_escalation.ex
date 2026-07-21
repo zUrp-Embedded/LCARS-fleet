@@ -30,8 +30,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   This dispatch shares a SKELETON with the poller-driven producer/judge dispatch
   (`StepDispatcher.Spawn.spawn_step`) — resolve profile → opts → spawn/reuse → pull → wake — but the
   resemblance is of FORM, not of substance. The truly-shared atoms are ALREADY factored out and used by
-  BOTH rails: `CapProfile.resolve` (effective profile), `WakeRecovery.wake` (wake+recovery, wired here by
-  C-01), `PodId.for_*`, `Spawn.resolve_repo_id`. What stays distinct is the OPERATIONAL CONTRACT, not
+  BOTH rails: `CapProfile.resolve` (effective profile), `WakeRecovery.wake` (wake+recovery, wired here),
+  `PodId.for_*`, `Spawn.resolve_repo_id`. What stays distinct is the OPERATIONAL CONTRACT, not
   duplicated logic — this rail is:
 
     * COMPLETION-triggered (a gate escalation), never the Poller's detection side;
@@ -84,7 +84,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
             forge_opts: keyword(),
             # Cap-profile loader (load + compose with default modops). nil → `Fleet.CapProfile`.
             loader: module() | nil,
-            # Wake-with-recovery of an already-alive gatekeeper (C-01). nil → `&WakeRecovery.wake/3`.
+            # Wake-with-recovery of an already-alive gatekeeper. nil → `&WakeRecovery.wake/3`.
             wake_recovery: (String.t(), (-> any()), keyword() -> :ok | {:error, term()}) | nil
           }
   end
@@ -200,7 +200,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
         {:error, {:already_started, _pid}} ->
           # Previous eval still closing (or re-dispatch): the brief is queued (enqueue-before-spawn) — wake
-          # WITH RECOVERY. C-01 (sonde convergence 2026-07-20): a bare `wake_pod`-then-`:ok` SWALLOWED a
+          # WITH RECOVERY. A bare `wake_pod`-then-`:ok` SWALLOWED a
           # failed wake → a dead/stuck pod left the eval brief pending, the gate announced-but-never-run,
           # the issue silently locked with NO failure reported (the dispatcher, by contrast, has recovery).
           # Route through the SAME `WakeRecovery` — the module was BUILT for this ("gatekeeper reboot",

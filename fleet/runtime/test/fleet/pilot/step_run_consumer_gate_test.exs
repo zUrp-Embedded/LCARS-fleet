@@ -432,8 +432,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:wake, "o-r-issue-1-gatekeeper"}
   end
 
-  test "escalation: gatekeeper already ALIVE but the WAKE fails → recovery SURFACED, not a silent :ok (C-01)" do
-    # Pre-C-01 (sonde convergence 2026-07-20): `already_started` + a failed `wake_pod` was SWALLOWED to
+  test "escalation: gatekeeper already ALIVE but the WAKE fails → recovery SURFACED, not a silent :ok" do
+    # Before the fix: `already_started` + a failed `wake_pod` was SWALLOWED to
     # `:ok` → the eval brief sat pending, the gate announced-but-never-run, the issue silently locked with
     # NO failure reported. Now the wake routes through the injectable WakeRecovery; its verdict is
     # SURFACED (fail-loud upstream → issue visible). Stubbed here (the real WakeRecovery would hit

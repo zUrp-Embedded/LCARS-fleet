@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.Brief do
   - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -85,8 +85,8 @@ defmodule Fleet.Spawner.Pod.Brief do
   Idempotent:
 
   - no `self_enqueue_brief` flag (a Fleet DISPATCH or gatekeeper spawn: the ORCHESTRATOR owns the
-    enqueue — it enqueues via TaskQueue itself; or a resident pod with no brief) → skip. C-01 (sonde
-    convergence 2026-07-20): the dispatcher enqueues AFTER the spawn (canonical order
+    enqueue — it enqueues via TaskQueue itself; or a resident pod with no brief) → skip. The
+    dispatcher enqueues AFTER the spawn (canonical order
     lock→pod→enqueue→wake), so gating self-enqueue on the SLOT was RACY — the pod could self-enqueue in
     the window BEFORE the dispatcher's enqueue, double-enqueuing / clearing the active item mid-run. The
     explicit flag removes that race structurally (never slot-timing-dependent on a dispatch spawn);
@@ -119,7 +119,7 @@ defmodule Fleet.Spawner.Pod.Brief do
     case slot do
       :occupied ->
         # A brief is genuinely already pending (an admin retry: only the flagged admin rail reaches
-        # here since C-01) → skip, silent.
+        # here since the self-enqueue flag became the gate) → skip, silent.
         :ok
 
       :unknown ->
