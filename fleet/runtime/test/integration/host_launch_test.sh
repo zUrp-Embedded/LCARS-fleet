@@ -81,7 +81,7 @@ chmod +x "$FAKE_CMD"
 # ------------------------------------------------------------------
 step "1. host_launch.sh (containment: none) — launch"
 
-# Argv mirrors the shape assembled in Pod's :launching transition (launcher + opaque command):
+# Argv mirrors the vector assembled by LauncherPortBackend.build_spawn (launcher + opaque command):
 #   host_launch <role> <pod_id> <pod_dir>  <COMMAND = claude_launch role pod_id pod_dir>
 # Here COMMAND = fake_cmd role pod_id pod_dir <probe>: the 4th token is the synthetic passthrough
 # probe (spaces preserved), NOT the SP — prod's command is 3 args, SP read from a file out of argv.
