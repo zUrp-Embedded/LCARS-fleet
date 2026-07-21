@@ -10,10 +10,13 @@ defmodule Fleet.Spawner.Pod.Liveness do
   systematically co-arms it with the other's output: two modules for ONE mechanism, an
   artificial boundary. They stay co-located, in the distinct sections below:
 
-  - **Liveness probe**: on each tick of the `:liveness` generic timeout, sample two complementary
-    signals of pod activity — cumulative size of the `<session_id>.jsonl` ("produced output") and CPU
-    jiffies of the claude process via `/proc/<os_pid>/stat` ("grinding without output yet") — and decide
-    whether the pod has MOVED since the previous tick. A movement → the `Pod` re-arms the deadline
+  - **Liveness probe**: on each tick of the `:liveness` generic timeout, sample the pod's activity —
+    the cumulative size of the `<session_id>.jsonl` ("produced output") and the CPU jiffies at
+    `/proc/<os_pid>/stat` — and decide whether the pod has MOVED since the previous tick. That os_pid
+    is the pod's HOLDER, though (the Port's `sleep infinity` that holds the namespace, cf. `PodTmux`),
+    NOT claude — which runs under tmux as a separate process, its CPU excluded from the holder's own
+    `/proc/stat`. So the near-idle holder makes the CPU a weak second signal; the jsonl-size carries
+    liveness (probing claude's real pid stays an open question, cf. `proc_cpu_jiffies/1`). A movement → the `Pod` re-arms the deadline
     (pushes the kill back); total silence → the deadline runs until the timeout.
   - **Response timeout**: derive the delay (ms) of the `:result_deadline` watchdog from the cap-profile
     (override `spec.timeouts.response_sec`, otherwise a scope-coded default) and the tick cadence.
@@ -40,7 +43,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` and
   `default_response_timeout_sec/1` are internal (called ONLY by the functions above).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   # ============================================================
@@ -68,8 +71,9 @@ defmodule Fleet.Spawner.Pod.Liveness do
   end
 
   @doc """
-  Liveness probe: `{jsonl_size, cpu_jiffies}` — two complementary signals (the jsonl covers
-  "produced output", the CPU covers "grinding without output yet"). Injectable (test) via the
+  Liveness probe: `{jsonl_size, cpu_jiffies}`. The jsonl covers "produced output"; the cpu is the
+  HOLDER's `/proc/stat` (see `proc_cpu_jiffies/1` — the Port's os_pid is the `sleep infinity` holder,
+  not claude), a weak second signal. Injectable (test) via the
   per-pod opt `:liveness_probe_fun` (fun/1) or the config. `nil` on a signal = unavailable (no file /
   no port) → does not count as movement (anti-kill bias: we do not kill on a nil). Default shape
   `{size | nil, jiffies | nil}`; an injected probe returns its own opaque shape (compared by
@@ -114,11 +118,13 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # utime+stime (jiffies) of the claude process via `/proc/<os_pid>/stat`. Robust to `comm` (field 2, in
-  # parentheses, may contain spaces/`)`): we cut after the LAST `)` (field 3 = index 0 of the rest →
-  # utime = index 11, stime = index 12). `nil` if no port / process gone / proc unreadable. NB: measures
-  # the PARENT process (a CPU-heavy child tool does not appear there — covered by the jsonl-OR + the
-  # silence window).
+  # utime+stime (jiffies) at `/proc/<os_pid>/stat`, where os_pid is the Port's process. Robust to
+  # `comm` (field 2, in parentheses, may contain spaces/`)`): we cut after the LAST `)` (field 3 =
+  # index 0 of the rest → utime = index 11, stime = index 12). `nil` if no port / process gone / proc
+  # unreadable. WARNING: this os_pid is the HOLDER (the `sleep infinity` that holds the namespace, cf.
+  # PodTmux), NOT claude — claude runs under tmux, a separate process, and `/proc/stat` counts only the
+  # pid's OWN cpu (descendants excluded). The holder is near-idle, so this signal is a weak second to
+  # the jsonl-OR; probing claude's real pid (or dropping the column) is the open follow-up.
   defp proc_cpu_jiffies(state) do
     with port when is_port(port) <- Map.get(state, :port),
          {:os_pid, pid} <- Port.info(port, :os_pid),
