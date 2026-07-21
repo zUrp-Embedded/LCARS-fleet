@@ -86,4 +86,43 @@ defmodule Fleet.Observation.ReadModelTest do
     start_supervised!({ReadModel, subscribe: true, subscribe_fun: fn _topic -> {:error, :nope} end})
     assert :deaf = ReadModel.projection_status()
   end
+
+  test "a failed subscribe RETRIES (bounded backoff) and recovers to :live — no permanent deafness" do
+    # The Bus was momentarily unavailable at the first attempt (a boot race, a transient). Before the fix
+    # the read-model stayed DEAF for life (only a restart recovered). It must self-heal: re-subscribe on a
+    # bounded backoff until the Bus answers.
+    # Linked to the test process → cleaned up automatically when the test ends (no on_exit needed).
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    # Fails the FIRST attempt, succeeds after → a plain :live would prove nothing (could be first-try);
+    # the recovery to :live is only reachable through a RETRY.
+    subscribe_fun = fn _topic ->
+      case Agent.get_and_update(counter, fn n -> {n, n + 1} end) do
+        0 -> {:error, :bus_not_up_yet}
+        _ -> :ok
+      end
+    end
+
+    start_supervised!(
+      {ReadModel, subscribe: true, subscribe_fun: subscribe_fun, resubscribe_base_ms: 10}
+    )
+
+    # Self-healed: the bounded retry re-subscribed → :live (the old code stayed :deaf forever here).
+    assert until_true(fn -> ReadModel.projection_status() == :live end)
+    # …and it genuinely RETRIED (the first attempt failed, so ≥ 2 calls).
+    assert Agent.get(counter, & &1) >= 2
+  end
+
+  # Polls `fun` (up to ~500 ms) until it returns true — bounded, for the async re-subscribe recovery.
+  defp until_true(fun, remaining \\ 100)
+  defp until_true(_fun, 0), do: false
+
+  defp until_true(fun, remaining) do
+    if fun.() do
+      true
+    else
+      Process.sleep(5)
+      until_true(fun, remaining - 1)
+    end
+  end
 end

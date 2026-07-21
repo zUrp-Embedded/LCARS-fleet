@@ -42,7 +42,7 @@ defmodule Fleet.Observation.ReadModel do
     * `:fleet_observation, :start_readmodel` (app env, default `true`) —
       `false` in `:test` (no parasitic subscriber, hermetic invariant).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -53,6 +53,13 @@ defmodule Fleet.Observation.ReadModel do
   @table :fleet_observation_projection
   @stream_max 100
   @deck_max 20
+
+  # Re-subscribe backoff (recovery): a failed Bus subscribe leaves the read-model DEAF; without a
+  # retry it stays deaf FOR LIFE (only a restart recovers). We retry with a bounded exponential backoff —
+  # base `@resubscribe_base_ms`, doubling, capped at `@resubscribe_max_ms` — so a transient/boot-race Bus
+  # unavailability heals itself while the status honestly reads :deaf until a retry lands.
+  @resubscribe_base_ms 1_000
+  @resubscribe_max_ms 30_000
 
   # Deck routing catalogue (DATA, not mechanics): type prefix → deck.
   # Order matters (first matched prefix wins). One single mechanic
@@ -145,35 +152,58 @@ defmodule Fleet.Observation.ReadModel do
        proj: empty(),
        subscribe?: subscribe?,
        # Seam: the subscribe fn (default `Bus.subscribe/1`) — injectable to exercise the DEAF path in test.
-       subscribe_fun: Keyword.get(opts, :subscribe_fun, &Bus.subscribe/1)
+       subscribe_fun: Keyword.get(opts, :subscribe_fun, &Bus.subscribe/1),
+       # Current backoff delay for the re-subscribe retry (grows on failure, resets on success). Base
+       # overridable so tests exercise the recovery without a real-time wait.
+       resubscribe_base_ms: Keyword.get(opts, :resubscribe_base_ms, @resubscribe_base_ms),
+       resubscribe_delay: Keyword.get(opts, :resubscribe_base_ms, @resubscribe_base_ms)
      }, {:continue, :subscribe}}
   end
 
   @impl GenServer
-  def handle_continue(:subscribe, %{subscribe?: true, subscribe_fun: subscribe_fun} = state) do
-    topic = Bus.main_topic()
-
-    case subscribe_fun.(topic) do
-      :ok ->
-        :ets.insert(@table, {:subscribed, true})
-
-      other ->
-        # DR-027 hollow-green: a failed subscribe leaves the read-model ALIVE but DEAF — no event will
-        # ever arrive, and `projection_status/0` would otherwise say :live (a deaf process INDISTINGUISHABLE from
-        # a quiet-healthy fleet). We leave `:subscribed` FALSE → status reports :deaf, and we LOG LOUD.
-        Logger.error(
-          "ReadModel: subscribe #{topic} FAILED (#{inspect(other)}) — read-model is DEAF: no event " <>
-            "will arrive, /api/projection reports :deaf (a deaf process is NOT a quiet-healthy fleet)"
-        )
-    end
-
-    {:noreply, state}
+  def handle_continue(:subscribe, %{subscribe?: true} = state) do
+    {:noreply, try_subscribe(state)}
   end
 
   # Deliberate no-subscribe mode (test/static config): already :live from init (no subscribe attempt).
   def handle_continue(:subscribe, state), do: {:noreply, state}
 
+  defp try_subscribe(%{subscribe_fun: subscribe_fun} = state) do
+    topic = Bus.main_topic()
+
+    case subscribe_fun.(topic) do
+      :ok ->
+        :ets.insert(@table, {:subscribed, true})
+        # Recovered (or first-try success) → reset the backoff for any future re-subscribe.
+        %{state | resubscribe_delay: state.resubscribe_base_ms}
+
+      other ->
+        # DR-027 hollow-green: a failed subscribe leaves the read-model ALIVE but DEAF — no event will
+        # ever arrive, and `projection_status/0` would otherwise say :live (a deaf process INDISTINGUISHABLE from
+        # a quiet-healthy fleet). We leave `:subscribed` FALSE → status reports :deaf, and we LOG LOUD.
+        # We also RETRY (bounded backoff) — a deaf read-model must self-heal once the Bus is up,
+        # never stay deaf until a manual restart. The status stays honest (:deaf) until a retry lands.
+        Logger.error(
+          "ReadModel: subscribe #{topic} FAILED (#{inspect(other)}) — read-model is DEAF: no event " <>
+            "will arrive, /api/projection reports :deaf. Retrying in #{state.resubscribe_delay} ms."
+        )
+
+        schedule_resubscribe(state)
+    end
+  end
+
+  # Schedules the next re-subscribe attempt and grows the backoff (capped). Returns the state with the
+  # NEXT delay so successive failures back off, resetting to base on success.
+  defp schedule_resubscribe(state) do
+    Process.send_after(self(), :resubscribe, state.resubscribe_delay)
+    %{state | resubscribe_delay: min(state.resubscribe_delay * 2, @resubscribe_max_ms)}
+  end
+
+  # Bounded backoff re-subscribe: fired by `schedule_resubscribe/1` after a failed attempt.
   @impl GenServer
+  def handle_info(:resubscribe, %{subscribe?: true} = state),
+    do: {:noreply, try_subscribe(state)}
+
   def handle_info(%Fleet.Event{} = event, state) do
     proj = project(state.proj, event)
     :ets.insert(@table, {:projection, proj})

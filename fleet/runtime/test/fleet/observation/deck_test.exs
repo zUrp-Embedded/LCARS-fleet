@@ -47,6 +47,13 @@ defmodule Fleet.Observation.DeckTest do
 
     # starfleet boundary: no starfleet panel (non-negotiable #2)
     refute body =~ "STARFLEET"
+
+    # The shell surfaces the projection status (a :deaf/:unavailable read-model must not read as a
+    # calm fleet) and does NOT swallow the projection fetch error — the deaf/blind states are shown.
+    assert body =~ ~s(id="proj-status")
+    assert body =~ "projStatus"
+    assert body =~ "_status"
+    assert body =~ "dashboard aveugle"
   end
 
   test "GET /api/pods → 200 JSON {pods, count} (read-only, JSON-safe)" do

@@ -21,7 +21,7 @@ defmodule Fleet.Observation.Deck.View do
   HOW to show it. Every value interpolated server-side goes through
   the `h/1` escaping (client-side, through `esc()` in the embedded JS).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @doc """
@@ -51,6 +51,8 @@ defmodule Fleet.Observation.Deck.View do
       .pod-card .pc-k{color:#668;width:80px;display:inline-block}
       .deck-soon{color:#668;font-family:monospace;font-size:12px;padding:8px}
       .led-ok{background:#3f3 !important}
+      .proj-status{font-family:monospace;font-size:12px;margin:0 10px;color:#668}
+      .proj-status-bad{color:#f33;font-weight:bold}
       .glyph{font-weight:bold}
       .ev-list{font-family:monospace;font-size:12px;max-height:240px;overflow:auto}
       .ev-row{display:flex;gap:8px;padding:2px 6px;border-bottom:1px solid #223;white-space:nowrap}
@@ -73,6 +75,7 @@ defmodule Fleet.Observation.Deck.View do
         </div>
         <div class="head-status">
           <span class="status-led" id="led-health"></span>
+          <span class="proj-status" id="proj-status"></span>
           <span class="head-clock" id="clock">--:--:--</span>
         </div>
         <div class="bezel bezel-right"></div>
@@ -127,9 +130,20 @@ defmodule Fleet.Observation.Deck.View do
         g.innerHTML = j.pods.length ? j.pods.map(podCard).join('') : '<div class="deck-soon">aucun pod actif</div>';
       }catch(e){led.classList.remove('led-ok');}
     }
+    function projStatus(txt){
+      var s=document.getElementById('proj-status');
+      if(!s)return;
+      s.textContent=txt;
+      s.className=txt?'proj-status proj-status-bad':'proj-status';
+    }
     async function refreshProjection(){
       try{
         var p=await (await fetch('/api/projection')).json();
+        // Surface the read-model status. A :deaf/:unavailable projection is a FROZEN stream, NOT a
+        // quiet fleet — the empty decks below would otherwise read as a calm, healthy fleet (FR operator).
+        projStatus(p._status && p._status!=='live'
+          ? '⚠ projection '+p._status+' — flux figé, PAS une flotte calme'
+          : '');
         var c=p.counts||{};
         document.getElementById('bridge-body').innerHTML =
           '<span class="stat">events <b>'+(p.total||0)+'</b></span>'
@@ -148,7 +162,10 @@ defmodule Fleet.Observation.Deck.View do
         fillList('coord-body', p.coordination, 'aucune coordination / issue');
         fillList('stream-body', p.stream, 'flux vide');
         fillList('diag-body', p.diagnostics, 'aucun signal diagnostic');
-      }catch(e){}
+      }catch(e){
+        // Don't swallow — a failed projection fetch means the dashboard is BLIND, not calm.
+        projStatus('⚠ projection injoignable — dashboard aveugle');
+      }
     }
     function refresh(){refreshPods();refreshProjection();}
     tick();setInterval(tick,1000);refresh();setInterval(refresh,3000);
