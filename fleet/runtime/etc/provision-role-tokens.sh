@@ -222,16 +222,24 @@ for entry in "${ENTRIES[@]}"; do
   fi
 
   # Atomic write (tmp+mv) + POSIX rights: 0640, group fleet — the per-human BEAM reads through the
-  # group, nobody else. chgrp needs the right on the directory: a refusal does NOT cancel the token
-  # write, it is reported WARN on stderr. Until the group is fixed the BEAM cannot read the file, and
-  # RoleToken logs a warning when it tries.
+  # group, nobody else. LOCAL READABILITY is a postcondition on a par with forge validity: a token
+  # valid on the forge but owned by the wrong group is UNREADABLE by the runtime — announcing POSE and
+  # exiting 0 there hid a broken deploy behind a WARN. So the group ownership is VERIFIED (stat, not
+  # just the chgrp exit code), and a mismatch FAILS the account: the file stays written (the mint cost
+  # was real, --check will confirm it), but it is not counted as posed and the run exits non-zero.
   install -d -m 0750 "$TOKENS_DIR" 2>/dev/null || true
   tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$GROUP" "$tmp" 2>/dev/null || echo "WARN  $account — chgrp $GROUP impossible (geste manuel requis)" >&2
+  chgrp "$GROUP" "$tmp" 2>/dev/null || true
   mv -f "$tmp" "$file"
-  echo "POSE  $account — nouveau token, sonde OK → $file"
+
+  if [[ "$(stat -c %G "$file" 2>/dev/null)" != "$GROUP" ]]; then
+    echo "FAIL  $account — token valide sur la forge mais groupe != $GROUP : ILLISIBLE par le runtime (chgrp $GROUP requis, droit sur $TOKENS_DIR ?)" >&2
+    fail=1
+    continue
+  fi
+  echo "POSE  $account — nouveau token, sonde OK, lisible par le groupe $GROUP → $file"
 done
 
 if [[ "$fail" -ne 0 ]]; then

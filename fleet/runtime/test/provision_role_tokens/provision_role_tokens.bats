@@ -54,20 +54,20 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "provisioning mode WITHOUT --passwords-file → exit 1, never a blind mint" {
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"droit de mint"* ]]
   [ ! -f "$MOCK/calls.log" ]
 }
 
 @test "--admin-token-file REMOVED (stillborn mode: Gitea refuses minting by admin token)" {
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"option inconnue"* ]]
 }
 
 @test "unreadable passwords-file → exit 1 (the missing right is STATED, not worked around)" {
-  run "$SCRIPT" --forge http://f --passwords-file "$TMP/inexistant.json" --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --passwords-file "$TMP/inexistant.json" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"illisible"* ]]
 }
@@ -75,7 +75,7 @@ teardown() { rm -rf "$TMP"; }
 @test "--check: valid local token (probe 200) → OK, exit 0" {
   printf 'tok-ok\n' > "$TOKDIR/engineer.gitea_token"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer --check
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    engineer"* ]]
 }
@@ -83,16 +83,30 @@ teardown() { rm -rf "$TMP"; }
 @test "--check: invalid token (probe 401) → FAIL, exit 2, file INTACT (--check never writes)" {
   printf 'tok-mort\n' > "$TOKDIR/engineer.gitea_token"
   printf '401' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer --check
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer --check
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  engineer"* ]]
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
 }
 
+@test "local readability is load-bearing: a token whose group != GROUP FAILS (unreadable by runtime)" {
+  # Forge-valid but group-wrong = the runtime BEAM cannot read it. Announcing POSE + exit 0 there
+  # hid a broken deploy behind a WARN. A group the runner cannot chgrp to → the stat verify FAILS
+  # the account: the file is written (mint was real), but it is not counted as posed and exit != 0.
+  printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
+  printf '200' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --group nonexistent-group-zzz --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  engineer"* ]]
+  [[ "$output" == *"ILLISIBLE"* ]]
+  # The token IS on disk (the forge mint cost was real; --check will confirm), just flagged unreadable.
+  [ -f "$TOKDIR/engineer.gitea_token" ]
+}
+
 @test "happy path: mint (sha1) + probe 200 → file written 0640, exit 0" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   [[ "$output" == *"POSE  engineer"* ]]
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-frais" ]
@@ -103,9 +117,9 @@ teardown() { rm -rf "$TMP"; }
 @test "idempotence: second run on an already-valid token → OK skip, ZERO new POST" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   posts_before="$(grep -c POST "$MOCK/calls.log")"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    engineer"* ]]
   [ "$(grep -c POST "$MOCK/calls.log")" = "$posts_before" ]
@@ -114,7 +128,7 @@ teardown() { rm -rf "$TMP"; }
 @test "password missing from the file for a role → FAIL that role, exit 2 (the others' mint is not masked)" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "architect engineer"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "architect engineer"
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  architect"* ]]
   [[ "$output" == *"POSE  engineer"* ]]
@@ -123,7 +137,7 @@ teardown() { rm -rf "$TMP"; }
 @test "mint refused (POST without sha1) → FAIL, exit 2, no file written" {
   printf '{"message":"forbidden"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  engineer"* ]]
   [ ! -f "$TOKDIR/engineer.gitea_token" ]
@@ -132,7 +146,7 @@ teardown() { rm -rf "$TMP"; }
 @test "passwords-file: BOTH JSON shapes accepted (bare string and {password:...})" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "engineer qualifier"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "engineer qualifier"
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
   [ -f "$TOKDIR/qualifier.gitea_token" ]
@@ -144,7 +158,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"Architect":"pw-arch"}' > "$TMP/caps.json"
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/caps.json" --roles architect
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/caps.json" --roles architect
   [ "$status" -eq 0 ]
   [ "$(cat "$TOKDIR/architect.gitea_token")" = "tok-frais" ]
 }
@@ -153,7 +167,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"lcars-system":"pw-sys"}' > "$TMP/syspw.json"
   printf '{"sha1":"tok-sys"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
       --roles "" --extra-token lcars-system:system.gitea_token
   [ "$status" -eq 0 ]
   [[ "$output" == *"POSE  lcars-system"* ]]
@@ -162,7 +176,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "--extra-token without ':' → exit 1 fail-loud (account:file format required)" {
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
   [ "$status" -eq 1 ]
   [[ "$output" == *"compte>:<fichier"* ]]
 }
@@ -171,7 +185,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"engineer":"pw-eng","lcars-system":"pw-sys"}' > "$TMP/full.json"
   printf '{"sha1":"tok-x"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
       --roles engineer --extra-token lcars-system:system.gitea_token
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
