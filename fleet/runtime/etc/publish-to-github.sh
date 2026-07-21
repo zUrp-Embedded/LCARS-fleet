@@ -2,37 +2,53 @@
 # SOURCE: etc/publish-to-github.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-07
-# STATUS: PROTO-V1 — transform de publish GH : réécrit l'historique d'un clone forge pour un miroir GitHub
+# STATUS: PROTO-V1 — GitHub publish transform: rewrites a forge clone's history for a GitHub mirror
 #
-# POURQUOI CE SCRIPT (et pas un raffinement d'onboard) : la forge de travail (Gitea) porte une vérité
-# INTERNE — author=humain, co-author=`LCARS-<role>` (Fleet.Credentials.ForgeIdentity, gate de commit),
-# et certains commits système (onboard/scaffold) sont authored `lcars-system`. C'est HONNÊTE pour le
-# travail (le système a vraiment généré le scaffold), mais ce n'est PAS ce qu'on veut publier : sur un
-# miroir GitHub, l'humain doit posséder tout son arbre (author humain partout) + le crédit va au VENDOR
-# qui a exécuté le travail (jamais un rôle interne, jamais hardcodé « Claude » — dérivé du launcher N1
-# actif). `Co-authored-by:` n'est PAS git-natif : c'est un trailer de message, une convention GitHub —
-# donc réécrivable, sans mentir sur rien (un commit n'a qu'un seul author ; le co-author est une surcouche).
+# WHY THIS SCRIPT (rather than a refinement of onboard): the work forge (Gitea) carries an INTERNAL
+# truth — author=human, co-author=`LCARS-<role>` (Fleet.Credentials.ForgeIdentity, commit gate) — and
+# some system commits (onboard/scaffold) are authored by `lcars-system`. That is HONEST for the work
+# (the system really did generate the scaffold), but it is NOT what we want to publish: on a GitHub
+# mirror the human must own their whole tree (human author everywhere) and the credit goes to the VENDOR
+# that did the work — never an internal role, never a hardcoded "Claude", but derived from the active N1
+# launcher. `Co-authored-by:` is NOT git-native: it is a message trailer, a GitHub convention, so it can
+# be rewritten without lying about anything (a commit has exactly one author; the co-author is a layer
+# on top).
 #
-# MÉCANIQUE : clone FRAIS depuis la forge (jamais le worktree de travail — one-way, les SHA changent, ce
-# n'est PAS un sync bidir) → `git filter-repo` avec UN commit-callback qui (1) réécrit l'author des
-# commits système (author_email == system_email) en author := committer (déjà l'humain qui a initié) et
-# (2) réécrit le trailer `Co-authored-by: LCARS-<role> <...@lcars.local>` en `Co-Authored-By: <vendor>`.
-# Ce script NE POUSSE JAMAIS sur GitHub (contrainte dure du projet : push forges locales UNIQUEMENT) —
-# il prépare le clone réécrit et affiche le geste de publish pour l'HUMAIN.
+# MECHANICS: a FRESH clone from the forge (never the work worktree — this is one-way, the SHAs change,
+# it is NOT a bidirectional sync), then `git filter-repo`. THREE things happen, not two:
+#   0. BEFORE the callback, host-side: scan the clone for the first commit whose committer is NOT the
+#      system, and keep that identity (HUMAN_NAME/HUMAN_EMAIL). This pre-scan exists for the root commit
+#      alone — see below — and it is the one thing here that can exit non-zero on its own.
+#   1. In the callback, for a system-authored commit WITH a human committer: author := committer.
+#   2. In the callback, for the Gitea `auto_init` root commit (author AND committer are the system, no
+#      human trace at all): author AND committer are both set to the pre-scanned human. This is NOT
+#      "author := committer" — the committer is precisely what cannot be trusted on that one commit.
+#   3. In the callback, for every commit: rewrite the `Co-authored-by: LCARS-<role> <...@lcars.local>`
+#      trailer into `Co-Authored-By: <vendor>`.
+# This script NEVER PUSHES to GitHub (a hard project constraint: pushes go to local forges ONLY) — it
+# prepares the rewritten clone and prints the publish gesture for the HUMAN to run.
 #
-# DÉPENDANCE : `git-filter-repo` (script Python, PAS empaqueté par défaut sur cette machine — noté au
-# backlog provisioning : à installer par le provisioning, ex. via un venv dédié ou pipx, JAMAIS
-# `pip install --break-system-packages` qui contourne la protection PEP 668). Override du binaire via
-# --filter-repo-bin ou $FILTER_REPO_BIN si hors PATH (ex. un venv : /path/to/venv/bin/git-filter-repo).
+# DEPENDENCY: `git-filter-repo` (a Python script, NOT packaged by default here). Install it in a
+# dedicated venv or with pipx — NEVER `pip install --break-system-packages`, which defeats the PEP 668
+# protection. The runtime error path below prints the exact venv recipe. Override the binary through
+# --filter-repo-bin or $FILTER_REPO_BIN when it is off PATH (e.g. /path/to/venv/bin/git-filter-repo).
 #
-# USAGE :
+# USAGE:
 #   publish-to-github.sh --repo fleet/mon-projet --forge http://localhost:3000 \
 #       --token-file /home/private/test/system.gitea_token --out /tmp/mon-projet-gh
-#   Options : --vendor-identity FICHIER (défaut : bin/claude_launch.identity, co-localisé au launcher N1
-#             actif — NAME=/EMAIL=) · --filter-repo-bin BIN (défaut : git-filter-repo sur PATH, ou
-#             $FILTER_REPO_BIN) · --system-email EMAIL (défaut : lcars-system@lcars.local — DOIT matcher
-#             Fleet.Credentials.ForgeIdentity.system_email/0, autorité unique côté runtime).
-# EXIT : 0 = clone réécrit prêt dans --out · 1 = usage/dépendance manquante · 2 = échec clone/filter-repo.
+#   Options: --vendor-identity FILE (default: bin/claude_launch.identity, co-located with the active N1
+#            launcher — NAME=/EMAIL=) · --filter-repo-bin BIN (default: git-filter-repo on PATH, or
+#            $FILTER_REPO_BIN) · --system-email EMAIL (default: lcars-system@lcars.local — MUST match
+#            Fleet.Credentials.ForgeIdentity.system_email/0, the single authority runtime-side).
+#
+# EXIT CODES, as they actually are — this runs under `set -euo pipefail` with no trap, so most failures
+# propagate the exit status of the command that failed, they are NOT normalised:
+#   0   the rewritten clone is ready in --out
+#   1   usage, unreadable token/identity file, --out already exists, or git-filter-repo missing
+#   2   ONE case only: no non-system commit in the clone, so the human cannot be derived (the pre-scan)
+#   *   anything else is the failing command's own status — `git clone` returns git's (128 on the usual
+#       clone errors), the filter-repo subshell returns filter-repo's. Do not read a non-2 failure as
+#       "not a clone/filter-repo problem": it is the opposite.
 
 set -euo pipefail
 
@@ -65,17 +81,17 @@ done
 
 [[ -n "$REPO" && -n "$FORGE" && -n "$TOKEN_FILE" && -n "$OUT_DIR" ]] || usage
 [[ -r "$TOKEN_FILE" ]] || { echo "publish-to-github: token-file illisible: $TOKEN_FILE" >&2; exit 1; }
-[[ -e "$OUT_DIR" ]] && { echo "publish-to-github: --out existe déjà ($OUT_DIR) — filter-repo exige un clone FRAIS, choisis un chemin neuf" >&2; exit 1; }
+[[ -e "$OUT_DIR" ]] && { echo "publish-to-github: --out ($OUT_DIR) n'est pas un chemin neuf — filter-repo exige un clone FRAIS" >&2; exit 1; }
 
 command -v "$FILTER_REPO_BIN" >/dev/null 2>&1 || {
   echo "publish-to-github: git-filter-repo introuvable ($FILTER_REPO_BIN)." >&2
-  echo "  Installe-le dans un venv dédié (PEP 668 bloque le pip système) :" >&2
+  echo "  Installe-le dans un venv (PEP 668 bloque le pip global) :" >&2
   echo "    python3 -m venv ~/.venvs/git-filter-repo && ~/.venvs/git-filter-repo/bin/pip install git-filter-repo" >&2
   echo "  Puis relance avec --filter-repo-bin ~/.venvs/git-filter-repo/bin/git-filter-repo" >&2
   exit 1
 }
 
-[[ -r "$VENDOR_IDENTITY" ]] || { echo "publish-to-github: fichier d'identité vendor illisible: $VENDOR_IDENTITY" >&2; exit 1; }
+[[ -r "$VENDOR_IDENTITY" ]] || { echo "publish-to-github: fichier vendor illisible: $VENDOR_IDENTITY" >&2; exit 1; }
 # shellcheck source=/dev/null
 source "$VENDOR_IDENTITY"
 [[ -n "${NAME:-}" && -n "${EMAIL:-}" ]] || { echo "publish-to-github: $VENDOR_IDENTITY doit poser NAME= et EMAIL=" >&2; exit 1; }
@@ -85,29 +101,31 @@ VENDOR_EMAIL="$EMAIL"
 TOKEN="$(<"$TOKEN_FILE")"
 
 echo "publish-to-github: clone frais $FORGE/$REPO.git → $OUT_DIR"
-# Auth par header (JAMAIS le token dans l'URL/argv — même mécanisme que Fleet.Credentials.ForgeAuth.git_env,
-# GIT_CONFIG_KEY/VALUE plutôt que https://<token>@host, pour ne pas fuiter le token via /proc/<pid>/cmdline).
+# Header auth (NEVER the token in the URL or argv — the same mechanism as
+# Fleet.Credentials.ForgeAuth.git_env: GIT_CONFIG_KEY/VALUE rather than https://<token>@host, so the
+# token does not leak through /proc/<pid>/cmdline).
 GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_KEY_0="http.${FORGE}.extraheader" \
   GIT_CONFIG_VALUE_0="Authorization: token ${TOKEN}" \
   git clone "$FORGE/$REPO.git" "$OUT_DIR"
 
-# Le committer=humain existe sur TOUT commit routé par GitOps (onboard/scaffold/travail) — SAUF le tout
-# premier : le `auto_init` de Gitea (POST /repos, "Initial commit") est author=committer=SYSTÈME, aucune
-# trace humaine dans CE commit. On ne peut donc pas dériver l'humain de son propre committer → on scanne
-# les AUTRES commits du repo pour trouver la première identité non-système (garantie d'exister : tout
-# projet onboardé a au moins un commit scaffold/travail avec committer=humain).
+# A human committer exists on EVERY commit routed through GitOps (onboard/scaffold/work) — EXCEPT the
+# very first: Gitea's `auto_init` (POST /repos, "Initial commit") is author=committer=SYSTEM, with no
+# human trace in THAT commit at all. So the human cannot be derived from its own committer, and we scan
+# the OTHER commits for the first non-system identity (guaranteed to exist: any onboarded project has at
+# least one scaffold/work commit with a human committer). This is the pre-scan the header describes as
+# step 0, and the only path in this script that exits 2.
 HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se {print; exit}')"
-[[ -n "$HUMAN_LINE" ]] || { echo "publish-to-github: aucun commit non-système trouvé — humain indérivable" >&2; exit 2; }
+[[ -n "$HUMAN_LINE" ]] || { echo "publish-to-github: tous les commits sont au compte lcars-system — l'humain reste inconnu" >&2; exit 2; }
 HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
 
-echo "publish-to-github: réécriture (git filter-repo) — author système→humain ($HUMAN_NAME), co-author rôle→vendor ($VENDOR_NAME)"
-# Les 5 valeurs passent par l'ENVIRONNEMENT (os.environb côté callback), JAMAIS par interpolation bash
-# dans le source Python : un nom d'auteur est une donnée NON CONTRÔLÉE (git log %cn) — l'ancien
-# `${VAR@Q}` produisait, sur une apostrophe (O'Brien), un littéral bash `$'...'` INVALIDE en Python →
-# SyntaxError git-filter-repo, exit 2 opaque. Le callback est un texte FIXE (quote simple bash, aucune
-# apostrophe dedans) ; `os.environb` rend les bytes exacts (zéro décodage/réencodage, noms non-UTF-8 ok).
+echo "publish-to-github: passe filter-repo — author lcars-system devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
+# The 5 values cross through the ENVIRONMENT (os.environb, callback side), NEVER through bash
+# interpolation into the Python source: an author name is UNCONTROLLED data (git log %cn), and the old
+# `${VAR@Q}` produced, on an apostrophe (O'Brien), a bash literal `$'...'` that is INVALID Python —
+# a git-filter-repo SyntaxError and an opaque exit 2. The callback is FIXED text (bash single quotes, no
+# apostrophe inside it); `os.environb` yields the exact bytes (no decode/re-encode, non-UTF-8 names ok).
 (cd "$OUT_DIR" && \
   LCARS_PUB_SYSTEM_EMAIL="$SYSTEM_EMAIL" \
   LCARS_PUB_VENDOR_NAME="$VENDOR_NAME" \
@@ -145,9 +163,9 @@ commit.message = re.sub(
 ')
 
 echo ""
-echo "publish-to-github: clone réécrit prêt → $OUT_DIR"
-echo "  Les SHA ont changé (réécriture one-way — ce n'est PAS un sync avec la forge de travail)."
-echo "  Geste de publish (JAMAIS exécuté par ce script — push GitHub = ton geste) :"
+echo "publish-to-github: fin de la passe filter-repo → $OUT_DIR"
+echo "  Les SHA sont tous neufs (passe one-way : ce n'est PAS un sync avec la forge de travail)."
+echo "  Geste de publish (ce script ne pousse JAMAIS — le push GitHub est ton geste) :"
 echo "    cd $OUT_DIR"
 echo "    git remote add github git@github.com:<owner>/<repo>.git"
 echo "    git push github main"
