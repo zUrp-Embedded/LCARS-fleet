@@ -17,6 +17,30 @@ defmodule Fleet.MCP.PodToolsTest do
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
+  defp tool_description(name) do
+    tool = PodTools.get_tools()[name]
+    to_string(tool[:description] || tool["description"])
+  end
+
+  describe "deftool descriptions match the real contract (agent-facing, read at call time)" do
+    test "create_issue does NOT promise an ALWAYS-commit, and states the inline degradation" do
+      desc = tool_description("create_issue")
+      # ensure_pointer/5 delivers the brief INLINE when physicalization cannot complete → the old
+      # "ALWAYS commits" mis-guided the agent's mental model of where its brief lands.
+      refute desc =~ "ALWAYS commits"
+      assert desc =~ "DEGRADES"
+      assert desc =~ "INLINE"
+    end
+
+    test "create_project does NOT tell the agent to pass a `project` param that no longer exists" do
+      desc = tool_description("create_project")
+      # `project` was removed from create_issue's schema+handler (the repo comes from the pod binding).
+      refute desc =~ "project: <the returned repo>"
+      refute desc =~ "passing it `project:"
+      assert desc =~ "NO `project` parameter"
+    end
+  end
+
   # State carried by the socket acceptor: the identity = the channel, not a wire field.
   defp pod_state(pod), do: %{pod_id: pod}
 

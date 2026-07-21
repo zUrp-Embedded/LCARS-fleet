@@ -39,7 +39,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use ExMCP.Server
@@ -101,9 +101,11 @@ defmodule Fleet.MCP.PodTools do
         "Delegate an implementation brick of YOUR project to the LCARS fleet: creates a work ticket " <>
           "ready for delivery (engineer → PR → review → merge). Use it to DELEGATE rather than code " <>
           "yourself (the fleet delivers better and preserves your context). `brief` = the FULL brief " <>
-          "for the engineer. The system ALWAYS commits your `brief` as the authored doc in your " <>
-          "project's work/ops and the ticket carries `summary` + the pinned pointer " <>
-          "(`Brief: <ref> @ <commit>`) — so ALSO pass `summary`: 2-6 lines, human-facing, " <>
+          "for the engineer. The system commits your `brief` as the authored doc in your " <>
+          "project's work/ops and the ticket then carries `summary` + the pinned pointer " <>
+          "(`Brief: <ref> @ <commit>`); if that materialization cannot complete it DEGRADES to your " <>
+          "`brief` INLINE in the ticket instead (logged loud) — never a wall — so ALSO pass " <>
+          "`summary`: 2-6 lines, human-facing, " <>
           "what/why/done-when (without it the ticket shows a raw excerpt). If you ALREADY " <>
           "authored+committed the doc yourself (multi-doc brief), pass `brief_ref` (entry doc, e.g. " <>
           "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
@@ -150,8 +152,9 @@ defmodule Fleet.MCP.PodTools do
           "fabricated). If the human declares NOTHING (no card, no level), pass nothing: the project is " <>
           "recorded C0 undeclared on the default card. Optional: `nature` (domain hint, e.g. " <>
           "web-gui/hardware). " <>
-          "Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
-          "`create_issue` passing it `project: <the returned repo>` to deliver INTO this project."
+          "Returns {\"status\":\"onboarded\",\"repo\":...}; then use `create_issue` to deliver bricks " <>
+          "INTO this project — the repo comes from your pod's binding, `create_issue` takes NO " <>
+          "`project` parameter."
       )
     end
 
