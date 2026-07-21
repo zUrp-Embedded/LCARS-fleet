@@ -666,9 +666,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # — NOT lifted here, persists until the final `:promote`, the whole brick stays in-flight)
     # AND the non-terminal JUDGE (qualifier→reviewer: PR lock — lifted NORMALLY here, THIS judge's
     # turn is done, the next one will set its own via dispatch_review — per-turn granularity, not the brick).
-    with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
-         {:ok, _} <-
+    #
+    # ORDER IS LOAD-BEARING — durable STATE first, TRIGGER second, unlock last. The engraved
+    # route is what the dispatched judge derives its map position from (RoleDispatch reads the
+    # issue's fresh route): trigger-first exposed the judge to the PREVIOUS step on any
+    # tick/webhook racing the post_route — and DETERMINISTICALLY on a post_route failure —
+    # so it resolved off-map (inherited route), its soft gates never evaluated and the
+    # gatekeeper escalation was bypassed. State-first fails SAFE: a failed post_route leaves
+    # no review requested and the lock held (stuck-but-consistent, visible in the log),
+    # never a judgment on the wrong step.
+    with {:ok, _} <-
            post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
+         :ok <- request_review_step(forge, repo, pr, next, forge_opts),
          :ok <- maybe_unlock_judge_advance(forge, repo, step_run, pr, forge_opts) do
       {:ok, :review_requested}
     end

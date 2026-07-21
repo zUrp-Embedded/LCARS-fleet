@@ -138,6 +138,27 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
+
+    def post_route(_repo, _n, workflow_map, step, _opts) do
+      send(self(), {:route, workflow_map, step})
+      {:ok, :posted}
+    end
+  end
+
+  # Same producer-advance surface as OrchForge, but post_route FAILS — proves the
+  # state-first order fails SAFE (no review trigger ever fired on the stale route).
+  defmodule RouteFailForge do
+    def open_pr(_repo, _head, _base, _title, _opts), do: {:ok, 7}
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def post_comment(_repo, _pr, _body, _opts), do: {:ok, :posted}
+
+    def request_review(_repo, pr, reviewers, _opts) do
+      send(self(), {:request_review, pr, reviewers})
+      :ok
+    end
+
+    def post_route(_repo, _n, _workflow_map, _step, _opts), do: {:error, {:http, 500, "boom"}}
   end
 
   # PR not found (the judge falls before any review); FF merge impossible (open ok, merge 409).
@@ -487,6 +508,44 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # BUT the eng's build STOPWATCH closes at hand-off (on ISSUE 42) — decoupled from the lock:
       # otherwise the eng's time would span the whole review (cycle time ≠ work time).
       assert_received {:stopwatch_stopped, 42}
+    end
+
+    test "advance is STATE-FIRST: the route engraves BEFORE the review trigger (order load-bearing)" do
+      step_run =
+        producer_step_run(:advance, %{
+          next_assignee: "qualifier",
+          workflow_map: "gk-smoke",
+          next_step: "review"
+        })
+
+      assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
+
+      # The dispatched judge derives its map position from the ISSUE's engraved route:
+      # trigger-first exposed it to the PREVIOUS step on any racing tick (off-map
+      # resolution, soft gates never evaluated). Mailbox order IS call order.
+      {:messages, msgs} = Process.info(self(), :messages)
+
+      calls =
+        for m <- msgs, is_tuple(m) and elem(m, 0) in [:route, :request_review], do: elem(m, 0)
+
+      assert calls == [:route, :request_review]
+    end
+
+    test "a failed post_route fails SAFE: no review trigger ever fired on the stale route" do
+      step_run =
+        producer_step_run(:advance, %{
+          next_assignee: "qualifier",
+          workflow_map: "gk-smoke",
+          next_step: "review"
+        })
+
+      assert {:error, {:route, {:http, 500, _}}} =
+               StepRunCompleter.complete_pr(step_run, orch_opts(forge_client: RouteFailForge))
+
+      # Trigger-first used to LAY the review request and THEN fail the route: the judge
+      # evaluated the previous step deterministically. State-first leaves the brick
+      # stuck-but-consistent — lock held, no judge, the error visible.
+      refute_received {:request_review, _, _}
     end
 
     test "producer with :eng_summary → FULL note on the TICKET, FOLDED POINTER in the PR opening (QoL, a single PR post)" do
