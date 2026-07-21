@@ -1,6 +1,6 @@
-# Memory-X V1 archivist — pod permanent Type 1 (consolide réponses monks)
+# Memory-X V1 archivist — pod permanent Type 1 (consolide reponses monks)
 # DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile archivist" L297-321
-# budget canon-dérivé (DN archivist template sans budget). GAP G24-11 #565 (subagent_template).
+# budget canon-derive (DN archivist template sans budget). GAP G24-11 #565 (subagent_template).
 kind: CapabilityProfile
 metadata:
   name: archivist

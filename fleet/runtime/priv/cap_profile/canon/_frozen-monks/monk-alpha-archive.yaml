@@ -1,11 +1,11 @@
 # Memory-X V1 monk alpha — pod permanent Type 1 (boot_at_start)
 # DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile monk alpha" L142-167
-# budget shape canon-dérivé de engineer.yaml (DN monk template n'avait pas de budget ;
+# budget shape canon-derive de engineer.yaml (DN monk template n'avait pas de budget ;
 #   cap-profile-v2.5.json l'exige : maxUsd/maxDurationSec). Date 2026-05-19 Lot 4.
-# ADR #565 verdict B appliqué : sp_template sous knowledge, subagent_template retiré (G24-11 N/A pour monks permanents).
+# ADR #565 verdict B applique : sp_template sous knowledge, subagent_template retire (G24-11 N/A pour monks permanents).
 #   (subagent_template != null => one-shot) MAIS DN fleet_memory.md L149-153 le mandate
-#   pour les monks permanents. Contradiction canon escaladée architect (non résolue
-#   par inférence GO-0/#P5). Profil matérialisé per DN (autorité monk-spec).
+#   pour les monks permanents. Contradiction canon escaladee architect (non resolue
+#   par inference GO-0/#P5). Profil materialise per DN (autorite monk-spec).
 kind: CapabilityProfile
 metadata:
   name: monk-alpha-archive

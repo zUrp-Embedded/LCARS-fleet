@@ -6,9 +6,9 @@ spec:
   corpus_path: /home/projects.work/LCARS/work/beyond
   archivist_cap_profile: archivist
   monk_cap_profile: monk
-  # 10 monks individuels (pas de consolidation observée pour beta — v1.5 alpha consolide via runtime,
-  # beta reste granulaire). Si concurrence devient problème (>5 monks actifs simultanés),
-  # consolider en post-MVP par regroupements thématiques.
+  # 10 monks individuels (pas de consolidation observee pour beta — v1.5 alpha consolide via runtime,
+  # beta reste granulaire). Si concurrence devient probleme (>5 monks actifs simultanes),
+  # consolider en post-MVP par regroupements thematiques.
   monks:
     - label: chantier-sp-positif
       glob: "/home/projects.work/LCARS/work/beyond/chantier-sp-positif/**/*.md"

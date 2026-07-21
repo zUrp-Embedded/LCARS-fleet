@@ -1,7 +1,7 @@
-# Memory-X V1 — registry service alpha (corpus moon-shot consolidé)
+# Memory-X V1 — registry service alpha (corpus moon-shot consolide)
 # DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Registry alpha" L169-216
 # Date : 2026-05-19 | Statut : actif | Lot 4 (plan-implementation.md)
-# Consommé par : cap-profile compose Phase boot (injecte corpus_paths +
+# Consomme par : cap-profile compose Phase boot (injecte corpus_paths +
 #   persona_hint dans le SP du monk via Fleet.SPBuilder.compose).
 metadata:
   service: alpha

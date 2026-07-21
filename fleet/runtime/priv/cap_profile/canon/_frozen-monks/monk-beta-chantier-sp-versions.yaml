@@ -1,7 +1,7 @@
 # Memory-X V1 monk beta — pod permanent Type 1 (boot_at_start)
-# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile monk" L142-167 + registry beta.yaml entrée "chantier-sp-versions"
-# budget canon-dérivé engineer.yaml (DN monk template sans budget ; schema l'exige).
-# ADR #565 verdict B appliqué : sp_template sous knowledge, subagent_template retiré (G24-11 N/A pour monks permanents).
+# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile monk" L142-167 + registry beta.yaml entree "chantier-sp-versions"
+# budget canon-derive engineer.yaml (DN monk template sans budget ; schema l'exige).
+# ADR #565 verdict B applique : sp_template sous knowledge, subagent_template retire (G24-11 N/A pour monks permanents).
 kind: CapabilityProfile
 metadata:
   name: monk-beta-chantier-sp-versions
