@@ -220,7 +220,10 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    {_result, new_state} = safe_poll(state)
+    # `Quiesce.busy/1`: the tick's synchronous work (dispatch, review lifecycle, merge)
+    # is in-flight the drain must WAIT for — it is neither a broker work-item nor a
+    # completion offload, so without this wrap a stop could be accepted mid-merge.
+    {_result, new_state} = Fleet.Shutdown.Quiesce.busy(fn -> safe_poll(state) end)
     schedule(Backoff.next_delay(new_state.err_streak, new_state.interval_ms))
     {:noreply, new_state}
   end
@@ -243,7 +246,11 @@ defmodule Fleet.Pilot.Poller do
     # no reconciliation (2-tick grace calibrated in REGULAR ticks), no arch re-kick
     # (same for the throttle), no poll_count. A kick accelerates dispatch; it consumes
     # no tick-based clock.
-    {_result, new_state} = safe_poll(%{state | gitea_kick_pending?: false}, :kick)
+    {_result, new_state} =
+      Fleet.Shutdown.Quiesce.busy(fn ->
+        safe_poll(%{state | gitea_kick_pending?: false}, :kick)
+      end)
+
     {:noreply, new_state}
   end
 

@@ -57,6 +57,22 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
     assert AggregateDispatcher.in_flight_count() == 5
   end
 
+  test "in_flight_count/0 also sums the synchronous finalizers inside Quiesce.busy/1" do
+    # A poller tick's merge or a completion handler pre-offload is neither a work-item
+    # nor an offload: without this term, three zero reads could conclude :drained while
+    # a merge was in flight inside a singleton.
+    inject_broker(EmptyBroker)
+    inject_completion(fn -> 0 end)
+
+    assert AggregateDispatcher.in_flight_count() == 0
+
+    Quiesce.busy(fn ->
+      assert AggregateDispatcher.in_flight_count() == 1
+    end)
+
+    assert AggregateDispatcher.in_flight_count() == 0
+  end
+
   test "list_active that RAISES → in_flight_count > 0 (fail-closed: broker present but unreachable)" do
     inject_broker(RaisingBroker)
     inject_completion(fn -> 0 end)

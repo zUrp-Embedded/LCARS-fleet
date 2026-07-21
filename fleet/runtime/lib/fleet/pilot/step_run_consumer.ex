@@ -294,6 +294,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @impl GenServer
   def handle_info(%Fleet.Event{source: :spawner, type: :"pod.completed", payload: p}, state) do
+    # `Quiesce.busy/1`: between this reception and the offload's start, the completion is
+    # neither a work-item (already :completed) nor a counted offload — a drain's zero read
+    # in that window would cut it. The wrap makes the handoff countable end to end.
+    Fleet.Shutdown.Quiesce.busy(fn -> handle_pod_completed(p, state) end)
+  end
+
+  defp handle_pod_completed(p, state) do
     case maybe_complete(p, state) do
       # The outcome is logged by `run_completion` (in the task when async), not here.
       {:ok, _outcome} ->

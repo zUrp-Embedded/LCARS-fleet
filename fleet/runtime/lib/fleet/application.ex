@@ -65,6 +65,10 @@ defmodule Fleet.Application do
 
   @impl Application
   def start(_type, _args) do
+    # Single-threaded materialization of the drain's activity counter (two concurrent
+    # lazy inits would orphan a ref and undercount its wrap).
+    :ok = Fleet.Shutdown.Quiesce.init_busy!()
+
     children = [
       # The Bus first (everyone's PubSub substrate).
       Fleet.EventRouter.Application,

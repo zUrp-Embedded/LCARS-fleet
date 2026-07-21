@@ -101,7 +101,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   def refuse_new_jobs(_opts), do: Fleet.Shutdown.Quiesce.refuse!()
 
   @impl true
-  def in_flight_count, do: broker_active() + completion_phases()
+  # + the synchronous finalizers inside `Quiesce.busy/1` (poller tick review/merge work,
+  # completion handlers pre-offload) — invisible to the broker and the offload counts,
+  # yet exactly the work a stop must not cut between a merge and its terminal projection.
+  def in_flight_count,
+    do: broker_active() + completion_phases() + Fleet.Shutdown.Quiesce.busy_count()
 
   # The broker's ACTIVE work-items (queued + being worked) — the real forge work, minus the idle
   # residents (no work-item). Fail-CLOSED: broker present-but-unreachable → sentinel > 0; genuinely
