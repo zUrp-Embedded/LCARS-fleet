@@ -4,11 +4,18 @@
 # STARDATE: 2026-06-14
 # STATUS: PROTO-V2 — N0 host launcher (containment: none): persistent tmux PTY + per-pod socket-dir + holder, NO bwrap
 #
-# Host sibling (N0, Ring 1 pod primitive, vendor-agnostic) of `bin/bwrap_launch.sh`. Selected by the
-# spawner for `containment: none` roles (architect, starfleet): those pods run ON THE HOST, like the
-# human, with NO bwrap sandbox (the interactive arch pairs with the human and sees the real env — that
-# IS what containment:none host_native means). LAUNCH-Q: before this launcher the spawner bwrapped
-# EVERYTHING (containment never read), so the arch booted at start-up was isolated by mistake.
+# Host sibling (N0 pod primitive, vendor-agnostic) of `bin/bwrap_launch.sh`. The spawner selects it for
+# `containment: none` roles: those pods run ON THE HOST, like the human, with NO bwrap sandbox — outside
+# the sandbox is the strongest power in the fleet. LAUNCH-Q: before this launcher the spawner bwrapped
+# EVERYTHING (containment was never read), so a role meant to pair with the human was isolated by
+# mistake.
+#
+# NO CANON CAP-PROFILE SELECTS IT TODAY. All 7 are `containment: bwrap` since the 2026-07-19 reorg
+# (starfleet became an ordinary bwrap orchestrator); `Fleet.CapProfile` and `Fleet.Spawner.Pod` say the
+# same. So this launcher is a supported, tested mode (test/integration/host_launch_test.sh) with zero
+# current users — not dead, and not in use. `/api/admin/spawn` refuses host-native by construction
+# (`SpawnAdmission` -> `{:host_native_forbidden, name}`), so turning it on is a deliberate act, never a
+# default. Read the role names in any older prose here as history, not as configuration.
 #
 # This launcher REPLICATES bwrap_launch's PROVEN mechanism — a `tmux new-session -d` on a per-pod
 # socket-DIR plus a HOLDER keeping this process alive (the life handle IS the spawner's Port) — MINUS the
