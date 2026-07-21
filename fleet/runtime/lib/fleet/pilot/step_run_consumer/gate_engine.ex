@@ -51,7 +51,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     Armored boundary of the gate engine: the ONLY reads `GateEngine` may perform.
     Built by the consumer from its DERIVED per-step-run state (`repo`/`forge_opts`
     come from the event, multi-project). `escalation` = the async-out seams struct of
-    `GatekeeperEscalation` (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery),
+    `GatekeeperEscalation` (task_queue/spawner/repo/forge/forge_opts/loader/wake_recovery),
     passed as-is to `dispatch/7`.
     """
     @enforce_keys [:loader, :deliverable_mode_fun, :escalation]

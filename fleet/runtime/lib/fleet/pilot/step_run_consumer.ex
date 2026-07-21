@@ -86,7 +86,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `:step_run_completer` — seam (default `Fleet.Pilot.StepRunCompleter`)
     * `:task_queue` — brief broker for the gatekeeper escalation (default `Fleet.TaskQueue`)
     * `:spawner` — wake of the gatekeeper after enqueue (default `Fleet.Spawner`)
-    * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (default `&Fleet.Workflow.Gatekeeper.pod_id/0`)
     * `:subscribe` — bool default `true` (tests: `false` + manual send)
     * `:step_run_runner` — completion offload seam. Default `nil` → **SYNC** (the outcome bubbles up,
       seams/tests unchanged). Prod (`application.ex`) injects `&offload_async/1` → the completion (git push
@@ -108,7 +107,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
   # IMPURE "gatekeeper escalation" cluster (async-out): enqueue the eval brief + kick + telemetry.
-  # Reads ONLY 4 seams (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery), passed as an
+  # Reads ONLY the `Seams` fields (task_queue/spawner/repo/forge/forge_opts/loader/wake_recovery), passed as an
   # explicit `GatekeeperEscalation.Seams` struct (not the whole `state` — hardened boundary). Called by
   # the GateEngine on the `{:dispatch_gatekeeper, _}` path (seams forwarded via `gate_seams/1`).
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
@@ -807,7 +806,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # the ORCHESTRATION (acting on the returned decision).
 
   # Builds the NARROW seams struct passed to `GatekeeperEscalation.dispatch` (via GateEngine):
-  # the 4 async-out seams read from the state (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery).
+  # the async-out seams read from the state (task_queue/spawner/repo/forge/forge_opts/loader/wake_recovery — cf. the `Seams` struct, which is the authority).
   # We do NOT pass the whole `state` — hardened boundary: the escalation cluster can read nothing else.
   defp escalation_seams(state) do
     # NB: `loader` stays nil → GatekeeperEscalation defaults to `Fleet.CapProfile` (the CAP loader).
