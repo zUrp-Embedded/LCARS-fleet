@@ -74,7 +74,6 @@ spec:
     # No forge write channel — forge-blind barrier: the engineer reads its brief and
     # returns its deliverable via MCP get_work_item/submit_result (the runtime does
     # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
-    mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
     bridge_enabled: false
   modop_set:

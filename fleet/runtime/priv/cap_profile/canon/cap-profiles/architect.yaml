@@ -74,7 +74,6 @@ spec:
     # boot-orchestrator role is starfleet's now (reorg 2026-07-19).
     boot_at_start: false
     subagent_template: null
-    mcp_channels: ["fleet-control.*", "fleet-forge.*"]
     host_native: false
     bridge_enabled: true
     # The arch terminal IS the human's interactive session: the send-keys wake fallback would

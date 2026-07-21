@@ -84,7 +84,6 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
       tools = get_in(canon, ["spec", "scope", "allowedTools"]) || []
       denied = get_in(canon, ["spec", "scope", "git_ops_denied"]) || []
-      channels = get_in(canon, ["spec", "invocation", "mcp_channels"]) || []
 
       for forbidden <- @forge_write_tools do
         refute forbidden in tools,
@@ -93,9 +92,6 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
       assert "push" in denied,
              "#{unquote(profile)} must deny `push` (git_ops_denied) — mechanical §4 barrier"
-
-      refute Enum.any?(channels, &String.starts_with?(&1, "fleet-forge")),
-             "#{unquote(profile)} must not have a fleet-forge channel (§4 barrier) — saw: #{inspect(channels)}"
     end
   end
 

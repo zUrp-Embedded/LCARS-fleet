@@ -22,10 +22,11 @@ defmodule Fleet.CapProfile.Invariants do
     * The numbering GAPS in the registry (`g24_2`, `g24_5`, `g24_7`) are deliberate:
       those invariants no longer exist, and their codes stay retired — never reused
       (frozen wire vocab). A one-line note sits at each gap's position below.
-    * `g24_13` (mcp_channels non-empty ⟹ `Fleet.MCP.Server` alive) — a runtime
-      **liveness** check, hence impure/non-deterministic; it violates the "pure
-      data transformer" contract and is a spawn-time concern, not a static
-      invariant. Enforced at the spawn boundary (the validated world), not here.
+    * `g24_13` RETIRED with its `mcp_channels` field: the field was a phantom control —
+      no production code ever read it (the real tool surface is `scope.allowedTools`,
+      filtered by `mcp_fleet_tools/1`, plus the MCP handler gates). A schema field that
+      LOOKS like a mechanical barrier while nothing enforces it hands the catalogue
+      author a false assurance — removed rather than wired (no consumer ever needed it).
     * The **I/O parts** of otherwise-pure checks: `g24_14`'s FS existence of
       the monk registry + `monk_instance` lookup is load-time (`compose/2`);
       only its pure both-or-neither structural part is checked here.

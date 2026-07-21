@@ -33,7 +33,7 @@ spec:
       # No git push/commit/mv/tag, no `tea issues edit/close/comment` — forge-blind
       # barrier: the gatekeeper hands off its verdict via `submit_result`
       # (fleet-control channel); the SYSTEM writes `verdict.json` + pushes + routes.
-      # The pod NEVER touches the forge. See git_ops_denied + mcp_channels.
+      # The pod NEVER touches the forge. See git_ops_denied.
     disallowedTools:
       - web_search
       - web_fetch
@@ -61,7 +61,6 @@ spec:
     subagent_template: null
     # No forge channel — forge-blind barrier: the gatekeeper hands off its verdict via
     # `fleet-control.gatekeeper.*` (submit_result); the system writes the forge.
-    mcp_channels: ["fleet-control.gatekeeper.*"]
     host_native: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control

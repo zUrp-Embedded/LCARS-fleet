@@ -52,7 +52,6 @@ spec:
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     subagent_template: spec-reviewer
-    mcp_channels: ["fleet-control.qualifier.*"]  # fleet-control: Memory-X + coord. NO fleet-forge channel: a judge clones in-pod and returns a payload verdict — NOTHING to do with the forge.
     host_native: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (ephemeral, churny judge) — no --remote-control

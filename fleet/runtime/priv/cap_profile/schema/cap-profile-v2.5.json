@@ -156,12 +156,6 @@
                 "null"
               ]
             },
-            "mcp_channels": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "host_native": {
               "type": "boolean"
             },

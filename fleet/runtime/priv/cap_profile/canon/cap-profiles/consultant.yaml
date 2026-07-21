@@ -51,7 +51,6 @@ spec:
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     subagent_template: null
-    mcp_channels: ["fleet-control.consultant.*", "fleet-forge.consultant"]  # fleet-control: Memory-X + coord; fleet-forge: Gitea ticket routing
     host_native: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (ephemeral, churny brief-judge) — no --remote-control
