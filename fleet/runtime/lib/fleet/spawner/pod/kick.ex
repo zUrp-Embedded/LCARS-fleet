@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -119,7 +119,11 @@ defmodule Fleet.Spawner.Pod.Kick do
       lands in the human's prompt and costs a spurious turn, live 2026-07-19; the no-ACK
       `wake.failed` escalation remains the terminal net).
 
-  The bootstrap `"yop"` is NEVER gated (otherwise a fresh pod would not start). Discriminated
+  The bootstrap `"yop"` is never gated by the GLOBAL knob — muting it globally would leave every
+  fresh worker unarmed (nobody types into a fresh worker's tmux). The PER-POD cap-profile gate,
+  however, DOES mute it for the human-terminal class (arch/starfleet): a fresh worker always arms,
+  a human terminal never does (cf. the two-scope comment in the body and the `profile_allows? =
+  false` case of `kick_keyword/3` — nil for EVERYTHING, yop included). Discriminated
   keywords ⇒ we know, by reading the REPL/the logs, whether it is a kick (startup) or a fallback
   (Monitor missed). A send-keys failure is logged, never propagated (the monitor timeout covers).
   """
