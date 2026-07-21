@@ -31,7 +31,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       (MCP convention: a tool error is a result with `isError`, not a protocol
       error — the pod reads it as tool text).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -191,11 +191,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # `controlling_process` gives the socket to the worker (the acceptor can re-accept / die
   # without killing the in-flight connections); transfer failed (worker already dead) → we close
   # the socket rather than leak it. The Task is MONITORED: its end frees the pod's slot.
+  #
+  # :go HANDSHAKE (ordering, not an option): the worker must NOT `recv` before it OWNS the socket, or
+  # the recv races `controlling_process` and fails `:einval`/`:not_owner` depending on scheduling (green
+  # in sequential tests, flaky under load). So the worker starts PARKED (waits for `:go`); the acceptor
+  # transfers ownership FIRST, then sends `:go` — recv is now provably after the transfer. Canonical
+  # Ranch pattern.
   defp spawn_conn(sock, %{pod_id: pod_id, tools: tools} = state) do
-    case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id, tools) end) do
+    case Task.Supervisor.start_child(@conn_sup, fn -> await_go_then_serve(sock, pod_id, tools) end) do
       {:ok, pid} ->
         case :gen_tcp.controlling_process(sock, pid) do
           :ok ->
+            # Ownership is the worker's → release it to recv.
+            send(pid, :go)
             ref = Process.monitor(pid)
             %{state | conns: Map.put(state.conns, ref, pid)}
 
@@ -215,6 +223,25 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
         :gen_tcp.close(sock)
         state
+    end
+  end
+
+  # Bound on the wait for the acceptor's `:go` (ownership handed over). It arrives in microseconds
+  # (right after `controlling_process`); a wait this long only fires if the acceptor DIED between
+  # `start_child` and the transfer — then we free the Task slot rather than park forever.
+  @go_timeout_ms 5_000
+
+  # PARKED worker: waits for the acceptor's `:go` before touching the socket — recv only AFTER ownership
+  # was transferred (cf. spawn_conn's :go handshake). No `:go` (acceptor gone before the transfer) → the
+  # socket, still owned by the dead acceptor, is reaped by OTP; we just release the slot.
+  defp await_go_then_serve(sock, pod_id, tools) do
+    receive do
+      :go -> serve(sock, pod_id, tools)
+    after
+      @go_timeout_ms ->
+        Logger.warning(
+          "PodSocketAcceptor: pod=#{pod_id} connection worker never got :go (acceptor gone?) — slot released"
+        )
     end
   end
 

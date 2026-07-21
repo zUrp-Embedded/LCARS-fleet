@@ -154,6 +154,28 @@ defmodule Fleet.MCP.PodSocketTest do
              content(call(path, 1, "get_work_item", %{}))
   end
 
+  test "many simultaneous connections all round-trip: the ownership handshake holds under concurrency" do
+    # Each accepted connection's worker parks until the acceptor transfers socket ownership and sends
+    # `:go` (spawn_conn), so recv never races controlling_process. Hammer the setup path concurrently:
+    # every connection must serve its tools/list, none dropped/hung by a mis-ordered transfer.
+    pod = uniq("race")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    results =
+      1..6
+      |> Enum.map(fn i -> Task.async(fn -> rpc(path, i, "tools/list") end) end)
+      |> Task.await_many(5_000)
+
+    assert length(results) == 6
+
+    for resp <- results do
+      assert %{"result" => %{"tools" => tools}} = resp
+      names = Enum.map(tools, & &1["name"])
+      assert "get_work_item" in names and "submit_result" in names
+    end
+  end
+
   test "the identity IS the channel: a fake `_lcars_pod_id` in the args is IGNORED" do
     victim = uniq("victim")
     attacker = uniq("attacker")
