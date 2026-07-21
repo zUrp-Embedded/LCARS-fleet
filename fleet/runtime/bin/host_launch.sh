@@ -2,46 +2,47 @@
 # SOURCE: bin/host_launch.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-14
-# STATUS: PROTO-V2 — launcher N0 host (containment: none) : tmux PTY persistant + socket-dir par-pod + holder, SANS bwrap
+# STATUS: PROTO-V2 — N0 host launcher (containment: none): persistent tmux PTY + per-pod socket-dir + holder, NO bwrap
 #
-# Frère host (N0, Ring 1 pod primitive, vendor-agnostic) de `bin/bwrap_launch.sh`. Sélectionné par le
-# spawner pour les rôles `containment: none` (architect, starfleet) : ces pods tournent SUR
-# L'HÔTE, comme l'humain, SANS sandbox bwrap (l'arch interactif paire avec l'humain et voit l'env réel ;
-# c'est le SENS de containment:none host_native). LAUNCH-Q : avant ce launcher, le spawner bwrappait TOUT
-# (containment jamais lu) → l'arch booté au démarrage était isolé à tort.
+# Host sibling (N0, Ring 1 pod primitive, vendor-agnostic) of `bin/bwrap_launch.sh`. Selected by the
+# spawner for `containment: none` roles (architect, starfleet): those pods run ON THE HOST, like the
+# human, with NO bwrap sandbox (the interactive arch pairs with the human and sees the real env — that
+# IS what containment:none host_native means). LAUNCH-Q: before this launcher the spawner bwrapped
+# EVERYTHING (containment never read), so the arch booted at start-up was isolated by mistake.
 #
-# Ce launcher RÉPLIQUE le mécanisme PROUVÉ de bwrap_launch — un `tmux new-session -d` sur une socket-DIR
-# par-pod + un HOLDER qui garde ce process vivant (handle de vie = Port spawner) — MOINS le sandbox bwrap
-# (pas de `--unshare`, pas de `--tmpfs /home`, pas de bind RO/RW, pas de `--clearenv`). Il NE remplace PAS
-# l'ancien `TmuxBackend` (`claude --remote-control` hors bwrap, control-path CASSÉ, supprimé R20/F103) : le
-# mécanisme tmux-holder est celui de bwrap_launch, pas le remote-control nu.
+# This launcher REPLICATES bwrap_launch's PROVEN mechanism — a `tmux new-session -d` on a per-pod
+# socket-DIR plus a HOLDER keeping this process alive (the life handle IS the spawner's Port) — MINUS the
+# bwrap sandbox (no `--unshare`, no `--tmpfs /home`, no RO/RW bind, no `--clearenv`). It does NOT bring
+# back the old `TmuxBackend` (`claude --remote-control` outside bwrap, BROKEN control-path, removed
+# R20/F103): the mechanism here is bwrap_launch's tmux-holder, not bare remote-control.
 #
-# Frontière N0/N1 (cf. bwrap_launch IX.2/IX.3) : tmux = N0 (tient n'importe quel REPL). host_launch ne
-# connaît PAS les flags `claude` — le command (`claude_launch.sh …`, opaque) est dans `${COMMAND[@]}`.
-# Un nouveau besoin de containment = un nouveau launcher co-localisé (un launcher par mode, même
-# argv-shape) : motif d'extension propre, PAS parce que bwrap_launch serait intouchable. Aucun code n'est sacré.
+# N0/N1 frontier (cf. bwrap_launch IX.2/IX.3): tmux is N0 — it holds any REPL. host_launch does NOT know
+# the `claude` flags; the command (`claude_launch.sh …`, opaque) lives in `${COMMAND[@]}`. A new
+# containment need means a new co-located launcher (one launcher per mode, same argv-shape): a clean
+# extension pattern, NOT because bwrap_launch would be untouchable. No code is sacred.
 #
-# Env identité/session (posés par le spawner, hérités du Port — PAS de --setenv, pas de namespace à
-# repeupler ; le pod tourne dans l'env réel du daemon, qui tourne `User=<humain>`) :
-#   LCARS_POD_SESSION_ID          UUID pré-alloué — requis (:? strict, consommé par claude_launch)
-#   LCARS_POD_SESSION_NAME_PREFIX préfixe nom RC requis (<human>_<role>)
-#   HOME                          home RÉEL de l'humain (posé par pod.ex pour containment:none) → claude lit
-#                                 le ~/.claude humain natif (auth :bind réalisée nativement, refresh OAuth,
-#                                 pas de falaise 8h — l'arch est un pod forever).
-#   LCARS_VENDOR_BIN              binaire claude per-user résolu par le spawner (autorité, pas `command -v`).
+# Identity/session env (set by the spawner, INHERITED through the Port — no --setenv, no namespace to
+# repopulate; the pod runs in the daemon's real env, and the daemon runs as `User=<human>`):
+#   LCARS_POD_SESSION_ID          pre-allocated UUID — required (:? strict, consumed by claude_launch)
+#   LCARS_POD_SESSION_NAME_PREFIX required RC name prefix (<human>_<role>)
+#   HOME                          the human's REAL home (set by pod.ex for containment:none) → claude reads
+#                                 the native ~/.claude (auth :bind happens natively, OAuth refresh, no 8h
+#                                 cliff — the arch is a forever pod).
+#   LCARS_VENDOR_BIN              per-user claude binary resolved by the spawner (the authority, not `command -v`).
 #
 # Usage : host_launch.sh <role> <pod_id> <pod_dir> <command...>
-#   <command...> = `claude_launch.sh <role> <pod_id> <pod_dir>` (opaque, argv préservé) ; le SP est lu
-#   depuis $POD_DIR/.lcars/system-prompt.md (hors argv depuis 2026-06-14).
+#   <command...> = `claude_launch.sh <role> <pod_id> <pod_dir>` (opaque, argv preserved). The SP is read
+#   from $POD_DIR/.lcars/system-prompt.md — it is NOT in the argv.
 #
-# Teardown (DIFFÉRENCE clé vs bwrap) : pas de namespace → tuer le holder ne CASCADE PAS sur le serveur
-# tmux (orphelin claude). Donc le holder TRAP SIGTERM/EXIT → `tmux kill-server` sur la socket par-pod
-# (teardown self-contained ; `Pod.terminate_pod_port` SIGTERM reste générique). Filet : `reap_orphan_pod`
-# (pkill -f pod_id + kill-server) couvre sur le relaunch suivant si le trap rate (crash dur BEAM).
+# Teardown (the KEY difference vs bwrap): no namespace, so killing the holder does NOT CASCADE onto the
+# tmux server — claude would be orphaned. The holder therefore TRAPS SIGTERM/EXIT and runs `tmux
+# kill-server` on the per-pod socket (self-contained teardown; `Pod.terminate_pod_port` stays a generic
+# SIGTERM). Safety net: `reap_orphan_pod` (pkill -f pod_id + kill-server) catches it on the next relaunch
+# if the trap is missed (hard BEAM crash).
 #
-# Exit codes :
-#   0   : holder terminé proprement (SIGTERM teardown)
-#   1   : setup error (args/env vides, cwd inaccessible, sock parent absent, pod_dir absent)
+# Exit codes:
+#   0   : holder exited cleanly (SIGTERM teardown)
+#   1   : setup error (empty args/env, unreachable cwd, missing sock parent, missing pod_dir)
 #   2   : tmux missing/not-x
 
 set -euo pipefail
@@ -52,10 +53,11 @@ set -euo pipefail
 
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
 
-# Socket-dir par-pod — MÊME convention que bwrap_launch.sh. Le parent est normalement fourni par
-# `bin/fleet_v2`, qui exporte `LCARS_TMUX_SOCK_BASE` sous `~/.lcars/run/tmux-sock` (fleet lancée par un
-# humain) et crée le dir au start. MÊME chemin côté Elixir (PodTmux.sock_path = <base>/<pod_id>/pod.sock).
-# (Le défaut littéral `/run/lcars/tmux-sock` ci-dessous = fallback d'invocation directe legacy seulement.)
+# Per-pod socket-dir — the SAME convention as bwrap_launch.sh. The parent is normally provided by
+# `bin/fleet_v2`, which exports `LCARS_TMUX_SOCK_BASE` under `~/.lcars/run/tmux-sock` (the fleet is
+# launched by a human) and creates the dir at start. SAME path on the Elixir side (PodTmux.sock_path =
+# <base>/<pod_id>/pod.sock). The literal `/run/lcars/tmux-sock` default below is a legacy direct-invocation
+# fallback only.
 SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
 
 # =============================================================
@@ -70,23 +72,23 @@ ROLE="$1"; POD_ID="$2"; POD_DIR="$3"; shift 3
 COMMAND=("$@")
 [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]] && { echo "ERR: role, pod_id, pod_dir must be non-empty" >&2; exit 1; }
 
-# Identité/session (lues de l'env, posées par le spawner ; :? strict — claude_launch les exige aussi).
-: "${LCARS_POD_SESSION_ID:?UUID de session requis (pré-alloué par le spawner)}"
-: "${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<human>_<role>)}"
+# Identity/session (read from the env, set by the spawner; :? strict — claude_launch requires them too).
+: "${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
+: "${LCARS_POD_SESSION_NAME_PREFIX:?RC name prefix required (<human>_<role>)}"
 
-# cwd = racine de branche (monde-invoqué). Défaut $POD_DIR ; le spawner/bootstrap pose le repo cloné.
+# cwd = the branch root (the invoked world). Defaults to $POD_DIR; the spawner/bootstrap lays down the clone.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
 
-# Session tmux (nom INTERNE, distinct du préfixe nom RC claude) — MÊMES conventions que bwrap_launch.
+# tmux session (an INTERNAL name, distinct from claude's RC name prefix) — SAME conventions as bwrap_launch.
 POD_SOCK_DIR="$SOCK_PARENT/$POD_ID"
 TMUX_SESSION_NAME="lcars-pod-$POD_ID"
-# Filename CONSTANT (pas ${TMUX_SESSION_NAME}.sock) : le dir $POD_ID/ donne déjà l'unicité ; le double
-# pod_id dépassait sun_path 108o pour un pod_id UUID. (= Fleet.Spawner.PodTmux.sock_path.)
+# CONSTANT filename (not ${TMUX_SESSION_NAME}.sock): the $POD_ID/ dir already carries the uniqueness, and
+# doubling the pod_id overflowed sun_path's 108 bytes for a UUID pod_id. (= Fleet.Spawner.PodTmux.sock_path.)
 TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
 
-# Binaire vendor : N0 pass-through de l'autorité spawner (LCARS_VENDOR_BIN), exposé sous le nom que le
-# launcher vendor attend — MÊME relais que bwrap_launch.sh:283 (--setenv LCARS_CLAUDE_BIN). Sans lui,
-# claude_launch retombe sur `command -v claude` (binaire système périmé, outil Monitor absent — piège #4).
+# Vendor binary: N0 pass-through of the spawner's authority (LCARS_VENDOR_BIN), exposed under the name the
+# vendor launcher expects — the SAME relay as bwrap_launch.sh (--setenv LCARS_CLAUDE_BIN). Without it
+# claude_launch falls back to `command -v claude`: a stale system binary with no Monitor tool (trap #4).
 if [[ -n "${LCARS_VENDOR_BIN:-}" ]]; then
   export LCARS_CLAUDE_BIN="${LCARS_CLAUDE_BIN:-$LCARS_VENDOR_BIN}"
 fi
@@ -97,50 +99,51 @@ fi
 [[ -x "$TMUX_BIN" ]] || { echo "ERR: tmux missing/not-x: $TMUX_BIN (N0 PTY host)" >&2; exit 2; }
 [[ -d "$POD_DIR"  ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 [[ -d "$WORKDIR"  ]] || { echo "ERR: workdir $WORKDIR inaccessible" >&2; exit 1; }
-# Parent socket normalement posé par fleet_v2 (LCARS_TMUX_SOCK_BASE → ~/.lcars/run/tmux-sock, mkdir au
-# start) — fail-fast au boundary, comme bwrap_launch.
-[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (fleet lancée via fleet_v2 ? LCARS_TMUX_SOCK_BASE correct ?)" >&2; exit 1; }
+# The parent socket dir is normally laid down by fleet_v2 (LCARS_TMUX_SOCK_BASE → ~/.lcars/run/tmux-sock,
+# mkdir at start) — fail-fast at the boundary, like bwrap_launch.
+[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (fleet started via fleet_v2? LCARS_TMUX_SOCK_BASE correct?)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 
 # =============================================================
-# Teardown self-contained (pas de cascade namespace sur l'hôte)
+# Self-contained teardown (no namespace cascade on the host)
 # =============================================================
 cleanup() {
   "$TMUX_BIN" -S "$TMUX_SOCK" kill-server 2>/dev/null || true
   rm -rf "$POD_SOCK_DIR" 2>/dev/null || true
 }
-# SIGTERM (Port close côté spawner) / SIGINT → exit → le trap EXIT fait le cleanup (une seule fois).
+# SIGTERM (spawner-side Port close) / SIGINT → exit → the EXIT trap runs the cleanup (exactly once).
 trap 'exit 143' TERM
 trap 'exit 130' INT
 trap cleanup EXIT
 
 # =============================================================
-# Launch : tmux new-session détaché (COMMAND opaque) + HOLDER trappable.
-#   `cd $WORKDIR` AVANT new-session ⇒ la session démarre dans la branche code (= bwrap `--chdir`).
-#   Serveur tmux FRAIS par-pod (socket par-pod) ⇒ il capture l'env hérité du Port → COMMAND voit
-#   HOME/CLAUDE_DIR/GIT_*/LCARS_* tels que posés par le spawner (pas de --setenv : pas de namespace).
-#   PAS d'`exec` : le shell reste vivant comme HOLDER (handle Port) ET trappable (sinon kill-server raté).
+# Launch: detached tmux new-session (opaque COMMAND) + a trappable HOLDER.
+#   `cd $WORKDIR` BEFORE new-session ⇒ the session starts in the code branch (bwrap's `--chdir`).
+#   A FRESH per-pod tmux server (per-pod socket) ⇒ it captures the env inherited from the Port, so COMMAND
+#   sees HOME/CLAUDE_DIR/GIT_*/LCARS_* as the spawner set them (no --setenv: there is no namespace).
+#   NO `exec`: the shell stays alive as the HOLDER (Port handle) AND trappable — otherwise kill-server is missed.
 # =============================================================
 cd "$WORKDIR"
-# Le pod doit connaître son dossier de pod (watch.sh/turn.flag du réveil-par-flag Monitor, etc.). En
-# bwrap c'est `--setenv LCARS_POD_CWD` ; ici (host_launch, pas de namespace) on EXPORTE pour que le
-# new-session — qui hérite de cet env — le transmette à COMMAND (le pod voyait sinon `$LCARS_POD_CWD` vide).
+# The pod must know its own pod directory (watch.sh/turn.flag of the Monitor flag-wake, etc.). Under bwrap
+# that is `--setenv LCARS_POD_CWD`; here (host_launch, no namespace) we EXPORT it so that new-session —
+# which inherits this env — passes it to COMMAND. Without it the pod saw an empty `$LCARS_POD_CWD`.
 export LCARS_POD_CWD="$WORKDIR"
-# F-E1 — RACINE du pod (où vivent watch.sh/turn.flag du réveil-par-flag), distincte du workspace CODE
-# (LCARS_POD_CWD = la branche quand un repo est cloné). En bwrap, $HOME = $POD_DIR la donne ; en host
-# (HOME = home réel ≠ pod_dir) le pod n'a aucune autre porte → on EXPOSE LCARS_POD_DIR. Le SP arme le
-# Monitor sur `${LCARS_POD_DIR:-$HOME}/watch.sh` (universel bwrap+host).
+# F-E1 — the pod's ROOT (where watch.sh/turn.flag of the flag-wake live), distinct from the CODE workspace
+# (LCARS_POD_CWD = the branch when a repo is cloned). Under bwrap, $HOME = $POD_DIR gives it; on the host
+# (HOME = the real home ≠ pod_dir) the pod has no other door, so we EXPOSE LCARS_POD_DIR. The SP arms the
+# Monitor on `${LCARS_POD_DIR:-$HOME}/watch.sh` (works for bwrap and host alike).
 export LCARS_POD_DIR="$POD_DIR"
 "$TMUX_BIN" -S "$TMUX_SOCK" new-session -d -s "$TMUX_SESSION_NAME" "${COMMAND[@]}"
 
-# Holder : ce process EST le pod vivant (Port spawner). SIGTERM → trap → cleanup → namespace-libre, le
-# serveur tmux par-pod est tué explicitement. Validation ASYNC côté spawner via `tmux -S sock list-sessions`.
+# Holder: this process IS the live pod (the spawner's Port). SIGTERM → trap → cleanup → no namespace to
+# free, the per-pod tmux server is killed explicitly. Spawner-side validation is ASYNC, via
+# `tmux -S sock list-sessions`.
 #
-# argv0 identifiable `lcars-hold:<role>:<pod_id>` (hygiène ressources) : host_launch n'a NI namespace NI
-# `--die-with-parent` (vs bwrap) → sur crash dur BEAM, le trap est bypassé, le holder meurt et le sleep
-# ORPHELINE. Sans pod_id dans l'argv, le filet `pkill -f <pod_id>` ne le matche pas → accumulation
-# invisible. Avec argv0 porteur du pod_id : orphelin VISIBLE (`ps | grep lcars-hold:`) et REAPABLE.
-# Subshell `( exec -a … )` et pas `exec` direct : le shell holder reste vivant + trappable (sinon le
-# teardown `kill-server` du trap raterait — cf. l.118).
+# Identifiable argv0 `lcars-hold:<role>:<pod_id>` (resource hygiene): host_launch has NEITHER a namespace
+# NOR `--die-with-parent` (unlike bwrap), so on a hard BEAM crash the trap is bypassed, the holder dies and
+# the sleep is ORPHANED. Without the pod_id in the argv, the `pkill -f <pod_id>` net does not match it and
+# orphans pile up invisibly. With the pod_id carried in argv0 an orphan is VISIBLE
+# (`ps | grep lcars-hold:`) and REAPABLE. A subshell `( exec -a … )` rather than a direct `exec`: the
+# holder shell stays alive AND trappable — otherwise the trap's `kill-server` teardown would be missed.
 ( exec -a "lcars-hold:${ROLE}:${POD_ID}" sleep infinity ) &
 wait $!
