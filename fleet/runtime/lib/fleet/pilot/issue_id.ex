@@ -6,7 +6,7 @@ defmodule Fleet.Pilot.IssueId do
   (`Fleet.Pilot.StepRunConsumer.parse_issue_number`, which delegates) cannot drift apart from
   each other. The `issue_id` correlates a pod to its forge issue throughout the step_run (enqueue → end-of-step-run).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @prefix "issue-"
@@ -21,22 +21,23 @@ defmodule Fleet.Pilot.IssueId do
   def compose(number), do: @prefix <> to_string(number)
 
   @doc ~S'''
-  Parses a step issue_id `"issue-<n>"` → `{:ok, n}`; otherwise `:error`. The suffix must be a
-  COMPLETE integer (`"issue-7x"` / `"issue-"` / `"issue-x"` → `:error`).
+  Parses a step issue_id `"issue-<n>"` → `{:ok, n}`; otherwise `:error`. The STRICT inverse of
+  `compose/1`: it accepts ONLY the canonical spelling `compose` emits (`Integer.to_string(n)`), so
+  `"issue-007"` and `"issue-+7"` are `:error` — `Integer.parse/1` alone tolerates leading zeros and an
+  explicit sign, but `compose(7)` only ever yields `"issue-7"`. One issue ⇒ exactly one issue_id
+  spelling, safe even if an issue_id from OUTSIDE ever becomes a KEY (dedup/mutex/lookup) — no two
+  spellings for one issue. The suffix must be a COMPLETE canonical integer (`"issue-7x"` / `"issue-"` /
+  `"issue-x"` → `:error`).
 
-  `parse ∘ compose == id` (round-trip guaranteed, negatives included — locked by property).
-  The converse does NOT hold: `Integer.parse/1` accepts leading zeros and an explicit sign, so
-  `"issue-007"` and `"issue-+7"` both parse to `7` while `compose(7)` only ever yields `"issue-7"`.
-  Several DISTINCT issue_ids therefore denote the same issue. Harmless while the issue_id is a
-  correlator that is only ever READ (its writer is `compose/1`, single-source); it would NOT be
-  harmless the day an issue_id coming from OUTSIDE becomes a KEY (dedup, mutex, lookup) — two
-  spellings would then be two different keys for one issue. Stated here rather than silently
-  tightened: the tolerance is the current, tested behaviour.
+  Round-trip both ways (locked by property): `parse(compose(n)) == {:ok, n}` (negatives included) and,
+  for every accepted string, `compose(n) ==` that string.
   '''
   @spec parse(String.t()) :: {:ok, integer()} | :error
   def parse(@prefix <> rest) do
     case Integer.parse(rest) do
-      {n, ""} -> {:ok, n}
+      # STRICT: accept only the canonical spelling — `Integer.to_string(n)` is exactly what compose/1
+      # wrote, so a non-canonical `rest` ("007", "+7") that would parse to the SAME n is refused.
+      {n, ""} -> if Integer.to_string(n) == rest, do: {:ok, n}, else: :error
       _ -> :error
     end
   end

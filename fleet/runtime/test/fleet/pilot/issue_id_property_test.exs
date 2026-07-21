@@ -12,10 +12,9 @@ defmodule Fleet.Pilot.IssueIdPropertyTest do
 
   alias Fleet.Pilot.IssueId
 
-  # ORACLE — the shape `parse/1` ACTUALLY accepts (observed, not postulated). See the audit note
-  # under P2: `Integer.parse/1` tolerates leading zeros and an explicit sign, so the oracle is NOT
-  # `\Aissue-(0|-?[1-9][0-9]*)\z` (the canonical shape of `compose/1`).
-  @accepted ~r/\Aissue-[+-]?[0-9]+\z/
+  # ORACLE — the CANONICAL shape `compose/1` emits (`Integer.to_string(n)`), which `parse/1` now
+  # accepts STRICTLY. No leading zeros, no explicit `+`, a single `-` only before a non-zero magnitude.
+  @accepted ~r/\Aissue-(0|-?[1-9][0-9]*)\z/
 
   # ── P1 — ROUND-TRIP ──
 
@@ -39,15 +38,11 @@ defmodule Fleet.Pilot.IssueIdPropertyTest do
   # step's result would be posted on someone else's issue. Fail-closed (`:error`) is the only safe
   # exit.
   #
-  # ⚠ AUDIT NOTE — @doc / behavior GAP, frozen here as-is, NOT corrected:
-  # the `@doc` of `parse/1` promises a "STRICT inverse of compose/1". That is not the case.
-  # `Integer.parse/1` accepts leading zeros and an explicit sign:
-  #     parse("issue-007") == {:ok, 7}   and   compose(7) == "issue-7"   ≠ "issue-007"
-  #     parse("issue-+7")  == {:ok, 7}   and   compose(7) == "issue-7"   ≠ "issue-+7"
-  # `parse ∘ compose == id` holds (P1), but `compose ∘ parse ≠ id`: several DISTINCT issue_ids
-  # denote the same issue. Benign as long as the issue_id is only a correlator that gets read;
-  # dangerous the day it serves as a KEY (dedup, mutex, lookup) — two keys for one issue.
-  property "P2 REJECTION — parse/1 accepts exactly the `issue-<integer>` shape, nothing else" do
+  # `parse/1` is now the STRICT inverse of `compose/1` (tightened): the non-canonical spellings
+  # `Integer.parse/1` alone would tolerate are REFUSED — `parse("issue-007") == :error` and
+  # `parse("issue-+7") == :error`, so `compose ∘ parse == id` holds both ways. One issue ⇒ exactly one
+  # issue_id spelling (safe even if the issue_id ever becomes a KEY: dedup/mutex/lookup).
+  property "P2 REJECTION — parse/1 accepts exactly the CANONICAL `issue-<integer>` shape, nothing else" do
     check all(s <- candidate_gen(), max_runs: 300) do
       if Regex.match?(@accepted, s) do
         "issue-" <> rest = s
