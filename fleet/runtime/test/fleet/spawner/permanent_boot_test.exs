@@ -328,7 +328,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   # BL-028: `auto_boot_enabled?/0` IS the canon gate for booting permanent pods
-  # (consulted by BootOrchestrator, single authority — F-14).
+  # (consulted by BootOrchestrator, single authority).
   # Default **true** (DN lcars-fleet_service §391); `false` disables.
   describe "auto_boot_enabled?/0 — canon gate for permanent-pod boot (default true)" do
     test "default true (unconfigured) — boots by default, DN canon" do

@@ -2048,7 +2048,7 @@ defmodule Fleet.Spawner.PodTest do
 
       opts = [state_fs_root: state_root, pod_dir_root: pod_root]
 
-      # Codex audit F-07 (2026-07-19): the read-only parent must NEVER survive this test —
+      # The read-only parent must NEVER survive this test —
       # a leftover `0500` dir under the STABLE @tmp_dir path blocks the NEXT runner's
       # `create_tmp_dir!` (rm_rf of a non-writable dir owned by another UID fails). So the restore
       # is SYNCHRONOUS (`try/after` — runs even if the body raises, unlike `on_exit`) AND

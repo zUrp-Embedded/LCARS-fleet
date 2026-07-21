@@ -143,7 +143,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert {:error, :no_files_in_payload} = Deliverable.publish(opts)
     end
 
-    test "F-07 — .git/hooks/ planted by the pod do NOT execute world-side (commit+push)",
+    test ".git/hooks/ planted by the pod do NOT execute world-side (commit+push)",
          %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-hooks")
       sentinel = Path.join(tmp, "pwned")
