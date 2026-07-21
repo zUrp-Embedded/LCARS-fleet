@@ -53,7 +53,12 @@ defmodule LcarsFleet.MixProject do
   # come back into plt_add_apps: not apps anymore → dialyzer crash "unknown application".
   defp dialyzer do
     [
-      plt_add_apps: [:mix, :ex_unit],
+      # `:boundary` is `runtime: false` (compile-time guardian), so its modules are NOT in the default
+      # PLT — and `lcars.topology` reads its COMPILED graph. Without this, Dialyzer reports
+      # `Boundary.all/1 does not exist` on a call that works. Adding it also buys a SECOND alarm,
+      # earlier than the runtime raise: if a boundary upgrade moves that API, the gate says
+      # `unknown_function` at the Dialyzer step instead of blowing up when the task runs.
+      plt_add_apps: [:mix, :ex_unit, :boundary],
       plt_core_path: "_build/plts",
       plt_local_path: "_build/plts",
       ignore_warnings: ".dialyzer_ignore.exs",

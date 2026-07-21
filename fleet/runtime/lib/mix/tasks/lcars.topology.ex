@@ -9,18 +9,28 @@ defmodule Mix.Tasks.Lcars.Topology do
   enforces it, this task only PROJECTS it) and writes it as a markdown table between
   markers in `lib/fleet/README.md`.
 
-  The projection reads the `use Boundary` declarations by REGEX over the source, not Boundary's
-  compiled metadata — so it assumes their standard formatting. An unusual-but-valid declaration (an
-  alias, a `deps:` layout the regex misses) could diverge from the COMPILED boundary, and `--check`
-  (which compares the committed map to the SAME regex re-projection) would catch a stale README, not
-  such a misparse. Projecting from Boundary's compiled metadata would close that gap — but it is NOT
-  freely available, and that is the part worth knowing before anyone tries: every public `Boundary`
-  reader (`all/1`, `fetch!/2`, `for_module/2`) takes a `view`, and the only builder of a view is
-  `Boundary.Mix.View.build/0`, which is `@moduledoc false` — as is `Boundary.Mix` itself. So closing
-  this gap means wiring the GATE onto a dependency's private module: accurate, but a boundary upgrade
-  could then break the check that is supposed to be the trustworthy one. The regex reads OUR own
-  source and depends on nothing external. Neither side is free; the trade is stated so it can be
-  chosen rather than stumbled into.
+  The projection reads Boundary's COMPILED graph (`Boundary.all/1` over
+  `Boundary.Mix.View.build/0`), not our source text. It therefore shows what the compiler actually
+  enforces, which is the only thing worth comparing a committed map against.
+
+  This used to be a regex over the source, and the regex was the mechanism that always said YES: a
+  `deps:` list containing a COMMENT with a `[]` in it truncated the capture at that bracket, and every
+  dependency declared after it vanished. That was live on `Fleet.Spawner`, whose declared dependency
+  on `Fleet.Shutdown.Quiesce` never reached the extractor.
+
+  It produced no VISIBLE error, and the reason is worth stating because it is luck rather than design:
+  this table renders `H`, not dep lists, and `H = 1 + max(H(deps))` — the lost dep is a `deps: []`
+  foundation at height 0, so dropping it could not move a height. A lost dep of NON-zero height would
+  have shifted a floor with nothing to catch it. The extractor was wrong; the projection happened to
+  absorb it.
+
+  The price is one function: `Boundary.Mix.View.build/0` is `@moduledoc false`, a private entry point
+  of the dependency (everything after it — `Boundary.all/1`, the `%Boundary{}` fields — is public and
+  specified). If a boundary upgrade moves it, this task raises at gate time. That is the GOOD failure:
+  loud, immediate, and it sends someone to look. The alternative was a hand-rolled parser that fails
+  silently and stays green — which is the defect this project exists to remove. We already depend on
+  boundary totally: `mix compile --warnings-as-errors` refuses the build on a violation. Reading its
+  graph adds no dependency, it stops re-deriving one by hand.
 
   Height is mechanical: `H(domain) = 1 + max(H(deps))`, 0 for `deps: []` (a DAG —
   boundary forbids cycles — always induces this ladder). The layer NAMES are editorial
@@ -117,33 +127,49 @@ defmodule Mix.Tasks.Lcars.Topology do
 
   # ── derivation ────────────────────────────────────────────────────────────
 
-  # Domain boundaries = TOP-LEVEL `use Boundary` declarations. Skipped: `classify_to:`
-  # (mix tasks classified into a domain) and SUB-boundaries (a boundary whose module name
-  # is prefixed by another boundary, e.g. `Fleet.Pilot.ForgeClient` under `Fleet.Pilot` —
-  # an intra-domain wall, not a floor of the ladder).
+  # Domain boundaries = TOP-LEVEL boundaries of `:lcars_fleet` declared under `lib/`. Excluded, in
+  # this order: another app's boundaries; boundaries compiled from `test/support` (they exist in the
+  # `:test` env the gate runs in, and are not runtime topology); SUB-boundaries (a boundary whose
+  # module name is prefixed by another one, e.g. `Fleet.Pilot.ForgeClient` under `Fleet.Pilot` — an
+  # intra-domain wall, not a floor of the ladder). `classify_to:` needs no filter here: a module
+  # classified INTO a domain is not a boundary of its own in the compiled graph.
   defp parse_boundaries do
-    all =
-      for f <- Path.wildcard("lib/fleet/**/*.ex") ++ ["lib/fleet.ex"],
-          File.exists?(f),
-          src = File.read!(f),
-          String.contains?(src, "use Boundary"),
-          not String.contains?(src, "classify_to:"),
-          [_, mod] <- [Regex.run(~r/defmodule\s+([\w.]+)/, src)],
-          into: %{} do
-        deps =
-          case Regex.run(~r/use Boundary,.*?deps:\s*\[(.*?)\]/s, src) do
-            [_, body] -> Regex.scan(~r/Fleet[\w.]*/, body) |> List.flatten() |> Enum.uniq()
-            nil -> []
-          end
+    lib_boundaries =
+      Boundary.Mix.View.build()
+      |> Boundary.all()
+      |> Enum.filter(&(&1.app == :lcars_fleet and lib_source?(&1.name)))
 
-        {mod, deps -- [mod]}
-      end
+    names = MapSet.new(lib_boundaries, & &1.name)
 
-    mods = Map.keys(all)
+    top =
+      Enum.reject(lib_boundaries, fn b ->
+        Enum.any?(
+          names,
+          &(&1 != b.name and String.starts_with?(inspect(b.name), inspect(&1) <> "."))
+        )
+      end)
 
-    all
-    |> Enum.reject(fn {mod, _} -> Enum.any?(mods, &String.starts_with?(mod, &1 <> ".")) end)
-    |> Map.new(fn {mod, deps} -> {mod, Enum.filter(deps, &(&1 in mods))} end)
+    top_names = MapSet.new(top, & &1.name)
+
+    Map.new(top, fn b ->
+      deps =
+        b.deps
+        |> Enum.map(fn {mod, _mode} -> mod end)
+        |> Enum.filter(&MapSet.member?(top_names, &1))
+        |> Enum.map(&inspect/1)
+        |> Enum.uniq()
+
+      {inspect(b.name), deps}
+    end)
+  end
+
+  # A boundary's own compiled-from path. `test/support` modules are boundaries too in the `:test` env
+  # (the env the gate runs in) — they are not part of the runtime topology.
+  defp lib_source?(module) do
+    case module.module_info(:compile)[:source] do
+      nil -> false
+      source -> source |> List.to_string() |> String.contains?("/lib/")
+    end
   end
 
   defp compute_heights(graph) do
