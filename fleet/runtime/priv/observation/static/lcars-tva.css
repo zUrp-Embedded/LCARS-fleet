@@ -296,59 +296,6 @@ html { scroll-behavior: smooth; }
   grid-column: 1 / -1;
 }
 
-/* ── Tickets filterbar ──────────────────────────────────── */
-.tickets-filterbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--grey-dark);
-}
-.tickets-filterbar input {
-  flex: 0 1 240px;
-  background: var(--bg-mid);
-  border: 1px solid var(--grey-dark);
-  border-radius: 4px;
-  padding: 4px 8px;
-  color: var(--cream);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.tickets-filterbar input:focus { outline: 1px solid var(--amber); }
-.filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-.filter-pill {
-  background: var(--bg-mid);
-  border: 1px solid var(--grey-dark);
-  border-radius: 12px;
-  padding: 2px 10px;
-  font-size: 10px;
-  color: var(--grey);
-  cursor: pointer;
-  font-family: var(--font-mono);
-}
-.filter-pill.active {
-  background: var(--amber);
-  color: var(--bg-deep);
-  border-color: var(--amber);
-}
-
-/* ── Breakdown grid (tickets/stats) ─────────────────────── */
-.breakdown-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-}
-.breakdown-cell {
-  background: var(--bg-mid);
-  padding: 8px 10px;
-  border-left: 3px solid var(--amber);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.breakdown-cell .bd-label { color: var(--grey); font-size: 10px; letter-spacing: 1px; }
-.breakdown-cell .bd-val { color: var(--cream); font-size: 16px; font-weight: 700; display: block; }
-
 /* ── Memory monks détail ────────────────────────────────── */
 .memory-detail-grid {
   display: grid;
