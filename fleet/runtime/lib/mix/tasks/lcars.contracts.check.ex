@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   Runs all checks and returns `{overall, checks}` WITHOUT printing or `exit`.
 
   Reusable form of the check logic: called by `run/1` (CLI: print +
-  exit) AND by the `mix release` step (`mix.exs` `verrou_contracts/1`: refuses to
+  exit) AND by the `mix release` step (`mix.exs` `contracts_gate/1`: refuses to
   build the release if red). Since the sources are present at build (release built
   from the project), the grep/introspection checks run; a red check →
   release refused = the mechanical realization of "the boot refuses to come up if a
@@ -529,7 +529,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # These rails promote invariants from a documentary closure to a closure
   # by constraint: an invariant we already violated for lack of a check becomes here an
   # executable check. An agent who re-derives → `mix release` REFUSES
-  # (verrou_contracts), red build, immediate fix.
+  # (contracts_gate), red build, immediate fix.
 
   # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
   # kills the long-lived forever/pipe/run pods at cycle 2). Since the `Pod` →

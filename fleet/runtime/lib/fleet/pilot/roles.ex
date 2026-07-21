@@ -4,11 +4,11 @@ defmodule Fleet.Pilot.Roles do
   gatekeeper). SINGLE data source = `config/config.exs`; this module is the SINGLE accessor (without it
   the default would be hard-rewritten in each caller). Override per project/test via the opts.
 
-  The three roles live HERE: producer (`producer_role/1`), jury (`reviewer_roles/1`) and gatekeeper
+  The three roles live HERE: producer (`producer_role/1`), jury (`jury/2`) and gatekeeper
   (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
   (never an `engineer`/`gatekeeper` default rewritten at the caller).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger

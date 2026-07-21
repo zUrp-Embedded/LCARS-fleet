@@ -618,7 +618,8 @@ defmodule Fleet.Spawner.Pod do
   #   - a crashed or STUCK completion → a git op may still be reading the workspace when we clear.
   # The second case used to be argued away by a timing bound ("the git ops are SIGKILL'd under the
   # deadline, so no live reader survives"). That bound was counted wrong — see
-  # `Publishing.publish_deadline_ms`, which now carries the real 135_000 against a 120_000 deadline.
+  # `Publishing.publish_deadline_ms`, which now carries the real 165_000 (150_000 without the role trailer)
+  # against a 120_000 deadline.
   # We clear ANYWAY, and that part is not in question: otherwise the pod stays never-:ready hence never
   # re-briefed, which is a certain wedge against an unproven race. What is NOT established is the
   # safety, in either direction — nobody has shown the reset landing on a live git process either.

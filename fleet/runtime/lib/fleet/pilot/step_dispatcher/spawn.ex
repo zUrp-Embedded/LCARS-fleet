@@ -473,9 +473,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   def maybe_reprovision(:proceed, _spawner, _pod_id, _project, _slug), do: :ok
 
-  # State of a project-scoped pipe facing a NEW brief. :ready = idle AND last deliverable confirmed (neither
-  # active task nor :publishing) — the ONLY situation where resetting the workspace is safe (the push already read
-  # the commit, the agent writes no more). pod_info exposes conditions + has_active_task (the pod knows both).
+  # State of a project-scoped pipe facing a NEW brief. :ready = idle (no active task) AND :publishing absent.
+  # Resetting the workspace is safe ONLY under the premise "the push already read the workspace, the agent writes
+  # no more" — and that premise covers just ONE of the two paths that clear :publishing: (a) `deliverable.published`
+  # confirmed → holds; (b) the `:publish_deadline` fail-safe cleared the flag WITHOUT that confirmation → does NOT
+  # hold (see Pod's reprovision/deadline handler). pod_info exposes conditions + has_active_task (the pod knows both).
   defp pipe_rebrief_state(spawner, pod_id) do
     case safe_pod_info(spawner, pod_id) do
       {:ok, %{conditions: conds, has_active_task: active}} ->

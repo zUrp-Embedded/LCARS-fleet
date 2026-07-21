@@ -68,7 +68,7 @@ defmodule Fleet.Pilot.ForgeClient do
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   # Tip sha of a branch (seal's provenance wall reads the deliverable head at merge time).
-  # Delegated on the FAÇADE so the seal reaches it through its forge SEAM (test stubs
+  # Delegated on the FACADE so the seal reaches it through its forge SEAM (test stubs
   # without it fall into the wall's skip path, function_exported?-guarded).
   defdelegate branch_head(repo, branch, opts), to: Fleet.Pilot.ForgeClient.Repo
 

@@ -136,7 +136,7 @@ defmodule LcarsFleet.MixProject do
   # is red. No red release ever builds ⇒ the mechanical realization of
   # "the boot refuses if a contract is reopened". Runs after the compile phase,
   # before :assemble (sources present at build → grep/introspection checks valid).
-  defp verrou_contracts(release) do
+  defp contracts_gate(release) do
     # Fail-closed: a check that CRASHES (missing file, invalid YAML…) leaves the
     # contracts status unknown → refuse the release with a clear message, as for a
     # red contract.
@@ -200,7 +200,7 @@ defmodule LcarsFleet.MixProject do
       fleet_umbrella: [
         include_executables_for: [:unix],
         applications: [lcars_fleet: :permanent],
-        steps: [&verrou_contracts/1, :assemble, &write_build_info/1, :tar]
+        steps: [&contracts_gate/1, :assemble, &write_build_info/1, :tar]
       ]
     ]
   end

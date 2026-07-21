@@ -85,23 +85,27 @@ defmodule Fleet.Spawner.Pod.Publishing do
   CONCURRENTLY on `pod.completed` (no queue) and each git op is hard-bounded + SIGKILL-enforced, for a
   worst-case serial under this 120_000 deadline.
 
-  The bound was counted wrong. `publish` chains SIX bounded ops, not three, and the count omitted
-  `DeliverableGate.verify` entirely — which also carries a THIRD timeout knob the argument never
-  mentions, its own `@git_timeout_ms` (15_000, a module attribute, not config):
+  The bound was counted wrong — twice. `publish` chains SEVEN bounded git ops on the git_native path
+  (the ONLY path that arms this deadline — `maybe_enter_publishing` gates on `git_native`), not three,
+  and the count omitted BOTH `materialize_content`'s own HEAD read AND `DeliverableGate.verify` — the
+  latter carrying a THIRD timeout knob the argument never mentions, its own `@git_timeout_ms` (15_000,
+  a module attribute, not config):
 
-      Git.ancestor?        (verify)   :fleet_workflow, :git_local_timeout_ms   30_000
-      check_identity       (verify)   DeliverableGate @git_timeout_ms          15_000
-      maybe_check_trailer  (verify)   DeliverableGate @git_timeout_ms          15_000
-      scan_secrets         (verify)   DeliverableGate @git_timeout_ms          15_000
-      head_sha                        :fleet_workflow, :git_local_timeout_ms   30_000
-      push_deliverable                :fleet_workflow, :git_push_timeout_ms    30_000
-                                                                              -------
-                                                                              135_000
+      materialize_content  (head_advanced → read_head_sha)  :fleet_workflow, :git_local_timeout_ms   30_000
+      Git.ancestor?        (verify)                         :fleet_workflow, :git_local_timeout_ms   30_000
+      check_identity       (verify)                         DeliverableGate @git_timeout_ms          15_000
+      maybe_check_trailer  (verify)                         DeliverableGate @git_timeout_ms          15_000
+      scan_secrets         (verify)                         DeliverableGate @git_timeout_ms          15_000
+      head_sha                                              :fleet_workflow, :git_local_timeout_ms   30_000
+      push_deliverable                                      :fleet_workflow, :git_push_timeout_ms    30_000
+                                                                                                    -------
+                                                                                                    165_000
 
-  135s against a 120_000 deadline — and that is a floor: it excludes `materialize_content`'s commit on
-  the non-git_native path and the `--force-with-lease` branch of the push. Without the role trailer it
-  lands on 120s exactly, i.e. zero margin. So the lift is NOT established safe by this reasoning; it is
-  asserted.
+  165s against a 120_000 deadline — 150s without the role trailer, still over. (`materialize_content`'s
+  HEAD read at `publish/1` is a DISTINCT `read_head_sha` from the later `head_sha` op; on the `:payload`
+  path it is a commit instead, but that path never arms this deadline.) And that is still a floor: it
+  excludes the `--force-with-lease` branch of the push. So the lift is NOT established safe by this
+  reasoning; it is asserted.
 
   What is NOT established either is that the race bites: nobody has shown the reset actually landing on
   a live git process. Do not read the numbers above as a bug report — read them as: this invariant is

@@ -36,7 +36,7 @@ die() { echo "install: ERREUR — $*" >&2; exit 1; }
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
 
 # --- 1. Build the prod release (self-contained, bundled ERTS). The contracts lock runs as a release
-#        STEP (mix.exs `verrou_contracts/1`, first in `steps:`), so a red contract fails the build here.
+#        STEP (mix.exs `contracts_gate/1`, first in `steps:`), so a red contract fails the build here.
 say "build release prod (MIX_ENV=prod mix release --overwrite)…"
 (
   cd "$RUNTIME_DIR"

@@ -145,10 +145,10 @@ if commit.author_email == SYSTEM_EMAIL:
         commit.author_name = commit.committer_name
         commit.author_email = commit.committer_email
     else:
-        # auto_init Gitea (Initial commit) : committer AUSSI systeme, aucune trace humaine sur CE
-        # commit -> fallback sur HUMAN_NAME/EMAIL (identite humaine scannee en amont, hors callback).
-        # NB : ce bloc est une chaine bash single-quotee -> AUCUNE apostrophe ASCII ici (sinon la
-        # quote casse — la classe de bug exacte que le passage par env corrige).
+        # auto_init Gitea (Initial commit): committer is ALSO the system account, no human trace on THIS
+        # commit -> fall back to HUMAN_NAME/EMAIL (human identity scanned upstream, outside the callback).
+        # NB: this block is a single-quoted bash string -> NO ASCII apostrophe here (one would close the
+        # quote - the exact bug class the env-var passing fixes).
         commit.author_name = HUMAN_NAME
         commit.author_email = HUMAN_EMAIL
         commit.committer_name = HUMAN_NAME

@@ -100,7 +100,7 @@ defmodule Fleet.Application do
         # structurally POST-boot: as a mid-boot child of starfleet, its async Task could spawn
         # BEFORE pilot/api are up — if a later domain failed its start_link (port taken), the
         # permanents would already be running in a half-dead fleet (wasted spend, orphaned
-        # processes). Here, if the boot aborts, NO spawn has happened. Via the FAÇADE (the
+        # processes). Here, if the boot aborts, NO spawn has happened. Via the FACADE (the
         # domain owns its `:start_boot_orchestrator` gate — false in test, hermetic — and its
         # trigger; the root only says "now"): boundary refuses a direct call to
         # Starfleet.Application, rightly — the facade IS the surface.
