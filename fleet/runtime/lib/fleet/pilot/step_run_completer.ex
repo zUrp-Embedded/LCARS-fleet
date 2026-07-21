@@ -965,9 +965,24 @@ defmodule Fleet.Pilot.StepRunCompleter do
         end
 
       d_opts when is_map(d_opts) ->
-        case deliverable.publish(d_opts) do
-          {:ok, %{commit_sha: sha}} -> {:ok, Map.get(step_run, :step_run_sha, sha)}
-          {:error, reason} -> {:error, {:publish, reason}}
+        # Mark the producer pod as publish-in-flight for the WHOLE `Deliverable.publish` window (the
+        # git ops that read its workspace). The pod's `:publish_deadline` reads this mark and defers
+        # its destructive reset instead of firing on a live publish (observation, not
+        # arithmetic). Crash-safe: `while_publishing` clears in an `after`, so a crashed publish
+        # never freezes the pod forever. No pod_id (legacy/test) → no mark, behaviour unchanged.
+        publish = fn ->
+          case deliverable.publish(d_opts) do
+            {:ok, %{commit_sha: sha}} -> {:ok, Map.get(step_run, :step_run_sha, sha)}
+            {:error, reason} -> {:error, {:publish, reason}}
+          end
+        end
+
+        case Map.get(step_run, :pod_id) do
+          pod_id when is_binary(pod_id) ->
+            Fleet.Publish.InFlight.while_publishing(pod_id, publish)
+
+          _ ->
+            publish.()
         end
     end
   end

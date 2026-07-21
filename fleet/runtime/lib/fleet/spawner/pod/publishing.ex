@@ -74,6 +74,16 @@ defmodule Fleet.Spawner.Pod.Publishing do
   def cancel_publish_deadline_action, do: {{:timeout, :publish_deadline}, :infinity, :fire}
 
   @doc """
+  gen_statem action that RE-ARMS the `:publish_deadline` for a fresh window (`publish_deadline_ms/0`).
+  Emitted by the deadline handler when the publish is observed still IN FLIGHT (`Fleet.Publish.InFlight`):
+  the fail-safe should fire only against a publish that is NOT running, so a live one gets a new window
+  rather than a reset. Same shape as the arming in `maybe_enter_publishing/1`.
+  """
+  @spec arm_publish_deadline_action(map()) :: :gen_statem.action()
+  def arm_publish_deadline_action(_data),
+    do: {{:timeout, :publish_deadline}, publish_deadline_ms(), :fire}
+
+  @doc """
   The `:publish_deadline` fail-safe delay (ms) — config `:fleet_spawner, :publish_deadline_ms`,
   default 120_000. Past this delay with no `deliverable.published`, the flag is lifted anyway
   (otherwise the pod would stay never-`:ready` hence never re-briefed — a wedge), with a WARNING on
@@ -107,13 +117,14 @@ defmodule Fleet.Spawner.Pod.Publishing do
   excludes the `--force-with-lease` branch of the push. So the lift is NOT established safe by this
   reasoning; it is asserted.
 
-  What is NOT established either is that the race bites: nobody has shown the reset actually landing on
-  a live git process. Do not read the numbers above as a bug report — read them as: this invariant is
-  unproven in both directions, and the timing argument is the wrong instrument. The pod cannot observe
-  the publisher (different domain, Spawner ∌ Pilot; the flag is the only channel), which is why a
-  budget comparison stands in for a fact. The side that PERFORMS the reset is Pilot, and it does hold
-  that fact — `StepRunConsumer.inflight_completions/0` counts the live completion Tasks. Wiring those
-  two is what would replace arithmetic with observation.
+  The timing argument was the wrong instrument, and the deadline no longer stands in for the fact:
+  the `:publish_deadline` handler now OBSERVES whether the publish is in flight before its
+  destructive lift. The Pilot completion marks the pod in `Fleet.Publish.InFlight` (a foundation
+  primitive `deps: []`, reachable from both domains since Spawner ∌ Pilot) for the whole
+  `Deliverable.publish` window; the handler reads that mark and RE-ARMS the deadline instead of
+  lifting a running publish, so the fail-safe fires only against a publish that is NOT in flight.
+  The number below is therefore no longer load-bearing (the observation is the guard); it stays a
+  bounded backstop for the genuinely-lost-emission case.
   """
   @spec publish_deadline_ms() :: non_neg_integer()
   def publish_deadline_ms,

@@ -1571,6 +1571,53 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
+    # The :publish_deadline handler OBSERVES the publish before its destructive lift: if a
+    # publish is in flight for this pod (the Pilot completion marked it), the deadline RE-ARMS instead
+    # of lifting (never a reset out from under a live git process); only when no publish is in flight
+    # is the lift safe. The handler reads only `conditions` + `pod_id`, so we drive it directly.
+    test "publish_deadline fires while a publish is IN FLIGHT → RE-ARM, :publishing kept (no reset)" do
+      pod_id = "pod-inflight-#{System.unique_integer([:positive])}"
+      data = %{conditions: MapSet.new([:publishing]), pod_id: pod_id}
+
+      Fleet.Publish.InFlight.mark(pod_id)
+      on_exit(fn -> Fleet.Publish.InFlight.clear(pod_id) end)
+
+      result =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:keep_state_and_data, [{{:timeout, :publish_deadline}, ms, :fire}]} =
+                   Fleet.Spawner.Pod.handle_event(
+                     {:timeout, :publish_deadline},
+                     :fire,
+                     :monitoring,
+                     data
+                   )
+
+          assert is_integer(ms) and ms > 0
+        end)
+
+      assert result =~ "IN FLIGHT"
+    end
+
+    test "publish_deadline fires with NO publish in flight → lift as before (:publishing removed)" do
+      pod_id = "pod-nolongerpub-#{System.unique_integer([:positive])}"
+      data = %{conditions: MapSet.new([:publishing]), pod_id: pod_id}
+
+      # No mark → not in flight → the lift is safe.
+      refute Fleet.Publish.InFlight.in_flight?(pod_id)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:keep_state, new_data, [{{:timeout, :publish_deadline}, :infinity, :fire}]} =
+                 Fleet.Spawner.Pod.handle_event(
+                   {:timeout, :publish_deadline},
+                   :fire,
+                   :monitoring,
+                   data
+                 )
+
+        refute :publishing in new_data.conditions
+      end)
+    end
+
     # A payload pipe (no async push) does NOT arm :publishing — otherwise it would arm a 120s
     # deadline never lifted by deliverable.published (emitted only for git_native).
     test "submit of a payload pipe → NO :publishing condition (nothing to protect)" do

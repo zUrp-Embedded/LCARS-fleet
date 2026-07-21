@@ -637,24 +637,23 @@ defmodule Fleet.Spawner.Pod do
   # safety, in either direction — nobody has shown the reset landing on a live git process either.
   # Logs WARNING: a missed confirmation must be visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
-    if Publishing.publishing?(data) do
-      # THIS WARNING IS THE ONLY TRACE, AND IT IS NOT RECOVERABLE. There is no file backend on the
-      # logger (`config :logger, level:` only), so it lands in the daemon's tmux pane — a 2000-line
-      # ring buffer that dies with the daemon. The durable NDJSON (`Starfleet.AuditLog.write/1`) is
-      # written by `Cat5Escalator` and `DriftMonitor` alone: Cat-5 forensics, not this.
-      #
-      # Consequence, and it is the reason the safety question above stays open: nobody can find out
-      # AFTER THE FACT whether this ever fired. Not for lack of access — because nothing records it.
-      # So "does the reset ever land on a live git process?" is unanswerable as the code stands, in
-      # both directions. Making it answerable is a design call (Cat-5 rail? a durable audit rail? or
-      # accept the log?), deliberately not taken here.
-      Logger.warning(
-        "pod #{data.pod_id} :publishing -> :ready by DEADLINE (deliverable.published not received in time)"
-      )
-    end
+    cond do
+      # OBSERVATION: a publish is still IN FLIGHT for this pod (the Pilot completion marked
+      # it, `Fleet.Publish.InFlight`). The deadline was the arithmetic backstop; the mark is the
+      # fact. A running publish must not be reset out from under a live git process — re-arm the
+      # deadline (a fresh bounded window) instead of lifting. A crashed publish clears its mark
+      # (while_publishing's `after`), so this can never defer forever.
+      Publishing.publishing?(data) and Fleet.Publish.InFlight.in_flight?(data.pod_id) ->
+        Logger.warning(
+          "pod #{data.pod_id} :publish_deadline fired but a publish is IN FLIGHT — re-arming " <>
+            "(observed live, not reset; observation over arithmetic)"
+        )
 
-    {:keep_state, Publishing.leave_publishing(data),
-     [Publishing.cancel_publish_deadline_action()]}
+        {:keep_state_and_data, [Publishing.arm_publish_deadline_action(data)]}
+
+      true ->
+        do_publish_deadline_lift(data)
+    end
   end
 
   # UNIFIED ack-driven KICK loop (bootstrap + wake-fallback, parameterized: cap/retry/keyword/ACK).
@@ -937,6 +936,27 @@ defmodule Fleet.Spawner.Pod do
     # (Pod.McpProvision — the whole MCP channel lives over there) is self-protected (never raises):
     # a raise here would propagate out of `terminate`.
     McpProvision.release_pod_socket(data)
+  end
+
+  defp do_publish_deadline_lift(data) do
+    if Publishing.publishing?(data) do
+      # THIS WARNING IS THE ONLY TRACE, AND IT IS NOT RECOVERABLE. There is no file backend on the
+      # logger (`config :logger, level:` only), so it lands in the daemon's tmux pane — a 2000-line
+      # ring buffer that dies with the daemon. The durable NDJSON (`Starfleet.AuditLog.write/1`) is
+      # written by `Cat5Escalator` and `DriftMonitor` alone: Cat-5 forensics, not this.
+      #
+      # Consequence, and it is the reason the safety question above stays open: nobody can find out
+      # AFTER THE FACT whether this ever fired. Not for lack of access — because nothing records it.
+      # So "does the reset ever land on a live git process?" is unanswerable as the code stands, in
+      # both directions. Making it answerable is a design call (Cat-5 rail? a durable audit rail? or
+      # accept the log?), deliberately not taken here.
+      Logger.warning(
+        "pod #{data.pod_id} :publishing -> :ready by DEADLINE (deliverable.published not received in time)"
+      )
+    end
+
+    {:keep_state, Publishing.leave_publishing(data),
+     [Publishing.cancel_publish_deadline_action()]}
   end
 
   # ============================================================
