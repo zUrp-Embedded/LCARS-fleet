@@ -30,6 +30,7 @@ is restated, only pointed at.
 - `Fleet.Workflow.Git` — system-side git publication mechanism (add → commit → [push]), fail-closed
 - `Fleet.Workflow.BriefArtifact` — physical brief in work/ops (`briefs/` worker / `gate-briefs/` judge, plain names, identity = introducing commit)
 - `Fleet.Workflow.OpsObject` — the ONE commit-an-object-into-work/ops mechanic (write → commit → best-effort push)
+- `Fleet.Workflow.OpsObjectSync` — per-node serializer in front of `OpsObject`: the work/ops worktree gate (one git transaction at a time per node).
 - `Fleet.Workflow.BriefTemplate` — calibration-template renderer (`priv/workflow/brief_templates/`, F-23: prose is data)
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
 - `Fleet.Workflow.Provenance.Verifier` — deterministic triplet verifier, the non-LLM wall (+ `mix lcars.provenance.verify`)

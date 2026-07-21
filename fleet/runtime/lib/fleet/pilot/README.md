@@ -1,7 +1,7 @@
 # Fleet.Pilot — domain card
 
 **Date**: 2026-05-26
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-21
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
@@ -35,7 +35,11 @@ restated, only pointed at.
 **Incidents & onboarding**
 - `Fleet.Pilot.IncidentConsumer` — Bus consumer of pod-failure events (`pod.failed` / `wake.failed`) → `IncidentRegistry`.
 - `Fleet.Pilot.IncidentRegistry` — persistent cross-session incident memory (GenServer + WAL + forge sync). Sub-module `Escalation` (the sysadmin issue).
+- `Fleet.Pilot.ArchWake` — SINGLE authority for waking a project's architect on an `lcars-awaits-arch` escalation: the ordered offer-then-wake pair, shared by both rails.
+- `Fleet.Pilot.ArchFeed` — Bus consumer appending one short line per fleet milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`).
 - `Fleet.Pilot.WakeRecovery` — hardening of `Spawner.wake_pod/1` (re-roll / escalate).
+- `Fleet.Pilot.ProjectArchitect` — the PER-PROJECT architect: pod-id authority + idempotent `ensure/2` (one architect per repo, project-bound identity).
+- `Fleet.Pilot.ProjectIntensity` — single owner of the per-project criticality declaration (`<project>/intensity.json`, schema `intensity-v1`): written at onboarding, read at the workflow-map burn.
 - `Fleet.Pilot.ProjectOnboard` — `onboard/2` / `import/2`: mechanically create/import a dual-dir project. Sub-module `Scaffold` (pure templates).
 
 **Primitives (single-authority utils)**
