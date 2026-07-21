@@ -3,13 +3,19 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Architect's "forge delegation" domain + authorization gate — extracted from
   `Fleet.MCP.PodTools` (which keeps the `handle_tool_call/3` routing table and the
   MCP content format). Named after the code's vocabulary ("DELEGATION channel",
-  `delegation_org`, `delegation_target`): the four tools form the channel through which
+  `delegation_org`, `delegation_target`): these tools form the channel through which
   the architect delegates work to the fleet and tracks it.
 
     * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
     * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + dual-dir).
     * `import_project/2` — ONBOARDING channel (variant): imports an EXISTING forge repo into
       the machine (dual-worktree, `main` content intact — ≠ `create_project`).
+    * `open_project/2` — ONBOARDING channel (variant): relaunches a project ALREADY on the
+      machine (the third portfolio verb — create / import / open; no forge/disk write, ensures
+      the per-project architect — the path back to a project after a fleet restart).
+    * `delete_project/3` — ONBOARDING channel: general teardown of a project (forge repo, then the
+      dual-dir, then the architect pod — stopped last, only if a dir is proven to be `full_name`),
+      fail-closed unless `args["force"] == true` (the delete is irreversible).
     * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
 
   ## Two server-side gates (reorg 2026-07-19, cf. DESIGN-carte-des-roles §9)
@@ -18,7 +24,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   the socket acceptor — NOT a wire field), then matched. The tools split along the arch's two heads:
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
-      `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
+      `open_project` / `delete_project` / `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
       OR `architect` (transitionally, until it goes per-project). Refusal → `:forbidden_not_onboarder`.
     * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
       `comment_issue`: the per-project head. Admits ONLY `architect`. Refusal → `:forbidden_not_architect`.
@@ -162,9 +168,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  DELETES a project `full_name` (`"owner/name"`) — general teardown (architect pod + forge repo +
-  dual-dir) via the `:project_onboard` seam. Onboarder gate (starfleet/architect), same as
-  create/import. FAIL-CLOSED: `args["force"]` MUST be the boolean `true` to act — without it the seam
+  DELETES a project `full_name` (`"owner/name"`) — general teardown via the `:project_onboard` seam,
+  in order: forge repo first, then the dual-dir, then the architect pod (stopped LAST, and only once a
+  dir is proven to BE `full_name` — a homonym owned by someone else is never touched). Onboarder gate
+  (starfleet/architect), same as create/import. FAIL-CLOSED: `args["force"]` MUST be the boolean `true` to act — without it the seam
   returns `{:error, {:force_required, _}}` and destroys nothing (the target is a free argument and the
   delete is irreversible; there is no reliable "valueless" heuristic).
   """
