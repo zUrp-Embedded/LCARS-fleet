@@ -2,16 +2,17 @@
 # SOURCE: test/claude_launch/claude_launch.bats
 # AUTHOR: engineer
 # STARDATE: 2026-06-01
-# STATUS: beyond_#5 chantier 3 — tests bats bin/claude_launch.sh v2 (ADR-G, RC interactif)
+# STATUS: bats tests for bin/claude_launch.sh v2 (ADR-G, interactive RC)
 #
-# Tests intégration bin/claude_launch.sh (frontière vendor N1) au contrat ADR-G ACTUEL :
-# 3 args positionnels <role> <pod_id> <pod_dir> (le SP N'est PLUS un arg — durcissement anti-fuite
-# /proc/cmdline 2026-06-14). Le launcher lit le SP depuis $POD_DIR/.lcars/system-prompt.md (écrit par
-# le spawner en do_project) et le passe via --system-prompt-file (replace + TRUSTED). Session UUID
-# pré-allouée + préfixe nom RC voyagent par l'ENV (LCARS_POD_SESSION_ID / _RESUME / _SESSION_NAME_PREFIX).
-# Permission = --permission-mode default par défaut (#kill-yolo : listes ENFORCED, fini le --dangerously-skip).
-# exec `claude --remote-control` interactif (PAS -p/stream-json/budget). Le launcher exec direct → le stub
-# claude echo ses args, on asserte sur la ligne STUB_ARGS.
+# Integration tests for bin/claude_launch.sh (the N1 vendor frontier) against the CURRENT ADR-G
+# contract: 3 positional args <role> <pod_id> <pod_dir>. The SP is NOT an arg any more — it was pulled
+# out of the argv to stop it leaking through /proc/cmdline. The launcher reads it from
+# $POD_DIR/.lcars/system-prompt.md (written by the spawner in do_project) and passes it through
+# --system-prompt-file (replace + TRUSTED). The pre-allocated session UUID and the RC name prefix travel
+# through the ENV (LCARS_POD_SESSION_ID / _RESUME / _SESSION_NAME_PREFIX). Permissions default to
+# --permission-mode default (#kill-yolo: the lists are ENFORCED, no more --dangerously-skip). It execs
+# `claude --remote-control` interactively (NOT -p/stream-json/budget). Since the launcher execs
+# directly, the claude stub echoes its args and we assert on the STUB_ARGS line.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/claude_launch.sh"
@@ -19,8 +20,8 @@ setup() {
   POD_DIR="$TMP_BASE/pod-engineer-test"
   mkdir -p "$POD_DIR/.claude" "$POD_DIR/.lcars"
 
-  # Cap-profile JSON resolved (forme fleet_spawner chantier 6). Pas de spec.invocation → le launcher
-  # tombe sur ses défauts (permission_mode "default", remote_control true, model/effort omis).
+  # Resolved cap-profile JSON (the fleet_spawner shape). No spec.invocation → the launcher falls back on
+  # its defaults (permission_mode "default", remote_control true, model/effort omitted).
   cat > "$POD_DIR/.cap-profile.json" <<'EOF'
 {
   "api_version": "lcars/v2.5",
@@ -35,7 +36,7 @@ setup() {
 }
 EOF
 
-  # Stub vendor claude : répond à --version (provisioning .claude.json) puis echo ses args.
+  # claude vendor stub: answers --version (for the .claude.json provisioning) then echoes its args.
   CLAUDE_STUB="$TMP_BASE/claude-stub"
   cat > "$CLAUDE_STUB" <<'EOF'
 #!/usr/bin/env bash
@@ -49,14 +50,15 @@ EOF
   chmod +x "$CLAUDE_STUB"
 
   export LCARS_CLAUDE_BIN="$CLAUDE_STUB"
-  # Session : UUID pré-alloué + préfixe nom RC (posés par le spawner via bwrap --setenv en prod).
+  # Session: pre-allocated UUID + RC name prefix (set by the spawner through bwrap --setenv in prod).
   export LCARS_POD_SESSION_ID="test-session-uuid"
   export LCARS_POD_SESSION_NAME_PREFIX="lordzurp_engineer"
 
-  # SP HORS argv : le launcher le lit depuis $POD_DIR/.lcars/system-prompt.md via --system-prompt-file
-  # (écrit par le spawner en do_project). On le provisionne donc COMME le spawner, pas en argv.
+  # SP OUT of the argv: the launcher reads it from $POD_DIR/.lcars/system-prompt.md through
+  # --system-prompt-file (written by the spawner in do_project). So we provision it LIKE the spawner
+  # does, not as an arg.
   SP_FILE="$POD_DIR/.lcars/system-prompt.md"
-  printf '%s\n' "# Engineer SP de test" > "$SP_FILE"
+  printf '%s\n' "# Engineer test SP" > "$SP_FILE"
 }
 
 teardown() {
@@ -64,31 +66,31 @@ teardown() {
 }
 
 # =============================================================
-# Args validation — contrat 3 args STRICT (SP n'est plus positionnel)
+# Args validation — STRICT 3-arg contract (the SP is no longer positional)
 # =============================================================
 
-@test "args: exit 1 quand aucun argument" {
+@test "args: exit 1 with no argument" {
   run "$SCRIPT"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"usage:"* ]]
 }
 
-@test "args: exit 1 quand 4 args (SP n'est PLUS positionnel — $# -ne 3 strict)" {
-  # Régression jumelle du bridge python A7 : l'ancien contrat prenait le SP en argv 4. Le durcissement
-  # anti-fuite l'a sorti de l'argv → 4 args = trop d'args = usage error.
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" "# SP en trop"
+@test "args: exit 1 with 4 args (the SP is NO LONGER positional — strict $# -ne 3)" {
+  # The old contract took the SP as argv 4. Pulling it out of the argv (anti-leak hardening) makes a
+  # 4th arg one arg too many: usage error.
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "# one SP too many"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"usage:"* ]]
 }
 
-@test "args: exit 1 quand role est string vide" {
+@test "args: exit 1 when role is an empty string" {
   run "$SCRIPT" "" pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"must be non-empty"* ]]
 }
 
-@test "args: exit 1 quand le fichier SP (.lcars/system-prompt.md) est absent ou vide" {
-  # Le SP est lu d'un fichier ([[ ! -s ]] = absent OU vide). On tronque à vide pour exercer le -s.
+@test "args: exit 1 when the SP file (.lcars/system-prompt.md) is missing or empty" {
+  # The SP is read from a file ([[ ! -s ]] = missing OR empty). We truncate it to exercise the -s.
   : > "$SP_FILE"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
@@ -97,17 +99,17 @@ teardown() {
 }
 
 # =============================================================
-# Session env (:? strict — posés par le spawner)
+# Session env (strict :? — set by the spawner)
 # =============================================================
 
-@test "session: exit non-zéro + message quand LCARS_POD_SESSION_ID absent" {
+@test "session: non-zero exit + message when LCARS_POD_SESSION_ID is absent" {
   unset LCARS_POD_SESSION_ID
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -ne 0 ]]
   [[ "$output" == *"session UUID required"* ]]
 }
 
-@test "session: exit non-zéro + message quand LCARS_POD_SESSION_NAME_PREFIX absent" {
+@test "session: non-zero exit + message when LCARS_POD_SESSION_NAME_PREFIX is absent" {
   unset LCARS_POD_SESSION_NAME_PREFIX
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -ne 0 ]]
@@ -118,21 +120,21 @@ teardown() {
 # Setup checks
 # =============================================================
 
-@test "setup: exit 1 quand claude binary missing" {
+@test "setup: exit 1 when the claude binary is missing" {
   export LCARS_CLAUDE_BIN="/nonexistent/claude"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"claude binary missing"* ]]
 }
 
-@test "setup: exit 1 quand jq binary missing" {
+@test "setup: exit 1 when the jq binary is missing" {
   export LCARS_JQ_BIN="/nonexistent/jq"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"jq binary missing"* ]]
 }
 
-@test "setup: exit 1 quand cap-profile JSON missing" {
+@test "setup: exit 1 when the cap-profile JSON is missing" {
   rm -f "$POD_DIR/.cap-profile.json"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
@@ -141,7 +143,7 @@ teardown() {
 }
 
 # =============================================================
-# Happy path + assemblage flags ADR-G (le stub echo ses args)
+# Happy path + ADR-G flag assembly (the stub echoes its args)
 # =============================================================
 
 @test "happy path: exit 0" {
@@ -149,21 +151,21 @@ teardown() {
   [[ "$status" -eq 0 ]]
 }
 
-@test "flags: --remote-control présent (RC-at-startup)" {
+@test "flags: --remote-control present (RC-at-startup)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--remote-control"* ]]
 }
 
-@test "env: ENABLE_TOOL_SEARCH non exporté (défaut vendor conservé — arbitrage 2026-07-18)" {
+@test "env: ENABLE_TOOL_SEARCH not exported (the vendor default is kept)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"STUB_ENV: ENABLE_TOOL_SEARCH=unset"* ]]
 }
 
-@test "F115/F157: .claude.json provisionné porte les 3 clés remote-control (écrivain unique N1)" {
+@test "F115/F157: the provisioned .claude.json carries the 3 remote-control keys (single N1 writer)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
-  # Le launcher est l'unique écrivain du .claude.json : sans ces clés, le dialog RC re-bloque
-  # au boot (pod.ex N0 ne les pose plus — sa version était clobberée par ce `cat >`).
+  # The launcher is the ONLY writer of .claude.json: without these keys the RC dialog blocks the boot
+  # again (pod.ex N0 no longer sets them — its version was clobbered by this `cat >`).
   [[ -f "$POD_DIR/.claude.json" ]]
   run cat "$POD_DIR/.claude.json"
   [[ "$output" == *'"remoteControlAtStartup": true'* ]]
@@ -171,75 +173,76 @@ teardown() {
   [[ "$output" == *'"remoteDialogSeen": true'* ]]
 }
 
-@test "flags: 1ʳᵉ création → --session-id <UUID> (pas --resume)" {
+@test "flags: first creation → --session-id <UUID> (not --resume)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--session-id test-session-uuid"* ]]
   [[ "$output" != *"--resume"* ]]
 }
 
-@test "flags: recovery (LCARS_POD_RESUME=1) → --resume <UUID> (pas --session-id)" {
+@test "flags: recovery (LCARS_POD_RESUME=1) → --resume <UUID> (not --session-id)" {
   export LCARS_POD_RESUME=1
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--resume test-session-uuid"* ]]
   [[ "$output" != *"--session-id"* ]]
 }
 
-@test "flags: nom RC = préfixe humain_role (positionnel de --remote-control, PAS de suffixe auto)" {
-  # Le nom RC lisible Desktop est le positionnel de --remote-control (= SESSION_NAME_PREFIX = <projet>_<role>),
-  # PAS --remote-control-session-name-prefix (qui collerait un suffixe auto random qui s'empile).
+@test "flags: RC name = the human_role prefix (--remote-control's positional, NOT an auto suffix)" {
+  # The Desktop-readable RC name is --remote-control's positional (= SESSION_NAME_PREFIX =
+  # <project>_<role>), NOT --remote-control-session-name-prefix, which would glue on a random auto
+  # suffix that stacks up.
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--remote-control lordzurp_engineer"* ]]
 }
 
-@test "flags: SP via --system-prompt-file (HORS argv, anti-fuite /proc/cmdline) — pas inline" {
+@test "flags: SP through --system-prompt-file (OUT of the argv, /proc/cmdline anti-leak) — not inline" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
-  # Le launcher passe le CHEMIN du fichier SP, pas le contenu → le SP ne fuite pas dans l'argv exec'd.
+  # The launcher passes the SP file's PATH, not its content → the SP does not leak into the exec'd argv.
   [[ "$output" == *"--system-prompt-file $POD_DIR/.lcars/system-prompt.md"* ]]
-  [[ "$output" != *"Engineer SP de test"* ]]
+  [[ "$output" != *"Engineer test SP"* ]]
 }
 
-@test "flags: --permission-mode default par défaut (#kill-yolo : listes ENFORCED, plus de skip)" {
-  # Le monde est shapé (bwrap RO/RW + cap-profile allow/deny) → on N'utilise PLUS --dangerously-skip-
-  # permissions (qui neutralisait les listes). Sans spec.invocation.permission_mode → défaut "default".
+@test "flags: --permission-mode default by default (#kill-yolo: lists ENFORCED, no skip)" {
+  # The world is already shaped (bwrap RO/RW + cap-profile allow/deny), so we no longer use
+  # --dangerously-skip-permissions, which neutralized the lists. With no
+  # spec.invocation.permission_mode, the default is "default".
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--permission-mode default"* ]]
   [[ "$output" != *"--dangerously-skip-permissions"* ]]
 }
 
-@test "flags: LCARS_PERMISSION_MODE override → --permission-mode <mode> (rôle bridé)" {
+@test "flags: LCARS_PERMISSION_MODE override → --permission-mode <mode> (restricted role)" {
   export LCARS_PERMISSION_MODE=plan
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--permission-mode plan"* ]]
   [[ "$output" != *"--dangerously-skip-permissions"* ]]
 }
 
-@test "flags: --allowedTools = cap-profile + protocole MCP fleet universel (get_work_item/submit_result)" {
+@test "flags: --allowedTools = cap-profile + the universal fleet MCP protocol (get_work_item/submit_result)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--allowedTools Read,Glob,Grep"* ]]
-  # #kill-yolo : le protocole MCP fleet (get_work_item/submit_result) est APPENDÉ à l'allowlist — sinon
-  # un tool MCP non listé PROMPTE en --permission-mode default → hang headless. (vocab : get_work_item,
-  # ex-get_task renommé par la campagne vocab.)
+  # #kill-yolo: the fleet MCP protocol (get_work_item/submit_result) is APPENDED to the allowlist —
+  # otherwise an unlisted MCP tool PROMPTS under --permission-mode default, which hangs headless.
   [[ "$output" == *"mcp__fleet__get_work_item"* ]]
   [[ "$output" == *"mcp__fleet__submit_result"* ]]
 }
 
-@test "flags: --disallowedTools extrait du cap-profile JSON" {
+@test "flags: --disallowedTools extracted from the cap-profile JSON" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--disallowedTools web_search,tool_search_internal"* ]]
 }
 
-@test "flags: --setting-sources project,local INCONDITIONNEL (exclut 'user')" {
+@test "flags: --setting-sources project,local UNCONDITIONAL (excludes 'user')" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--setting-sources project,local"* ]]
 }
 
-@test "flags: --settings pointe .lcars/settings.json (flagSettings additif)" {
-  # Le settings pod est provisionné INCONDITIONNELLEMENT (cf. section settings) → --settings toujours émis.
+@test "flags: --settings points at .lcars/settings.json (additive flagSettings)" {
+  # The pod settings are provisioned UNCONDITIONALLY (cf. the settings section) → --settings is always emitted.
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
 }
 
-@test "flags: --mcp-config --strict-mcp-config si .mcp-fleet.json présent" {
+@test "flags: --mcp-config --strict-mcp-config when .mcp-fleet.json is present" {
   echo '{"mcpServers":{}}' > "$POD_DIR/.mcp-fleet.json"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--mcp-config $POD_DIR/.mcp-fleet.json"* ]]
@@ -247,16 +250,15 @@ teardown() {
 }
 
 # =============================================================
-# Settings pod (.lcars/settings.json) : provisioning INCONDITIONNEL + pass-through --settings (flagSettings).
-# #kill-yolo (2026-06-22) : PERM_MODE default → plus de --dangerously-skip-permissions ni de
-# skipDangerousModePermissionPrompt dans le chemin par défaut. Le fichier porte autoMemoryEnabled:false
-# (F-POD-AUTOMEM : auto-memory pod coupée). Le skip-dialog est réservé à PERM_MODE=bypassPermissions
-# (la valeur réelle de l'enum — PERM_MODE n'est JAMAIS vide, défaut "default" ; l'ancienne garde -z
-# était morte, audit lot 6 2026-07-12). --settings = source flagSettings, indépendante de
-# --setting-sources.
+# Pod settings (.lcars/settings.json): UNCONDITIONAL provisioning + --settings pass-through
+# (flagSettings). #kill-yolo: PERM_MODE default → no --dangerously-skip-permissions and no
+# skipDangerousModePermissionPrompt on the default path. The file carries autoMemoryEnabled:false
+# (F-POD-AUTOMEM: pod auto-memory off). The skip-dialog is reserved for PERM_MODE=bypassPermissions —
+# the real enum value, since PERM_MODE is NEVER empty (it defaults to "default") and the old `-z` guard
+# was therefore dead code. --settings is the flagSettings source, independent of --setting-sources.
 # =============================================================
 
-@test "settings: provisionne .lcars/settings.json (autoMemory coupée) + le passe via --settings" {
+@test "settings: provisions .lcars/settings.json (autoMemory off) + passes it through --settings" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
   [[ -f "$POD_DIR/.lcars/settings.json" ]]
@@ -264,27 +266,28 @@ teardown() {
   [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
 }
 
-@test "settings: merge non-destructif (settings pod préexistant conservé + clé fleet ajoutée)" {
+@test "settings: non-destructive merge (pre-existing pod settings kept + fleet key added)" {
   echo '{"hooks":{"PreToolUse":[]}}' > "$POD_DIR/.lcars/settings.json"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
-  grep -q "autoMemoryEnabled" "$POD_DIR/.lcars/settings.json"   # la clé fleet est ajoutée
-  grep -q "PreToolUse" "$POD_DIR/.lcars/settings.json"          # l'existant n'est PAS clobberé
+  grep -q "autoMemoryEnabled" "$POD_DIR/.lcars/settings.json"   # the fleet key is added
+  grep -q "PreToolUse" "$POD_DIR/.lcars/settings.json"          # the existing content is NOT clobbered
 }
 
-@test "settings: rôle bridé (LCARS_PERMISSION_MODE) NE provisionne PAS le skip-dialog" {
+@test "settings: a restricted role (LCARS_PERMISSION_MODE) does NOT provision the skip-dialog" {
   export LCARS_PERMISSION_MODE=plan
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
-  # Le fichier existe (autoMemoryEnabled INCONDITIONNEL) mais SANS skipDangerousModePermissionPrompt :
-  # le skip-dialog est réservé à PERM_MODE=bypassPermissions, jamais pour un mode bridé/défaut.
+  # The file exists (autoMemoryEnabled is UNCONDITIONAL) but WITHOUT
+  # skipDangerousModePermissionPrompt: the skip-dialog is reserved for PERM_MODE=bypassPermissions,
+  # never for a restricted or default mode.
   ! grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
 }
 
-@test "settings: PERM_MODE=bypassPermissions (override env) provisionne le skip-dialog (pré-acceptation, pas de hang)" {
-  # Régression audit lot 6 : la garde historique `-z "$PERM_MODE"` était MORTE (PERM_MODE jamais vide,
-  # défaut "default") → un pod bypassPermissions hangait au boot sur le dialogue « Yes I accept ».
-  # La garde est keyée sur la valeur réelle de l'enum (launch_spec.ex @permission_modes).
+@test "settings: PERM_MODE=bypassPermissions (env override) provisions the skip-dialog (pre-accepted, no hang)" {
+  # Regression: the historical `-z "$PERM_MODE"` guard was DEAD (PERM_MODE is never empty, it defaults
+  # to "default"), so a bypassPermissions pod hung at boot on the "Yes I accept" dialog. The guard is
+  # now keyed on the real enum value (launch_spec.ex @permission_modes).
   export LCARS_PERMISSION_MODE=bypassPermissions
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
@@ -292,9 +295,9 @@ teardown() {
   grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
 }
 
-@test "settings: cap-profile permission_mode=bypassPermissions provisionne le skip-dialog (canal in-sandbox)" {
-  # Même invariant que ci-dessus mais par le canal PROD : `.spec.invocation.permission_mode` du
-  # cap-profile JSON (l'env est strippé par bwrap --clearenv — la JSON est LE canal du mode).
+@test "settings: cap-profile permission_mode=bypassPermissions provisions the skip-dialog (in-sandbox channel)" {
+  # Same invariant as above but through the PROD channel: the cap-profile JSON's
+  # `.spec.invocation.permission_mode`. bwrap --clearenv strips the env, so the JSON IS the mode's channel.
   cat > "$POD_DIR/.cap-profile.json" <<'EOF'
 {
   "api_version": "lcars/v2.5",
@@ -312,10 +315,10 @@ EOF
   grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
 }
 
-@test "version: claude --version au format inattendu → fallback 2.1.150, PAS de mort pipefail" {
-  # Régression audit lot 6 : `VER=$(... | grep ...)` sous set -euo pipefail mourait (exit 1 opaque,
-  # TOUS les pods) quand le format --version changeait — le fallback ${VER:-2.1.150} était
-  # inatteignable pour ce chemin. Le pipeline doit être non-fatal et le fallback effectif.
+@test "version: claude --version in an unexpected format → fallback 2.1.150, NOT a pipefail death" {
+  # Regression: `VER=$(... | grep ...)` under `set -euo pipefail` died (opaque exit 1, for EVERY pod)
+  # whenever the --version format changed — the ${VER:-2.1.150} fallback was unreachable on that path.
+  # The pipeline must be non-fatal and the fallback must actually apply.
   cat > "$CLAUDE_STUB" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then echo "Claude Code (dev build, no semver here)"; exit 0; fi
@@ -331,10 +334,10 @@ EOF
 }
 
 # =============================================================
-# Interdits ADR-G (IV.1/IV.2 : pas de -p/stream-json/budget)
+# ADR-G prohibitions (IV.1/IV.2: no -p/stream-json/budget)
 # =============================================================
 
-@test "ADR-G: aucun -p/--print/--output-format/stream-json/--max-budget-usd" {
+@test "ADR-G: no -p/--print/--output-format/stream-json/--max-budget-usd" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" != *"--print"* ]]
   [[ "$output" != *"--output-format"* ]]
@@ -343,29 +346,29 @@ EOF
 }
 
 # =============================================================
-# Frontière vendor N1 — préfixe claude_*, jamais bwrap/tmux
+# N1 vendor frontier — claude_* only, never bwrap/tmux
 # =============================================================
 
-@test "frontière vendor: aucun containment fonctionnel (flags bwrap / bwrap|tmux exécutés)" {
-  # Les MENTIONS en doc/string (« LCARS_CLAUDE_BIN posé par bwrap », « le PTY est tmux ») sont
-  # légitimes (frontière N0/N1 documentée). On interdit le FONCTIONNEL : flags bwrap
-  # (--ro-bind/--unshare/--clearenv/--tmpfs) ou bwrap/tmux exécutés (début de ligne ou après exec).
+@test "vendor frontier: no functional containment (bwrap flags / bwrap|tmux executed)" {
+  # MENTIONS in doc or strings ("LCARS_CLAUDE_BIN set by bwrap", "the PTY is tmux") are legitimate —
+  # the N0/N1 frontier is documented. What is forbidden is the FUNCTIONAL use: bwrap flags
+  # (--ro-bind/--unshare/--clearenv/--tmpfs) or bwrap/tmux executed (line start, or after exec).
   ! grep -vE "^\s*#" "$SCRIPT" | grep -E "(^|exec +)(bwrap|tmux)\b|--ro-bind|--unshare|--clearenv|--tmpfs"
 }
 
-@test "frontière vendor: pas de --bare ni anthropic_api_key fonctionnels (hors commentaires)" {
+@test "vendor frontier: no functional --bare or anthropic_api_key (comments excluded)" {
   ! grep -vE "^\s*#" "$SCRIPT" | grep -iE "openai|anthropic_api_key|--bare"
 }
 
-@test "frontière vendor: script connaît juste claude (vendor N1)" {
+@test "vendor frontier: the script knows only claude (N1 vendor)" {
   grep -q "claude" "$SCRIPT"
 }
 
 # =============================================================
-# Header LCARS standard
+# Standard LCARS header
 # =============================================================
 
-@test "header LCARS: SOURCE/AUTHOR/STARDATE/STATUS présents" {
+@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   grep -q "^# SOURCE:" "$SCRIPT"
   grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"
