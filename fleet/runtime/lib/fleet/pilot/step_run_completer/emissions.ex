@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   Same keyword seams as the completer (`:forge_client` / `:forge_opts`) — no
   dedicated struct: the module lives in the completer's orbit and reads the same opts.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -43,34 +43,43 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   def deliverable_published(step_run, pr) do
     case Map.get(step_run, :pod_id) do
       pod_id when is_binary(pod_id) ->
-        result =
-          Fleet.EventRouter.Bus.emit(:workflow, :"deliverable.published",
-            pod_id: pod_id,
-            # Traceability: correlate to the issue (end-to-end key).
-            correlation_id: to_string(Map.fetch!(step_run, :issue_number)),
-            payload: %{
-              "repo" => Map.fetch!(step_run, :repo),
-              "issue" => Map.fetch!(step_run, :issue_number),
-              "pr" => pr
-            }
+        # `safe_emit`, not bare `emit/3`: this is a fire-and-forget announcement — the deliverable is
+        # ALREADY pushed and the forge already holds the truth by the time we get here. `safe_emit` is
+        # the project's single authority for that idiom, and its own doc says "Do NOT re-implement a
+        # local rescue around emit/3". What it buys over the bare call plus the function-level rescue
+        # below: the emitter's CONTEXT in the log, a construction exception distinguished from a
+        # delivery error (the bare rescue flattens both into one warning), and the `:on_unregistered`
+        # policy for the boot window before `Catalog.load!/0` populates the registry.
+        #
+        # It does NOT close a crash hole: the `rescue` at the end of this function already caught a
+        # raising `emit/3`, so the completion Task was never at risk from a failed announcement.
+        _ =
+          Fleet.EventRouter.Bus.safe_emit(
+            :workflow,
+            :"deliverable.published",
+            [
+              pod_id: pod_id,
+              # Traceability: correlate to the issue (end-to-end key).
+              correlation_id: to_string(Map.fetch!(step_run, :issue_number)),
+              payload: %{
+                "repo" => Map.fetch!(step_run, :repo),
+                "issue" => Map.fetch!(step_run, :issue_number),
+                "pr" => pr
+              }
+            ],
+            context: "StepRunCompleter: deliverable.published (slot-freeze release, non-fatal)"
           )
 
-        case result do
-          :ok ->
-            :ok
-
-          other ->
-            Logger.warning(
-              "StepRunCompleter: deliverable.published not emitted (#{inspect(other)})"
-            )
-
-            :ok
-        end
+        :ok
 
       _ ->
         :noop
     end
   rescue
+    # KEPT, and no longer about the emission: `safe_emit` handles its own failures above. What is left
+    # under this rescue is the `Map.fetch!` calls building the payload (`:issue_number`, `:repo`) — a
+    # step_run missing a key would raise here, and this emission must not take the completion down
+    # with it. Narrower than it looks, and deliberately not removed with the bare `emit`.
     e ->
       Logger.warning("StepRunCompleter: deliverable.published raised (#{inspect(e)})")
       :ok
