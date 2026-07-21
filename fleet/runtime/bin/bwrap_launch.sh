@@ -4,8 +4,7 @@
 # STARDATE: 2026-06-01
 # STATUS: PROD-V2 — containment N0 + tmux PTY persistant + socket-dir par-pod + holder bwrap-PID1 + die-with-parent
 #
-# Projette le SANCTUAIRE DU POD (N0, Ring 1 pod primitive, vendor-agnostic). Déroule la DN
-# `beyond_#5/design-notes/spawn/containment-bwrap.md` (DRAFT, REWORK PROVEN terrain 2026-05-31).
+# Projette le SANCTUAIRE DU POD (N0, Ring 1 pod primitive, vendor-agnostic).
 # RENVERSEMENT de la sandbox : bwrap ne CAGE pas l'agent pour protéger le monde de lui — il protège
 # l'AGENT du monde. Le sanctuaire, c'est le monde clos qu'il PROJETTE pour l'agent (« qu'est-ce qu'on
 # fournit », default vide-sauf-provision) : l'agent a EXACTEMENT ce dont il a besoin, ne peut rien casser,
@@ -17,10 +16,8 @@
 # Modèle ADR-G : le command (`claude_launch.sh`, opaque) tourne dans un **PTY tmux persistant** DANS
 # bwrap, via une **socket-DIR par-pod**. `tmux new-session -d` détache la session ; un **HOLDER**
 # (`exec sleep infinity` après la création) garde bwrap-PID1 vivant → le namespace + le serveur tmux
-# survivent. CORR. TERRAIN 2026-06-01 : SANS holder, bwrap sort dès que `new-session -d` rend la main
-# et TUE le namespace (donc le pod) — le modèle "bwrap-PID1 tient le détaché tout seul / moniteur rend
-# la main en ~13 ms" de la DN containment-bwrap est **FALSIFIÉ** (prouvé e2e). bwrap NE rend donc PAS
-# la main : ce process EST le pod (handle Port spawner). Validation boot ASYNC côté spawner
+# survivent. Le holder est REQUIS : sans lui, bwrap sort dès que `new-session -d` rend la main et TUE
+# le namespace, donc le pod. bwrap ne rend donc PAS la main : ce process EST le pod (handle Port spawner). Validation boot ASYNC côté spawner
 # (`tmux list-sessions`) ; teardown = close Port / SIGTERM. `--die-with-parent` = orphan-safe.
 #
 # Frontière N0/N1 (IX.2/IX.3) : tmux = N0 (tient n'importe quel REPL). bwrap_launch ne connaît PAS les
@@ -32,12 +29,12 @@
 #   LCARS_POD_RESUME              0|1 (1ʳᵉ création / recovery) — défaut 0
 #   LCARS_POD_SESSION_NAME_PREFIX <human>_<role> nom RC lisible — requis (:? strict)
 #   CLAUDE_DIR                    claudeDir du compte humain — requis (bindé RW, cf. LCARS_AUTH_MODE)
-#   LCARS_AUTH_MODE               bind UNIQUEMENT (token_arg retiré 2026-06-14) :
+#   LCARS_AUTH_MODE               bind UNIQUEMENT :
 #                                   - bind : bind RW de CLAUDE_DIR/.credentials.json SEUL →
 #                                            pod_dir/.claude/.credentials.json (refresh natif Anthropic
 #                                            en place + mtime sync, PAS de falaise ~8h). PAS le .claude
 #                                            humain entier — sinon ses hooks fuient et jamment le boot
-#                                            (P1/C9, JOURNAL-P1-hooks.md). .claude/ pod-owned.
+#                                            .claude/ reste pod-owned.
 #   LCARS_POD_CWD                 cwd du pod = racine de la branche/repo (monde-invoqué, align Claude
 #                                 Code natif /init) — défaut $POD_DIR (le bootstrap/spawner le pose
 #                                 sur $POD_DIR/<repo> pour un pod-projet).
@@ -58,7 +55,6 @@
 #   + --clearenv            (env CLOS : tout en --setenv explicite ; sinon l'ambient du spawner fuit)
 #   + DISABLE_AUTO_MEMORY   (pod stateless : pas d'auto-memory cachée qui drifte/meurt au nuke)
 #   + LCARS_POD_CWD         (cwd = racine de branche, pas $POD_DIR — align Claude Code natif)
-#   (à réconcilier dans la DN containment-bwrap au prochain tour doctrine.)
 
 set -euo pipefail
 
@@ -129,7 +125,7 @@ CWD_BIND_ARGS=()
 [[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" != "$WORKDIR" ]] &&
   CWD_BIND_ARGS=(--bind "$LCARS_POD_CWD_SRC" "$WORKDIR")
 
-# Mode auth — bind UNIQUEMENT (token_arg retiré 2026-06-14). token_arg injectait l'access_token OAuth en
+# Mode auth — bind UNIQUEMENT. Le mode token_arg, écarté, injectait l'access_token OAuth en
 #   `--setenv CLAUDE_CODE_OAUTH_TOKEN <token>` → FUITE dans l'argv (ps), ET pas de refresh (expiresAt:null)
 #   → un pod long (eng >8h) perdait l'auth en plein travail. bind (ADR-F) : bind RW de .credentials.json,
 #   refresh OAuth natif (proactif + réactif 401 + lockfile), full scope, pas de falaise.
@@ -236,17 +232,16 @@ set +f
 #   --clearenv : ENV CLOS — rien de l'ambient du spawner ne fuit ; tout est --setenv explicite.
 #   La discipline est dans les MURS (binds = ce qui existe) + l'ENV (ce qui est posé), pas dans le SP.
 # =============================================================
-# BL-021 — bind du SEUL `.credentials.json` de CLAUDE_DIR (ADR-F). token_arg retiré 2026-06-14 (cf. en-tête
-# « Mode auth »). `AUTH_ENV_ARGS` gardé vide pour la commande bwrap finale (référence préservée).
+# BL-021 — bind du SEUL `.credentials.json` de CLAUDE_DIR (ADR-F). `AUTH_ENV_ARGS` reste vide pour la
+# commande bwrap finale (référence préservée).
 #
-# P1/C9 (2026-06-07) — on NE bind PLUS le .claude humain entier. Raison : cwd=HOME=POD_DIR, donc les
+# P1/C9 — le .claude humain entier n'est PAS bindé. Raison : cwd=HOME=POD_DIR, donc les
 # tiers settings `project`/`local` (racine=cwd, activés par --setting-sources project,local)
 # résolvaient dans le .claude humain bindé → le settings.json humain était chargé comme settings
 # *projet* → ses hooks (session-startup.sh…) s'exécutaient → plantent → retry 10× → JAM au boot.
 # Le flag ne pouvait rien (il autorise project/local). Fix : seul `.credentials.json` est bindé
 # (refresh OAuth natif = écriture EN PLACE, survit au bind single-file + réécrit le fichier humain) ;
-# `.claude/` reste pod-owned (créé par do_project) → 0 settings.json humain → 0 hook. Détail
-# mécanisme : validation-pod/JOURNAL-P1-hooks.md.
+# `.claude/` reste pod-owned (créé par do_project) → 0 settings.json humain → 0 hook.
 AUTH_BIND_ARGS=()
 AUTH_ENV_ARGS=()
 HUMAN_CREDS="$CLAUDE_DIR/.credentials.json"
@@ -257,8 +252,7 @@ mkdir -p "$POD_DIR/.claude"
 AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$SANDBOX_HOME/.claude/.credentials.json")
 
 # Télémétrie ↔ feature-flags. Les flags Statsig/GrowthBook (dont `MONITOR_TOOL`, qui expose
-# l'outil Monitor = réveil-par-flag du pod, cf. investigation 2026-06-07 :
-# beyond_#5/.../investigation-monitor/JOURNAL.md) sont fetchés via le pipeline télémétrie.
+# l'outil Monitor = réveil-par-flag du pod) sont fetchés via le pipeline télémétrie.
 # `DISABLE_TELEMETRY=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` COUPENT ce fetch → `MONITOR_TOOL`
 # défaut OFF → l'agent retombe sur le kick `yop` (send-keys) au lieu du Monitor. Le contenu reste
 # 100% MCP (get_work_item/submit_result) dans les deux cas. Arbitrage acté (user) : on PRIVILÉGIE le
