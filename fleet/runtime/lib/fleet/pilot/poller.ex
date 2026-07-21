@@ -92,6 +92,11 @@ defmodule Fleet.Pilot.Poller do
   # Coalescence window of the webhook kick: a burst of events within the window = ONE poll.
   @gitea_kick_debounce_ms 1_000
 
+  # Cadence of the per-repo main-protection desired-state pass (1 GET per repo per period;
+  # first tick after boot rechecks everything — boot-time reconciliation is the feature,
+  # not a burst to shave). Regular ticks only, same rationale as the arch net.
+  @protection_recheck_ms 3_600_000
+
   defstruct [
     :repo,
     :interval_ms,
@@ -115,6 +120,12 @@ defmodule Fleet.Pilot.Poller do
     # G6 seam: escalation of an unreadable workflow_map (default nil → `IncidentRegistry.record_or_escalate/4`).
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
+    # Desired-state pass of the main branch-protection (default nil →
+    # `ProjectOnboard.reconcile_main_protection/2`) — seam for tests (zero forge).
+    protection_reconciler: nil,
+    # repo → monotonic ms of its last protection recheck (throttle; RAM loss on restart =
+    # recheck at next boot, convergent by construction).
+    protection_rechecked: %{},
     # Webhook-kick coalescence: true = an accelerated poll is already scheduled, the
     # following gitea.* events of the burst schedule NOTHING.
     gitea_kick_pending?: false,
@@ -193,7 +204,8 @@ defmodule Fleet.Pilot.Poller do
       spawner: Keyword.get(opts, :spawner),
       task_queue: Keyword.get(opts, :task_queue),
       wake_recovery: Keyword.get(opts, :wake_recovery),
-      incident_fun: Keyword.get(opts, :incident_fun)
+      incident_fun: Keyword.get(opts, :incident_fun),
+      protection_reconciler: Keyword.get(opts, :protection_reconciler)
     }
 
     _ =
@@ -382,11 +394,53 @@ defmodule Fleet.Pilot.Poller do
         # set only changes on poll reads — evaluating between them is pure churn).
         base = if mode == :tick, do: maybe_rekick_arch(awaits, base), else: base
 
+        # Desired-state pass of the main branch-protection (throttled per repo, regular
+        # ticks only): the rule was projected ONCE at onboarding and "already exist" used
+        # to be a blind :ok — an imported repo's stale rule or a card changed since then
+        # kept a main protection out of line with the CURRENT jury until now.
+        base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
+
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
         handle_poll_error(state, {:discover_repos, reason}, started)
     end
+  end
+
+  # Throttled desired-state pass: every repo whose last recheck is older than the period
+  # goes through the SAME projection point as onboarding (convergent protect_branch). A
+  # failed reconcile logs warning and retries next period — the protection is a
+  # desired-state, not a one-shot projection.
+  defp maybe_recheck_protection(%__MODULE__{} = state, repos) do
+    now = System.monotonic_time(:millisecond)
+
+    due =
+      Enum.filter(repos, fn repo ->
+        now - Map.get(state.protection_rechecked, repo, now - @protection_recheck_ms - 1) >=
+          @protection_recheck_ms
+      end)
+
+    reconciler =
+      state.protection_reconciler ||
+        (&Fleet.Pilot.ProjectOnboard.reconcile_main_protection/2)
+
+    Enum.each(due, fn repo ->
+      case reconciler.(repo, state.forge_opts) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Poller: main-protection reconcile #{repo} FAILED (#{inspect(reason)}) — " <>
+              "retried next period (the rule may be out of line with the current jury)"
+          )
+      end
+    end)
+
+    %{
+      state
+      | protection_rechecked: Enum.reduce(due, state.protection_rechecked, &Map.put(&2, &1, now))
+    }
   end
 
   # DISCOVERY path only (`list_org_repos` KO = the forge itself is down/degraded): feeds

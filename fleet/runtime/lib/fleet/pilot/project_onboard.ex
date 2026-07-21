@@ -436,6 +436,17 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # FORGE side. `work/ops` + feature-branches NOT protected (zones of direct system movement).
   defp lock_main(full_name, opts), do: protect_main(full_name, opts)
 
+  @doc """
+  Periodic desired-state pass of the `main` protection (poller-driven): re-projects the
+  rule sized by the CURRENT card jury through the convergent `protect_branch` — an
+  imported repo's stale rule, a card changed since onboarding, or a hand-edited forge
+  rule converges back within one recheck period. Same single projection point as
+  onboarding (`protect_main`): never a second vocabulary for the same rule.
+  """
+  @spec reconcile_main_protection(String.t(), keyword()) :: :ok | {:error, term()}
+  def reconcile_main_protection(repo, forge_opts) when is_binary(repo),
+    do: protect_main(repo, forge_opts: forge_opts)
+
   defp protect_main(repo, opts) do
     rule = %{
       rule_name: "main",

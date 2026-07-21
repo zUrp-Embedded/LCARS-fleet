@@ -1246,6 +1246,27 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid}
     end
 
+    test "the tick reconciles each repo's main protection ONCE per period (desired-state, throttled)" do
+      parent = self()
+
+      {name, _pid} =
+        start_entry_poller({:ok, []}, %{},
+          protection_reconciler: fn repo, _opts ->
+            send(parent, {:protection_reconciled, repo})
+            :ok
+          end
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+
+      # First tick reconciles (boot-time reconciliation IS the feature); the second tick is
+      # inside the period → throttled, no second pass. The old runtime had NO pass at all —
+      # the rule projected at onboarding was never compared to the current jury again.
+      assert_received {:protection_reconciled, repo}
+      refute_received {:protection_reconciled, ^repo}
+    end
+
     test "an ENGAGED pipeline (advanced route) holds the lease and blocks a QUEUED issue" do
       # #8: the lease is read from the ROUTE (state-machine), no longer state:*. #11 routed
       # qa-2:deploy (2nd step ≠ 1st = ADVANCED pipeline between two step_runs) → ENGAGED → holds

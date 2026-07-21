@@ -282,19 +282,62 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
         {:ok, _} ->
           :ok
 
-        # Idempotent ONLY on the "already exist" MESSAGE (403/409/422 across versions), never on the
-        # code alone — an invalid-payload 422 or a permission-refusal 403 falls through to a precise
-        # error, so we never claim a protection the forge rejected.
+        # "already exist" (403/409/422 across versions, matched on the MESSAGE never the code
+        # alone) used to read as a bare :ok with NO readback: an imported repo's stale rule —
+        # or a card whose jury changed since onboarding — silently kept a main protection
+        # weaker or stronger than the CURRENT projection. Desired-state instead: read the
+        # existing rule back, compare ONLY the fields we project (a hand-enriched rule keeps
+        # its extra fields), PATCH on divergence, fail loud when the readback/patch fails —
+        # never claim a protection whose actual shape was not seen.
         {:error, {:http, code, %{"message" => msg}}}
         when code in [403, 409, 422] and is_binary(msg) ->
           if String.contains?(msg, "already exist"),
-            do: :ok,
+            do: converge_existing_protection(config, repo, rule),
             else: {:error, {:http, code, %{"message" => msg}}}
 
         {:error, _} = err ->
           err
       end
     end
+  end
+
+  defp converge_existing_protection(config, repo, rule) do
+    rule_name = Map.fetch!(rule, :rule_name)
+    path = "/repos/#{encode_repo(repo)}/branch_protections/#{encode_seg(rule_name)}"
+    projected = projected_protection_fields(rule)
+
+    if projected == %{} do
+      # Nothing projected beyond the rule's existence — nothing to reconcile.
+      :ok
+    else
+      case http_get(config, path) do
+        {:ok, existing} when is_map(existing) ->
+          if Map.take(existing, Map.keys(projected)) == projected do
+            :ok
+          else
+            case http_patch(config, path, projected) do
+              {:ok, _} -> :ok
+              {:error, reason} -> {:error, {:protection_reconcile_failed, reason}}
+            end
+          end
+
+        {:ok, other} ->
+          {:error, {:protection_readback_invalid, other}}
+
+        {:error, reason} ->
+          {:error, {:protection_readback_failed, reason}}
+      end
+    end
+  end
+
+  # The reconcilable surface = the protection fields `lock_main` sizes, restricted to those
+  # the CALLER actually projected (string keys, the wire's shape on readback). Comparing or
+  # patching MORE would clobber operator enrichments (status checks, push whitelists) the
+  # runtime never projected.
+  @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push)
+
+  defp projected_protection_fields(rule) do
+    for {k, v} <- rule, sk = to_string(k), sk in @protectable_fields, into: %{}, do: {sk, v}
   end
 
   @doc """

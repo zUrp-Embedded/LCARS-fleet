@@ -1132,6 +1132,96 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
     end
 
+    test "already exist + DIVERGENT readback → PATCH of the projected fields only, :ok" do
+      # The blind :ok is the audited hole: an imported repo's stale rule (approvals 0) under a
+      # 2-judge card silently kept the weaker gate. Now: readback, compare, patch.
+      full_rule = %{
+        rule_name: "main",
+        required_approvals: 2,
+        dismiss_stale_approvals: true,
+        block_on_rejected_reviews: true,
+        enable_push: false
+      }
+
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "branch protection already exists"}},
+        {"GET", "/api/v1/repos/fleet/proj/branch_protections/main"} =>
+          {200,
+           %{
+             "required_approvals" => 0,
+             "dismiss_stale_approvals" => true,
+             "block_on_rejected_reviews" => true,
+             "enable_push" => false
+           }},
+        {"PATCH", "/api/v1/repos/fleet/proj/branch_protections/main"} => {200, %{}}
+      }
+
+      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+    end
+
+    test "already exist + divergent readback + PATCH fails → error (the old code claimed :ok here)" do
+      full_rule = %{
+        rule_name: "main",
+        required_approvals: 2,
+        dismiss_stale_approvals: true,
+        block_on_rejected_reviews: true,
+        enable_push: false
+      }
+
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "branch protection already exists"}},
+        {"GET", "/api/v1/repos/fleet/proj/branch_protections/main"} =>
+          {200, %{"required_approvals" => 0}},
+        {"PATCH", "/api/v1/repos/fleet/proj/branch_protections/main"} =>
+          {500, %{"message" => "boom"}}
+      }
+
+      assert {:error, {:protection_reconcile_failed, _}} =
+               ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+    end
+
+    test "already exist + IDENTICAL readback → :ok, no patch" do
+      full_rule = %{
+        rule_name: "main",
+        required_approvals: 2,
+        dismiss_stale_approvals: true,
+        block_on_rejected_reviews: true,
+        enable_push: false
+      }
+
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "branch protection already exists"}},
+        {"GET", "/api/v1/repos/fleet/proj/branch_protections/main"} =>
+          {200,
+           %{
+             "required_approvals" => 2,
+             "dismiss_stale_approvals" => true,
+             "block_on_rejected_reviews" => true,
+             "enable_push" => false,
+             "extra_operator_field" => "kept"
+           }}
+      }
+
+      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+    end
+
+    test "already exist + readback FAILS → error, never a protection claimed sight unseen" do
+      full_rule = %{rule_name: "main", required_approvals: 2}
+
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "branch protection already exists"}},
+        {"GET", "/api/v1/repos/fleet/proj/branch_protections/main"} =>
+          {500, %{"message" => "forge hiccup"}}
+      }
+
+      assert {:error, {:protection_readback_failed, _}} =
+               ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+    end
+
     test "protect_branch: a 403 permission refusal (not 'already exist') → precise error, not swallowed" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
