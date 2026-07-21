@@ -23,7 +23,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   `Fleet.CapProfile`: a data value read across the whole pilot/taskqueue domain, an `@opaque`
   would bark at every legitimate reader.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @type state :: :pending | :assigned | :in_progress | :completed | :failed | :cleared
@@ -269,7 +269,10 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_brief_ref(nil, _field), do: {:ok, nil}
 
   defp cast_brief_ref(s, field) when is_binary(s) do
-    if Regex.match?(~r/\A(briefs|gate-briefs)\/[A-Za-z0-9][A-Za-z0-9._-]*\.md\z/, s),
+    # Validate THROUGH `Fleet.Layout` (the single source of the work/ops object grammar), not a twin
+    # copy of its regex — Layout's own doc names this call-site as validating through it, so the
+    # grammar cannot drift between the two sides of the boundary.
+    if Fleet.Layout.valid_brief_ref?(s),
       do: {:ok, s},
       else: {:error, {:bad_attr, {field, s}}}
   end
