@@ -30,7 +30,7 @@
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
 #       --extra-token lcars-system:system.gitea_token        # les 6 rôles + le token système = A4 complet
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
-# Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 7) ·
+# Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 6) ·
 #           --extra-token COMPTE:FICHIER (répétable — pour un token où le compte ≠ le nom de fichier,
 #             ex. le système `lcars-system:system.gitea_token`) · --group GRP (défaut fleet) ·
 #           --token-name NAME (défaut lcars-fleet)
