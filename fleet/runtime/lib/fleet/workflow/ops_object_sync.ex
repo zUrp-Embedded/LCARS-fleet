@@ -17,6 +17,15 @@ defmodule Fleet.Workflow.OpsObjectSync do
   for the post-merge `reset --hard`: it handles one message at a time → ONE git transaction at a time,
   whatever the number of triggers. `OpsObject` stays the untouched engine; this is only the gate.
 
+  The gate is deliberately WIDER than the hazard it closes, and that widening is the thing to know
+  before touching it: the collision is per-`work_dir` (one worktree per project → one `.git/index.lock`
+  per project), but the serializer is ONE node-global process — `work_dir` travels as payload, never as
+  a routing key. So a commit for project B queues behind project A's even though they share no lock. It
+  is a chosen simplicity (no Registry, no per-project process lifecycle); its price is cross-project
+  head-of-line blocking, bounded by `@call_timeout` and widened by the push below staying inside the
+  transaction. Sharding per `work_dir` (`:via` a Registry) is the exit if it ever bites — and note that
+  NO test pins the node-wide scope, so a green suite would not by itself prove such a change safe.
+
   ## SYNCHRONOUS (unlike WorktreeSync)
 
   WorktreeSync is a cast (the merge does not wait, the clone is a mirror). Here the return — the
@@ -41,7 +50,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
   starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
