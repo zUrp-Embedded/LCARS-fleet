@@ -10,8 +10,16 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   defmodule StubSpawner do
     # PASSE-9 — real shape of `Spawner.spawn_pod/3` = {:ok, pid()}, NEVER {:ok, :stub_pod}: a
     # consumer re-interpolating the pid would break in prod.
+    #
+    # Async-safe observability: `spawn_pod` runs INSIDE the consumer GenServer, so it CANNOT read the
+    # test's process dictionary (the old `send(Process.get(:test_pid), …)` read the CONSUMER's dict →
+    # nil → the {:spawn_called} signal never reached any test, so the nominal dispatch + its threaded
+    # opts were never actually asserted). It relays to an observer registered under a name derived from
+    # the UNIQUE issue_id (no cross-test collision under `async`); silent no-op when none is registered.
     def spawn_pod(_cap_profile, issue_id, opts) do
-      send(Process.get(:test_pid), {:spawn_called, issue_id, opts})
+      if obs = Process.whereis(:"spawn_probe_#{issue_id}"),
+        do: send(obs, {:spawn_called, issue_id, opts})
+
       {:ok, self()}
     end
   end
@@ -36,7 +44,6 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   end
 
   defp start_consumer(spawner \\ StubSpawner) do
-    Process.put(:test_pid, self())
     name = :"pc_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
@@ -83,6 +90,32 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert Process.alive?(pid)
     assert log =~ "spawn dispatched name=engineer issue=issue-9"
     refute log =~ "invalid — name missing/empty"
+  end
+
+  test "nominal dispatch threads issue_id + allowlisted opts to spawn_pod (proven, not just logged)" do
+    # The OkSpawner test above proves the spawn FIRES (via the log line); this proves WHAT actually
+    # reaches spawn_pod — the issue_id and the allowlisted opts (brief + pod_id), i.e. the payload the
+    # pod is born with. The old suite never asserted this: the `{:spawn_called, …}` relay was broken
+    # (read the wrong process dict), so the opts threading went entirely unverified.
+    issue_id = "issue-proven-#{System.unique_integer([:positive])}"
+    Process.register(self(), :"spawn_probe_#{issue_id}")
+    {pid, _} = start_consumer()
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{
+          "cap_profile_name" => "engineer",
+          "issue_id" => issue_id,
+          "opts" => %{"brief" => "ship it", "pod_id" => "#{issue_id}-engineer"}
+        }
+      )
+    )
+
+    assert_receive {:spawn_called, ^issue_id, opts}, 2000
+    assert Keyword.get(opts, :brief) == "ship it"
+    assert Keyword.get(opts, :pod_id) == "#{issue_id}-engineer"
+    assert Process.alive?(pid)
   end
 
   test "acte4 #32: fully empty name → spawn.failed emitted (visible drop, not a mute warning)" do
