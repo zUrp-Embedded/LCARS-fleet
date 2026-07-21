@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "boot_at_start?/1 — Type 1 fleet-level" do
-    test "true: boot_at_start true + forever + host_native false (architect)" do
+    test "true: boot_at_start true + forever + host_native false (starfleet)" do
       assert PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => true,
@@ -118,7 +118,14 @@ defmodule Fleet.Spawner.PermanentBootTest do
       # The enumerator (`CapProfile.list`) resolves by `metadata.name` → yaml fixtures carrying the
       # name (the indexable identity). The FULL content comes from the injected loader (`loader_for`).
       # `notes.txt` = non-.yaml, ignored by the scan.
-      for name <- ~w(architect engineer starfleet) do
+      #
+      # WHY THESE NAMES — they used to say the opposite of the canon, and the conformance describe at the
+      # bottom of this file proves which way is true: `starfleet` is the Type 1 permanent that boots,
+      # the architect is PER-PROJECT (`boot_at_start: false`, spawned on-open), and NO canon role is
+      # host-native since the reorg. So the booting fixture is `starfleet`, and the D-01 exclusion is
+      # probed with a SYNTHETIC `host-native-probe`: the guard must be exercised, and no real role can
+      # exercise it any more. Naming it after a real role is what made this file teach a dead topology.
+      for name <- ~w(engineer host-native-probe starfleet) do
         File.write!(Path.join(dir, "#{name}.yaml"), "metadata:\n  name: #{name}\n")
       end
 
@@ -129,11 +136,11 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
     defp loader_for do
       fn
-        "architect" ->
+        "starfleet" ->
           {:ok,
            %Fleet.CapProfile{
              kind: "CapabilityProfile",
-             metadata: %{"name" => "architect"},
+             metadata: %{"name" => "starfleet"},
              spec: %{
                "invocation" => %{
                  "boot_at_start" => true,
@@ -151,11 +158,11 @@ defmodule Fleet.Spawner.PermanentBootTest do
              spec: %{"invocation" => %{"boot_at_start" => false, "lifetime_scope" => "one-shot"}}
            }}
 
-        "starfleet" ->
+        "host-native-probe" ->
           {:ok,
            %Fleet.CapProfile{
              kind: "CapabilityProfile",
-             metadata: %{"name" => "starfleet"},
+             metadata: %{"name" => "host-native-probe"},
              spec: %{
                "invocation" => %{
                  "boot_at_start" => false,
@@ -167,7 +174,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       end
     end
 
-    test "spawns ONLY architect (engineer worker + starfleet D-01 excluded)",
+    test "spawns ONLY starfleet (engineer worker + host-native-probe D-01 excluded)",
          %{dir: dir} do
       parent = self()
 
@@ -177,7 +184,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       end
 
       # G9: the boot returns the RESULT LIST (the BootOrchestrator's safe_boot classifies it).
-      assert [{:ok, pid_arch}] =
+      assert [{:ok, pid_perm}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
@@ -185,19 +192,19 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
 
       # BL-055: DETERMINISTIC permanent pod_id (no `-<os_time>`) → idempotent.
-      assert pid_arch == "permanent-architect"
-      assert_received {:spawned, "architect", ^pid_arch}
+      assert pid_perm == "permanent-starfleet"
+      assert_received {:spawned, "starfleet", ^pid_perm}
       refute_received {:spawned, "engineer", _}
-      refute_received {:spawned, "starfleet", _}
+      refute_received {:spawned, "host-native-probe", _}
     end
 
     test "BL-055: permanent already alive ({:already_started}) → idempotent no-op (pod_id kept)",
          %{dir: dir} do
-      # deterministic id → a re-boot lands back on `permanent-architect`; if the pod already runs,
+      # deterministic id → a re-boot lands back on `permanent-starfleet`; if the pod already runs,
       # spawn_pod returns {:already_started} → this is NOT an error, the pod_id is kept.
       spawner = fn _cp, _tid, _o -> {:error, {:already_started, self()}} end
 
-      assert [{:ok, "permanent-architect"}] =
+      assert [{:ok, "permanent-starfleet"}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
@@ -209,9 +216,9 @@ defmodule Fleet.Spawner.PermanentBootTest do
          %{dir: dir} do
       # Crash-boot doctrine: an unloadable profile = broken artifact → propagate (a "partial
       # success" that skips invalid roles and boots the rest would hide a broken deploy).
-      # `list_roles` returns sorted roles → engineer is the 1st to fail (architect OK).
+      # `list_roles` returns sorted roles → engineer is the 1st to fail (starfleet OK).
       loader = fn
-        "architect" -> loader_for().("architect")
+        "starfleet" -> loader_for().("starfleet")
         _ -> {:error, :invalid_schema}
       end
 
@@ -226,10 +233,10 @@ defmodule Fleet.Spawner.PermanentBootTest do
     test "G9 HONEST boot: spawner {:error} → the failure is RETURNED named, never filtered", %{
       dir: dir
     } do
-      # G9: a swallowed architect spawn failure ({:ok, []} via reject nil) would make the
+      # G9: a swallowed starfleet spawn failure ({:ok, []} via reject nil) would make the
       # BootOrchestrator emit a LYING fleet.boot_complete. The failure lives in the result
       # list, named (role + reason) → safe_boot classifies it → fleet.boot_partial.
-      assert [{:error, {"architect", :launch_failed}}] =
+      assert [{:error, {"starfleet", :launch_failed}}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
@@ -245,10 +252,10 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      assert {:ok, "permanent-architect"} =
-               PermanentBoot.respawn("architect", loader: loader_for(), spawner: spawner)
+      assert {:ok, "permanent-starfleet"} =
+               PermanentBoot.respawn("starfleet", loader: loader_for(), spawner: spawner)
 
-      assert_received {:respawned, "architect", "permanent-architect"}
+      assert_received {:respawned, "starfleet", "permanent-starfleet"}
     end
 
     test "G5 respawn/2: guardrail — a NON-permanent role is refused fail-loud" do
@@ -262,8 +269,8 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
 
     test "G5 respawn/2: unreadable cap-profile → {:error, {role, {:cap_profile_load_failed, _}}}" do
-      assert {:error, {"architect", {:cap_profile_load_failed, :corrupt}}} =
-               PermanentBoot.respawn("architect",
+      assert {:error, {"starfleet", {:cap_profile_load_failed, :corrupt}}} =
+               PermanentBoot.respawn("starfleet",
                  loader: fn _ -> {:error, :corrupt} end,
                  spawner: fn _c, _t, _o -> flunk("must not spawn") end
                )
