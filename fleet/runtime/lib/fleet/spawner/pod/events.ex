@@ -20,8 +20,9 @@ defmodule Fleet.Spawner.Pod.Events do
   - `required_broadcast/2` (PUBLIC) — load-bearing LIFECYCLE (`pod.completed`). The failure is NOT
     swallowed: returns `:ok` | `{:error, {:broadcast_failed, _}}`. The `:extracting` state
     (`do_extract_proceed`) does NOT release/kill the pod on an orphaned completion. DELIBERATELY
-    outside `Bus.safe_emit` (cf. its comment — safe_emit flattens every failure into `:ok`,
-    indistinguishable from a success).
+    outside `Bus.safe_emit` (cf. its comment — the Bus propagates a delivery `{:error, _}`, but
+    safe_emit flattens it into a logged `:ok`: loud in the logs, yet the caller still gets `:ok` and
+    cannot branch on it, which `required` must).
 
   The app-env SEAM (`:fleet_spawner, :event_bus`, default `Fleet.EventRouter.Bus`) carries ONLY the
   load-bearing path `required_broadcast/2`: it serves to inject a DETERMINISTIC failure on
@@ -30,7 +31,7 @@ defmodule Fleet.Spawner.Pod.Events do
   swallowed there by contract). `event_bus/0` and `build_spawner_event/2` are internal (called ONLY
   by `required_broadcast/2`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
