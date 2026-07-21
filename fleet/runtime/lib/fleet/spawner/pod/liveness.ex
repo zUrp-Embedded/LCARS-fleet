@@ -124,7 +124,14 @@ defmodule Fleet.Spawner.Pod.Liveness do
   # unreadable. WARNING: this os_pid is the HOLDER (the `sleep infinity` that holds the namespace, cf.
   # PodTmux), NOT claude — claude runs under tmux, a separate process, and `/proc/stat` counts only the
   # pid's OWN cpu (descendants excluded). The holder is near-idle, so this signal is a weak second to
-  # the jsonl-OR; probing claude's real pid (or dropping the column) is the open follow-up.
+  # the jsonl-OR.
+  #
+  # Before "cleaning this up", note the RISK ASYMMETRY that makes the weak term the safe side: `moved?`
+  # ORs the two signals, so a term that almost never fires can only make the pod look MORE alive —
+  # its cost is a late kill, never an early one. DROPPING the column makes the deadline strictly more
+  # trigger-happy, and the failure it buys is killing a pod that was working: the expensive direction.
+  # Probing claude's real pid under tmux is the improvement, not the removal — and it must be proven
+  # against a live pod, since guessing the pid is how this measured the wrong process to begin with.
   defp proc_cpu_jiffies(state) do
     with port when is_port(port) <- Map.get(state, :port),
          {:os_pid, pid} <- Port.info(port, :os_pid),
