@@ -13,8 +13,14 @@ defmodule Mix.Tasks.Lcars.Topology do
   compiled metadata — so it assumes their standard formatting. An unusual-but-valid declaration (an
   alias, a `deps:` layout the regex misses) could diverge from the COMPILED boundary, and `--check`
   (which compares the committed map to the SAME regex re-projection) would catch a stale README, not
-  such a misparse. Projecting from Boundary's compiled metadata would close that gap — a tooling
-  follow-up, not a guarantee this task makes today.
+  such a misparse. Projecting from Boundary's compiled metadata would close that gap — but it is NOT
+  freely available, and that is the part worth knowing before anyone tries: every public `Boundary`
+  reader (`all/1`, `fetch!/2`, `for_module/2`) takes a `view`, and the only builder of a view is
+  `Boundary.Mix.View.build/0`, which is `@moduledoc false` — as is `Boundary.Mix` itself. So closing
+  this gap means wiring the GATE onto a dependency's private module: accurate, but a boundary upgrade
+  could then break the check that is supposed to be the trustworthy one. The regex reads OUR own
+  source and depends on nothing external. Neither side is free; the trade is stated so it can be
+  chosen rather than stumbled into.
 
   Height is mechanical: `H(domain) = 1 + max(H(deps))`, 0 for `deps: []` (a DAG —
   boundary forbids cycles — always induces this ladder). The layer NAMES are editorial
