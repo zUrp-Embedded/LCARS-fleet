@@ -296,7 +296,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # DRIFT from the deftools). Single
       # source: the schemas come from `PodTools.get_tools/0` (the `deftool` authority), filtered to this
       # pod's surface = base (universal) + the role-gated names threaded at spawn (derived from the
-      # cap-profile `allowedTools`). Presence = authorization, per role. The bridge forwards blindly.
+      # cap-profile `allowedTools`). This list is DISCOVERY, NOT authorization: `tools/call` (above) does
+      # NOT re-check it, so a pod that knows an off-list tool name can still call it. The real barrier is
+      # AT the tool — delegation tools carry a server-side gate (`require_architect`/`require_onboarder`,
+      # `Delegation`), `get_work_item`/`submit_result` are scoped to the pod's OWN work item (pod_id from
+      # the channel, never a wire arg). INVARIANT: every tool MUST be gated or pod-scoped; one relying on
+      # this list alone would be callable off-list. The bridge forwards blindly.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
