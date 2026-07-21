@@ -35,7 +35,8 @@ defmodule Fleet.Pilot.Poller do
   Stay HERE: the loop (org-repo discovery + admission + tally orchestration + state
   backoff), the pulls path (`step_process_pulls`, not guarded by the lease) and the throttled
   awaits-arch re-kick (coupled to `poll_count`; fired ONCE per tick by `do_poll` on the
-  cross-repo union — the arch pod is fleet-unique, a per-repo kick multiplied the wake).
+  cross-repo union — `ArchWake` groups the awaits BY REPO and wakes each project's architect
+  independently, so a single call here fans out to all of them).
 
   ## Init configuration
 
@@ -482,8 +483,9 @@ defmodule Fleet.Pilot.Poller do
       # to the pulls via `:awaits_arch_ids` → `dispatch_review` skips the judge of a PR whose parent issue
       # awaits the arch (symmetric to `decide/1` on the issue side). Without this: escalation places `awaits-arch` on
       # the ISSUE but `dispatch_review` reads ONLY the PR's labels → judge re-spawn every tick (churn).
-      # The arch re-kick itself is NOT fired here: it is fleet-global (unique arch pod) → the set is
-      # returned repo-QUALIFIED (issue numbers collide across repos) and `do_poll` kicks ONCE on the union.
+      # The arch re-kick itself is NOT fired here: `ArchWake` fans it out per-repo (one architect per
+      # project), so the set is returned repo-QUALIFIED (issue numbers collide across repos) and `do_poll`
+      # kicks ONCE on the union — that single call reaches every project's architect.
       awaits_arch_ids = awaits_arch_ids(issues)
       pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
 
@@ -562,9 +564,11 @@ defmodule Fleet.Pilot.Poller do
   # re-read at every tick — and THIS net re-derives a wake from it, capped by
   # `@awaits_rekick_cooldown_ms` since the last SENT signal. The net only NUDGES the airlock
   # (a wake, nothing more): the label stays human-released, we never force the verdict.
-  # Called ONCE per tick by `do_poll` on the CROSS-REPO union — the arch pod is unique (fleet
-  # airlock), so the decision is fleet-level; `awaits_ids` is repo-qualified (`{repo, n}` — bare
-  # issue numbers collide across repos) so the logged count is the honest fleet-wide backlog.
+  # Called ONCE per tick by `do_poll` on the CROSS-REPO union — the architect is PER-PROJECT, and
+  # `ArchWake.offer_then_wake` groups `awaits_ids` BY REPO to wake each project's architect on its own
+  # `{repo}` queue, so this single call fans out to all of them. `awaits_ids` is repo-qualified
+  # (`{repo, n}` — bare issue numbers collide across repos) so the logged count is the honest
+  # fleet-wide backlog (the sum across projects, not one fleet airlock).
   # Resolves `state.spawner || Fleet.Spawner` at the call site (symmetric to reconciliation_seams /
   # lease_seams). Prod does NOT inject the seams → the REAL modules are used — resolve the
   # defaults HERE, never a nil-guard on the seam (a guard that skips on nil turns this prod

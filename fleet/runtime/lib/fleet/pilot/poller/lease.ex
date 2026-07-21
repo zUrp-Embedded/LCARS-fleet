@@ -105,9 +105,9 @@ defmodule Fleet.Pilot.Poller.Lease do
   """
   @spec process_issues([map()], MapSet.t(), keyword(), Seams.t()) :: tally()
   def process_issues(issues, pr_issue_ids, dispatch_opts, %Seams{} = seams) do
-    # Coherence: the routing lives in the ROUTE-COMMENT (state-machine, engraved at onboard) — never
-    # by label. We read the route → dispatch (workflow_map_role). The lease "1 active workflow_run/repo"
-    # also reads on the route (robust, append-only). We classify each issue ONCE:
+    # Coherence: the routing lives in SCOPED LABELS (`wfmap/*` + `stage/*`, engraved by `post_route`) —
+    # a forge-side state-machine, not a comment. We read the route → dispatch (workflow_map_role). The
+    # lease "1 active workflow_run/repo" also reads on the same route (a durable forge fact). We classify each issue ONCE:
     #   - ENGAGED (in-flight, or route advanced beyond the 1st step = workflow_run started) → holds the lease;
     #     we dispatch its current step (continues the step_run, or skips if in-flight).
     #   - QUEUED (routed at the 1st step, or routeless to be onboarded, not yet dispatched) → starts only
