@@ -233,7 +233,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   project of another owner), and the architect is stopped only once a local dir is so proven.
   Returns `{:ok, %{repo, forge, architect, project_dir, work_dir, local}}` (`forge` = `:deleted` |
   `:absent`; `architect` = `:stopped` | `:none` | `:error` | `:skipped_identity`; `local` =
-  `%{project, work}`, each `:removed` | `:kept_identity_unproven` | `:absent`) or `{:error, term()}`.
+  `%{project, work}`, each `:removed` | `:removal_incomplete` (proven but the rm_rf left residue) |
+  `:kept_identity_unproven` | `:absent`) or `{:error, term()}`.
   The local removals + the architect stop are best-effort (logged, never fail the delete once the forge
   teardown is decided).
   """
@@ -286,8 +287,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
         :absent
 
       origin_full_name(dir, opts) == {:ok, full_name} ->
-        nuke_dir(dir)
-        :removed
+        # Identity proven → remove, but report the REAL FS verdict: a partial rm_rf leaves residue, and
+        # the caller must not read `:removed` over it (the warning is logged in nuke_dir).
+        case nuke_dir(dir) do
+          :ok -> :removed
+          {:error, _} -> :removal_incomplete
+        end
 
       true ->
         Logger.warning(
@@ -369,7 +374,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
       {:error, reason, path} ->
         Logger.warning("ProjectOnboard: reset could not fully remove #{path}: #{inspect(reason)}")
-        :ok
+        {:error, reason}
     end
   end
 

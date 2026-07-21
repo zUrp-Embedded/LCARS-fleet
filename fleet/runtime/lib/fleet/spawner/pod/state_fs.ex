@@ -33,7 +33,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
     by the `PodWarden`.
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -69,15 +69,25 @@ defmodule Fleet.Spawner.Pod.StateFs do
          {:ok, %{"phase" => phase_str}} <- Jason.decode(json),
          phase when phase in [:succeeded, :released, :killed] <-
            Recovery.phase_from_string(phase_str) do
-      rm_terminal_artifacts(
-        Path.dirname(state_fs_path),
-        Paths.pod_dir_for(pod_id, opts),
-        opts
-      )
+      case rm_terminal_artifacts(
+             Path.dirname(state_fs_path),
+             Paths.pod_dir_for(pod_id, opts),
+             opts
+           ) do
+        :ok ->
+          Logger.info(
+            "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erased (FRESH re-spawn)"
+          )
 
-      Logger.info(
-        "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erased (FRESH re-spawn)"
-      )
+        {:error, _} ->
+          # The erase failed (each cause is LOUD-logged in safe_rm_rf) — do NOT claim "erased": a
+          # surviving state.json re-loops the pod on :release. The re-spawn proceeds (best-effort GC),
+          # but the residue is diagnosed honestly, not hidden under a success line.
+          Logger.warning(
+            "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erase INCOMPLETE (see errors " <>
+              "above) — a surviving state.json may loop the pod on :release"
+          )
+      end
 
       :ok
     else
@@ -100,15 +110,25 @@ defmodule Fleet.Spawner.Pod.StateFs do
   strictly UNDER its root (`state_fs_root` / `pod_dir_root`, resolved the SAME way the path was built,
   hence the `opts`) and REFUSE (loud, no `rm_rf`) otherwise — a wrong path never widens the blast radius.
   """
-  @spec rm_terminal_artifacts(String.t(), String.t(), keyword()) :: :ok
+  @spec rm_terminal_artifacts(String.t(), String.t(), keyword()) :: :ok | {:error, [term()]}
   def rm_terminal_artifacts(state_dir, pod_dir, opts \\ [])
       when is_binary(state_dir) and is_binary(pod_dir) and is_list(opts) do
-    safe_rm_rf(state_dir, Paths.state_fs_root_for(opts), :state_dir)
-    safe_rm_rf(pod_dir, Paths.pod_dir_root(opts), :pod_dir)
-    :ok
+    results = [
+      safe_rm_rf(state_dir, Paths.state_fs_root_for(opts), :state_dir),
+      safe_rm_rf(pod_dir, Paths.pod_dir_root(opts), :pod_dir)
+    ]
+
+    # Surface the verdict instead of a blanket `:ok`: the caller (clear_terminal_snapshot) must not log
+    # "erased" over a survivor. Each failure is already LOUD-logged below; here we just carry the outcome.
+    case Enum.reject(results, &(&1 == :ok)) do
+      [] -> :ok
+      errors -> {:error, errors}
+    end
   end
 
   # rm_rf ONLY if `dir` resolves strictly under `root` — else refuse loudly (never rm outside the root).
+  # Returns `:ok` on a clean erase, `{:error, {label, reason}}` when the rm_rf FAILED or was refused —
+  # never a fake `:ok` (the caller decides fail/continue on it).
   defp safe_rm_rf(dir, root, label) do
     if String.starts_with?(Path.expand(dir), Path.expand(root) <> "/") do
       case File.rm_rf(dir) do
@@ -120,13 +140,13 @@ defmodule Fleet.Spawner.Pod.StateFs do
           # SURVIVES, `recover_or_init` re-reads it → `:release` → the pod `{:stop, :normal}` silently → poller
           # reclaim → re-dispatch → same tombstone: an INFINITE no-launch loop, masked by a false "erased" log.
           # LOG LOUD (rm_rf removes files before the dir, so state.json often goes even on a partial failure;
-          # when it survives, the loop must be visible).
+          # when it survives, the loop must be visible) AND surface the verdict.
           Logger.error(
             "StateFs: #{label} tombstone erase FAILED at #{inspect(file)} (#{inspect(reason)}) — a surviving " <>
               "state.json will loop the pod on :release (recover_or_init re-reads the tombstone)"
           )
 
-          :ok
+          {:error, {label, reason}}
       end
     else
       Logger.error(
@@ -134,7 +154,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
           "#{inspect(root)} (path-escape guard, no rm_rf)"
       )
 
-      :ok
+      {:error, {label, :path_escape}}
     end
   end
 

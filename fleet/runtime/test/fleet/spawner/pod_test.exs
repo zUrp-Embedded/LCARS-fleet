@@ -2007,7 +2007,9 @@ defmodule Fleet.Spawner.PodTest do
       File.mkdir_p!(victim)
       File.write!(Path.join(victim, "precious"), "keep")
 
-      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
+      # The refusal is SURFACED (structured verdict), never a fake :ok that a caller would read as "erased".
+      assert {:error, [error: {:state_dir, :path_escape}, error: {:pod_dir, :path_escape}]} =
+               Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
 
       assert File.exists?(Path.join(victim, "precious")),
              "rm_terminal_artifacts erased a dir OUTSIDE the root — the path-escape guard does not hold"
@@ -2026,7 +2028,7 @@ defmodule Fleet.Spawner.PodTest do
       refute File.exists?(pod_dir)
     end
 
-    test "B-#6 — rm_rf FAILS (I/O) → :ok returned (non-fatal) BUT LOUD log (surviving tombstone = loop)",
+    test "B-#6 — rm_rf FAILS (I/O) → {:error} surfaced (non-fatal to the caller) AND LOUD log (surviving tombstone = loop)",
          %{tmp_dir: tmp} do
       # B-#6 fold: a `_ = File.rm_rf(dir)` swallows an erase failure. If the `state.json` SURVIVES,
       # `recover_or_init` re-reads it → `:release` → SILENT `{:stop, :normal}` → poller reclaim →
@@ -2056,7 +2058,9 @@ defmodule Fleet.Spawner.PodTest do
       try do
         log =
           ExUnit.CaptureLog.capture_log(fn ->
-            assert :ok =
+            # The verdict is SURFACED (:eacces at the final rmdir), no longer swallowed to a fake :ok —
+            # the caller (clear_terminal_snapshot) can then avoid logging "erased" over a survivor.
+            assert {:error, [error: {:state_dir, :eacces}]} =
                      Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
           end)
 

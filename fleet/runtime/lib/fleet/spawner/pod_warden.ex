@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.PodWarden do
   > ephemeral. It is anchored in the PROJECT via `Fleet.Pilot.IncidentRegistry` (`work/ops` registry,
   > cross-session). PodWarden remains the guardian of the SUBSTRATE (reaping orphans).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   use GenServer
@@ -222,7 +222,10 @@ defmodule Fleet.Spawner.PodWarden do
   # GC of an orphan pod_dir (mechanism shared with Pod.StateFs.clear_terminal_snapshot/3).
   defp gc_one(%{pod_id: pod_id, state_dir: state_dir, pod_dir: pod_dir}) do
     Logger.info("PodWarden: orphan pod_dir GC: pod_#{pod_id}, freeing #{pod_dir}")
-    StateFs.rm_terminal_artifacts(state_dir, pod_dir)
+
+    # Best-effort GC: an incomplete erase is already LOUD-logged inside StateFs; the orphan then simply
+    # persists and the NEXT tick retries it → we CONTINUE (one stuck tombstone never fails the warden).
+    _ = StateFs.rm_terminal_artifacts(state_dir, pod_dir)
     :ok
   rescue
     e -> Logger.warning("PodWarden: GC pod_#{pod_id} failed (non-blocking): #{inspect(e)}")

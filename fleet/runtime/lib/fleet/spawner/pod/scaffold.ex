@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
   (recall restore). No dependency toward `Fleet.Spawner.Pod`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -37,10 +37,11 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   @doc """
   Removes any residual `<session_id>.jsonl` under the pod_dir (all cwd-slugs, shared glob
   `SessionFiles.jsonl_paths/2`) → frees the UUID for `--session-id` (a stale jsonl would trip
-  "Session ID already in use" on the deterministic re-spawn). The `File.rm` return is discarded: a
-  leftover jsonl does not fail here — it resurfaces at the `--session-id` launch itself as the
-  vendor's "Session ID already in use" error (the launch, not this GC, carries the visible failure;
-  the info log below fires whether or not the rm succeeded). Called by the `:cleaning` state
+  "Session ID already in use" on the deterministic re-spawn). A leftover jsonl does not FAIL here — it
+  resurfaces at the `--session-id` launch itself as the vendor's "Session ID already in use" error (the
+  launch, not this GC, carries the blocking failure). But we log the REAL result per file, never a blanket
+  "removed": actually removed → info; already absent → silent; a removal that FAILED → warning (so the
+  residue is diagnosed here too, not only at the later launch). Called by the `:cleaning` state
   (skipped on `resume` — `SeedStore.restore` overwrites the jsonl).
   """
   @spec gc_stale_session_jsonl(map()) :: :ok
@@ -48,11 +49,22 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     state.pod_dir
     |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
-      _ = File.rm(f)
+      case File.rm(f) do
+        :ok ->
+          Logger.info(
+            "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} removed (UUID GC → fresh session)"
+          )
 
-      Logger.info(
-        "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} removed (UUID GC → fresh session)"
-      )
+        {:error, :enoent} ->
+          # Nothing to remove (the UUID slot is already free) — the nominal case, silent.
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "pod #{state.pod_id} gc: could NOT remove stale jsonl #{Path.basename(f)} " <>
+              "(#{inspect(reason)}) — the --session-id launch will surface it as 'Session ID already in use'"
+          )
+      end
     end)
   end
 
