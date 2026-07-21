@@ -9,7 +9,7 @@ defmodule Fleet.Credentials.RoleTokenTest do
     tmp = Path.join(System.tmp_dir!(), "roletoken-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf(tmp) end)
-    Fleet.Credentials.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     {:ok, dir: tmp}
   end

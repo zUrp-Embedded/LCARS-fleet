@@ -30,7 +30,7 @@ defmodule Fleet.MCP.PodSocketTest do
   setup do
     base = Path.join(System.tmp_dir!(), "lcars-mcp-sock-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(base) end)
-    Fleet.MCP.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, base)
+    Fleet.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, base)
 
     %{base: base}
   end
@@ -297,7 +297,7 @@ defmodule Fleet.MCP.PodSocketTest do
     # raising tool handler injected → without the acceptor's rescue, the connection Task would die →
     # socket closed → the `call` below would see recv `{:error, :closed}` (the pod would wait out its
     # timeout).
-    Fleet.MCP.TestEnv.put_env_restoring(
+    Fleet.TestEnv.put_env_restoring(
       :fleet_mcp,
       :tool_handler,
       Fleet.MCP.PodSocketTest.RaisingTools

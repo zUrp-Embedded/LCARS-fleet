@@ -6,7 +6,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
 
   setup do
     # Tests set :step_dispatch? themselves; capture-and-restore only.
-    Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, :step_dispatch?)
+    Fleet.TestEnv.restore_env_on_exit(:fleet_pilot, :step_dispatch?)
     :ok
   end
 

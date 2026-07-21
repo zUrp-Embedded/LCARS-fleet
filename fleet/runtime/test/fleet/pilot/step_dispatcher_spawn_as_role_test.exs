@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
 
   alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StubTaskQueue
-  alias Fleet.Pilot.TestEnv
+  alias Fleet.TestEnv
 
   @moduletag :tmp_dir
 

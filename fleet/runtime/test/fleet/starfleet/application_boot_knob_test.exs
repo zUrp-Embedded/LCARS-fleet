@@ -10,7 +10,7 @@ defmodule Fleet.Starfleet.ApplicationBootKnobTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Starfleet.Application, as: App
-  alias Fleet.Starfleet.TestEnv
+  alias Fleet.TestEnv
 
   test "explicit boolean value is honored" do
     TestEnv.put_env_restoring(:fleet_starfleet, :start_mcp_monitor, false)

@@ -25,7 +25,7 @@ defmodule Fleet.EventRouter.BusRegistryEmptyTest do
     on_exit(fn -> Bus.set_authorized_event_types(previous) end)
 
     # Tests set :permit_when_registry_empty themselves; capture-restore only.
-    Fleet.EventRouter.TestEnv.restore_env_on_exit(
+    Fleet.TestEnv.restore_env_on_exit(
       :fleet_event_router,
       :permit_when_registry_empty
     )

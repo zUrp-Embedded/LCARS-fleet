@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
   alias Fleet.Pilot.GatekeeperSeal
-  alias Fleet.Pilot.TestEnv
+  alias Fleet.TestEnv
 
   @moduletag :tmp_dir
 

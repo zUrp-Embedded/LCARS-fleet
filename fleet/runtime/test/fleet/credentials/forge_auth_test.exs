@@ -5,7 +5,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   import ExUnit.CaptureLog
 
   alias Fleet.Credentials.ForgeAuth
-  alias Fleet.Credentials.TestEnv
+  alias Fleet.TestEnv
 
   setup do
     # Tests set/delete :forge_auth themselves; here we only capture the restoration.

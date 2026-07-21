@@ -37,10 +37,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   end
 
   defp inject_broker(mod),
-    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :task_queue_mod, mod)
+    do: Fleet.TestEnv.put_env_restoring(:fleet_starfleet, :task_queue_mod, mod)
 
   defp inject_completion(fun),
-    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :completion_inflight_fun, fun)
+    do: Fleet.TestEnv.put_env_restoring(:fleet_starfleet, :completion_inflight_fun, fun)
 
   test "refuse_new_jobs/1 activates quiescence" do
     Quiesce.resume!()

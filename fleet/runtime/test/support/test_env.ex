@@ -1,6 +1,11 @@
-defmodule Fleet.Credentials.TestEnv do
+defmodule Fleet.TestEnv do
+  # Own boundary (same pattern as `Fleet.CapProfileFixture`): a support module used from every
+  # domain's tests is not the property of any one domain. No deps — it only touches
+  # `Application` and `ExUnit.Callbacks`.
+  use Boundary, deps: [], exports: []
+
   @moduledoc """
-  Application-env helper for this domain's tests (B6 harness dedup).
+  Application-env helper for the whole suite's tests (B6 harness dedup).
 
   Replaces the idiom rewritten in every file: "save `prev = Application.get_env`;
   `on_exit` → `put_env(prev)` or `delete_env`". The capture goes through `Application.fetch_env/2`
@@ -11,8 +16,10 @@ defmodule Fleet.Credentials.TestEnv do
   `ExUnit.Callbacks.on_exit/1`. `on_exit` callbacks run in LIFO order → nested sets
   (module setup then describe setup) unwind in the right order.
 
-  Each domain carries ITS copy of this module (same body, module prefixed by the domain):
-  test support stays per-domain — no cross-domain test dependency.
+  ONE module for the whole suite. It used to be copied once per domain because umbrella apps could
+  not see each other's `test/support`; the single-app collapse removed that wall —
+  `elixirc_paths(:test)` compiles `test/support` as one tree, so the copies had lost their reason
+  and only kept six bodies in sync by hand.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]

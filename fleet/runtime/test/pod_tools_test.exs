@@ -12,7 +12,7 @@ defmodule Fleet.MCP.PodToolsTest do
   use ExUnit.Case, async: false
 
   alias Fleet.MCP.PodTools
-  alias Fleet.MCP.TestEnv
+  alias Fleet.TestEnv
   alias Fleet.TaskQueue
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"

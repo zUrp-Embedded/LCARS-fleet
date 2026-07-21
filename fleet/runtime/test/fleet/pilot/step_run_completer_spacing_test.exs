@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
   end
 
   defp set_spacing(ms),
-    do: Fleet.Pilot.TestEnv.put_env_restoring(:fleet_pilot, :forge_write_spacing_ms, ms)
+    do: Fleet.TestEnv.put_env_restoring(:fleet_pilot, :forge_write_spacing_ms, ms)
 
   test "complete: the configured gap is INSERTED between the verdict comment and the route" do
     set_spacing(2000)

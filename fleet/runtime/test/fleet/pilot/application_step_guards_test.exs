@@ -6,8 +6,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
 
   setup do
     # Tests set these keys themselves; we only register their restoration here.
-    Enum.each(@keys, &Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
-    Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
+    Enum.each(@keys, &Fleet.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
+    Fleet.TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
     :ok
   end
 

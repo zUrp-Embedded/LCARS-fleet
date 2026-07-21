@@ -3,7 +3,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Catalog
-  alias Fleet.EventRouter.TestEnv
+  alias Fleet.TestEnv
 
   setup do
     # Tests set :load_event_registry / :events_yaml_path themselves; capture-restore only.

@@ -10,7 +10,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     secret_path = Path.join(tmp_dir, "webhook-secret")
     File.write!(secret_path, "supersecret\n")
 
-    Fleet.EventRouter.TestEnv.put_env_restoring(
+    Fleet.TestEnv.put_env_restoring(
       :fleet_event_router,
       :webhook_secret_path,
       secret_path
@@ -60,7 +60,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # B-#1: a `_ = Bus.emit` that discards the `{:error}` tuple → `send_resp 200` → Gitea believes
       # it delivered, never replays → forge event silently lost. The return is matched: `{:error}` →
       # 422 (retry/alert).
-      Fleet.EventRouter.TestEnv.put_env_restoring(
+      Fleet.TestEnv.put_env_restoring(
         :fleet_event_router,
         :webhook_emit_fun,
         fn _source, _type, _opts -> {:error, :pubsub_down} end

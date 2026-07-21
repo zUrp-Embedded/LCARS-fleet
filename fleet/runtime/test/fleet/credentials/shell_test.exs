@@ -202,7 +202,7 @@ defmodule Fleet.Credentials.ShellTest do
   # from the async-safe describe above.
   describe "git/2 — injects git_env/0 by default (anti-prompt MA-22)" do
     setup do
-      Fleet.Credentials.TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
+      Fleet.TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
       :ok
     end
 
