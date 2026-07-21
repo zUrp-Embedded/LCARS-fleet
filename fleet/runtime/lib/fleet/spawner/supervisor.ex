@@ -10,10 +10,12 @@ defmodule Fleet.Spawner.Supervisor do
   Since `:temporary` children do **not** count toward restart intensity,
   `max_restarts` cannot trigger a **fleet-wide cascade** —
   it is effectively inert as long as all children are `:temporary`.
-  Resurrection is a **deliberate** act of the boot-orchestrator from the
-  desired-state (cap-profile), not an OTP restart: it is the only relaunch path.
+  Resurrection is a **deliberate** act from the desired-state (cap-profile), not an OTP restart — the
+  only relaunch path. Two callers drive it, both through `PermanentBoot`'s desired-state respawn (never
+  the supervisor): the boot-orchestrator (initial boot of the permanents) and the `PermanentWarden`
+  (recovery respawn of a DEAD permanent, on `pod.failed` + reconciliation).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use DynamicSupervisor
