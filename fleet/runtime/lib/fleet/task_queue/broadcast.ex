@@ -46,10 +46,11 @@ defmodule Fleet.TaskQueue.Broadcast do
   that serve test isolation (stub bus that fails/raises on `work_item.completed`, dedicated topic
   per async test): both paths must go through the INJECTED bus/topic, out of
   reach of `safe_emit`. The `required/3` path is in any case DELIBERATELY outside
-  `safe_emit` (cf. its moduledoc: it flattens every failure into `:ok`, indistinguishable from a
-  success) — same exclusion as `Fleet.Spawner.Pod.Events.required_broadcast/2`.
+  `safe_emit` (cf. its moduledoc: it flattens every failure into a logged `:ok` — CI-09 logs the drop
+  loud, but the caller still gets `:ok` and cannot branch on it, which `required` must) — same
+  exclusion as `Fleet.Spawner.Pod.Events.required_broadcast/2`.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   require Logger
