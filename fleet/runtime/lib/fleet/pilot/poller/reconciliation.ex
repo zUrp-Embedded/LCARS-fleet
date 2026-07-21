@@ -4,11 +4,16 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   same tick, the same suspect set and the same 2-tick grace:
 
   **(1) Orphaned lock** (label without pod). A `lcars-in-flight` lock is ORPHANED if the brick
-  carries it but no live pod is working it. Cause: a dead pod (`:result_timeout` deadline, crash,
-  BEAM restart) reaped by the PodWarden — which removes the PROCESS but NOT the forge label.
-  Broken symmetry → without repair the `dispatch_*` skips the `:in_flight` brick FOREVER (a single
-  pod stall wedges the pipe). Repair: reclaim (remove the label) the CONFIRMED orphans → the next
-  tick re-dispatches.
+  carries it but no live pod is WORKING it. Two causes: a dead pod (`:result_timeout` deadline, crash,
+  BEAM restart) reaped by the PodWarden — which removes the PROCESS but NOT the forge label — OR a
+  PARKED pod: one spawned + locked + briefed whose wake never LANDED (`wake_unreached`, and the pod's
+  ack-driven kick loop exhausted), so the agent never pulled its task. "Working" is proven by a
+  PULLED task (`pod_pulled?`), not merely an enqueued `:pending` one: a never-pulled admission owns
+  no lock, else a parked pod (task active-but-`:pending`) would mask its lock forever — a silent
+  wedge the reconciliation could not tell from real work. Broken symmetry → without repair the
+  `dispatch_*` skips the `:in_flight` brick FOREVER (a single pod stall wedges the pipe). Repair:
+  reclaim (remove the label) the CONFIRMED orphans → the next tick re-dispatches (re-attempting the
+  activation of a still-alive parked pod, or a fresh spawn if it died).
 
   **(2) Quiesced pod** (pod without lock — the inverse). A live PER-BRICK pod (judge, one-shot
   gatekeeper) whose brick no longer holds the lock and which has no active task has no reason to
@@ -59,7 +64,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -250,7 +255,15 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   defp live_owned_refs(%Seams{spawner: spawner, task_queue: tq, repo: repo}) do
     pod_refs =
       spawner.list_pods()
-      |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
+      # Ownership requires a PULLED task (`pod_pulled?`), not merely an enqueued one. A task stuck at
+      # `:pending` (never pulled) is an admission whose wake never LANDED (`wake_unreached` — the pod is
+      # spawned + locked + briefed, but the send-keys was lost and the ack-driven kick loop exhausted):
+      # the pod is PARKED, not working. `:pending` is an "active" state, so counting it as ownership let
+      # a parked pod mask its lock FOREVER (the reconciliation could not tell parked from working) — a
+      # silent wedge. The PULL (get_work_item → `:assigned`) is the durable ACK that the wake landed, so
+      # a never-pulled lock is treated as an orphan (2-tick grace) and the next dispatch re-attempts the
+      # activation. The nominal enqueue→pull window (seconds) is absorbed by the ~60s grace.
+      |> Enum.filter(&pod_pulled?(tq, &1[:pod_id]))
       |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
       |> MapSet.new()
 
@@ -331,6 +344,28 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   end
 
   defp pod_has_active_task?(_tq, _), do: false
+
+  # Has the pod PULLED its latest task (state `:assigned`/`:in_progress`)? The PULL (`get_work_item`,
+  # which transitions `:pending → :assigned` and records the in-band ACK) is the DURABLE proof that
+  # the wake LANDED and the agent activated — the distinction the orphan-lock duty needs to tell a
+  # PARKED admission (task enqueued but never pulled, `wake_unreached`) from a working pod. Stricter
+  # than `pod_has_active_task?` on ONE state: `:pending` is active (owns the slot at enqueue, anti
+  # double-spawn) but NOT pulled (no activation proven). Terminal states (`:completed`/`:failed`/
+  # `:cleared`) are not pulled either — same non-ownership as `pod_has_active_task?` (F-C050). Used by
+  # `live_owned_refs` (lock ownership); the quiesced-pod duty keeps `pod_has_active_task?` so a
+  # freshly-briefed `:pending` pod is re-dispatched (via the lock reclaim), never REAPED.
+  defp pod_pulled?(tq, pod_id) when is_binary(pod_id) do
+    case tq.pod_status(pod_id) do
+      {:ok, state} -> state in [:assigned, :in_progress]
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  defp pod_pulled?(_tq, _), do: false
 
   # Lock refs that an INSTANCE pod owns, deduced from its pod_id. The FORMAT (`issue|pr` + number)
   # lives in `Fleet.Pilot.PodId.parse_ref/2` (the authority that builds it); here we only SCOPE to the

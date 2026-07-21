@@ -507,6 +507,15 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
+  # Parked-admission TaskQueue stub: the pod was ADMITTED (task enqueued on issue-8) but its wake
+  # never LANDED (`wake_unreached`) — the task is still `:pending`, never pulled. `:pending` is
+  # "active" but NOT pulled: a PARKED admission owns no lock. Twin of ProjectTaskQueueCompletedIssue8,
+  # `:pending` instead of `:completed`.
+  defmodule ParkedPendingTaskQueue do
+    def pod_status(_pod_id), do: {:ok, :pending}
+    def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
+  end
+
   # G1 — TaskQueue stub: an ACTIVE GATEKEEPER EVAL carries brick #8 of THIS repo (self-describing
   # MA-03 metadata: gate_eval + resume_n + resume_payload.repository). No live pod otherwise (the
   # producer is done): exactly the eval window.
@@ -1020,6 +1029,54 @@ defmodule Fleet.Pilot.PollerTest do
       # 2nd tick: orphan CONFIRMED → lock reclaimed (a `:completed` no longer masks). Before the
       # fix: the `:completed` eng "owned" #8 → never reclaimed (this assert failed = the F-C050
       # wedge).
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
+
+      GenServer.stop(pid)
+    end
+
+    test "a parked admission (:pending task, wake never landed) does NOT mask the orphan — reclaimed at the 2nd tick" do
+      # wake_unreached: the pod is spawned, the lock set, the brief ENQUEUED — but the wake never
+      # reached the agent (send-keys lost, the ack-driven kick loop exhausted). The task stays
+      # `:pending` (never pulled = never activated). `:pending` is an ACTIVE state, so before the fix
+      # the pod "owned" its lock forever (the reconciliation counted a parked pod as a working owner)
+      # → silent permanent wedge (the brick is admitted but nothing ever produces its completion). The
+      # PULL (get_work_item → `:assigned`) is the durable ACK that the wake landed; a `:pending`-forever
+      # admission does not own → the orphan is reclaimed (2-tick grace), the next dispatch re-attempts
+      # activation. The nominal enqueue→pull window (seconds) is covered by the ~60s grace.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_rf21_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          # LIVE instance pod (issue-8-engineer) whose task is `:pending` — admitted, never activated.
+          spawner: LivePodSpawner,
+          task_queue: ParkedPendingTaskQueue
+        )
+
+      # 1st tick: #8 becomes a SUSPECT (2-tick grace), not reclaimed yet.
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      # 2nd tick: orphan CONFIRMED → lock reclaimed (a `:pending` parked pod no longer masks). Before
+      # the fix: the `:pending` pod "owned" #8 → never reclaimed (this assert failed = the parked wedge).
       Poller.force_poll(name)
       assert_received {:remove_label, 8, "lcars-in-flight"}
 
