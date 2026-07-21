@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date**: 2026-05-10
-**Last revised**: 2026-07-20
+**Last revised**: 2026-07-21
 **Status**: human-launched model (systemd removed 2026-06-16)
 **Referenced by**: `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -53,13 +53,18 @@ Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c
 MIX_ENV=prod mix release --overwrite
 sudo rsync -a --delete _build/prod/rel/fleet_umbrella/ /local/LCARS_v2/rel/fleet_umbrella/
 sudo cp bin/fleet_v2 bin/lcars bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh \
-        bin/fleet_mcp_stdio_bridge.py bin/claude_launch.identity /local/LCARS_v2/bin/
+        bin/fleet_mcp_stdio_bridge.py /local/LCARS_v2/bin/
 sudo chgrp -R fleet /local/LCARS_v2 && sudo chmod g+rx /local/LCARS_v2/bin/*
 # CHAQUE humain relance SA fleet pour recharger le BEAM : fleet_v2 stop && fleet_v2 start
 ```
 
 ⚠ `rel/` seul ne suffit PAS : `bin/` porte les launchers N0/N1 (le monde des pods) — un deploy qui
 oublie `bin/` fait tourner le nouveau BEAM avec les vieux sandboxes.
+
+`bin/claude_launch.identity` n'est **pas** dans cette liste, et c'est voulu : son en-tête précise qu'il
+n'est lu ni par le pod ni par le BEAM. Seul `etc/publish-to-github.sh` le source, et il le lit **depuis
+le repo** (`$SCRIPT_DIR/../bin/`), jamais depuis l'install. Le copier ferait croire que le runtime en
+dépend. Même liste que `etc/install.sh`, qui automatise cette procédure.
 
 ## Tests intégration
 
