@@ -221,9 +221,10 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   # Boundary guard: mcp owns its FS safety (a DIFFERENT concern from the pod_id GRAMMAR, whose authority
-  # is `Fleet.Spawner.valid_pod_id?` — no cross-app dep here; mcp defends its OWN effect boundary, since
-  # ensure/release do `File.rm` on `<base>/<pod_id>/…` and a `/` or `..` would escape it). The pod_id must
-  # be ONE safe path component AND the built socket path must fit `sun_path`.
+  # is `Fleet.Spawner.valid_pod_id?`, a dep mcp DOES declare — but this guard is NOT that grammar: it
+  # defends mcp's OWN effect boundary, since ensure/release do `File.rm` on `<base>/<pod_id>/…` and a
+  # `/` or `..` would escape it, plus the built socket path must fit `sun_path`). The two coexist by
+  # design (grammar vs FS/sun_path safety), NOT a copy to dodge a dependency.
   defp safe_pod_id?(pod_id) do
     pod_id not in ["", ".", ".."] and
       not String.contains?(pod_id, ["/", "..", "\0"]) and
