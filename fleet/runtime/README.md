@@ -1,7 +1,7 @@
 # LCARS Fleet Runtime
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-18
+**Dernière révision** : 2026-07-21
 **Statut** : runtime v2 — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
 **Référencé par** : —
 
@@ -137,7 +137,7 @@ nouveau `bin/<vendor>_launch.sh`, même forme d'arguments ; aucun flag vendor ne
 ```
 mix gate
 ├─ compile --warnings-as-errors   # + le compilateur boundary (arêtes montantes = build cassé)
-├─ test                            # suite ExUnit hermétique (aucune socket, aucun spawn réel)
+├─ test                            # ExUnit — baseline hermétique (REST Plug.Test, spawn StubBackend) ; les tests transport/launcher ouvrent de vraies sockets/pods
 ├─ tests hors-mix                  # bridge MCP stdio (python) + tests bats des launchers (bwrap/claude)
 ├─ lcars.contracts.check          # contrats inter-modules — 20 invariants à cliquet
 ├─ lcars.topology --check         # fraîcheur de la carte générée (lib/fleet/README.md ≡ use Boundary)
