@@ -78,9 +78,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
   workspace (with cwd=workspace it must be INSIDE the cwd). Absent (`repo_path` nil) → no-op.
 
-  The role's git identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
-  the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) and the guarantee lives
-  on the world side (DeliverableGate gate at push).
+  The pod's commit identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
+  the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*` = the HUMAN, role in the
+  trailer) and the guarantee lives on the world side (DeliverableGate gate at push).
   """
   @spec maybe_bootstrap_project_workspace(map()) ::
           :ok | {:error, {:project_workspace_clone_failed, term()}}
