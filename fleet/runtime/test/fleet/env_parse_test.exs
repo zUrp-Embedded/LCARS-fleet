@@ -55,6 +55,22 @@ defmodule Fleet.EnvParseTest do
     end
   end
 
+  describe "bool!/3 — the strict form for safety flags" do
+    test "recognized forms and unset behave like bool/3" do
+      assert EnvParse.bool!("B", "false", true) == false
+      assert EnvParse.bool!("B", "ON", false) == true
+      assert EnvParse.bool!("B", nil, true) == true
+    end
+
+    test "UNKNOWN value → raise (a typo on a reduction-of-effects switch stops the boot)" do
+      # bool/3's warn-and-default is fail-open exactly when the operator asked for FEWER
+      # effects: a typo'd `flase` became a FULL boot. The strict form refuses instead.
+      assert_raise ArgumentError, ~r/refusing to boot/, fn ->
+        EnvParse.bool!("LCARS_BOOT_PERMANENT_AT_START", "flase", true)
+      end
+    end
+  end
+
   describe "path/2" do
     test "normalizes (~ / relative → absolute)" do
       assert EnvParse.path("PA", "/a/b") == "/a/b"

@@ -137,9 +137,12 @@ if config_env() != :test do
   # gate `:start_boot_orchestrator` (default true) controls whether the orchestrator
   # runs at all. Two distinct, meaningful knobs.
   # ============================================================
+  # STRICT parse (bool!): this is a reduction-of-effects switch — the warn-and-default
+  # of `bool/3` would turn a typo'd `false` into a FULL boot (permanent pods spawned,
+  # real spend). An unrecognized value refuses the boot instead.
   config :fleet_spawner,
     boot_permanent_at_start:
-      Fleet.EnvParse.bool(
+      Fleet.EnvParse.bool!(
         "LCARS_BOOT_PERMANENT_AT_START",
         System.get_env("LCARS_BOOT_PERMANENT_AT_START"),
         true

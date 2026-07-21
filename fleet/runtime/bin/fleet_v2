@@ -158,8 +158,13 @@ setup_env() {
   # rebinds it at boot). Rebinding at runtime after a crash is handled on the BEAM side.
   rm -f "$LCARS_API_SOCK"
 
-  # On-switches: the permanent boots, the forge-driven step-mode machine runs.
-  export LCARS_BOOT_PERMANENT_AT_START=true
+  # On-switches: the permanent boots, the forge-driven step-mode machine runs. BOTH are
+  # overridable defaults, never clobbers: LCARS_BOOT_PERMANENT_AT_START=false is the
+  # operator's MAINTENANCE boot (no permanent pod spawned = no spend, no forge effect) —
+  # an unconditional export here silently turned that intent into a full boot. The
+  # engine side refuses an unparseable value (EnvParse.bool! in runtime.exs): a typo on
+  # a reduction-of-effects switch stops the boot, it never becomes the active default.
+  export LCARS_BOOT_PERMANENT_AT_START="${LCARS_BOOT_PERMANENT_AT_START:-true}"
   export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
 
   # Erlang distribution (named node, RPC debug) is handled per MODE in cmd_start, under a name DERIVED
@@ -366,6 +371,10 @@ cmd_restart() {
   cmd_stop
   cmd_start "$@"
 }
+
+# Source guard (standard idiom): sourcing the file loads the functions WITHOUT running
+# the dispatcher — the bats suite (test/fleet_v2/) exercises setup_env/cmd_* directly.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-help}" in
   start)   shift; cmd_start "$@" ;;

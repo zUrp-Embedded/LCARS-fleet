@@ -14,7 +14,7 @@ defmodule Fleet.EnvParse do
   not an opaque `String.to_integer` stacktrace). A boolean feature-flag typo → the documented default +
   a LOUD warning (a flag typo should be visible, but must not kill the boot).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   require Logger
@@ -68,6 +68,33 @@ defmodule Fleet.EnvParse do
         )
 
         default
+    end
+  end
+
+  @doc """
+  Strict variant of `bool/3` for flags whose WRONG reading is dangerous in one direction
+  (a maintenance / reduction-of-effects switch): unset → `default`, recognized → its
+  value, UNRECOGNIZED → raise (the boot refuses). `bool/3` warns-and-defaults, which is
+  fail-open exactly when the operator asked for fewer effects — a typo there must stop
+  the boot, never silently become the active default. Adopt per-flag, deliberately:
+  strictness on an ordinary tuning knob would trade a boot for a cosmetic typo.
+  """
+  @spec bool!(String.t(), String.t() | nil, boolean()) :: boolean()
+  def bool!(_name, nil, default) when is_boolean(default), do: default
+
+  def bool!(name, value, default) when is_binary(value) and is_boolean(default) do
+    case value |> String.trim() |> String.downcase() do
+      v when v in @truthy ->
+        true
+
+      v when v in @falsy ->
+        false
+
+      _ ->
+        raise ArgumentError,
+              "LCARS config: #{name}=#{inspect(value)} is not a recognized boolean " <>
+                "(true/1/yes/on | false/0/no/off) — refusing to boot rather than fall " <>
+                "back to the active default (#{default}) on a safety flag"
     end
   end
 
