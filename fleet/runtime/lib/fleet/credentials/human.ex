@@ -15,8 +15,10 @@ defmodule Fleet.Credentials.Human do
   @doc "The current human (`id -un`). `{:ok, login}` | `{:error, reason}`."
   @spec current() :: {:ok, String.t()} | {:error, term()}
   def current do
-    case System.cmd("id", ["-un"], stderr_to_stdout: true) do
-      {out, 0} -> {:ok, String.trim(out)}
+    # Bounded (Shell authority): `id` resolves through NSS — a hung backend (LDAP/SSSD)
+    # would hold the caller indefinitely on the unbounded form.
+    case Fleet.Credentials.Shell.run("id", ["-un"], timeout_ms: 5_000) do
+      {:ok, {out, 0}} -> {:ok, String.trim(out)}
       other -> {:error, {:human_unresolved, other}}
     end
   end
@@ -40,8 +42,8 @@ defmodule Fleet.Credentials.Human do
   """
   @spec current_uid() :: {:ok, non_neg_integer()} | {:error, term()}
   def current_uid do
-    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
-      {out, 0} ->
+    case Fleet.Credentials.Shell.run("id", ["-u"], timeout_ms: 5_000) do
+      {:ok, {out, 0}} ->
         case Integer.parse(String.trim(out)) do
           {uid, _} -> {:ok, uid}
           :error -> {:error, {:uid_unparseable, out}}

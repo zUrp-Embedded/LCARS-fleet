@@ -256,18 +256,21 @@ defmodule Fleet.Credentials.ForgeIdentity do
   # `git config --global --get <key>` of the human (daemon runs *as* them → ~/.gitconfig).
   # git absent / key not set → nil (→ fallback).
   defp git_config(key) do
-    case System.cmd("git", ["config", "--global", "--get", key], stderr_to_stdout: true) do
-      {out, 0} -> blank_to_nil(String.trim(out))
+    # Bounded (Shell authority): a home on a hung mount would hold the resolution
+    # indefinitely on the unbounded form; every non-zero/typed failure reads nil (fallback).
+    case Fleet.Credentials.Shell.run("git", ["config", "--global", "--get", key],
+           timeout_ms: 5_000
+         ) do
+      {:ok, {out, 0}} -> blank_to_nil(String.trim(out))
       _ -> nil
     end
-  rescue
-    _ -> nil
   end
 
   # GECOS (field 5 of `getent passwd`, before the 1st comma) = full name, or nil.
   defp gecos_name(human) do
-    case System.cmd("getent", ["passwd", human], stderr_to_stdout: true) do
-      {line, 0} ->
+    # Bounded (Shell authority): `getent` IS the NSS call — the canonical hang.
+    case Fleet.Credentials.Shell.run("getent", ["passwd", human], timeout_ms: 5_000) do
+      {:ok, {line, 0}} ->
         line
         |> String.trim()
         |> String.split(":")

@@ -39,7 +39,7 @@ defmodule Fleet.API.BuildInfo do
   no concurrency, no fault isolation). `:persistent_term` is a table cache,
   not a process.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   @persistent_key {__MODULE__, :info}
@@ -170,16 +170,14 @@ defmodule Fleet.API.BuildInfo do
     end
   end
 
-  # Total wrapper around git. `stderr_to_stdout` + match on the exit status
-  # for "not a repo"; `rescue` for "git absent" (System.cmd raises
-  # ErlangError :enoent when the executable is not found).
+  # Total wrapper around git, BOUNDED (Shell authority): this runs on the boot path
+  # (post_boot build-info trace) — an unbounded git on a hung FS would hold the boot
+  # completion. Every failure (non-zero, absent binary, timeout) reads :error.
   defp git(args) do
-    case System.cmd("git", args, stderr_to_stdout: true) do
-      {out, 0} -> {:ok, String.trim(out)}
-      {_out, _nonzero} -> :error
+    case Fleet.Credentials.Shell.run("git", args, timeout_ms: 5_000) do
+      {:ok, {out, 0}} -> {:ok, String.trim(out)}
+      _ -> :error
     end
-  rescue
-    _ -> :error
   end
 
   defp unknown, do: %{sha: "unknown", dirty: false, ref: nil, source: :unknown}
