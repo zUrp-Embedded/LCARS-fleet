@@ -18,7 +18,7 @@ defmodule Fleet.Workflow.DeliverableGate do
   The system-chosen target branch and the forge network isolation are outside this module
   (resp. `Fleet.Workflow.Deliverable.publish` and the bwrap containment).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-07-21
   """
 
   @git_timeout_ms 15_000
@@ -139,8 +139,8 @@ defmodule Fleet.Workflow.DeliverableGate do
             end
         end
 
-      {out, _rc} ->
-        {:error, {:git_error, String.trim(out)}}
+      {out, rc} ->
+        {:error, classify_git_error(out, rc)}
     end
   end
 
@@ -208,8 +208,8 @@ defmodule Fleet.Workflow.DeliverableGate do
           shas -> {:error, {:missing_coauthor_trailer, expected_role, shas}}
         end
 
-      {out, _rc} ->
-        {:error, {:git_error, String.trim(out)}}
+      {out, rc} ->
+        {:error, classify_git_error(out, rc)}
     end
   end
 
@@ -258,8 +258,8 @@ defmodule Fleet.Workflow.DeliverableGate do
           f -> {:error, {:secret_detected, "blacklisted_file", f}}
         end
 
-      {out, _rc} ->
-        {:error, {:git_error, String.trim(out)}}
+      {out, rc} ->
+        {:error, classify_git_error(out, rc)}
     end
   end
 
@@ -295,8 +295,8 @@ defmodule Fleet.Workflow.DeliverableGate do
           kind -> {:error, {:secret_detected, kind, "diff added lines"}}
         end
 
-      {out, _rc} ->
-        {:error, {:git_error, String.trim(out)}}
+      {out, rc} ->
+        {:error, classify_git_error(out, rc)}
     end
   end
 
@@ -316,13 +316,27 @@ defmodule Fleet.Workflow.DeliverableGate do
     # zombie holding FDs on the workspace; unbounded accumulation under concurrent gates). `@hooks_off`
     # stays composed HERE: Shell.git does NOT auto-compose the config neutralization (it is load-bearing —
     # anti-RCE `diff.external` on `git log -p`), the caller keeps it. External contract `{out, exit_code}`
-    # preserved (the 2 scan_secret_* callers match `{out, 0}` / `{out, _rc}` — unchanged).
-    case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", workspace] ++ args,
-           timeout_ms: @git_timeout_ms
-         ) do
+    # preserved; the callers map the exit code via `classify_git_error/2`, which keeps the synthetic
+    # rc 124 (timeout) DISTINCT from a hard git error. Runner injectable (`:deliverable_gate_git_runner`)
+    # so a test can exercise the rc124 timeout path (a real Shell timeout is impractical to induce).
+    runner =
+      Application.get_env(
+        :fleet_workflow,
+        :deliverable_gate_git_runner,
+        &Fleet.Credentials.Shell.git/2
+      )
+
+    case runner.(@hooks_off ++ ["-C", workspace] ++ args, timeout_ms: @git_timeout_ms) do
       {:ok, {out, code}} -> {out, code}
       {:error, {:timeout, ms}} -> {"git timeout (#{ms}ms)", 124}
       {:error, {:exit, reason}} -> {"git exec error: #{inspect(reason)}", 125}
     end
   end
+
+  # Maps a non-zero git exit code to a typed reason. The bounded `git/2` synthesizes rc 124 for a
+  # Shell TIMEOUT (SIGKILL at the deadline) — that is NOT a hard git failure, and a caller/operator must
+  # keep the distinction (a timeout is retry-worthy, a git_error is investigate-worthy). rc 125 (exec
+  # error) and any real git rc are hard `:git_error`.
+  defp classify_git_error(out, 124), do: {:git_timeout, String.trim(out)}
+  defp classify_git_error(out, _rc), do: {:git_error, String.trim(out)}
 end
