@@ -283,10 +283,12 @@ defmodule Fleet.Spawner.Pod do
     with {:ok, sp_compose} <-
            SPBuilder.compose(
              data.cap_profile,
-             # The role's modop overlays (`spec.modop_set.default`) are composed into the pod's
-             # system prompt (F-C146). A modop declared without a bundle →
+             # The ACTIVE modops of this composition — the role's defaults PLUS any optional modop the
+             # step activated (`CapProfile.resolve/3` stamps them; `active_modops/1` falls back to the
+             # defaults for a profile built outside it). Their `sp.md` fragments are composed into the
+             # pod's system prompt (F-C146). A modop declared without a bundle →
              # `{:error, {:modop_bundle_missing, _}}` surfaces here (fail-loud: the pod does not launch).
-             Fleet.CapProfile.default_modops(data.cap_profile),
+             Fleet.CapProfile.active_modops(data.cap_profile),
              pod_id: data.pod_id,
              job_id: data.issue_id
            ),

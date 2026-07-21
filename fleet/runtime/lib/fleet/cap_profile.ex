@@ -77,12 +77,19 @@ defmodule Fleet.CapProfile do
   # The single construction boundary `to_struct/1` always populates them → additive, does not
   # break normal construction; what it forbids = a partial `%CapProfile{}` hand-built outside load.
   @enforce_keys [:kind, :metadata, :spec]
-  defstruct [:kind, :metadata, :spec]
+  # `active_modops` is NOT part of the cap-profile DATA — it is what `resolve/3` DECIDED for this
+  # composition (role defaults ++ the step's optional modops). It lives on the struct and not in `spec`
+  # on purpose: `spec` is schema-validated (`modop_set` and the root are both
+  # `additionalProperties: false`), and the decision is not a catalogue field — two steps resolving the
+  # same role legitimately differ. `nil` = never went through `resolve/3` (hand-built struct, fixture,
+  # direct `compose/2`); readers must use `active_modops/1`, which falls back to the role's defaults.
+  defstruct [:kind, :metadata, :spec, :active_modops]
 
   @type t :: %__MODULE__{
           kind: String.t(),
           metadata: map(),
-          spec: map()
+          spec: map(),
+          active_modops: [String.t()] | nil
         }
 
   # Default containment mode = SANDBOXED pod. SINGLE SOURCE of the literal: a config gap
@@ -212,11 +219,32 @@ defmodule Fleet.CapProfile do
       # overlays) → the base IS the resolved profile (composing empty overlays is a no-op). The
       # prod loader `Fleet.CapProfile` always exposes `compose/2`, so this branch never yields the
       # base in prod — it spares the stubs a trivial `compose` clause, nothing more.
-      if function_exported?(loader, :compose, 2),
-        do: loader.compose(role, default_modops(base) ++ extra_modops),
-        else: {:ok, base}
+      # The ACTIVE list is decided here — and it must survive to the SP composition. `compose/2` merges
+      # the overlays but returns a profile that no longer says WHICH modops were asked for, so stamping
+      # it is what makes a step's optional modop reach `SPBuilder.compose` instead of being validated
+      # above and then silently dropped (the spawn path re-derived the role's defaults).
+      active = default_modops(base) ++ extra_modops
+
+      if function_exported?(loader, :compose, 2) do
+        with {:ok, composed} <- loader.compose(role, active),
+             do: {:ok, %{composed | active_modops: active}}
+      else
+        {:ok, %{base | active_modops: active}}
+      end
     end
   end
+
+  @doc """
+  The modops ACTIVE for this composition — what `SPBuilder.compose` must receive so their `sp.md`
+  fragments reach the pod's system prompt.
+
+  Stamped by `resolve/3` (role defaults ++ the step's validated optional modops). `nil` means the
+  profile never went through `resolve/3` (hand-built struct, fixture, direct `compose/2`): we then fall
+  back to the role's declared defaults, which is exactly what the spawn path used to do for everyone.
+  """
+  @spec active_modops(t()) :: [String.t()]
+  def active_modops(%__MODULE__{active_modops: mods}) when is_list(mods), do: mods
+  def active_modops(%__MODULE__{} = profile), do: default_modops(profile)
 
   # B-01 GUARD: a STEP can only activate a modop the role itself declares in `modop_set.optional`
   # — it can never turn a reviewer into an engineer (that would be the killed profile-swap), only

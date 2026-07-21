@@ -1162,6 +1162,25 @@ defmodule Fleet.CapProfileTest do
       assert_received {:composed, "engineer", ["rubber-duck", "tdd"]}
     end
 
+    # THE regression this closes. `compose/2` returns a profile that no longer says WHICH modops were
+    # asked for — here it returns `spec: %{}`, so `default_modops/1` of the RESULT is `[]`. The spawn
+    # path used to re-derive the SP's modop list from that result, so a step's optional modop was
+    # validated by the B-01 guard above and then silently never reached `SPBuilder.compose`.
+    test "the ACTIVE modops survive the composition (this is what reaches the pod's system prompt)" do
+      assert {:ok, profile} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
+
+      assert Fleet.CapProfile.active_modops(profile) == ["rubber-duck", "tdd"]
+
+      # Same profile, re-derived the old way: the step's `tdd` is gone — and so was its `sp.md`.
+      assert Fleet.CapProfile.default_modops(profile) == []
+    end
+
+    test "a profile that never went through resolve/3 falls back to the role's declared defaults" do
+      assert {:ok, base} = RecordingLoader.load("engineer")
+      assert base.active_modops == nil
+      assert Fleet.CapProfile.active_modops(base) == ["rubber-duck"]
+    end
+
     test "loader without compose/2 (test stub, no overlays) → the base IS the resolved profile" do
       assert {:ok, %Fleet.CapProfile{}} = Fleet.CapProfile.resolve(LoadOnlyLoader, "engineer")
       refute_received {:composed, _, _}
