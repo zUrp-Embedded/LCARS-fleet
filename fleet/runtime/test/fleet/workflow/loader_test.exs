@@ -225,6 +225,86 @@ defmodule Fleet.Workflow.LoaderTest do
     end
   end
 
+  describe "published image — what the boot proved IS what runs" do
+    setup do
+      on_exit(fn -> Loader.unpublish_all_images() end)
+      :ok
+    end
+
+    defp write_card(dir, name) do
+      File.write!(Path.join(dir, "#{name}.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: #{name}
+      spec:
+        max_rework_rounds: 1
+        jury: []
+        steps:
+          only:
+            role: noop
+      """)
+    end
+
+    test "no-opts readers serve the image — a post-boot disk edit is INERT", %{tmp_dir: tmp} do
+      write_card(tmp, "steady")
+      assert :ok = Loader.publish_image!()
+
+      # Post-publish mutations of the live catalogue: one card rewritten, one added.
+      File.write!(Path.join(tmp, "steady.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: steady
+      spec:
+        max_rework_rounds: 9
+        jury: [qualifier]
+        steps:
+          a:
+            role: noop
+          b:
+            role: noop
+            needs: [a]
+      """)
+
+      write_card(tmp, "late")
+
+      # The image, not the disk: the proven single-step card, the proven enumeration.
+      assert %{"max_rework_rounds" => 1, "steps" => steps} = Loader.load!("steady")
+      assert map_size(steps) == 1
+      assert Loader.canon_names() == ["steady"]
+      assert Loader.canon_names!() == ["steady"]
+
+      # A card that exists on disk but not in the image is refused BY NAME (never a
+      # silent half-epoch mixing proven and unproven cards).
+      assert_raise RuntimeError, ~r/not in the published catalogue image/, fn ->
+        Loader.load!("late")
+      end
+    end
+
+    test "explicit opts stay a direct disk read (the hermetic path bypasses the image)", %{
+      tmp_dir: tmp
+    } do
+      write_card(tmp, "steady")
+      assert :ok = Loader.publish_image!()
+      write_card(tmp, "late")
+
+      assert %{"name" => "late"} = Loader.load!("late", workflow_maps_root: tmp)
+      assert Loader.canon_names(workflow_maps_root: tmp) == ["late", "steady"]
+    end
+
+    test "publish is all-or-nothing: one invalid card → raise, NOTHING published", %{
+      tmp_dir: tmp
+    } do
+      write_card(tmp, "steady")
+      File.write!(Path.join(tmp, "broken.yaml"), "kind: WorkflowMap\nmetadata:\n  name: broken\nspec: {}\n")
+
+      assert_raise RuntimeError, ~r/schema .*invalid/, fn -> Loader.publish_image!() end
+
+      # No image → the readers still enumerate the DISK (both cards visible): the failed
+      # publish left no partial epoch behind.
+      assert Loader.canon_names() == ["broken", "steady"]
+    end
+  end
+
   describe "load!/2 — graph validation" do
     # Schema-VALID (needs = array of strings) but graph-INVALID: `b` refers to a nonexistent
     # step. The schema lets it through (inter-step constraint inexpressible in draft-07);

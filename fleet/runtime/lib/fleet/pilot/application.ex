@@ -164,6 +164,12 @@ defmodule Fleet.Pilot.Application do
               "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
 
+    # Publish the workflow catalogue IMAGE first: the two guards below — and every
+    # runtime consumer after them — then read what was just proved, never the live
+    # disk (a post-boot catalogue edit is inert until restart). Missing, empty or
+    # invalid catalogue → raise HERE, same dead-man's-switch as the base_url guard.
+    Fleet.Workflow.Loader.publish_image!()
+
     validate_card_juries!()
     validate_card_steps!()
 

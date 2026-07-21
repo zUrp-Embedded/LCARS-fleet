@@ -8,6 +8,9 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     # Tests set these keys themselves; we only register their restoration here.
     Enum.each(@keys, &Fleet.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
     Fleet.TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
+    # step_children! publishes the catalogue image; :persistent_term outlives the test —
+    # erase every image so no test serves another test's proven catalogue.
+    on_exit(fn -> Fleet.Workflow.Loader.unpublish_all_images() end)
     :ok
   end
 
@@ -131,6 +134,34 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     Application.put_env(:fleet_workflow, :workflow_maps_root, Path.join(tmp, "nowhere"))
 
     assert Fleet.Pilot.Application.step_children_for_test() == []
+  end
+
+  test "the rail boot PUBLISHES the image the guards proved — a post-boot disk edit is inert", %{
+    tmp_dir: tmp
+  } do
+    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:fleet_pilot, :forge, base_url: "http://forge.local")
+
+    File.write!(Path.join(tmp, "proven.yaml"), """
+    kind: WorkflowMap
+    metadata:
+      name: proven
+    spec:
+      max_rework_rounds: 1
+      jury: []
+      steps:
+        only:
+          role: engineer
+    """)
+
+    Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)
+
+    assert [_ | _] = Fleet.Pilot.Application.step_children_for_test()
+
+    # The catalogue mutates after boot: the runtime keeps serving the PROVEN card.
+    File.rm!(Path.join(tmp, "proven.yaml"))
+    assert %{"name" => "proven"} = Fleet.Workflow.Loader.load!("proven")
+    assert Fleet.Workflow.Loader.canon_names() == ["proven"]
   end
 
   test "F-C061 V2 (cards): a card jury with a NON-role login (human) → raise at boot",

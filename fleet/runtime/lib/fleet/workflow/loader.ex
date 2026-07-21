@@ -42,8 +42,12 @@ defmodule Fleet.Workflow.Loader do
   consumers always read `workflow_map["steps"]` without reopening the envelope:
   a single representable form.
 
-  Raises `YamlElixir.FileNotFoundError` if the file is not found,
-  `RuntimeError` if the schema is invalid.
+  When a catalogue IMAGE is published (`publish_image!/0`, rail boot) and the call
+  carries no opts, the card is served FROM the image — the proven epoch, never the
+  live disk; an unknown name then raises `RuntimeError` (not in the image). Without
+  an image (rail off, or explicit opts — the hermetic test path), the card is read
+  and validated from disk: raises `YamlElixir.FileNotFoundError` if the file is not
+  found, `RuntimeError` if the schema is invalid.
   """
   @spec load!(String.t(), keyword()) :: map()
   def load!(workflow_map_name, opts \\ []) when is_binary(workflow_map_name) and is_list(opts) do
@@ -54,6 +58,22 @@ defmodule Fleet.Workflow.Loader do
     # caller bug); a slug can contain neither `/` nor `..` → the leaf stays under the root
     # by construction.
     name = Fleet.Slug.cast!(workflow_map_name)
+
+    case image_card(name, opts) do
+      {:ok, card} ->
+        card
+
+      :not_in_image ->
+        raise "Fleet.Workflow.Loader: workflow map #{inspect(name)} is not in the published " <>
+                "catalogue image — the runtime serves what its boot proved; a card added to " <>
+                "the live disk after boot is deliberately not served (redeploy = restart)"
+
+      :no_image ->
+        load_from_disk!(name, opts)
+    end
+  end
+
+  defp load_from_disk!(name, opts) do
     yaml_path = Path.join(workflow_maps_root(opts), "#{name}.yaml")
     yaml = YamlElixir.read_from_file!(yaml_path)
     schema = resolved_schema(opts)
@@ -65,11 +85,11 @@ defmodule Fleet.Workflow.Loader do
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
         workflow_map = normalize(yaml)
-        validate_graph!(workflow_map, workflow_map_name)
+        validate_graph!(workflow_map, name)
         workflow_map
 
       {:error, errors} ->
-        raise "Fleet.Workflow.Loader: schema #{@schema_file} invalid for #{workflow_map_name}: #{inspect(errors)}"
+        raise "Fleet.Workflow.Loader: schema #{@schema_file} invalid for #{name}: #{inspect(errors)}"
     end
   end
 
@@ -120,18 +140,18 @@ defmodule Fleet.Workflow.Loader do
   end
 
   @doc """
-  Names of the canon workflow maps (`*.yaml` basenames under the maps root). Single
-  listing authority — the root derivation is NOT re-derived at callers. TOLERANT by
-  design: a missing root and an empty catalogue both enumerate to `[]` — fine for a
-  listing, vacuously true for a guard. Guards use `canon_names!/1`.
+  Names of the canon workflow maps. Single listing authority — the root derivation is
+  NOT re-derived at callers. Serves the published image when one exists (no-opts call
+  sites), the disk otherwise. TOLERANT by design: a missing root and an empty
+  catalogue both enumerate to `[]` — fine for a listing, vacuously true for a guard.
+  Guards use `canon_names!/1`.
   """
   @spec canon_names(keyword()) :: [String.t()]
   def canon_names(opts \\ []) do
-    workflow_maps_root(opts)
-    |> Path.join("*.yaml")
-    |> Path.wildcard()
-    |> Enum.map(&Path.basename(&1, ".yaml"))
-    |> Enum.sort()
+    case image_names(opts) do
+      nil -> disk_canon_names(opts)
+      names -> names
+    end
   end
 
   @doc """
@@ -140,10 +160,26 @@ defmodule Fleet.Workflow.Loader do
   Boot guards call this — without it a rail can reach readiness with zero loadable
   card and fail at its first route, far from the deploy fault. Raises with the
   resolved root and its config sources; distinguishes missing from empty (two
-  different operator mistakes).
+  different operator mistakes). A published image satisfies it by construction
+  (nothing empty is ever published).
   """
   @spec canon_names!(keyword()) :: [String.t()]
   def canon_names!(opts \\ []) do
+    case image_names(opts) do
+      nil -> disk_canon_names!(opts)
+      names -> names
+    end
+  end
+
+  defp disk_canon_names(opts) do
+    workflow_maps_root(opts)
+    |> Path.join("*.yaml")
+    |> Path.wildcard()
+    |> Enum.map(&Path.basename(&1, ".yaml"))
+    |> Enum.sort()
+  end
+
+  defp disk_canon_names!(opts) do
     root = workflow_maps_root(opts)
 
     unless File.dir?(root) do
@@ -152,7 +188,7 @@ defmodule Fleet.Workflow.Loader do
               "LCARS_WORKFLOW_MAPS_ROOT), fail-loud"
     end
 
-    case canon_names(opts) do
+    case disk_canon_names(opts) do
       [] ->
         raise "Fleet.Workflow.Loader: workflow maps root #{inspect(root)} contains no *.yaml card — " <>
                 "an empty catalogue would make every canon validation vacuously true; " <>
@@ -160,6 +196,81 @@ defmodule Fleet.Workflow.Loader do
 
       names ->
         names
+    end
+  end
+
+  # ============================================================
+  # Published catalogue image (what the boot proved IS what runs)
+  # ============================================================
+
+  # Namespaced miss sentinel (a published image is always a map).
+  @no_image {__MODULE__, :no_image}
+
+  @doc """
+  Builds the workflow catalogue IMAGE — every canon card loaded and validated from
+  disk — and publishes it atomically in `:persistent_term`, keyed by the resolved
+  root. From then on the no-opts readers (`load!/1`, `canon_names/0`,
+  `canon_names!/0`) serve the image: what the boot proved is what the runtime
+  consumes, and a post-boot mutation of the live catalogue is INERT (redeploy =
+  restart; a future hot-reload must build and validate a COMPLETE new image before
+  swapping, never mutate card by card). Fail-loud on a missing/empty root or any
+  invalid card — nothing is published unless the whole catalogue proved.
+
+  Owner: the step rail's boot (`Fleet.Pilot.Application.step_children!`). Rail off →
+  no image → direct validated disk reads (listing/tooling contexts).
+  """
+  @spec publish_image!() :: :ok
+  def publish_image! do
+    root = workflow_maps_root([])
+    names = disk_canon_names!([])
+    image = Map.new(names, fn name -> {name, load_from_disk!(Fleet.Slug.cast!(name), [])} end)
+    :persistent_term.put(image_key(root), image)
+    :ok
+  end
+
+  @doc false
+  # Test hygiene: erases every published image (any root). `:persistent_term` outlives a
+  # test; a leaked image would silently serve another test's catalogue for the same root.
+  def unpublish_all_images do
+    for {key, _} <- :persistent_term.get(), match?({__MODULE__, :image, _}, key) do
+      :persistent_term.erase(key)
+    end
+
+    :ok
+  end
+
+  defp image_key(root), do: {__MODULE__, :image, root}
+
+  # Image lookup applies ONLY to the no-opts call sites (runtime consumers): an explicit
+  # opts root/schema is a hermetic direct read (tests, tooling), never served from the image.
+  defp image_card(name, []) do
+    case published_image() do
+      nil ->
+        :no_image
+
+      image ->
+        case Map.fetch(image, name) do
+          {:ok, card} -> {:ok, card}
+          :error -> :not_in_image
+        end
+    end
+  end
+
+  defp image_card(_name, _opts), do: :no_image
+
+  defp image_names([]) do
+    case published_image() do
+      nil -> nil
+      image -> image |> Map.keys() |> Enum.sort()
+    end
+  end
+
+  defp image_names(_opts), do: nil
+
+  defp published_image do
+    case :persistent_term.get(image_key(workflow_maps_root([])), @no_image) do
+      @no_image -> nil
+      image -> image
     end
   end
 
