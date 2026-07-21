@@ -110,13 +110,19 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     refute_received {:comment, _, _, _, _}
   end
 
-  # The merge is the act that counts; the comment is a post-merge trace DISCARDED WITHOUT LOG by
-  # seal_and_merge — the readable trace is then missing on the issue and nothing re-posts it (the
-  # dedup only guards against replays). Only the human trace is lost, never the merge.
-  test "comment KO AFTER merge → :ok anyway (the merge counts, the trace is lost silently)" do
-    assert :ok = GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
+  # The merge is the act that counts; the comment is a POST-merge trace, best-effort: a failed seal
+  # comment does NOT block the seal (the merge stays authoritative), but it is LOGGED loud — nothing
+  # re-posts it (the dedup only guards against replays), so the loss is visible in the log, never
+  # silent. Only the human-readable trace is lost, never the merge.
+  test "comment KO AFTER merge → :ok anyway (the merge counts, the lost trace is LOGGED, not silent)" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok =
+                 GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
+      end)
 
     assert_received :merged
+    assert log =~ "seal comment NOT posted"
   end
 
   test "F-C066: merge OK but close failed (persistent) → {:error, {:close_after_merge, _}}, NEVER a lying :ok" do
