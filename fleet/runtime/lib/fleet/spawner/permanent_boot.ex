@@ -43,10 +43,6 @@ defmodule Fleet.Spawner.PermanentBoot do
   def parse_permanent(@permanent_prefix <> role) when role != "", do: {:ok, role}
   def parse_permanent(_), do: :not_permanent
 
-  @doc "true if the pod_id is that of a PERMANENT pod (resident — not in-flight work)."
-  @spec permanent?(String.t()) :: boolean()
-  def permanent?(pod_id) when is_binary(pod_id), do: match?({:ok, _}, parse_permanent(pod_id))
-
   @doc """
   Should this cap-profile boot at fleet startup (Type 1)?
 

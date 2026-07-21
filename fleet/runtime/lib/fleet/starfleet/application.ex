@@ -40,26 +40,10 @@ defmodule Fleet.Starfleet.Application do
   `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` — each child is independent;
   the widened restart window (vs OTP's 3/5) is a deliberate choice for blips.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-21
   """
 
   use Supervisor
-
-  # The atoms Cat5Escalator ACTUALLY emits:
-  # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator).
-  @starfleet_event_atoms [
-    :"starfleet.audit_cat5_pod_drift",
-    :"starfleet.audit_cat5_workflow_map_failed",
-    :"starfleet.audit_cat5_oauth_refresh_failed",
-    :"audit.verdict",
-    # BootOrchestrator lifecycle events
-    :"fleet.boot_complete",
-    :"fleet.boot_partial",
-    :"fleet.boot_failed",
-    # V2 extensions — MCPWatcher + MCPMonitor
-    :"sdk.upstream_alert",
-    :"mcp.server_crashed"
-  ]
 
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
@@ -129,11 +113,4 @@ defmodule Fleet.Starfleet.Application do
     end
   end
 
-  @doc """
-  List of the pre-registered event atoms (`starfleet.audit_cat5_*`, `audit.verdict`,
-  `fleet.boot_*`, `sdk.upstream_alert`, `mcp.server_crashed`). Part of the
-  atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
-  """
-  @spec starfleet_event_atoms() :: [atom()]
-  def starfleet_event_atoms, do: @starfleet_event_atoms
 end
