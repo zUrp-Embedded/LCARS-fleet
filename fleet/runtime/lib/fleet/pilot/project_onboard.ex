@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -96,11 +96,32 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # push) and one after push main (main IS pushed before work/ops) orders the writes BETWEEN calls.
     # The work/ops birth itself is a twin same-second pair — structural to Gitea, both channels
     # measured (cf. `publish_work_ops`). Accepted: the twins tell the same fact.
+    # COMPENSATED sequence: `create_repo` is the first artifact-creating step; everything after it
+    # runs under `finish_onboard`, and a failure there UNWINDS what THIS call created (forge repo +
+    # both dirs) before returning the error. Without the unwind, a mid-sequence failure (seen LIVE:
+    # commit failed) left the repo created + the dirs scaffolded, and the retry hit BOTH walls —
+    # `refute_existing` (dir exists) and create_repo 409 — a wedge only a host-side rm could break.
+    # Within ONE call there is no ownership ambiguity (refute_existing just proved the dirs absent,
+    # classify_create_repo proved the repo fresh) → the unwind destroys only what it just made, so
+    # the fail-loud walls keep guarding FOREIGN state without ever trapping our own debris.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
-         {:ok, full_name, provision} <- create_repo(name, org, opts),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         {:ok, full_name, provision} <- create_repo(name, org, opts) do
+      case finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
+        {:ok, result} ->
+          {:ok, result}
+
+        {:error, reason} = err ->
+          compensate_onboard(full_name, proj_dir, work_dir, reason, opts)
+          err
+      end
+    end
+  end
+
+  # Steps after the repo exists — the compensable window of `onboard/2`.
+  defp finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
+    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- maybe_scaffold_main(provision, proj_dir, name, opts),
@@ -123,6 +144,45 @@ defmodule Fleet.Pilot.ProjectOnboard do
       # ensure_architect — a spawn hiccup never fails the onboard, the project exists).
       arch = ensure_architect(full_name, opts)
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+    end
+  end
+
+  # Unwind of a failed onboard: forge repo (created by THIS call — classify_create_repo refused a
+  # pre-existing one, so the delete can never hit foreign work) + both dirs (absent at entry by
+  # `refute_existing`, so whatever sits there now is our debris — including a PARTIAL clone whose
+  # origin is not yet provable, which an identity-gated removal would leave to wedge the retry).
+  # Best-effort by design: each leg reports, none aborts the others; the residue of an incomplete
+  # unwind is named LOUD (the retry then fails on the wall the residue explains, with this trace
+  # above it in the log). The BEAM dying mid-onboard skips this (no unwind runs) — that residue is
+  # recoverable agent-side via `delete_project(force: true)`, still no host intervention.
+  defp compensate_onboard(full_name, proj_dir, work_dir, reason, opts) do
+    forge =
+      case delete_forge(full_name, opts) do
+        {:ok, verdict} -> verdict
+        {:error, e} -> {:delete_failed, e}
+      end
+
+    proj = compensate_dir(proj_dir)
+    work = compensate_dir(work_dir)
+
+    Logger.warning(
+      "ProjectOnboard: onboard #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
+        "forge #{inspect(forge)}, project_dir #{inspect(proj)}, work_dir #{inspect(work)} " <>
+        "(a clean retry is possible; incomplete legs above must be cleared first)"
+    )
+  end
+
+  # Dir leg of the unwind — the ENTRY INVARIANT (refute_existing passed in the same call) is the
+  # ownership proof; an origin check would miss the partial-clone case (no origin yet), the exact
+  # debris that wedges the retry.
+  defp compensate_dir(dir) do
+    if File.exists?(dir) do
+      case nuke_dir(dir) do
+        :ok -> :removed
+        {:error, _} -> :removal_incomplete
+      end
+    else
+      :absent
     end
   end
 
@@ -165,12 +225,35 @@ defmodule Fleet.Pilot.ProjectOnboard do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
+    # COMPENSATED like `onboard/2`, dirs ONLY: the repo pre-exists (that is the point of an import)
+    # and is NEVER unwound — the disk clones are the only artifacts this call creates.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing(proj_dir, work_dir),
          :ok <- require_org_membership(full_name, org),
-         :ok <- require_default_branch_main(full_name, opts),
-         {:ok, url} <- repo_url(full_name, opts),
+         :ok <- require_default_branch_main(full_name, opts) do
+      case finish_import(full_name, proj_dir, work_dir, name, opts) do
+        {:ok, result} ->
+          {:ok, result}
+
+        {:error, reason} = err ->
+          proj = compensate_dir(proj_dir)
+          work = compensate_dir(work_dir)
+
+          Logger.warning(
+            "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
+              "project_dir #{inspect(proj)}, work_dir #{inspect(work)} (repo untouched — " <>
+              "pre-existing; a clean retry is possible)"
+          )
+
+          err
+      end
+    end
+  end
+
+  # Steps after the preflights — the compensable window of `import/2` (disk artifacts only).
+  defp finish_import(full_name, proj_dir, work_dir, name, opts) do
+    with {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts),
          :ok <- lock_main(full_name, opts) do
@@ -332,7 +415,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # Forge teardown: absent → nothing to delete; present → delete. A non-404 read error → refuse (never
   # delete on an unverifiable forge state). No value-guard here — the `force` gate above owns the decision.
   defp delete_forge(full_name, opts) do
-    repo_mod = Keyword.get(opts, :forge_repo, ForgeClient.Repo)
+    repo_mod = repo_mod(opts)
     fc = fc_opts(opts)
 
     case repo_mod.default_branch(full_name, fc) do
@@ -398,7 +481,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp require_default_branch_main(full_name, opts) do
-    case ForgeClient.Repo.default_branch(full_name, fc_opts(opts)) do
+    case repo_mod(opts).default_branch(full_name, fc_opts(opts)) do
       {:ok, "main"} -> :ok
       {:ok, other} -> {:error, {:unexpected_default_branch, other}}
       {:error, _} = err -> err
@@ -409,7 +492,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # (the nominal case of an external repo) → same sequence as onboard (steps 5-7): orphan branch + scaffold
   # + commit + push.
   defp ensure_work_ops(full_name, url, _proj_dir, work_dir, name, opts) do
-    if ForgeClient.Repo.branch_exists?(full_name, "work/ops", fc_opts(opts)) do
+    if repo_mod(opts).branch_exists?(full_name, "work/ops", fc_opts(opts)) do
       File.mkdir_p!(Path.dirname(work_dir))
       GitOps.run(["clone", "--branch", "work/ops", url, work_dir], auth: true)
     else
@@ -460,13 +543,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
       enable_push: false
     }
 
-    case ForgeClient.Repo.protect_branch(repo, rule, fc_opts(opts)) do
+    case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do
       :ok -> :ok
       {:error, reason} -> {:error, {:protect_main, reason}}
     end
   end
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
+
+  # The ONE resolution of the forge repo module (seam `:forge_repo`, default `ForgeClient.Repo`) —
+  # the idiom `delete_forge` already used, generalized so the WHOLE onboard/import sequence is
+  # driveable in test against a `file://` forge (the compensation e2e needs to fail a late step).
+  defp repo_mod(opts), do: Keyword.get(opts, :forge_repo, ForgeClient.Repo)
 
   # F2 — fail-loud preflight BEFORE any creation: an OS human without a forge account, or outside
   # the `humans` team, otherwise surfaces as an OPAQUE downstream 422 ("Assignee does not exist"
@@ -589,7 +677,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     desc = Keyword.get(opts, :description, "")
     template = project_template(opts)
 
-    case ForgeClient.Repo.generate_repo(
+    case repo_mod(opts).generate_repo(
            template,
            name,
            Keyword.merge(opts, org: org, description: desc)
@@ -607,7 +695,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
         )
 
         result =
-          ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc))
+          repo_mod(opts).create_repo(name, Keyword.merge(opts, org: org, description: desc))
 
         with {:ok, full_name} <- classify_create_repo(result, org, name) do
           {:ok, full_name, :bare}
