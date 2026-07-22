@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   defmodule Clone do
@@ -230,40 +230,52 @@ defmodule Fleet.ProjectBootstrap.Phase do
       work_branch = project["work_branch"]
       repo_url = project["repo_path"]
 
-      if is_nil(work_branch) or is_nil(repo_url) do
-        {:ok, nil}
-      else
-        doc = Path.join(pod_dir, "work")
-        ref = project["reference_repo_path"]
-        ref_args = if ref, do: ["--reference", ref], else: []
+      cond do
+        is_nil(work_branch) or is_nil(repo_url) ->
+          {:ok, nil}
 
-        # PARITY with `clone_or_skip` (same `rm_rf` of the residue): a DEAD predecessor pod leaves its
-        # `work/` on disk; the pod_id being deterministic, the re-dispatch lands on the same
-        # `pod_dir` → `git clone` would refuse ("destination already exists and is not an empty
-        # directory") → same permanent wedge as the workspace. Clean slate: the residual `work/` can
-        # only come from a dead predecessor (the pod owns its pod_dir) → a fresh re-clone is
-        # always correct.
-        _ = File.rm_rf(doc)
+        # The branch is GATED before it reaches the argv (Fleet.GitRef): the cap-profile is
+        # operator canon (schema-typed as a bare string), but a ref beginning with `-` would read
+        # as a git OPTION on the clone below — refuse it typed instead of handing it to git.
+        not Fleet.GitRef.valid?(work_branch) ->
+          {:error, {:work_doc_clone_failed, {:invalid_work_branch, inspect(work_branch)}}}
 
-        # --single-branch: the doc branch is orphan ⇒ no need to fetch the rest of the history.
-        # NETWORK clone BOUNDED via `Shell.git/2` (anti-prompt + forge auth via `git_env/0`, killed within
-        # the deadline if hung → no pod frozen on the doc clone).
-        case Fleet.Credentials.Shell.git(
-               ["clone"] ++
-                 ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc]
-             ) do
-          {:ok, {_, 0}} ->
-            {:ok, doc}
+        true ->
+          do_clone_work_doc_valid(pod_dir, project, work_branch, repo_url)
+      end
+    end
 
-          {:ok, {out, code}} ->
-            {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
+    defp do_clone_work_doc_valid(pod_dir, project, work_branch, repo_url) do
+      doc = Path.join(pod_dir, "work")
+      ref = project["reference_repo_path"]
+      ref_args = if ref, do: ["--reference", ref], else: []
 
-          {:error, {:timeout, ms}} ->
-            {:error, {:work_doc_clone_failed, {work_branch, :git_timeout, ms}}}
+      # PARITY with `clone_or_skip` (same `rm_rf` of the residue): a DEAD predecessor pod leaves its
+      # `work/` on disk; the pod_id being deterministic, the re-dispatch lands on the same
+      # `pod_dir` → `git clone` would refuse ("destination already exists and is not an empty
+      # directory") → same permanent wedge as the workspace. Clean slate: the residual `work/` can
+      # only come from a dead predecessor (the pod owns its pod_dir) → a fresh re-clone is
+      # always correct.
+      _ = File.rm_rf(doc)
 
-          {:error, {:exit, reason}} ->
-            {:error, {:work_doc_clone_failed, {work_branch, :git_exit, reason}}}
-        end
+      # --single-branch: the doc branch is orphan ⇒ no need to fetch the rest of the history.
+      # NETWORK clone BOUNDED via `Shell.git/2` (anti-prompt + forge auth via `git_env/0`, killed within
+      # the deadline if hung → no pod frozen on the doc clone).
+      case Fleet.Credentials.Shell.git(
+             ["clone"] ++
+               ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc]
+           ) do
+        {:ok, {_, 0}} ->
+          {:ok, doc}
+
+        {:ok, {out, code}} ->
+          {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
+
+        {:error, {:timeout, ms}} ->
+          {:error, {:work_doc_clone_failed, {work_branch, :git_timeout, ms}}}
+
+        {:error, {:exit, reason}} ->
+          {:error, {:work_doc_clone_failed, {work_branch, :git_exit, reason}}}
       end
     end
 

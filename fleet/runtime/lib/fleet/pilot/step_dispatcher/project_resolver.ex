@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
   the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-22
   """
 
   # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.
@@ -81,16 +81,17 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   defp ls_remote_sha(repo_url, branch) do
     # Forge token via env (out of argv/cmdline). DR-024: a private ls-remote REQUIRES auth → fail-loud on a
     # present-but-malformed credential (git_env_result) instead of running unauthenticated (a 403/404 masks it).
-    with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
+    # The branch is GATED before it reaches the argv (Fleet.GitRef, the runtime's ref grammar): the
+    # sources are trusted-ish (card/config), but a ref beginning with `-` would read as a git OPTION —
+    # the belt makes that unrepresentable rather than relying on every upstream author.
+    with :ok <- validate_branch(branch),
+         {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
       case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
              timeout_ms: 15_000,
              env: auth_env
            ) do
         {:ok, {out, 0}} ->
-          case out |> String.split("\n", trim: true) |> List.first() do
-            nil -> {:error, :no_ref}
-            line -> {:ok, line |> String.split() |> List.first()}
-          end
+          parse_ls_remote_out(out)
 
         {:ok, {out, rc}} ->
           {:error, {rc, String.trim(out)}}
@@ -101,6 +102,36 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
         {:error, {:exit, reason}} ->
           {:error, {:exit, reason}}
       end
+    end
+  end
+
+  defp validate_branch(branch) do
+    if Fleet.GitRef.valid?(branch),
+      do: :ok,
+      else: {:error, {:invalid_branch, inspect(branch)}}
+  end
+
+  # Pure parse of `git ls-remote` stdout → the pinned sha. The first column MUST be a full 40-hex
+  # object id: this sha becomes `base_sha` — the reset target, the provenance input, the gate base —
+  # so a malformed line (truncated output, an error string on stdout) must surface as a typed error,
+  # never flow downstream as a "sha" the workspace would then be reset onto.
+  @doc false
+  @spec parse_ls_remote_out(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def parse_ls_remote_out(out) do
+    case out |> String.split("\n", trim: true) |> List.first() do
+      nil ->
+        {:error, :no_ref}
+
+      line ->
+        case line |> String.split() |> List.first() do
+          sha when is_binary(sha) ->
+            if Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
+              do: {:ok, sha},
+              else: {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
+
+          nil ->
+            {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
+        end
     end
   end
 end

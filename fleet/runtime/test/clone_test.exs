@@ -319,4 +319,24 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert String.trim(status) == ""
     assert File.exists?(sentinel)
   end
+
+  test "work_branch failing the ref grammar → typed refusal BEFORE git (no option injection)", %{
+    tmp_dir: tmp
+  } do
+    # The cap-profile types work_branch as a bare string: a ref starting with `-` would read as a
+    # git OPTION on the clone argv. The gate refuses it typed — git is never invoked (the repo_path
+    # below does not even exist, so reaching git would fail differently).
+    pod_dir = Path.join(tmp, "pod-evil-branch")
+    File.mkdir_p!(pod_dir)
+
+    profile =
+      cap(%{
+        "repo_path" => Path.join(tmp, "no-such-repo"),
+        "base_branch" => "main",
+        "work_branch" => "--upload-pack=/tmp/evil"
+      })
+
+    assert {:error, {:work_doc_clone_failed, {:invalid_work_branch, _}}} =
+             Clone.clone_work_doc(pod_dir, profile)
+  end
 end
