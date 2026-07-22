@@ -26,7 +26,10 @@ events:
   # consumer) = registry lie (the registry must reflect reality). Removed; to re-add WITH a
   # producer if pod progression becomes observable.
   pod.completed: []
-  pod.failed: []
+  pod.failed:
+    source: spawner
+    action: incident
+    incident: {op: pod, subject: pod_id}
   # pod.drift: consumed by DriftMonitor + AuditConsumer (wired + tested), but DORMANT — NO producer
   # emits it (codex audit F-08 2026-07-19: the claimed F-C043 producer in Fleet.Spawner.PermanentBoot
   # does NOT exist, and the "corrupt versioned base seed" it was meant to detect vanished with the
@@ -47,7 +50,11 @@ events:
   # keys the IncidentRegistry dedup signature)/`reason_detail`/`pane`. Consumed by
   # `Fleet.Pilot.IncidentConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
   # Real producer AND consumer → legitimate key (was absent = consumed-outside-registry, contracts-check red).
-  wake.failed: []
+  # wake recurrence = SP suspect (typed escalation) + `pane` forwarded for the diag.
+  wake.failed:
+    source: spawner
+    action: incident
+    incident: {op: wake, subject: pod_id, escalate_kind: sp_suspect, forward: [pane]}
   # spawn.failed: emitted by `Spawner.PublishConsumer` (source :spawner) when the dispatch of an
   # `admin.spawn.request` RAISES (CapProfile/spawn_pod fails unexpectedly) → the spawn is dropped.
   # The REST API has already replied HTTP 202 "queued" to the client BEFORE this async dispatch → without
@@ -56,7 +63,12 @@ events:
   # role are absent/empty — the alarm always reaches the rail)/`issue_id`/`reason` (stable
   # category string)/`reason_detail`. Consumed by
   # `Fleet.Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
-  spawn.failed: []
+  # twin of pod.failed, keyed on the ROLE (no pod was ever created): recurrence = "this role
+  # keeps failing to spawn".
+  spawn.failed:
+    source: spawner
+    action: incident
+    incident: {op: spawn, subject: cap_profile_name}
 
   # --- Credentials ---
   # source `credentials` DECLARED for the dormant signal (anti-spoof completed): its future
@@ -150,9 +162,15 @@ events:
   # `audit_cat5_pod_drift` and `audit_cat5_oauth_refresh_failed` cannot be emitted either, however
   # wired their consumers are. Only `audit_cat5_workflow_map_failed` has a live path (draft producer,
   # see the CAT-5 CHAIN note above). The three keys read symmetrically; their reachability does not.
-  starfleet.audit_cat5_pod_drift: []
-  starfleet.audit_cat5_workflow_map_failed: []
-  starfleet.audit_cat5_oauth_refresh_failed: []
+  starfleet.audit_cat5_pod_drift:
+    source: starfleet
+    action: incident_cat5
+  starfleet.audit_cat5_workflow_map_failed:
+    source: starfleet
+    action: incident_cat5
+  starfleet.audit_cat5_oauth_refresh_failed:
+    source: starfleet
+    action: incident_cat5
 
   # --- TaskQueue lifecycle (source :task_queue) ---
   work_item.enqueued: []

@@ -7,8 +7,33 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   # record_fun (zero forge) that echoes the call back to the test. We verify the ROUTING event →
   # contract `record_or_escalate(op, subject, reason, opts)`, not the escalation policy (tested on
   # the registry side).
-  defp start(record_fun) do
-    start_supervised!({IncidentConsumer, subscribe: false, record_fun: record_fun})
+  # Canon-equivalent classification table via the `:routing_fun` seam (the consumer is a MECHANIC
+  # over the table — audit B-05); hermetic (no global persistent_term mutation, async stays true).
+  defp routing do
+    %{
+      {:spawner, :"pod.failed"} => %{
+        action: :incident,
+        incident: %{op: "pod", subject: "pod_id", escalate_kind: nil, forward: []}
+      },
+      {:spawner, :"wake.failed"} => %{
+        action: :incident,
+        incident: %{op: "wake", subject: "pod_id", escalate_kind: :sp_suspect, forward: [:pane]}
+      },
+      {:spawner, :"spawn.failed"} => %{
+        action: :incident,
+        incident: %{op: "spawn", subject: "cap_profile_name", escalate_kind: nil, forward: []}
+      },
+      {:starfleet, :"starfleet.audit_cat5_pod_drift"} => %{action: :incident_cat5},
+      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5},
+      {:starfleet, :"starfleet.audit_cat5_oauth_refresh_failed"} => %{action: :incident_cat5}
+    }
+  end
+
+  defp start(record_fun, opts \\ []) do
+    start_supervised!(
+      {IncidentConsumer,
+       [subscribe: false, record_fun: record_fun, routing_fun: fn -> routing() end] ++ opts}
+    )
   end
 
   defp echo_fun do
@@ -59,6 +84,48 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
     # Payload without reason_detail (pre-normalization producer or forged event) → nil, never a crash.
     assert Keyword.get(opts, :reason_detail) == nil
+  end
+
+  test "the classification is DATA: re-declaring the op in the table changes the recording, zero code" do
+    # The killer discriminator vs hardcoded clauses: the SAME wake.failed event records under the
+    # op the TABLE declares — the old handler carried "wake" in code and could not follow.
+    me = self()
+
+    fun = fn op, subject, reason, opts ->
+      send(me, {:rec, op, subject, reason, opts})
+      :recorded
+    end
+
+    pid =
+      start_supervised!(
+        {IncidentConsumer,
+         subscribe: false,
+         record_fun: fun,
+         routing_fun: fn ->
+           %{
+             {:spawner, :"wake.failed"} => %{
+               action: :incident,
+               incident: %{op: "reveil", subject: "pod_id", escalate_kind: nil, forward: []}
+             }
+           }
+         end}
+      )
+
+    send(pid, failed_event(:"wake.failed", %{"pod_id" => "pod_9", "reason" => "no_ack"}))
+    assert_receive {:rec, "reveil", "pod_9", "no_ack", _opts}
+  end
+
+  test "a routed incident whose subject key is MISSING → LOUD producer-bug warning, nothing recorded" do
+    me = self()
+    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(pid, failed_event(:"pod.failed", %{"reason" => "boom", "no_pod_id" => true}))
+        refute_receive :rec, 100
+      end)
+
+    assert log =~ "producer bug"
   end
 
   test "failure event without pod_id → ignored (no record)" do
@@ -118,7 +185,10 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   defp start_cat5(escalate_fun) do
     start_supervised!(
       {IncidentConsumer,
-       subscribe: false, record_fun: fn _, _, _, _ -> :recorded end, escalate_fun: escalate_fun}
+       subscribe: false,
+       record_fun: fn _, _, _, _ -> :recorded end,
+       escalate_fun: escalate_fun,
+       routing_fun: fn -> routing() end}
     )
   end
 

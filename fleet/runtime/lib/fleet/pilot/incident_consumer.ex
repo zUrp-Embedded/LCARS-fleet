@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
       immediate, repeats under the registry cooldown suppressed.
     * `:runner` — offload seam (see above). Default `nil` → sync.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use GenServer
@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # this consumer) and `offload_async/1`. Specific to this consumer (not the StepRunConsumer's): clean separation.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
-  defstruct record_fun: nil, escalate_fun: nil, runner: nil
+  defstruct record_fun: nil, escalate_fun: nil, runner: nil, routing_fun: nil
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -127,94 +127,34 @@ defmodule Fleet.Pilot.IncidentConsumer do
         Keyword.get(opts, :record_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4),
       escalate_fun:
         Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5),
-      runner: Keyword.get(opts, :runner)
+      runner: Keyword.get(opts, :runner),
+      # The event → op/escalation-kind CLASSIFICATION is TABLE data (`events.yaml` routing —
+      # audit B-05); the seam keeps the unit tests hermetic (no global persistent_term mutation).
+      routing_fun: Keyword.get(opts, :routing_fun, &Fleet.EventRouter.Bus.event_routing/0)
     }
 
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info(
-        %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id} = p} =
-          ev,
-        state
-      )
-      when is_binary(pod_id) do
-    # `reason` = stable category (producer-normalized, keys the dedup signature);
-    # `reason_detail` rides as an opt → engraved in the issue body by Escalation (human diag);
-    # `correlation_id` → the "Mandat lié" block of the recurrence issue.
-    record(state, "pod", pod_id, p["reason"],
-      reason_detail: p["reason_detail"],
-      correlation_id: ev.correlation_id
-    )
+  # TABLE-DRIVEN consumer (audit B-05): which event becomes WHICH incident class — op, subject key,
+  # escalation kind, forwarded diag keys — is DATA (`events.yaml` routing), this module is the
+  # MECHANIC. Adding an incident class is a registry edit, not a new clause. Actions owned here:
+  # `incident` (recurrence-gated recording) and `incident_cat5` (direct escalation, max severity —
+  # the tag derived from the synthesized `starfleet.audit_cat5_<tag>` type). Other actions belong
+  # to other mechanics (DriftMonitor) and are ignored, as are unrouted events.
+  def handle_info(%Fleet.Event{source: source, type: type, payload: p} = ev, state) do
+    case Map.get(state.routing_fun.(), {source, type}) do
+      %{action: :incident, incident: inc} ->
+        handle_incident(state, inc, p, ev)
 
-    {:noreply, state}
-  end
+      %{action: :incident_cat5} ->
+        escalate_cat5(state, cat5_tag(type), ev)
 
-  def handle_info(
-        %Fleet.Event{source: :spawner, type: :"wake.failed", payload: %{"pod_id" => pod_id} = p} =
-          ev,
-        state
-      )
-      when is_binary(pod_id) do
-    # wake recurrence = SP suspect (see moduledoc) → typed escalation + `pane` for the diag.
-    record(state, "wake", pod_id, p["reason"],
-      escalate_kind: :sp_suspect,
-      pane: p["pane"],
-      reason_detail: p["reason_detail"],
-      correlation_id: ev.correlation_id
-    )
+      _ ->
+        :ok
+    end
 
-    {:noreply, state}
-  end
-
-  def handle_info(
-        %Fleet.Event{
-          source: :spawner,
-          type: :"spawn.failed",
-          payload: %{"cap_profile_name" => name} = p
-        } = ev,
-        state
-      )
-      when is_binary(name) do
-    # spawn.failed (twin of pod.failed): admin.spawn.request dispatch DROPPED the spawn AFTER the API
-    # already answered 202 (no pod was ever created — hence no pod_id). Subject = cap_profile_name (the
-    # role): recurrence = "this role keeps failing to spawn" (issue_id is per-request → never recurs).
-    # op="spawn", default :recurrence escalation. Without this handler the event would be orphaned
-    # (produced, never consumed) and the 202 would lie silently.
-    record(state, "spawn", name, p["reason"],
-      reason_detail: p["reason_detail"],
-      correlation_id: ev.correlation_id
-    )
-
-    {:noreply, state}
-  end
-
-  # ── Cat-5 (source :starfleet) — DIRECT escalation, no recurrence gate (max severity). ──
-  # The 3 types are LITERAL matches (atoms pre-registered by starfleet/application.ex + events.yaml)
-  # — no dynamic atom construction. Sig = "cat5:<source>:<subject>" (per-subject dedup lives in the
-  # issue timeline, not a gate); correlation_id (wave E) links the issue to the causing mandate.
-  def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_pod_drift"} = ev,
-        state
-      ) do
-    escalate_cat5(state, "pod_drift", ev)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_workflow_map_failed"} = ev,
-        state
-      ) do
-    escalate_cat5(state, "workflow_map_failed", ev)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_oauth_refresh_failed"} = ev,
-        state
-      ) do
-    escalate_cat5(state, "oauth_refresh_failed", ev)
     {:noreply, state}
   end
 
@@ -225,6 +165,36 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # `(op, subject, reason, opts)` is the contract of `IncidentRegistry.record_or_escalate/4` (`op="pod"` →
   # `opts=[]`; `op="wake"` → `escalate_kind:/pane:`). The outcome is logged (never swallowed): an
   # unrecorded incident / a failed escalation must be VISIBLE (forge down? registry unavailable?).
+  # Applies one `incident` route: subject from the DECLARED payload key, universal mechanics
+  # (reason/reason_detail/correlation_id) + declared extras (escalate_kind, forwarded diag keys —
+  # e.g. wake's `pane`). A routed event whose subject key is missing is a PRODUCER bug: named
+  # LOUD, never recorded under a nil subject (the dedup signature would collapse).
+  defp handle_incident(state, inc, payload, ev) do
+    case Map.get(payload, inc.subject) do
+      subject when is_binary(subject) ->
+        reg_opts =
+          [
+            reason_detail: payload["reason_detail"],
+            correlation_id: ev.correlation_id
+          ] ++
+            if(inc.escalate_kind, do: [escalate_kind: inc.escalate_kind], else: []) ++
+            for key <- inc.forward, do: {key, payload[Atom.to_string(key)]}
+
+        record(state, inc.op, subject, payload["reason"], reg_opts)
+
+      _ ->
+        Logger.warning(
+          "IncidentConsumer: routed incident #{ev.type} carries no #{inspect(inc.subject)} " <>
+            "subject — producer bug, NOT recorded (a nil subject would collapse the dedup signature)"
+        )
+    end
+  end
+
+  # The Cat-5 tag from the synthesized broadcast type (`starfleet.audit_cat5_<tag>` — the
+  # registered key the routing's cat5 route was validated against at boot).
+  defp cat5_tag(type),
+    do: type |> Atom.to_string() |> String.replace_prefix("starfleet.audit_cat5_", "")
+
   defp record(state, op, pod_id, reason, reg_opts) do
     exec = fn ->
       case state.record_fun.(op, pod_id, reason, reg_opts) do

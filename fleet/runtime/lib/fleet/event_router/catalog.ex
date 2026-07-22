@@ -161,17 +161,38 @@ defmodule Fleet.EventRouter.Catalog do
                   "registered event key — the Cat-5 broadcast would be refused at emit"
       end
 
+      if action == "incident" and not match?(%{"op" => _, "subject" => _}, route["incident"]) do
+        raise "Catalog: routing for #{type} declares action=incident without a complete " <>
+                "incident block ({op, subject} required)"
+      end
+
       threshold =
         case route["threshold"] do
           %{"counter" => counter, "min" => min} -> %{counter: counter, min: min}
           nil -> nil
         end
 
+      incident =
+        case route["incident"] do
+          %{"op" => op, "subject" => subject} = inc ->
+            %{
+              op: op,
+              subject: subject,
+              # escalate_kind/forward atoms are canon-bounded (schema patterns), post-validation.
+              escalate_kind: inc["escalate_kind"] && String.to_atom(inc["escalate_kind"]),
+              forward: Enum.map(inc["forward"] || [], &String.to_atom/1)
+            }
+
+          nil ->
+            nil
+        end
+
       {{String.to_atom(source), String.to_atom(type)},
        %{
          action: String.to_atom(action),
          cat5_source: cat5_source && String.to_atom(cat5_source),
-         threshold: threshold
+         threshold: threshold,
+         incident: incident
        }}
     end
   end

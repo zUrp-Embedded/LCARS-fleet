@@ -39,9 +39,11 @@
               "action": {
                 "enum": [
                   "cat5",
-                  "coord_decision"
+                  "coord_decision",
+                  "incident",
+                  "incident_cat5"
                 ],
-                "description": "cat5 = escalate via Cat5Escalator (audit log + audit_cat5_<cat5_source> broadcast + coord escalation). coord_decision = route the payload's decision to the coord backend (audit-verdict mechanics)."
+                "description": "cat5 = escalate via Cat5Escalator (audit log + audit_cat5_<cat5_source> broadcast + coord escalation). coord_decision = route the payload's decision to the coord backend (audit-verdict mechanics). incident = recurrence-gated incident recording (IncidentConsumer; requires the incident block). incident_cat5 = direct max-severity escalation (IncidentConsumer; the tag derives from the starfleet.audit_cat5_<tag> type)."
               },
               "cat5_source": {
                 "type": "string",
@@ -64,6 +66,36 @@
                   "min": {
                     "type": "integer",
                     "minimum": 1
+                  }
+                }
+              },
+              "incident": {
+                "type": "object",
+                "required": [
+                  "op",
+                  "subject"
+                ],
+                "additionalProperties": false,
+                "description": "Incident classification (action=incident only): op = the registry operation class (dedup namespace), subject = the payload key carrying the incident subject, escalate_kind = typed escalation override, forward = extra payload keys forwarded as diagnostic opts.",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "escalate_kind": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "forward": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    }
                   }
                 }
               }

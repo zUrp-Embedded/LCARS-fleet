@@ -82,7 +82,9 @@ defmodule Fleet.Starfleet.DriftMonitor do
       %{action: :coord_decision} ->
         dispatch_audit_verdict(payload, cid)
 
-      nil ->
+      # Unrouted, or an action owned by ANOTHER mechanic (`incident`/`incident_cat5` →
+      # IncidentConsumer): not ours, ignore.
+      _ ->
         :ok
     end
 
