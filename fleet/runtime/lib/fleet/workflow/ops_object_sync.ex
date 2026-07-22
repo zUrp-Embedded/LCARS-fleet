@@ -54,7 +54,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
   starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use GenServer
@@ -71,6 +71,12 @@ defmodule Fleet.Workflow.OpsObjectSync do
   # overrun the readback now handles safely.
   defp call_timeout,
     do: Application.get_env(:fleet_workflow, :ops_sync_call_timeout, @default_call_timeout)
+
+  # The drain-confirm budget: how long the post-timeout ping may wait for the queue (ours included)
+  # to finish. Default = one more full call budget; its own knob so tests drive the wedged-vs-drained
+  # branches deterministically.
+  defp drain_timeout,
+    do: Application.get_env(:fleet_workflow, :ops_sync_drain_timeout, call_timeout())
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -119,22 +125,80 @@ defmodule Fleet.Workflow.OpsObjectSync do
           # queued behind others whose composed budget exceeds @call_timeout), and the server keeps
           # going after our exit. A blind retry would either duplicate or — worse — race the live
           # server on the same work_dir (the very `.git/index.lock` collision this serializer
-          # prevents). So we do a READ-ONLY readback (`committed_sha`, no lock): if our exact content
-          # is already committed at `ref`, the transaction LANDED — return its sha (idempotent, no
-          # duplicate). Otherwise the timeout is real (still queued, or genuinely stuck) → surface it.
+          # prevents). The verdict is sought in TWO steps (`confirm_after_timeout`): an immediate
+          # read-only readback (already landed?), then — because a NEGATIVE immediate readback proves
+          # nothing while our commit may still be queued or mid-flight — a DRAIN-CONFIRM: a sync ping
+          # that the server answers only AFTER every message ahead of it (ours included), making the
+          # second readback DEFINITIVE. Only a ping that itself times out (server wedged) leaves the
+          # verdict genuinely ambiguous.
           :exit, {:timeout, _} = reason ->
+            confirm_after_timeout(pid, work_dir, ref, content, reason)
+
+          # NON-timeout exit (:noproc — server died between resolve and call —, :shutdown, a crash
+          # mid-call): this path is reached from best-effort provenance callers, and an uncaught exit
+          # crashed THEM for a serializer hiccup. Classify instead: the work may have landed just
+          # before the death (readback), otherwise a typed unavailability — never a caller crash.
+          :exit, reason ->
             case OpsObject.committed_sha(work_dir, ref, content) do
               {:ok, sha} ->
                 Logger.warning(
-                  "OpsObjectSync: call timed out but #{ref} is already committed (#{String.slice(sha, 0, 12)}) " <>
-                    "— transaction LANDED, confirmed by read-only readback (no retry, no race)"
+                  "OpsObjectSync: serializer exited (#{inspect(reason)}) but #{ref} is committed " <>
+                    "(#{String.slice(sha, 0, 12)}) — transaction LANDED before the exit"
                 )
 
                 {:ok, sha}
 
               :not_committed ->
-                {:error, {:ops_sync_timeout, reason}}
+                {:error, {:ops_sync_unavailable, reason}}
             end
+        end
+    end
+  end
+
+  # The two-step post-timeout verdict. Step 1: immediate readback — landed? Step 2 (the step whose
+  # absence made a negative verdict a LIE): drain-confirm. The server processes its mailbox in
+  # order, so a sync ping enqueued NOW returns only after our original {:commit, …} has fully run —
+  # the readback after it is DEFINITIVE: landed-late ({:ok, sha}, the caller never wrongly told
+  # failure while the effect lands behind its back) or genuinely not-landed (the commit RAN and
+  # failed server-side; its error reply was lost with our abandoned call — surfaced as the same
+  # `:ops_sync_timeout` shape, logged as definitive). A ping that itself times out = server wedged →
+  # the only remaining honestly-ambiguous case.
+  defp confirm_after_timeout(pid, work_dir, ref, content, reason) do
+    case OpsObject.committed_sha(work_dir, ref, content) do
+      {:ok, sha} ->
+        Logger.warning(
+          "OpsObjectSync: call timed out but #{ref} is already committed (#{String.slice(sha, 0, 12)}) " <>
+            "— transaction LANDED, confirmed by read-only readback (no retry, no race)"
+        )
+
+        {:ok, sha}
+
+      :not_committed ->
+        try do
+          :drained = GenServer.call(pid, :drain_confirm, drain_timeout())
+
+          case OpsObject.committed_sha(work_dir, ref, content) do
+            {:ok, sha} ->
+              Logger.warning(
+                "OpsObjectSync: call timed out, #{ref} LANDED during drain-confirm " <>
+                  "(#{String.slice(sha, 0, 12)}) — late but definitive, no false failure"
+              )
+
+              {:ok, sha}
+
+            :not_committed ->
+              Logger.warning(
+                "OpsObjectSync: drain-confirm complete and #{ref} NOT committed — the transaction " <>
+                  "ran and failed server-side (definitive, not ambiguous)"
+              )
+
+              {:error, {:ops_sync_timeout, reason}}
+          end
+        catch
+          :exit, _drain_exit ->
+            # The ping itself timed out / died: the server is wedged or the queue exceeds a second
+            # full budget — genuinely ambiguous, the one case the caller must treat as unknown.
+            {:error, {:ops_sync_timeout, reason}}
         end
     end
   end
@@ -143,13 +207,21 @@ defmodule Fleet.Workflow.OpsObjectSync do
   defp resolve(name) when is_atom(name), do: Process.whereis(name)
 
   @impl GenServer
-  def init(_opts), do: {:ok, %{}}
+  def init(opts) do
+    # `commit_fun` — test seam ONLY (a hermetic test injects a slow/failing engine to drive the
+    # timeout + drain-confirm paths deterministically); prod = the real `OpsObject` engine.
+    {:ok, %{commit_fun: Keyword.get(opts, :commit_fun, &OpsObject.commit_object/4)}}
+  end
 
   # One message at a time → the git transactions of ALL concurrent writers are serialized, never two
   # `git` on the same work/ops worktree (the `.git/index.lock` + moving-HEAD race). The engine is
-  # `OpsObject` verbatim: no logic here, only the ordering.
+  # `OpsObject` verbatim (via the seam): no logic here, only the ordering.
   @impl GenServer
   def handle_call({:commit, work_dir, ref, content, opts}, _from, state) do
-    {:reply, OpsObject.commit_object(work_dir, ref, content, opts), state}
+    {:reply, state.commit_fun.(work_dir, ref, content, opts), state}
   end
+
+  # Drain-confirm ping (cf. `confirm_after_timeout/5`): answered only once every message ahead of
+  # it has been processed — the mailbox IS the proof, this clause carries no logic.
+  def handle_call(:drain_confirm, _from, state), do: {:reply, :drained, state}
 end

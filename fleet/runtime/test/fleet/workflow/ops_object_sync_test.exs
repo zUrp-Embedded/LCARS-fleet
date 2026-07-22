@@ -92,6 +92,90 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     end
   end
 
+  describe "drain-confirm — a negative immediate readback is never the last word" do
+    setup do
+      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_call_timeout, 30)
+
+      # The drain must outlive the injected 80ms engine (its own knob; prod default = a full call budget).
+      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_drain_timeout, 1_000)
+      :ok
+    end
+
+    test "commit QUEUED/mid-flight at timeout → drain-confirm waits it out → {:ok, sha}, no false failure",
+         %{tmp_dir: tmp} do
+      git_init(tmp)
+
+      # Engine slowed beyond the 30ms call budget: the caller times out MID-WORK, the server keeps
+      # going and lands the commit — the exact window where the old single immediate readback
+      # answered :not_committed and the caller wrongly reported failure while the effect landed
+      # behind its back (the deceptive case).
+      slow_engine = fn work_dir, ref, content, opts ->
+        Process.sleep(80)
+        Fleet.Workflow.OpsObject.commit_object(work_dir, ref, content, opts)
+      end
+
+      name = :"ops_sync_slow_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        Supervisor.child_spec({OpsObjectSync, name: name, commit_fun: slow_engine}, id: name)
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, sha} =
+                   OpsObjectSync.commit_object(name, tmp, "briefs/late.md", "lands late\n",
+                     label: "t"
+                   )
+
+          assert is_binary(sha)
+        end)
+
+      assert log =~ "LANDED during drain-confirm"
+      assert File.exists?(Path.join(tmp, "briefs/late.md"))
+      assert commit_count(tmp) == "1"
+    end
+
+    test "commit RAN and FAILED server-side → drain-confirm makes the failure DEFINITIVE, not ambiguous",
+         %{tmp_dir: tmp} do
+      git_init(tmp)
+
+      # Slow AND failing engine: the caller times out, the server finishes with an error (whose
+      # reply is lost with the abandoned call). After the drain the readback is definitive.
+      failing_engine = fn _w, _r, _c, _o ->
+        Process.sleep(80)
+        {:error, :engine_says_no}
+      end
+
+      name = :"ops_sync_fail_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        Supervisor.child_spec({OpsObjectSync, name: name, commit_fun: failing_engine}, id: name)
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:ops_sync_timeout, _}} =
+                   OpsObjectSync.commit_object(name, tmp, "briefs/no.md", "never\n", label: "t")
+        end)
+
+      assert log =~ "definitive, not ambiguous"
+    end
+
+    test "serializer DEAD (:noproc exit) → typed :ops_sync_unavailable, never a caller crash", %{
+      tmp_dir: tmp
+    } do
+      git_init(tmp)
+      dead = spawn(fn -> :ok end)
+      ref = Process.monitor(dead)
+      assert_receive {:DOWN, ^ref, :process, ^dead, _}, 1_000
+
+      # The old catch handled ONLY {:timeout, _}: a :noproc exit PROPAGATED and crashed the
+      # best-effort provenance caller for a serializer hiccup.
+      assert {:error, {:ops_sync_unavailable, _}} =
+               OpsObjectSync.commit_object(dead, tmp, "briefs/z.md", "x\n", label: "t")
+    end
+  end
+
   test "idempotent through the gate: same path + same content → same identity, no new commit",
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
