@@ -5,6 +5,28 @@ defmodule Fleet.MCP.PodSocketTest.RaisingTools do
   def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
 end
 
+defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
+  @moduledoc false
+  # Records + GATES create_issue to prove the acceptor's single-flight over the MUTATION surface: the
+  # first invocation signals the coordinator and BLOCKS until released; a concurrent duplicate (the
+  # retry that overran the stdio bridge timeout) must be deduped by `Fleet.MCP.Idempotency` and never
+  # reach this handler a second time. `:idem_dup_count` counts the real invocations.
+  def handle_tool_call("create_issue", _args, _state) do
+    if pid = Process.whereis(:idem_dup_listener), do: send(pid, {:handling, self()})
+
+    receive do
+      :proceed -> :ok
+    after
+      5_000 -> :ok
+    end
+
+    Agent.update(:idem_dup_count, &(&1 + 1))
+    {:ok, %{"content" => [%{"type" => "text", "text" => "{\"status\":\"issue_created\"}"}]}, %{}}
+  end
+
+  def handle_tool_call(_tool, _args, state), do: {:error, :unexpected_tool, state}
+end
+
 defmodule Fleet.MCP.PodSocketTest do
   @moduledoc """
   Pod-facing per-pod AF_UNIX transport (`Fleet.MCP.PodSocketAcceptor` /
@@ -311,6 +333,51 @@ defmodule Fleet.MCP.PodSocketTest do
 
     resp = call(path, 1, "get_work_item", %{})
     assert %{"id" => 1, "result" => %{"isError" => true}} = resp
+  end
+
+  test "SOC-IDEM: a concurrent duplicate create_issue is deduped by single-flight — the handler runs ONCE" do
+    # The stdio bridge times a slow mutation's response out at 30s while central's effect completes;
+    # the agent re-emits the SAME create_issue. Two connections carrying the same call must resolve to
+    # ONE forge effect: the core-owned single-flight makes the duplicate wait on the in-flight run and
+    # replay its result, never invoking the handler twice.
+    # self() carries the coordination; the registered name auto-clears when this test process ends.
+    Process.register(self(), :idem_dup_listener)
+    {:ok, agent} = Agent.start_link(fn -> 0 end, name: :idem_dup_count)
+    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    Fleet.TestEnv.put_env_restoring(
+      :fleet_mcp,
+      :tool_handler,
+      Fleet.MCP.PodSocketTest.RecordingMutationTools
+    )
+
+    pod = uniq("idemdup")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["create_issue"])
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    args = %{"title" => "T", "brief" => "b"}
+
+    # A: fires create_issue; its handler blocks in-flight (holds the single-flight claim).
+    ta = Task.async(fn -> call(path, 1, "create_issue", args) end)
+
+    handler =
+      receive do
+        {:handling, pid} -> pid
+      after
+        3_000 -> flunk("the first create_issue never reached the handler")
+      end
+
+    # B: a concurrent duplicate (same args, same pod → same key). It must WAIT on A, not reach the handler.
+    tb = Task.async(fn -> call(path, 2, "create_issue", args) end)
+    refute_receive {:handling, _}, 500
+
+    # Release A → it completes; B then replays A's memoized result without a second run.
+    send(handler, :proceed)
+    assert %{"result" => %{"content" => _}} = Task.await(ta, 3_000)
+    assert %{"result" => %{"content" => _}} = Task.await(tb, 3_000)
+
+    # Exactly ONE forge-facing invocation across the two concurrent calls.
+    assert Agent.get(agent, & &1) == 1
   end
 
   test "SOC-EFF-005: readiness counts the `*/sock`, not the dirs — a stray dir does not fake 'orphaned'",

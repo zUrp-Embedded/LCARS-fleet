@@ -31,7 +31,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       (MCP convention: a tool error is a result with `isError`, not a protocol
       error — the pod reads it as tool text).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use GenServer
@@ -361,13 +361,31 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
+  # The MUTATION surface (creates/onboards/comments on the forge). A response the stdio bridge times
+  # out at 30s while central's effect completes makes the agent re-emit the SAME call — and the forge
+  # enforces no uniqueness, so a bare re-run would DUPLICATE. These go through the core-owned
+  # single-flight + memoize (`Fleet.MCP.Idempotency`): a retry with the same logical identity waits on
+  # the in-flight run or replays its result, never a second effect. Reads are not wrapped (idempotent
+  # by nature); `submit_result` is already idempotent central-side (double-submit ignored).
+  @mutation_tools ~w(create_issue create_project import_project delete_project comment_issue)
+
   # `PodTools.handle_tool_call` is EXPECTED total (`{:ok}|{:error}`), but a bug/edge in a tool could RAISE
   # — an uncaught raise here KILLS the connection Task WITHOUT sending any response → the pod HANGS to its
   # own timeout (SOC-RES-001). Rescue into an `{:error, ...}` 3-tuple → the caller renders it as an MCP
   # `isError` result, so the pod ALWAYS gets an answer (MCP convention: a failure is a result, not a
   # dropped connection).
   defp safe_handle_tool_call(tool, tool_args, pod_id) do
-    tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id})
+    handle = fn -> tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end
+
+    if tool in @mutation_tools do
+      # Key = the LOGICAL identity of the call (deterministic function of who/what — no client id): a
+      # re-emit carries the same args → the same key. Only a SUCCESS is memoized/replayed; a failed
+      # mutation (`{:error, _, _}`) releases the key so a genuine retry re-runs (the effect did not land).
+      key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
+      Fleet.MCP.Idempotency.run(key, handle, memoize?: &match?({:ok, _, _}, &1))
+    else
+      handle.()
+    end
   rescue
     e -> {:error, {:tool_crashed, tool, Exception.message(e)}, %{pod_id: pod_id}}
   catch

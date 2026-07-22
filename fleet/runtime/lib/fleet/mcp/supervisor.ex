@@ -33,7 +33,7 @@ defmodule Fleet.MCP.Supervisor do
   (`Fleet.EventRouter.Application`, substrate, launched by `Fleet.Application`), not started
   here (no double-start).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use Supervisor
@@ -55,6 +55,11 @@ defmodule Fleet.MCP.Supervisor do
 
     children = [
       {Fleet.MCP.Server, opts},
+      # Core-owned exactly-once for the MUTATION tool surface — started BEFORE the connection Tasks
+      # (which serve each tools/call): a retry that overran the stdio bridge timeout dedups here
+      # instead of duplicating a forge effect. Its death losing the in-flight table only degrades to
+      # the pre-idempotency behavior (a rare duplicate), never a wedge → tolerated by :one_for_one.
+      Fleet.MCP.Idempotency,
       # Resolution Registry `pod_id → acceptor` (`:via` names), started BEFORE the
       # DynamicSupervisor that registers into it.
       {Registry, keys: :unique, name: Fleet.MCP.PodSocketRegistry},
