@@ -74,6 +74,12 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # fork of a literal, the authority stays `Labels.in_flight/0`.
   @in_flight Fleet.Labels.in_flight()
 
+  # The PULLED work-item states — the durable proof an executor ACTIVATED (get_work_item transitions
+  # `:pending → :assigned` and records the in-band ACK). ONE source for both ownership reads
+  # (`pod_pulled?` and `gate_eval_owned_refs`): a `:pending` admission (enqueued, never pulled — the
+  # wake was lost) owns nothing, on either side.
+  @pulled_states [:assigned, :in_progress]
+
   defmodule Seams do
     @moduledoc """
     Reconciliation boundary contract: the 5 seams (and NOTHING else) that `reconcile/5` reads.
@@ -277,16 +283,23 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # G1 — refs owned by the ACTIVE GATEKEEPER EVALS of the broker. The source of truth already exists:
   # the eval task metadata is self-describing: it carries `gate_eval: true` + `resume_n` (issue number)
   # + `resume_payload.repository.full_name` (repo — multi-project: an eval of repoB does NOT own a
-  # ref of repoA). ACTIVE states only (`TaskQueue.list_active`): an eval `:cleared` (clobbered by
-  # a supersede at enqueue — 1 active work item/pod bound) or `:completed` (verdict rendered,
-  # resume in flight — window covered by the 2-tick grace) no longer owns its ref → the reclaim takes
-  # back control and the re-dispatch re-escalates (self-heal bounded by the rework budget). The evals are on
-  # ISSUES (the PR judges go through dispatch_review, without a gate) → refs `{repo, :issue, n}`.
+  # ref of repoA). PULLED states only (`@pulled_states`, same rule as `pod_pulled?`): an eval owns its
+  # ref only once the gatekeeper has PULLED it — an eval stuck `:pending` (enqueued, but the wake was
+  # lost and the kick net exhausted) is an admission WITHOUT an executor, and counting it as ownership
+  # preserved the lock forever in the name of an eval nobody runs (the exact wedge this duty repairs
+  # for pods). A never-pulled eval loses ownership on the 2-tick grace → the reclaim takes back
+  # control and the re-dispatch re-escalates a FRESH eval (self-heal bounded by the rework budget) —
+  # same recovery as the `:cleared` (clobbered) / `:completed` (verdict rendered) cases below. Honest
+  # trade: while the gatekeeper is mid-turn on another task, a just-enqueued eval sits `:pending`
+  # past the grace and its lock churns (reclaim → re-escalate, a harmless replay that clobbers the
+  # pending eval with its own re-issue) — transient churn against a permanent silent wedge. The evals
+  # are on ISSUES (the PR judges go through dispatch_review, without a gate) → refs `{repo, :issue, n}`.
   # `function_exported?`: a task_queue stub without `list_active` → empty MapSet (conservative, same
   # pattern as `pod_active_issue_id` — masks nothing it does not know).
   defp gate_eval_owned_refs(tq, repo) do
     if function_exported?(tq, :list_active, 0) do
-      for %{metadata: meta} <- tq.list_active(),
+      for %{metadata: meta, state: item_state} <- tq.list_active(),
+          item_state in @pulled_states,
           meta["gate_eval"] == true,
           get_in(meta, ["resume_payload", "repository", "full_name"]) == repo,
           n = meta["resume_n"],
@@ -356,7 +369,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # freshly-briefed `:pending` pod is re-dispatched (via the lock reclaim), never REAPED.
   defp pod_pulled?(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
-      {:ok, state} -> state in [:assigned, :in_progress]
+      {:ok, state} -> state in @pulled_states
       _ -> false
     end
   rescue

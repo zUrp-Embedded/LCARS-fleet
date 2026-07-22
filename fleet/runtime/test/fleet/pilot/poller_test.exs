@@ -516,15 +516,16 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
-  # G1 — TaskQueue stub: an ACTIVE GATEKEEPER EVAL carries brick #8 of THIS repo (self-describing
-  # MA-03 metadata: gate_eval + resume_n + resume_payload.repository). No live pod otherwise (the
-  # producer is done): exactly the eval window.
+  # G1 — TaskQueue stub: a PULLED GATEKEEPER EVAL (state :in_progress — the gatekeeper activated)
+  # carries brick #8 of THIS repo (self-describing MA-03 metadata: gate_eval + resume_n +
+  # resume_payload.repository). No live pod otherwise (the producer is done): exactly the eval window.
   defmodule GateEvalTaskQueue do
     def pod_status(_pod_id), do: {:ok, nil}
 
     def list_active do
       [
         %{
+          state: :in_progress,
           metadata: %{
             "gate_eval" => true,
             "resume_n" => 8,
@@ -535,7 +536,27 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  # G1 — TaskQueue stub: an active eval exists but for ANOTHER repo → it does NOT own the #8 ref
+  # A gate-eval ADMITTED but never activated: enqueued (state :pending), the gatekeeper never pulled
+  # it (wake lost, kick net exhausted). An eval without an executor owns nothing — twin of
+  # GateEvalTaskQueue with :pending instead of :in_progress.
+  defmodule GateEvalPendingTaskQueue do
+    def pod_status(_pod_id), do: {:ok, nil}
+
+    def list_active do
+      [
+        %{
+          state: :pending,
+          metadata: %{
+            "gate_eval" => true,
+            "resume_n" => 8,
+            "resume_payload" => %{"repository" => %{"full_name" => "lordzurp/lcars-test"}}
+          }
+        }
+      ]
+    end
+  end
+
+  # G1 — TaskQueue stub: a pulled eval exists but for ANOTHER repo → it does NOT own the #8 ref
   # of lordzurp/lcars-test (multi-project: the ref's repo comes from the resume_payload).
   defmodule GateEvalOtherRepoTaskQueue do
     def pod_status(_pod_id), do: {:ok, nil}
@@ -543,6 +564,7 @@ defmodule Fleet.Pilot.PollerTest do
     def list_active do
       [
         %{
+          state: :in_progress,
           metadata: %{
             "gate_eval" => true,
             "resume_n" => 8,
@@ -1119,6 +1141,47 @@ defmodule Fleet.Pilot.PollerTest do
       Poller.force_poll(name)
       Poller.force_poll(name)
       refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "a gate-eval stuck :pending (never pulled — no executor) does NOT hold the lock: reclaimed at the 2nd tick" do
+      # The eval-without-executor wedge: the eval is enqueued and the lock is preserved IN ITS NAME,
+      # but the gatekeeper never pulled it (wake lost, kick net exhausted) — nobody will ever judge,
+      # and before the fix the reconciliation preserved the lock forever (a `:pending` eval counted
+      # as ownership). The PULL is the activation proof: a never-pulled eval loses ownership on the
+      # 2-tick grace → reclaim → the next dispatch re-escalates a FRESH eval (self-heal).
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_g1_pending_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
+          task_queue: GateEvalPendingTaskQueue
+        )
+
+      # 1st tick: suspect (grace). 2nd tick: confirmed → reclaimed (before the fix: owned forever).
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
 
       GenServer.stop(pid)
     end
