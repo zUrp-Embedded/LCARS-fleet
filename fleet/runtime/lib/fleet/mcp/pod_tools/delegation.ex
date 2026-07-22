@@ -158,7 +158,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   @doc """
   Starts a fresh project (forge repo + dual-worktree `main`/`work/ops` + scaffold +
-  push) — architect gate applied BEFORE any repo creation or disk write.
+  push) — onboarder gate (starfleet/architect) applied BEFORE any repo creation or disk write.
 
   The SYSTEM runs the mechanics via the `:project_onboard` seam (default
   `Fleet.Pilot.ProjectOnboard`, runtime dispatch). The created repo is RETURNED in the
@@ -180,8 +180,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @doc """
   Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — dual-worktree
   `main`/`work/ops` + forge-enforced gate, WITHOUT creating nor scaffolding `main` (the repo
-  content stays intact — that is the whole point). Architect gate BEFORE any disk write, same
-  mechanics as `create_project`. Preconditions (repo already in the org, default branch `main`)
+  content stays intact — that is the whole point). Onboarder gate (starfleet/architect) BEFORE
+  any disk write, same mechanics as `create_project`. Preconditions (repo already in the org, default branch `main`)
   are checked by `ProjectOnboard.import/2` — a precondition failure returns an explicit
   `{:error, ...}`.
   """

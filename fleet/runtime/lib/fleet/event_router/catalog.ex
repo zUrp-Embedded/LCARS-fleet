@@ -6,12 +6,14 @@ defmodule Fleet.EventRouter.Catalog do
   stateless write-once function in a process). Called by
   `Fleet.EventRouter.Application.init/1`.
 
-  Role: `events.yaml` is a **pure registry** — its keys are the authorized event
-  types. Consumption happens through **direct subscribers** (`Bus.subscribe` +
-  `handle_info`); there is NO dispatch table. `load!/0` **populates
-  `authorized_event_types`** (`Bus.set_authorized_event_types/1`) → `Bus.broadcast/2`
-  fails loud on any type outside the registry: an emitted, unregistered event crashes
-  its emitter. The dynamic emitters (`WebhooksGitea`, `Coord.Emitter`,
+  Role: `events.yaml` serves **two purposes**. **(1) Registry**: its keys are the authorized event
+  types; `load!/0` populates `authorized_event_types` (`Bus.set_authorized_event_types/1`) →
+  `Bus.broadcast/2` fails loud on any unregistered type. **(2) Routing table**: values marked with
+  `source`/`action`/`threshold` build the `event + source → classification/action/sink` map
+  (`Bus.set_event_routing/1`) that the Cat 5 chain (DriftMonitor → Cat5Escalator) reads at boot.
+  Consumption by business logic is through **direct PubSub subscribers** (`Bus.subscribe` +
+  `handle_info`), not a consumer-dispatch table; the old `Dispatch` GenServer was removed. An
+  emitted, unregistered event crashes its emitter. The dynamic emitters (`WebhooksGitea`, `Coord.Emitter`,
   `Pod.Events.lossy_broadcast`) rescue `UnregisteredError` so as not to die
   on an unexpected type; the `pod.completed` lifecycle, on the other hand, goes through
   `Pod.Events.required_broadcast` which PROPAGATES the failure instead of swallowing it (a

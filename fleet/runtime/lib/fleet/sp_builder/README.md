@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-22
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -27,3 +27,16 @@ there, not restated here.
 - Knob `:fleet_sp_builder, :monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
 - None set in `config/*.exs` or via env var — inline defaults only (tests override via `put_env`/opt).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/sp_builder.ex`).
+
+## Content filter posture (V2)
+
+`Fleet.SPBuilder.RepoSections` lifts repo `CLAUDE.md` sections into the pod `CLAUDE.md` by
+**name only** — a closed list of 6: `Stack`, `Build`, `Test`, `Conventions`, `Commands`,
+`Gotchas` (regex `@repo_section_re` in `repo_sections.ex:28`). Sections outside this list are
+silently dropped; a warning logs if none of the 6 matches.
+
+**Content is not filtered.** Any text inside a matching section is forwarded verbatim into the
+pod `CLAUDE.md`. V1 applied a regex doctrinal filter (`ipc-reception-filter.md`); V2 does not —
+the NAME whitelist is the boundary, not content inspection. This is an assumed posture, not an
+oversight: the repo `CLAUDE.md` is operator-controlled. If content filtering is needed it must
+be added explicitly at this layer (`repo_sections.ex`), not assumed present.

@@ -3,8 +3,10 @@ defmodule Fleet.MCP.Idempotency do
   use GenServer
 
   @moduledoc """
-  Core-owned exactly-once for the MCP mutation surface — single-flight + short-TTL memoize keyed by
-  the LOGICAL IDENTITY of a call.
+  Core-owned single-flight de-duplication for the MCP mutation surface — at-most-once delivery
+  for a *published* result; a runner that crashes before publish releases the key so ONE waiter
+  re-runs the effect (at-least-once across a mid-effect crash). Short-TTL memoize keyed by the
+  LOGICAL IDENTITY of a call.
 
   ## Why this exists (doctrine)
 
@@ -21,7 +23,7 @@ defmodule Fleet.MCP.Idempotency do
 
   ## Mechanism
 
-  `run/3` runs `fun` EXACTLY once per `key`:
+  `run/3` de-duplicates `fun` for a given `key` (single-flight + memoize):
 
     * first caller for a live key → runs `fun` (single-flight);
     * a concurrent caller (the retry that arrived while the first is still in flight) → BLOCKS on the
@@ -33,7 +35,9 @@ defmodule Fleet.MCP.Idempotency do
   the caller rejects (e.g. an MCP `{:error, _, _}` — the mutation FAILED, its effect did not happen)
   is NOT cached and RELEASES the key so a genuine retry re-runs. Single-flight is preserved across a
   runner that crashes or fails: the coordinator promotes exactly ONE waiter to re-run (never a
-  stampede), so a dead runner never wedges the retries nor duplicates the effect.
+  stampede), so a dead runner never wedges the retries — but a runner that dies BEFORE publishing
+  its result releases the key so the waiter re-runs the effect (at-least-once across a mid-effect
+  crash; at-most-once is only guaranteed for a *published* result).
 
   Iron rule: the coordinator NEVER runs `fun` itself (a forge call would serialize every mutation
   behind one process) — it only arbitrates claim/publish; `fun` runs in the caller's connection Task.

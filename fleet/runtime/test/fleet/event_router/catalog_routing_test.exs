@@ -20,7 +20,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     :ok
   end
 
-  test "the CANON events.yaml loads: the 4 routed entries land in Bus.event_routing with their data" do
+  test "the CANON events.yaml loads: the 10 routed entries land in Bus.event_routing with their data" do
     # Real canon, real loader path (config points the loader at the bundled priv by default).
     Application.put_env(:fleet_event_router, :load_event_registry, true)
     on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)

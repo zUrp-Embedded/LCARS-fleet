@@ -80,8 +80,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
     * `:projects_root` / `:work_root` — FS roots (defaults: `/home/projects`, `/home/projects.work`)
     * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
 
-  Returns `{:ok, %{repo, project_dir, work_dir}}` or `{:error, term()}` (fail-fast, no auto
-  rollback: a mid-way failure leaves partial state — the operator cleans up before re-run).
+  Returns `{:ok, %{repo, project_dir, work_dir}}` or `{:error, term()}` (fail-fast). On an error
+  return the sequence compensates automatically: the forge repo and both local dirs are removed so
+  a clean retry is possible (see `compensate_onboard/5`). A BEAM crash mid-sequence skips the
+  unwind — the residue is recoverable agent-side via `delete_project(force: true)`.
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
@@ -731,8 +733,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # pushes over it). `{:ok, :already_exists}` (create_repo 409) → the repo pre-existed → we FAIL-LOUD
   # instead of scaffolding OVER it (which would CLOBBER a real repo's `main` — a human's repo onboarded by
   # mistake, or a completed project re-onboarded). The operator uses `import_project` (ADOPTS an existing
-  # repo, content INTACT) or deletes the stale/partial repo — consistent with this module's own doctrine
-  # (« no auto rollback: a mid-way failure leaves partial state — the operator cleans up before re-run »).
+  # repo, content INTACT) or deletes the stale/partial repo first, then retries. A pre-existing repo
+  # is foreign state: the onboard compensation cannot safely remove it (it would destroy content not
+  # created by this call), so the operator handles that leg explicitly.
   # A GENUINE create (`{:ok, full_name}`) proceeds: onboard owns the fresh repo it just made.
   @spec classify_create_repo(
           {:ok, String.t() | :already_exists} | {:error, term()},

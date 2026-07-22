@@ -147,8 +147,9 @@ defmodule Fleet.Spawner.PermanentBoot do
   The SAME selection as `boot_permanent_pods/1` (one authority for "who is permanent"), exposed so
   the `PermanentWarden` can reconcile expectation against the live Registry — a permanent that dies
   WITHOUT emitting `pod.failed` (clean sub-tree restart, lost lossy event) is invisible to the
-  event rail. A role whose profile no longer loads is NOT listed (the loud fail-loud belongs to
-  boot; a reconciliation tick must not respawn from a broken artefact — it stays silent about it).
+  event rail. A role whose profile no longer loads is NOT listed (the fail-loud belongs to boot;
+  a reconciliation tick must not respawn from a broken artefact — but it logs a warning per
+  tick so the exclusion is never silent: no permanent vanishes from reconciliation without a trace).
 
   Seams `:cap_profiles_dir` / `:loader` — same as `boot_permanent_pods/1`.
   """
