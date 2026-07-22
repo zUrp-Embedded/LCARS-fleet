@@ -281,4 +281,42 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     # Without base_sha the dispatcher pinned nothing = caller bug -> refuse rather than reset blindly.
     assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
   end
+
+  test "reset_in_place — a REDUNDANT re-reprovision (caller timed out, the poll re-issues it) is a safe idempotent no-op",
+       %{tmp_dir: tmp} do
+    # `reprovision_pipe_workspace` is a bounded GenServer.call. If its deadline is exceeded (the
+    # composed local git ops overrun only in a pathological case: a force-push erased the base AND a
+    # slow fetch AND a huge untracked tree), the pod gen_statem still runs the reset to completion and
+    # the poll re-issues reprovision on the next tick. Because the pod SERIALIZES its calls there is no
+    # concurrent git (hence no index.lock race — the ops-serializer readback site had that race, this
+    # one does not), so the only residual is a REDUNDANT reset. This proves that residual is harmless:
+    # repeating the reset any number of times converges to the same clean state (at base, feature
+    # branch, .git preserved) — the retry is a safe idempotent, never a corruption.
+    src = make_source_repo(Path.join(tmp, "src-redundant"))
+    {base, 0} = git(["rev-parse", "HEAD"], src)
+    base = String.trim(base)
+    pod_dir = Path.join(tmp, "pod-redundant")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => base})
+
+    assert {:ok, ws, "feature/work"} = Clone.clone_or_skip(pod_dir, profile, [])
+    sentinel = Path.join(ws, ".git/SENTINEL_INPLACE")
+    File.write!(sentinel, "x")
+
+    # First reset, then a leftover appears, then the redundant re-issues (twice) — as a stuck poll would.
+    assert {:ok, ^ws, "feature/work"} = Clone.reset_in_place(pod_dir, profile, [])
+    File.write!(Path.join(ws, "leftover.sh"), "echo leftover")
+    assert {:ok, ^ws, "feature/work"} = Clone.reset_in_place(pod_dir, profile, [])
+    assert {:ok, ^ws, "feature/work"} = Clone.reset_in_place(pod_dir, profile, [])
+
+    # Converged: at base, clean, feature branch, .git preserved — no drift from the repeats.
+    {head, 0} = git(["rev-parse", "HEAD"], ws)
+    assert String.trim(head) == base
+    refute File.exists?(Path.join(ws, "leftover.sh"))
+    {branch, 0} = git(["rev-parse", "--abbrev-ref", "HEAD"], ws)
+    assert String.trim(branch) == "feature/work"
+    {status, 0} = git(["status", "--porcelain"], ws)
+    assert String.trim(status) == ""
+    assert File.exists?(sentinel)
+  end
 end
