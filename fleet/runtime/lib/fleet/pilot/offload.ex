@@ -35,25 +35,73 @@ defmodule Fleet.Pilot.Offload do
   @spec async(atom(), (-> any()), {String.t(), String.t()}) ::
           {:ok, :offloaded} | {:error, {:offload_failed, term()}}
   def async(supervisor_name, fun, {consumer, consequence} = label) do
-    case Task.Supervisor.start_child(supervisor_name, fun) do
-      {:ok, pid} ->
-        # The task's DEATH is observed: before this, an offloaded task
-        # that DIED mid-work (raise past the caller's own rescue, kill, brutal shutdown) vanished —
-        # nobody owned the :DOWN, the consumer's catch-all swallowed it, and the only trace of a
-        # lost completion was the pod's publish deadline expiring 120s later for an unknown reason.
-        # The monitor is created IN the calling consumer (async runs in its GenServer), so the
-        # :DOWN lands in that consumer's mailbox: each consumer routes it to `handle_down/3` BEFORE
-        # its catch-all. The label rides in the caller's process dictionary keyed by the monitor
-        # ref — bounded (one entry per in-flight task, deleted at :DOWN), no state plumbing through
-        # two consumers, no extra process.
-        ref = Process.monitor(pid)
-        Process.put({__MODULE__, ref}, label)
-        {:ok, :offloaded}
+    case start_monitored(supervisor_name, fun, label) do
+      {:ok, :offloaded} = ok ->
+        ok
 
       {:error, reason} ->
         Logger.error("#{consumer}: offload Task failed (#{inspect(reason)}) — #{consequence}")
 
         {:error, {:offload_failed, reason}}
+    end
+  end
+
+  # Spawns + MONITORS the task (shared by async/3 and async_or_inline/3, no logging here — each
+  # entry point states ITS truth: dropped vs falling back). The task's DEATH is observed: before
+  # this, an offloaded task that DIED mid-work (raise past the caller's own rescue, kill, brutal
+  # shutdown) vanished — nobody owned the :DOWN, the consumer's catch-all swallowed it, and the
+  # only trace of a lost completion was the pod's publish deadline expiring 120s later for an
+  # unknown reason. The monitor is created IN the calling consumer (this runs in its GenServer),
+  # so the :DOWN lands in that consumer's mailbox: each consumer routes it to `handle_down/3`
+  # BEFORE its catch-all. The label rides in the caller's process dictionary keyed by the monitor
+  # ref — bounded (one entry per in-flight task, deleted at :DOWN), no state plumbing through two
+  # consumers, no extra process.
+  defp start_monitored(supervisor_name, fun, label) do
+    case Task.Supervisor.start_child(supervisor_name, fun) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+        Process.put({__MODULE__, ref}, label)
+        {:ok, :offloaded}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  `async/3` with the INLINE fallback: on a REFUSED offload (`:max_children` saturation, supervisor
+  down) the work runs in the calling consumer instead of being dropped — a lost completion wedges
+  the issue downstream and a lost incident erases the escalation, both worse than blocking the
+  singleton for ONE bounded unit (the offloaded work is deadline-bounded git/forge I/O). The inline
+  crash is isolated (rescued, LOUD, typed) — the consumer never dies for a fallback. ONE policy for
+  both consumers (StepRunConsumer + IncidentConsumer) — never a re-implemented local copy.
+  """
+  @spec async_or_inline(atom(), (-> any()), {String.t(), String.t()}) ::
+          {:ok, :offloaded} | {:ok, :inline} | {:error, :inline_crashed}
+  def async_or_inline(supervisor_name, fun, {consumer, consequence} = label) do
+    case start_monitored(supervisor_name, fun, label) do
+      {:ok, :offloaded} = ok ->
+        ok
+
+      {:error, reason} ->
+        # ONE honest trace: the offload was refused AND the work runs anyway — never the drop-log
+        # (whose consequence would be false here) followed by a silent save.
+        Logger.warning(
+          "#{consumer}: offload refused (#{inspect(reason)}) → falls back to INLINE " <>
+            "(bounded; #{consequence} avoided)"
+        )
+
+        try do
+          fun.()
+          {:ok, :inline}
+        rescue
+          e ->
+            Logger.error(
+              "#{consumer}: INLINE fallback crashed (#{Exception.message(e)}) — #{consequence}"
+            )
+
+            {:error, :inline_crashed}
+        end
     end
   end
 

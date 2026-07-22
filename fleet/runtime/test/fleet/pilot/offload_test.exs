@@ -105,6 +105,61 @@ defmodule Fleet.Pilot.OffloadTest do
     refute log =~ "DIED"
   end
 
+  describe "async_or_inline — saturation runs the work, never drops it" do
+    test "offload REFUSED (max_children 0) → the work runs INLINE, {:ok, :inline}" do
+      # A saturated pool was the exact hole: the completion was dropped with a log — the ONE
+      # moment (burst) where losing work hurts most. The shared policy runs it inline instead.
+      sup =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Task.Supervisor,
+             name: :"sat_sup_#{System.unique_integer([:positive])}", max_children: 0},
+            id: :sat
+          )
+        )
+
+      test = self()
+
+      assert {:ok, :inline} =
+               Fleet.Pilot.Offload.async_or_inline(
+                 sup_name(sup),
+                 fn -> send(test, :ran_inline) end,
+                 {"StepRunConsumer", "completion lost"}
+               )
+
+      assert_received :ran_inline
+    end
+
+    test "inline fallback CRASHES → typed {:error, :inline_crashed} + LOUD, the caller survives" do
+      sup =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Task.Supervisor,
+             name: :"sat2_#{System.unique_integer([:positive])}", max_children: 0},
+            id: :sat2
+          )
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :inline_crashed} =
+                   Fleet.Pilot.Offload.async_or_inline(
+                     sup_name(sup),
+                     fn -> raise "poison" end,
+                     {"IncidentConsumer", "incident NOT recorded"}
+                   )
+        end)
+
+      assert log =~ "INLINE fallback crashed"
+      assert log =~ "incident NOT recorded"
+    end
+
+    test "pool available → offloaded normally ({:ok, :offloaded})", %{sup: _} = ctx do
+      assert {:ok, :offloaded} =
+               Fleet.Pilot.Offload.async_or_inline(sup_name(ctx.sup), fn -> :ok end, {"C", "x"})
+    end
+  end
+
   test "a :DOWN that is NOT an offloaded task → :not_mine (the consumer's catch-all takes over)" do
     {pid, ref} = spawn_monitor(fn -> :ok end)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000

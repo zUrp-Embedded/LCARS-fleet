@@ -88,34 +88,19 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # "sysadmin issue already opened by the incident rail"), and a failure burst is precisely when
   # the pool saturates — dropping the record there loses the recurrence anchor at the moment it
   # matters most. Inline cost: the consumer's mailbox waits one registry write (bounded by the
-  # forge timeouts) — acceptable for THIS consumer (separate singleton, its blast-radius is the
-  # point); the completion consumer keeps the drop because its loss is reclaimed out-of-band by
-  # the poller reconciliation — incidents have no such net. The crash isolation the Task gave is
+  # forge timeouts). BOTH consumers now share this policy (`Offload.async_or_inline` — the
+  # completion consumer's former drop-on-saturation lost a completion the reconciliation could
+  # only reclaim by CHURN, re-dispatching finished work). The crash isolation the Task gave is
   # kept by the rescue: a poisoned incident payload must not kill the singleton.
   @doc false
   def offload_async(fun) do
-    case Fleet.Pilot.Offload.async(
-           @task_supervisor,
-           fun,
-           {"IncidentConsumer", "incident falls back to INLINE recording"}
-         ) do
-      {:ok, :offloaded} = ok ->
-        ok
-
-      {:error, {:offload_failed, _reason}} ->
-        try do
-          fun.()
-          {:ok, :inline}
-        rescue
-          e ->
-            Logger.error(
-              "IncidentConsumer: INLINE fallback crashed (#{Exception.message(e)}) — " <>
-                "incident NOT recorded"
-            )
-
-            {:error, :inline_crashed}
-        end
-    end
+    # ONE inline-fallback policy, factored in Offload (shared with StepRunConsumer) — the local
+    # try/rescue copy this used to carry was exactly the duplication async_or_inline absorbs.
+    Fleet.Pilot.Offload.async_or_inline(
+      @task_supervisor,
+      fun,
+      {"IncidentConsumer", "incident NOT recorded"}
+    )
   end
 
   @impl GenServer

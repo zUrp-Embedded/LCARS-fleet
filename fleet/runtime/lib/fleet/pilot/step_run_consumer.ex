@@ -232,7 +232,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   @doc false
   def offload_async(fun),
     do:
-      Fleet.Pilot.Offload.async(
+      Fleet.Pilot.Offload.async_or_inline(
         @step_run_task_supervisor,
         fun,
         {"StepRunConsumer", "completion lost"}
