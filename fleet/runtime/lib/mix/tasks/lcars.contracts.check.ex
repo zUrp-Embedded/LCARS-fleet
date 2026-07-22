@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use Mix.Task
@@ -120,21 +120,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # 9th instance of the B family (residue_check), migrated in the shared-combinator factorization. The `confirm` = the
   # pattern itself post-strip: an `"event_type" =>` mention in a COMMENT (doc of the legacy-tuple
   # removal) does not count as a violation (otherwise the gate would flag its own documentation).
-  # NB `executor.ex`/`task_monitor.ex` are no longer targets (rails/apps removed).
-  # SCOPE: a TARGETED residue check — it scans ONLY api/ws.ex (the `files:` below), the WS boundary
-  # consumer. NOT a global consumer sweep: the id's "canon" is the canonical `%Fleet.Event{}` SHAPE,
-  # not exhaustive coverage. A legacy "event_type" tuple reappearing in a Pilot/Starfleet/Observation
-  # consumer is NOT caught here — those files are not scanned. Broadening the scan is a separate change;
-  # this check's contract is the single file it lists.
+  # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
+  # what the name claims (it long scanned only api/ws.ex, the last migrant).
   defp check_event_consumers_canon(root) do
+    # The check's NAME claims the canon for ALL consumers; it long grepped ws.ex alone (the last
+    # migrant), leaving the guarantee narrower than its label. The residue scan now covers
+    # every source under lib/ — a legacy `"event_type"` tuple REINTRODUCED anywhere fails the gate,
+    # not just in the one file that once carried it.
     residue_check(root, %{
       id: "event.consumers.canon",
       remediation:
         "migrate the flagged consumer(s) off the legacy `event_type` tuple to `%Fleet.Event{}` matching",
-      files: ["lib/fleet/api/ws.ex"],
+      files:
+        Path.wildcard(Path.join(root, "lib/**/*.ex"))
+        |> Enum.map(&Path.relative_to(&1, root)),
       pattern: ~r/"event_type"\s*=>/,
       confirm: ~r/"event_type"\s*=>/,
-      note: "the WS boundary consumer (api/ws.ex) still on the legacy \"event_type\" tuple"
+      note: "a consumer on the legacy \"event_type\" tuple (canon = %Fleet.Event{} matching)"
     })
   end
 
