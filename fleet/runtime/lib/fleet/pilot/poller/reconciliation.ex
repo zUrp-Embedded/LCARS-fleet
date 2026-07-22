@@ -175,12 +175,24 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         orphaned_now = issue_orphans |> MapSet.union(pr_orphans) |> MapSet.union(zombie_pods)
         to_act = MapSet.intersection(orphaned_now, prior_suspects)
 
-        Enum.each(to_act, fn
-          {_repo, :pod, pod_id} -> reap_pod(seams, pod_id)
-          {_repo, _type, n} -> reclaim_lock(seams, n)
-        end)
+        # A FAILED reclaim STAYS a suspect: dropping it with the acted set would force a fresh
+        # 2-tick re-suspicion before the retry (the label is still there, but the grace restarts) —
+        # the honest retry is the NEXT tick, since the orphan was already confirmed once. Reap
+        # failures keep the self-heal-by-re-suspicion path (safe_kill swallows by design; the pod
+        # resurfaces in the scan next tick).
+        failed_reclaims =
+          to_act
+          |> Enum.filter(fn
+            {_repo, :pod, pod_id} ->
+              reap_pod(seams, pod_id)
+              false
 
-        MapSet.difference(orphaned_now, to_act)
+            {_repo, _type, n} ->
+              reclaim_lock(seams, n) == :failed
+          end)
+          |> MapSet.new()
+
+        orphaned_now |> MapSet.difference(to_act) |> MapSet.union(failed_reclaims)
     end
   end
 
@@ -418,14 +430,18 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # — cf. `Fleet.Pilot.StepDispatcher.Spawn`/`StepRunCompleter.unlock` for the nominal attribution).
     _ = forge.stop_stopwatch(repo, number, forge_opts)
 
-    # The label removal IS the reclaim: a failed remove_label means the lock is NOT released (the announced
-    # reclaim did not take). Self-heals on the next tick (2-tick grace), but it must be VISIBLE, not swallowed.
+    # The label removal IS the reclaim: a failed remove_label means the lock is NOT released (the
+    # announced reclaim did not take). The verdict is RETURNED (`:failed`) so the caller KEEPS the
+    # ref in the suspect set — the retry genuinely happens next tick (already-confirmed orphan, no
+    # fresh 2-tick re-suspicion), which is what this log promises.
     case forge.remove_label(repo, number, @in_flight, forge_opts) do
       {:error, reason} ->
         Logger.error(
           "Poller: reconciliation : reclaim of #{repo}##{number} FAILED — #{@in_flight} NOT removed " <>
-            "(#{inspect(reason)}) — lock persists, retry next tick"
+            "(#{inspect(reason)}) — lock persists, kept suspect, retry next tick"
         )
+
+        :failed
 
       _ ->
         :ok

@@ -377,7 +377,12 @@ defmodule Fleet.Pilot.PollerTest do
     # the test pid (`:_test_pid` of the forge_opts), not `self()` (the Poller's mailbox).
     def remove_label(_repo, n, label, opts) do
       send(Keyword.get(opts, :_test_pid, self()), {:remove_label, n, label})
-      {:ok, :removed}
+
+      # `_test_fail_remove_label` — the forge refuses the removal (outage): the reconciliation must
+      # KEEP the ref suspect and retry NEXT tick (not restart the 2-tick grace from scratch).
+      if Keyword.get(opts, :_test_fail_remove_label, false),
+        do: {:error, :forge_down},
+        else: {:ok, :removed}
     end
   end
 
@@ -1051,6 +1056,53 @@ defmodule Fleet.Pilot.PollerTest do
       # 2nd tick: orphan CONFIRMED → lock reclaimed (a `:completed` no longer masks). Before the
       # fix: the `:completed` eng "owned" #8 → never reclaimed (this assert failed = the F-C050
       # wedge).
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
+
+      GenServer.stop(pid)
+    end
+
+    test "a FAILED reclaim keeps the ref SUSPECT: the retry lands NEXT tick, not after a fresh 2-tick grace" do
+      # remove_label refused by the forge (outage). The orphan was already CONFIRMED once — dropping
+      # it from the suspects with the acted set would force tick3 to re-suspect and tick4 to retry
+      # (while the log promised "retry next tick"). Kept suspect, the retry is genuinely at tick3.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_reclaim_retry_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [
+            _test_issues: {:ok, issues},
+            _test_pid: self(),
+            _test_fail_remove_label: true
+          ],
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
+          task_queue: QuiescedTaskQueue
+        )
+
+      # tick1: suspect (grace). tick2: confirmed → reclaim ATTEMPTED (fails). tick3: STILL suspect →
+      # retry ATTEMPTED again. Two attempts across three ticks — the old code dropped the ref at
+      # tick2 and re-suspected at tick3 (one single attempt in three ticks).
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
       Poller.force_poll(name)
       assert_received {:remove_label, 8, "lcars-in-flight"}
 

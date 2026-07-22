@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
 
   """
 
@@ -161,8 +161,21 @@ defmodule Fleet.Spawner.PermanentBoot do
       {:ok, roles} ->
         Enum.flat_map(roles, fn role ->
           case loader.(role) do
-            {:ok, %Fleet.CapProfile{} = cp} -> if boot_at_start?(cp.spec), do: [role], else: []
-            {:error, _} -> []
+            {:ok, %Fleet.CapProfile{} = cp} ->
+              if boot_at_start?(cp.spec), do: [role], else: []
+
+            {:error, reason} ->
+              # The exclusion is DELIBERATE (never respawn from a broken artefact) but must not be
+              # SILENT: a permanent whose profile breaks AFTER boot would otherwise vanish from the
+              # reconciliation with no trace — dead and never respawned, and nobody told. The warden
+              # ticks, so this fires once per tick while the artefact stays broken: loud by design.
+              Logger.warning(
+                "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
+                  "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
+                  "until the artefact is repaired"
+              )
+
+              []
           end
         end)
 

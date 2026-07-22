@@ -212,6 +212,26 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
     end
 
+    test "a role whose profile BREAKS after boot is excluded from reconciliation LOUDLY, never silently",
+         %{dir: dir} do
+      # Deliberate exclusion (never respawn from a broken artefact), but it must leave a trace: a
+      # permanent whose profile corrupts after boot would otherwise vanish from the expected set —
+      # dead, never respawned, and nobody told.
+      loader = fn
+        "starfleet" -> {:error, :invalid_schema}
+        role -> loader_for().(role)
+      end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          roles = PermanentBoot.expected_permanent_roles(cap_profiles_dir: dir, loader: loader)
+          refute "starfleet" in roles
+        end)
+
+      assert log =~ "starfleet"
+      assert log =~ "EXCLUDED from permanent reconciliation"
+    end
+
     test "F-052: load {:error} on one role → fail-loud (broken deploy, no silent skip)",
          %{dir: dir} do
       # Crash-boot doctrine: an unloadable profile = broken artifact → propagate (a "partial

@@ -31,8 +31,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   `GateEngine.producer?/3` (same criterion as the gate decision), preferring the payload's effective
   `deliverable_mode` and falling back to the base-role seam.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
+
+  require Logger
 
   alias Fleet.Pilot.StepRunConsumer.GateEngine
   alias Fleet.Pilot.StepRunConsumer.Verdict
@@ -179,16 +181,33 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     end
   end
 
-  # The producer branch of issue N = the `head.ref` of the (1st) open PR whose head parses
-  # to issue N. Ambiguity (≥2 PRs for N — abnormal) → the first; none → nil (fail-loud downstream).
+  # The producer branch of issue N = the `head.ref` of THE open PR whose head parses to issue N.
+  # Ambiguity (≥2 PRs for N) is a PROTOCOL VIOLATION (one issue = one producer branch): picking
+  # "the first" would silently review an ARBITRARY one of the two — the judge could bless the wrong
+  # deliverable. We take the SAFE absent path instead (nil, same as no-PR — the caller's fail-loud
+  # downstream), and name the anomaly LOUD so the operator resolves which PR is the real one.
   defp producer_head_for_issue(pulls, n) do
     # C-05: the single Fleet-PR selector (ForgeProtocol); local projection = the head.ref of issue N's PR.
-    pulls
-    |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
-    |> Enum.find_value(fn
-      {^n, pr} -> get_in(pr, ["head", "ref"])
-      _ -> false
-    end)
+    case pulls
+         |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
+         |> Enum.filter(&match?({^n, _}, &1)) do
+      [] ->
+        nil
+
+      [{^n, pr}] ->
+        get_in(pr, ["head", "ref"])
+
+      several ->
+        numbers = Enum.map(several, fn {_n, pr} -> pr["number"] end)
+
+        Logger.error(
+          "StepRunConsumer: issue ##{n} has #{length(several)} open fleet PRs #{inspect(numbers)} " <>
+            "— one issue = one producer branch; REFUSING to pick one arbitrarily (treated as " <>
+            "no-producer-head; close the stray PR to unblock)"
+        )
+
+        nil
+    end
   end
 
   # The producer (engineer) carries its `deliverable_opts` (publish to its feature-branch); the judge
