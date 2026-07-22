@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -100,6 +100,13 @@ defmodule Fleet.CapProfile do
   # ============================================================
   # Loader behaviour
   # ============================================================
+
+  @doc """
+  Publishes the proven-good cap-profile image (delegate — the facade is the boundary surface;
+  called by the ROOT at boot, gated `:fleet_cap_profile, :publish_image`). Raises on any
+  invalid artifact: do not boot. Cf. `Fleet.CapProfile.Image`.
+  """
+  defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
 
   @doc """
   Loads the cap-profile for the given role and validates its STRUCTURE against

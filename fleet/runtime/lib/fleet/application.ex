@@ -16,7 +16,11 @@ defmodule Fleet.Application do
       # Deliberate API widening: the root materializes the drain's activity counter at
       # boot (`Quiesce.init_busy!` — single-threaded spot, before any concurrent first
       # use) — a foundation primitive, reachable by design.
-      Fleet.Shutdown.Quiesce
+      Fleet.Shutdown.Quiesce,
+      # Proven-good images at boot (tier B): the ROOT publishes both snapshots before any child
+      # can spawn a pod — a boot concern by nature (do-not-boot on invalid), hence the two edges.
+      Fleet.CapProfile,
+      Fleet.SPBuilder
     ],
     exports: []
 
@@ -62,7 +66,7 @@ defmodule Fleet.Application do
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use Application
@@ -72,6 +76,18 @@ defmodule Fleet.Application do
     # Single-threaded materialization of the drain's activity counter (two concurrent
     # lazy inits would orphan a ref and undercount its wrap).
     :ok = Fleet.Shutdown.Quiesce.init_busy!()
+
+    # PROVEN-GOOD IMAGES at boot (images doctrine, tier B): the cap-profile catalogue and the SP
+    # artifacts are loaded, validated and frozen into versioned snapshots BEFORE any child can
+    # spawn a pod — an invalid artifact raises here (do not boot), and a disk mutation mid-life
+    # no longer changes the pods spawn by spawn (new image = restart). Gated per domain (default
+    # true; :test sets false — hermeticity, the suites drive the disk fallback and publish
+    # explicitly where the image itself is under test).
+    if Application.get_env(:fleet_cap_profile, :publish_image, true),
+      do: Fleet.CapProfile.publish_image!()
+
+    if Application.get_env(:fleet_sp_builder, :publish_image, true),
+      do: Fleet.SPBuilder.publish_image!()
 
     children = [
       # The Bus first (everyone's PubSub substrate).

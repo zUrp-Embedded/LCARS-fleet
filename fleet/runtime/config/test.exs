@@ -103,3 +103,8 @@ config :fleet_pilot, start_ops_object_sync: false
 # vide → escape-hatch assert_authorized! → Bus.broadcast/2 ne valide pas). Le test dédié
 # (catalog/broadcast validation) peuple le registry manuellement.
 config :fleet_event_router, load_event_registry: false
+
+# Images NON publiées en test (hermétisme) : les suites prouvent le fallback disque ; les tests
+# de l'image la publient EXPLICITEMENT depuis des racines tmp (proven-good image at boot, tier B).
+config :fleet_cap_profile, publish_image: false
+config :fleet_sp_builder, publish_image: false

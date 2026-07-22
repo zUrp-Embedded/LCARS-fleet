@@ -61,7 +61,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -95,6 +95,18 @@ defmodule Fleet.SPBuilder do
   # ============================================================
   # Composer behaviour
   # ============================================================
+
+  @doc """
+  Publishes the proven-good SP-artifact image (delegate — facade surface; ROOT at boot, gated
+  `:fleet_sp_builder, :publish_image`). Raises on an unreadable root: do not boot.
+  """
+  defdelegate publish_image!(), to: Fleet.SPBuilder.Image, as: :publish!
+
+  @doc """
+  The role's SP draft from the published image (delegate for the spawner's Assets rail —
+  `{:ok, content}` | `:not_found` closed-world | `:unpublished` → caller's disk fallback).
+  """
+  defdelegate image_draft(role), to: Fleet.SPBuilder.Image, as: :draft
 
   @doc """
   Compose the system prompt from a cap-profile and modop bundles.
@@ -330,7 +342,29 @@ defmodule Fleet.SPBuilder do
   # and IS wired into the spawn chain (cf. pod.ex `compose(cap, active_modops(cap), …)`).
   defp read_modop_fragments([]), do: {:ok, []}
 
+  # IMAGE-FIRST (proven-good image at boot, sp_builder half): a published image carries every
+  # bundle fragment — a name absent from it is `:modop_bundle_missing` (closed world; a
+  # traversal-shaped name simply misses the map). No image → live-disk fallback below, unchanged.
   defp read_modop_fragments(modop_bundles) do
+    case Fleet.SPBuilder.Image.published() do
+      %{modop_sp: fragments} ->
+        Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
+          case Map.fetch(fragments, name) do
+            {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+            :error -> {:halt, {:error, {:modop_bundle_missing, name}}}
+          end
+        end)
+        |> case do
+          {:ok, list} -> {:ok, Enum.reverse(list)}
+          error -> error
+        end
+
+      nil ->
+        read_modop_fragments_from_disk(modop_bundles)
+    end
+  end
+
+  defp read_modop_fragments_from_disk(modop_bundles) do
     root = modop_root()
 
     result =
@@ -368,11 +402,10 @@ defmodule Fleet.SPBuilder do
     # ONLY "is the name safe as a path fragment?" (the real leaf is `subagent-<name>.md`, built
     # below); `valid?` states that intent directly (same gesture as filter_skills).
     if Fleet.Slug.valid?(name) do
-      path = Path.join(subagent_template_root(), "subagent-#{name}.md")
-
-      case File.read(path) do
+      # IMAGE-FIRST (same closed world as the modop fragments); no image → live disk.
+      case fetch_subagent_content(name) do
         {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
-        {:error, _} -> {:error, {:subagent_template_missing, name}}
+        :error -> {:error, {:subagent_template_missing, name}}
       end
     else
       {:error, {:subagent_template_unsafe, name}}
@@ -380,6 +413,19 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_subagent_template(_cap_profile), do: {:ok, ""}
+
+  defp fetch_subagent_content(name) do
+    case Fleet.SPBuilder.Image.published() do
+      %{subagent: templates} ->
+        Map.fetch(templates, name)
+
+      nil ->
+        case File.read(Path.join(subagent_template_root(), "subagent-#{name}.md")) do
+          {:ok, content} -> {:ok, content}
+          {:error, _} -> :error
+        end
+    end
+  end
 
   defp subagent_template_root do
     Application.get_env(:fleet_sp_builder, :subagent_template_root) ||

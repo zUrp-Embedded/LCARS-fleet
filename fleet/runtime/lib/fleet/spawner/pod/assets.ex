@@ -19,7 +19,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/0`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-22
   """
 
   alias Fleet.Spawner.Pod.Fs
@@ -69,10 +69,26 @@ defmodule Fleet.Spawner.Pod.Assets do
     # fleet, never through the forge. `role` is interpolated into a path → a malformed slug is a broken
     # cap-profile (fail-loud), not a fallback.
     if Fleet.Slug.valid?(role) do
-      read_tagged(
-        Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts/agent-#{role}-base.md"),
-        :agent_draft_missing
-      )
+      # IMAGE-FIRST (proven-good image at boot): a published SP image carries every role draft —
+      # the epoch is closed at the deployment scale (a draft edited mid-life changes nothing until
+      # a restart republishes). Closed world: image published + draft absent = the same hard spawn
+      # death as a missing file (a role without an SP is a half-role, the system refuses). No
+      # image → the live-disk read below, unchanged.
+      case Fleet.SPBuilder.image_draft(role) do
+        {:ok, content} ->
+          {:ok, content}
+
+        :not_found ->
+          {:error,
+           {:agent_draft_missing, "agent-#{role}-base.md (absent from the published SP image)",
+            :enoent}}
+
+        :unpublished ->
+          read_tagged(
+            Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts/agent-#{role}-base.md"),
+            :agent_draft_missing
+          )
+      end
     else
       {:error, {:agent_draft_invalid_role, role}}
     end

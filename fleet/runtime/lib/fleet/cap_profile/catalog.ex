@@ -38,7 +38,7 @@ defmodule Fleet.CapProfile.Catalog do
   via `Application.put_env/3`), default = the BUNDLED canon resolved by
   `:code.priv_dir(:lcars_fleet)` under `cap_profile/` (resolves in a release as in dev, without env).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -67,6 +67,24 @@ defmodule Fleet.CapProfile.Catalog do
           {:ok, map()}
           | {:error, :not_found | :invalid_schema | :catalogue_missing | :name_collision}
   def read_role(role) do
+    # IMAGE-FIRST (proven-good image at boot): once `Fleet.CapProfile.Image.publish!/0` ran, the
+    # image IS the catalogue — a closed world, one epoch for the whole deployment (a disk mutation
+    # mid-life changes nothing until a restart republishes). A role absent from the image is
+    # `:not_found`, whatever the disk now says. No image (tests' hermetic default, tooling) → the
+    # live-disk path below, unchanged.
+    case Fleet.CapProfile.Image.published() do
+      %{index: index} ->
+        case Map.fetch(index, role) do
+          {:ok, raw} -> {:ok, raw}
+          :error -> {:error, :not_found}
+        end
+
+      nil ->
+        read_role_from_disk(role)
+    end
+  end
+
+  defp read_role_from_disk(role) do
     # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
     # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,
     # which masks the config error as a mere typo'd role name). `list/1` already distinguishes; so must
@@ -195,6 +213,32 @@ defmodule Fleet.CapProfile.Catalog do
   """
   @spec read_modops([String.t()]) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set) when is_list(modop_set) do
+    # IMAGE-FIRST (same closed world as `read_role/1`): a published image carries the validated
+    # overlays — an overlay absent from the image is `:modop_not_found`, and a traversal-shaped
+    # name simply misses the map (the keys were enumerated from the canon at publish).
+    case Fleet.CapProfile.Image.published() do
+      %{overlays: overlays} ->
+        Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
+          case Map.fetch(overlays, name) do
+            {:ok, raw} ->
+              {:cont, {:ok, [raw | acc]}}
+
+            :error ->
+              Logger.warning("Catalog: modop not in the published image: #{inspect(name)}")
+              {:halt, {:error, :modop_not_found}}
+          end
+        end)
+        |> case do
+          {:ok, modops} -> {:ok, Enum.reverse(modops)}
+          error -> error
+        end
+
+      nil ->
+        read_modops_from_disk(modop_set)
+    end
+  end
+
+  defp read_modops_from_disk(modop_set) do
     result =
       Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
         # The modop name comes from the catalogue / a composer (untrusted input) and serves as a path
@@ -246,6 +290,40 @@ defmodule Fleet.CapProfile.Catalog do
       {:ok, _other} -> {:error, :invalid_schema}
       {:error, _reason} -> {:error, :invalid_schema}
     end
+  end
+
+  @doc """
+  Full role index from the live disk — the IMAGE BUILDER's input (`Fleet.CapProfile.Image`).
+  Same enumeration/decode authority as `read_role/1`'s disk path (name_index): one disk
+  knowledge, two consumers. Schema validation is the Image's job (it raises; this snapshots).
+  """
+  @spec snapshot_roles() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
+  def snapshot_roles do
+    if File.dir?(root_dir()),
+      do: name_index(root_dir()),
+      else: {:error, {:catalogue_missing, root_dir()}}
+  end
+
+  @doc """
+  Every modop overlay from the live disk, VALIDATED (same checks as `read_modops/1`'s disk
+  path) — the image builder's input. Keys = the modop dir basenames under `<root>/modop/`.
+  """
+  @spec snapshot_overlays() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
+  def snapshot_overlays do
+    modop_root = Path.join(root_dir(), "modop")
+
+    Path.wildcard(Path.join(modop_root, "*/profile.yaml"))
+    |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
+      name = path |> Path.dirname() |> Path.basename()
+
+      with {:ok, raw} <- decode_yaml(path),
+           :ok <- Schema.validate_modop_keys(raw),
+           :ok <- Schema.validate(raw, :modop) do
+        {:cont, {:ok, Map.put(acc, name, raw)}}
+      else
+        {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
+      end
+    end)
   end
 
   @doc """
