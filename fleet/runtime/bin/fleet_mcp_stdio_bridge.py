@@ -43,6 +43,11 @@ import time
 SOCKET_PATH = os.environ.get("LCARS_FLEET_MCP_SOCKET", "")
 PROTO = "2024-11-05"
 _req_id = [1000]
+# Timeout split — see central_call for the full reasoning. connect/send = "central DEAD" bound;
+# readline = "central WORKING" bound, above central's composed worst case (never below it: a read
+# timeout under the real bound turns a slow success into an error the agent retries).
+CONNECT_TIMEOUT = float(os.environ.get("LCARS_MCP_CONNECT_TIMEOUT", "30"))
+READ_TIMEOUT = float(os.environ.get("LCARS_MCP_READ_TIMEOUT", "600"))
 
 
 def log(msg):
@@ -69,10 +74,20 @@ def central_call(method, params):
     # accepting (busy/serialized acceptor); a slow `readline` means it accepted but is not answering.
     # Without this the pod sees only a mute "timed out", indistinguishable either way. A successful but
     # slow call (>1s) is logged too, with the same per-step breakdown.
+    # TWO timeouts, one per failure mode. CONNECT_TIMEOUT bounds the "central is DEAD" case: a dead
+    # or wedged acceptor shows at connect/send, and 30s is generous for a local AF_UNIX handshake.
+    # READ_TIMEOUT bounds the "central is WORKING" case — and must therefore exceed central's real
+    # composed worst case (a create_project chains ~8 SIGKILL-bounded 30s git ops + forge HTTP +
+    # write-spacing gaps; the publish path alone was measured at 165s). The old single 30s sat BELOW
+    # that bound: a slow mutation returned an ERROR to the agent while its effect completed on
+    # central, and the agent's re-emit created a duplicate. Central dedups retries now (core-side
+    # idempotency), but the bridge must not MANUFACTURE them: it waits out the real bound instead of
+    # lying at 30s. 600s = every composed central bound with margin, while a truly hung central
+    # still surfaces as a timeout. Both env-tunable (also what makes the split TESTABLE fast).
     _req_id[0] += 1
     rpc = {"jsonrpc": "2.0", "id": _req_id[0], "method": method, "params": params}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(30)
+    s.settimeout(CONNECT_TIMEOUT)
     t0 = time.monotonic()
     stage = "connect"
     try:
@@ -80,6 +95,7 @@ def central_call(method, params):
         t_conn = time.monotonic()
         stage = "send"
         s.sendall((json.dumps(rpc) + "\n").encode())
+        s.settimeout(READ_TIMEOUT)
         t_send = time.monotonic()
         stage = "readline"
         resp_line = s.makefile("rb").readline()

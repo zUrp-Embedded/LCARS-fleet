@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 BRIDGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -51,6 +52,11 @@ class Stub(socketserver.StreamRequestHandler):
                 {"name": "get_work_item", "inputSchema": {"type": "object", "properties": {}}},
                 {"name": "submit_result", "inputSchema": {"type": "object", "properties": {}}},
             ]}
+        elif body.get("params", {}).get("name") == "slow_tool":
+            # Central WORKING but slow (a mutation whose composed git/forge ops take a while): the
+            # answer comes AFTER the connect timeout, under the read timeout — Test D.
+            time.sleep(4)
+            result = {"done": True, "task": {"id": "SLOW-OK"}}
         else:
             result = {"done": False, "task": {"id": "T1"},
                       "_echo_args": body.get("params", {}).get("arguments")}
@@ -125,6 +131,21 @@ check(errB.get("code") == -32000, f"missing socket -> error -32000 ({errB.get('c
 print("--- Test C: unknown method -> JSON-RPC error -32601 ---")
 by_id3 = run_bridge(base, [{"jsonrpc": "2.0", "id": 9, "method": "bogus/method", "params": {}}])
 check(by_id3.get(9, {}).get("error", {}).get("code") == -32601, "unknown method -> error -32601")
+
+print("--- Test D: SLOW central (answer after the connect timeout) -> RELAYED, not timed out ---")
+# The read timeout must govern the readline stage, NOT the connect timeout: central's answer lands
+# after CONNECT_TIMEOUT (2s here, 4s stub delay) but under READ_TIMEOUT (8s). The old single-timeout
+# bridge killed the read at the connect bound -> the agent saw an error while central's effect
+# completed, and its re-emit duplicated the mutation. Env-shrunk timeouts keep the proof fast.
+slow_env = dict(base)
+slow_env.update({"LCARS_MCP_CONNECT_TIMEOUT": "2", "LCARS_MCP_READ_TIMEOUT": "8"})
+by_idD = run_bridge(slow_env, [
+    {"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+     "params": {"name": "slow_tool", "arguments": {}}},
+])
+resD = by_idD.get(11, {}).get("result", {})
+check(resD.get("task", {}).get("id") == "SLOW-OK",
+      f"slow central answer RELAYED (read timeout governs the readline stage) -> {resD}")
 
 # F-C138 — the old Test D (bridge exposes create_issue+schema in architect mode) and the role-filtering
 # anti-regression WERE REMOVED: the bridge hardcodes neither a catalogue nor role filtering any more.
