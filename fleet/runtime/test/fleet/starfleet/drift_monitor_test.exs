@@ -21,6 +21,35 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   @monitor __MODULE__.Monitor
 
   setup %{tmp_dir: tmp_dir} do
+    # The classification chain is TABLE-DRIVEN (audit B-05): tests set the canon-equivalent
+    # routing table explicitly (persistent_term, same seam as set_authorized_event_types —
+    # `load_event_registry: false` keeps the boot loader off in test).
+    prior_routing = Bus.event_routing()
+
+    Bus.set_event_routing(%{
+      {:spawner, :"pod.drift"} => %{
+        action: :cat5,
+        cat5_source: :pod_drift,
+        threshold: %{counter: "drift_count", min: 3}
+      },
+      {:workflow, :"workflow_map.failed"} => %{
+        action: :cat5,
+        cat5_source: :workflow_map_failed,
+        threshold: nil
+      },
+      {:credentials, :"oauth.refresh.failed"} => %{
+        action: :cat5,
+        cat5_source: :oauth_refresh_failed,
+        threshold: nil
+      },
+      {:workflow, :"audit.verdict"} => %{
+        action: :coord_decision,
+        cat5_source: nil,
+        threshold: nil
+      }
+    })
+
+    on_exit(fn -> Bus.set_event_routing(prior_routing) end)
     log_path = Path.join(tmp_dir, "drift-monitor-test.jsonl")
     Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
 
@@ -59,9 +88,10 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Application.get_env(:fleet_starfleet, :coord_invocations, [])
   end
 
-  # `source` defaults to `:event_router`. WIRED producers require their source (DriftMonitor
-  # anti-spoof): workflow_map.failed / audit.verdict → `:workflow`; pod.drift → `:spawner` (F-C043).
-  # Only oauth.refresh.failed remains type-only (dormant, no producer).
+  # `source` defaults to `:event_router`. Every routed type requires its source (the routing
+  # table is keyed on the {source, type} PAIR — anti-spoof is structural): workflow_map.failed /
+  # audit.verdict → `:workflow`; pod.drift → `:spawner` (F-C043); oauth.refresh.failed →
+  # `:credentials` (declared for the dormant signal — its future producer must match).
   defp emit_canon(type, payload, opts \\ []) do
     Bus.broadcast(
       "fleet.events",
@@ -107,6 +137,42 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
                {:escalation, :pod_drift, _, _} -> true
                _ -> false
              end)
+    end
+
+    test "the threshold is DATA: a table min of 5 makes drift_count 3 insufficient (no code constant)" do
+      # The killer discriminator vs the hardcoded threshold: with the number living in the TABLE,
+      # re-declaring min=5 changes the behavior with ZERO code — the old @drift_threshold 3 would
+      # have escalated here regardless of the registry.
+      routing = Bus.event_routing()
+
+      Bus.set_event_routing(
+        Map.put(routing, {:spawner, :"pod.drift"}, %{
+          action: :cat5,
+          cat5_source: :pod_drift,
+          threshold: %{counter: "drift_count", min: 5}
+        })
+      )
+
+      on_exit(fn -> Bus.set_event_routing(routing) end)
+
+      :ok =
+        emit_canon(:"pod.drift", %{"pod_id" => "p-t", "drift_count" => 3},
+          source: :spawner,
+          pod_id: "p-t"
+        )
+
+      wait_drift_monitor_drain()
+      refute_receive %Fleet.Event{type: :"starfleet.audit_cat5_pod_drift"}, 100
+
+      # And 5 crosses the declared min → escalates.
+      :ok =
+        emit_canon(:"pod.drift", %{"pod_id" => "p-t", "drift_count" => 5},
+          source: :spawner,
+          pod_id: "p-t"
+        )
+
+      wait_drift_monitor_drain()
+      assert_receive %Fleet.Event{type: :"starfleet.audit_cat5_pod_drift"}, 500
     end
 
     test "anti-spoof: pod.drift with drift_count 3 but source ≠ :spawner (spoof) → NO escalation" do
@@ -166,10 +232,14 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   describe "oauth.refresh.failed event" do
     test "broadcast → Cat5 escalation oauth_refresh_failed" do
       :ok =
-        emit_canon(:"oauth.refresh.failed", %{
-          "account" => "u@x.com",
-          "lead_time_min" => 30
-        })
+        emit_canon(
+          :"oauth.refresh.failed",
+          %{
+            "account" => "u@x.com",
+            "lead_time_min" => 30
+          },
+          source: :credentials
+        )
 
       wait_drift_monitor_drain()
 

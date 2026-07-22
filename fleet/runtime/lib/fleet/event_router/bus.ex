@@ -42,7 +42,7 @@ defmodule Fleet.EventRouter.Bus do
   `true` (default) = let through (intended init safety-net); `false` = fail-closed
   (raise while the registry is not loaded). See `assert_authorized!/1`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -253,6 +253,27 @@ defmodule Fleet.EventRouter.Bus do
   @spec set_authorized_event_types(MapSet.t()) :: :ok
   def set_authorized_event_types(%MapSet{} = set) do
     :persistent_term.put({__MODULE__, :authorized_event_types}, set)
+    :ok
+  end
+
+  @doc """
+  The declarative event ROUTING table — `%{{source, type} => %{action:, cat5_source:, threshold:}}`,
+  keyed on `{source_atom, type_atom}` (the anti-spoof pair: a spoofed-source event of a routed type
+  misses the table and is ignored). Loaded from `events.yaml` by `Catalog.load!/0` (schema-validated,
+  fail-loud) — the classification chain (DriftMonitor → Cat5Escalator / coord) reads it HERE, so
+  adding an incident class or changing a threshold/sink is a registry edit, not code. Empty map
+  before load (tests with `load_event_registry: false` set it explicitly — same seam as
+  `set_authorized_event_types/1`).
+  """
+  @spec event_routing() :: %{optional({atom(), atom()}) => map()}
+  def event_routing do
+    :persistent_term.get({__MODULE__, :event_routing}, %{})
+  end
+
+  @doc "Set the event routing table — called by `Catalog.load!/0` at boot (and by tests). Idempotent."
+  @spec set_event_routing(map()) :: :ok
+  def set_event_routing(routing) when is_map(routing) do
+    :persistent_term.put({__MODULE__, :event_routing}, routing)
     :ok
   end
 

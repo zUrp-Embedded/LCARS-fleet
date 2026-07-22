@@ -2,8 +2,9 @@ defmodule Fleet.Starfleet.DriftMonitor do
   @moduledoc """
   Pure-subscriber GenServer on `Fleet.EventRouter.Bus` topic `fleet.events`.
 
-  No runtime state: the threshold is evaluated against the `drift_count` carried
-  by the `pod.drift` payload itself (`drift_count/1`), not by a local counter.
+  No runtime state: thresholds are evaluated against counters carried by the payload
+  itself, per the DECLARATIVE routing table (`events.yaml` → `Bus.event_routing/0`) —
+  never a local counter, never a number hardcoded here.
 
   Producer status (Q2 draft wiring — "at least it blinks"):
   - `workflow_map.failed` — LIVE via a DRAFT producer: `Pilot.StepRunConsumer` emits it (source
@@ -17,7 +18,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
     producer emits it. The claimed `Fleet.Spawner.PermanentBoot` producer does not exist,
     and the "corrupt versioned base seed" it targeted disappeared with the boot-from-base nuke
     (unified seed flow). If a real drift signal is ever needed, whoever wires it MUST add its
-    `source:` here (anti-spoof rule). Escalates on `drift_count >= 3` once a producer emits.
+    `source:` in the ROUTING TABLE (anti-spoof rule — the table key is the {source, type} pair).
   - `oauth.refresh.failed` — DORMANT: no producer on the launcher/credentials side yet.
 
   All handlers stay ready — the dormant ones route as soon as a real producer emits.
@@ -26,9 +27,9 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   | event_type | source match | Cat 5 trigger |
   |---|---|---|
-  | `pod.drift` | `:spawner` (dormant — no producer) | if `drift_count >= 3` |
+  | `pod.drift` | `:spawner` (dormant — no producer) | per table threshold (drift_count) |
   | `workflow_map.failed` | `:workflow` (draft producer) | unconditional → `Cat5Escalator` |
-  | `oauth.refresh.failed` | type-only (dormant) | unconditional |
+  | `oauth.refresh.failed` | `:credentials` (dormant) | unconditional |
   | `audit.verdict` | `:workflow` (draft producer) | validate decision JSON → `CoordBackend` |
 
   ## Why a runtime process
@@ -37,7 +38,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   functions are impossible. No state = minimal Iron Law (1 process, no local
   ETS).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use GenServer
@@ -46,8 +47,6 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.{AuditLog, Cat5Escalator, CoordBackend, Gatekeeper}
-
-  @drift_threshold 3
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -65,65 +64,39 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   @impl GenServer
-  # Pattern-match on the strict canonical %Fleet.Event{} schema.
-  #
-  # Q2 anti-spoof: the WIRED types match their producer's source — `workflow_map.failed` +
-  # `audit.verdict` on `:workflow` (`Pilot.StepRunConsumer`). Matching the source means a
-  # SPOOFED-source event of that type (e.g. a pod broadcasting `audit.verdict` on `:event_router`)
-  # CANNOT trigger the Cat 5 escalation. The DORMANT types (`pod.drift`, `oauth.refresh.failed`)
-  # have NO producer yet — whoever wires one MUST keep its `source:` match (same anti-spoof rule).
-
-  # DORMANT: `pod.drift` has NO producer (the claimed PermanentBoot
-  # emit does not exist; the corrupt-base-seed scenario is gone with boot-from-base). The handler
-  # stays wired + source-matched so the rail is one emit away from live — but it is NOT coverage.
+  # TABLE-DRIVEN subscriber (audit B-05): the event+source → classification/action/threshold/sink
+  # table is DATA (`events.yaml` routing, loaded by Catalog into `Bus.event_routing/0`), this module
+  # is the MECHANIC that applies it. Adding an incident class, changing a threshold or a sink is a
+  # registry edit, not a new handler clause. The anti-spoof rule is structural: the table is keyed
+  # on the `{source, type}` PAIR, so a spoofed-source event of a routed type misses the lookup and
+  # is ignored — the rule can no longer be forgotten one clause at a time. Dormant routes (pod.drift,
+  # oauth.refresh.failed — no producer) stay one emit away from live, and are NOT coverage.
   def handle_info(
-        %Fleet.Event{source: :spawner, type: :"pod.drift", payload: payload, correlation_id: cid},
+        %Fleet.Event{source: source, type: type, payload: payload, correlation_id: cid},
         state
       ) do
-    if drift_count(payload) >= @drift_threshold do
-      Cat5Escalator.escalate(:pod_drift, payload, cid)
+    case Map.get(Fleet.EventRouter.Bus.event_routing(), {source, type}) do
+      %{action: :cat5, cat5_source: tag, threshold: threshold} ->
+        if meets_threshold?(payload, threshold), do: Cat5Escalator.escalate(tag, payload, cid)
+
+      %{action: :coord_decision} ->
+        dispatch_audit_verdict(payload, cid)
+
+      nil ->
+        :ok
     end
 
     {:noreply, state}
   end
 
-  def handle_info(
-        %Fleet.Event{
-          source: :workflow,
-          type: :"workflow_map.failed",
-          payload: payload,
-          correlation_id: cid
-        },
-        state
-      ) do
-    Cat5Escalator.escalate(:workflow_map_failed, payload, cid)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        %Fleet.Event{type: :"oauth.refresh.failed", payload: payload, correlation_id: cid},
-        state
-      ) do
-    Cat5Escalator.escalate(:oauth_refresh_failed, payload, cid)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        %Fleet.Event{
-          source: :workflow,
-          type: :"audit.verdict",
-          payload: payload,
-          correlation_id: cid
-        },
-        state
-      ) do
-    dispatch_audit_verdict(payload, cid)
-    {:noreply, state}
-  end
-
-  # Ignore other unhandled %Fleet.Event{} types + any other message.
-  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Threshold gate from the TABLE (nil = act on every occurrence): act only when the payload's
+  # declared counter reaches the declared min — the number lives in the registry, not here.
+  defp meets_threshold?(_payload, nil), do: true
+
+  defp meets_threshold?(payload, %{counter: counter, min: min}),
+    do: counter_value(payload, counter) >= min
 
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
@@ -152,8 +125,10 @@ defmodule Fleet.Starfleet.DriftMonitor do
     end
   end
 
-  defp drift_count(payload) do
-    case Map.get(payload, "drift_count") do
+  # The declared counter read from the payload — non-integer/absent = 0 (below any min >= 1:
+  # a malformed counter never triggers a Cat-5).
+  defp counter_value(payload, counter) do
+    case Map.get(payload, counter) do
       n when is_integer(n) -> n
       _ -> 0
     end

@@ -8,6 +8,30 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
   alias Fleet.Starfleet.Cat5Escalator
 
   setup %{tmp_dir: tmp_dir} do
+    # The Cat 5 source enum is DERIVED from the routing table (B-05) — set the canon-equivalent
+    # cat5 tags explicitly (test env keeps the boot loader off).
+    prior_routing = Bus.event_routing()
+
+    Bus.set_event_routing(%{
+      {:spawner, :"pod.drift"} => %{
+        action: :cat5,
+        cat5_source: :pod_drift,
+        threshold: %{counter: "drift_count", min: 3}
+      },
+      {:workflow, :"workflow_map.failed"} => %{
+        action: :cat5,
+        cat5_source: :workflow_map_failed,
+        threshold: nil
+      },
+      {:credentials, :"oauth.refresh.failed"} => %{
+        action: :cat5,
+        cat5_source: :oauth_refresh_failed,
+        threshold: nil
+      }
+    })
+
+    on_exit(fn -> Bus.set_event_routing(prior_routing) end)
+
     log_path = Path.join(tmp_dir, "test-starfleet.jsonl")
     Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
 

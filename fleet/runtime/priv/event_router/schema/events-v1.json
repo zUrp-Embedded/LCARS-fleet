@@ -2,25 +2,74 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:events-v1",
   "title": "LCARS Events Catalogue v1",
-  "description": "Structural schema for priv/event_router/events.yaml (parsed YAML map). The runtime loader (Fleet.EventRouter.Catalog.load!/0) does NOT validate against this schema — it only populates authorized_event_types. This schema is exercised by events_schema_test.exs (ex_json_schema) as a build-time structural gate on the canon. Structural only: handler module *existence*, producer/consumer wiring, and asymmetries are out of scope here.",
+  "description": "Structural schema for priv/event_router/events.yaml (parsed YAML map). Exercised BOTH by events_schema_test.exs (build-time structural gate) AND by the runtime loader (Fleet.EventRouter.Catalog.load!/0) since the registry became load-bearing for ROUTING: an entry's value is either [] (unrouted - consumed by direct subscribers, documented per consumer moduledoc) or a routing object driving the classification chain (DriftMonitor/Cat5Escalator). The old tolerance for a non-empty handler-module list is GONE: the runtime never consumed it, and a schema must not announce handlers while they stay inert (audit B-05).",
   "type": "object",
-  "required": ["events"],
+  "required": [
+    "events"
+  ],
   "additionalProperties": false,
   "properties": {
     "events": {
       "type": "object",
       "minProperties": 1,
-      "description": "Map event_type -> [handler_module, ...]. Fan-out N handlers via Phoenix.PubSub.",
+      "description": "Map event_type -> [] (unrouted) OR routing object {source, action, cat5_source?, threshold?}. The routing is the declarative event+source -> classification/action/threshold/sink table the classification chain loads at boot.",
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
       },
       "additionalProperties": {
-        "type": "array",
-        "minItems": 0,
-        "items": {
-          "type": "string",
-          "pattern": "^Fleet\\.[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)*$"
-        }
+        "oneOf": [
+          {
+            "type": "array",
+            "maxItems": 0,
+            "description": "Unrouted: consumed by direct PubSub subscribers (see the consumers' moduledocs)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "source",
+              "action"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "REQUIRED producer source (anti-spoof): the chain acts only on events carrying this source - a spoofed-source event of the type is ignored."
+              },
+              "action": {
+                "enum": [
+                  "cat5",
+                  "coord_decision"
+                ],
+                "description": "cat5 = escalate via Cat5Escalator (audit log + audit_cat5_<cat5_source> broadcast + coord escalation). coord_decision = route the payload's decision to the coord backend (audit-verdict mechanics)."
+              },
+              "cat5_source": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "Cat-5 source tag (action=cat5 only): names the escalation and synthesizes the audit_cat5_<tag> broadcast type - which MUST itself be a registered event key (starfleet.audit_cat5_<tag>)."
+              },
+              "threshold": {
+                "type": "object",
+                "required": [
+                  "counter",
+                  "min"
+                ],
+                "additionalProperties": false,
+                "description": "Optional gating: act only when payload[counter] >= min. Absent = act on every occurrence.",
+                "properties": {
+                  "counter": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "min": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

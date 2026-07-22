@@ -15,8 +15,10 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
   ## Supported Cat 5 sources
 
-  All 3 sources are wired end to end (DriftMonitor → Cat5Escalator → broadcast + coord).
-  Producer status (Q2 draft wiring, cf. `DriftMonitor` moduledoc — the authority):
+  The source enum is DERIVED from the routing table (`events.yaml` → `Bus.event_routing/0`
+  cat5 tags) — one authority, no code enum to drift. Currently routed end to end
+  (DriftMonitor → Cat5Escalator → broadcast + coord); producer status (Q2 draft wiring,
+  cf. `DriftMonitor` moduledoc — the authority):
 
     * `:workflow_map_failed` — on `workflow_map.failed`. **LIVE via a Q2 DRAFT producer**:
       `Pilot.StepRunConsumer` emits it on a `:workflow_map_load_failed` in the forge-driven
@@ -35,7 +37,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         ...original payload (pod_id, drift_count, reason, etc.)
       }
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -61,14 +63,26 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   Always `:ok` (audit-only fail-safe: a log-write failure does not interrupt
   the workflow).
   """
-  # Closed enum of Cat 5 sources — the ONLY 3 wired (DriftMonitor emitters + the `starfleet.audit_cat5_*`
-  # keys in events.yaml). An out-of-enum source would synthesize an UNREGISTERED `audit_cat5_<source>`
-  # event (broken broadcast) → escalation `escalate` must bound the source, not accept any atom.
-  @cat5_sources [:pod_drift, :workflow_map_failed, :oauth_refresh_failed]
-
   @spec escalate(source :: atom(), payload :: map(), correlation_id :: String.t() | nil) :: :ok
-  def escalate(source, payload, correlation_id)
-      when source in @cat5_sources and is_map(payload) do
+  def escalate(source, payload, correlation_id) when is_atom(source) and is_map(payload) do
+    if source in cat5_sources() do
+      do_escalate(source, payload, correlation_id)
+    else
+      refuse_unknown(source)
+    end
+  end
+
+  # The Cat 5 sources are DERIVED from the routing table (`events.yaml` → `Bus.event_routing/0`,
+  # the `cat5_source` tags): adding an escalation class is a registry edit, and the enum can no
+  # longer drift from what DriftMonitor actually routes (one authority — the table; Catalog refuses
+  # at boot a tag whose `audit_cat5_<tag>` broadcast key is unregistered). An out-of-table source
+  # would synthesize an UNREGISTERED `audit_cat5_<source>` event (broken broadcast) → refused loud.
+  defp cat5_sources do
+    for {_key, %{action: :cat5, cat5_source: tag}} <- Fleet.EventRouter.Bus.event_routing(),
+        do: tag
+  end
+
+  defp do_escalate(source, payload, correlation_id) do
     chain = (Map.get(payload, "chain") || []) ++ ["starfleet.cat5.#{source}"]
 
     enriched =
@@ -97,13 +111,14 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     :ok
   end
 
-  # Out-of-enum source = a producer drift (only DriftMonitor emits, with the 3 wired sources). We do NOT
+  # Out-of-table source = a producer drift (only DriftMonitor emits, from the routed tags). We do NOT
   # synthesize a broken `audit_cat5_<source>` broadcast — REFUSE loud, return `:ok` (the `@spec`; a
   # Cat 5 escalator must never itself crash a caller).
-  def escalate(source, _payload, _correlation_id) when is_atom(source) do
+  defp refuse_unknown(source) do
     Logger.error(
-      "Cat5Escalator: REFUSED unknown Cat 5 source #{inspect(source)} — not in " <>
-        "#{inspect(@cat5_sources)} (producer drift; audit_cat5_<source> would be unregistered)"
+      "Cat5Escalator: REFUSED unknown Cat 5 source #{inspect(source)} — not among the routing " <>
+        "table's cat5 tags #{inspect(cat5_sources())} (producer drift; audit_cat5_<source> would " <>
+        "be unregistered)"
     )
 
     :ok

@@ -28,7 +28,7 @@ defmodule Fleet.EventRouter.Catalog do
       `assert_authorized!` `MapSet.size == 0` → broadcast not validated in test).
     * `:fleet_event_router, :events_yaml_path` — path override (default `priv/event_router/events.yaml`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -49,9 +49,22 @@ defmodule Fleet.EventRouter.Catalog do
   defp do_load do
     case parse_events() do
       {:ok, events} when map_size(events) > 0 ->
+        # The registry is LOAD-BEARING since it carries the routing table (the classification
+        # chain acts on it) → the WHOLE file is schema-validated at boot, fail-loud: a malformed
+        # routing entry silently dropped would un-wire an escalation chain with a green deploy.
+        validate_against_schema!(events)
+
         set = events |> Map.keys() |> Enum.map(&String.to_atom/1) |> MapSet.new()
         Fleet.EventRouter.Bus.set_authorized_event_types(set)
-        Logger.info("Catalog: events.yaml registry loaded (#{MapSet.size(set)} types)")
+
+        routing = build_routing!(events)
+        Fleet.EventRouter.Bus.set_event_routing(routing)
+
+        Logger.info(
+          "Catalog: events.yaml registry loaded (#{MapSet.size(set)} types, " <>
+            "#{map_size(routing)} routed)"
+        )
+
         :ok
 
       {:ok, events} when map_size(events) == 0 ->
@@ -106,6 +119,60 @@ defmodule Fleet.EventRouter.Catalog do
     case File.exists?(path) && YamlElixir.read_from_file(path) do
       {:ok, %{"events" => events}} when is_map(events) -> {:ok, events}
       _ -> :error
+    end
+  end
+
+  # Boot-time schema validation of the parsed registry (events-v1.json, same ExJsonSchema idiom as
+  # coord-policies). Raise = crash-boot, consistent with the absent/empty cases above.
+  defp validate_against_schema!(events) do
+    schema =
+      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events-v1.json")
+      |> File.read!()
+      |> Jason.decode!()
+      |> ExJsonSchema.Schema.resolve()
+
+    case ExJsonSchema.Validator.validate(schema, %{"events" => events}) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        raise "Catalog: events.yaml INVALID against events-v1.json: #{inspect(errors)} — " <>
+                "the registry carries the routing table (load-bearing); fail-loud at boot."
+    end
+  end
+
+  # The routing table: `{source_atom, type_atom} => %{action:, cat5_source:, threshold:}`. Atoms are
+  # safe here: the values come from the schema-validated canon (bounded patterns), post-validation.
+  # The anti-spoof key is the PAIR — a routed type broadcast under another source misses the table.
+  # A `cat5` route whose synthesized broadcast type (`starfleet.audit_cat5_<tag>`) is NOT itself a
+  # registered event key would fail at emit (unregistered type) — refused HERE at boot instead.
+  defp build_routing!(events) do
+    for {type, %{"source" => source, "action" => action} = route} <- events, into: %{} do
+      cat5_source = route["cat5_source"]
+
+      if action == "cat5" do
+        cat5_source ||
+          raise "Catalog: routing for #{type} declares action=cat5 without cat5_source"
+
+        audit_key = "starfleet.audit_cat5_#{cat5_source}"
+
+        Map.has_key?(events, audit_key) ||
+          raise "Catalog: routing for #{type} synthesizes #{audit_key}, which is NOT a " <>
+                  "registered event key — the Cat-5 broadcast would be refused at emit"
+      end
+
+      threshold =
+        case route["threshold"] do
+          %{"counter" => counter, "min" => min} -> %{counter: counter, min: min}
+          nil -> nil
+        end
+
+      {{String.to_atom(source), String.to_atom(type)},
+       %{
+         action: String.to_atom(action),
+         cat5_source: cat5_source && String.to_atom(cat5_source),
+         threshold: threshold
+       }}
     end
   end
 
