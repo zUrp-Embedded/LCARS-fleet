@@ -151,6 +151,34 @@ teardown() {
   [[ "$status" -eq 0 ]]
 }
 
+# =============================================================
+# Setting-sources guard — 'user' is FORBIDDEN in ANY source list (the human's settings must
+# never bleed into the pod); the env override is validated, not trusted.
+# =============================================================
+
+@test "setting-sources: override containing 'user' -> REFUSED (exit 1, named knob)" {
+  LCARS_SETTING_SOURCES="user,project,local" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"LCARS_SETTING_SOURCES"* ]]
+  [[ "$output" == *"user"* ]]
+}
+
+@test "setting-sources: 'user' alone -> REFUSED" {
+  LCARS_SETTING_SOURCES="user" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 1 ]]
+}
+
+@test "setting-sources: 'user' in the middle -> REFUSED" {
+  LCARS_SETTING_SOURCES="project,user,local" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 1 ]]
+}
+
+@test "setting-sources: legitimate override (project only) -> accepted, forwarded" {
+  LCARS_SETTING_SOURCES="project" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--setting-sources project"* ]]
+}
+
 @test "flags: --remote-control present (RC-at-startup)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--remote-control"* ]]

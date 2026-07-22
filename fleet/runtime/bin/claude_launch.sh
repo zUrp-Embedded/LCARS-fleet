@@ -91,7 +91,18 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?RC name prefix required (<
 PERM_ENV_OVERRIDE="${LCARS_PERMISSION_MODE:-}"
 # --settings is ADDITIVE ⇒ --setting-sources MUST exclude 'user', otherwise the human's settings bleed
 # into the pod. Default project,local — 'user' is FORBIDDEN (fleet_spawner v2 §G).
+# The override is VALIDATED, not trusted: the FORBIDDEN rule above must hold mechanically for any
+# LCARS_SETTING_SOURCES value too, or the env var is a one-word bypass of the containment frontier.
+# 'user' in the override → refuse LOUD (fail-closed: a launch with human settings bled into the pod
+# is worse than no launch; the operator sees exactly which knob to fix).
 SETTING_SOURCES="${LCARS_SETTING_SOURCES:-project,local}"
+case ",${SETTING_SOURCES}," in
+  *,user,*)
+    echo "claude_launch: REFUSED — LCARS_SETTING_SOURCES contains 'user' (${SETTING_SOURCES})." >&2
+    echo "claude_launch: 'user' would bleed the human's settings into the pod (forbidden, fleet_spawner v2 §G)." >&2
+    exit 1
+    ;;
+esac
 
 # =============================================================
 # Debug trace #585 — appends to POD_DIR/claude_launch.dbg (bwrap RW bind → survives host-side for a
