@@ -81,6 +81,12 @@ if config_env() != :test do
     # reads `:fleet_spawner, :cap_profiles_dir` (a config separate from the
     # loader). Same env source → same shared canonical path.
     config :fleet_spawner, cap_profiles_dir: path
+
+    # ⚠ SCOPE of this override: it moves the cap-profile YAMLs ONLY. The SP overlay artifacts the
+    # profiles reference — modop bundles (`:fleet_sp_builder, :modop_root`) and subagent templates —
+    # stay resolved from the bundled priv (or their own config keys). An operator overriding the
+    # profiles WITHOUT the matching SP roots runs overridden profiles over BUNDLED SP fragments: a
+    # coherent-looking skew. Override the sp_builder roots alongside, or override neither.
   end
 
   # ============================================================
