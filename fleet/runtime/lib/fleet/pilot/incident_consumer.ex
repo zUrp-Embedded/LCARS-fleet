@@ -158,6 +158,14 @@ defmodule Fleet.Pilot.IncidentConsumer do
     {:noreply, state}
   end
 
+  # BEFORE the catch-all: the death of an OFFLOADED record/escalate task (Offload monitors it;
+  # the :DOWN lands here). Same witness rule as StepRunConsumer — a recording task dying mid-work
+  # must leave a loud trace, not vanish into the catch-all.
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    _ = Fleet.Pilot.Offload.handle_down(ref, pid, reason)
+    {:noreply, state}
+  end
+
   # Any other message (non-failure events we also see via the Bus, or non-Fleet.Event) → no-op.
   def handle_info(_other, state), do: {:noreply, state}
 

@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.Offload do
   The real outcome of the offloaded work is logged IN the task by the caller (the return
   `{:ok, :offloaded}` only says "the task was launched").
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-07-22
   """
 
   require Logger
@@ -34,15 +34,66 @@ defmodule Fleet.Pilot.Offload do
   """
   @spec async(atom(), (-> any()), {String.t(), String.t()}) ::
           {:ok, :offloaded} | {:error, {:offload_failed, term()}}
-  def async(supervisor_name, fun, {consumer, consequence}) do
+  def async(supervisor_name, fun, {consumer, consequence} = label) do
     case Task.Supervisor.start_child(supervisor_name, fun) do
-      {:ok, _pid} ->
+      {:ok, pid} ->
+        # The task's DEATH is observed: before this, an offloaded task
+        # that DIED mid-work (raise past the caller's own rescue, kill, brutal shutdown) vanished —
+        # nobody owned the :DOWN, the consumer's catch-all swallowed it, and the only trace of a
+        # lost completion was the pod's publish deadline expiring 120s later for an unknown reason.
+        # The monitor is created IN the calling consumer (async runs in its GenServer), so the
+        # :DOWN lands in that consumer's mailbox: each consumer routes it to `handle_down/3` BEFORE
+        # its catch-all. The label rides in the caller's process dictionary keyed by the monitor
+        # ref — bounded (one entry per in-flight task, deleted at :DOWN), no state plumbing through
+        # two consumers, no extra process.
+        ref = Process.monitor(pid)
+        Process.put({__MODULE__, ref}, label)
         {:ok, :offloaded}
 
       {:error, reason} ->
         Logger.error("#{consumer}: offload Task failed (#{inspect(reason)}) — #{consequence}")
 
         {:error, {:offload_failed, reason}}
+    end
+  end
+
+  @doc """
+  Routes a `:DOWN` received by a consumer: `:handled` if the ref belongs to one of ITS offloaded
+  tasks (entry consumed — no leak), `:not_mine` otherwise (the consumer's catch-all takes over).
+  A `:normal`/`:shutdown` exit is the nominal end (silent); anything else is the LOUD trace this
+  mechanism exists for — the task died mid-work and its consequence is named.
+  """
+  @spec handle_down(reference(), pid(), term()) :: :handled | :not_mine
+  def handle_down(ref, _pid, reason) do
+    case Process.delete({__MODULE__, ref}) do
+      nil ->
+        :not_mine
+
+      {consumer, consequence} ->
+        case reason do
+          :normal ->
+            :ok
+
+          :shutdown ->
+            :ok
+
+          {:shutdown, _} ->
+            :ok
+
+          # The task exited BEFORE the monitor attached (start_child → monitor is µs; only a
+          # near-instant task fits that window, and the offloaded work is git/forge I/O that
+          # takes ms+). :noproc cannot distinguish a normal from an abnormal pre-monitor exit —
+          # treated as the nominal fast case rather than crying wolf on trivial tasks.
+          :noproc ->
+            :ok
+
+          other ->
+            Logger.error(
+              "#{consumer}: offloaded task DIED mid-work (#{inspect(other)}) — #{consequence}"
+            )
+        end
+
+        :handled
     end
   end
 end

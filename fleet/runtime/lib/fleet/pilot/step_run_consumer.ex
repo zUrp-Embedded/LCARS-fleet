@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   use GenServer
@@ -376,6 +376,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # (SEPARATE consumer → incident registry). Here they fall into the catch-all (no-op): this singleton
   # carries ONLY step-run completion, not the incident policy (distinct concern, isolated blast-radius).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
+
+  # BEFORE the catch-all: the death of an OFFLOADED completion task (Offload monitors it; the
+  # :DOWN lands here, in the consumer that launched it). Without this clause the catch-all
+  # swallowed the only witness of a completion dying mid-work — the pod's publish deadline then
+  # expired 120s later for an unexplained reason.
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    _ = Fleet.Pilot.Offload.handle_down(ref, pid, reason)
+    {:noreply, state}
+  end
+
   def handle_info(_other, state), do: {:noreply, state}
 
   defp handle_pod_completed(p, state) do
