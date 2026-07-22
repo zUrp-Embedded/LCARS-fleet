@@ -1,7 +1,7 @@
 # Modop — subagent-driven (dispatch fresh per task)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-14
+**Dernière révision** : 2026-07-22
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/subagent-driven-development (ADAPT) + LCARS fire-mode + cap-profile lifetime_scope one-shot
 
@@ -21,7 +21,7 @@ Pour chaque task du plan :
 
 1. **Compose brief mandate** : task description verbatim + scene-setting context + "Before you begin" Q&A opportunity
 2. **Dispatch subagent fresh** : `Fleet.Spawner.spawn_pod/3` avec :
-   - cap-profile : implementer (cf. cap-profile workers M2)
+   - template subagent : implementer (cf. subagent-templates/subagent-implementer.md)
    - lifetime_scope : `one-shot`
    - brief : composed mandate
    - input : task text + spec.md ref + plan.md ref (read-only)
@@ -29,7 +29,7 @@ Pour chaque task du plan :
 4. **Read structured output** : `{status: DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT, ...}`
 5. **Process verdict** (cf. modop:dual-review pour stages spec-review + code-review)
 
-### Subagent (cap-profile implementer)
+### Subagent (template implementer)
 
 1. **Lit le brief mandate** (task text inline).
 2. **Pose questions Q&A** si "Before you begin" — orchestrateur répond.

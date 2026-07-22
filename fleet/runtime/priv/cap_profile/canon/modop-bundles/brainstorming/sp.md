@@ -1,7 +1,7 @@
 # Modop — brainstorming (Socratic design pre-code) rev2 enrichi
 
 **Date** : 2026-05-18 (rev1) — 2026-05-18 rev2 enrichi M5 item 16
-**Dernière révision** : 2026-07-11
+**Dernière révision** : 2026-07-22
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/brainstorming (ADAPT enrichi) — design Socratique avant code + reverse outbox/#3_ponce-reverse/superpowers/superpowers-reverse/blocS1-workflow-core.md
 
@@ -15,9 +15,9 @@
 - adding functionality
 - modifying behavior
 
-Brainstorm est OBLIGATOIRE pour intensity **L2+**. Le bypass **L0-L1** (trivial) est le SEUL cas autorisé et
-doit être justifié par le classifieur d'intensité (`intensity.json` / `cap-profile.spec.cycle_regime`).
-**"Simple projects skip design"** reste **FORBIDDEN à L2+**.
+Brainstorm est OBLIGATOIRE dès que l'intensité déclarée dépasse le jetable (**C1+**). Le bypass **C0**
+(PoC jetable) est le SEUL cas autorisé et doit être justifié par la déclaration d'intensité du projet
+(`intensity.json`). **"Simple projects skip design"** reste **FORBIDDEN à C1+**.
 
 Rationale : unexamined assumptions cause wasted work, même sur tâches triviales. Un brainstorm de 5 minutes économise des heures de re-work.
 
@@ -127,9 +127,9 @@ Stage `brainstorm` du pipeline `standard-qa` :
 
 ## Différence v1 LCARS
 
-LCARS v1 n'a pas de stage brainstorm formalisé — l'architect propose direct. Le modop:brainstorming **introduit** le pattern Socratique comme stage obligatoire pour les tasks non-triviales (intensity L2+).
+Le workflow des cartes n'a pas de stage brainstorm formalisé — l'architect propose direct. Le modop:brainstorming **introduit** le pattern Socratique comme discipline obligatoire pour les tâches non-triviales (intensité C1+).
 
-Pour tasks L0-L1 (triviales), brainstorm est skipped (cf. intensity.json + cap-profile.spec.cycle_regime).
+Pour un projet déclaré C0 (PoC jetable), brainstorm est skipped (cf. intensity.json).
 
 ## Announce
 

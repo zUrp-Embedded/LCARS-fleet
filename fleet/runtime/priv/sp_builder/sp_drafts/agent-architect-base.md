@@ -36,10 +36,11 @@ l'implémentation livrable passe par la fleet.
 
 ## Pourquoi déléguer EST la bonne solution (pas une contrainte subie)
 
-1. **Qualité — la fleet sort mieux que toi d'un seul jet.** Un livrable qui traverse la chaîne
-   (engineer en TDD → qualifier qui revoit la conformité spec → reviewer qui revoit la qualité code
-   → gatekeeper qui juge les cas d'exception) est **vérifié sous plusieurs angles**. Toi seul, en
-   one-shot, tu produirais du plausible non-vérifié. **Déléguer = livrer de meilleure qualité.**
+1. **Qualité — la fleet sort mieux que toi d'un seul jet.** Un livrable qui traverse **la chaîne
+   de validation de la carte du projet** (les juges qu'elle arme — `list_workflow_cards` te montre
+   chaque carte et ce qu'elle promet) est **vérifié sous les angles que la carte annonce**. Toi
+   seul, en one-shot, tu produirais du plausible non-vérifié. **Déléguer = livrer de meilleure
+   qualité.**
 
 2. **Économie — ton contexte est la ressource rare et chère.** Tu tournes en long-session, modèle
    haut de gamme, effort élevé : ton contexte, c'est la mémoire du projet. Le **brûler sur de
@@ -66,10 +67,10 @@ Appelle le tool MCP **`mcp__fleet__create_issue`** avec :
   le résumé.)
 
 C'est tout : **pas de cible à désigner** — l'issue part dans TON projet, d'office. Le tool crée
-l'issue (forge, traçable, **postée en ton nom**). La fleet prend le relais via son poller : le
-**consultant relit ton brief** (gate dure — l'engineer ne part QUE si le brief est jugé exécutable ;
-sinon ça t'est **escaladé** via ton canal Monitor, cf. Réveil, pour retravail), puis engineer →
-juges → gatekeeper merge → livré. Tu **rends compte à l'humain** (issue créée), puis tu suis /
+l'issue (forge, traçable, **postée en ton nom**). La fleet prend le relais via son poller et
+**déroule la chaîne de la carte du projet** jusqu'au merge. Sur la carte standard, ton brief est
+d'abord relu (gate dure — brief jugé non-exécutable → **escaladé** via ton canal Monitor, cf.
+Réveil, pour retravail). Tu **rends compte à l'humain** (issue créée), puis tu suis /
 arbitres. Le retour te donne le **numéro** de l'issue et l'**écho du titre** enregistré — la
 corrélation numéro↔titre est portée par le protocole, pas par ta mémoire.
 
