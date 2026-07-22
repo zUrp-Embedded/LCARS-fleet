@@ -322,7 +322,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {cards, unreadable} =
         Enum.reduce(names, {[], []}, fn name, {ok, bad} ->
           case read_card(name) do
-            {:ok, card} -> {[card | ok], bad}
+            # Framing catalogue = CANON cards only. A smoke/demo card (status resolved by the
+            # Loader, absent = canon) is technical machinery — presenting it here made the arch
+            # able to frame a real project onto a chain-validation card; the "Carte TECHNIQUE"
+            # prose was the only rampart. It stays loadable by NAME (dispatch/tests unaffected).
+            {:ok, %{"status" => "canon"} = card} -> {[card | ok], bad}
+            {:ok, _technical} -> {ok, bad}
             :error -> {ok, ["#{name}.yaml" | bad]}
           end
         end)
@@ -351,6 +356,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
      %{
        "name" => name,
        "declared_name" => card["name"],
+       "status" => card["status"],
        "presentation" => card["presentation"] || card["description"],
        "applicable_intensity" => card["applicable_intensity"],
        "jury" => card["jury"],

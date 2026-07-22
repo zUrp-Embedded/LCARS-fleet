@@ -27,7 +27,7 @@ defmodule Fleet.Workflow.Loader do
   coupling to the global Application env). `load!/1` remains for the prod call
   sites that can live with the Application env (read at boot).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-22
   """
 
   # The workflow_map carries a single envelope: `kind: WorkflowMap` / `metadata` / `spec`.
@@ -135,7 +135,13 @@ defmodule Fleet.Workflow.Loader do
       # Self-presentation for the framing interview (metadata, optional) — the MCP catalogue
       # listing shows it to the human VERBATIM (the card's own voice). nil = fall back to
       # "description" at the listing site.
-      "presentation" => get_in(yaml, ["metadata", "presentation"])
+      "presentation" => get_in(yaml, ["metadata", "presentation"]),
+      # Card class (metadata, optional; schema enum canon|smoke|demo). Absent = "canon" — the
+      # default is resolved HERE, the single authority, so no consumer re-derives it. The framing
+      # catalogue (list_workflow_cards) offers CANON cards only: a smoke/demo card is technical
+      # machinery (chain validation, demos), loadable by NAME for dispatch/tests but never a
+      # choice presented to the architect — the mechanical half of its "Carte TECHNIQUE" prose.
+      "status" => get_in(yaml, ["metadata", "status"]) || "canon"
     }
   end
 

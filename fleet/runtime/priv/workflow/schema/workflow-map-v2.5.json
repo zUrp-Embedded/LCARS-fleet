@@ -44,6 +44,14 @@
        "C4"
       ]
      }
+    },
+    "status": {
+     "enum": [
+      "canon",
+      "smoke",
+      "demo"
+     ],
+     "description": "Card class. Absent = canon (a production card, offered to the architect via list_workflow_cards). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
     }
    }
   },

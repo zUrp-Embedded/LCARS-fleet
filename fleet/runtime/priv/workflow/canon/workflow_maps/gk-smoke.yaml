@@ -15,6 +15,7 @@
 kind: WorkflowMap
 metadata:
   name: gk-smoke
+  status: smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
   presentation: "Carte TECHNIQUE — smoke-test du chemin d'escalade : un engineer livre (profil noop), un reviewer pose une gate SOFT qui escalade au gatekeeper, et le rail reprend sur son verdict (continue/abandon/humain). Sert à valider la chaîne d'escalade sur de vrais pods — pas à livrer un projet."
 spec:

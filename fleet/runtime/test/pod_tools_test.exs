@@ -1162,7 +1162,19 @@ defmodule Fleet.MCP.PodToolsTest do
       assert %{"jury" => [], "applicable_intensity" => ["C0"]} = by_name["c0-poc"]
       assert %{"jury" => ["qualifier"], "applicable_intensity" => ["C1"]} = by_name["c1-light"]
       assert by_name["brief-gate"]["jury"] == ["qualifier", "reviewer"]
-      assert map_size(by_name) >= 7
+      assert map_size(by_name) >= 5
+
+      # The framing catalogue offers CANON cards ONLY: the technical cards (smoke/demo — chain
+      # validation, demos) are NOT choices for a real project; their "Carte TECHNIQUE" prose was
+      # the only rampart before the mechanical status filter.
+      refute Map.has_key?(by_name, "gk-smoke")
+      refute Map.has_key?(by_name, "poc-helloworld")
+      assert Enum.all?(cards, &(&1["status"] == "canon"))
+
+      # Technical cards stay LOADABLE BY NAME (dispatch/tests unaffected): filtered from the
+      # offer, not from the catalogue.
+      assert %{"name" => "gk-smoke", "status" => "smoke"} =
+               Fleet.Workflow.Loader.load!("gk-smoke")
     end
 
     @tag :tmp_dir
