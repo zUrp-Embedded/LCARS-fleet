@@ -264,7 +264,8 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       end
     end
 
-    for profile <- ~w(engineer consultant qualifier reviewer gatekeeper architect starfleet) do
+    # ONE role inventory (@profiles) — a second inline list could silently drift from it.
+    for profile <- @profiles do
       raw = YamlElixir.read_from_file!(Path.join(@canon_dir, "#{profile}.yaml"))
       scope = get_in(raw, ["spec", "invocation", "lifetime_scope"])
       defaults = get_in(raw, ["spec", "modop_set", "default"]) || []
@@ -303,6 +304,25 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     for judge <- ~w(consultant qualifier reviewer) do
       refute Fleet.CapProfile.has_capability?(cap.(judge), :onboarder)
       refute Fleet.CapProfile.has_capability?(cap.(judge), :project_delegate)
+    end
+  end
+
+  describe "modop overlays are IDENTITY (a modop changes behavior via its SP bundle, never the profile)" do
+    test "every canon modop profile.yaml parses to the EMPTY map" do
+      # A non-empty overlay would mutate the role's cap-profile identity AT SPAWN, silently sized
+      # by whichever modop happens to be active — capabilities, scope and containment must never
+      # vary by modop. The canon commits to `{}`; this pins it: a future modop that NEEDS a real
+      # overlay must edit this test — a visible design decision, not a quiet deep-merge.
+      overlays = Path.wildcard(Path.join(@canon_dir, "modop/*/profile.yaml"))
+      assert overlays != [], "no modop overlays found - canon moved?"
+
+      for overlay <- overlays do
+        assert {:ok, %{} = parsed} = YamlElixir.read_from_file(overlay)
+
+        assert parsed == %{},
+               "#{overlay}: NON-IDENTITY modop overlay #{inspect(parsed)} - a modop must not " <>
+                 "mutate the cap-profile (behavior goes through its SP bundle)"
+      end
     end
   end
 end
