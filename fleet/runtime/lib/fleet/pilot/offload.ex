@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.Offload do
   The real outcome of the offloaded work is logged IN the task by the caller (the return
   `{:ok, :offloaded}` only says "the task was launched").
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   require Logger
@@ -101,6 +101,13 @@ defmodule Fleet.Pilot.Offload do
             )
 
             {:error, :inline_crashed}
+        catch
+          kind, reason ->
+            Logger.error(
+              "#{consumer}: INLINE fallback crashed (#{kind} #{inspect(reason)}) — #{consequence}"
+            )
+
+            {:error, :inline_crashed}
         end
     end
   end
@@ -128,12 +135,14 @@ defmodule Fleet.Pilot.Offload do
           {:shutdown, _} ->
             :ok
 
-          # The task exited BEFORE the monitor attached (start_child → monitor is µs; only a
-          # near-instant task fits that window, and the offloaded work is git/forge I/O that
-          # takes ms+). :noproc cannot distinguish a normal from an abnormal pre-monitor exit —
-          # treated as the nominal fast case rather than crying wolf on trivial tasks.
+          # The task exited BEFORE the monitor attached. On the offload path (git/forge I/O)
+          # this window is µs vs ms+ work → near-instant exit almost always means the task
+          # crashed before any real work happened. Treat as LOUD (cry wolf once, never silently
+          # drop a mid-work death).
           :noproc ->
-            :ok
+            Logger.error(
+              "#{consumer}: offloaded task DIED mid-work (:noproc — exited before monitor) — #{consequence}"
+            )
 
           other ->
             Logger.error(

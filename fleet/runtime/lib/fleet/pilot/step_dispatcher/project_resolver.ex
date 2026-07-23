@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
   the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.
@@ -101,6 +101,9 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
         {:error, {:exit, reason}} ->
           {:error, {:exit, reason}}
+
+        {:error, reason} ->
+          {:error, {:shell_error, reason}}
       end
     end
   end

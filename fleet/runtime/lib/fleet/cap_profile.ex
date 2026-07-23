@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -658,6 +658,19 @@ defmodule Fleet.CapProfile do
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   defdelegate list(), to: Catalog
   defdelegate list(dir), to: Catalog
+
+  @doc """
+  Role names from the published cap-profile image when available; `:not_published` otherwise.
+  Preferred over `list/1` (disk scan) when the image is available — returns instantly from
+  `:persistent_term`, no IO, no YAML parse on the hot path (permanent-boot / reconciliation).
+  """
+  @spec list_from_published() :: {:ok, [String.t()]} | {:error, :not_published}
+  def list_from_published do
+    case Fleet.CapProfile.Image.published() do
+      %{index: index} -> {:ok, index |> Map.keys() |> Enum.sort()}
+      nil -> {:error, :not_published}
+    end
+  end
 
   @doc """
   Root of the cap-profiles catalogue (`<root_dir>/<role>.yaml`). **SINGLE SOURCE**: every

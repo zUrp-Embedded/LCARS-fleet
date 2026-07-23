@@ -90,19 +90,23 @@ defmodule Fleet.Pilot.OffloadTest do
     refute log =~ "DIED"
   end
 
-  test "a task faster than the monitor (:noproc) → silent nominal, never a false DIED alarm", %{
-    sup: sup
+  test "a task faster than the monitor (:noproc) → LOUD mid-work DIED error, never silent", %{
+    sup: _
   } do
-    {:ok, :offloaded} = Offload.async(sup_name(sup), fn -> :ok end, {"C", "x"})
-    assert_receive {:DOWN, ref, :process, pid, reason}, 1_000
-    assert reason in [:normal, :noproc]
+    ref = make_ref()
+    pid = spawn(fn -> :ok end)
+    Process.put({Fleet.Pilot.Offload, ref}, {"OffloadConsumer", "work lost"})
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :handled = Offload.handle_down(ref, pid, reason)
+        assert :handled = Offload.handle_down(ref, pid, :noproc)
       end)
 
-    refute log =~ "DIED"
+    assert log =~ "DIED mid-work"
+    assert log =~ ":noproc"
+    assert log =~ "work lost"
+    # The label entry is consumed: a second call is not ours.
+    assert :not_mine = Offload.handle_down(ref, pid, :noproc)
   end
 
   describe "async_or_inline — saturation runs the work, never drops it" do
@@ -152,6 +156,30 @@ defmodule Fleet.Pilot.OffloadTest do
 
       assert log =~ "INLINE fallback crashed"
       assert log =~ "incident NOT recorded"
+    end
+
+    test "inline fallback EXIT (exit/throw) → typed {:error, :inline_crashed} + LOUD, caller survives" do
+      sup =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Task.Supervisor,
+             name: :"sat3_#{System.unique_integer([:positive])}", max_children: 0},
+            id: :sat3
+          )
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :inline_crashed} =
+                   Fleet.Pilot.Offload.async_or_inline(
+                     sup_name(sup),
+                     fn -> exit(:boom) end,
+                     {"StepRunConsumer", "completion lost"}
+                   )
+        end)
+
+      assert log =~ "INLINE fallback crashed"
+      assert log =~ "completion lost"
     end
 
     test "pool available → offloaded normally ({:ok, :offloaded})", %{sup: _} = ctx do

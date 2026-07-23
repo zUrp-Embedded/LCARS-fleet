@@ -478,6 +478,7 @@ defmodule Fleet.MCP.PodToolsTest do
          repo: full_name,
          forge: :deleted,
          architect: :stopped,
+         local: %{project: :removed, work: :removed},
          project_dir: "/tmp/projects/#{name}",
          work_dir: "/tmp/projects.work/#{name}",
          forced: Keyword.get(opts, :force, false)
@@ -1364,6 +1365,25 @@ defmodule Fleet.MCP.PodToolsTest do
                  PodTools.handle_tool_call(tool, biz_args, %{}),
                "tool=#{tool} without pod_id should have been REFUSED"
       end
+    end
+
+    test "DPF-04: delete_project response carries local-dir verdicts — never dropped" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect", repo: "fleet/demo"}}
+      end)
+
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "delete_project",
+                 %{"full_name" => "fleet/demo-proj"},
+                 pod_state(pod)
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["status"] == "deleted"
+      assert %{"project" => "removed", "work" => "removed"} = result["local"]
     end
 
     test "architect → the privileged tools PASS the gate (no :forbidden / :pod_unknown)" do

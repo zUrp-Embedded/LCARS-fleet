@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   defmodule Clone do
@@ -127,6 +127,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
               {:error, {:clone_failed, {:git_timeout, ms}}}
 
             {:error, {:exit, reason}} ->
+              {:error, {:clone_failed, {:git_exit, reason}}}
+
+            {:error, reason} ->
               {:error, {:clone_failed, {:git_exit, reason}}}
           end
       end
@@ -275,6 +278,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           {:error, {:work_doc_clone_failed, {work_branch, :git_timeout, ms}}}
 
         {:error, {:exit, reason}} ->
+          {:error, {:work_doc_clone_failed, {work_branch, :git_exit, reason}}}
+
+        {:error, reason} ->
           {:error, {:work_doc_clone_failed, {work_branch, :git_exit, reason}}}
       end
     end

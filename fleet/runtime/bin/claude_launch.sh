@@ -96,6 +96,7 @@ PERM_ENV_OVERRIDE="${LCARS_PERMISSION_MODE:-}"
 # 'user' in the override → refuse LOUD (fail-closed: a launch with human settings bled into the pod
 # is worse than no launch; the operator sees exactly which knob to fix).
 SETTING_SOURCES="${LCARS_SETTING_SOURCES:-project,local}"
+SETTING_SOURCES="${SETTING_SOURCES// /}"
 case ",${SETTING_SOURCES}," in
   *,user,*)
     echo "claude_launch: REFUSED — LCARS_SETTING_SOURCES contains 'user' (${SETTING_SOURCES})." >&2

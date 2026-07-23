@@ -30,7 +30,7 @@ defmodule Fleet.EventRouter.Catalog do
       `assert_authorized!` `MapSet.size == 0` → broadcast not validated in test).
     * `:fleet_event_router, :events_yaml_path` — path override (default `priv/event_router/events.yaml`).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   require Logger
@@ -168,6 +168,14 @@ defmodule Fleet.EventRouter.Catalog do
                 "incident block ({op, subject} required)"
       end
 
+      if cat5_source && action != "cat5" do
+        raise "Catalog: #{type} carries cat5_source but action=#{action} is not cat5"
+      end
+
+      if route["incident"] && action != "incident" do
+        raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
+      end
+
       threshold =
         case route["threshold"] do
           %{"counter" => counter, "min" => min} -> %{counter: counter, min: min}
@@ -189,7 +197,14 @@ defmodule Fleet.EventRouter.Catalog do
             nil
         end
 
-      {{String.to_atom(source), String.to_atom(type)},
+      source_atom = String.to_atom(source)
+
+      unless Fleet.Event.valid_source?(source_atom) do
+        raise "Catalog: #{type} declares source=#{source}, not a canonical source " <>
+                "(expected one of #{inspect(Fleet.Event.canonical_sources())})"
+      end
+
+      {{source_atom, String.to_atom(type)},
        %{
          action: String.to_atom(action),
          cat5_source: cat5_source && String.to_atom(cat5_source),

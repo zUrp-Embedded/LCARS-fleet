@@ -72,6 +72,47 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
   end
 
   @tag :tmp_dir
+  test "DPF-13: a route with a non-canonical source → boot REFUSED", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "events.yaml")
+
+    File.write!(path, """
+    events:
+      pod.drift:
+        source: typo_source
+        action: coord_decision
+    """)
+
+    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
+    Application.put_env(:fleet_event_router, :load_event_registry, true)
+    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+
+    assert_raise RuntimeError, ~r/not a canonical source/, fn ->
+      Fleet.EventRouter.Catalog.load!()
+    end
+  end
+
+  @tag :tmp_dir
+  test "DPF-14: cat5_source on a non-cat5 action → boot REFUSED", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "events.yaml")
+
+    File.write!(path, """
+    events:
+      pod.drift:
+        source: spawner
+        action: coord_decision
+        cat5_source: orphan_tag
+    """)
+
+    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
+    Application.put_env(:fleet_event_router, :load_event_registry, true)
+    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+
+    assert_raise RuntimeError, ~r/carries cat5_source/, fn ->
+      Fleet.EventRouter.Catalog.load!()
+    end
+  end
+
+  @tag :tmp_dir
   test "a schema-invalid routing entry (unknown action) → boot REFUSED", %{tmp_dir: tmp} do
     path = Path.join(tmp, "events.yaml")
 

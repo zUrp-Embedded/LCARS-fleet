@@ -91,6 +91,19 @@ defmodule Fleet.MCP.IdempotencyTest do
     refute_receive :ran, 200
   end
 
+  test "DPF-15 sweep: expired :done entries are evicted — no monotonic growth" do
+    name = :"idem_sweep_#{System.unique_integer([:positive])}"
+    start_supervised!({Idempotency, name: name, sweep_interval_ms: 50}, id: name)
+
+    for i <- 1..5 do
+      assert {:ok, :r} = Idempotency.run(:"k#{i}", fn -> {:ok, :r} end, server: name, ttl_ms: 0)
+    end
+
+    assert map_size(:sys.get_state(name).entries) == 5
+    Process.sleep(150)
+    assert map_size(:sys.get_state(name).entries) == 0
+  end
+
   test "a runner that DIES before publishing promotes a waiting duplicate — no wedge, still single-flight",
        %{server: s} do
     test = self()

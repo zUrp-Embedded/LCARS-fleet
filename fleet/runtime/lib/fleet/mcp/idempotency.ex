@@ -42,7 +42,7 @@ defmodule Fleet.MCP.Idempotency do
   Iron rule: the coordinator NEVER runs `fun` itself (a forge call would serialize every mutation
   behind one process) — it only arbitrates claim/publish; `fun` runs in the caller's connection Task.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   # A completed result is replayable to a retry for this long (covers the agent's re-emit window).
@@ -106,8 +106,14 @@ defmodule Fleet.MCP.Idempotency do
 
   # ---- coordinator ----
 
+  @sweep_interval_ms 60_000
+
   @impl true
-  def init(_opts), do: {:ok, %{entries: %{}}}
+  def init(opts) do
+    interval = Keyword.get(opts, :sweep_interval_ms, @sweep_interval_ms)
+    _ = if interval > 0, do: Process.send_after(self(), :sweep, interval)
+    {:ok, %{entries: %{}, sweep_interval_ms: interval}}
+  end
 
   @impl true
   def handle_call({:claim, key}, {pid, _} = from, state) do
@@ -151,6 +157,19 @@ defmodule Fleet.MCP.Idempotency do
       {key, _} -> {:noreply, release_entry(state, key)}
       nil -> {:noreply, state}
     end
+  end
+
+  def handle_info(:sweep, %{sweep_interval_ms: interval} = state) do
+    now = mono_ms()
+
+    entries =
+      Map.filter(state.entries, fn
+        {_, {:done, _, expiry}} -> expiry > now
+        _ -> true
+      end)
+
+    _ = if interval > 0, do: Process.send_after(self(), :sweep, interval)
+    {:noreply, %{state | entries: entries}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}

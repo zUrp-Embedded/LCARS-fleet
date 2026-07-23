@@ -66,4 +66,9 @@ defmodule Fleet.SPBuilderImageTest do
     File.mkdir_p!(Path.join(tmp, "templates"))
     assert_raise RuntimeError, ~r/no artifact matches/, fn -> Image.publish!() end
   end
+
+  test "proven-good or do not boot: an empty artifact file makes publish! raise", %{tmp_dir: tmp} do
+    File.write!(Path.join(tmp, "bundles/tdd/sp.md"), "")
+    assert_raise RuntimeError, ~r/empty/, fn -> Image.publish!() end
+  end
 end

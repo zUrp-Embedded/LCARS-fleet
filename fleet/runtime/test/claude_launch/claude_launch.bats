@@ -179,6 +179,17 @@ teardown() {
   [[ "$output" == *"--setting-sources project"* ]]
 }
 
+@test "setting-sources: 'project, user' (space-padded token) -> REFUSED" {
+  LCARS_SETTING_SOURCES="project, user" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"REFUSED"* ]]
+}
+
+@test "setting-sources: 'user ,project' (leading space on user) -> REFUSED" {
+  LCARS_SETTING_SOURCES="user ,project" run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 1 ]]
+}
+
 @test "flags: --remote-control present (RC-at-startup)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--remote-control"* ]]

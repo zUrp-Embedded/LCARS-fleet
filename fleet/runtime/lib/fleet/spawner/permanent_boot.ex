@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
 
   """
 
@@ -244,7 +244,10 @@ defmodule Fleet.Spawner.PermanentBoot do
   # `metadata.name` prop, never by filename. Enum and `load` thus share the SAME key
   # (the name) → no more enum↔load mismatch (a listed profile is always loadable).
   defp list_roles(dir) do
-    Fleet.CapProfile.list(dir)
+    case Fleet.CapProfile.list_from_published() do
+      {:ok, roles} -> {:ok, roles}
+      {:error, :not_published} -> Fleet.CapProfile.list(dir)
+    end
   end
 
   # Loads ALL roles, short-circuits on the FIRST load failure (fail-loud, no more silent

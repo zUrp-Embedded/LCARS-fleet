@@ -300,6 +300,36 @@ defmodule Fleet.Spawner.PermanentBootTest do
       assert {:error, {:cap_profiles_dir_unreadable, _}} =
                PermanentBoot.boot_permanent_pods(cap_profiles_dir: "/nonexistent/dir/x")
     end
+
+    test "DPF-08: published cap-profile image preferred over disk scan (empty dir ignored)", %{
+      dir: dir
+    } do
+      :persistent_term.put(
+        {Fleet.CapProfile.Image, :image},
+        %{index: %{"starfleet" => %{}}, overlays: %{}, version: "v-test"}
+      )
+
+      on_exit(fn -> Fleet.CapProfile.Image.unpublish() end)
+
+      empty_dir = Path.join(dir, "empty_subdir")
+      File.mkdir_p!(empty_dir)
+
+      parent = self()
+
+      spawner = fn %Fleet.CapProfile{metadata: %{"name" => n}}, tid, _o ->
+        send(parent, {:spawned, n, tid})
+        {:ok, spawn(fn -> :ok end)}
+      end
+
+      assert [{:ok, "permanent-starfleet"}] =
+               PermanentBoot.boot_permanent_pods(
+                 cap_profiles_dir: empty_dir,
+                 loader: loader_for(),
+                 spawner: spawner
+               )
+
+      assert_received {:spawned, "starfleet", "permanent-starfleet"}
+    end
   end
 
   describe "REAL canon conformance — boot_at_start? on in-repo cap-profiles" do

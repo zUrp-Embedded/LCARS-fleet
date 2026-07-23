@@ -10,7 +10,7 @@ defmodule Fleet.SPBuilder.Image do
   mutation mid-life no longer changes the prompts pods receive, spawn by spawn. No image
   (tests' hermetic default, tooling) → live-disk fallback, unchanged.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   require Logger
@@ -99,11 +99,26 @@ defmodule Fleet.SPBuilder.Image do
               "proven-good image at boot, or do not boot (broken deploy?)"
     end
 
-    Map.new(files, fn path -> {key_fun.(path), File.read!(path)} end)
+    Map.new(files, fn path ->
+      content = File.read!(path)
+
+      if content == "" do
+        raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
+                "non-empty artifacts (truncated file in deploy?)"
+      end
+
+      {key_fun.(path), content}
+    end)
   end
 
   defp read_worker_protocol! do
-    File.read!(Path.join(drafts_root(), "protocole-user-worker.md"))
+    content = File.read!(Path.join(drafts_root(), "protocole-user-worker.md"))
+
+    if content == "" do
+      raise "SPBuilder.Image: worker protocol is empty — proven-good image requires non-empty artifacts"
+    end
+
+    content
   end
 
   # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root; the

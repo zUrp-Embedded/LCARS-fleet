@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-23
   """
 
   require Logger
@@ -624,12 +624,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       case onboard.delete_project(full_name, opts) do
         {:ok, %{repo: repo} = result} ->
+          local = Map.get(result, :local, %{})
+
           {:ok,
            %{
              "status" => "deleted",
              "repo" => repo,
              "forge" => to_string(Map.get(result, :forge, "")),
-             "architect" => to_string(Map.get(result, :architect, ""))
+             "architect" => to_string(Map.get(result, :architect, "")),
+             "local" => %{
+               "project" => to_string(Map.get(local, :project, :absent)),
+               "work" => to_string(Map.get(local, :work, :absent))
+             }
            }}
 
         # Preserve the TYPED reason (do NOT flatten): the caller must distinguish
