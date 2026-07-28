@@ -256,7 +256,13 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     test "an ALREADY-CONFORMANT rule says nothing — a nominal tick is silent" do
       # The other half of the rule: one line per repo per period saying 'still fine' would bury
       # the one line that matters under noise it produced itself.
-      assert reconcile_with(:unchanged) == ""
+      #
+      # Anchored on the announcement, NOT on global emptiness: capture_log/1 collects the WHOLE
+      # VM's Logger output, so in an async suite any unrelated module logging inside this window
+      # turns `== ""` red. That verdict comes from the scheduler, not from the code under test —
+      # and a wall that answers at random gives a green having exercised nothing. The claim here
+      # is narrow and belongs to this call: reconcile announced NO main-protection for this repo.
+      refute reconcile_with(:unchanged) =~ "fleet/proj main-protection"
     end
   end
 end
