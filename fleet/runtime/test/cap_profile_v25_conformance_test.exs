@@ -325,4 +325,25 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       end
     end
   end
+
+  describe "kick reachability (a pod the machine spawns must be startable)" do
+    test "starfleet is the ONLY canon role gating send-keys" do
+      # `invocation.wake_send_keys: false` gates EVERY send-keys, `yop` included — not just the
+      # wake fallback it reads like. For a pod the machine spawns with no brief enqueued, the
+      # kick loop then cancels itself (`bootstrap? and not profile_send_keys?`) and the pod sits
+      # at an untouched prompt forever: started, alive, and unreachable. Only a pod a HUMAN is
+      # already typing into can afford that, and starfleet is the sole role of that class.
+      # A second role landing here means somebody copied the flag onto a machine-spawned pod
+      # and shipped an architect (or a worker) that never boots.
+      flag_only =
+        for p <- @profiles,
+            raw = YamlElixir.read_from_file!(Path.join(@canon_dir, "#{p}.yaml")),
+            get_in(raw, ["spec", "invocation", "wake_send_keys"]) == false,
+            do: p
+
+      assert flag_only == ["starfleet"],
+             "roles gating every send-keys: #{inspect(flag_only)} — expected only starfleet " <>
+               "(a machine-spawned pod with this flag never receives its bootstrap kick)"
+    end
+  end
 end

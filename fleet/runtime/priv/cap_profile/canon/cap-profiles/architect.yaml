@@ -76,10 +76,16 @@ spec:
     subagent_template: null
     host_native: false
     bridge_enabled: true
-    # The arch terminal IS the human's interactive session: the send-keys wake fallback would
-    # type "wake" into the human's prompt (costs a spurious turn — seen live 2026-07-19, fired
-    # DURING nominal Monitor delivery). Flag-only for this pod; wake.failed stays the net.
-    wake_send_keys: false
+    # TRUE because this flag gates EVERY send-keys, `yop` included — not just the wake fallback
+    # it was set to false for. An architect is spawned BY THE MACHINE, on-open, with no brief
+    # enqueued: the kick loop then reads `bootstrap? and not profile_send_keys?` and CANCELS
+    # itself, so the pod came up and sat at an untouched prompt forever, waiting for a human to
+    # type into it. A pod nobody can start is not a quieter pod, it is a dead one.
+    # The cost this re-accepts is the one the false was buying: a wake fallback may type into a
+    # session the human is using (spurious turn, seen live 2026-07-19 during nominal Monitor
+    # delivery). That fallback is separately gated by the GLOBAL knob `:wake_send_keys` — a
+    # per-pod flag that also silences bootstrap is the wrong instrument for it.
+    wake_send_keys: true
   modop_set:
     default: [long-session-discipline]
     optional: [brainstorming, rubber-duck]
