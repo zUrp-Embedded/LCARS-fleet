@@ -52,7 +52,25 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       :ok
     end
 
-    def branch_exists?(_full_name, _branch, _fc), do: false
+    # Answered from the bare repo this forge actually holds. Hardcoded `false`, it sent the
+    # import RETRY into re-pushing a freshly recreated orphan `work/ops` — a no-op only while
+    # the new commit lands on the same SHA, i.e. within the same SECOND (git timestamps are
+    # second-granular). Under load the second flips, the SHA differs, and the push is refused
+    # non-fast-forward: a test whose verdict came from the clock. Answering truthfully also
+    # exercises the `work/ops` idempotence `import/2` promises, instead of bypassing it.
+    def branch_exists?(full_name, branch, _fc) do
+      path = bare_path(full_name)
+
+      File.dir?(path) and
+        match?(
+          {_, 0},
+          System.cmd(
+            "git",
+            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+            stderr_to_stdout: true
+          )
+        )
+    end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
   end
@@ -124,6 +142,11 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     refute File.exists?(Path.join(o[:projects_root], "heritage"))
     refute File.exists?(Path.join(o[:work_root], "heritage"))
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
+
+    # `work/ops` was published BEFORE the late failure (ensure_work_ops precedes lock_main), so
+    # the forge holds it and the retry below must SEE it and skip the re-push. Pinned here
+    # because a forge lying `false` makes that retry depend on the wall clock, not on the code.
+    assert FileForge.branch_exists?("fleet/heritage", "work/ops", [])
 
     # Retry clean.
     Process.put(:protect_result, {:ok, :created})
