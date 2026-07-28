@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
   are called directly by `Fleet.Pilot.ProjectOnboard`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-29
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -269,18 +269,27 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   `block_on_rejected_reviews`, `enable_push`, …). It's the **forge-enforced gate**: on the sandbox
   repo, the forge refuses the merge as long as the guards (N approvals, no REQUEST_CHANGES) are
   not green → the arbiter is the forge, not the runtime. Requires repo-admin.
-  Idempotent: an already-placed rule → `:ok`. Gitea signals it with the precise message
-  `"Branch protection already exist"` — carried across **403 / 409 / 422** depending on the version.
-  We match on that MESSAGE, NEVER on the code alone: a 422 for an INVALID rule (bad payload) or a 403
-  for a real permission refusal must NOT be announced as a protection that never took — those return a
-  precise error and `lock_main` fails loud.
+  Idempotent: an already-placed rule → `{:ok, :unchanged}` or `{:ok, :updated}`. Gitea signals it
+  with the precise message `"Branch protection already exist"` — carried across **403 / 409 / 422**
+  depending on the version. We match on that MESSAGE, NEVER on the code alone: a 422 for an INVALID
+  rule (bad payload) or a 403 for a real permission refusal must NOT be announced as a protection
+  that never took — those return a precise error and `lock_main` fails loud.
+
+  The outcome is REPORTED, never collapsed to a bare `:ok`: `:created` / `:updated` moved the forge,
+  `:unchanged` did not. A caller that runs on a timer (the periodic pass) can then speak only when
+  something actually moved — a rule placed or resized is a lifecycle event, whereas "still
+  conformant" is a nominal tick, and a projection that cannot tell them apart must either stay
+  silent through a real change or drown it in per-tick noise.
   """
-  @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
+  @type protection_outcome :: :created | :updated | :unchanged
+
+  @spec protect_branch(String.t(), map(), Keyword.t()) ::
+          {:ok, protection_outcome()} | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
     with {:ok, config} <- resolve_config(opts) do
       case http_post(config, "/repos/#{encode_repo(repo)}/branch_protections", rule) do
         {:ok, _} ->
-          :ok
+          {:ok, :created}
 
         # "already exist" (403/409/422 across versions, matched on the MESSAGE never the code
         # alone) used to read as a bare :ok with NO readback: an imported repo's stale rule —
@@ -308,15 +317,15 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
 
     if projected == %{} do
       # Nothing projected beyond the rule's existence — nothing to reconcile.
-      :ok
+      {:ok, :unchanged}
     else
       case http_get(config, path) do
         {:ok, existing} when is_map(existing) ->
           if Map.take(existing, Map.keys(projected)) == projected do
-            :ok
+            {:ok, :unchanged}
           else
             case http_patch(config, path, projected) do
-              {:ok, _} -> :ok
+              {:ok, _} -> {:ok, :updated}
               {:error, reason} -> {:error, {:protection_reconcile_failed, reason}}
             end
           end

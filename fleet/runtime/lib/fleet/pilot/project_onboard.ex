@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-28
+  **Last revised**: 2026-07-29
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -574,9 +574,29 @@ defmodule Fleet.Pilot.ProjectOnboard do
     }
 
     case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do
-      :ok -> :ok
+      {:ok, outcome} -> announce_protection(repo, rule, outcome)
       {:error, reason} -> {:error, {:protect_main, reason}}
     end
+  end
+
+  # THE single place a `main` protection is announced — both the onboarding lock and the periodic
+  # pass land here, so one rule covers both and there is no second vocabulary for the same act.
+  # Speak only when the forge MOVED: placing or resizing a rule is a lifecycle event (once per
+  # project at onboarding, and on the periodic pass a rule that came back or a jury that changed —
+  # exactly the fact an operator needs), while "still conformant" is a nominal tick and stays
+  # silent. The distinction matters BECAUSE this runs on a timer: a projection that cannot tell a
+  # change from a no-op must either say nothing through a real change — leaving a forge mutation
+  # nobody asked for untraceable from inside the fleet — or repeat itself every period until the
+  # noise buries the one line that mattered.
+  defp announce_protection(_repo, _rule, :unchanged), do: :ok
+
+  defp announce_protection(repo, rule, outcome) when outcome in [:created, :updated] do
+    Logger.info(
+      "ProjectOnboard: #{repo} main-protection #{outcome} " <>
+        "(approvals=#{rule.required_approvals}, direct push refused)"
+    )
+
+    :ok
   end
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])

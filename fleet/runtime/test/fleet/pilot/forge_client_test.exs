@@ -1139,23 +1139,23 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
-    test "protect_branch → POST branch_protections, :ok" do
+    test "protect_branch → POST branch_protections, {:ok, :created}" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
           {201, %{"branch_name" => "main"}}
       }
 
       rule = %{rule_name: "main", required_approvals: 2, dismiss_stale_approvals: true}
-      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", rule, opts(handlers))
+      assert {:ok, :created} = ForgeClient.Repo.protect_branch("fleet/proj", rule, opts(handlers))
     end
 
-    test "protect_branch idempotent: rule already set (422 with the 'already exist' message) → :ok" do
+    test "protect_branch idempotent: rule already set (422 'already exist') → {:ok, :unchanged}" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
           {422, %{"message" => "branch protection already exists"}}
       }
 
-      assert :ok =
+      assert {:ok, :unchanged} =
                ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
     end
 
@@ -1172,7 +1172,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
     end
 
-    test "already exist + DIVERGENT readback → PATCH of the projected fields only, :ok" do
+    test "already exist + DIVERGENT readback → PATCH of the projected fields only, {:ok, :updated}" do
       # The blind :ok is the audited hole: an imported repo's stale rule (approvals 0) under a
       # 2-judge card silently kept the weaker gate. Now: readback, compare, patch.
       full_rule = %{
@@ -1197,7 +1197,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"PATCH", "/api/v1/repos/fleet/proj/branch_protections/main"} => {200, %{}}
       }
 
-      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+      assert {:ok, :updated} =
+               ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
     end
 
     test "already exist + divergent readback + PATCH fails → error (the old code claimed :ok here)" do
@@ -1222,7 +1223,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
     end
 
-    test "already exist + IDENTICAL readback → :ok, no patch" do
+    test "already exist + IDENTICAL readback → {:ok, :unchanged}, no patch" do
       full_rule = %{
         rule_name: "main",
         required_approvals: 2,
@@ -1245,7 +1246,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
            }}
       }
 
-      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
+      assert {:ok, :unchanged} =
+               ForgeClient.Repo.protect_branch("fleet/proj", full_rule, opts(handlers))
     end
 
     test "already exist + readback FAILS → error, never a protection claimed sight unseen" do

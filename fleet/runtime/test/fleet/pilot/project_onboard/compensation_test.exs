@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       {:ok, "fleet/#{name}"}
     end
 
-    def protect_branch(_repo, _rule, _fc), do: Process.get(:protect_result, :ok)
+    def protect_branch(_repo, _rule, _fc), do: Process.get(:protect_result, {:ok, :created})
 
     def default_branch(full_name, _fc) do
       if File.dir?(bare_path(full_name)), do: {:ok, "main"}, else: {:error, {:http, 404, "gone"}}
@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     refute File.exists?(Path.join(o[:work_root], "phoenix"))
 
     # The RETRY of the same onboard now goes through cleanly (fresh create, full sequence).
-    Process.put(:protect_result, :ok)
+    Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/phoenix"}} = ProjectOnboard.onboard("phoenix", o)
     assert File.dir?(Path.join(o[:projects_root], "phoenix"))
     assert File.dir?(Path.join(o[:work_root], "phoenix"))
@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
 
   test "a successful onboard compensates NOTHING (dirs + repo stay)", %{tmp_dir: tmp} do
     o = opts(tmp)
-    Process.put(:protect_result, :ok)
+    Process.put(:protect_result, {:ok, :created})
 
     assert {:ok, %{repo: "fleet/apollo", architect: %{status: "up"}}} =
              ProjectOnboard.onboard("apollo", o)
@@ -126,7 +126,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
 
     # Retry clean.
-    Process.put(:protect_result, :ok)
+    Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/heritage"}} = ProjectOnboard.import("fleet/heritage", o)
   end
 end

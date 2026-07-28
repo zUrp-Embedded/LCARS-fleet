@@ -10,6 +10,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
   """
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Fleet.Pilot.ProjectOnboard
 
   describe "classify_create_repo/3 (F-C084 — pre-existing repo is not an onboard target)" do
@@ -183,7 +185,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
       def protect_branch(repo, rule, _opts) do
         send(self(), {:protect_branch, repo, rule})
-        :ok
+        {:ok, :created}
       end
     end
 
@@ -217,6 +219,44 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
       assert_received {:protect_branch, "fleet/onboarded",
                        %{rule_name: "main", enable_push: false}}
+    end
+  end
+
+  describe "main-protection announcement (a forge move is traceable, a no-op is silent)" do
+    defmodule OutcomeRepo do
+      def branch_exists?(_repo, _branch, _opts), do: true
+      def protect_branch(_repo, _rule, _opts), do: Process.get(:outcome)
+    end
+
+    defp reconcile_with(outcome) do
+      Process.put(:outcome, {:ok, outcome})
+
+      capture_log(fn ->
+        assert :ok =
+                 ProjectOnboard.reconcile_main_protection("fleet/proj",
+                   forge_repo: OutcomeRepo,
+                   reviewer_roles: ["reviewer", "qualifier"]
+                 )
+      end)
+    end
+
+    test "a rule PLACED is announced — the pass runs on a timer, so a forge move nobody asked for must leave a trace" do
+      # This is the whole point: the periodic pass can put `enable_push: false` on a repo at any
+      # tick. Silent, that mutation is invisible from inside the fleet and only its consequences
+      # are observable (a push refused somewhere else, much later).
+      log = reconcile_with(:created)
+      assert log =~ "fleet/proj main-protection created"
+      assert log =~ "approvals=2"
+    end
+
+    test "a rule RESIZED is announced (the jury changed since onboarding)" do
+      assert reconcile_with(:updated) =~ "fleet/proj main-protection updated"
+    end
+
+    test "an ALREADY-CONFORMANT rule says nothing — a nominal tick is silent" do
+      # The other half of the rule: one line per repo per period saying 'still fine' would bury
+      # the one line that matters under noise it produced itself.
+      assert reconcile_with(:unchanged) == ""
     end
   end
 end
