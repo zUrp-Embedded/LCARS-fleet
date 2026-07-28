@@ -168,8 +168,8 @@ defmodule LcarsFleet.MixProject do
     [
       # — substrate & wire —
       {:phoenix_pubsub, "~> 2.1"},
-      {:plug, "~> 1.19"},
-      {:plug_cowboy, "~> 2.8"},
+      {:plug, "~> 1.20"},
+      {:plug_cowboy, "~> 2.9"},
       {:jason, "~> 1.4"},
       {:ex_json_schema, "~> 0.11"},
       {:yaml_elixir, "~> 2.12"},
@@ -177,8 +177,8 @@ defmodule LcarsFleet.MixProject do
       {:ex_mcp, "~> 0.9.1"},
       {:jose, "1.11.10", override: true},
       # — forge HTTP (pilot/starfleet) —
-      {:req, "~> 0.5"},
-      {:finch, "~> 0.22"},
+      {:req, "~> 0.7"},
+      {:finch, "~> 0.23"},
       # — runtime misc —
       {:uuid, "~> 1.1"},
       # — architecture (compile-time tracer, zero runtime cost) —
