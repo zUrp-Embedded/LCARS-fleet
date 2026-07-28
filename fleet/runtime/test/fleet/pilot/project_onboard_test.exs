@@ -171,4 +171,52 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       refute File.exists?(ctx.work_dir)
     end
   end
+
+  describe "reconcile_main_protection/2 (periodic pass — only a SEEDED project is a target)" do
+    defmodule ProbeRepo do
+      # `work/ops` is pushed AFTER `main` by both onboard and import, so its presence on the forge
+      # PROVES the seed push already landed. Driven here by the repo name.
+      def branch_exists?(repo, branch, _opts) do
+        send(self(), {:branch_exists?, repo, branch})
+        repo in ["fleet/onboarded", "fleet/project-template"]
+      end
+
+      def protect_branch(repo, rule, _opts) do
+        send(self(), {:protect_branch, repo, rule})
+        :ok
+      end
+    end
+
+    defp reconcile(repo) do
+      ProjectOnboard.reconcile_main_protection(repo,
+        forge_repo: ProbeRepo,
+        project_template: "fleet/project-template",
+        reviewer_roles: ["reviewer"]
+      )
+    end
+
+    test "a repo whose seed push has NOT landed yet is left ALONE (the onboarding race)" do
+      # The window: create_repo puts the repo in the org (org-membership IS the poller's
+      # discovery) SECONDS before onboard pushes `main`. Protecting `main` inside that window
+      # makes the forge refuse the seed push itself — the project can never be created. The
+      # periodic pass must therefore never touch a repo it did not witness finish.
+      assert :ok = reconcile("fleet/being-onboarded")
+      refute_received {:protect_branch, _repo, _rule}
+    end
+
+    test "the project TEMPLATE is never protected (its sync FORCE-pushes main)" do
+      # The template carries a `work/ops` face of its own, so the seeded-project test alone would
+      # let it through. `mix lcars.project_template.sync` force-pushes both faces: a protected
+      # `main` breaks the projection that every new project is generated from.
+      assert :ok = reconcile("fleet/project-template")
+      refute_received {:protect_branch, _repo, _rule}
+    end
+
+    test "a seeded project still converges — the desired-state pass keeps its whole point" do
+      assert :ok = reconcile("fleet/onboarded")
+
+      assert_received {:protect_branch, "fleet/onboarded",
+                       %{rule_name: "main", enable_push: false}}
+    end
+  end
 end

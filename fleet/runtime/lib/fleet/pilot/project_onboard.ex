@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-28
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -527,10 +527,38 @@ defmodule Fleet.Pilot.ProjectOnboard do
   imported repo's stale rule, a card changed since onboarding, or a hand-edited forge
   rule converges back within one recheck period. Same single projection point as
   onboarding (`protect_main`): never a second vocabulary for the same rule.
+
+  Applies to a SEEDED project ONLY (`seeded_project?/2`); any other repo of the org is
+  left untouched and answers `:ok` — nothing to reconcile is not a failure.
   """
   @spec reconcile_main_protection(String.t(), keyword()) :: :ok | {:error, term()}
-  def reconcile_main_protection(repo, forge_opts) when is_binary(repo),
-    do: protect_main(repo, forge_opts: forge_opts)
+  def reconcile_main_protection(repo, forge_opts) when is_binary(repo) do
+    opts = Keyword.put(forge_opts, :forge_opts, forge_opts)
+
+    if seeded_project?(repo, opts), do: protect_main(repo, opts), else: :ok
+  end
+
+  # WHICH repos this periodic pass may touch. Org-membership is the poller's discovery, so a repo
+  # enters its scope the INSTANT `create_repo` returns — SECONDS before `onboard` pushes the seed
+  # `main`. Protecting `main` inside that window makes the forge refuse the seed push itself
+  # (`enable_push: false` denies it at pre-receive), and the project can never be created at all: a
+  # periodic guard must never be able to forbid the very act it exists to guard. So the pass claims
+  # a repo only once the forge shows the onboarding FINISHED, and reads that from the forge rather
+  # than from any in-memory bookkeeping — the onboarding may well belong to ANOTHER human's fleet,
+  # which this node knows nothing about.
+  #
+  # Two disqualifiers, each its own reason:
+  #   * no `work/ops` — both `onboard` and `import` publish that branch AFTER pushing `main`, so its
+  #     presence PROVES the seed landed. Absent, the seed is still in flight (or this is simply not a
+  #     fleet project: `main`-only repos are none of this pass's business).
+  #   * the project TEMPLATE — it carries a `work/ops` face of its own, so the check above would let
+  #     it through, yet `mix lcars.project_template.sync` FORCE-pushes both its faces. A protected
+  #     `main` there breaks the projection every new project is generated from. Named from config,
+  #     never probed: the template's identity is a declaration, not a forge observation.
+  defp seeded_project?(repo, opts) do
+    repo != project_template(opts) and
+      repo_mod(opts).branch_exists?(repo, "work/ops", fc_opts(opts))
+  end
 
   defp protect_main(repo, opts) do
     rule = %{
