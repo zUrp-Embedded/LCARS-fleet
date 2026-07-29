@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-22
+**Last revised**: 2026-07-29
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -37,6 +37,17 @@ silently dropped; a warning logs if none of the 6 matches.
 
 **Content is not filtered.** Any text inside a matching section is forwarded verbatim into the
 pod `CLAUDE.md`. V1 applied a regex doctrinal filter (`ipc-reception-filter.md`); V2 does not —
-the NAME whitelist is the boundary, not content inspection. This is an assumed posture, not an
-oversight: the repo `CLAUDE.md` is operator-controlled. If content filtering is needed it must
-be added explicitly at this layer (`repo_sections.ex`), not assumed present.
+the NAME whitelist is the boundary, not content inspection.
+
+**This is a KNOWN HOLE, not an assumed posture.** An earlier revision of this file claimed the
+absence was deliberate ("the repo CLAUDE.md is operator-controlled"). That claim was never
+arbitrated by anyone, and the doctrine it contradicts is still ACTIVE: `ipc-reception-filter.md`
+carries status "doctrine active" in the corpus, and its threat vector V3 is verbatim "prompt
+injection via contenu projet". A filter mandated by live doctrine and absent from the code is a
+regression that was lost in the V1 -> V2 rewrite, not a decision.
+
+Arbitrated 2026-07-29: an externally cloned repo must be filtered and onboarded BEFORE its
+content can reach a pod — the trust boundary is the adoption of the repo, not the network it
+came from. Until that gate exists, the hole stands as stated here. The closure does NOT belong
+at this layer alone (a length cap and a raw `^#` rejection would only blunt the SP-hierarchy
+override, leaving a hostile instruction inside a section intact); it belongs at repo adoption.
