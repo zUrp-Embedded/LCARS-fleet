@@ -61,7 +61,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-29
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -107,6 +107,13 @@ defmodule Fleet.SPBuilder do
   `{:ok, content}` | `:not_found` closed-world | `:unpublished` → caller's disk fallback).
   """
   defdelegate image_draft(role), to: Fleet.SPBuilder.Image, as: :draft
+
+  @doc """
+  The pod's worker `protocole-user.md` from the published image (delegate for the spawner's Assets
+  rail — `{:ok, content}` | `:unpublished` → caller's disk fallback). Same facade shape as
+  `image_draft/1`: the Image module stays unexported, the domain surface carries the accessor.
+  """
+  defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
 
   @doc """
   Compose the system prompt from a cap-profile and modop bundles.
@@ -329,11 +336,24 @@ defmodule Fleet.SPBuilder do
             {:error, {:sp_role_path_escape, path}}
 
           true ->
-            case File.read(full_path) do
+            # Image FIRST (proven-good epoch): the path is validated above, then resolved against the
+            # frozen snapshot. `:not_found` under a published image is a CLOSED WORLD verdict — the
+            # catalogue names a base this deploy does not ship — and must NOT fall back to disk, or
+            # the epoch reopens exactly where it matters. Only `:unpublished` (tests, tooling) reads
+            # the live file.
+            case Fleet.SPBuilder.Image.sp_role_base(path) do
               {:ok, content} -> {:ok, content}
-              {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
+              :not_found -> {:error, {:sp_role_path_missing, full_path}}
+              :unpublished -> read_sp_role_base_from_disk(full_path)
             end
         end
+    end
+  end
+
+  defp read_sp_role_base_from_disk(full_path) do
+    case File.read(full_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
     end
   end
 
@@ -450,13 +470,19 @@ defmodule Fleet.SPBuilder do
   # Template rendering
   # ============================================================
 
-  defp render_template(:sp, assigns), do: do_render(template_path("sp_template.eex"), assigns)
+  defp render_template(:sp, assigns), do: do_render("sp_template.eex", assigns)
+  defp render_template(:claude_md, assigns), do: do_render("claude_md_template.eex", assigns)
 
-  defp render_template(:claude_md, assigns),
-    do: do_render(template_path("claude_md_template.eex"), assigns)
-
-  defp do_render(path, assigns) do
-    {:ok, EEx.eval_file(path, assigns: assigns)}
+  # A template is the SHAPE of every prompt the fleet emits — imaged like the rest, and rendered from
+  # the frozen SOURCE (`eval_string`) so no spawn ever re-reads the file. `:not_found` under a
+  # published image is a closed-world error, never a silent disk fallback; `:unpublished` (tests,
+  # tooling) renders from the live file, unchanged.
+  defp do_render(name, assigns) do
+    case Fleet.SPBuilder.Image.template(name) do
+      {:ok, source} -> {:ok, EEx.eval_string(source, assigns: assigns)}
+      :not_found -> {:error, {:template_missing_from_image, name}}
+      :unpublished -> {:ok, EEx.eval_file(template_path(name), assigns: assigns)}
+    end
   rescue
     e -> {:error, {:template_render_failed, Exception.message(e)}}
   end

@@ -19,7 +19,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/0`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-29
   """
 
   alias Fleet.Spawner.Pod.Fs
@@ -107,6 +107,17 @@ defmodule Fleet.Spawner.Pod.Assets do
   @spec read_protocole_user() ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
   def read_protocole_user do
+    # Image FIRST — the protocole-user is prompt material: it redefines the pod's trigger keywords, so
+    # a mid-life edit used to change what `yop` MEANS for the next pod while the image version claimed
+    # a closed epoch. The image froze it at boot through this same override resolution, so a deployment
+    # override still applies and a live edit no longer does. `:unpublished` (tests, tooling) reads disk.
+    case Fleet.SPBuilder.image_worker_protocol() do
+      {:ok, content} -> {:ok, content}
+      :unpublished -> read_protocole_user_from_disk()
+    end
+  end
+
+  defp read_protocole_user_from_disk do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
         :lcars_fleet

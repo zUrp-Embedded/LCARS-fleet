@@ -66,7 +66,7 @@ defmodule Fleet.Application do
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-29
   """
 
   use Application
@@ -83,6 +83,18 @@ defmodule Fleet.Application do
     # no longer changes the pods spawn by spawn (new image = restart). Gated per domain (default
     # true; :test sets false — hermeticity, the suites drive the disk fallback and publish
     # explicitly where the image itself is under test).
+    #
+    # SCOPE of "no longer changes the pods" — the promise names what it covers, because a guarantee
+    # written wider than its mechanism is the failure mode this doctrine exists to kill. EVERY piece
+    # of load-bearing PROMPT material is in the image and consumed exclusively from it: cap-profiles
+    # + overlays, modop SP fragments, subagent templates, role drafts, role SP bases
+    # (`spec.systemPrompt`), the worker protocole-user, and the two EEx templates that give every
+    # emitted prompt its shape. Under a published image a missing entry is a CLOSED-WORLD error, never
+    # a silent re-read of the live file — that fallback is what reopened the epoch where it mattered.
+    # OUTSIDE the image, deliberately and exhaustively: the per-project assets a running fleet
+    # legitimately rewrites (project maps, briefs, work/ops docs) — data the pods act ON, never the
+    # prompt material they are BUILT from. Adding a prompt input without adding it here re-widens the
+    # promise past the mechanism; the boot log's version covers exactly the list above.
     if Application.get_env(:fleet_cap_profile, :publish_image, true),
       do: Fleet.CapProfile.publish_image!()
 
