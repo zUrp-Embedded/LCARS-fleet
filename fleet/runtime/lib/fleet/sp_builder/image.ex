@@ -22,7 +22,23 @@ defmodule Fleet.SPBuilder.Image do
   live file: that fallback is what reopened the epoch exactly where a deployment had extended the
   fleet. Only the absence of an image (tests' hermetic default, tooling) falls back to disk.
 
-  **Last revised**: 2026-07-29
+  ## Why a frozen COPY and not just a validation pass (the reason was written nowhere)
+
+  Three of the four things this buys need no copy — do-not-boot on a truncated artifact, a closed
+  world, a version to correlate "what was this pod built from". The fourth does, and it is the one
+  that makes the copy load-bearing: **the deployed program is the trust boundary**. The material in
+  the release `priv/` was read and validated at boot; serving from that snapshot means bytes that
+  appear on disk AFTERWARDS never reach an agent. For a fleet whose whole claim is that its agents
+  receive exactly the instructions they were meant to receive, that is a defence, not a cache.
+
+  What does NOT justify it — and used to be the headline argument — is "immunity to live edits" as
+  a feature. Nothing legitimately edits a deployed program's prompt material mid-life; such an edit
+  is a mistake or tampering. Absorbing it in SILENCE was the defect, and it is closed by `drift/0`
+  (fingerprints recorded at publish, checked on the spawn path): the pods keep receiving the
+  proven-good content, and the divergence is said out loud instead of vanishing into the mechanism
+  that was supposed to guard against it.
+
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -73,12 +89,20 @@ defmodule Fleet.SPBuilder.Image do
       templates: read_dir_map!(template_root(), "*.eex", &Path.basename(&1))
     }
 
+    # The SOURCES this epoch was opened with: absolute path -> content sha. Not a second copy — a
+    # FINGERPRINT, so the epoch can answer "is the disk still what I validated?". Without it, an
+    # edit to the deployed program's prompt material under a live daemon is a NON-EVENT: the image
+    # keeps serving the good copy (which is the point — tampered bytes never reach an agent) and
+    # nobody ever learns the two diverged. Serving proven-good is the defence; staying SILENT about
+    # the divergence is the defect, and the doctrine is explicit — active suspicion of silent failure.
+    sources = source_fingerprints()
+
     version =
       :crypto.hash(:sha256, :erlang.term_to_binary(image))
       |> Base.encode16(case: :lower)
       |> binary_part(0, 12)
 
-    :persistent_term.put(@key, Map.put(image, :version, version))
+    :persistent_term.put(@key, image |> Map.put(:version, version) |> Map.put(:sources, sources))
 
     # Every section counted: the line an operator reads to know WHAT the version covers. A section
     # published but unnamed here is a piece of the epoch nobody can see was frozen.
@@ -91,6 +115,52 @@ defmodule Fleet.SPBuilder.Image do
 
     :ok
   end
+
+  @doc """
+  Paths whose content no longer matches what `publish!/0` validated, as
+  `[{path, :modified | :vanished}]`. `[]` = the disk still agrees with the epoch; `:unpublished`
+  when no image is live (nothing was ever validated, so nothing can have drifted).
+
+  Answers the question the image used to swallow. A non-empty list means the deployed program's
+  prompt material changed under a running daemon: the pods keep receiving the proven-good content
+  (that is the defence), and the operator gets told (that is what was missing).
+  """
+  @spec drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
+  def drift do
+    case published() do
+      %{sources: sources} ->
+        {:ok,
+         sources
+         |> Enum.flat_map(fn {path, sha} ->
+           case File.read(path) do
+             {:ok, content} -> if sha_of(content) == sha, do: [], else: [{path, :modified}]
+             {:error, _} -> [{path, :vanished}]
+           end
+         end)
+         |> Enum.sort()}
+
+      _ ->
+        :unpublished
+    end
+  end
+
+  # Same roots, same globs as the sections above — one traversal, hashed. Kept beside them on
+  # purpose: a section added without a line here would be material the drift check cannot see.
+  defp source_fingerprints do
+    [
+      {modop_root(), "*/sp.md"},
+      {subagent_root(), "subagent-*.md"},
+      {drafts_root(), "agent-*-base.md"},
+      {sp_role_root(), "**/*.md"},
+      {template_root(), "*.eex"}
+    ]
+    |> Enum.flat_map(fn {root, glob} -> root |> Path.join(glob) |> Path.wildcard() end)
+    |> Enum.concat([worker_protocol_path()])
+    |> Enum.uniq()
+    |> Map.new(fn path -> {path, path |> File.read!() |> sha_of()} end)
+  end
+
+  defp sha_of(content), do: :crypto.hash(:sha256, content)
 
   @doc "The published image or nil (fallback-to-disk regime)."
   @spec published() :: map() | nil

@@ -61,7 +61,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-07-30
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -114,6 +114,13 @@ defmodule Fleet.SPBuilder do
   `image_draft/1`: the Image module stays unexported, the domain surface carries the accessor.
   """
   defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
+
+  @doc """
+  Sources whose content no longer matches what the published image validated (delegate —
+  `{:ok, [{path, :modified | :vanished}]}` | `:unpublished`). Consulted on the spawn path so a
+  deployed program edited under a live daemon stops being a non-event.
+  """
+  defdelegate image_drift(), to: Fleet.SPBuilder.Image, as: :drift
 
   @doc """
   Compose the system prompt from a cap-profile and modop bundles.

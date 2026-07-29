@@ -152,6 +152,83 @@ defmodule Fleet.SPBuilderImageTest do
     assert sp =~ "a base the epoch never admitted"
   end
 
+  describe "drift — the epoch knows whether the disk still matches what it validated" do
+    test "a source edited after publish! is REPORTED (the silence is the defect, not the copy)",
+         %{
+           tmp_dir: tmp
+         } do
+      # Serving the frozen copy is the DEFENCE: bytes that appear on disk after boot never reach an
+      # agent. Saying nothing about the divergence was the defect — an edit to the deployed program's
+      # prompt material was absorbed as a non-event by the very mechanism guarding it.
+      :ok = Image.publish!()
+      assert {:ok, []} = Image.drift()
+
+      edited = Path.join(tmp, "bundles/tdd/sp.md")
+      File.write!(edited, "# tdd v2 MUTATED\n")
+
+      assert {:ok, [{^edited, :modified}]} = Image.drift()
+      # And the pod still gets the proven-good content — detection never becomes degradation.
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        spec: %{},
+        metadata: %{"name" => "x"}
+      }
+
+      assert {:ok, %{sp_md: sp}} = Fleet.SPBuilder.compose(profile, ["tdd"])
+      assert sp =~ "tdd v1"
+    end
+
+    test "a source DELETED after publish! is reported as :vanished, distinctly", %{tmp_dir: tmp} do
+      # A different operator story from an edit (a botched deploy, not a botched edit), so it must
+      # not collapse into the same word.
+      :ok = Image.publish!()
+      gone = Path.join(tmp, "drafts/agent-probe-base.md")
+      File.rm!(gone)
+
+      assert {:ok, [{^gone, :vanished}]} = Image.drift()
+    end
+
+    test "an untouched deployment reports NO drift — the check is not a permanent alarm", %{
+      tmp_dir: _tmp
+    } do
+      :ok = Image.publish!()
+      assert {:ok, []} = Image.drift()
+    end
+
+    test "no image published → :unpublished (nothing was validated, nothing can have drifted)" do
+      Image.unpublish()
+      assert :unpublished = Image.drift()
+    end
+
+    test "the fingerprint covers EVERY imaged section, including the worker protocol", %{
+      tmp_dir: tmp
+    } do
+      # A section imaged but absent from the fingerprint is material whose drift nobody can see —
+      # the exact hole this closes, one level down. Each source is edited in turn and must surface.
+      :ok = Image.publish!()
+
+      for rel <- [
+            "bundles/tdd/sp.md",
+            "templates/subagent-spec-reviewer.md",
+            "drafts/agent-probe-base.md",
+            "drafts/protocole-user-worker.md"
+          ] do
+        path = Path.join(tmp, rel)
+        original = File.read!(path)
+        File.write!(path, original <> "\nMUTATED\n")
+
+        assert {:ok, drifted} = Image.drift()
+
+        assert Enum.any?(drifted, &match?({^path, :modified}, &1)),
+               "#{rel} is imaged but invisible to the drift check"
+
+        File.write!(path, original)
+      end
+
+      assert {:ok, []} = Image.drift()
+    end
+  end
+
   test "proven-good or do not boot: an empty artifact root makes publish! raise", %{tmp_dir: tmp} do
     File.rm_rf!(Path.join(tmp, "templates"))
     File.mkdir_p!(Path.join(tmp, "templates"))

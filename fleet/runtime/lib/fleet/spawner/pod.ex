@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -279,6 +279,13 @@ defmodule Fleet.Spawner.Pod do
     pod_claude_dir = Path.join(data.pod_dir, ".claude")
     lcars_dir = Path.join(data.pod_dir, ".lcars")
     issues_dir = Path.join(data.pod_dir, "issues")
+
+    # Is the disk still what the epoch validated? Asked HERE because this is the moment the question
+    # means something: a pod is about to be built from that material. The pod is built ANYWAY, from
+    # the image — serving proven-good is the whole point, and bytes that appeared after boot must not
+    # reach an agent. What was missing is saying it: an edit to the deployed program's prompt material
+    # used to be a NON-EVENT, absorbed in silence by the very mechanism protecting against it.
+    warn_on_image_drift()
 
     with {:ok, sp_compose} <-
            SPBuilder.compose(
@@ -1401,6 +1408,29 @@ defmodule Fleet.Spawner.Pod do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
       {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
+    end
+  end
+
+  # Drift of the prompt material against the epoch the image opened. `warning`, not `error`: nothing
+  # is lost and nothing is degraded — the pod gets the proven-good content either way — but the
+  # deployed program no longer matches what boot validated, which an operator must not learn by
+  # accident. Silent, this is the failure mode the doctrine names first: active suspicion of silent
+  # failure. Unpublished (tests, tooling) → nothing was validated, so nothing can have drifted.
+  defp warn_on_image_drift do
+    case SPBuilder.image_drift() do
+      {:ok, []} ->
+        :ok
+
+      {:ok, drifted} ->
+        Logger.warning(
+          "SPBuilder.Image: #{length(drifted)} prompt source(s) DIVERGE from the published epoch — " <>
+            "pods keep receiving the proven-good image, the disk no longer matches it " <>
+            "(restart to open a new epoch): " <>
+            Enum.map_join(drifted, ", ", fn {path, how} -> "#{path} (#{how})" end)
+        )
+
+      :unpublished ->
+        :ok
     end
   end
 end
