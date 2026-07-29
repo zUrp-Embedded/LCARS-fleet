@@ -16,7 +16,7 @@ defmodule Fleet.Workflow.OpsObject do
   a push failure logs LOUD and keeps the local success — the branch catches up whole at the
   next successful push. Local commit failure remains a real failure.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -61,24 +61,53 @@ defmodule Fleet.Workflow.OpsObject do
     end
   end
 
+  # How far back a readback walks `ref`'s history looking for its own version. Bounded so a
+  # long-lived ref cannot turn a post-timeout confirmation into an unbounded scan; generous enough
+  # that a realistic burst of concurrent writers on ONE ref cannot bury a commit that just landed.
+  @readback_history_depth 50
+
   @doc """
-  READ-ONLY probe: is `content` already committed at `ref` with a real sha? `{:ok, sha}` if yes,
-  `:not_committed` otherwise. Takes NO index.lock (only `File.read` + `git log`, both read-only), so a
-  caller that TIMED OUT waiting on the serializer can confirm whether its transaction landed WITHOUT
-  reintroducing the concurrent-git race the serializer exists to prevent. Never materializes.
+  READ-ONLY probe: has `content` been committed at `ref`? `{:ok, sha}` (the commit carrying that
+  version) or `:not_committed`. Takes NO index.lock (only `git log` + `git show`, both read-only),
+  so a caller that TIMED OUT waiting on the serializer can confirm whether its transaction landed
+  WITHOUT reintroducing the concurrent-git race the serializer exists to prevent. Never materializes.
+
+  Asks "did MY version land", NOT "is my version at the TIP". The distinction is the whole point:
+  the tip answers for the LAST writer only, so under two concurrent writes on one ref the first
+  one's commit is in the history, is real, is pushed — and a tip-identity readback reported it as
+  never having happened. That negative was then logged as DEFINITIVE, and a caller acting on it
+  retries and overwrites the version that displaced it. Walking `ref`'s bounded history instead
+  matches the identity model this module already declares (identity = the introducing commit),
+  and a version present anywhere in that history HAS landed, whatever sits at the tip now.
+
+  Content-identity, deliberately: two writers of the SAME content are indistinguishable and
+  equivalent here — exactly the idempotency `commit_object/4` already promises for that case.
   """
   @spec committed_sha(Path.t(), String.t(), String.t()) :: {:ok, String.t()} | :not_committed
   def committed_sha(work_dir, ref, content)
       when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
-    abs = Path.join(work_dir, ref)
-
-    with true <- File.dir?(work_dir),
-         true <- File.exists?(abs),
-         {:ok, ^content} <- File.read(abs),
-         {:ok, sha} when sha != "" <- Git.last_commit_sha(work_dir, ref) do
-      {:ok, sha}
+    if File.dir?(work_dir) do
+      find_committed_version(work_dir, ref, content)
     else
-      _ -> :not_committed
+      :not_committed
+    end
+  end
+
+  defp find_committed_version(work_dir, ref, content) do
+    case Git.commits_touching(work_dir, ref, @readback_history_depth) do
+      {:ok, shas} ->
+        # Newest first: under concurrency the answer is normally the tip, so the common case still
+        # costs one `git show`. An unreadable commit is SKIPPED, never fatal — this probe exists to
+        # turn a maybe into a fact, and one bad object must not make it lie in the other direction.
+        Enum.find_value(shas, :not_committed, fn sha ->
+          case Git.show(work_dir, sha, ref) do
+            {:ok, ^content} -> {:ok, sha}
+            _ -> nil
+          end
+        end)
+
+      {:error, _reason} ->
+        :not_committed
     end
   end
 

@@ -161,6 +161,50 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       assert log =~ "definitive, not ambiguous"
     end
 
+    test "a version DISPLACED at the tip still confirms — the readback asks 'did MY commit land'",
+         %{tmp_dir: tmp} do
+      # The deceptive case a tip-identity readback got wrong. Two writers on ONE ref: ours lands
+      # first, a second overwrites it. Our commit is in the history, is real, is pushable — and
+      # asking "is my content at the TIP" answered no, so the caller was told `:ops_sync_timeout`
+      # and the log called that DEFINITIVE. A caller acting on it retries and overwrites the
+      # version that displaced ours.
+      git_init(tmp)
+
+      {:ok, ours} =
+        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1 ours\n", label: "t")
+
+      {:ok, theirs} =
+        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2 theirs\n", label: "t")
+
+      assert ours != theirs
+      # The tip is THEIRS: the premise of the test, and what used to end the story.
+      assert File.read!(Path.join(tmp, "briefs/x.md")) == "V2 theirs\n"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, ^ours} =
+                   OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/x.md", "V1 ours\n",
+                     label: "t"
+                   )
+        end)
+
+      assert log =~ "confirmed by read-only readback"
+      # No retry: the displacing version is untouched, and no third commit was made.
+      assert File.read!(Path.join(tmp, "briefs/x.md")) == "V2 theirs\n"
+      assert commit_count(tmp) == "2"
+    end
+
+    test "a version that NEVER landed is still not confirmed by a history walk", %{tmp_dir: tmp} do
+      # The adverse half: widening the readback from the tip to the history must not turn it into a
+      # yes-machine. A ref with real history, and a version that was never committed to it.
+      git_init(tmp)
+      {:ok, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
+      {:ok, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
+
+      assert :not_committed =
+               Fleet.Workflow.OpsObject.committed_sha(tmp, "briefs/x.md", "never written\n")
+    end
+
     test "serializer DEAD (:noproc exit) → typed :ops_sync_unavailable, never a caller crash", %{
       tmp_dir: tmp
     } do

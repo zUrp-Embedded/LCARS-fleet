@@ -26,7 +26,7 @@ defmodule Fleet.Workflow.Git do
   `committer_*` is the human (git_native: author=committer) or the system (payload commits, e.g.
   onboard). Native git honours `GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -317,6 +317,41 @@ defmodule Fleet.Workflow.Git do
         {:error, {:exit, reason}} -> {:error, {:git_exit, reason}}
         # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
         {:error, reason} -> {:error, {:git_exit, reason}}
+      end
+    end
+  end
+
+  @doc """
+  The commits touching `path`, newest first, capped at `limit` (`git log -n <limit> --format=%H`),
+  **bounded**, hooks-off, read-only. `{:ok, [sha]}` — `[]` when the path has no history.
+
+  Exists because "is my content at the TIP of this ref" is not the same question as "did MY
+  commit land": as soon as a second writer touches the same ref, the tip stops answering for
+  anyone but the last of them. Whoever needs the second question walks this list. Capped by the
+  caller so a long-lived ref cannot turn a readback into an unbounded scan.
+  """
+  @spec commits_touching(Path.t(), String.t(), pos_integer()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  def commits_touching(workspace, path, limit) when is_integer(limit) and limit > 0 do
+    with :ok <- validate_cli_arg(path, :invalid_path) do
+      args = @hooks_off ++ ["log", "-n", Integer.to_string(limit), "--format=%H", "--", path]
+
+      case Fleet.Credentials.Shell.git(args, cd: workspace, timeout_ms: git_local_timeout_ms()) do
+        {:ok, {out, 0}} ->
+          {:ok, out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)}
+
+        {:ok, {err, rc}} ->
+          {:error, {:git_log_failed, rc, String.trim(err)}}
+
+        {:error, {:timeout, ms}} ->
+          {:error, {:git_log_timeout, ms}}
+
+        {:error, {:exit, reason}} ->
+          {:error, {:git_log_exit, reason}}
+
+        # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
+        {:error, reason} ->
+          {:error, {:git_log_exit, reason}}
       end
     end
   end
