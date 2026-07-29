@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-07-29
   """
 
   require Logger
@@ -408,9 +408,30 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_escalation_forge(),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
-      case forge.post_comment(repo, number, body, token: identity.token) do
-        {:ok, _} -> {:ok, %{"status" => "commented", "number" => number}}
-        {:error, reason} -> {:error, {:comment_failed, reason}}
+      # Convergent by READBACK, the same shape `create_issue` uses — and for the same reason: the
+      # stdio bridge times a mutation out at 30s while the forge POST completes, the agent re-emits,
+      # and the forge enforces no uniqueness on comments, so a bare re-post DUPLICATES. Dedup cannot
+      # live in the in-memory memoize alone: that one is volatile (a runner that dies after the POST
+      # and before publishing releases its key) and time-boxed, so it lets the duplicate through on
+      # exactly the crash it exists to cover. The marker is DURABLE — it lives in the artifact, so
+      # the readback answers the only question that matters: did THIS act already land?
+      # KNOWN COST, deliberate and identical to create_issue's: identity is content-derived, so two
+      # INTENTIONALLY identical comments on the same issue collapse into one. Indistinguishable from
+      # a retry by construction without client cooperation, which this layer refuses on doctrine
+      # (a critical property is never a prompt instruction to "resend the same id").
+      marker = comment_op_marker(number, body)
+
+      case find_comment_with_marker(forge, repo, number, marker) do
+        {:ok, _already_landed} ->
+          {:ok, %{"status" => "commented", "number" => number, "idempotent" => true}}
+
+        :none ->
+          case forge.post_comment(repo, number, with_op_marker(body, marker),
+                 token: identity.token
+               ) do
+            {:ok, _} -> {:ok, %{"status" => "commented", "number" => number}}
+            {:error, reason} -> {:error, {:comment_failed, reason}}
+          end
       end
     else
       {:error, :role_token_unavailable} = err ->
@@ -779,6 +800,38 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp with_op_marker(body, marker), do: body <> "\n" <> marker
+
+  # The comment act's logical identity: which issue, which text. Same `<!-- lcars-op:… -->` shape as
+  # the issue marker (one vocabulary for one mechanism), keyed on what a re-emit reproduces exactly.
+  defp comment_op_marker(number, body) do
+    sig =
+      :crypto.hash(:sha256, :erlang.term_to_binary({:comment, number, body}))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
+
+    "<!-- lcars-op:#{sig} -->"
+  end
+
+  # Readback for the comment marker. FAIL-SAFE like its issue twin, and for the same reason: a
+  # transient forge blip must not swallow the arch's reply on a ticket in flight. A rare duplicate
+  # comment beats an answer that never lands — so an unreadable list logs and falls through to post.
+  defp find_comment_with_marker(forge, repo, number, marker) do
+    case forge.list_comments(repo, number, []) do
+      {:ok, comments} ->
+        case Enum.find(comments, &String.contains?(Map.get(&1, "body") || "", marker)) do
+          nil -> :none
+          comment -> {:ok, comment}
+        end
+
+      err ->
+        Logger.warning(
+          "Delegation: comment_issue idempotency readback on #{repo}##{number} failed " <>
+            "(#{inspect(err)}) — proceeding to post (dedup is best-effort)"
+        )
+
+        :none
+    end
+  end
 
   # Readback for the idempotency marker: an OPEN issue of the repo whose raw body carries `marker`.
   # A failed list is FAIL-SAFE — we do NOT block a legitimate first delegation on a transient forge

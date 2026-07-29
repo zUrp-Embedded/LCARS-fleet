@@ -1447,6 +1447,50 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
+  # A forge that REMEMBERS what was posted — the only kind that can witness convergence. The static
+  # stub above cannot: it answers the same list whatever happened, so a re-post looks like a first one.
+  # Same process as the caller (handle_tool_call is synchronous) → the process dictionary IS the forge
+  # state.
+  defmodule RecordingEscalationForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def list_comments(_repo, number, _opts), do: {:ok, Process.get({:comments, number}, [])}
+
+    @impl true
+    def post_comment(repo, number, body, opts) do
+      send(self(), {:post_comment, repo, number, body, opts})
+
+      Process.put(
+        {:comments, number},
+        Process.get({:comments, number}, []) ++ [%{"body" => body}]
+      )
+
+      {:ok, :posted}
+    end
+  end
+
+  # Readback broken while posting still works: the fail-safe branch must POST, never swallow the
+  # arch's reply on a transient blip.
+  defmodule RecordingForgeBlindReadback do
+    @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
+
+    @impl true
+    def list_open_issues(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def list_comments(_repo, _number, _opts), do: {:error, :forge_down}
+
+    @impl true
+    def post_comment(repo, number, body, opts) do
+      send(self(), {:post_comment, repo, number, body, opts})
+      {:ok, :posted}
+    end
+  end
+
   # The arch's single repo is UNREADABLE: an unreadable repo is an unreadable inbox, which must
   # surface as an error — not a `count: 0` the arch would read as "nothing to escalate".
   defmodule EscalationForgeUnreadable do
@@ -1516,10 +1560,80 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       # The repo is the spawn binding — never a wire field; the result never names it (axiom).
-      assert_received {:post_comment, "fleet/alpha", 4, "vu, je re-cadre le brief", opts}
+      # The body carries the durable idempotency marker (invisible in rendered markdown).
+      assert_received {:post_comment, "fleet/alpha", 4, posted, opts}
+      assert posted =~ "vu, je re-cadre le brief"
+      assert posted =~ ~r/<!-- lcars-op:[0-9a-f]{16} -->/
       assert opts[:token] =~ "ARCH_TOKEN"
       assert {:ok, %{"status" => "commented", "number" => 4} = decoded} = Jason.decode(txt)
       refute Map.has_key?(decoded, "repo")
+    end
+
+    test "comment_issue: the SAME reply re-emitted posts ONCE — convergent by durable readback" do
+      # The duplicate this closes: the stdio bridge times the call out at 30s while the forge POST
+      # completes, so the agent re-emits and a bare re-post lands a second identical comment on a
+      # ticket in flight. The in-memory memoize cannot cover it — it is volatile (a runner dying
+      # after the POST releases its key) and time-boxed. The marker lives IN the artifact, so the
+      # readback answers the only durable question: did this act already land?
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingEscalationForge)
+      args = %{"number" => 4, "body" => "vu, je re-cadre le brief"}
+
+      assert {:ok, %{content: [%{"text" => first}]}, _} =
+               PodTools.handle_tool_call("comment_issue", args, pod_state(uniq("pod-arch")))
+
+      assert {:ok, %{content: [%{"text" => second}]}, _} =
+               PodTools.handle_tool_call("comment_issue", args, pod_state(uniq("pod-arch")))
+
+      assert {:ok, %{"status" => "commented"} = one} = Jason.decode(first)
+      refute Map.has_key?(one, "idempotent")
+      assert {:ok, %{"status" => "commented", "idempotent" => true}} = Jason.decode(second)
+
+      # ONE post reached the forge, not two.
+      assert_received {:post_comment, "fleet/alpha", 4, _body, _opts}
+      refute_received {:post_comment, _, _, _, _}
+      assert [_only_one] = Process.get({:comments, 4})
+    end
+
+    test "comment_issue: a DIFFERENT reply still posts — convergence must not swallow a second act" do
+      # The adverse half. A dedup keyed on the act must let a genuinely new act through; if it did
+      # not, the arch would be silenced on the ticket after its first word.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingEscalationForge)
+      pod = uniq("pod-arch")
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"number" => 4, "body" => "premiere reponse"},
+                 pod_state(pod)
+               )
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"number" => 4, "body" => "seconde reponse, differente"},
+                 pod_state(pod)
+               )
+
+      assert {:ok, decoded} = Jason.decode(txt)
+      refute Map.has_key?(decoded, "idempotent")
+      assert [_first, _second] = Process.get({:comments, 4})
+    end
+
+    test "comment_issue: an unreadable readback POSTS anyway (fail-safe, never a swallowed reply)" do
+      # A transient forge blip must not turn into a silently dropped answer on a ticket in flight:
+      # a rare duplicate beats a reply that never lands. Same posture as create_issue's readback.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForgeBlindReadback)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "comment_issue",
+                 %{"number" => 4, "body" => "la forge ne repond pas a la relecture"},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert {:ok, %{"status" => "commented"} = decoded} = Jason.decode(txt)
+      refute Map.has_key?(decoded, "idempotent")
+      assert_received {:post_comment, "fleet/alpha", 4, _body, _opts}
     end
 
     test "comment_issue: architect gate (non-architect role → refused, nothing posted)" do
