@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     * `:token_file` — file path (default `~/.gitea_token`).
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -234,7 +234,10 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
         # an idle connection from going stale and hanging the 1st call until receive_timeout. In
         # the BASE list (before the merge) → a test injecting `plug:` via `req_options` takes precedence (the plug
         # short-circuits the Finch adapter), test hermeticity stays intact.
-        finch: Fleet.Pilot.ForgeFinch
+        # `[name: …]`, not the bare pool name: req 0.7 deprecated the bare form and warns on EVERY
+        # request. Caught only against the live forge — the suite injects `plug:`, which short-circuits
+        # the Finch adapter entirely, so no test can reach this line.
+        finch: [name: Fleet.Pilot.ForgeFinch]
       ]
       |> Opts.maybe_put(:json, body)
       |> Keyword.merge(config.req_options)
