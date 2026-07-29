@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-07-30
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # the fail-loud walls keep guarding FOREIGN state without ever trapping our own debris.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- refute_existing(proj_dir, work_dir),
+         :ok <- refute_existing_or_converge("#{org}/#{name}", proj_dir, work_dir, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
       case finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
         {:ok, result} ->
@@ -120,6 +120,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
           compensate_onboard(full_name, proj_dir, work_dir, reason, opts)
           err
       end
+    else
+      # A re-emit of an onboard that already fully landed: the intention is realized, so the caller
+      # gets the SUCCESS its effect earned instead of a refusal. Errors pass through untouched.
+      {:already_satisfied, result} -> {:ok, result}
+      {:error, _} = err -> err
     end
   end
 
@@ -233,7 +238,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # and is NEVER unwound — the disk clones are the only artifacts this call creates.
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- refute_existing(proj_dir, work_dir),
+         :ok <- refute_existing_or_converge(full_name, proj_dir, work_dir, opts),
          :ok <- require_org_membership(full_name, org),
          :ok <- require_default_branch_main(full_name, opts) do
       case finish_import(full_name, proj_dir, work_dir, name, opts) do
@@ -252,6 +257,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
           err
       end
+    else
+      # Same convergence as `onboard/2`: an import whose effect fully landed answers with it.
+      {:already_satisfied, result} -> {:ok, result}
+      {:error, _} = err -> err
     end
   end
 
@@ -769,6 +778,68 @@ defmodule Fleet.Pilot.ProjectOnboard do
       File.exists?(work_dir) -> {:error, {:already_exists, work_dir}}
       true -> :ok
     end
+  end
+
+  # CONVERGENT entry: `:ok` (nothing there, proceed and create), `{:already_satisfied, result}` (this
+  # exact intention is ALREADY realized — return it), or the plain `already_exists` refusal.
+  #
+  # Why this exists: a mutation whose response the 30s stdio bridge timed out on gets RE-EMITTED by
+  # the agent. Without this, the retry of a create/import that actually SUCCEEDED dies on
+  # `refute_existing` — an operation reported as FAILED to the caller while its whole effect is in
+  # place. The in-memory memoize hid that behind a replayed result, which is why it had to answer for
+  # correctness at all; a mutation that converges on the world does not need a cache to look sane.
+  #
+  # The bar is deliberately HIGHER than `open/2`'s (which only asks "are the dirs there"). Converging
+  # onto mere EXISTENCE would let a create silently adopt a same-basename project of another owner —
+  # a far worse bug than the one being fixed. Three things must hold, and any one missing falls back
+  # to the refusal unchanged (F-C084 intact: onboard never scaffolds over a repo it did not make):
+  #
+  #   1. BOTH dirs' git origin resolves to `full_name` — the ownership proof `delete_project` uses.
+  #   2. the forge repo exists (a local pair whose repo is gone is NOT a satisfied intention).
+  #   3. `work/ops` is published — the LAST step of the sequence, so it standing proves the whole
+  #      sequence ran. Without it the residue is a half-onboard, and answering "done" would be the
+  #      same lie in the other direction.
+  defp refute_existing_or_converge(full_name, proj_dir, work_dir, opts) do
+    case refute_existing(proj_dir, work_dir) do
+      :ok ->
+        :ok
+
+      {:error, _} = refusal ->
+        if satisfied_end_state?(full_name, proj_dir, work_dir, opts) do
+          Logger.info(
+            "ProjectOnboard: #{full_name} already realized (repo + dual-dir proven ours + " <>
+              "work/ops published) — idempotent re-emit, nothing created"
+          )
+
+          arch = ensure_architect(full_name, opts)
+
+          {:already_satisfied,
+           %{
+             repo: full_name,
+             project_dir: proj_dir,
+             work_dir: work_dir,
+             architect: arch,
+             idempotent: true
+           }}
+        else
+          refusal
+        end
+    end
+  end
+
+  defp satisfied_end_state?(full_name, proj_dir, work_dir, opts) do
+    ours? =
+      origin_full_name(proj_dir, opts) == {:ok, full_name} and
+        origin_full_name(work_dir, opts) == {:ok, full_name}
+
+    ours? and forge_repo_present?(full_name, opts) and
+      repo_mod(opts).branch_exists?(full_name, "work/ops", fc_opts(opts))
+  end
+
+  # Present ONLY on a clean positive: a 404 is absent, and an outage is NOT a licence to declare the
+  # intention satisfied (that would converge on an unverifiable world).
+  defp forge_repo_present?(full_name, opts) do
+    match?({:ok, _branch}, repo_mod(opts).default_branch(full_name, fc_opts(opts)))
   end
 
   # ── forge + git ──────────────────────────────────────────────────────────

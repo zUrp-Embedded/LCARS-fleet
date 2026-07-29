@@ -152,4 +152,86 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/heritage"}} = ProjectOnboard.import("fleet/heritage", o)
   end
+
+  describe "convergent re-emit — a mutation whose effect landed answers with it, never a refusal" do
+    # The 30s stdio bridge times a mutation out while the effect completes; the agent re-emits the
+    # SAME call. Before this, the retry of an onboard that FULLY SUCCEEDED died on refute_existing:
+    # an operation reported FAILED to the caller with its whole effect in place. That lie is what the
+    # in-memory memoize was papering over.
+
+    defp landed_onboard(tmp) do
+      o = opts(tmp)
+      assert {:ok, %{repo: "fleet/apollo"}} = ProjectOnboard.onboard("apollo", o)
+      {o, Path.join(o[:projects_root], "apollo"), Path.join(o[:work_root], "apollo")}
+    end
+
+    test "re-emit of a fully landed onboard → {:ok, idempotent}, nothing created", %{tmp_dir: tmp} do
+      {o, proj, work} = landed_onboard(tmp)
+      before_head = File.read!(Path.join([proj, ".git", "HEAD"]))
+
+      assert {:ok, %{repo: "fleet/apollo", idempotent: true, project_dir: ^proj, work_dir: ^work}} =
+               ProjectOnboard.onboard("apollo", o)
+
+      # Nothing re-created, nothing re-scaffolded, no second repo.
+      refute_received {:forge_deleted, _}
+      assert File.read!(Path.join([proj, ".git", "HEAD"])) == before_head
+      assert File.dir?(Path.join([tmp, "forge", "fleet", "apollo.git"]))
+    end
+
+    test "re-emit of a fully landed import → {:ok, idempotent}", %{tmp_dir: tmp} do
+      o = opts(tmp)
+      {:ok, "fleet/legacy"} = FileForge.create_repo("legacy", [])
+      assert {:ok, %{repo: "fleet/legacy"}} = ProjectOnboard.import("fleet/legacy", o)
+
+      assert {:ok, %{repo: "fleet/legacy", idempotent: true}} =
+               ProjectOnboard.import("fleet/legacy", o)
+    end
+
+    test "dirs of a HOMONYM project → still REFUSED (converging on existence would adopt it)", %{
+      tmp_dir: tmp
+    } do
+      # The reason the bar is higher than `open/2`'s: converging on mere EXISTENCE would let a create
+      # silently adopt a same-basename project of another owner. Far worse than the bug being fixed.
+      {o, proj, _work} = landed_onboard(tmp)
+
+      {_, 0} =
+        System.cmd(
+          "git",
+          [
+            "-C",
+            proj,
+            "remote",
+            "set-url",
+            "origin",
+            "file:///elsewhere/someone-else/apollo.git"
+          ],
+          stderr_to_stdout: true
+        )
+
+      assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
+    end
+
+    test "a HALF onboard (work/ops never published) → still REFUSED, never answered 'done'", %{
+      tmp_dir: tmp
+    } do
+      # `work/ops` is the LAST step of the sequence, so it standing is what proves the whole sequence
+      # ran. Missing, the residue is a half-onboard and answering success would be the same lie in
+      # the other direction — a caller told 'created' over a project that has no work/ops.
+      {o, _proj, _work} = landed_onboard(tmp)
+      bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
+      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/work/ops"])
+      refute FileForge.branch_exists?("fleet/apollo", "work/ops", [])
+
+      assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
+    end
+
+    test "dirs ours but the forge repo is GONE → still REFUSED (not a satisfied intention)", %{
+      tmp_dir: tmp
+    } do
+      {o, _proj, _work} = landed_onboard(tmp)
+      File.rm_rf!(Path.join([tmp, "forge", "fleet", "apollo.git"]))
+
+      assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
+    end
+  end
 end
