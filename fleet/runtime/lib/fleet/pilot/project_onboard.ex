@@ -83,7 +83,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Returns `{:ok, %{repo, project_dir, work_dir}}` or `{:error, term()}` (fail-fast). On an error
   return the sequence compensates automatically: the forge repo and both local dirs are removed so
   a clean retry is possible (see `compensate_onboard/5`). A BEAM crash mid-sequence skips the
-  unwind — the residue is recoverable agent-side via `delete_project(force: true)`.
+  unwind, and its residue is recoverable agent-side via `delete_project(force: true)`: the dirs it
+  can leave are either origin-carrying (identity provable) or empty (provable as debris), which are
+  exactly the two proofs that teardown accepts — no host-side `rm` in the loop.
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
@@ -314,8 +316,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
   `:forge_repo` (default `ForgeClient.Repo`) / `:spawner` (default `Fleet.Spawner`) for test isolation.
   A forge check that does not cleanly resolve (outage) → REFUSED (never delete on an unverifiable state).
   The IRREVERSIBLE local teardown is identity-gated: proj_dir/work_dir/architect all derive from the
-  BASENAME, so a dir is removed ONLY if its git origin proves it IS `full_name` (never a same-basename
-  project of another owner), and the architect is stopped only once a local dir is so proven.
+  BASENAME, so a dir is removed ONLY on a PROOF of ownership (never a same-basename project of another
+  owner), and the architect is stopped only once a local dir is so proven. Two proofs, no third:
+  its git origin resolves to `full_name`, OR it has no origin at all AND is provably empty — the only
+  state a crash mid-`add_work_ops` can leave, since anything holding work carries an origin. A dir with
+  commits but no origin is a local-only repo and is KEPT.
   Returns `{:ok, %{repo, forge, architect, project_dir, work_dir, local}}` (`forge` = `:deleted` |
   `:absent`; `architect` = `:stopped` | `:none` | `:error` | `:skipped_identity`; `local` =
   `%{project, work}`, each `:removed` | `:removal_incomplete` (proven but the rm_rf left residue) |
@@ -362,30 +367,81 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # Removes `dir` ONLY if its git origin resolves to `full_name` — the identity proof against a basename
-  # homonym. `:absent` (nothing there) | `:removed` (proven + nuked) | `:kept_identity_unproven` (present
-  # but its origin does not resolve to `full_name`, or is unreadable → KEPT, loud: never destroy a project
-  # we cannot prove is the target).
+  # Removes `dir` ONLY when its ownership is PROVEN — two proofs, never a guess.
+  # `:absent` (nothing there) | `:removed` (proven + nuked) | `:removal_incomplete` (proven but the
+  # rm_rf left residue) | `:kept_identity_unproven` (present and unprovable → KEPT, loud).
   defp nuke_if_is(full_name, dir, opts) do
-    cond do
-      not File.exists?(dir) ->
-        :absent
+    if File.exists?(dir),
+      do: nuke_proven(full_name, dir, origin_full_name(dir, opts)),
+      else: :absent
+  end
 
-      origin_full_name(dir, opts) == {:ok, full_name} ->
-        # Identity proven → remove, but report the REAL FS verdict: a partial rm_rf leaves residue, and
-        # the caller must not read `:removed` over it (the warning is logged in nuke_dir).
-        case nuke_dir(dir) do
-          :ok -> :removed
-          {:error, _} -> :removal_incomplete
-        end
+  # Proof 1 — the origin names the target. Report the REAL FS verdict: a partial rm_rf leaves residue,
+  # and the caller must not read `:removed` over it (the warning is logged in nuke_dir).
+  defp nuke_proven(full_name, dir, {:ok, origin}) when origin == full_name, do: remove_proven(dir)
 
-      true ->
-        Logger.warning(
-          "ProjectOnboard: DELETE #{full_name} — KEPT #{dir}: its git origin does not resolve to " <>
-            "#{full_name} (homonym or unprovable). A basename collision must never nuke another project."
-        )
+  # An origin naming something ELSE is the case this guard exists for.
+  defp nuke_proven(full_name, dir, {:ok, _elsewhere}),
+    do: keep_unproven(full_name, dir, "its git origin does not resolve to #{full_name}")
 
-        :kept_identity_unproven
+  # Proof 2 — no origin AND provably empty is our own onboard debris, and nothing else can hold that
+  # state. A dir carrying work ALWAYS has an origin: a clone sets it while creating the repo, and
+  # `add_work_ops` runs `git init` then `remote add origin` BEFORE any scaffold. So an origin-less dir
+  # never reached the point of holding anything — it is what a crash between those two git calls leaves
+  # behind, and precisely the residue that then wedges the next onboard on `refute_existing` while this
+  # function refused to touch it. Refusing to erase a directory that is empty BY CONSTRUCTION protects
+  # nothing and costs a host-side `rm`. Emptiness is PROVEN here, never assumed (no reachable commit,
+  # nothing beside `.git`): a dir with commits but no origin is somebody's local-only repo, and it falls
+  # through to KEPT — that one stays genuinely ambiguous and is not ours to destroy.
+  defp nuke_proven(full_name, dir, {:error, _no_origin}) do
+    if empty_debris?(dir) do
+      Logger.info(
+        "ProjectOnboard: DELETE #{full_name} — removed #{dir}: no git origin and provably empty " <>
+          "(no commit, nothing beside .git) — onboard debris, never a project"
+      )
+
+      remove_proven(dir)
+    else
+      keep_unproven(full_name, dir, "it has no readable git origin and is not empty")
+    end
+  end
+
+  defp remove_proven(dir) do
+    case nuke_dir(dir) do
+      :ok -> :removed
+      {:error, _} -> :removal_incomplete
+    end
+  end
+
+  defp keep_unproven(full_name, dir, why) do
+    Logger.warning(
+      "ProjectOnboard: DELETE #{full_name} — KEPT #{dir}: #{why} " <>
+        "(homonym or unprovable). A basename collision must never nuke another project."
+    )
+
+    :kept_identity_unproven
+  end
+
+  # Empty = no commit reachable from ANY ref AND nothing on disk beside `.git`. Both halves are load-
+  # bearing: "no commit" alone would clear a dir holding an uncommitted scaffold, and "nothing on disk"
+  # alone would clear a repo whose content is committed but not checked out. Either half unreadable
+  # counts as NOT empty — this predicate may only ever answer true on a proof.
+  defp empty_debris?(dir), do: no_commit?(dir) and bare_of_content?(dir)
+
+  defp no_commit?(dir) do
+    case GitOps.read(["-C", dir, "rev-list", "-n", "1", "--all"]) do
+      {:ok, out} -> out == ""
+      # Not a git repo at all (or unreadable): no commit by construction. `bare_of_content?` is what
+      # keeps this honest — a plain directory holding files is never removed on this branch.
+      {:error, _} -> true
+    end
+  end
+
+  defp bare_of_content?(dir) do
+    case File.ls(dir) do
+      {:ok, entries} -> entries -- [".git"] == []
+      # Unreadable listing: emptiness cannot be proven, so nothing is removed.
+      {:error, _} -> false
     end
   end
 

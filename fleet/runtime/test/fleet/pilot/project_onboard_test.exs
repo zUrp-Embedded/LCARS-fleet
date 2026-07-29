@@ -172,6 +172,99 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       assert File.exists?(ctx.proj_dir)
       refute File.exists?(ctx.work_dir)
     end
+
+    @tag :tmp_dir
+    test "force + NO origin + provably empty → removed as onboard debris (the wedge is gone)",
+         ctx do
+      # The exact residue a crash between `git init -b work/ops` and `remote add origin` leaves:
+      # a git repo, no origin, nothing in it. Refusing to remove it protected nothing and wedged the
+      # next onboard on `refute_existing`, with a host-side `rm` as the only way out.
+      File.rm_rf!(ctx.work_dir)
+      File.mkdir_p!(ctx.work_dir)
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+
+      assert {:ok, %{local: %{project: :removed, work: :removed}}} =
+               del(ctx, force: true, forge_repo: OkRepo)
+
+      refute File.exists?(ctx.work_dir)
+    end
+
+    @tag :tmp_dir
+    test "force + NO origin but COMMITS present → KEPT (a local-only repo is never ours to erase)",
+         ctx do
+      # The adverse half of the proof above: no origin is NOT sufficient. A repo carrying commits is
+      # somebody's local-only work at that path — genuinely ambiguous, and emptiness is what separates
+      # the two. Proving debris must never degrade into "no origin, therefore expendable".
+      File.rm_rf!(ctx.work_dir)
+      File.mkdir_p!(ctx.work_dir)
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      File.write!(Path.join(ctx.work_dir, "notes.md"), "someone's local-only work")
+      {_out, 0} = System.cmd("git", ["-C", ctx.work_dir, "add", "-A"])
+
+      {_out, 0} =
+        System.cmd("git", [
+          "-C",
+          ctx.work_dir,
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@t",
+          "commit",
+          "-qm",
+          "keep me"
+        ])
+
+      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+               del(ctx, force: true, forge_repo: OkRepo)
+
+      assert File.exists?(ctx.work_dir)
+      assert File.exists?(Path.join(ctx.work_dir, "notes.md"))
+    end
+
+    @tag :tmp_dir
+    test "force + NO origin, no commit, but UNCOMMITTED content → KEPT (both halves are load-bearing)",
+         ctx do
+      # `git init` alone answers "no commit" while a half-written scaffold still sits on disk. If the
+      # emptiness proof were the commit check alone, this dir would be erased with its content.
+      File.rm_rf!(ctx.work_dir)
+      File.mkdir_p!(ctx.work_dir)
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      File.write!(Path.join(ctx.work_dir, "draft.md"), "uncommitted, still someone's")
+
+      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+               del(ctx, force: true, forge_repo: OkRepo)
+
+      assert File.exists?(Path.join(ctx.work_dir, "draft.md"))
+    end
+
+    @tag :tmp_dir
+    test "force + NO origin, EMPTY worktree but history present → KEPT (the commit check is load-bearing)",
+         ctx do
+      # The symmetric half: content committed then removed from the worktree leaves a dir that LOOKS
+      # empty on disk while its history holds the work. Listing the directory cannot see that; only the
+      # commit check can. Erasing this would destroy the history it is made of.
+      File.rm_rf!(ctx.work_dir)
+      File.mkdir_p!(ctx.work_dir)
+      git = fn args -> {_out, 0} = System.cmd("git", ["-C", ctx.work_dir | args]) end
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+
+      File.write!(
+        Path.join(ctx.work_dir, "history.md"),
+        "committed, then removed from the worktree"
+      )
+
+      git.(["add", "-A"])
+      git.(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "the work"])
+      git.(["rm", "-q", "history.md"])
+
+      assert {:ok, entries} = File.ls(ctx.work_dir)
+      assert entries -- [".git"] == [], "fixture must look empty on disk"
+
+      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+               del(ctx, force: true, forge_repo: OkRepo)
+
+      assert File.exists?(ctx.work_dir)
+    end
   end
 
   describe "reconcile_main_protection/2 (periodic pass — only a SEEDED project is a target)" do
