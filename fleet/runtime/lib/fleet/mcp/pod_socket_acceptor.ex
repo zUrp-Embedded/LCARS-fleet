@@ -31,7 +31,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       (MCP convention: a tool error is a result with `isError`, not a protocol
       error — the pod reads it as tool text).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-30
   """
 
   use GenServer
@@ -363,10 +363,14 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   # The MUTATION surface (creates/onboards/comments on the forge). A response the stdio bridge times
   # out at 30s while central's effect completes makes the agent re-emit the SAME call — and the forge
-  # enforces no uniqueness, so a bare re-run would DUPLICATE. These go through the core-owned
-  # single-flight + memoize (`Fleet.MCP.Idempotency`): a retry with the same logical identity waits on
-  # the in-flight run or replays its result, never a second effect. Reads are not wrapped (idempotent
-  # by nature); `submit_result` is already idempotent central-side (double-submit ignored).
+  # enforces no uniqueness, so a bare re-run would DUPLICATE. Two layers answer, and only together:
+  # each mutation CONVERGES on the world (durable op markers read back on issues/comments, proven end
+  # state on create/import, forge 404 + ownership proofs on delete), and this core-owned SINGLE-FLIGHT
+  # (`Fleet.MCP.Idempotency`) keeps a retry STORM from becoming N concurrent effects. Nothing is
+  # cached past the flight: a late retry re-runs and converges, rather than replaying a success the
+  # world may have moved on from (that memoize once returned the first `create` of a
+  # create/delete/recreate sequence). Reads are not wrapped (idempotent by nature); `submit_result`
+  # is already idempotent central-side (double-submit ignored).
   @mutation_tools ~w(create_issue create_project import_project delete_project comment_issue)
 
   # `PodTools.handle_tool_call` is EXPECTED total (`{:ok}|{:error}`), but a bug/edge in a tool could RAISE
@@ -382,7 +386,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # re-emit carries the same args → the same key. Only a SUCCESS is memoized/replayed; a failed
       # mutation (`{:error, _, _}`) releases the key so a genuine retry re-runs (the effect did not land).
       key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
-      Fleet.MCP.Idempotency.run(key, handle, memoize?: &match?({:ok, _, _}, &1))
+      Fleet.MCP.Idempotency.run(key, handle, succeeded?: &match?({:ok, _, _}, &1))
     else
       handle.()
     end
