@@ -56,20 +56,35 @@ a4_check() {
     --roles "$PROV_ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token" --check >/dev/null 2>&1
 }
 
-# Le handoff tofu→A4 : {compte: seed} pour tous — dérivé, jamais demandé deux fois.
-derive_passwords_file() {
-  local seed tmp acct rc=0
+# Le handoff tofu→A4, convergent PAR ENTRÉE : chaque compte de $ACCOUNTS a son entrée dans le
+# passwords-file. Fichier absent → dérivé entier depuis le seed ; rôle AJOUTÉ après bootstrap →
+# entrée manquante complétée depuis le seed (l'ajout de rôle converge dans le cycle — la
+# dérivation fichier-entier ratait ce cas, attrapé au premier ajout réel : scoper). Les entrées
+# existantes ne sont JAMAIS réécrites (un password tourné à la main reste sien).
+ensure_passwords_entries() {
+  local acct absents=()
+  for acct in $ACCOUNTS; do
+    if ! { [[ -r "$PROV_PASSWORDS_FILE" ]] && jq -e --arg a "$acct" 'has($a)' "$PROV_PASSWORDS_FILE" >/dev/null 2>&1; }; then
+      absents+=("$acct")
+    fi
+  done
+  [[ "${#absents[@]}" -eq 0 ]] && return 0
+  if [[ ! -r "$PROV_FORGE_SEED_FILE" ]]; then
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — pose le seed (geste 2 de « forge-bootstrap ») ou complète $PROV_PASSWORDS_FILE, puis relance"
+    return 1
+  fi
+  local seed tmp rc=0
   seed="$(tr -d '[:space:]' < "$PROV_FORGE_SEED_FILE")"
   [[ -n "$seed" ]] || { p_fail "seed vide : $PROV_FORGE_SEED_FILE"; return 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/prov-pwd.XXXXXX")" || { p_fail "tmp passwords-file"; return 1; }
-  if ! for acct in $ACCOUNTS; do printf '%s\n' "$acct"; done \
-      | jq -R -n --arg s "$seed" '[inputs] | map({(.): $s}) | add' > "$tmp"; then
-    rm -f "$tmp"; p_fail "dérivation jq du passwords-file"; return 1
+  if ! { [[ -r "$PROV_PASSWORDS_FILE" ]] && cat "$PROV_PASSWORDS_FILE" || printf '{}'; } \
+      | jq --arg s "$seed" '. + ($ARGS.positional | map({(.): $s}) | add)' --args "${absents[@]}" > "$tmp"; then
+    rm -f "$tmp"; p_fail "complétion jq du passwords-file"; return 1
   fi
   write_atomic "$PROV_PASSWORDS_FILE" 0600 root:root < "$tmp" || rc=1
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || return 1
-  p_ok "passwords-file dérivé du seed de bootstrap ($PROV_PASSWORDS_FILE)"
+  p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
 }
 
 check() {
@@ -128,16 +143,9 @@ apply() {
     p_ok "role-tokens déjà valides ($PROV_TOKENS_DIR)"
     verdict_apply
   fi
-  # Des tokens manquent/sont morts → mode pose (mint basic-auth, exige le passwords-file —
-  # dérivé du seed de bootstrap si absent : le handoff qui met les tokens DANS le cycle).
-  if [[ ! -r "$PROV_PASSWORDS_FILE" ]]; then
-    if [[ -r "$PROV_FORGE_SEED_FILE" ]]; then
-      derive_passwords_file || verdict_apply
-    else
-      p_drift "tokens à minter mais ni passwords-file ($PROV_PASSWORDS_FILE) ni seed ($PROV_FORGE_SEED_FILE) — pose le seed (geste 2 de « forge-bootstrap ») et relance"
-      verdict_apply
-    fi
-  fi
+  # Des tokens manquent/sont morts → mode pose (mint basic-auth). Le passwords-file converge
+  # PAR ENTRÉE depuis le seed — fichier absent OU rôle ajouté après bootstrap, même chemin.
+  ensure_passwords_entries || verdict_apply
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
       --roles "$PROV_ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token"; then
