@@ -46,6 +46,14 @@ else
   say "pas de LCARS_SSH_AUTHORIZED_KEYS — accès par « docker exec -it -u $LCARS_HUMAN <ctr> bash » seulement"
 fi
 
+# ─── 1bis. La zone projets (catalogue) : /home/projects, partagée groupe fleet ───────────────────
+# Le sanctuaire bwrap des pods monte le catalogue depuis /home/projects — ABSENT, le premier
+# spawn meurt (« catalogue mount path missing host-side », vu au premier E2E). Sur WSL la zone
+# existe (créée par l'histoire du substrat) ; ICI, l'entrypoint est le créateur de zones du
+# conteneur (comme pour l'humain). setgid fleet : chaque humain du groupe y crée ses projets.
+install -d -m 2775 -g fleet /home/projects
+say "zone projets : /home/projects (2775 root:fleet)"
+
 # ─── 2. Identité SSH du conteneur : clés d'hôte PERSISTANTES dans le volume ──────────────────────
 # (Un conteneur recréé qui change de clés d'hôte = « WARNING: REMOTE HOST IDENTIFICATION HAS
 # CHANGED » chez chaque humain — l'identité vit avec l'état, pas avec l'éphémère.)
