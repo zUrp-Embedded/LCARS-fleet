@@ -10,9 +10,30 @@ defmodule Fleet.Conflict.Classifier do
   **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.{DecisionTrace, Hunk, Parser}
-  alias Fleet.Conflict.Patterns.{Complex, DeleteNoChange, OneSideChange, SameChange}
 
-  @registry [SameChange, DeleteNoChange, OneSideChange, Complex]
+  alias Fleet.Conflict.Patterns.{
+    Complex,
+    DeleteNoChange,
+    InsertionAtBoundary,
+    NonOverlapping,
+    OneSideChange,
+    ReorderOnly,
+    SameChange,
+    ValueOnlyChange,
+    WhitespaceOnly
+  }
+
+  @registry [
+    SameChange,
+    DeleteNoChange,
+    OneSideChange,
+    NonOverlapping,
+    WhitespaceOnly,
+    ReorderOnly,
+    InsertionAtBoundary,
+    ValueOnlyChange,
+    Complex
+  ]
 
   @doc "Classifies a raw conflict and wraps it as a `Hunk`, applying the zdiff3 adjustment."
   @spec to_hunk(Parser.raw_conflict()) :: Hunk.t()
@@ -111,6 +132,11 @@ defmodule Fleet.Conflict.Classifier do
   defp summary(:same_change), do: "Same edit on both sides -- trivial."
   defp summary(:delete_no_change), do: "One side deleted, the other untouched -- delete."
   defp summary(:one_side_change), do: "Only one side changed -- take the changed side."
+  defp summary(:non_overlapping), do: "Non-overlapping changes -- 3-way LCS merge."
+  defp summary(:whitespace_only), do: "Whitespace-only difference."
+  defp summary(:reorder_only), do: "Pure permutation -- same lines, different order."
+  defp summary(:insertion_at_boundary), do: "Pure insertions on both sides -- union."
+  defp summary(:value_only_change), do: "Volatile value(s) differ."
   defp summary(:complex), do: "Complex conflict -- all automatic heuristics declined."
   defp summary(other), do: "Detected: #{other}."
 end
