@@ -26,4 +26,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationTier0Test do
       assert Remediation.tier0_decision(diag(totals)) == :fall_through
     end
   end
+
+  describe "gatekeeper_stage_decision (tier-2 gate before the arch)" do
+    test "no gatekeeper pass yet -> :dispatch" do
+      assert Remediation.gatekeeper_stage_decision({:ok, 0}) == :dispatch
+    end
+
+    test "gatekeeper already tried -> :escalate" do
+      assert Remediation.gatekeeper_stage_decision({:ok, 1}) == :escalate
+    end
+
+    test "unreadable count -> :escalate (never a blind loop)" do
+      assert Remediation.gatekeeper_stage_decision({:error, :boom}) == :escalate
+    end
+  end
 end
