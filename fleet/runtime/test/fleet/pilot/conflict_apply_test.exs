@@ -12,14 +12,17 @@ defmodule Fleet.Pilot.ConflictApplyTest do
 
   # Bare remote with main + feature that both change `f.txt` off a common base -> a real conflict.
   # Returns a fresh clone (standing in for the runtime's local clone).
-  defp setup_remote(base, feature_line, main_line) do
+  defp setup_remote(base, feature_line, main_line),
+    do: setup_remote(base, "\ta = 1\n", feature_line, main_line)
+
+  defp setup_remote(base, base_content, feature_line, main_line) do
     remote = Path.join(base, "remote.git")
     work = Path.join(base, "work")
     System.cmd("git", ["init", "-q", "--bare", "-b", "main", remote])
     System.cmd("git", ["clone", "-q", remote, work])
     cfg(work)
 
-    File.write!(Path.join(work, "f.txt"), "\ta = 1\n")
+    File.write!(Path.join(work, "f.txt"), base_content)
     sh(work, ["add", "."])
     sh(work, ["commit", "-qm", "base"])
     sh(work, ["push", "-q", "origin", "main"])
@@ -50,14 +53,45 @@ defmodule Fleet.Pilot.ConflictApplyTest do
   end
 
   @tag :tmp_dir
-  test "auto-resolves a trivial (whitespace) conflict and pushes", %{tmp_dir: base} do
-    clone = setup_remote(base, "  a = 1\n", "    a = 1\n")
+  test "auto-resolves a WRITABLE conflict (non_overlapping) and pushes", %{tmp_dir: base} do
+    # Adjacent-line edits: git conflicts (shared context) but the base proves the two sides touch
+    # disjoint regions, so composing them is sound in ANY language. This is the only shape the write
+    # path may take on its own, and it was validated live against the laptop forge.
+    clone =
+      setup_remote(
+        base,
+        "un\ndeux\ntrois\nquatre\n",
+        "un\nDEUX-feature\ntrois\nquatre\n",
+        "un\ndeux\nTROIS-main\nquatre\n"
+      )
 
     assert {:ok, :auto_resolved} =
              ConflictApply.apply_in(clone, "feature", base_branch: "origin/main", auth: false)
 
     # The pushed feature now contains main -> the PR is mergeable.
     assert main_is_ancestor_of_feature?(clone)
+
+    # And BOTH contributions survived — an auto-resolution that drops a side is the failure mode.
+    sh(clone, ["fetch", "-q", "origin"])
+    {blob, 0} = sh(clone, ["show", "origin/feature:f.txt"])
+    assert blob =~ "DEUX-feature"
+    assert blob =~ "TROIS-main"
+  end
+
+  @tag :tmp_dir
+  test "a WHITESPACE conflict is NOT auto-pushed — the format assumption stops here", %{
+    tmp_dir: base
+  } do
+    # This fixture used to be the write path's happy case. Measured on the deployed build: it wrote
+    # at :high, which in Python changes a block's indentation and in YAML changes which key owns the
+    # value. The engine is format-blind by design; it must therefore hand this to the producer, who
+    # has the context to know whether the indentation mattered.
+    clone = setup_remote(base, "  a = 1\n", "    a = 1\n")
+
+    assert {:error, _} =
+             ConflictApply.apply_in(clone, "feature", base_branch: "origin/main", auth: false)
+
+    refute main_is_ancestor_of_feature?(clone)
   end
 
   @tag :tmp_dir

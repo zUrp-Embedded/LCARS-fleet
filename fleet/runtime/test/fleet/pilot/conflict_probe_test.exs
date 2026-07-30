@@ -14,7 +14,9 @@ defmodule Fleet.Pilot.ConflictProbeTest do
                trivial: 1,
                complex: 1,
                total: 2,
+               writable: 1,
                all_trivial?: false,
+               all_writable?: false,
                none_trivial?: false
              }
     end
@@ -38,7 +40,9 @@ defmodule Fleet.Pilot.ConflictProbeTest do
                trivial: 0,
                complex: 0,
                total: 0,
+               writable: 0,
                all_trivial?: false,
+               all_writable?: false,
                none_trivial?: false
              }
     end

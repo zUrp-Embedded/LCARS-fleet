@@ -36,7 +36,9 @@ defmodule Fleet.Pilot.ConflictProbe do
           trivial: non_neg_integer(),
           complex: non_neg_integer(),
           total: non_neg_integer(),
+          writable: non_neg_integer(),
           all_trivial?: boolean(),
+          all_writable?: boolean(),
           none_trivial?: boolean()
         }
   @type diagnosis :: %{files: %{String.t() => Report.t()}, totals: totals()}
@@ -46,16 +48,24 @@ defmodule Fleet.Pilot.ConflictProbe do
   @doc "Aggregates a `path => Report` map into totals + the two routing predicates."
   @spec aggregate(%{String.t() => Report.t()}) :: totals()
   def aggregate(reports) do
-    {trivial, complex, total} =
-      Enum.reduce(reports, {0, 0, 0}, fn {_p, r}, {tr, cx, to} ->
-        {tr + r.stats.trivial, cx + r.stats.complex, to + r.stats.total}
+    {trivial, complex, total, writable} =
+      Enum.reduce(reports, {0, 0, 0, 0}, fn {_p, r}, {tr, cx, to, wr} ->
+        {tr + r.stats.trivial, cx + r.stats.complex, to + r.stats.total,
+         wr + Map.get(r.stats, :writable, 0)}
       end)
 
+    # `all_trivial?` says "shallow"; `all_writable?` says "the machine may do it itself". They are
+    # NOT the same question: a whitespace-only or reorder-only conflict is shallow (a producer fixes
+    # it in one round) yet not machine-writable, because writing it needs a format assumption this
+    # engine refuses to make. Routing the write on `all_trivial?` would spend a throwaway worktree
+    # and a merge to discover the engine declines -- a step whose outcome is known before it runs.
     %{
       trivial: trivial,
       complex: complex,
       total: total,
+      writable: writable,
       all_trivial?: total > 0 and complex == 0,
+      all_writable?: total > 0 and writable == total,
       none_trivial?: total > 0 and trivial == 0
     }
   end

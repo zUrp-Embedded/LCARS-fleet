@@ -13,9 +13,11 @@ defmodule Fleet.Conflict do
 
   ## Contract
 
-  `resolve/2` returns a `Fleet.Conflict.Report`. `merged` is non-nil ONLY when every hunk was
-  resolved at or above `:min_confidence` (default `:high`) -- the single "safe to write back"
-  signal. Any residual (`:complex`, or a resolvable hunk below threshold) leaves `merged: nil`; the
+  `resolve/2` returns a `Fleet.Conflict.Report`. `merged` is non-nil ONLY when every hunk is of an
+  auto-WRITABLE type (cf. `@writable_types` -- a blast-radius judgement the confidence score does
+  not carry) AND resolved at or above `:min_confidence` (default `:high`). That pair is the single
+  "safe to write back" signal; confidence alone was not enough, and the gap wrote Python indentation
+  and duplicate YAML keys at `:high`. Any residual (`:complex`, or a resolvable hunk below threshold) leaves `merged: nil`; the
   caller then routes to the producer conflict-rework / gatekeeper, never writing on a partial guess.
 
   Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
@@ -26,6 +28,41 @@ defmodule Fleet.Conflict do
   alias Fleet.Conflict.{Assemble, Classifier, Parser, Report}
 
   @confidence_rank %{certain: 4, high: 3, medium: 2, low: 1}
+
+  # WRITE-SAFETY, a dimension the confidence score does NOT carry. The score answers "how sure am I
+  # of this classification"; it says nothing about what being wrong COSTS. MEASURED against the
+  # deployed build: `whitespace_only` scores 76 and `non_overlapping` 80 -- both `:high`, both above
+  # the write floor -- yet being wrong about the first rewrites Python indentation while being wrong
+  # about the second is near-impossible (the base proves the two sides touch disjoint lines).
+  #
+  # A pattern is auto-WRITABLE only when its correctness follows from the base and the two sides
+  # ALONE, with no assumption about the language:
+  #
+  #   * same_change      -- the sides are identical; there is nothing to choose.
+  #   * one_side_change  -- the base proves only one side moved.
+  #   * delete_no_change -- the base proves the deletion is unilateral.
+  #   * non_overlapping  -- the base proves the two changes touch disjoint regions.
+  #
+  # The rest each need a semantic assumption this engine cannot check, because it is deliberately
+  # FORMAT-BLIND (the audited engine's format-aware resolvers were dropped for being unreliable --
+  # dropping them and then keeping patterns that silently assume a format is the same bug wearing
+  # the opposite mask). What they assume, and where it is false, measured:
+  #
+  #   * whitespace_only       assumes whitespace is insignificant -> Python indent/dedent changes
+  #                           scope, YAML indent changes which key owns a value.
+  #   * reorder_only          assumes order is insignificant -> `RUN apt update` after `install`,
+  #                           CSS last-wins, `log()` before `auth()`.
+  #   * insertion_at_boundary assumes two insertions at one place are ADDITIVE -> when they are
+  #                           alternatives it keeps both: duplicate YAML key (invalid file),
+  #                           duplicate `def` (dead clause), duplicate CSS property (ours lost).
+  #   * value_only_change     picks the "newer" value -- and for an UNORDERABLE volatile (a sha, a
+  #                           uuid) `Assemble` itself records "not orderable -- accept theirs
+  #                           (default)". A coin flip must not ride a `:high` label to disk.
+  #
+  # These stay CLASSIFIED (the diagnosis "this is shallow, a producer fixes it in one round" is real
+  # and drives tier-0 routing) but are never WRITTEN by the machine. This is the set the source
+  # audit recommended enabling and no more; the port kept the classifier and lost that line.
+  @writable_types [:same_change, :one_side_change, :delete_no_change, :non_overlapping]
 
   @type opt :: {:min_confidence, Fleet.Conflict.ConfidenceScore.label()}
 
@@ -60,7 +97,7 @@ defmodule Fleet.Conflict do
   end
 
   defp try_resolve(hunk, min) do
-    if rank(hunk.confidence.label) >= rank(min) do
+    if hunk.type in @writable_types and rank(hunk.confidence.label) >= rank(min) do
       case Assemble.resolve_lines(hunk) do
         {:ok, lines, _reason} -> {:ok, lines}
         :skip -> :unresolved
@@ -84,9 +121,15 @@ defmodule Fleet.Conflict do
   # `trivial` = hunks classified as a resolvable type; `complex` = the residual that needs a human
   # or the producer. Classification-based, not resolution-based: a resolvable type kept below the
   # confidence floor still counts trivial (it is recoverable, just not at this threshold).
+  #
+  # `writable` is the STRICTER count: hunks the machine may resolve on its own (cf. `@writable_types`).
+  # Reported separately because the two answer different questions -- "is this shallow?" routes the
+  # tier, "may we write it?" authorizes the disk. Collapsing them is what let a format assumption
+  # reach a worktree.
   defp stats(hunks) do
     complex = Enum.count(hunks, &(&1.type == :complex))
     total = length(hunks)
-    %{trivial: total - complex, complex: complex, total: total}
+    writable = Enum.count(hunks, &(&1.type in @writable_types))
+    %{trivial: total - complex, complex: complex, total: total, writable: writable}
   end
 end

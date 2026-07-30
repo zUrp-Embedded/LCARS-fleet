@@ -77,8 +77,21 @@ defmodule Fleet.Pilot.ConflictApply do
   # Merge base_branch into the feature worktree; resolve every conflicted file deterministically.
   # A clean merge is already committed by git. A residual (any file we cannot fully resolve) aborts
   # the whole apply -- never a partial write.
+  #
+  # `merge.conflictStyle=diff3` is LOAD-BEARING, not cosmetic. Three of the four auto-writable
+  # patterns prove their correctness AGAINST THE BASE (`one_side_change`: only one side moved;
+  # `delete_no_change`: the deletion is unilateral; `non_overlapping`: the two changes touch disjoint
+  # regions). Git's DEFAULT style emits diff2 -- ours and theirs, no base -- so on that input those
+  # three cannot fire at all, and the only patterns left able to resolve were the format-assuming
+  # ones this engine refuses to write. MEASURED, not deduced: the probe diagnosed `non_overlapping`
+  # (it feeds `merge-file` the base blob explicitly) while this path saw the SAME conflict as
+  # unresolvable — the diagnosis that authorized the write and the write itself were reading
+  # different inputs. Asking git for the base makes them agree.
   defp merge_and_resolve(wt, base_branch) do
-    case GitOps.run(["-C", wt, "merge", "--no-edit", base_branch], author: @author) do
+    case GitOps.run(
+           ["-C", wt, "-c", "merge.conflictStyle=diff3", "merge", "--no-edit", base_branch],
+           author: @author
+         ) do
       :ok ->
         # Clean merge -- git already made the merge commit.
         :ok

@@ -12,7 +12,7 @@ defmodule Fleet.ConflictTest do
       {:ok, r} = Conflict.resolve(diff3("b", "a", "b"))
       assert r.merged == "b"
       assert [%{type: :same_change}] = r.hunks
-      assert r.stats == %{trivial: 1, complex: 0, total: 1}
+      assert r.stats == %{trivial: 1, complex: 0, total: 1, writable: 1}
     end
 
     test "one_side_change: only theirs changed -> accept theirs" do

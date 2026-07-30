@@ -22,11 +22,16 @@ defmodule Fleet.Conflict.PatternsTest do
   end
 
   describe "whitespace_only" do
-    test "same code, different indentation -> prefer ours" do
+    test "same code, different indentation -> CLASSIFIED, never auto-written" do
+      # Classification is real and useful (it routes the tier: this is shallow). Writing it is not
+      # ours to do: the engine is format-blind, and in Python an indent/dedent changes scope, in
+      # YAML it changes which key owns the value. Measured on the deployed build before this gate:
+      # `    return a` vs `\treturn a` resolved at :high and rewrote the block.
       content = diff3("a", "  a", "    a")
       {:ok, r} = Conflict.resolve(content)
-      assert [%{type: :whitespace_only}] = r.hunks
-      assert r.merged == "a"
+      assert [%{type: :whitespace_only, confidence: %{label: :high}}] = r.hunks
+      refute r.merged, "a whitespace assumption must never reach the worktree"
+      assert r.stats == %{trivial: 1, complex: 0, total: 1, writable: 0}
     end
 
     test "whitespace inside a string is data -> not whitespace_only" do
@@ -38,20 +43,28 @@ defmodule Fleet.Conflict.PatternsTest do
   end
 
   describe "reorder_only" do
-    test "same lines, different order (diff2) -> accept theirs order" do
-      content = diff2("import a\nimport b", "import b\nimport a")
+    test "same lines, different order (diff2) -> CLASSIFIED, never auto-written" do
+      # Order carries meaning far too often to guess: `RUN apt update` after `apt install`, CSS
+      # last-declaration-wins, and `log()` before `auth()` -- the engine reordered an auth check
+      # ahead of its log at :high before this gate.
+      content = diff2("a\nb", "b\na")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :reorder_only}] = r.hunks
-      assert r.merged == "import b\nimport a"
+      refute r.merged, "an order assumption must never reach the worktree"
     end
   end
 
   describe "insertion_at_boundary" do
-    test "both sides insert at the same boundary -> union" do
+    test "both sides insert at the same boundary -> CLASSIFIED, never auto-written" do
+      # The union is right when the two insertions are ADDITIVE and wrong when they are
+      # ALTERNATIVES -- and nothing in the text says which. Measured before this gate: two sides
+      # setting the same key produced `timeout: 30` AND `timeout: 60` (invalid in strict YAML), two
+      # sides defining `def run` kept both (dead clause), two sides setting `color:` kept both (ours
+      # silently lost to CSS last-wins).
       content = diff3("a\nX", "a", "a\nY")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :insertion_at_boundary}] = r.hunks
-      assert r.merged == "a\nX\nY"
+      refute r.merged, "keeping both insertions must never reach the worktree unreviewed"
     end
   end
 
@@ -64,10 +77,23 @@ defmodule Fleet.Conflict.PatternsTest do
       assert r.merged == nil
     end
 
-    test "at :medium floor, resolves to the highest semver" do
+    test "lowering the floor to :medium does NOT unlock it — the type gate is independent" do
+      # The confidence floor and the write gate answer different questions. Lowering the floor used
+      # to hand the disk to a value pick; it no longer can, because `value_only_change` is not an
+      # auto-writable type at ANY floor. The reason is measured, not theoretical: for an unorderable
+      # volatile `Assemble` itself records "not orderable -- accept theirs (default)", i.e. a coin
+      # flip. A sha `aaaa1111` vs `bbbb2222` resolved to theirs at :high before this gate.
       content = diff3("version = 1.2.0", "version = 1.0.0", "version = 1.1.0")
       {:ok, r} = Conflict.resolve(content, min_confidence: :medium)
-      assert r.merged == "version = 1.2.0"
+      assert [%{type: :value_only_change}] = r.hunks
+      refute r.merged
+    end
+
+    test "an UNORDERABLE volatile is where the pick is a coin flip (the reason for the gate)" do
+      content = diff3(~s|sha = "aaaa1111"|, ~s|sha = "0000abcd"|, ~s|sha = "bbbb2222"|)
+      {:ok, r} = Conflict.resolve(content, min_confidence: :low)
+      assert [%{type: :value_only_change}] = r.hunks
+      refute r.merged, "no ordering exists between two hashes; picking one is not a resolution"
     end
   end
 

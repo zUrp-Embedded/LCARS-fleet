@@ -194,7 +194,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
   @spec tier0_decision(map()) :: :escalate | :apply | :fall_through
   def tier0_decision(%{totals: %{none_trivial?: true}}), do: :escalate
-  def tier0_decision(%{totals: %{all_trivial?: true}}), do: :apply
+
+  # `all_writable?`, not `all_trivial?`: the write path is authorized by what the machine may safely
+  # do alone, not by how shallow the conflict looks. A shallow-but-unwritable conflict (whitespace,
+  # reorder, competing insertions) falls through to the producer, which HAS the context to decide
+  # whether the indentation, the order or the duplicate mattered.
+  def tier0_decision(%{totals: %{all_writable?: true}}), do: :apply
   def tier0_decision(_), do: :fall_through
 
   defp tier0_act(:escalate, pr_number, head, reason, ctx) do

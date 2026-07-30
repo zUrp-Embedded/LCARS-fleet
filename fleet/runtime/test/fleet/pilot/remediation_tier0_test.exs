@@ -11,18 +11,64 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationTier0Test do
       assert Remediation.tier0_decision(diag(totals)) == :escalate
     end
 
-    test "all-trivial -> :apply (auto-resolve)" do
-      totals = %{trivial: 2, complex: 0, total: 2, all_trivial?: true, none_trivial?: false}
+    test "all-WRITABLE -> :apply (auto-resolve)" do
+      totals = %{
+        trivial: 2,
+        complex: 0,
+        total: 2,
+        writable: 2,
+        all_trivial?: true,
+        all_writable?: true,
+        none_trivial?: false
+      }
+
       assert Remediation.tier0_decision(diag(totals)) == :apply
     end
 
+    test "all-trivial but NOT all-writable -> :fall_through, not :apply" do
+      # The distinction the write gate exists for: whitespace-only / reorder-only / competing
+      # insertions are SHALLOW (a producer fixes them in one round) but not machine-writable, because
+      # writing them needs a format assumption this engine refuses to make. Routing them to :apply
+      # would spend a throwaway worktree and a merge to discover the engine declines — an outcome
+      # known before the step runs. The producer HAS the context; it gets the round.
+      totals = %{
+        trivial: 2,
+        complex: 0,
+        total: 2,
+        writable: 0,
+        all_trivial?: true,
+        all_writable?: false,
+        none_trivial?: false
+      }
+
+      assert Remediation.tier0_decision(diag(totals)) == :fall_through
+    end
+
     test "mixed -> :fall_through (producer conflict-rework)" do
-      totals = %{trivial: 1, complex: 1, total: 2, all_trivial?: false, none_trivial?: false}
+      totals = %{
+        trivial: 1,
+        complex: 1,
+        total: 2,
+        writable: 1,
+        all_trivial?: false,
+        all_writable?: false,
+        none_trivial?: false
+      }
+
       assert Remediation.tier0_decision(diag(totals)) == :fall_through
     end
 
     test "no conflicts -> :fall_through" do
-      totals = %{trivial: 0, complex: 0, total: 0, all_trivial?: false, none_trivial?: false}
+      totals = %{
+        trivial: 0,
+        complex: 0,
+        total: 0,
+        writable: 0,
+        all_trivial?: false,
+        all_writable?: false,
+        none_trivial?: false
+      }
+
       assert Remediation.tier0_decision(diag(totals)) == :fall_through
     end
   end
