@@ -118,10 +118,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     * `:policy`   → git-mergeable but branch-protection refuses (approvals cleared by a
                     human RE-REQUEST, CI…) → we re-converge: re-dispatch the re-requested judge (timeline).
                     No re-requested = policy block we can't lift mechanically → honest escalation.
-    * `:conflict` → BOUNDED producer conflict-rework (tier 1, `conflict_rework/4`: local
-                    resolution on the same PR — needs no forge credentials); budget exhausted or
-                    unreadable → honest arch escalation (tier 3). Tier 2 (gatekeeper-agent
-                    diagnosis before the arch) is a later increment.
+    * `:conflict` → the 4-tier pipeline of `conflict_rework/4`, gated by `:conflict_diagnosis?`:
+                    tier 0 (deterministic diagnosis + auto-resolution of an all-trivial conflict,
+                    runtime, no pod), tier 1 (BOUNDED producer conflict-rework: local resolution on
+                    the same PR — needs no forge credentials), tier 2 (ONE gatekeeper pass, the
+                    exception judge), tier 3 (honest arch escalation). Flag off → tier 1 → tier 3,
+                    byte-for-byte the legacy path.
     * `:unknown`  → not classifiable → HONEST arch escalation (we don't guess).
   """
   @spec route_merge_failure(integer(), String.t(), term(), Ctx.t()) ::
@@ -262,9 +264,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # conflict-rework dispatch as the producer: it clones the feature branch (`base_branch: head`),
   # resolves in its workspace, the SYSTEM pushes, the jury re-judges the new head. The round-1 marker
   # bounds it to a single pass and makes the re-dispatch idempotent (dedup, like the producer's).
-  # NOTE (handoff): the pod BRIEF currently reuses the producer conflict framing ("your brief"); a
-  # gatekeeper-specific conflict brief (exception-judge voice) is the finishing touch — the mechanics
-  # (workspace, resolve, push, re-judge) are identical and correct regardless of framing.
+  # The brief carries the EXCEPTION-JUDGE voice (`:conflict_rework_gatekeeper`), not the producer's:
+  # the gatekeeper has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited
+  # it to guess at an intention it does not hold. Same mechanics, addressed to who is actually there.
   defp dispatch_gatekeeper_rework(pr_number, head, %Ctx{} = ctx) do
     signature = "[conflict-gatekeeper:pr-#{pr_number}:round-1]"
 
@@ -282,7 +284,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     case ctx.forge.post_comment(ctx.repo, pr_number, body, comment_opts) do
       {:ok, _} ->
         RoleDispatch.dispatch(
-          :conflict_rework,
+          :conflict_rework_gatekeeper,
           pr_number,
           head,
           Fleet.Pilot.Roles.gatekeeper_role(),
@@ -315,9 +317,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
   # dedup makes the count replay-safe). Beyond budget, or any unreadable read → tier 3, the
-  # honest arch escalation (never a blind loop). NOTE the tier 2 (gatekeeper-agent diagnosis
-  # mechanical-vs-semantic before the arch) is a LATER increment — it needs a workspace for the
-  # gatekeeper one-shot; today budget-exhausted goes straight to the arch.
+  # honest arch escalation (never a blind loop). Tier 2 (a gatekeeper one-shot before the arch) is
+  # CÂBLÉ since the conflict-engine increment: budget-exhausted goes through `gatekeeper_stage_decision`
+  # and one gatekeeper pass, then the arch — gated by `:conflict_diagnosis?` like tier 0.
   defp legacy_conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     marker_prefix = "[conflict-rework:pr-#{pr_number}"
 
