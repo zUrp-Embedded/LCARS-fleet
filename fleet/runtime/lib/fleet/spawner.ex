@@ -157,7 +157,12 @@ defmodule Fleet.Spawner do
     # reads (brief-exempt at the guard, yet "one-shot" at extraction → releases). We refuse it at THE
     # choke point (every spawn — publish_consumer, step_dispatcher, recall — funnels here), so no
     # unvalidated profile ever reaches the divergent readers.
+    # Same structural guard, same choke point, for `interlocutor`: it decides WHICH protocol
+    # contract the pod is provisioned with. Absent, the provisioning would fall back to the
+    # machine contract — the exact silence the field exists to end, and one that reads as correct
+    # from the outside (the pod boots, the human just gets an agent holding a worker's contract).
     with {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
+         {:ok, _who} <- Fleet.CapProfile.fetch_interlocutor(cap_profile),
          :ok <- brief_guard(cap_profile, opts) do
       pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
@@ -204,6 +209,14 @@ defmodule Fleet.Spawner do
         )
 
         {:error, :cap_profile_no_lifetime_scope}
+
+      {:error, :no_interlocutor} ->
+        Logger.error(
+          "Spawner: spawn_pod refused — cap-profile has no interlocutor (schema-required; " <>
+            "the protocol contract a pod is provisioned with is never inferred)."
+        )
+
+        {:error, :cap_profile_no_interlocutor}
 
       {:error, _} = err ->
         err

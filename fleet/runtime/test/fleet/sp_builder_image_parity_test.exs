@@ -68,15 +68,26 @@ defmodule Fleet.SPBuilderImageParityTest do
              inspect(divergent)
   end
 
-  test "the worker protocole-user is byte-identical in both regimes" do
+  test "the protocole-user is byte-identical in both regimes, for every interlocutor" do
     # Not composed by SPBuilder but read by the spawner's Assets rail, through its own image
-    # accessor — same duplication, same exposure, and it decides what `engage` means to the pod.
-    :ok = SPBuilder.publish_image!()
-    assert {:ok, from_image} = Fleet.Spawner.Pod.Assets.read_protocole_user()
+    # accessors — same duplication, same exposure, and it decides what `engage` means to the pod.
+    # Swept over the THREE values because each one takes a different path through the rail
+    # (machine only, machine + human, human only): a parity proven on `fleet` alone would leave
+    # the two branches that actually gained an image accessor unchecked.
+    for who <- ["fleet", "both", "human"] do
+      cap = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "probe"},
+        spec: %{"interlocutor" => who}
+      }
 
-    SPBuilder.Image.unpublish()
-    assert {:ok, from_disk} = Fleet.Spawner.Pod.Assets.read_protocole_user()
+      :ok = SPBuilder.publish_image!()
+      assert {:ok, from_image} = Fleet.Spawner.Pod.Assets.read_protocole_user(cap)
 
-    assert from_image == from_disk
+      SPBuilder.Image.unpublish()
+      assert {:ok, from_disk} = Fleet.Spawner.Pod.Assets.read_protocole_user(cap)
+
+      assert from_image == from_disk, "interlocutor #{who}: image and disk regimes disagree"
+    end
   end
 end

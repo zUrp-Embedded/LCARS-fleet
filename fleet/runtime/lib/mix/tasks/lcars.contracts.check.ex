@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-30
   """
 
   use Mix.Task
@@ -389,6 +389,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #   2. a cap-profile WITHOUT `lifetime_scope` is not a spawnable state (DR-019): spawn_pod gates on
   #      `CapProfile.fetch_lifetime_scope/1` and refuses `{:error, :cap_profile_no_lifetime_scope}` — so
   #      "absent lifetime_scope" is not silently exempted from the brief rule (the hole DR-019/BND-099 closed).
+  #   3. same structural guard on `interlocutor`: it selects WHICH protocol contract a pod is
+  #      provisioned with, so an undeclared profile must not spawn. Defaulting it would restore the
+  #      silence the field exists to end — the pod boots and looks healthy while holding a contract
+  #      nobody chose for it, which is undetectable from the outside.
   # Unwiring any clause turns this RED, whatever the docs say.
   defp check_spawn_has_brief(root) do
     spawner = "lib/fleet/spawner.ex"
@@ -397,9 +401,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       %{
         id: "spawn.has_brief",
         remediation:
-          "keep spawn_pod guards: {:error, :brief_required} for a one-shot without brief AND {:error, :cap_profile_no_lifetime_scope} for a missing lifetime_scope",
+          "keep spawn_pod guards: {:error, :brief_required} for a one-shot without brief, {:error, :cap_profile_no_lifetime_scope} for a missing lifetime_scope, {:error, :cap_profile_no_interlocutor} for a missing interlocutor",
         note:
-          "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}) AND refuses a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) — the real one-shot-brief invariant, not a marker"
+          "spawn_pod refuses a one-shot pod without a brief ({:error, :brief_required}), a cap-profile with no lifetime_scope (DR-019: fetch_lifetime_scope → {:error, :cap_profile_no_lifetime_scope}) AND one with no interlocutor (fetch_interlocutor → {:error, :cap_profile_no_interlocutor}) — the real invariants, not markers"
       },
       [
         {code_match?(root, spawner, ~r/:brief_required/, [
@@ -412,7 +416,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {code_match?(root, spawner, ~r/:cap_profile_no_lifetime_scope/, [
            ~r/:cap_profile_no_lifetime_scope/,
            ~r/^\s*\{:error, :cap_profile_no_lifetime_scope\}/
-         ]), "#{spawner}: no executable refusal of a cap-profile without lifetime_scope (DR-019)"}
+         ]),
+         "#{spawner}: no executable refusal of a cap-profile without lifetime_scope (DR-019)"},
+        {code_match?(root, spawner, ~r/fetch_interlocutor/),
+         "#{spawner}: spawn_pod does not gate on CapProfile.fetch_interlocutor (the protocol contract would be inferred)"},
+        {code_match?(root, spawner, ~r/:cap_profile_no_interlocutor/, [
+           ~r/:cap_profile_no_interlocutor/,
+           ~r/^\s*\{:error, :cap_profile_no_interlocutor\}/
+         ]), "#{spawner}: no executable refusal of a cap-profile without interlocutor"}
       ]
     )
   end

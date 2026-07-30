@@ -99,6 +99,7 @@ defmodule Fleet.SpawnerTest do
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot"},
+        "interlocutor" => "fleet",
         "injects" => %{},
         "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 60},
         "modop_set" => []
@@ -184,6 +185,28 @@ defmodule Fleet.SpawnerTest do
 
       assert {:error, :cap_profile_no_lifetime_scope} =
                Fleet.Spawner.spawn_pod(no_scope, "issue-no-scope", allow_no_brief: true)
+    end
+
+    test "cap-profile WITHOUT interlocutor → spawn REFUSED (the protocol contract is never inferred)" do
+      # Same structural guard as DR-019, on the field that decides WHICH protocol the pod is
+      # provisioned with. Defaulting it would restore the exact silence it exists to end: the pod
+      # boots, looks healthy, and holds a machine contract nobody chose for it. The refusal must
+      # precede the brief question, like the scope one.
+      no_who = Map.delete(valid_profile().spec, "interlocutor")
+      cap = %{valid_profile() | spec: no_who}
+
+      assert {:error, :cap_profile_no_interlocutor} =
+               Fleet.Spawner.spawn_pod(cap, "issue-no-who", brief: "do x")
+
+      assert {:error, :cap_profile_no_interlocutor} =
+               Fleet.Spawner.spawn_pod(cap, "issue-no-who", allow_no_brief: true)
+
+      # An EMPTY string is not a declaration either — the accessor requires a non-empty binary,
+      # or `interlocutor: ""` would pass the gate and then match no branch downstream.
+      blank = %{valid_profile() | spec: Map.put(valid_profile().spec, "interlocutor", "")}
+
+      assert {:error, :cap_profile_no_interlocutor} =
+               Fleet.Spawner.spawn_pod(blank, "issue-blank-who", brief: "do x")
     end
 
     test "one-shot + no brief → {:error, :brief_required}" do

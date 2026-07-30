@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-07-30
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -760,6 +760,50 @@ defmodule Fleet.CapProfile do
   @spec brief_kind(t()) :: String.t() | nil
   def brief_kind(%__MODULE__{spec: spec}) do
     get_in(spec, ["brief_kind"])
+  end
+
+  @doc """
+  Canonical accessor for `interlocutor` (`spec.interlocutor`, schema v2.5) — WHO the role's REPL
+  converses with, and therefore which protocol contract its `.lcars/protocole-user.md` carries.
+
+    * `"fleet"` — the fleet alone (engineer, judges): machine protocol only. `engage` opens a
+      work-item cycle; nobody is there to be answered.
+    * `"both"` — the fleet AND a human on the same terminal (architect, starfleet): machine
+      protocol PLUS the human addendum. The machine kicks this pod and a human also talks to it.
+    * `"human"` — a human alone: no work-item rail, no `engage`; the human is the source of work.
+
+  Three values rather than a human/machine boolean because FEEDING and FACING are independent
+  axes, and the architect is the proof that they are (machine-kicked through `wake_send_keys`,
+  human-facing through the Desktop bridge and `lcars attach`). The fourth cell of that 2x2 — fed
+  by a human with nobody in front — has no referent, so one three-valued field makes it
+  unrepresentable instead of legal-but-meaningless.
+
+  `interlocutor` is **REQUIRED** by the schema (`spec.required`), never inferred. Until it existed
+  every pod was served the worker protocol unconditionally, which is how an interactive architect
+  came up holding a contract that told it `SeeU` closes nothing and no handoff exists.
+  """
+  @spec interlocutor(t()) :: String.t() | nil
+  def interlocutor(%__MODULE__{spec: spec}) do
+    get_in(spec, ["interlocutor"])
+  end
+
+  @doc """
+  Load-bearing accessor for `interlocutor` — NO default. `{:ok, who}` iff the schema-REQUIRED
+  field is present as a non-empty string, `{:error, :no_interlocutor}` otherwise.
+
+  Same shape and same reason as `fetch_lifetime_scope/1`: the field decides WHICH protocol a pod
+  is provisioned with, so a `%CapProfile{}` without it is an invalid state the struct type still
+  allows. Defaulting it would reinstate exactly the silence this field exists to end — an
+  undeclared profile would quietly get the machine contract, and a human-facing role would look
+  correct while being provisioned as a worker. The spawn choke point (`Fleet.Spawner.spawn_pod`)
+  gates on THIS.
+  """
+  @spec fetch_interlocutor(t()) :: {:ok, String.t()} | {:error, :no_interlocutor}
+  def fetch_interlocutor(%__MODULE__{spec: spec}) do
+    case get_in(spec, ["interlocutor"]) do
+      s when is_binary(s) and s != "" -> {:ok, s}
+      _ -> {:error, :no_interlocutor}
+    end
   end
 
   @doc """

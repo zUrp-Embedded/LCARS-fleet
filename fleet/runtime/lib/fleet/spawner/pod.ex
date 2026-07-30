@@ -303,7 +303,7 @@ defmodule Fleet.Spawner.Pod do
            SPBuilder.compose_claude_md(data.cap_profile, Assets.maybe_path(repo_md)),
          {:ok, _skills_paths} <- Assets.maybe_filter_skills(data.cap_profile, skills_root),
          {:ok, agent_draft} <- Assets.read_agent_draft(data.cap_profile),
-         {:ok, protocole_user} <- Assets.read_protocole_user(),
+         {:ok, protocole_user} <- Assets.read_protocole_user(data.cap_profile),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = target of the creds-only bind (bwrap_launch). We create ONLY the dir,
          # no settings.json inside → 0 human hook. bwrap mounts `.credentials.json` there.

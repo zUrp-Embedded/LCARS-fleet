@@ -92,3 +92,6 @@ spec:
   # Entry dual of deliverable_mode: brief = executable instruction (the issue body), the
   # role ACTS. REQUIRED (schema) — judge-ness is never inferred.
   brief_kind: worker
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet

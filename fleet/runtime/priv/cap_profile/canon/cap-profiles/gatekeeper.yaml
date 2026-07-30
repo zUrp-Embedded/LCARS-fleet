@@ -76,3 +76,6 @@ spec:
   # deliverable + verdict contract, NO executable instruction). Declared by catalogue
   # (not a magic "gatekeeper" name in the code). Entry dual of deliverable_mode.
   brief_kind: judge
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet

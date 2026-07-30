@@ -22,6 +22,12 @@ spec:
   capabilities: [onboarder, project_delegate]
   # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
+  # Fleet AND human on the same terminal: the machine kicks this pod (`wake_send_keys: true`,
+  # spawned on-open with no brief) and a human talks to it through `lcars attach` / the Desktop
+  # bridge. Both contracts are injected — the work-item cycle AND the human addendum. REQUIRED
+  # (schema): before this field existed, every pod was served the machine contract unconditionally,
+  # so this interactive role held one telling it no handoff exists.
+  interlocutor: both
   scope:
     # Tool naming convention (consistent with G24-9):
     #   - PascalCase  = native Claude Code tools pod-side, validated via the `can_use_tool` permission callback

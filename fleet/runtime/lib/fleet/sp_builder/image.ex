@@ -7,8 +7,12 @@ defmodule Fleet.SPBuilder.Image do
     * `modop_sp` — modop SP fragments (`<modop>/sp.md`)
     * `subagent` — subagent templates
     * `drafts` — per-role SP drafts (`agent-<role>-base.md`)
-    * `worker_protocol` — the pod's `protocole-user.md`, resolved through the consumer's own
+    * `worker_protocol` — the pod's machine `protocole-user.md`, resolved through the consumer's own
       `:protocole_user_path` override so a deployment override cannot escape the epoch
+    * `human_protocol` — the conversation contract added for a pod whose cap-profile declares a
+      human interlocutor (`both`/`human`). Frozen for the same reason as its machine twin: it is
+      the material an interactive agent is judged on, and two pods of one deployment must not be
+      holding different versions of it under one image version
     * `sp_role_bases` — role SP bases a profile's `spec.systemPrompt` names, keyed by path
       RELATIVE to the SP root (the only OPTIONAL section: a dormant extension point, cf. `publish!/0`)
     * `templates` — the EEx template SOURCES, rendered with `eval_string`
@@ -71,6 +75,7 @@ defmodule Fleet.SPBuilder.Image do
             |> String.replace_suffix("-base", ""))
         ),
       worker_protocol: read_worker_protocol!(),
+      human_protocol: read_protocol!(human_protocol_path(), "human protocol"),
       # The role SP bases a cap-profile's `spec.systemPrompt` names, keyed by path RELATIVE to the
       # SP root — the composer joins that same relative path, so the key is the lookup. Imaged
       # because it is prompt material like any other: left on a live read, two pods of one
@@ -110,7 +115,7 @@ defmodule Fleet.SPBuilder.Image do
       "SPBuilder.Image: published (#{map_size(image.modop_sp)} modop fragments, " <>
         "#{map_size(image.subagent)} subagent templates, #{map_size(image.drafts)} drafts, " <>
         "#{map_size(image.sp_role_bases)} role SP bases, #{map_size(image.templates)} EEx templates, " <>
-        "worker protocol frozen, version=#{version})"
+        "worker + human protocols frozen, version=#{version})"
     )
 
     :ok
@@ -155,7 +160,7 @@ defmodule Fleet.SPBuilder.Image do
       {template_root(), "*.eex"}
     ]
     |> Enum.flat_map(fn {root, glob} -> root |> Path.join(glob) |> Path.wildcard() end)
-    |> Enum.concat([worker_protocol_path()])
+    |> Enum.concat([worker_protocol_path(), human_protocol_path()])
     |> Enum.uniq()
     |> Map.new(fn path -> {path, path |> File.read!() |> sha_of()} end)
   end
@@ -202,6 +207,17 @@ defmodule Fleet.SPBuilder.Image do
   def worker_protocol do
     case published() do
       %{worker_protocol: content} -> {:ok, content}
+      nil -> :unpublished
+    end
+  end
+
+  @doc """
+  The conversation contract added for a human interlocutor (`{:ok, content}`) or `:unpublished`.
+  """
+  @spec human_protocol() :: {:ok, binary()} | :unpublished
+  def human_protocol do
+    case published() do
+      %{human_protocol: content} -> {:ok, content}
       nil -> :unpublished
     end
   end
@@ -263,17 +279,19 @@ defmodule Fleet.SPBuilder.Image do
     end)
   end
 
-  defp read_worker_protocol! do
-    content = File.read!(worker_protocol_path())
+  defp read_worker_protocol!, do: read_protocol!(worker_protocol_path(), "worker protocol")
+
+  defp read_protocol!(path, label) do
+    content = File.read!(path)
 
     if content == "" do
-      raise "SPBuilder.Image: worker protocol is empty — proven-good image requires non-empty artifacts"
+      raise "SPBuilder.Image: #{label} is empty — proven-good image requires non-empty artifacts"
     end
 
     content
   end
 
-  # SAME resolution as `Pod.Assets.read_protocole_user/0` (override first, bundled worker default
+  # SAME resolution as `Pod.Assets`' machine half (override first, bundled worker default
   # otherwise) — the image must freeze what the consumer would have read, or it freezes the wrong
   # file and the override silently escapes the epoch. Reading another domain's config ATOM creates
   # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative was a second
@@ -282,6 +300,12 @@ defmodule Fleet.SPBuilder.Image do
     Application.get_env(:fleet_spawner, :protocole_user_path) ||
       Path.join(drafts_root(), "protocole-user-worker.md")
   end
+
+  # No override knob, DELIBERATELY: the machine protocol has one because a deployment may need to
+  # re-cut the work-item contract, whereas the operator-facing half is meant to be replaced by the
+  # operator's own file through the deploy's override scheme, not by a runtime config path. Adding
+  # a second knob now would be inventing the mechanism twice before either exists.
+  defp human_protocol_path, do: Path.join(drafts_root(), "protocole-user-human.md")
 
   # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root; the
   # drafts root gains its knob here — Assets' app_dir literal stays its fallback).

@@ -31,6 +31,9 @@ spec:
   capabilities: [onboarder]
   # Worker role (interactive front-desk): brief = executable instruction, never a judge. REQUIRED (schema).
   brief_kind: worker
+  # Fleet AND human on the same terminal: front-desk reached through Claude Desktop, and still
+  # dispatched by the fleet. Both contracts are injected. REQUIRED (schema).
+  interlocutor: both
   scope:
     allowedTools:
       - Read

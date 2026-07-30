@@ -116,6 +116,13 @@ defmodule Fleet.SPBuilder do
   defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
 
   @doc """
+  The human conversation contract from the published image (delegate for the spawner's Assets rail
+  — `{:ok, content}` | `:unpublished` → caller's disk fallback). Added to a pod whose cap-profile
+  declares `interlocutor: both`, served alone on `interlocutor: human`.
+  """
+  defdelegate image_human_protocol(), to: Fleet.SPBuilder.Image, as: :human_protocol
+
+  @doc """
   Sources whose content no longer matches what the published image validated (delegate —
   `{:ok, [{path, :modified | :vanished}]}` | `:unpublished`). Consulted on the spawn path so a
   deployed program edited under a live daemon stops being a non-event.

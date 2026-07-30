@@ -3,7 +3,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   READ + PROVISION of a pod's vendor/priv ASSETS — island extracted from `Fleet.Spawner.Pod.Scaffold`.
 
   Everything the `:projecting` state READS from the fleet apps' `priv/` (role-aware SP draft,
-  worker protocole-user, `watch.sh`) or MANUFACTURES as static content (the REPL's `settings.json`),
+  the protocole-user selected by the profile's `interlocutor`, `watch.sh`) or MANUFACTURES as
+  static content (the REPL's `settings.json`),
   plus the cap-profile skills filter. Each step returns `{:ok, content}`/`:ok` or an
   `{:error, reason}` TAGGED per asset (the tag identifies the failing step in the
   `transition_failed` of the `:projecting` state) — the `with` of `:projecting` propagates.
@@ -16,7 +17,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   ## Contract (called by `Pod`, `:projecting` state)
 
-  - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/0`, `maybe_path/1`,
+  - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
   **Last revised**: 2026-07-30
@@ -95,30 +96,71 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  The pod's `protocole-user.md` (the keywords its REPL answers to). Default =
-  `priv/sp_builder/sp_drafts/protocole-user-worker.md` shipped in the bundled priv: the WORKER version
-  (`engage` = trigger the issue-driven workflow, `SeeU` = no-op). Override via config
-  `:fleet_spawner, :protocole_user_path` (custom user instance).
+  The pod's `protocole-user.md` — the contract its REPL answers to, selected by the cap-profile's
+  `interlocutor` (schema-REQUIRED, gated at the spawn choke point, so it is present here).
 
-  `engage` is MACHINE protocol — not a personalizable keyword, unlike a human's session keywords.
-  TRAP: pointing at a HUMAN instance's protocole-user replaces the whole contract by one that
-  never defines `engage` at all (it defines the human's own resume/close keywords instead) → the
-  pod's claude REPL does NOT trigger the worker workflow.
+    * `"fleet"` — the MACHINE contract alone (`protocole-user-worker.md`): `engage` opens a
+      work-item cycle, `SeeU` is a no-op, there is no handoff and nobody to answer.
+    * `"both"` — machine contract THEN the human conversation contract
+      (`protocole-user-human.md`), in that order. The two ADD instead of replacing because they
+      answer different questions: one is the rail the fleet drives this pod on, the other is how to
+      talk to the person also sitting at that terminal. Neither defines a keyword the other
+      defines, which is why concatenation is honest here and not a merge.
+    * `"human"` — the conversation contract alone: no work-item rail, no `engage`.
+
+  Before `interlocutor` existed this function took no argument and always returned the worker
+  contract, so an interactive architect was provisioned with a contract stating it has no handoff
+  and closes nothing — true of an engineer, false of it.
+
+  `:fleet_spawner, :protocole_user_path` still overrides the MACHINE half (a deployment may re-cut
+  the work-item contract). It does not reach the human half: replacing what an agent is told about
+  its operator is a deploy-time decision about that operator's own file, not a runtime config path.
   """
-  @spec read_protocole_user() ::
+  @spec read_protocole_user(Fleet.CapProfile.t()) ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
-  def read_protocole_user do
-    # Image FIRST — the protocole-user is prompt material: it redefines the pod's trigger keywords, so
-    # a mid-life edit used to change what `engage` MEANS for the next pod while the image version claimed
-    # a closed epoch. The image froze it at boot through this same override resolution, so a deployment
-    # override still applies and a live edit no longer does. `:unpublished` (tests, tooling) reads disk.
-    case Fleet.SPBuilder.image_worker_protocol() do
-      {:ok, content} -> {:ok, content}
-      :unpublished -> read_protocole_user_from_disk()
+  def read_protocole_user(%Fleet.CapProfile{} = cap) do
+    case Fleet.CapProfile.interlocutor(cap) do
+      "human" ->
+        read_human_protocol()
+
+      "both" ->
+        with {:ok, machine} <- read_worker_protocol(),
+             {:ok, human} <- read_human_protocol() do
+          {:ok, machine <> "\n---\n\n" <> human}
+        end
+
+      # "fleet", and the hand-forged struct the spawn gate refuses: the machine contract is the
+      # floor of every pod, so the safe read is also the correct one for the only value left.
+      _ ->
+        read_worker_protocol()
     end
   end
 
-  defp read_protocole_user_from_disk do
+  # Image FIRST — a protocole-user is prompt material: it defines the pod's trigger keywords, so a
+  # mid-life edit used to change what `engage` MEANS for the next pod while the image version
+  # claimed a closed epoch. The image froze both halves at boot through this same override
+  # resolution, so a deployment override still applies and a live edit no longer does.
+  # `:unpublished` (tests, tooling) reads disk.
+  defp read_worker_protocol do
+    case Fleet.SPBuilder.image_worker_protocol() do
+      {:ok, content} -> {:ok, content}
+      :unpublished -> read_worker_protocol_from_disk()
+    end
+  end
+
+  defp read_human_protocol do
+    case Fleet.SPBuilder.image_human_protocol() do
+      {:ok, content} ->
+        {:ok, content}
+
+      :unpublished ->
+        :lcars_fleet
+        |> Application.app_dir("priv/sp_builder/sp_drafts/protocole-user-human.md")
+        |> read_tagged(:protocole_user_human_missing)
+    end
+  end
+
+  defp read_worker_protocol_from_disk do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
         :lcars_fleet

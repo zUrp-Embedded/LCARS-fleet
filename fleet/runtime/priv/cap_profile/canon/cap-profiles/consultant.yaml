@@ -13,6 +13,9 @@ spec:
   # (`brief_kind: judge` on the brief-review step) — no duplicated profile. REQUIRED (schema) —
   # judge-ness is never inferred.
   brief_kind: worker
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet
   scope:
     allowedTools:
       - Read

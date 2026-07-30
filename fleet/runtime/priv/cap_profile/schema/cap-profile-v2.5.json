@@ -67,7 +67,8 @@
         "knowledge",
         "invocation",
         "modop_set",
-        "brief_kind"
+        "brief_kind",
+        "interlocutor"
       ],
       "additionalProperties": false,
       "properties": {
@@ -297,6 +298,15 @@
             "judge"
           ],
           "description": "Shape of the BRIEF the role receives — entry dual of deliverable_mode (differentiation by catalogue, not by magic code name). `worker`: brief = executable instruction (the issue body); the role ACTS. `judge`: the role JUDGES and receives a defused I-CBC GateBrief (context + deliverable + verdict contract, NO executable instruction). REQUIRED (`spec.required`): judge-ness is a SECURITY property, NEVER inferred — a profile without `brief_kind` is REJECTED at load. No silent `worker` default (a judge missing `judge` would fall back to worker=execute = fail-open on attacking content)."
+        },
+        "interlocutor": {
+          "type": "string",
+          "enum": [
+            "fleet",
+            "both",
+            "human"
+          ],
+          "description": "Who this role's REPL converses with — the axis that decides which protocol contract is injected into `.lcars/protocole-user.md`. `fleet`: the fleet alone (engineer, judges) — machine protocol only, `engage` starts a work-item cycle and there is nobody to answer. `both`: the fleet AND a human at the same terminal (architect, starfleet) — machine protocol PLUS the human addendum; a pod the machine kicks and a human also talks to. `human`: a human alone — no work-item rail, no `engage`; the human is the source of work. REQUIRED (`spec.required`), NEVER inferred: an unstated interlocutor was silently `fleet` for every pod ever spawned, which is why an interactive architect was being served a protocol saying `SeeU` closes nothing and no handoff exists. Three values and not a human/machine boolean, because feeding and facing are INDEPENDENT and the architect proves it (machine-kicked via wake_send_keys AND human-facing via the bridge); the fourth cell — fed by a human, nobody in front — has no referent and is unrepresentable by construction."
         }
       },
       "allOf": [

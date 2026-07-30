@@ -14,6 +14,9 @@ spec:
   # body: without it (default `worker`) the reviewer would EXECUTE the build instead of
   # judging it. Entry dual of deliverable_mode (output = `payload` default: a verdict, not a git patch).
   brief_kind: judge
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet
   scope:
     allowedTools:
       - Read

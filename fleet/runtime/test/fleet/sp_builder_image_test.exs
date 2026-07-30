@@ -17,7 +17,18 @@ defmodule Fleet.SPBuilderImageTest do
     File.write!(Path.join(tmp, "templates/subagent-spec-reviewer.md"), "# tpl v1\n")
     File.write!(Path.join(tmp, "drafts/agent-probe-base.md"), "# draft v1\n")
     File.write!(Path.join(tmp, "drafts/protocole-user-worker.md"), "# proto\n")
+    File.write!(Path.join(tmp, "drafts/protocole-user-human.md"), "# human proto\n")
     tmp
+  end
+
+  # `read_protocole_user/1` selects on the cap-profile's `interlocutor`; these tests are about the
+  # image, so they use the machine-facing shape and let the branch itself be tested where it lives.
+  defp fleet_facing do
+    %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      metadata: %{"name" => "probe"},
+      spec: %{"interlocutor" => "fleet"}
+    }
   end
 
   setup %{tmp_dir: tmp} do
@@ -79,11 +90,12 @@ defmodule Fleet.SPBuilderImageTest do
     :ok = Image.publish!()
     File.write!(custom, "# custom MUTATED\n")
 
-    assert {:ok, "# custom proto\n"} = Fleet.Spawner.Pod.Assets.read_protocole_user()
+    assert {:ok, "# custom proto\n"} =
+             Fleet.Spawner.Pod.Assets.read_protocole_user(fleet_facing())
 
     # Restart-republish → the new epoch (and proof the mutation was reachable all along).
     Image.unpublish()
-    assert {:ok, served} = Fleet.Spawner.Pod.Assets.read_protocole_user()
+    assert {:ok, served} = Fleet.Spawner.Pod.Assets.read_protocole_user(fleet_facing())
     assert served =~ "MUTATED"
   end
 
@@ -200,7 +212,7 @@ defmodule Fleet.SPBuilderImageTest do
       assert :unpublished = Image.drift()
     end
 
-    test "the fingerprint covers EVERY imaged section, including the worker protocol", %{
+    test "the fingerprint covers EVERY imaged section, both protocols included", %{
       tmp_dir: tmp
     } do
       # A section imaged but absent from the fingerprint is material whose drift nobody can see —
@@ -211,7 +223,8 @@ defmodule Fleet.SPBuilderImageTest do
             "bundles/tdd/sp.md",
             "templates/subagent-spec-reviewer.md",
             "drafts/agent-probe-base.md",
-            "drafts/protocole-user-worker.md"
+            "drafts/protocole-user-worker.md",
+            "drafts/protocole-user-human.md"
           ] do
         path = Path.join(tmp, rel)
         original = File.read!(path)

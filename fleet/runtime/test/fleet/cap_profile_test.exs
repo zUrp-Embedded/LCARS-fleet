@@ -42,6 +42,7 @@ defmodule Fleet.CapProfileTest do
       containment: bwrap
     spec:
       brief_kind: worker
+      interlocutor: fleet
       scope:
         allowedTools:
           - Read

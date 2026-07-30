@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.CanonProof do
   true) exists ONLY for the hermetic test baseline; tests call `prove_all!/0`
   directly.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -78,7 +78,7 @@ defmodule Fleet.Spawner.CanonProof do
          {:ok, _sp} <-
            Fleet.SPBuilder.compose(profile, Fleet.CapProfile.active_modops(profile), []),
          {:ok, _draft} <- Fleet.Spawner.Pod.Assets.read_agent_draft(profile),
-         {:ok, _protocole} <- Fleet.Spawner.Pod.Assets.read_protocole_user() do
+         {:ok, _protocole} <- Fleet.Spawner.Pod.Assets.read_protocole_user(profile) do
       profile
     else
       {:error, reason} ->
