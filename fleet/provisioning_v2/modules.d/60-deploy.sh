@@ -30,8 +30,12 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 RUNTIME_DIR="$(repo_root)/fleet/runtime"
-LAUNCHERS=(bwrap_launch.sh host_launch.sh claude_launch.sh)
-SYMLINKED=(fleet_v2 lcars)
+# Le manifeste qu'install.sh consomme — le doctor est aussi aveugle au contenu que l'installeur :
+# ajouter/retirer un fichier livré se fait DANS etc/install.manifest, jamais ici.
+MANIFEST="$RUNTIME_DIR/etc/install.manifest"
+mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/vides sautés
+  awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
+}
 
 release_present() { [[ -x "$PREFIX_REL/bin/fleet_umbrella" ]]; }
 PREFIX_REL="$PROV_PREFIX/rel/fleet_umbrella"
@@ -46,7 +50,10 @@ build_sha() {
 }
 
 check() {
-  [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR (checkout incomplet)"; verdict_check; }
+  # PAS de garde mix.exs ici : le SOURCE est un besoin de l'apply (build), pas de l'état-cible.
+  # En conteneur, l'image n'embarque que etc/ (manifest compris) — exiger le checkout complet
+  # faisait échouer la sonde là où elle est la plus utile (défaut révélé au premier boot réel).
+  [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
 
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
@@ -64,30 +71,34 @@ check() {
     p_drift "prefix non verrouillé : $cur ≠ root:$PROV_FLEET_GROUP 750"
   fi
 
-  local f
-  for f in "${SYMLINKED[@]}"; do
-    if [[ "$(readlink "/usr/local/bin/$f" 2>/dev/null)" == "$PROV_PREFIX/bin/$f" ]]; then
-      p_ok "symlink /usr/local/bin/$f"
+  # D3 : les fichiers livrés vivent UNIQUEMENT dans $PREFIX/bin (là où install.sh les pose et
+  # où fleet_v2 les lit) ; /usr/local/bin ne porte que les symlinks des entrées « link ».
+  # L'ancienne sonde exigeait des copies et driftait sur un système SAIN.
+  local name mode is_link
+  while read -r name mode is_link; do
+    if [[ "$mode" == "exec" && ! -x "$PROV_PREFIX/bin/$name" ]]; then
+      p_drift "bin/$name absent/non exécutable sous $PROV_PREFIX/bin"
+    elif [[ "$mode" == "noexec" && ! -r "$PROV_PREFIX/bin/$name" ]]; then
+      p_drift "bin/$name absent/illisible sous $PROV_PREFIX/bin"
     else
-      p_drift "/usr/local/bin/$f ≠ symlink vers $PROV_PREFIX/bin/$f"
+      p_ok "bin/$name"
     fi
-  done
-  for f in "${LAUNCHERS[@]}"; do
-    # D3 : les launchers vivent UNIQUEMENT dans $PREFIX/bin (là où install.sh les pose et où
-    # fleet_v2 les lit) — l'ancienne sonde exigeait la copie /usr/local/bin et driftait sur un
-    # système SAIN.
-    if [[ -x "$PROV_PREFIX/bin/$f" ]]; then
-      p_ok "launcher $PROV_PREFIX/bin/$f"
+    if [[ "$is_link" -eq 1 ]]; then
+      if [[ "$(readlink "$PROV_LINK_DIR/$name" 2>/dev/null)" == "$PROV_PREFIX/bin/$name" ]]; then
+        p_ok "symlink $PROV_LINK_DIR/$name"
+      else
+        p_drift "$PROV_LINK_DIR/$name ≠ symlink vers $PROV_PREFIX/bin/$name"
+      fi
     else
-      p_drift "launcher absent/non exécutable : $PROV_PREFIX/bin/$f"
+      [[ -f "$PROV_LINK_DIR/$name" ]] && p_warn "copie morte $PROV_LINK_DIR/$name (invention D3, plus aucun lecteur) — nettoyage manuel : sudo rm $PROV_LINK_DIR/$name"
     fi
-    [[ -f "/usr/local/bin/$f" ]] && p_warn "copie morte /usr/local/bin/$f (invention D3, plus aucun lecteur) — nettoyage manuel : sudo rm /usr/local/bin/$f"
-  done
+  done < <(mf_entries)
   verdict_check
 }
 
 apply() {
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
+  [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_apply; }
   command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
   id "$PROV_HUMAN" >/dev/null 2>&1 || { p_fail "humain-bâtisseur inconnu: $PROV_HUMAN"; verdict_apply; }
 
@@ -103,8 +114,11 @@ apply() {
       && git -C "$(repo_root)" diff --quiet HEAD -- fleet/runtime 2>/dev/null && release_present; then
     p_ok "build déployé $deployed_sha == HEAD source (fleet/runtime propre) — rien à bâtir"
     # Le câblage /usr/local/bin peut quand même avoir dérivé : on le re-converge, c'est gratuit.
-    local f
-    for f in "${SYMLINKED[@]}"; do ensure_symlink "/usr/local/bin/$f" "$PROV_PREFIX/bin/$f" || verdict_apply; done
+    local name _mode is_link
+    while read -r name _mode is_link; do
+      [[ "$is_link" -eq 1 ]] || continue
+      ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
+    done < <(mf_entries)
     verdict_apply
   fi
 
@@ -124,7 +138,7 @@ apply() {
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
 
   # 3. L'autorité : build + pose (LONG — mix release ; sortie dumpée seulement en échec).
-  if ! run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" bash "$RUNTIME_DIR/etc/install.sh"; then
+  if ! run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"; then
     p_fail "etc/install.sh en échec (verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply
   fi
@@ -134,11 +148,12 @@ apply() {
   chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown"; verdict_apply; }
   chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod"; verdict_apply; }
 
-  # 5. Câblage /usr/local/bin — les 2 symlinks-pointeurs, rien d'autre (D3).
-  local f
-  for f in "${SYMLINKED[@]}"; do
-    ensure_symlink "/usr/local/bin/$f" "$PROV_PREFIX/bin/$f" || verdict_apply
-  done
+  # 5. Câblage /usr/local/bin — les symlinks-pointeurs des entrées « link », rien d'autre (D3).
+  local name _mode is_link
+  while read -r name _mode is_link; do
+    [[ "$is_link" -eq 1 ]] || continue
+    ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
+  done < <(mf_entries)
 
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + /usr/local/bin câblé"

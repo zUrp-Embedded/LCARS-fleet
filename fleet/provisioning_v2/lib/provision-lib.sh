@@ -31,6 +31,7 @@ PROVISION_LIB_LOADED=1
 # DOIT égaler le défaut d'etc/install.sh (SSoT du layout : etc/README.md §Install canonique —
 # /local/fleet_v2 est MORT, renommé *.OBSOLETE le 2026-07-18). Un fait, deux rendus : sync à la main.
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
+: "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_ROLES:=architect consultant engineer gatekeeper qualifier reviewer vulcan}"
