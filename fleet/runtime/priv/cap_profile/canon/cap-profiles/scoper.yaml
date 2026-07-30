@@ -1,18 +1,20 @@
-# Cap-profile: consultant
+# Cap-profile: scoper
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
 # Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
-  name: consultant
+  name: scoper
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
   role_index: 6
 spec:
-  # WORKER profile: executable brief by default. Becomes a judge VIA the per-step override
-  # (`brief_kind: judge` on the brief-review step) — no duplicated profile. REQUIRED (schema) —
-  # judge-ness is never inferred.
-  brief_kind: worker
+  # NATIVE judge, like its peers: it judges the BRIEF (is it executable as written?) and receives a
+  # defused GateBrief. It used to be a `worker` profile turned judge by a per-step override, which
+  # described a dual nature it never had: every SP block it composes is a brief judge's
+  # (`method/brief-review`, `role/scoper`), and its only worker-shaped dispatch was a map written
+  # for an auditor that was never built. REQUIRED (schema) — judge-ness is never inferred.
+  brief_kind: judge
   # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
   # to answer. REQUIRED (schema) — never inferred.
   interlocutor: fleet
@@ -40,9 +42,9 @@ spec:
       - tool_search_python
       - tool_search_bash
     # `push --force`, `reset --hard`, `rebase main` etc. come from the universal
-    # baseline (`_baseline-git-denied.yaml`) — not duplicated here. Consultant-specific
-    # restrictions remain: no push/reset/rebase/commit (audit role, never touches
-    # the workspace).
+    # baseline (`_baseline-git-denied.yaml`) — not duplicated here. Scoper-specific
+    # restrictions remain: no push/reset/rebase/commit (it judges a brief, it never
+    # touches the workspace).
     git_ops_denied: ["push", "reset", "rebase", "commit"]
   knowledge:
     skills: []  # modops are listed in modop_set, not in skills

@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -265,7 +265,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # `issues/{n}/stopwatch`, a PR IS an issue on the model side). Wired to the 3 SAME convergence points
   # as the lock itself (spawn_step SETS it, unlock/reconciliation LIFT it): start_stopwatch/2 when
   # `lcars-in-flight` is set, stop_stopwatch/2 when it is lifted — A SINGLE mechanism, zero per-role
-  # branch (consultant/engineer/qualifier/reviewer/gatekeeper all go through the same 2 points).
+  # branch (scoper/engineer/qualifier/reviewer/gatekeeper all go through the same 2 points).
   # ============================================================
 
   @doc """

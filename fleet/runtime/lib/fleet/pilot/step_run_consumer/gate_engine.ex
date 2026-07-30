@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
       blindly) — no silent misroute.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -249,8 +249,17 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     # otherwise the gate sees the envelope instead of the outputs (wrongly hard-gates).
     result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
 
+    # Judge-ness is read from the STEP ONLY here — deliberately, and NOT the same resolution as
+    # `Pilot.BriefBuilder`, which falls back to the role's profile. The asymmetry is real and is
+    # documented rather than silently closed: adding the profile fallback here re-routes EVERY
+    # judge-held step whose card declares nothing (measured: 4 canon-chain tests flip from
+    # `:captured` to `:awaiting_arch`), because a judge's step gate stops being evaluated and its
+    # payload starts deciding its own route. That may well be the right model — it is not a change
+    # to make as a side effect of a role rename. Consequence to know: a card that dispatches a
+    # native judge MUST still carry `brief_kind: judge` on the step, or its verdict is hard-gated
+    # as if it were a producer's output.
     if Map.get(spec, "brief_kind") == "judge" do
-      # The finishing step IS a judge (brief_kind:judge, e.g. brief-review/consultant). Its
+      # The finishing step IS a judge (brief_kind:judge, e.g. brief-review/scoper). Its
       # result CARRIES the gate-decision-v1 verdict: the judge has ALREADY decided → NO Gates.evaluate (which
       # would judge the judge's outputs as a hard-gate). The verdict is applied by `apply_verdict` (THE
       # function, shared with the async gatekeeper) consumer-side. gate_decide stays a PURE decider:

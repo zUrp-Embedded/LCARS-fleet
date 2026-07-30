@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -329,7 +329,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
            ) do
       # `set_stage(stage_review)` is NOT done here: it lives in `complete_producer`, AFTER the
       # comment (eng voice) — same order "comment THEN stage transition" as `complete/2`
-      # (consultant gate), with the same `space_writes` anti-same-second gap. Dashboard coherence.
+      # (scoper gate), with the same `space_writes` anti-same-second gap. Dashboard coherence.
       Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
@@ -513,7 +513,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       _ = Emissions.post_eng_summary(step_run, opts)
 
       # Stage transition AFTER the comment (same order + same anti-same-second gap as `complete/2` /
-      # consultant gate: "logically before, displayed after" otherwise — cf. `space_writes`).
+      # scoper gate: "logically before, displayed after" otherwise — cf. `space_writes`).
       :ok = space_writes(opts)
       forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
       forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -1001,7 +1001,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       Map.get(step_run, :comment_body, Texts.step_run_comment(role, sha)) <>
         "\n\n" <> signature
 
-    # The signed step_run comment is IN THE NAME OF THE ROLE that finishes (`as_role`: consultant verdict /
+    # The signed step_run comment is IN THE NAME OF THE ROLE that finishes (`as_role`: scoper verdict /
     # eng deliverable → forge author = the role, not the system account; same gesture as the PR/review/seal).
     case ForgeClient.as_role(forge_opts, role) do
       {:ok, role_opts} ->

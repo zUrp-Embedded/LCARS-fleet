@@ -363,7 +363,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
     test "select_permanent on the 7 canon cap-profiles → starfleet alone" do
       profiles =
-        ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
+        ~w(architect engineer gatekeeper qualifier reviewer scoper starfleet)
         |> Enum.map(fn n ->
           %Fleet.CapProfile{
             kind: "CapabilityProfile",

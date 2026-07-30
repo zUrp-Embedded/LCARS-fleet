@@ -453,7 +453,7 @@ html { scroll-behavior: smooth; }
 }
 .data-table .role-archivist { background: var(--magenta); }
 .data-table .role-monk { background: var(--amber); }
-.data-table .role-consultant { background: var(--orange); }
+.data-table .role-scoper { background: var(--orange); }
 .data-table .role-engineer, .data-table .role-architect { background: var(--rust); }
 .data-table .role-qualifier, .data-table .role-reviewer { background: var(--cream); color: var(--bg-deep); }
 .data-table .role-gatekeeper { background: var(--green-ph); color: var(--bg-deep); }

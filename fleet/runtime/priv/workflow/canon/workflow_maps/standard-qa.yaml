@@ -13,8 +13,8 @@
 kind: WorkflowMap
 metadata:
   name: standard-qa
-  description: "Carte C2+ : revue du brief (consultant-juge) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
-  presentation: "C2→C4 — La carte SÉRIEUSE : un consultant-juge valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui, matrice réservée C2→C4 : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
+  description: "Carte C2+ : revue du brief (scoper) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
+  presentation: "C2→C4 — La carte SÉRIEUSE : un scoper valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui, matrice réservée C2→C4 : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
   applicable_intensity: [C2, C3, C4]
 
 spec:
@@ -24,10 +24,10 @@ spec:
   max_rework_rounds: 2
   steps:
 
-    # --- Step 1 (racine) : revue du brief par le consultant (mode JUGE) ---
+    # --- Step 1 (racine) : revue du brief par le scoper (juge natif) ---
     brief-review:
-      role: consultant
-      brief_kind: judge             # gate dure : verdict, pas de prod (GateBrief désamorcé)
+      role: scoper
+      brief_kind: judge             # redondant avec le profil, load-bearing pour GateEngine (cf. brief-gate)
       judge_target: brief           # juge le BRIEF (ticket.body) → pré-PR, avance issue-level
       needs: []                     # racine DAG
       inputs:

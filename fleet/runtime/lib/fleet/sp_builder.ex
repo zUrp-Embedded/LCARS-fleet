@@ -61,7 +61,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-07-31
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -372,7 +372,7 @@ defmodule Fleet.SPBuilder do
   end
 
   # No modop requested → nothing to read (this `[]` clause). A role with NO default modops takes it; a
-  # role WITH modops (consultant/starfleet) goes through the clause below, where `modop_root` IS resolved
+  # role WITH modops (scoper/starfleet) goes through the clause below, where `modop_root` IS resolved
   # and IS wired into the spawn chain (cf. pod.ex `compose(cap, active_modops(cap), …)`).
   defp read_modop_fragments([]), do: {:ok, []}
 

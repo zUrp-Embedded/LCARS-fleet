@@ -23,7 +23,14 @@ defmodule Fleet.Workflow.LoaderV25Test do
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
     assert is_map(pipe["steps"]["brief-review"])
-    assert pipe["steps"]["brief-review"]["brief_kind"] == "judge"
+    assert pipe["steps"]["brief-review"]["role"] == "scoper"
+    # The step no longer OVERRIDES `brief_kind`: `scoper` is a native judge since the 2026-07-30
+    # split, and its profile carries the property. What must hold is the RESOLVED judge-ness, which
+    # `Fleet.CapProfile` answers — asserting the map field would pin the mechanism, not the contract
+    # (and pinning it is what hid the missing fallback in GateEngine until now).
+    assert {:ok, profile} = Fleet.CapProfile.load(pipe["steps"]["brief-review"]["role"])
+    assert Fleet.CapProfile.brief_kind(profile) == "judge"
+    assert pipe["steps"]["brief-review"]["judge_target"] == "brief"
     assert pipe["steps"]["build"]["needs"] == ["brief-review"]
     assert pipe["jury"] == ["qualifier", "reviewer"]
     refute Map.has_key?(pipe, "spec")
@@ -38,13 +45,15 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
   # F-C160: brief-gate IS the DEFAULT workflow_map of the prod dispatch (StepDispatcher) → it must be
   # covered by canon conformance like standard-qa + audit-only: it must normalize cleanly + carry its
-  # load-bearing shape (consultant-judge brief gate BEFORE the engineer).
+  # load-bearing shape (scoper brief gate BEFORE the engineer).
   test "canon brief-gate.yaml (V2.5, prod DEFAULT map) normalized → brief-review(judge) gate build" do
     pipe = Loader.load!("brief-gate", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "brief-gate"
     assert is_map(pipe["steps"])
     assert is_map(pipe["steps"]["brief-review"])
-    assert pipe["steps"]["brief-review"]["brief_kind"] == "judge"
+    assert pipe["steps"]["brief-review"]["role"] == "scoper"
+    assert {:ok, profile} = Fleet.CapProfile.load(pipe["steps"]["brief-review"]["role"])
+    assert Fleet.CapProfile.brief_kind(profile) == "judge"
     assert is_map(pipe["steps"]["build"])
     assert pipe["steps"]["build"]["needs"] == ["brief-review"]
     refute Map.has_key?(pipe, "spec")

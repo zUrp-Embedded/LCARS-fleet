@@ -712,7 +712,7 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.kill_class(kc_prof(0, "forever")) == 0
     end
 
-    test "one-shot judge (qualifier/reviewer/consultant) → 2 (spawn-dead, reaped)" do
+    test "one-shot judge (qualifier/reviewer/scoper) → 2 (spawn-dead, reaped)" do
       assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot")) == 2
     end

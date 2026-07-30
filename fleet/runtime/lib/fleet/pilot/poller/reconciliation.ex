@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -203,7 +203,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # awaits-arch park, merge done, brick closed) AND which holds no active task (belt — same
   # authority `pod_has_active_task?` as the lock duty: a gatekeeper mid-eval is never reaped).
   #
-  # Live case 2026-07-19: a consultant idled INTERACTIVELY for 16 min after its redirect verdict.
+  # Live case 2026-07-19: a brief judge (then named `consultant`, now `scoper`) idled INTERACTIVELY
+  # for 16 min after its redirect verdict.
   # A one-shot does NOT "end itself" — the pod model is a persistent interactive PTY (tmux), so
   # after the verdict the session sits at the prompt indefinitely (no lifetime cap since
   # `max_alive_sec` was nuked 2026-07-20) and re-briefed by the next dispatch (the #5 zombie loop

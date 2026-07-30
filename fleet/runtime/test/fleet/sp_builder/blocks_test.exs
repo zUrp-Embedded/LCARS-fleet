@@ -57,7 +57,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
     # `starfleet` keep a HISTORICAL/manual draft (user-facing socle — one per-project, one fleet-level —
     # outside the composed blocks, so NOT in sp-map.yaml). Every other role is block-composed. A NEW pod
     # role → add it here AND give it a draft, else its spawn dies hard (no-fallback, cf. no-sp-no-pod-no-fleet).
-    pod_roles = ~w(architect starfleet consultant engineer gatekeeper qualifier reviewer)
+    pod_roles = ~w(architect starfleet engineer gatekeeper qualifier reviewer scoper)
 
     for role <- pod_roles do
       path = Path.join(drafts_dir(), "agent-#{role}-base.md")

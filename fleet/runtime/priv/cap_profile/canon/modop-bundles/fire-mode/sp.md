@@ -1,7 +1,7 @@
 # Modop — fire-mode (one-shot, JSON strict output)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-01
+**Dernière révision** : 2026-07-31
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : LCARS-v1.5 pattern fire-mode + extract_v1/system-prompt residu-doctrinal (résidu doctrinal worker minimal)
 
@@ -25,7 +25,7 @@ Le worker fire-mode reçoit son brief, exécute, produit output JSON structuré,
 
 ```json
 {
-  "agent": "engineer|qualifier|reviewer|consultant",
+  "agent": "engineer|qualifier|reviewer|scoper",
   "work_item_id": "...",
   "verdict": "proven|partial|fail|blocked",
   "details": {
@@ -62,7 +62,7 @@ spec:
   default: [fire-mode, <modop-spécifique>]
 ```
 
-Cap-profiles workers (engineer, qualifier, reviewer, consultant) ont **fire-mode** par défaut en mode dispatch one-shot.
+Cap-profiles workers (engineer, qualifier, reviewer, scoper) ont **fire-mode** par défaut en mode dispatch one-shot.
 
 Cap-profile **architect** est l'opposé : long-running, conversation, pas fire-mode.
 

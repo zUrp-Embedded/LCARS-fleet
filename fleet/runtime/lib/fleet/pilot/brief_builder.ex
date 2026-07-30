@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-07-31
   """
 
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
@@ -186,8 +186,12 @@ defmodule Fleet.Pilot.BriefBuilder do
          step_spec,
          opts
        ) do
-    # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — reuses
-    # a worker (consultant) profile as a JUDGE without a duplicate profile. ABSENT at the step → profile default
+    # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — it
+    # drives a worker profile as a JUDGE for one step without duplicating the profile. NO canon role uses
+    # it today: `scoper` was its only user and became a NATIVE judge at the 2026-07-30 split (the override
+    # described a dual nature it never had). The mechanism stays because it is the generic way to answer
+    # "this step judges", and removing it would force a duplicate profile the day one is needed.
+    # ABSENT at the step → profile default
     # (itself "worker" by default, fail-safe) via the `||`: absence is NOT an anomaly. What
     # follows handles the PRESENT-but-out-of-vocab value, distinct from absence.
     kind = Map.get(step_spec, "brief_kind") || Fleet.CapProfile.brief_kind(profile)
@@ -350,7 +354,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # Brief of a BRIEF judge (brief-review, judge_target:brief). The consultant judges the BRIEF
+  # Brief of a BRIEF judge (brief-review, judge_target:brief). The scoper judges the BRIEF
   # (issue.body written by the arch) BEFORE the engineer sets off: executable without a new question? We
   # reuse the SAME GateBrief (gate-decision-v1 contract + canonical options) as the other judges — only
   # `subject: :brief` reframes the "thing to judge". The BRIEF goes into `outputs` (the thing TO JUDGE; ≠

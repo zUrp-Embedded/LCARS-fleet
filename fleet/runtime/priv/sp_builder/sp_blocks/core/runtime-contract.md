@@ -8,7 +8,7 @@
      commité** `${LCARS_PROJECT_OPS}/<brief_ref>` — **LIS-le EN PREMIER** (le champ `brief` du
      work_item n'est qu'un pointeur court ; le doc commité est la source unique ; `brief_sha` est
      le **commit git** qui a introduit cette version). **CITE les 7 premiers hex du `brief_sha`**
-     dans ton résultat/verdict (ex. `brief 266af4c (gate-briefs/issue-3-consultant.md)`) — un
+     dans ton résultat/verdict (ex. `brief 266af4c (gate-briefs/issue-3-scoper.md)`) — un
      humain qui lit la forge doit pouvoir rapprocher ton verdict du commit exact de l'objet, pas
      te croire sur parole. Tu n'as RIEN à recalculer ni à vérifier toi-même (l'ancre
      d'authenticité est le commit sur la forge, vérifiable par tout tiers). Pas de `brief_ref` →

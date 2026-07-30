@@ -22,7 +22,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
                ])
   @canon_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles"])
 
-  @profiles ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
+  @profiles ~w(architect engineer gatekeeper qualifier reviewer scoper starfleet)
 
   setup_all do
     schema =
@@ -65,9 +65,10 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   # in-pod clone, work on it, return a verdict payload → NOTHING to do with the forge → forge-blind.
   # architect = user-facing (answers the user about forge state read-only, initiates clone/branch/feature
   # on demand — security delegated to the Anthropic classifier) → KEEPS fleet-forge (outside @forge_blind,
-  # legitimate). consultant = worker (judge only via per-step override) → special case, not settled.
-  # starfleet = system.
-  @forge_blind ~w(engineer gatekeeper qualifier reviewer)
+  # legitimate). scoper = NATIVE judge since the 2026-07-30 split (it was the unsettled "worker judged by
+  # per-step override" case): it judges a brief and returns a verdict payload, so it belongs with the
+  # forge-blind judges below. starfleet = system.
+  @forge_blind ~w(engineer gatekeeper qualifier reviewer scoper)
   @forge_write_tools [
     "Bash(git push:*)",
     "Bash(tea issues edit:*)",
@@ -301,7 +302,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     refute Fleet.CapProfile.has_capability?(cap.("engineer"), :onboarder)
 
     # The judges are NOT onboarders/delegates — the gates must refuse them.
-    for judge <- ~w(consultant qualifier reviewer) do
+    for judge <- ~w(scoper qualifier reviewer) do
       refute Fleet.CapProfile.has_capability?(cap.(judge), :onboarder)
       refute Fleet.CapProfile.has_capability?(cap.(judge), :project_delegate)
     end

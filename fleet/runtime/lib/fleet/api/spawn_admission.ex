@@ -44,7 +44,7 @@ defmodule Fleet.API.SpawnAdmission do
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   alias Fleet.EventRouter.Bus
@@ -224,7 +224,7 @@ defmodule Fleet.API.SpawnAdmission do
   end
 
   # MIRROR of the one-shot brief guard (Fleet.Spawner.brief_guard) at ADMISSION: a one-shot cap-profile
-  # (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave without work → the spawner
+  # (reviewer/qualifier/scoper) launched WITHOUT `brief` would leave without work → the spawner
   # refuses it (`brief_required`, ZERO pod). Without this guard, the "queued" 202 would be a
   # lying 202 (exact twin of the lying cap-profile). `Fleet.Spawner.brief_required?/1` IS
   # the shared authority (same nil-aware `get_in` read as `brief_guard`) → we did NOT copy

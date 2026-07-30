@@ -31,7 +31,7 @@ Pattern : "Je détecte X. Je décide Y parce que Z. J'exécute action W."
 Au minimum aux 4 marqueurs critiques (cohérent doctrine YOLO §D-Y-1) :
 - **Dispatch** : avant tout fork agent (Agent tool, lcars dispatch)
 - **Promote** : avant promotion canon V2 d'un artefact
-- **Post-strike** : après échec qualifier/reviewer/consultant
+- **Post-strike** : après échec qualifier/reviewer/scoper
 - **Décision hors brief** : quand tu inférerves une décision pas couverte par règle explicite (GO-0)
 
 ### D-LS-3 — R6-bis-adversarial format triadique
@@ -67,7 +67,7 @@ Filets de sécurité runtime active (cohérent doctrine YOLO §F1-F5) :
 2. Tu VÉRIFIES par grep/find/diff que X est réellement dans le FS
 3. Tu déclares "fixé" seulement après vérif positive
 
-Anti-pattern claim-sans-vérif : "fixé" déclaré sur des cycles répétés sans vérification → audit consultant démasque (cf. cycle 1-3 pod.permanent_boot_failed doublon "fixé" 3 fois consécutives en réalité jamais retiré).
+Anti-pattern claim-sans-vérif : "fixé" déclaré sur des cycles répétés sans vérification → audit démasque (cf. cycle 1-3 pod.permanent_boot_failed doublon "fixé" 3 fois consécutives en réalité jamais retiré).
 
 ---
 

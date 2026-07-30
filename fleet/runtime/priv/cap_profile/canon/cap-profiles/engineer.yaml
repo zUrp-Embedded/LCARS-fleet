@@ -59,7 +59,7 @@ spec:
     # when re-briefing a :ready pipe. The engineer submits via MCP `submit_result`; the
     # SYSTEM publishes to the forge (forge-blind). State lives on the forge, not in RAM:
     # a rework re-brief re-reads its context from the forge (PR + findings). The judges
-    # (qualifier, reviewer, consultant) are one-shot. Reversible: set `one-shot` back
+    # (qualifier, reviewer, scoper) are one-shot. Reversible: set `one-shot` back
     # here — the gate's one-shot path is UNCHANGED.
     lifetime_scope: pipe
     model: opus        # catalogue -> --model (alias or full name; tunable)

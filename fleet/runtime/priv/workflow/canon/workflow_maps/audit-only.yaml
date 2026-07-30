@@ -19,27 +19,42 @@
 kind: WorkflowMap
 metadata:
   name: audit-only
-  description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 step, gate terminal). Escalade gatekeeper sur échec de règle (dispatch_gatekeeper)."
-  presentation: "C0→C4 — AUDIT PUR : un consultant lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
+  description: "Audit indépendant — pas de code généré. 1 step, gate terminal. Escalade gatekeeper sur échec de règle (dispatch_gatekeeper). ⚠ NE PASSE PAS SA GATE : voir l'avertissement du step."
+  presentation: "C0→C4 — AUDIT PUR : un auditeur lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
   # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique
-  # (identité, secrets, ancêtre, sceau) tient seul ; le consultant audite post-hoc.
+  # (identité, secrets, ancêtre, sceau) tient seul ; l'auditeur passe post-hoc.
   jury: []
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:
 
-    # --- Step 1: audit (consultant fire-mode) ---
+    # --- Step 1: audit ---
+    #
+    # ⚠ CETTE CARTE DISPATCHE UN JUGE DE BRIEF POUR FAIRE UN AUDIT, et elle échouera.
+    #
+    # Ce n'est PAS une régression du split `consultant`→`scoper` : c'est l'état d'avant, renommé.
+    # Le rôle d'AUDITEUR que cette carte appelle n'a jamais été construit. Son mode d'exécution
+    # (`fire-mode`) a été retiré du modop_set le 2026-07-19 (codex F-05), et le profil qu'elle
+    # dispatchait ne composait QUE des blocs SP de juge de brief (`method/brief-review` : « ton
+    # input est le brief, PAS du code — tu ne codes pas et tu ne modifies rien »), contre la gate
+    # ci-dessous qui exige un document d'audit non vide. La carte se contredit.
+    #
+    # Le nom `consultant` a été essayé ici comme échec explicite (dispatch mort sur `:not_found`) :
+    # refusé par `validate_card_steps!/1`, qui valide AU BOOT que chaque rôle de carte canon résout
+    # — un rôle inconnu ne casse pas un ticket, il empêche la fleet de démarrer. La carte doit donc
+    # nommer un rôle réel, et `scoper` est le seul qui existe. Ce commentaire est ce qui reste
+    # d'honnête : ce champ attend un auditeur, pas ce juge.
     audit:
-      role: consultant
+      role: scoper
       needs: []  # racine DAG
       inputs:
         - ticket.body
         - audit_target  # files/repos à auditer (path explicit dans ticket.body)
       outputs:
-        - audits/consultant-{date}.json
+        - audits/scoper-{date}.json
       gate:
         # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
         # (le chemin terminal-string ne les évaluait pas), avoués tels quels. L'escalade gatekeeper vient

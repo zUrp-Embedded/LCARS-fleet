@@ -8,7 +8,7 @@
 # UN SEUL JUGE : le qualifier. Sa mission plancher (SP subagent-spec-reviewer) : le code
 # COMPILE avant tout verdict — base minimale correcte. Les tests du runner ne sont pas
 # encore câblés côté fleet (le qualifier les portera quand ils le seront) ; d'ici là son
-# verdict repose sur le build + la lecture du diff. Pas de consultant (revue de brief) :
+# verdict repose sur le build + la lecture du diff. Pas de scoper (revue de brief) :
 # pour la gate de brief EN AMONT, prendre brief-gate.
 
 kind: WorkflowMap

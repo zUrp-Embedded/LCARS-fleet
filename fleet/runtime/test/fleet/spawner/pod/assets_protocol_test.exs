@@ -96,7 +96,7 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
           {"architect", "both"},
           {"starfleet", "both"},
           {"engineer", "fleet"},
-          {"consultant", "fleet"},
+          {"scoper", "fleet"},
           {"qualifier", "fleet"},
           {"reviewer", "fleet"},
           {"gatekeeper", "fleet"}

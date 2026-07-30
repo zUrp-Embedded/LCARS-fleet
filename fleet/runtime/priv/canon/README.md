@@ -11,13 +11,13 @@
 > `cap-profiles/monks/` (absent = monks gelés) → chemin **dormant par design** jusqu'à un dégel explicite.
 
 **Date** : 2026-05-22 (bascule run #4)
-**Dernière révision** : 2026-07-15
+**Dernière révision** : 2026-07-31
 **Statut** : LEGACY GELÉ — non chargé par le code (cf. bannière ci-dessus)
 **Référencé par** : —
 
 ## Contenu
 
-- `cap-profiles/` — capability profiles (archivist, monk, à compléter : architect, engineer, consultant, qualifier, reviewer, gatekeeper, starfleet)
+- `cap-profiles/` — capability profiles (archivist, monk, à compléter : architect, engineer, scoper, qualifier, reviewer, gatekeeper, starfleet)
 - `fleets/` — configurations d'instances de fleet (memory-alpha, memory-beta) — gelées (dir legacy)
 - `sp/` — system prompts cap-profile (archivist, monk)
 

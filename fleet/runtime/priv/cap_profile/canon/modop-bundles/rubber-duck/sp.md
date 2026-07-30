@@ -1,7 +1,7 @@
 # Modop — rubber-duck (verbalisation pré-action)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-14
+**Dernière révision** : 2026-07-31
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : doctrine YOLO D-Y-1 4 marqueurs verbalisation + §2.6 verbalisation pre-edit inconditionnelle (beyond_#1 doctrine-anti-yolo + LCARS canon)
 
@@ -56,7 +56,7 @@ Cap-profile dont `modop_set: [rubber-duck, ...]` :
 
 Cap-profile **dispensé** :
 - qualifier, reviewer (read-only par scope, pas de marqueurs critiques)
-- consultant (audit-only, scope advisory)
+- scoper (brief judge, scope advisory)
 
 ## Anti-pattern superpowers
 

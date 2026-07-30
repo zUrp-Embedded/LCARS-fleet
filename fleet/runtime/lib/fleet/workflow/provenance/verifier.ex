@@ -3,7 +3,7 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   Deterministic verifier of the provenance SHA triplet — the one NON-LLM wall on
   traceability (brief: `beyond_#6/BRIEF-provenance-verifier.md`).
 
-  The four gates (consultant/qualifier/reviewer/gatekeeper) are LLMs — fooled together
+  The four gates (scoper/qualifier/reviewer/gatekeeper) are LLMs — fooled together
   they produce apparent rigor. An emitted-but-never-verified attestation is decorative.
   This module makes the triplet LOAD-BEARING with `git` + JSON alone: no LLM, no
   heuristic, no crypto, no new dependency — the same tooling budget as the emitter
@@ -23,7 +23,7 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   `mix lcars.provenance.verify` for manual/CI use. NOT wired as a hard gate (Phase 2 =
   a separate user decision at the seal).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   alias Fleet.Workflow.Git

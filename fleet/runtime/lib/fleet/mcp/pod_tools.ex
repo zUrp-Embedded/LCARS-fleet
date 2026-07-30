@@ -39,7 +39,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   use ExMCP.Server
@@ -280,7 +280,7 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "List the escalations of YOUR project awaiting YOUR arbitration (issues labelled " <>
-          "`lcars-awaits-arch`): a worker (consultant/engineer/gatekeeper) hit `escalate_user` and " <>
+          "`lcars-awaits-arch`): a role (scoper/engineer/gatekeeper) hit `escalate_user` and " <>
           "handed the decision back to you. The wake (\"ton tour\") only signals THAT there is work; " <>
           "THIS reads WHAT. Returns each awaiting issue with `number`, `title` and `verdict` (the " <>
           "worker's escalation comment — the reasoning). Then act: fix + re-`create_issue`, " <>

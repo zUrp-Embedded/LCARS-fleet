@@ -18,7 +18,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `GatekeeperEscalation` — async-out of the gatekeeper escalation (enqueue eval brief + kick).
 
   THIS module keeps: the Bus GenServer (subscribe/handle_info), the `gate_evals` state (async
-  resumptions), the verdict application (`apply_verdict` — shared gatekeeper/consultant), the
+  resumptions), the verdict application (`apply_verdict` — shared gatekeeper/scoper), the
   sync/offload execution discipline (`run_completion`) and the per-step-run derivation of the
   state (`step_run_state`: repo/remote from the event, multi-project).
 
@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-07-31
   """
 
   use GenServer
@@ -869,7 +869,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # APPLICATION of a judge verdict (gate-decision-v1). ONE function, shared by ALL judges
   # whatever their position: the gatekeeper (async verdict via `work_item.completed` → resume_gate) AND the
-  # brief-review consultant (verdict via `pod.completed` → gate_decide → run_step_run). continue → advances the
+  # brief-review scoper (verdict via `pod.completed` → gate_decide → run_step_run). continue → advances the
   # workflow_map; abandon → close; the rest → await_arch. The ONLY diff (PR vs pre-PR) lives in `complete_judge`
   # (trace = native review if PR, otherwise issue comment), derived from the forge state + the ctx's
   # `judge_target` — NOT from a fork here. `trace` is already attributed to the right judge (label) by the caller.
@@ -887,7 +887,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # terminal would MERGE the code WITHOUT going through the PR judges. We route via the SAME
         # `GateEngine.advance_intent/3` as the gate `:pass` path: a terminal
         # producer → `:review` (opens the PR + requests the judges, NEVER an auto-merge of a deliverable); a terminal
-        # judge (brief-review consultant) → `:promote` (it validated the last gate of its workflow_map);
+        # judge (brief-review scoper) → `:promote` (it validated the last gate of its workflow_map);
         # a next step → `:advance`. A single source of truth for the terminal intent.
         # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
         # cap-profile fails-loud, never a blind terminal intent under an unknown property.

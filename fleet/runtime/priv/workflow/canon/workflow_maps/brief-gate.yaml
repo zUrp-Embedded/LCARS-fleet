@@ -1,21 +1,22 @@
 # Pipeline V2 — brief-gate (#8, 2026-06-18)
 #
 # Date: 2026-06-18
-# Statut: actif — gate dure de revue de brief (consultant) AVANT dispatch engineer.
+# Statut: actif — gate dure de revue de brief (scoper) AVANT dispatch engineer.
 # Dérivé de: DECISIONS-attribution-promotion-concurrence-2026-06-18 + design #8 (build-spec passe 2-4).
 # Consommé par: Fleet.Workflow.Loader / Fleet.Pilot.Entry (type:->workflow_map) + StepDispatcher.workflow_map_role.
 #
-# La workflow_map EST la machine à états : le 1er step (racine needs:[]) est brief-review (consultant en
-# mode JUGE, brief_kind:judge per-step — le profil consultant reste worker pour l'audit). L'engineer
-# (step build) ne part QUE quand le consultant a validé le brief (gate dure mécanique : le poller ne
+# La workflow_map EST la machine à états : le 1er step (racine needs:[]) est brief-review (scoper,
+# juge NATIF depuis le split du 2026-07-30 ; le `brief_kind` du step reste declare, cf. son
+# commentaire). L'engineer
+# (step build) ne part QUE quand le scoper a validé le brief (gate dure mécanique : le poller ne
 # dispatche build qu'une fois la route avancée à `build`). Brief non-exécutable → escalade arch
-# (await_arch), PAS rework du consultant (re-juger ne corrige pas un mauvais brief — l'arch corrige).
+# (await_arch), PAS rework du scoper (re-juger ne corrige pas un mauvais brief — l'arch corrige).
 
 kind: WorkflowMap
 metadata:
   name: brief-gate
-  description: "Revue du brief (consultant-juge) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
-  presentation: "C1→C4 — La carte STANDARD : un consultant-juge valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
+  description: "Revue du brief (scoper) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
+  presentation: "C1→C4 — La carte STANDARD : un scoper valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
   applicable_intensity: [C1, C2, C3, C4]
 
 spec:
@@ -26,10 +27,14 @@ spec:
   max_rework_rounds: 2
   steps:
 
-    # --- Step 1 (racine) : revue du brief par le consultant (mode JUGE) ---
+    # --- Step 1 (racine) : revue du brief par le scoper (juge natif) ---
     brief-review:
-      role: consultant
-      brief_kind: judge           # #8.B : override per-step → GateBrief désamorcé (verdict, pas de prod)
+      role: scoper
+      # REDONDANT avec `brief_kind: judge` du profil scoper, et load-bearing quand meme :
+      # `GateEngine.gate_decide` lit cette propriete sur le STEP seul, sans repli sur le profil
+      # (contrairement a `BriefBuilder`). Retirer cette ligne fait hard-gater le verdict du juge
+      # comme la sortie d'un producteur. L'asymetrie est tracee cote code, elle n'est pas fermee ici.
+      brief_kind: judge
       judge_target: brief         # #8.E : juge le BRIEF (ticket.body), PAS un livrable/PR → pré-PR,
                                     #        avance issue-level, no-PR légitime (vs deliverable = fail-loud)
       needs: []                     # racine DAG

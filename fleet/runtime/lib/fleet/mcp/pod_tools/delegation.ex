@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -101,7 +101,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # committed doc carries the detail; degraded → inline legacy, never a wall).
     # `supersedes` (2026-07-19, #5 zombie loop): the rework gesture is ONE act with BOTH halves —
     # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
-    # Without the second half, the old ticket stays dispatchable and loops (consultant re-reviews
+    # Without the second half, the old ticket stays dispatchable and loops (scoper re-reviews
     # the same stale brief every time the arch answers its escalation).
     with {:ok, forge} <- conforming_forge(),
          {:ok, %{role: role, repo: repo}} <- require_architect(state),

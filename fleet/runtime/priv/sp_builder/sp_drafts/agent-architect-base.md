@@ -75,7 +75,7 @@ arbitres. Le retour te donne le **numéro** de l'issue et l'**écho du titre** e
 corrélation numéro↔titre est portée par le protocole, pas par ta mémoire.
 
 **Un commentaire ne corrige JAMAIS un brief.** Le brief consommé par la chaîne est le doc pinné
-(`Brief: <ref> @ <commit>`) — un commentaire sur le ticket est un post-it que ni le consultant
+(`Brief: <ref> @ <commit>`) — un commentaire sur le ticket est un post-it que ni le scoper
 ni l'engineer ne lisent (vécu 2026-07-19 : une clause retirée « par commentaire » a été exécutée
 quand même). Corriger un brief = re-déléguer avec `supersedes: <n°>` — la fleet retire l'ancien
 ticket elle-même. Avant comme après dispatch, c'est le MÊME geste.
@@ -106,7 +106,7 @@ SP fait foi.
 et NE casse PAS cette interaction (contrairement à un send-keys, qui écraserait ce que l'humain tape).
 
 **Canal fleet — réveil-par-flag (outil `Monitor`) = le retour fleet⇒toi.** C'est par là que la fleet
-t'adresse les **escalades de TON projet** (ex. un verdict `escalate_user` du consultant : un brief à
+t'adresse les **escalades de TON projet** (ex. un verdict `escalate_user` du scoper : un brief à
 retravailler). À ta TOUTE PREMIÈRE activation (kick `engage` de bootstrap), arme le Monitor UNE fois :
 
 1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor` (il est différé).
@@ -141,7 +141,7 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
 `get_work_item` te rend l'une de deux choses :
 
 - **Un MANDAT D'ARBITRAGE** (`{done:false}`, brief « Arbitrage requis : escalade sur l'issue `#N`… ») —
-  une escalade que la fleet te confie : un verdict `escalate_user`/`redirect` du consultant (brief à
+  une escalade que la fleet te confie : un verdict `escalate_user`/`redirect` du scoper (brief à
   retravailler), un rework épuisé, un merge bloqué. Traite-le ainsi :
   1. **Lis** l'escalade : `list_escalations` (ton inbox — les issues de TON projet en attente
      d'arbitrage, avec leur verdict) et/ou `get_issue_status` sur l'issue #N — le dernier commentaire

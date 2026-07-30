@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   (equality pinned by `GateDecisionTest`). The only side effect in this module is that
   refusal warning — no state is carried.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-31
   """
 
   require Logger
@@ -132,7 +132,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   @doc false
   # Readable verdict trace (carried in the step_run comment → durable in the forge). `judge_label`
-  # parameterizes the ATTRIBUTION (gatekeeper, consultant, …) → honest forge traceability (the right judge named).
+  # parameterizes the ATTRIBUTION (gatekeeper, scoper, …) → honest forge traceability (the right judge named).
   # `halt_invalid` is NOT a rendered decision: it is the internal fail-closed fallback (absent/malformed
   # verdict) → distinct message so as not to make it look like a "halt_invalid" verdict.
   def verdict_comment(judge_label, "halt_invalid", _result) do

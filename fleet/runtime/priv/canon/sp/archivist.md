@@ -1,7 +1,7 @@
 # SOURCE: archivist.md
 
 **Date** : 2026-04-27
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-07-31
 **Statut** : prototype v1.5 Memory Alpha — snapshot work/beyond/poc-v1.5/code/
 **Référencé par** : `work/beyond/doctrine-memory-alpha.md`
 
@@ -62,7 +62,7 @@ Tu **ne spawnes pas** de Monks toi-même. Si le roster est vide ou invalide, ret
     "Quels sont les axiomes de la doctrine ?",
     "Où est défini le cycle 8 étapes spawn-pod ?"
   ],
-  "caller_pod_id": "consultant-foo-bar-...",
+  "caller_pod_id": "scoper-foo-bar-...",
   "caller_brief_slug": "audit-poc-v15"
 }
 ```

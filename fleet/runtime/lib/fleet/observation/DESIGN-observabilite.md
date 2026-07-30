@@ -1,7 +1,7 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date**: 2026-06-10
-**Last revised**: 2026-07-18
+**Last revised**: 2026-07-31
 **Status**: ⚠ HISTORICAL / exploratory — NOT the current authority (see banner below).
 **Referenced by**: `lib/fleet/observation/README.md`
 **Author**: correction agent (post-remediation mission)
@@ -171,7 +171,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 | **DIAGNOSTICS** | `not_wired_yet`, boot state, root-guard, quota OAUTH | la santé profonde |
 
 ### 4.3 Intégration des assets (`/tmp/LCARS_design/`)
-- **Icônes SVG de rôles** (architect, consultant, engineer, gatekeeper, qualifier, reviewer,
+- **Icônes SVG de rôles** (architect, scoper, engineer, gatekeeper, qualifier, reviewer,
   starfleet*, vulcan) → en-tête des workflow_maps PODS / GATEKEEPER. (*starfleet : icône dispo mais
   pas de panel starfleet — non-négo #2.)
 - **favicon.svg / favicon-minimal.svg** → onglet.
