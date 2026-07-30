@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — substrat WSL : lockdown C: (wsl.conf), purge snap, masque gpg-agent, ready-room optionnelle
-# SUBSTRATE: wsl
+# APPLY-ON: wsl
+# CHECK-ON: wsl
 # NEEDS: root
 #
 # Ce module encaisse la dette de guerre WSL payée par les générations v0→v1 (commentaires de

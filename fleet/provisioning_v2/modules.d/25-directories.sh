@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — arborescence système : /local (préfixes d'install) + /home/private (secrets)
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: root
 #
 # DEUX dossiers. C'est tout. (La v1 en posait une dizaine — commons, handoffs, fleet-state,

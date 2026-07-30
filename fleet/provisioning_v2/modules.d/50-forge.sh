@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — forge : comptes de rôle + compte système CRÉÉS, puis tokens délégués au script A4
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: root
 #
 # La forge n'est PAS installée ici (elle vit à côté — conteneur sidecar en Docker, service externe

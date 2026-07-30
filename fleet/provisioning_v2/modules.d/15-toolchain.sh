@@ -3,8 +3,13 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — toolchain de BUILD : Erlang/OTP (apt, plancher) + Elixir précompilé PINNÉ (sha256)
-# SUBSTRATE: wsl linux
+# APPLY-ON: wsl linux
+# CHECK-ON: wsl linux
 # NEEDS: root
+# (CHECK-ON sans docker — délibéré, et ce n'est PAS le « 10/15 CHECK-ON » du plan ADR §11 pris au
+# mot : la toolchain vit dans le STAGE BUILD de l'image, pas dans le conteneur runtime. L'état-cible
+# « toolchain posée » n'a pas à être vrai là où on ne buildera jamais ; la vérité docker de ce
+# module, c'est la release présente — sondée par 60-deploy check.)
 #
 # La release fleet_umbrella est self-contained (ERTS bundlé) : la toolchain ne sert qu'à BÂTIR
 # (etc/install.sh → mix release), jamais au run. En Docker, elle vit dans le stage builder de

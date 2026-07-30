@@ -55,24 +55,29 @@ Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seul
 ## Modules (`modules.d/NN-*.sh`)
 
 Chaque module est un PROCESSUS exécuté (`<module> check|apply`), qui déclare son terrain en tête
-(`# SUBSTRATE:`, `# NEEDS:` — greppable, filtré par le runner). Ordre = préfixe numérique.
+sur DEUX axes (D6 : « qui applique » ≠ « ce qui doit être vrai ») — `# APPLY-ON:` (où les
+mutations tournent), `# CHECK-ON:` (où l'état-cible doit tenir), `# NEEDS:` — greppable, filtré
+par le runner. Ordre = préfixe numérique. En apply, un module CHECK-ON-retenu hors APPLY-ON
+tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — rebuild l'image).
 
-| Module | Substrat | Pose |
-|---|---|---|
-| 00-preflight | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
-| 10-packages | wsl linux | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
-| 15-toolchain | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only |
-| 20-groups | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
-| 25-directories | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
-| 30-wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
-| 40-claude-bin | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
-| 50-forge | any | comptes de rôle + `lcars-system` (API admin), passwords check-before-create, tokens DÉLÉGUÉS à `etc/provision-role-tokens.sh` (A4) |
-| 60-deploy | wsl linux | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
-| 70-human | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
+| Module | APPLY-ON | CHECK-ON | Pose |
+|---|---|---|---|
+| 00-preflight | any | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
+| 10-packages | wsl linux | any | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
+| 15-toolchain | wsl linux | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only, jamais dans le conteneur runtime |
+| 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
+| 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
+| 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
+| 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
+| 50-forge | any | any | comptes de rôle + `lcars-system` (API admin), passwords check-before-create, tokens DÉLÉGUÉS à `etc/provision-role-tokens.sh` (A4) |
+| 60-deploy | wsl linux | any | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 
-En **Docker**, `10/15/60` sont des layers de l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge à l'entrypoint — l'ISO WSL↔Docker est STRUCTURELLE (même liste
-de modules, filtrée), vérifiée par le MÊME doctor dans les deux substrats.
+En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
+install.sh) et le reste converge à l'entrypoint. L'ISO WSL↔Docker n'est plus seulement la liste
+filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
+`10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
+côtés.
 
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 

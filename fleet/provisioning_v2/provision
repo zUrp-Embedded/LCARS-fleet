@@ -14,9 +14,13 @@
 #     autres à moitié fait. L'ordre est le préfixe numérique, lisible dans un `ls`.
 #   - chaque module expose `check` (sonde read-only) et `apply` (check → fix → re-check) ;
 #     le doctor N'EST PAS un autre code : c'est le même check que l'apply utilise. Une seule vérité.
-#   - chaque module DÉCLARE son terrain en tête (greppable, pas de registre à maintenir) :
-#         # SUBSTRATE: any|wsl|docker|linux…   (le runner filtre — l'ISO WSL↔Docker est ce filtre)
-#         # NEEDS: root|human                  (droit d'exécution de l'apply)
+#   - chaque module DÉCLARE son terrain en tête (greppable, pas de registre à maintenir), sur
+#     DEUX axes (D6 de l'ADR install/compile/release — les confondre rendait le doctor Docker
+#     muet sur le verrou RO, le câblage bin et la sonde bwrap) :
+#         # APPLY-ON: wsl linux   où les MUTATIONS tournent (en Docker le stage image a déjà
+#                                 appliqué → l'apply de ce module est remplacé par son check)
+#         # CHECK-ON: any         où l'ÉTAT-CIBLE doit être VRAI (le doctor sonde tout ça)
+#         # NEEDS: root|human     droit d'exécution de l'apply
 #   - AUCUNE sentinelle d'état : l'état, c'est le système, re-sondé à chaque run. (La machine à
 #     états v1 — .install_ok/.fleet_ready/.deploy_ok/.offline-bootstrap éparpillées sur 2 dossiers —
 #     pouvait rester coincée « ni-vierge-ni-provisionnée » sans un message pour l'humain.)
@@ -142,41 +146,58 @@ if [[ "$CMD" == "update" ]]; then
 fi
 
 # ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
-# Le header `# SUBSTRATE:` d'un module liste ses terrains (`any` = partout). Un module sans header
-# est une ERREUR de construction (fail-loud, pas un défaut silencieux).
+# Deux headers, deux axes (D6). La sélection se fait sur CHECK-ON : partout où l'état-cible doit
+# être vrai, le module est retenu. En apply, un module retenu dont APPLY-ON ne couvre pas le
+# substrat courant tourne en CHECK (l'état est bâti ailleurs — stage image, build — mais il DOIT
+# tenir ici ; un drift est alors un ÉCHEC d'apply : rien ne peut le converger sur place).
+# Un module sans les DEUX headers est une ERREUR de construction (fail-loud).
 module_field() { # $1=file $2=FIELD → valeur (vide si absent)
   sed -n "s/^# ${2}: *//p" "$1" | head -1
 }
 
-declare -a SELECTED=()
+substrate_in() { # $1=liste (`any` ou mots séparés par des espaces) → 0 si $SUBSTRATE dedans
+  [[ "$1" == "any" ]] && return 0
+  case " $1 " in *" $SUBSTRATE "*) return 0 ;; *) return 1 ;; esac
+}
+
+declare -a SELECTED=() EFFECTIVE=()
 for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
   name="$(basename "$mod" .sh)"
-  subs="$(module_field "$mod" SUBSTRATE)"
+  apply_on="$(module_field "$mod" APPLY-ON)"
+  check_on="$(module_field "$mod" CHECK-ON)"
   needs="$(module_field "$mod" NEEDS)"
-  [[ -n "$subs" ]]  || die "$name: header '# SUBSTRATE:' manquant"
-  [[ -n "$needs" ]] || die "$name: header '# NEEDS:' manquant"
+  [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
+  [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
+  [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
+  # Cohérence : appliquer là où on ne vérifie pas est irreprésentable — tout terrain d'APPLY-ON
+  # doit être couvert par CHECK-ON.
+  if [[ "$check_on" != "any" ]]; then
+    for s in $apply_on; do
+      [[ "$s" == "any" ]] && die "$name: APPLY-ON any exige CHECK-ON any"
+      case " $check_on " in *" $s "*) ;; *) die "$name: APPLY-ON contient « $s » hors de CHECK-ON ($check_on)" ;; esac
+    done
+  fi
   # Filtre --only (nom complet `10-packages` ou préfixe `10`).
   if [[ "${#ONLY[@]}" -gt 0 ]]; then
     keep=0
     for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
     [[ "$keep" -eq 1 ]] || continue
   fi
-  # Filtre substrat (le header liste des mots séparés par des espaces : `wsl linux`).
-  if [[ "$subs" != "any" ]]; then
-    case " $subs " in
-      *" $SUBSTRATE "*) ;;
-      *) continue ;;
-    esac
-  fi
+  substrate_in "$check_on" || continue
   SELECTED+=("$mod")
+  if [[ "$CMD" == "apply" ]] && substrate_in "$apply_on"; then
+    EFFECTIVE+=("apply")
+  else
+    EFFECTIVE+=("check")
+  fi
 done
 [[ "${#SELECTED[@]}" -gt 0 ]] || die "aucun module ne matche (substrat=$SUBSTRATE${ONLY[0]:+, only=${ONLY[*]}})"
 
 if [[ "$CMD" == "list" ]]; then
   for mod in "${SELECTED[@]}"; do
-    printf '%-28s SUBSTRATE=%-14s NEEDS=%s\n' "$(basename "$mod" .sh)" \
-      "$(module_field "$mod" SUBSTRATE)" "$(module_field "$mod" NEEDS)"
+    printf '%-28s APPLY-ON=%-12s CHECK-ON=%-10s NEEDS=%s\n' "$(basename "$mod" .sh)" \
+      "$(module_field "$mod" APPLY-ON)" "$(module_field "$mod" CHECK-ON)" "$(module_field "$mod" NEEDS)"
   done
   exit 0
 fi
@@ -186,9 +207,10 @@ fi
 # le consentement + l'escalade). Il dit exactement ce qui manque. Les modules NEEDS:human sont
 # ramenés à PROV_HUMAN via as_human par le module lui-même — root peut donc tout appliquer.
 if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
-  for mod in "${SELECTED[@]}"; do
-    if [[ "$(module_field "$mod" NEEDS)" == "root" ]]; then
-      die "apply exige root pour $(basename "$mod" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
+  for i in "${!SELECTED[@]}"; do
+    # Seuls les modules qui vont réellement MUTER exigent root (un check-only reste read-only).
+    if [[ "${EFFECTIVE[$i]}" == "apply" && "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
+      die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
     fi
   done
 fi
@@ -201,22 +223,33 @@ if [[ "$CMD" == "apply" ]]; then
 fi
 
 # ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
-MODE="check"; [[ "$CMD" == "apply" ]] && MODE="apply"
 total=0 ok=0 drift=0 failed=0
 declare -a REPORT=()
 
-for mod in "${SELECTED[@]}"; do
+for i in "${!SELECTED[@]}"; do
+  mod="${SELECTED[$i]}"
   name="$(basename "$mod" .sh)"
+  eff="${EFFECTIVE[$i]}"
   total=$((total + 1))
-  [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($MODE) ==="
+  if [[ "$CMD" == "apply" && "$eff" == "check" ]]; then
+    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ==="
+  else
+    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($eff) ==="
+  fi
   rc=0
-  PROVISION_MODULE="$name" bash "$mod" "$MODE" || rc=$?
-  case "$MODE:$rc" in
-    check:0) ok=$((ok + 1));      REPORT+=("$name=OK") ;;
-    check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
-    apply:0) ok=$((ok + 1));      REPORT+=("$name=OK") ;;
-    apply:*) failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+  PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
+  case "$CMD:$eff:$rc" in
+    doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    doctor:check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
+    apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    apply:apply:*)  failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+    apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    apply:check:*)
+      # État-cible absent ET inapplicable ici : rien sur CE substrat ne peut le converger — le
+      # fournisseur est ailleurs (stage image, build). Un apply qui le tairait serait vert-menteur.
+      failed=$((failed + 1)); REPORT+=("$name=FAIL")
+      echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebuild l'image/le build qui le fournit" >&2 ;;
   esac
 done
 

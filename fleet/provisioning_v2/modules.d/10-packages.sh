@@ -3,8 +3,11 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — paquets runtime (apt) + sonde bwrap RÉELLE (le sandbox tourne, pas « le paquet est là »)
-# SUBSTRATE: wsl linux
+# APPLY-ON: wsl linux
+# CHECK-ON: any
 # NEEDS: root
+# (CHECK-ON any, APPLY-ON sans docker : les paquets sont des layers de l'image — mais bwrap
+# opérationnel et l'outillage présent doivent être VRAIS en conteneur, et le doctor les y sonde.)
 #
 # Le strict nécessaire au RUNTIME v2 (le contrat vit dans fleet/runtime/etc/README.md) :
 #   tmux        — sessions pod (host_launch/bwrap_launch) + le daemon fleet_v2

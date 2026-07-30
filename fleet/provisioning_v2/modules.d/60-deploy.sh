@@ -3,8 +3,12 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — deploy du runtime : orchestre etc/install.sh (l'autorité build+pose) puis verrouille RO
-# SUBSTRATE: wsl linux
+# APPLY-ON: wsl linux
+# CHECK-ON: any
 # NEEDS: root
+# (CHECK-ON any : en docker le déploiement est fait par le stage build de l'image, mais le verrou
+# RO, la release présente et le câblage bin sont l'état-cible PARTOUT — le doctor conteneur qui ne
+# les sondait pas était muet sur les faits les plus pertinents du substrat.)
 #
 # Ce module N'INVENTE PAS le déploiement : fleet/runtime/etc/install.sh est l'autorité (modèle
 # 3 zones SOURCE→INSTALL→STATE, release self-contained, idempotent). Ici, on mécanise la carte de
