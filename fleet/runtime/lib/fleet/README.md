@@ -1,7 +1,7 @@
 # Fleet — root map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-07-21
+**Last revised**: 2026-07-30
 **Status**: active — generated topology map + root pointers
 **Referenced by**: `CLAUDE.md`, `README.md`
 
@@ -40,6 +40,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | pod primitives | `Fleet.TaskQueue` | 2 |
 | substrate | `Fleet.CapProfile` | 1 |
 | substrate | `Fleet.EventRouter` | 1 |
+| foundation | `Fleet.Conflict` | 0 |
 | foundation | `Fleet.Decision` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |

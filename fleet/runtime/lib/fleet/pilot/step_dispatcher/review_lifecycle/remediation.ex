@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -118,10 +118,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     * `:policy`   → git-mergeable but branch-protection refuses (approvals cleared by a
                     human RE-REQUEST, CI…) → we re-converge: re-dispatch the re-requested judge (timeline).
                     No re-requested = policy block we can't lift mechanically → honest escalation.
-    * `:conflict` → BOUNDED producer conflict-rework (tier 1, `conflict_rework/4`: local
-                    resolution on the same PR — needs no forge credentials); budget exhausted or
-                    unreadable → honest arch escalation (tier 3). Tier 2 (gatekeeper-agent
-                    diagnosis before the arch) is a later increment.
+    * `:conflict` → the 4-tier pipeline of `conflict_rework/4`, gated by `:conflict_diagnosis?`:
+                    tier 0 (deterministic diagnosis + auto-resolution of an all-trivial conflict,
+                    runtime, no pod), tier 1 (BOUNDED producer conflict-rework: local resolution on
+                    the same PR — needs no forge credentials), tier 2 (ONE gatekeeper pass, the
+                    exception judge), tier 3 (honest arch escalation). Flag off → tier 1 → tier 3,
+                    byte-for-byte the legacy path.
     * `:unknown`  → not classifiable → HONEST arch escalation (we don't guess).
   """
   @spec route_merge_failure(integer(), String.t(), term(), Ctx.t()) ::
@@ -162,15 +164,169 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
+  # Tier-0 conflict handling (deterministic, config-gated, OFF by default). A diagnosis routes the
+  # conflict BEFORE any producer round: an all-semantic conflict escalates straight to the arch (no
+  # wasted rounds), an all-trivial one is auto-resolved and pushed by the runtime (the jury re-judges
+  # the new head, so a wrong resolution is caught downstream), anything else — and any probe/apply
+  # failure — falls through to the legacy producer conflict-rework. The gain only ever SHORTENS a
+  # path, never breaks one. Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are
+  # injectable seams (`:conflict_diagnoser` / `:conflict_applier`). NB tier-2 (gatekeeper inference)
+  # is a distinct, still-future increment — tier-0 is the deterministic pre-filter in front of it.
+  defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
+    if diagnosis_enabled?() do
+      case tier0_conflict_route(pr_number, head, reason, ctx) do
+        {:handled, result} -> result
+        :fall_through -> legacy_conflict_rework(pr_number, head, reason, ctx)
+      end
+    else
+      legacy_conflict_rework(pr_number, head, reason, ctx)
+    end
+  end
+
+  defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
+    case diagnoser().probe(ctx.repo, head, []) do
+      {:ok, diagnosis} -> tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx)
+      {:error, _} -> :fall_through
+    end
+  end
+
+  @doc false
+  # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
+  @spec tier0_decision(map()) :: :escalate | :apply | :fall_through
+  def tier0_decision(%{totals: %{none_trivial?: true}}), do: :escalate
+  def tier0_decision(%{totals: %{all_trivial?: true}}), do: :apply
+  def tier0_decision(_), do: :fall_through
+
+  defp tier0_act(:escalate, pr_number, head, reason, ctx) do
+    Logger.info(
+      "Remediation: PR #{ctx.repo}##{pr_number} conflict is all-semantic → arch escalation (tier-0, rounds skipped)"
+    )
+
+    {:handled,
+     ArchEscalation.escalate_merge_blocked(
+       arch_seams(ctx),
+       pr_number,
+       head,
+       :conflict,
+       {:conflict_all_semantic, reason}
+     )}
+  end
+
+  defp tier0_act(:apply, pr_number, head, _reason, ctx) do
+    case applier().apply(ctx.repo, head, []) do
+      {:ok, :auto_resolved} ->
+        Logger.info(
+          "Remediation: PR #{ctx.repo}##{pr_number} conflict auto-resolved (tier-0, all trivial)"
+        )
+
+        {:handled, {:ok, {:auto_resolved, pr_number}}}
+
+      {:error, _} ->
+        :fall_through
+    end
+  end
+
+  defp tier0_act(:fall_through, _pr_number, _head, _reason, _ctx), do: :fall_through
+
+  defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
+
+  defp diagnoser,
+    do: Application.get_env(:fleet_pilot, :conflict_diagnoser, Fleet.Pilot.ConflictProbe)
+
+  defp applier,
+    do: Application.get_env(:fleet_pilot, :conflict_applier, Fleet.Pilot.ConflictApply)
+
+  # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
+  # the one-shot GATEKEEPER a single inference pass before immobilizing a human (tier-3). Flag off,
+  # or the gatekeeper pass already spent → the legacy arch escalation, byte-for-byte unchanged.
+  defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    if diagnosis_enabled?() do
+      gatekeeper_stage(pr_number, head, reason, ctx, producer_rounds)
+    else
+      escalate_exhausted(pr_number, head, reason, ctx, producer_rounds)
+    end
+  end
+
+  defp gatekeeper_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    marker = "[conflict-gatekeeper:pr-#{pr_number}"
+    count = ctx.forge.count_comments_marked(ctx.repo, pr_number, marker, ctx.forge_opts)
+
+    case gatekeeper_stage_decision(count) do
+      :dispatch ->
+        dispatch_gatekeeper_rework(pr_number, head, ctx)
+
+      :escalate ->
+        escalate_exhausted(pr_number, head, {:gatekeeper_spent, reason}, ctx, producer_rounds)
+    end
+  end
+
+  @doc false
+  # PURE tier-2 gate: one gatekeeper pass, then the arch. Unreadable count → escalate (never a loop).
+  @spec gatekeeper_stage_decision({:ok, integer()} | {:error, term()}) :: :dispatch | :escalate
+  def gatekeeper_stage_decision({:ok, spent}) when is_integer(spent) and spent < 1, do: :dispatch
+  def gatekeeper_stage_decision(_), do: :escalate
+
+  # One inference pass by the gatekeeper (a distinct, more-capable one-shot judge) on the SAME proven
+  # conflict-rework dispatch as the producer: it clones the feature branch (`base_branch: head`),
+  # resolves in its workspace, the SYSTEM pushes, the jury re-judges the new head. The round-1 marker
+  # bounds it to a single pass and makes the re-dispatch idempotent (dedup, like the producer's).
+  # The brief carries the EXCEPTION-JUDGE voice (`:conflict_rework_gatekeeper`), not the producer's:
+  # the gatekeeper has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited
+  # it to guess at an intention it does not hold. Same mechanics, addressed to who is actually there.
+  defp dispatch_gatekeeper_rework(pr_number, head, %Ctx{} = ctx) do
+    signature = "[conflict-gatekeeper:pr-#{pr_number}:round-1]"
+
+    body =
+      "⚠ Conflit de merge non résolu par le producteur (budget de rework épuisé). Passe " <>
+        "d'exception : le gatekeeper tente une dernière résolution avant escalade humaine — il " <>
+        "intègre `origin/main`, résout, et re-livre sur CETTE PR ; les juges re-jugeront le nouveau " <>
+        "head.\n\n" <> signature
+
+    comment_opts =
+      ctx.forge_opts
+      |> Keyword.put(:dedup_signature, signature)
+      |> Keyword.put(:dedup_any_author, true)
+
+    case ctx.forge.post_comment(ctx.repo, pr_number, body, comment_opts) do
+      {:ok, _} ->
+        RoleDispatch.dispatch(
+          :conflict_rework_gatekeeper,
+          pr_number,
+          head,
+          Fleet.Pilot.Roles.gatekeeper_role(),
+          ctx
+        )
+
+      {:error, marker_reason} ->
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :conflict,
+          {:conflict_gatekeeper_marker_unpostable, marker_reason}
+        )
+    end
+  end
+
+  defp escalate_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    ArchEscalation.escalate_merge_blocked(
+      arch_seams(ctx),
+      pr_number,
+      head,
+      :conflict,
+      {:conflict_rework_exhausted, producer_rounds, reason}
+    )
+  end
+
   # Tier 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
   # dedup makes the count replay-safe). Beyond budget, or any unreadable read → tier 3, the
-  # honest arch escalation (never a blind loop). NOTE the tier 2 (gatekeeper-agent diagnosis
-  # mechanical-vs-semantic before the arch) is a LATER increment — it needs a workspace for the
-  # gatekeeper one-shot; today budget-exhausted goes straight to the arch.
-  defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
+  # honest arch escalation (never a blind loop). Tier 2 (a gatekeeper one-shot before the arch) is
+  # CÂBLÉ since the conflict-engine increment: budget-exhausted goes through `gatekeeper_stage_decision`
+  # and one gatekeeper pass, then the arch — gated by `:conflict_diagnosis?` like tier 0.
+  defp legacy_conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     marker_prefix = "[conflict-rework:pr-#{pr_number}"
 
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
@@ -180,13 +336,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       if rounds < budget do
         dispatch_conflict_rework(pr_number, head, rounds + 1, budget, ctx)
       else
-        ArchEscalation.escalate_merge_blocked(
-          arch_seams(ctx),
-          pr_number,
-          head,
-          :conflict,
-          {:conflict_rework_exhausted, rounds, reason}
-        )
+        producer_exhausted(pr_number, head, reason, ctx, rounds)
       end
     else
       {:skipped, _} = skip ->

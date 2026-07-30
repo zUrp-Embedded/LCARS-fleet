@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -46,8 +46,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
-  @typedoc "Nature of the PR dispatch: judge or producer rework."
-  @type kind :: :judge | :rework | :conflict_rework
+  @typedoc """
+  Nature of the PR dispatch. `:conflict_rework` and `:conflict_rework_gatekeeper` share the SAME
+  mechanics (clone the feature branch, resolve, system pushes, jury re-judges) and differ ONLY in
+  the brief's voice — the producer resumes ITS OWN approved work, the gatekeeper arrives as an
+  exception judge on someone else's. A single kind for both made the gatekeeper read a brief that
+  says "ton brief est INCHANGÉ" about a brief it never had.
+  """
+  @type kind :: :judge | :rework | :conflict_rework | :conflict_rework_gatekeeper
 
   @doc """
   Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
@@ -122,7 +128,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # changing the pod identity loses no context.
          pod_id =
            (case kind do
-              k when k in [:rework, :conflict_rework] ->
+              k when k in [:rework, :conflict_rework, :conflict_rework_gatekeeper] ->
                 Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
               _ ->
@@ -258,6 +264,25 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
        ),
        do:
          {:ok,
-          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: true),
+          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: :producer),
           "worker"}
+
+  # Conflict-rework GATEKEEPER (tier 2 — Remediation.dispatch_gatekeeper_rework): same dispatch,
+  # exception-judge voice. It is not resuming its own work and has no brief of its own to preserve.
+  defp review_brief(
+         :conflict_rework_gatekeeper,
+         _profile,
+         role,
+         forge,
+         repo,
+         _issue_n,
+         forge_opts,
+         route,
+         pr
+       ),
+       do:
+         {:ok,
+          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
+            conflict: :gatekeeper
+          ), "worker"}
 end

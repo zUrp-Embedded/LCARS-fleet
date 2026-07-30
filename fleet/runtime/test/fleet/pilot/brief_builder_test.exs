@@ -147,4 +147,48 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert brief =~ "Source du brief : brief inline du ticket"
     end
   end
+
+  describe "conflict rework brief — one mechanic, two voices" do
+    # The gatekeeper arrives on someone else's branch after the producer's budget ran out. Told
+    # "ton brief est INCHANGÉ", it is being addressed as the author of work it never wrote, and
+    # invited to guess at an intention it does not hold. The steps are the same; who is spoken to
+    # is not — and nothing but this test keeps the two apart once they share a code path.
+    defmodule ConflictForge do
+      def change_request_feedback(_repo, _pr, _opts), do: {:ok, []}
+    end
+
+    defp conflict_brief(voice) do
+      BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil, conflict: voice)
+    end
+
+    test "the PRODUCER is told its own brief is unchanged (it is resuming approved work)" do
+      brief = conflict_brief(:producer)
+
+      assert brief =~ "Ton brief est INCHANGÉ"
+      assert brief =~ "l'intention de TON brief"
+      refute brief =~ "Passe d'exception"
+    end
+
+    test "the GATEKEEPER is told it has no brief, and must compose rather than pick a side" do
+      brief = conflict_brief(:gatekeeper)
+
+      assert brief =~ "Passe d'exception"
+      assert brief =~ "tu n'as pas de brief à reprendre"
+      assert brief =~ "tu ne choisis pas un camp"
+      # The exception judge must know that refusing IS the expected outcome when composing needs a
+      # decision the code does not carry — a guessed resolution costs more than a motivated refusal.
+      assert brief =~ "blocked"
+
+      # And it must NEVER inherit the producer's framing.
+      refute brief =~ "Ton brief est INCHANGÉ"
+      refute brief =~ "TON brief"
+    end
+
+    test "no conflict → no section at all (the default path is untouched)" do
+      brief = BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil)
+
+      refute brief =~ "Conflit de merge"
+      refute brief =~ "Passe d'exception"
+    end
+  end
 end

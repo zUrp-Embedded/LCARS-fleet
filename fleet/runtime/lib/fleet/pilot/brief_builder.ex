@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
@@ -44,28 +44,61 @@ defmodule Fleet.Pilot.BriefBuilder do
   # prose, same stance as the feedback sections. HONEST about the refs: the pod cannot fetch
   # (forge-blind) — if its workspace's `origin/main` is stale and un-refreshable, the doctrine
   # answer is `blocked`, never a guessed resolution.
+  # Two voices for ONE mechanic. The steps are identical (merge, resolve, commit, the system pushes,
+  # the jury re-judges); what differs is WHO is being addressed. The producer resumes work it wrote
+  # and that the judges approved. The gatekeeper arrives as an exception judge on someone else's
+  # branch after the producer's budget ran out — telling it "ton brief est INCHANGÉ" names a brief
+  # it never had, and invites it to guess at an intention it does not hold.
   defp conflict_section(opts) do
-    if Keyword.get(opts, :conflict, false) do
-      """
-      ## Conflit de merge à résoudre (prioritaire)
-
-      Ta branche a divergé de `main` : des briques sœurs ont été mergées depuis ta coupe, et le
-      merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
-      déjà approuvé par les juges, seul le conflit bloque.
-
-      1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
-      2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
-         des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
-      3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
-
-      Si `origin/main` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
-      peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
-      JAMAIS le contenu d'une brique sœur.
-
-      """
-    else
-      ""
+    case Keyword.get(opts, :conflict, false) do
+      false -> ""
+      :gatekeeper -> gatekeeper_conflict_section()
+      _producer -> producer_conflict_section()
     end
+  end
+
+  defp producer_conflict_section do
+    """
+    ## Conflit de merge à résoudre (prioritaire)
+
+    Ta branche a divergé de `main` : des briques sœurs ont été mergées depuis ta coupe, et le
+    merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
+    déjà approuvé par les juges, seul le conflit bloque.
+
+    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
+       des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
+    3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
+
+    Si `origin/main` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
+    peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
+    JAMAIS le contenu d'une brique sœur.
+
+    """
+  end
+
+  defp gatekeeper_conflict_section do
+    """
+    ## Passe d'exception : conflit de merge non résolu par le producteur
+
+    Ce n'est PAS ton travail et tu n'as pas de brief à reprendre. Le producteur a épuisé son
+    budget de rework sur ce conflit ; tu interviens en dernière passe avant escalade humaine.
+
+    Le contenu des deux côtés est déjà APPROUVÉ : les juges ont validé la branche, et les briques
+    sœurs sont mergées sur `main`. Il n'y a donc rien à arbitrer sur le fond — la seule question
+    est de composer les deux intentions sans en sacrifier une.
+
+    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    2. Résous en PRÉSERVANT les deux apports. Tu n'as pas écrit ce code : tu ne connais pas les
+       raisons derrière chaque ligne, donc tu ne choisis pas un camp — tu composes.
+    3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
+
+    Rends `blocked` en disant pourquoi dès que la composition demande une DÉCISION que le code ne
+    porte pas (deux intentions réellement incompatibles, ou un `origin/main` périmé que tu ne peux
+    pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
+    humaine existe pour ça, et une résolution devinée coûte plus cher qu'un refus motivé.
+
+    """
   end
 
   # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable block.

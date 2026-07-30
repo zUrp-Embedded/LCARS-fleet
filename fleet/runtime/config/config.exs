@@ -18,3 +18,11 @@ import Config
 if File.exists?(Path.join(__DIR__, "#{Mix.env()}.exs")) do
   import_config "#{Mix.env()}.exs"
 end
+
+# Conflict engine (tier 0 deterministic diagnosis + tier 2 gatekeeper pass). OFF by default and
+# stated HERE rather than left to a `get_env` default: a capability whose only trace is the absence
+# of a line is one an operator cannot discover, and cannot audit as deliberately off.
+# ON → `Remediation` routes trivial conflicts to auto-resolution (the jury still re-judges the
+# pushed head) and gives the gatekeeper one pass before the human. OFF → producer then arch,
+# unchanged. Seams: `:conflict_diagnoser`, `:conflict_applier`.
+config :fleet_pilot, conflict_diagnosis?: false
