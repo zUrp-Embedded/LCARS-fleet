@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -156,6 +156,78 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
+  # Tier-0 conflict handling (deterministic, config-gated, OFF by default). A diagnosis routes the
+  # conflict BEFORE any producer round: an all-semantic conflict escalates straight to the arch (no
+  # wasted rounds), an all-trivial one is auto-resolved and pushed by the runtime (the jury re-judges
+  # the new head, so a wrong resolution is caught downstream), anything else — and any probe/apply
+  # failure — falls through to the legacy producer conflict-rework. The gain only ever SHORTENS a
+  # path, never breaks one. Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are
+  # injectable seams (`:conflict_diagnoser` / `:conflict_applier`). NB tier-2 (gatekeeper inference)
+  # is a distinct, still-future increment — tier-0 is the deterministic pre-filter in front of it.
+  defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
+    if diagnosis_enabled?() do
+      case tier0_conflict_route(pr_number, head, reason, ctx) do
+        {:handled, result} -> result
+        :fall_through -> legacy_conflict_rework(pr_number, head, reason, ctx)
+      end
+    else
+      legacy_conflict_rework(pr_number, head, reason, ctx)
+    end
+  end
+
+  defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
+    case diagnoser().probe(ctx.repo, head, []) do
+      {:ok, diagnosis} -> tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx)
+      {:error, _} -> :fall_through
+    end
+  end
+
+  @doc false
+  # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
+  @spec tier0_decision(map()) :: :escalate | :apply | :fall_through
+  def tier0_decision(%{totals: %{none_trivial?: true}}), do: :escalate
+  def tier0_decision(%{totals: %{all_trivial?: true}}), do: :apply
+  def tier0_decision(_), do: :fall_through
+
+  defp tier0_act(:escalate, pr_number, head, reason, ctx) do
+    Logger.info(
+      "Remediation: PR #{ctx.repo}##{pr_number} conflict is all-semantic → arch escalation (tier-0, rounds skipped)"
+    )
+
+    {:handled,
+     ArchEscalation.escalate_merge_blocked(
+       arch_seams(ctx),
+       pr_number,
+       head,
+       :conflict,
+       {:conflict_all_semantic, reason}
+     )}
+  end
+
+  defp tier0_act(:apply, pr_number, head, _reason, ctx) do
+    case applier().apply(ctx.repo, head, []) do
+      {:ok, :auto_resolved} ->
+        Logger.info(
+          "Remediation: PR #{ctx.repo}##{pr_number} conflict auto-resolved (tier-0, all trivial)"
+        )
+
+        {:handled, {:ok, {:auto_resolved, pr_number}}}
+
+      {:error, _} ->
+        :fall_through
+    end
+  end
+
+  defp tier0_act(:fall_through, _pr_number, _head, _reason, _ctx), do: :fall_through
+
+  defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
+
+  defp diagnoser,
+    do: Application.get_env(:fleet_pilot, :conflict_diagnoser, Fleet.Pilot.ConflictProbe)
+
+  defp applier,
+    do: Application.get_env(:fleet_pilot, :conflict_applier, Fleet.Pilot.ConflictApply)
+
   # Tier 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
@@ -164,7 +236,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # honest arch escalation (never a blind loop). NOTE the tier 2 (gatekeeper-agent diagnosis
   # mechanical-vs-semantic before the arch) is a LATER increment — it needs a workspace for the
   # gatekeeper one-shot; today budget-exhausted goes straight to the arch.
-  defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
+  defp legacy_conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     marker_prefix = "[conflict-rework:pr-#{pr_number}"
 
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
