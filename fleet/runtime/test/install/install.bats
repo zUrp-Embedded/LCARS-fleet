@@ -115,3 +115,45 @@ MIX
   [ "$status" -eq 0 ]
   [[ "$output" == *"sourced-ok"* ]]
 }
+
+# --- guards: the deploy refuses the two ways it silently produced a wrong result -------------------
+
+@test "refuse_root: root is refused (the gate is not valid under root)" {
+  run refuse_root 0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"root"* ]]
+  # The message must carry the REASON, not just the refusal: a reader who only sees "refused"
+  # reaches for sudo again.
+  [[ "$output" == *"gate"* ]]
+}
+
+@test "refuse_root: an ordinary uid passes" {
+  run refuse_root 1000
+  [ "$status" -eq 0 ]
+}
+
+@test "require_prefix_writable: a writable prefix passes" {
+  run require_prefix_writable "$TMP/prefix"
+  [ "$status" -eq 0 ]
+}
+
+@test "require_prefix_writable: walks UP to the first existing parent" {
+  # The prefix usually does not exist yet; what matters is whether we may create it. Checking the
+  # leaf alone would pass on any path at all.
+  run require_prefix_writable "$TMP/a/b/c/d"
+  [ "$status" -eq 0 ]
+}
+
+@test "require_prefix_writable: a non-writable destination FAILS before the build" {
+  # The probe must land on the first EXISTING ancestor and test THAT one. A sibling that happens to
+  # be writable inside a read-only parent is not the question: creating `$TMP/ro/prefix` needs write
+  # on `$TMP/ro` itself.
+  mkdir -p "$TMP/ro"
+  chmod 500 "$TMP/ro"
+  run require_prefix_writable "$TMP/ro/prefix"
+  chmod 700 "$TMP/ro"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"non inscriptible"* ]]
+  # And it must NOT send the reader back to sudo — that is the loop this pair exists to break.
+  [[ "$output" == *"sudo"* ]]
+}

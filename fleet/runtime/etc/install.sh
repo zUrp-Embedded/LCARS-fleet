@@ -91,6 +91,30 @@ build_release() {
   )
 }
 
+# ROOT IS REFUSED, and the reason is not caution -- it is that this script RUNS THE GATE, and the
+# gate is not valid under root. Measured on a real run: `rm_terminal_artifacts` asserts `:eacces` on
+# a chmod-000 directory, root bypasses permissions, `rm_rf` succeeds and the test reports a FAILURE
+# that is an artifact of the runner, not of the code. A gate whose verdict depends on who invoked it
+# attests nothing. Sudo also leaves the build tree littered with root-owned ExUnit artifacts (13167
+# files under tmp/ on that run) which then break the next ordinary `mix compile` on File.touch!.
+#
+# The privileged half is the FILE PLACEMENT, not the build. Run this as the account that owns the
+# install (or grant it write on the prefix); elevate only the copy, as etc/README.md's manual
+# procedure does. Elevating the whole script is what conflates the two.
+refuse_root() {
+  local uid="${1:-${EUID:-$(id -u)}}"
+  [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
+}
+
+# Fail on the prefix BEFORE spending several minutes on a gate + release. The old flow discovered the
+# permission at the copy, i.e. after the expensive part, and died with a staging error that named the
+# symptom rather than the cause.
+require_prefix_writable() {
+  local prefix="$1" probe="$1"
+  while [[ ! -e "$probe" && "$probe" != "/" ]]; do probe="$(dirname "$probe")"; done
+  [[ -w "$probe" ]] || die "prefix non inscriptible : $probe (destination $prefix). Lance-le sous le compte proprietaire, ou donne-toi le droit d'ecriture — ne relance PAS en sudo, cf. refuse_root"
+}
+
 # Source guard (standard idiom): sourcing loads the functions WITHOUT running the deploy — the bats
 # suite drives atomic_swap_dir / atomic_swap_file directly, without a mix build.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
@@ -104,6 +128,10 @@ SRC_BIN="$RUNTIME_DIR/bin"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
+
+# Both guards BEFORE the build: a refusal must cost a second, not a full gate.
+refuse_root
+require_prefix_writable "$PREFIX"
 
 # --- 1. Build the prod release (self-contained, bundled ERTS), TIED to the full gate on the same
 #        source tree (build_release: gate → release). A red gate or a failed build dies here.
