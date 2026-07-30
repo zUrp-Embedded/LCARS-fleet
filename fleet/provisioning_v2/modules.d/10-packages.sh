@@ -34,7 +34,10 @@ PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates)
 # avoir bwrap installé ET bloqué par AppArmor (userns restreints). On sonde en tant que
 # PROV_HUMAN : c'est LUI qui spawnera des pods.
 probe_bwrap() {
-  as_human bwrap --ro-bind / / --unshare-all --die-with-parent /bin/true 2>/dev/null
+  # stderr NON étouffé : l'échec réel de bwrap doit être verbeux (doctrine), et surtout un
+  # as_human impossible (doctor lancé par un user tiers) doit dire SA cause — le 2>/dev/null
+  # transformait « je ne peux pas sonder » en faux « le sandbox échoue ».
+  as_human bwrap --ro-bind / / --unshare-all --die-with-parent /bin/true
 }
 
 check() {

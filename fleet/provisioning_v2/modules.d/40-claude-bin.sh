@@ -32,7 +32,11 @@ human_bin() { echo "$(human_home)/.local/bin/claude"; }
 
 claude_ok() {
   local bin; bin="$(human_bin)"
-  [[ -x "$bin" ]] && as_human "$bin" --version >/dev/null 2>&1
+  # stderr NON étouffé sur la jambe as_human : un doctor lancé par un user tiers échouait
+  # l'impersonation en silence et posait un FAUX diagnostic (« binaire cassé ? ») — la vraie
+  # cause (identité, p_fail d'as_human) doit atteindre l'opérateur. Révélé par la première
+  # passe de parité WSL/docker.
+  [[ -x "$bin" ]] && as_human "$bin" --version >/dev/null
 }
 
 check() {
