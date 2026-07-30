@@ -36,7 +36,11 @@ provider "gitea" {
 # formalité exigée par l'API de création.
 
 locals {
-  roles = ["architect", "consultant", "engineer", "gatekeeper", "qualifier", "reviewer", "vulcan"]
+  # scoper (2026-07-30) : la judge-ness extraite du rôle dual consultant — il gate les briefs
+  # de l'architect AVANT dispatch engineer. AJOUT pur : consultant garde tout (compte, token,
+  # team writers — la forge l'a toujours modélisé worker, c'est le runtime qui logeait deux
+  # métiers sous un nom).
+  roles = ["architect", "consultant", "engineer", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {
@@ -176,7 +180,7 @@ resource "gitea_team" "humans" {
 # ── Memberships ────────────────────────────────────────────────────────────
 locals {
   writers   = ["architect", "consultant", "engineer", "gatekeeper"]
-  judges    = ["qualifier", "reviewer"]
+  judges    = ["qualifier", "reviewer", "scoper"]
   externals = ["vulcan"]
 }
 
