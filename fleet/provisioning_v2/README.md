@@ -88,8 +88,10 @@ côtés.
   sondés et instruits, jamais exécutés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
-- **Pas de runner CI** : infra de forge, hors du chemin machine-nue→fleet (unit systemd
-  d'exemple sur la boîte de dev, chantier séparé si besoin).
+- **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
+  le profil `forge` : act_runner officiel pinné, label `elixir` = la même image que le stage
+  build). Son enregistrement est un geste bootstrap (`docker.sh forge-bootstrap`), hors du
+  chemin machine-nue→fleet.
 - **Pas de gestion GitHub** (`gh`, branch-protection…) : la forge du triangle est Gitea.
 
 ## Dette de guerre encaissée (payée par v0→v1, à ne JAMAIS repayer)
