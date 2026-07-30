@@ -17,7 +17,7 @@
 #   unzip       — dépose du précompilé Elixir (module 15-toolchain)
 #   ca-certificates — TLS sortant (installer claude, forge https éventuelle)
 # En Docker ces paquets sont des LAYERS de l'image (docker/Dockerfile) — même liste, autre
-# mécanisme, ISO vérifiée par le même doctor. D'où SUBSTRATE: wsl linux ici.
+# mécanisme, ISO vérifiée par le même doctor sur place (d'où APPLY-ON sans docker, CHECK-ON any).
 #
 # PAS de yq (la donnée v2 est plate : env + listes — le blueprint YAML v1 meurt avec les
 # users-par-rôle), PAS de gh (la forge est Gitea, parlée en curl), PAS de python (plus de
@@ -38,16 +38,18 @@ probe_bwrap() {
 }
 
 check() {
-  local pkg missing=0
+  # (nommé pkg_absent, pas « missing » : la lib a un array `missing` dans apt_ensure, et
+  # l'analyse -x confond les deux scopes — SC2178 parasite.)
+  local pkg pkg_absent=0
   for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
       p_ok "paquet $pkg"
     else
       p_drift "paquet $pkg absent"
-      missing=1
+      pkg_absent=1
     fi
   done
-  if [[ "$missing" -eq 0 ]]; then
+  if [[ "$pkg_absent" -eq 0 ]]; then
     if probe_bwrap; then
       p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
     else

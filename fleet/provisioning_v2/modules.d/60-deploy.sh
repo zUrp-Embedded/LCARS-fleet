@@ -18,12 +18,12 @@
 #   2. hex/rebar locaux de l'humain (mix release en a besoin, le gate CI fait pareil) ;
 #   3. etc/install.sh (build + pose + template env) — LONG (mix release) ;
 #   4. re-VERROUILLER : root:fleet, u=rwX,g=rX,o= (personne ne modifie un runtime déployé) ;
-#   5. câbler /usr/local/bin : symlinks fleet_v2+lcars (une seule source), COPIES des 3 launchers
-#      pod (contrat spawner : paths absolus /usr/local/bin, défaut de pod.ex — et claude_launch
-#      s'exécute DANS le sandbox où seuls les mounts RO système sont visibles → copie réelle,
-#      pas un lien vers un prefix potentiellement non-bindé).
+#   5. câbler /usr/local/bin : les 2 symlinks-pointeurs fleet_v2+lcars, RIEN d'autre (D3 : la
+#      copie des 3 launchers pod était une invention — fleet_v2 pose LCARS_*_LAUNCH_PATH sur
+#      $PREFIX/bin (fleet_v2:137-139), le sandbox les voit par le mount système RO de
+#      $PREFIX/bin ; la copie était une seconde vérité qui faisait mentir le doctor).
 # En Docker, tout ceci est un LAYER du stage runtime (docker/Dockerfile) — même install.sh,
-# même verrouillage, vérifié par le même doctor. D'où SUBSTRATE: wsl linux.
+# même verrouillage, vérifié par le même doctor sur place (CHECK-ON: any).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -36,7 +36,14 @@ SYMLINKED=(fleet_v2 lcars)
 release_present() { [[ -x "$PREFIX_REL/bin/fleet_umbrella" ]]; }
 PREFIX_REL="$PROV_PREFIX/rel/fleet_umbrella"
 
-build_sha() { sed -n 's/^sha=//p' "$PROV_PREFIX/rel/fleet_umbrella/build_info.txt" 2>/dev/null | head -1; }
+# B2 : le vrai chemin est DANS la release (idiome fleet_v2:316 — lib/lcars_fleet-*/priv/api/),
+# et machine vierge = réponse VIDE, jamais un abort (le sed nu sur fichier absent tuait l'apply
+# sous set -euo pipefail AVANT le build, sans un mot).
+build_sha() {
+  local matches=("$PREFIX_REL"/lib/lcars_fleet-*/priv/api/build_info.txt)
+  [[ -f "${matches[0]}" ]] || return 0
+  sed -n 's/^sha=//p' "${matches[0]}" 2>/dev/null | head -1 || true
+}
 
 check() {
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR (checkout incomplet)"; verdict_check; }
@@ -66,11 +73,15 @@ check() {
     fi
   done
   for f in "${LAUNCHERS[@]}"; do
-    if cmp -s "$PROV_PREFIX/bin/$f" "/usr/local/bin/$f" 2>/dev/null; then
-      p_ok "launcher /usr/local/bin/$f (= version du prefix)"
+    # D3 : les launchers vivent UNIQUEMENT dans $PREFIX/bin (là où install.sh les pose et où
+    # fleet_v2 les lit) — l'ancienne sonde exigeait la copie /usr/local/bin et driftait sur un
+    # système SAIN.
+    if [[ -x "$PROV_PREFIX/bin/$f" ]]; then
+      p_ok "launcher $PROV_PREFIX/bin/$f"
     else
-      p_drift "/usr/local/bin/$f absent ou ≠ de la version déployée"
+      p_drift "launcher absent/non exécutable : $PROV_PREFIX/bin/$f"
     fi
+    [[ -f "/usr/local/bin/$f" ]] && p_warn "copie morte /usr/local/bin/$f (invention D3, plus aucun lecteur) — nettoyage manuel : sudo rm /usr/local/bin/$f"
   done
   verdict_check
 }
@@ -84,7 +95,9 @@ apply() {
   # rien à bâtir — on ne re-mixe pas 3 minutes pour rien, et surtout on ne déverrouille pas le
   # prefix sans raison. (Le sha embarqué build_info.txt est l'empreinte du build, 8 hex.)
   local src_sha deployed_sha
-  src_sha="$(git -C "$(repo_root)" rev-parse --short=8 HEAD 2>/dev/null || true)"
+  # B2 : --short NU des deux côtés — le build embarque le short par défaut de git (abbrev auto,
+  # 9 hex sur ce repo) ; un --short=8 côté module ne matchait jamais → rebuild à chaque apply.
+  src_sha="$(git -C "$(repo_root)" rev-parse --short HEAD 2>/dev/null || true)"
   deployed_sha="$(build_sha)"
   if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
       && git -C "$(repo_root)" diff --quiet HEAD -- fleet/runtime 2>/dev/null && release_present; then
@@ -92,10 +105,6 @@ apply() {
     # Le câblage /usr/local/bin peut quand même avoir dérivé : on le re-converge, c'est gratuit.
     local f
     for f in "${SYMLINKED[@]}"; do ensure_symlink "/usr/local/bin/$f" "$PROV_PREFIX/bin/$f" || verdict_apply; done
-    for f in "${LAUNCHERS[@]}"; do
-      cmp -s "$PROV_PREFIX/bin/$f" "/usr/local/bin/$f" 2>/dev/null \
-        || { write_atomic "/usr/local/bin/$f" 0755 root:root < "$PROV_PREFIX/bin/$f" || verdict_apply; }
-    done
     verdict_apply
   fi
 
@@ -125,15 +134,10 @@ apply() {
   chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown"; verdict_apply; }
   chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod"; verdict_apply; }
 
-  # 5. Câblage /usr/local/bin.
+  # 5. Câblage /usr/local/bin — les 2 symlinks-pointeurs, rien d'autre (D3).
   local f
   for f in "${SYMLINKED[@]}"; do
     ensure_symlink "/usr/local/bin/$f" "$PROV_PREFIX/bin/$f" || verdict_apply
-  done
-  for f in "${LAUNCHERS[@]}"; do
-    if ! cmp -s "$PROV_PREFIX/bin/$f" "/usr/local/bin/$f" 2>/dev/null; then
-      write_atomic "/usr/local/bin/$f" 0755 root:root < "$PROV_PREFIX/bin/$f" || verdict_apply
-    fi
   done
 
   PROV_CHANGED=$((PROV_CHANGED + 1))

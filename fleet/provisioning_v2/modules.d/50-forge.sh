@@ -126,8 +126,17 @@ ensure_account() { # $1=login — crée via l'API admin si absent
 }
 
 apply() {
-  [[ -n "$PROV_FORGE_URL" ]] || { p_fail "FORGE_BASE_URL/PROV_FORGE_URL non posé"; verdict_apply; }
-  forge_up || { p_fail "forge injoignable : $PROV_FORGE_URL"; verdict_apply; }
+  # B6 : aligné sur le check — URL vide ou forge injoignable est un DRIFT dit, pas un échec.
+  # L'apply (dont le boot Docker) converge le reste et DIT ce qui manque ; l'ancien p_fail
+  # rendait le conteneur à jamais non-vert dès que la forge n'était pas là.
+  if [[ -z "$PROV_FORGE_URL" ]]; then
+    p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
+    verdict_apply
+  fi
+  if ! forge_up; then
+    p_drift "forge injoignable : $PROV_FORGE_URL — comptes/tokens non convergés (relance quand elle répond)"
+    verdict_apply
+  fi
   [[ -x "$A4_SCRIPT" ]] || { p_fail "script A4 introuvable : $A4_SCRIPT"; verdict_apply; }
 
   local acct rc=0

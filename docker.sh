@@ -68,7 +68,9 @@ cmd_up() {
 }
 
 cmd_doctor() {
-  compose exec lcars /opt/lcars/fleet/provisioning_v2/provision doctor --substrate docker \
+  # -T (B8) : pas d'allocation TTY — le doctor doit tourner depuis un script/CI/cron, pas
+  # seulement depuis un terminal interactif.
+  compose exec -T lcars /opt/lcars/fleet/provisioning_v2/provision doctor --substrate docker \
     --human "${LCARS_HUMAN:-lcars}" "$@"
 }
 

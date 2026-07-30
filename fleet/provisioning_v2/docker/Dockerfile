@@ -5,7 +5,7 @@
 # STATUS: PROTO-V2 — image LCARS fleet v2 : build multi-stage (mix release) + runtime slim (sshd login-manager)
 #
 # ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/install.sh (l'autorité
-# build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/local/fleet_v2 RO
+# build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/local/LCARS_v2 RO
 # root:fleet, /usr/local/bin câblé) que le module 60-deploy pose sur WSL. Ce qui converge au
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
 # et vérifiable par LE MÊME doctor. Deux substrats, une seule vérité.
@@ -32,13 +32,13 @@ WORKDIR /src/fleet/runtime
 # vérité de révision est portée par le label OCI org.opencontainers.image.revision (build-arg).
 COPY fleet/runtime /src/fleet/runtime
 
-# hex/rebar + build + pose sous /local/fleet_v2 — le cache BuildKit évite de re-télécharger
+# hex/rebar + build + pose sous /local/LCARS_v2 — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
 # c'est une release). Verrou contracts + warnings-as-errors : un build rouge NE produit PAS d'image.
 RUN --mount=type=cache,target=/root/.hex \
     --mount=type=cache,target=/root/.cache \
     mix local.hex --force && mix local.rebar --force \
-    && LCARS_INSTALL_PREFIX=/local/fleet_v2 bash etc/install.sh
+    && LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh
 
 # ─── Stage 2 : runtime — slim, sshd = login-manager, tini = PID 1 ────────────────────────────────
 FROM ${RUNTIME_IMAGE} AS runtime
@@ -59,23 +59,24 @@ ENV LANG=C.UTF-8 LCARS_DOCKER=1
 # Paquets du RUNTIME (la liste miroir de modules.d/10-packages.sh + le substrat conteneur :
 # openssh-server = le login-manager du modèle « l'humain SSH en tant que lui », tini = PID 1
 # (reaper + signaux), procps = sondes pgrep du provisioning. Un seul layer apt, cache purgé.
+# util-linux-extra = runuser (B4) : absent de bookworm-slim, et TOUT le per-humain du provision
+# convergent (as_human) passe par lui — sans ce paquet l'entrypoint casse au premier module humain.
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps \
+       tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :
 # owner root (personne ne remplace un runtime déployé), groupe fleet r-x, autres rien.
-COPY --from=build /local/fleet_v2 /local/fleet_v2
-RUN chown -R root:fleet /local/fleet_v2 \
-    && chmod -R u=rwX,g=rX,o= /local/fleet_v2 \
-    && ln -sf /local/fleet_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \
-    && ln -sf /local/fleet_v2/bin/lcars    /usr/local/bin/lcars \
-    && install -m 0755 /local/fleet_v2/bin/bwrap_launch.sh  /usr/local/bin/bwrap_launch.sh \
-    && install -m 0755 /local/fleet_v2/bin/host_launch.sh   /usr/local/bin/host_launch.sh \
-    && install -m 0755 /local/fleet_v2/bin/claude_launch.sh /usr/local/bin/claude_launch.sh
+# /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
+# $PREFIX/bin, fleet_v2 pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
+COPY --from=build /local/LCARS_v2 /local/LCARS_v2
+RUN chown -R root:fleet /local/LCARS_v2 \
+    && chmod -R u=rwX,g=rX,o= /local/LCARS_v2 \
+    && ln -sf /local/LCARS_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \
+    && ln -sf /local/LCARS_v2/bin/lcars    /usr/local/bin/lcars
 
 # Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
 # les chemins inter-arbre (le module 50-forge délègue à fleet/runtime/etc/provision-role-tokens.sh).

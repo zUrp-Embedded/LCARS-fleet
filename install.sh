@@ -15,7 +15,7 @@
 #     install.sh — entrée publique, bootstrap SEULEMENT.
 #     S'assure qu'un checkout source existe, puis délègue TOUT à
 #     fleet/provisioning_v2/provision (apply idempotent, doctor = sonde).
-#     Modèle 3 zones : SOURCE (ce checkout) → INSTALL (/local/fleet_v2, RO)
+#     Modèle 3 zones : SOURCE (ce checkout) → INSTALL (/local/LCARS_v2, RO)
 #     → STATE (~/.lcars per-humain). Le re-run est TOUJOURS sûr : pas de
 #     sentinelle, l'état c'est le système, re-sondé à chaque passage.
 #
