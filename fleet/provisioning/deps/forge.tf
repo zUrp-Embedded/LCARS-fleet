@@ -53,6 +53,11 @@ resource "gitea_user" "system" {
   allow_import_local        = false
 }
 
+# ⚠ PIÈGE provider (constaté 2026-07-30, drill docker) : le password n'est réellement posé
+# qu'à la CRÉATION. Un changement de `seed_password` sur des comptes existants rend un plan
+# « changed » VERT mais ne change PAS le password côté forge (basic-auth : « invalid username,
+# password or token »). Rotation réelle = API admin PATCH /admin/users/{u} (exige login_name
+# dans le body) puis re-mint A4 — jamais « tofu apply » seul.
 resource "gitea_user" "role" {
   for_each             = toset(local.roles)
   username             = each.key
