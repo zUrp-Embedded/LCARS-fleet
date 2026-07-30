@@ -43,7 +43,7 @@ defmodule Fleet.Pilot do
 
   ## Operator entries (delegated here — the facade is the contract)
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
@@ -59,6 +59,8 @@ defmodule Fleet.Pilot do
       Fleet.Layout,
       Fleet.Event,
       Fleet.SchemaCache,
+      # Deterministic conflict classifier (tier-0 diagnosis in Remediation) — pure foundation.
+      Fleet.Conflict,
       Fleet.EventRouter,
       Fleet.Workflow,
       Fleet.Spawner,

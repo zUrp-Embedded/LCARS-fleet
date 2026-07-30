@@ -1,5 +1,5 @@
 defmodule Fleet.Conflict do
-  use Boundary, deps: [], exports: []
+  use Boundary, deps: [], exports: [Report]
 
   @moduledoc """
   Deterministic classifier and trivial-merge engine for git conflicts -- pure text -> classification
