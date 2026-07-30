@@ -13,9 +13,11 @@
 # TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
 #   LCARS_INSTALL_PREFIX    where everything is installed (default /local/LCARS_v2)
 #   LCARS_INSTALL_LINK_DIR  where the PATH symlinks go (default /usr/local/bin)
-# And several things ARE hardcoded, deliberately: the `fleet` group, the `fleet_umbrella` release name
-# (kept at the app collapse, cf. mix.exs), the two symlink names, and the list of non-BEAM scripts
-# copied into bin/.
+# Deliberately hardcoded: the `fleet` group and the `fleet_umbrella` release name (kept at the
+# app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
+# etc/install.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
+# content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
+# etc/README.md — and the copies had started to drift.)
 #
 # Usage: etc/install.sh                        # → /local/LCARS_v2
 #        LCARS_INSTALL_PREFIX=/x etc/install.sh
@@ -31,6 +33,38 @@ SRC_BIN="$RUNTIME_DIR/bin"
 
 say() { echo "install: $*" >&2; }
 die() { echo "install: ERREUR — $*" >&2; exit 1; }
+
+# --- 0. Config guards FIRST (fail on bad config before any environment check or build) ------------
+# This script later runs `rm -rf $PREFIX/rel` and recursive chgrp/chmod on $PREFIX: a shallow
+# prefix (`/`, `/usr`) would be a system-wide disaster (ring0-substrat finding). Absolute,
+# depth >= 2, no exception.
+RAW_PREFIX="$PREFIX"
+PREFIX="${PREFIX%/}"
+case "$PREFIX" in
+  /?*/?*) : ;;
+  *) die "LCARS_INSTALL_PREFIX doit etre absolu, profondeur >= 2 (recu : '$RAW_PREFIX')" ;;
+esac
+
+# The manifest is parsed and validated BEFORE the (long) build: a typo dies in milliseconds,
+# not after three minutes of mix release. Unknown tokens are a build error, never a skip.
+MANIFEST="$ETC_DIR/install.manifest"
+[[ -f "$MANIFEST" ]] || die "manifest absent : $MANIFEST (checkout incomplet ?)"
+declare -a MF_FILES=() MF_MODES=() MF_LINKS=()
+while read -r mf_name mf_mode mf_flag mf_extra; do
+  [[ -z "$mf_name" || "$mf_name" == \#* ]] && continue
+  [[ -z "$mf_extra" ]] || die "manifest : token en trop « $mf_extra » sur l'entree « $mf_name »"
+  case "$mf_mode" in
+    exec|noexec) : ;;
+    *) die "manifest : mode inconnu « ${mf_mode:-<vide>} » pour « $mf_name » (exec|noexec)" ;;
+  esac
+  mf_link=0
+  if [[ -n "$mf_flag" ]]; then
+    [[ "$mf_flag" == "link" ]] || die "manifest : flag inconnu « $mf_flag » pour « $mf_name » (seul : link)"
+    mf_link=1
+  fi
+  MF_FILES+=("$mf_name"); MF_MODES+=("$mf_mode"); MF_LINKS+=("$mf_link")
+done < "$MANIFEST"
+[[ "${#MF_FILES[@]}" -gt 0 ]] || die "manifest vide : $MANIFEST"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
@@ -56,15 +90,17 @@ rm -rf "$PREFIX/rel"
 mkdir -p "$PREFIX/rel"
 cp -a "$REL_SRC" "$PREFIX/rel/fleet_umbrella"
 
-# NON-BEAM scripts (outside the release): the human launcher + the CLI + the pod launchers + the MCP
-# bridge. The bridge is NOT chmod +x below and does not need to be: it is invoked as `python3 <path>`
-# (config/runtime.exs mcp_server_spec) after pod.ex copies it per-pod. It does need to be READABLE by
-# the human's BEAM, which is what the group-read in step 3 provides.
-for f in fleet_v2 lcars bwrap_launch.sh host_launch.sh claude_launch.sh fleet_mcp_stdio_bridge.py; do
-  [[ -e "$SRC_BIN/$f" ]] || die "manquant dans le source bin/: $f"
+# NON-BEAM files (outside the release): the manifest says WHAT ships and with which mode — this
+# loop is blind to content. Per-file chmod, hard failure (the old blanket `chmod ... || true`
+# could silently ship a non-executable launcher).
+for i in "${!MF_FILES[@]}"; do
+  f="${MF_FILES[$i]}"
+  [[ -e "$SRC_BIN/$f" ]] || die "entree du manifest absente du source bin/ : $f"
   cp -a "$SRC_BIN/$f" "$PREFIX/bin/$f"
+  if [[ "${MF_MODES[$i]}" == "exec" ]]; then
+    chmod +x "$PREFIX/bin/$f" || die "chmod +x refuse : $PREFIX/bin/$f"
+  fi
 done
-chmod +x "$PREFIX/bin/"*.sh "$PREFIX/bin/fleet_v2" "$PREFIX/bin/lcars" 2>/dev/null || true
 
 # Template d'env humain.
 cp -a "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/"
@@ -91,14 +127,20 @@ else
   say "chgrp fleet KO (droits ?) — le deploy doit le poser"
 fi
 
-# --- 4. PATH symlinks (launch from anywhere) — POINTERS, not copies --------------------------------
+# --- 4. PATH symlinks (launch from anywhere) — POINTERS, not copies; `link` manifest entries ------
 LINK_DIR="${LCARS_INSTALL_LINK_DIR:-/usr/local/bin}"
-if ln -sf "$PREFIX/bin/fleet_v2" "$LINK_DIR/fleet_v2" 2>/dev/null \
-   && ln -sf "$PREFIX/bin/lcars" "$LINK_DIR/lcars" 2>/dev/null; then
-  say "symlinks $LINK_DIR/{fleet_v2,lcars} → $PREFIX/bin/"
-else
-  say "symlinks $LINK_DIR KO (droits ?). Manuel : sudo ln -sf $PREFIX/bin/{fleet_v2,lcars} $LINK_DIR/"
-fi
+link_fail=0 linked=""
+for i in "${!MF_FILES[@]}"; do
+  [[ "${MF_LINKS[$i]}" -eq 1 ]] || continue
+  f="${MF_FILES[$i]}"
+  if ln -sf "$PREFIX/bin/$f" "$LINK_DIR/$f" 2>/dev/null; then
+    linked="$linked $f"
+  else
+    link_fail=1
+    say "symlink $LINK_DIR/$f KO (droits ?). Manuel : sudo ln -sf $PREFIX/bin/$f $LINK_DIR/"
+  fi
+done
+[[ "$link_fail" -eq 0 ]] && say "symlinks $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrees « link » du manifest)"
 
 say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/fleet_umbrella/releases/start_erl.data" 2>/dev/null || echo '?'))."
 say "Lancer : fleet_v2 start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."
