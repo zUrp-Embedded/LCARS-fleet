@@ -66,7 +66,10 @@ apply() {
     p_fail "download de l'installer en échec ($INSTALL_URL) — l'ancien binaire, s'il existait, est INTACT"
     verdict_apply
   fi
-  if ! run_quiet as_human env HOME="$staging" bash "$staging/install.sh"; then
+  # timeout EXTERNE : le script vendor télécharge le binaire (~100 Mo) par un curl SANS timeout
+  # à lui — le premier drill docker a laissé l'entrypoint wedgé >5 min dessus. Borne dure,
+  # échec verbeux, le boot continue (fail-loud, pas fail-wedged).
+  if ! run_quiet as_human timeout 600 env HOME="$staging" bash "$staging/install.sh"; then
     as_human rm -rf "$staging"
     p_fail "installer officiel en échec — l'ancien binaire, s'il existait, est INTACT"
     verdict_apply
