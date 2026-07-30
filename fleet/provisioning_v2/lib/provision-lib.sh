@@ -34,6 +34,7 @@ PROVISION_LIB_LOADED=1
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
+: "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 : "${PROV_ROLES:=architect consultant engineer gatekeeper qualifier reviewer vulcan}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only

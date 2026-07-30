@@ -48,7 +48,7 @@ Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=err
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
 `PROV_PREFIX` (/local/LCARS_v2 — le défaut d'etc/install.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/home/private) ·
-`PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_ADMIN_TOKEN_FILE` (création des comptes) ·
+`PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
 `PROV_WINDOWS_USER` (ready-room WSL, optionnelle) · pins toolchain (`PROV_ELIXIR_*`).
 
@@ -69,7 +69,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
-| 50-forge | any | any | comptes de rôle + `lcars-system` (API admin), passwords check-before-create, tokens DÉLÉGUÉS à `etc/provision-role-tokens.sh` (A4) |
+| 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
 | 60-deploy | wsl linux | any | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 

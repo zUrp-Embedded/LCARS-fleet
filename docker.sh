@@ -132,7 +132,12 @@ les instruit, il ne les exécute jamais — même famille que « claude /login �
        TF_VAR_gitea_url=http://127.0.0.1:${port} TF_VAR_gitea_token='<token-du-1>' \\
        TF_VAR_seed_password='<seed>' TF_VAR_human_username='<toi>' \\
        TF_VAR_human_email='<ton-email>' tofu apply
-     (les tokens de rôle ensuite : sudo provision apply --only 50 — la jambe A4, basic-auth)
+     puis pose le SEED dans le conteneur lcars — c'est le handoff vers la jambe tokens, qui
+     converge ensuite TOUTE SEULE à chaque apply/boot (plus aucun geste) :
+       printf '%s' '<le-même-seed>' > /tmp/.forge-seed
+       docker cp /tmp/.forge-seed lcars-lcars-1:/home/private/forge-seed.pass
+       docker exec lcars-lcars-1 chmod 600 /home/private/forge-seed.pass
+       rm /tmp/.forge-seed
 
   3. Le RUNNER CI :
        docker exec lcars-forge-1 gitea actions generate-runner-token

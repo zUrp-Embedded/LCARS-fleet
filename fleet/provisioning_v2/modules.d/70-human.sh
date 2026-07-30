@@ -98,6 +98,18 @@ apply() {
       else
         cat "$TEMPLATE" > "$tmp"
       fi
+      # D4 (ADR install/compile/release) : ce que le système fait est signé du SYSTÈME. Si le
+      # token lcars-system est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
+      # du cycle), on câble sa lecture ICI ; sinon le token minté ne serait jamais lu (le
+      # défaut runtime est ~/.gitea_token) — le travail mort que l'ADR pointait.
+      if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]]; then
+        {
+          echo ""
+          echo "# — posé par le seed 70-human (D4) : les marqueurs système sont signés lcars-system —"
+          echo "FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token"
+          echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
+        } >> "$tmp"
+      fi
       as_human chmod 0600 "$tmp"
       as_human mv -f "$tmp" "$ENV_FILE"
       PROV_CHANGED=$((PROV_CHANGED + 1))
