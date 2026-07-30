@@ -73,6 +73,12 @@ check() {
       # fichier est à l'humain : l'apply n'y touche pas, il n'y a que lui pour l'éditer.
       p_drift "fleet_v2.env présent mais FORGE_BASE_URL manquant — fleet_v2 start refusera ; édite $ENV_FILE"
     fi
+    # D4, cas env-seedé-AVANT-bootstrap (l'ordre du cold boot docker : le premier boot seed
+    # l'env, la forge n'est bootstrappée qu'après) : le fichier est à l'humain, on ne le
+    # réécrit JAMAIS — on instruit les 2 lignes exactes. Révélé par le run de validation.
+    if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
+      p_warn "token système minté mais non câblé dans $ENV_FILE — ajoute : FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token et FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT (puis fleet_v2 stop/start)"
+    fi
   else
     p_drift "fleet_v2.env absent ($ENV_FILE)"
   fi

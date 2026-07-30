@@ -67,7 +67,10 @@ cmd_up() {
   local profiles=()
   if [[ "${1:-}" == "--forge" ]]; then profiles=(--profile forge); shift; fi
   build_env
-  compose "${profiles[@]}" up -d "$@"
+  # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
+  # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
+  # « ./docker.sh build », et son verdict est le sien ; image absente → up échoue en le disant.
+  compose "${profiles[@]}" up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up. Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
