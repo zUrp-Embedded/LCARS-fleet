@@ -70,7 +70,7 @@ defmodule Fleet.SPBuilderImageParityTest do
 
   test "the worker protocole-user is byte-identical in both regimes" do
     # Not composed by SPBuilder but read by the spawner's Assets rail, through its own image
-    # accessor — same duplication, same exposure, and it decides what `yop` means to the pod.
+    # accessor — same duplication, same exposure, and it decides what `engage` means to the pod.
     :ok = SPBuilder.publish_image!()
     assert {:ok, from_image} = Fleet.Spawner.Pod.Assets.read_protocole_user()
 

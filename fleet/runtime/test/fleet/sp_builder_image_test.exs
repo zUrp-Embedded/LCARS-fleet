@@ -64,7 +64,7 @@ defmodule Fleet.SPBuilderImageTest do
   test "EPOCH CLOSURE: the worker protocole-user edited after publish! is invisible to Assets", %{
     tmp_dir: tmp
   } do
-    # This file redefines the pod's trigger keywords: unimaged, a mid-life edit changed what `yop`
+    # This file redefines the pod's trigger keywords: unimaged, a mid-life edit changed what `engage`
     # MEANS for the next pod while the image version still claimed a closed epoch.
     #
     # Driven through the `:protocole_user_path` override, which is the ONE resolution the image and

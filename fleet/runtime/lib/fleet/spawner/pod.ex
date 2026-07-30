@@ -265,7 +265,7 @@ defmodule Fleet.Spawner.Pod do
   # PROJECT — all the I/O in the `with` chain (non-bang) → error propagated → clean
   # transition_failed (state.json phase=failed written). Issue-driven model: the brief is written to
   # `issues/<issue_id>.md` (read as project content, not as a prompt-injection) AND pushed to
-  # TaskQueue (the pod PULLS via the MCP tool get_work_item, triggered by the `yop` keyword).
+  # TaskQueue (the pod PULLS via the MCP tool get_work_item, triggered by the `engage` keyword).
   def handle_event(:internal, :proceed, :projecting, data) do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
     repo_md = Path.join(data.pod_dir, "CLAUDE.md.repo-source")
@@ -667,7 +667,7 @@ defmodule Fleet.Spawner.Pod do
   # Bounded tick. The control = the agent's ACK (`acked?/3`), NEVER a proxy:
   #   - ACK (pull for a wake / poll for a bootstrap) → cancel the :kick generic timeout;
   #   - cap without ACK → broadcast `wake.failed` (layer-clean escalation: Bus broadcast, no upward call) + cancel;
-  #   - tmux reachable → kick_send (keyword `yop` bootstrap / `wake` fallback) + reschedule;
+  #   - tmux reachable → kick_send (keyword `engage` bootstrap / `wake` fallback) + reschedule;
   #   - tmux not up yet → reschedule without consuming a send-keys.
   # A send-keys error does not interrupt the pod (the monitor time-out covers it).
   def handle_event({:timeout, :kick}, {:attempt, n}, _state, %{tmux_session: session} = data)
@@ -678,11 +678,11 @@ defmodule Fleet.Spawner.Pod do
     bootstrap? = TaskProbe.no_pending_brief?(data.pod_id)
 
     # polled? = the agent has already called get_work_item (in-band ACK). Computed once: used for bootstrap-stop AND
-    # for the keyword choice (not polled yet = bootstrap-arm "yop"; already polled = running pod → "wake").
+    # for the keyword choice (not polled yet = bootstrap-arm "engage"; already polled = running pod → "wake").
     polled = TaskProbe.polled?(data)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
 
-    # Three cadences, one per situation: bootstrap probe (spaced), worker startup yop-until-pull
+    # Three cadences, one per situation: bootstrap probe (spaced), worker startup engage-until-pull
     # (frequent — nobody types in a fresh worker tmux), wake FALLBACK on a RUNNING pod (slow —
     # it paces itself BEHIND the carrier, cf. Kick.wake_retry_ms/0).
     retry =
@@ -702,7 +702,7 @@ defmodule Fleet.Spawner.Pod do
         {:keep_state_and_data, [cancel_kick_action()]}
 
       # Human-terminal pod (cap-profile `wake_send_keys: false`) with NOTHING pending: a
-      # flag-only bootstrap loop has NO action left (every send-keys gated, yop included) and
+      # flag-only bootstrap loop has NO action left (every send-keys gated, engage included) and
       # would only burn its cap into a FALSE `wake.failed` escalation — the human/bridge side
       # is the armer of this class (live 2026-07-19: resumed starfleet, `polled?` wiped by the
       # fleet restart). A pod WITH a pending brief keeps the loop: `wake.failed` stays the
@@ -997,7 +997,7 @@ defmodule Fleet.Spawner.Pod do
 
       # Brief delivery to the long-lived RC pod: PodTmux send-keys on the per-pod sock (universal,
       # bwrap AND host). Stub path (tests): no-op (no tmux_session returned → kick not armed).
-      # We arm the ack-driven kick loop as a transition ACTION (1st tick = bootstrap "yop").
+      # We arm the ack-driven kick loop as a transition ACTION (1st tick = bootstrap "engage").
       {:next_state, :monitoring, data, brief_kick_actions(data)}
     else
       # Guard misconfig `{:launch_backend_misconfigured, _}` OR launch `{:error, _}` → both fail the pod
@@ -1006,7 +1006,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # The 1st send-keys will be `yop` (bootstrap); the role's SP (`core/runtime-contract` block) carries the
+  # The 1st send-keys will be `engage` (bootstrap); the role's SP (`core/runtime-contract` block) carries the
   # get_work_item→submit_result workflow. No tmux_session (StubBackend/kill race) → no action.
   defp brief_kick_actions(%{tmux_session: nil}), do: []
 

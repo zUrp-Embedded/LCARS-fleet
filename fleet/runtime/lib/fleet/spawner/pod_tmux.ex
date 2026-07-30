@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.PodTmux do
   ## This channel carries the CONTROL-PLANE, not the brief
 
   The brief does NOT travel here (it is pulled by the pod via MCP `get_work_item`). This channel = the
-  **KICK** ("yop" → triggers get_work_item → processes → submit_result) + the slash-commands (`/clear`)
+  **KICK** ("engage" → triggers get_work_item → processes → submit_result) + the slash-commands (`/clear`)
   + health (`has-session`). The MCP channels are `skipSlashCommands:true` → only the tmux send-keys
   reaches the slash-commands.
 
@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PodTmux do
   Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
   the rescue gesture (tmux kill-server + anchored `pkill -f`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
@@ -221,11 +221,11 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Sends `keys` then `Enter` to the pod's REPL (the KICK, e.g. "yop"/"wake"). send-keys is the universal
+  Sends `keys` then `Enter` to the pod's REPL (the KICK, e.g. "engage"/"wake"). send-keys is the universal
   control-plane (it also reaches the slash-commands, unlike the MCP channels).
 
   Robustness: the text and the `Enter` go out as TWO distinct send-keys (cf. `send_keys_args/2`). Merged
-  into one (`keys "Enter"`), claude's TUI misses the `Enter` intermittently (the "yop" is not submitted
+  into one (`keys "Enter"`), claude's TUI misses the `Enter` intermittently (the "engage" is not submitted
   until we re-send the Enter). send-keys is the ONLY out-of-band channel when the Monitor is dead → it
   must be robust by construction, not only by the retry of the kick loop.
   """

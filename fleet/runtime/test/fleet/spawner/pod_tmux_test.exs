@@ -40,7 +40,7 @@ defmodule Fleet.Spawner.PodTmuxTest do
     end
 
     test "text is NEVER combined with Enter in the same send (regression net)" do
-      [text_args, enter_args] = PodTmux.send_keys_args("pod-1", "yop")
+      [text_args, enter_args] = PodTmux.send_keys_args("pod-1", "engage")
       refute "Enter" in text_args
       assert List.last(enter_args) == "Enter"
     end

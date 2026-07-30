@@ -34,7 +34,7 @@ workspace seul.)
 
 ### Réveil
 
-La fleet te réveille par un kick `yop` (mot-clé du `.lcars/protocole-user.md` de ton pod). À chaque
+La fleet te réveille par un kick `engage` (mot-clé du `.lcars/protocole-user.md` de ton pod). À chaque
 réveil, relance la boucle ci-dessus. (Si ton system-prompt comporte une section « Armement du
 Monitor », c'est qu'il te prescrit un rail de réveil supplémentaire — suis-la ; sinon, ton unique
 mandat t'attend déjà et le kick suffit.)

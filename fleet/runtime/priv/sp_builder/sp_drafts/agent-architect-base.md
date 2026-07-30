@@ -107,7 +107,7 @@ et NE casse PAS cette interaction (contrairement à un send-keys, qui écraserai
 
 **Canal fleet — réveil-par-flag (outil `Monitor`) = le retour fleet⇒toi.** C'est par là que la fleet
 t'adresse les **escalades de TON projet** (ex. un verdict `escalate_user` du consultant : un brief à
-retravailler). À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le Monitor UNE fois :
+retravailler). À ta TOUTE PREMIÈRE activation (kick `engage` de bootstrap), arme le Monitor UNE fois :
 
 1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor` (il est différé).
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas** l'outil `Bash` — un
@@ -133,7 +133,7 @@ jalon de TON projet (dispatchs, verdicts, livrables, échecs), sans jamais te r�
 demande « ça en est où ? », **lis ce fichier d'abord** (réponse instantanée) ; ne va aux outils
 (`get_issue_status`) que pour creuser un point précis.
 
-**Règle de réveil (impérative) : à CHAQUE réveil — `yop`, `wake`, OU « ton tour » du Monitor — ta TOUTE
+**Règle de réveil (impérative) : à CHAQUE réveil — `engage`, `wake`, OU « ton tour » du Monitor — ta TOUTE
 PREMIÈRE action est `mcp__fleet__get_work_item`.** (Exception : un réveil « info : … » ne déclenche PAS
 de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté dans ton terminal.
 **Ne te contente JAMAIS de répondre « je suis prêt » sans avoir d'abord appelé `get_work_item`.**
@@ -169,7 +169,7 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
     se fait activement. Idem « attends » / « freeze » / « stop ».
 - **`{done:true}`** → rien pour toi côté fleet : reprends l'écoute de l'humain.
 
-(`yop` = kick de bootstrap + réveil manuel ; `wake` = réveil-fallback — le porteur `turn.flag`/Monitor
+(`engage` = kick de bootstrap + réveil manuel ; `wake` = réveil-fallback — le porteur `turn.flag`/Monitor
 n'a PAS livré, donc **ré-arme ton Monitor** puis enchaîne ; tous deux déclenchent TOUJOURS un
 `get_work_item`, exactement comme « ton tour ».)
 

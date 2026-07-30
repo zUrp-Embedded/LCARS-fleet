@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.PodKickTest do
   @moduledoc """
   R3b / F-C4b-2 — AUTONOMOUS readiness-gated kick. The loop replaces a fixed-delay
-  yop (lost when the REPL is not ready, observed live at C4b).
+  engage (lost when the REPL is not ready, observed live at C4b).
 
   With `Pod` as a `gen_statem`, the kick is a **generic timeout named `:kick`**:
   the event is `{:timeout, :kick}` with content `{:attempt, n}`, and the handler is
@@ -11,7 +11,7 @@ defmodule Fleet.Spawner.PodKickTest do
     - reschedule = action `{{:timeout, :kick}, retry, {:attempt, n+1}}`;
     - stop (ACK / cap) = cancel action `{{:timeout, :kick}, :infinity, _}`;
     - no-op (no tmux) = `:keep_state_and_data` without action.
-  The path `tmux reachable → yop → stop on pull` requires a real tmux server → proven
+  The path `tmux reachable → engage → stop on pull` requires a real tmux server → proven
   LIVE (PASSE 5/6), not here.
   """
   use ExUnit.Case, async: false
@@ -60,7 +60,7 @@ defmodule Fleet.Spawner.PodKickTest do
   test "tmux not up yet (no server) + brief not pulled → retries (reschedule n+1)" do
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # `alive?` false (no real server) → reschedule branch (attempt n+1 action), no lost yop.
+    # `alive?` false (no real server) → reschedule branch (attempt n+1 action), no lost engage.
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end

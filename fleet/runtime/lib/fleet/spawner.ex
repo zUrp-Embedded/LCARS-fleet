@@ -76,7 +76,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   alias Fleet.Spawner.Pod
@@ -247,7 +247,7 @@ defmodule Fleet.Spawner do
   # Invariant made structurally impossible to violate: a `one-shot` pod (1 task
   # then dies) MUST carry a brief — otherwise it leaves with no work (generic brief →
   # claude waits → timeout). Long-lived pods (`forever`/`run`/`pipe`) pull their
-  # tasks via MCP (`yop` → get_work_item) → exempted (spares the permanent/gatekeeper pods).
+  # tasks via MCP (`engage` → get_work_item) → exempted (spares the permanent/gatekeeper pods).
   # Explicit admin/diagnostic escape hatch: `opts[:allow_no_brief]`.
   # PRECONDITION: `cap_profile` already passed `fetch_lifetime_scope/1` in `spawn_pod` (a no-scope
   # profile never reaches here — it is refused upstream, DR-019). So scope is guaranteed present:

@@ -76,7 +76,7 @@ spec:
     subagent_template: null
     host_native: false
     bridge_enabled: true
-    # TRUE because this flag gates EVERY send-keys, `yop` included — not just the wake fallback
+    # TRUE because this flag gates EVERY send-keys, `engage` included — not just the wake fallback
     # it was set to false for. An architect is spawned BY THE MACHINE, on-open, with no brief
     # enqueued: the kick loop then reads `bootstrap? and not profile_send_keys?` and CANCELS
     # itself, so the pod came up and sat at an untouched prompt forever, waiting for a human to

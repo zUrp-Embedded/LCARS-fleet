@@ -2,14 +2,14 @@ defmodule Fleet.Spawner.Pod.Kick do
   @moduledoc """
   DECISION + I/O of the ack-driven wake loop ("kick") — cluster extracted from `Fleet.Spawner.Pod`.
 
-  The kick loop wakes the claude REPL of a freshly launched pod (bootstrap keyword `yop`) or
+  The kick loop wakes the claude REPL of a freshly launched pod (bootstrap keyword `engage`) or
   re-triggers a pull of a brief left pending (fallback keyword `wake`), until the agent
   ACKs (it reached out via get_work_item). This module carries the THREE stateless pieces of the tick:
 
   - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
     `kick_bootstrap_max`, `kick_bootstrap_retry_ms`): `:fleet_spawner` config read on every tick;
   - **the PURE decisions** (`acked?/3`, `kick_keyword/2`): should the loop stop (ACK) and,
-    otherwise, which keyword to send (`yop`/`wake`/nothing) — testable outside the process;
+    otherwise, which keyword to send (`engage`/`wake`/nothing) — testable outside the process;
   - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
 
   What the module does NOT carry (STAYS in the core of `Pod`, timer/handler mechanics): the ARMING of the
@@ -32,28 +32,28 @@ defmodule Fleet.Spawner.Pod.Kick do
     `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `acked?/3` (PURE decision) — did the agent reach out? STOP of the loop (called by the handler;
     the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`).
-  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`yop`/`wake`/`nil`) (called by
+  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`engage`/`wake`/`nil`) (called by
     `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/2`).
   - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
 
   alias Fleet.Spawner.PodTmux
 
-  # AUTONOMOUS `yop` kick, readiness-gated. Triggers the pull of the brief
+  # AUTONOMOUS `engage` kick, readiness-gated. Triggers the pull of the brief
   # via MCP get_work_item — the brief is NOT injected (it lives in issues/ + TaskQueue).
   # No-op if no tmux_session (StubBackend; LauncherPortBackend sets one, bwrap or host).
   #
   # Why not a FIXED delay: the claude REPL is not ready at a known instant — it
   # boots (tmux server up, banner, MCP servers init via .mcp-fleet.json), variable duration.
-  # A fixed-delay yop arrives too early and is lost (the tmux server's sock does not exist
+  # A fixed-delay engage arrives too early and is lost (the tmux server's sock does not exist
   # yet). So we schedule a BOUNDED LOOP: at each tick, if the tmux server is
-  # reachable (`PodTmux.alive?`) we send yop; we stop as soon as the brief is pulled
+  # reachable (`PodTmux.alive?`) we send engage; we stop as soon as the brief is pulled
   # (task ≠ pending) or at the cap. Non-blocking (generic timeout `:kick`), the pod moves to
   # :monitoring in the meantime. Intervals configurable (test: ~ms values).
 
@@ -72,7 +72,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   @spec wake_first_delay_ms() :: non_neg_integer()
   def wake_first_delay_ms, do: Application.get_env(:fleet_spawner, :wake_first_delay_ms, 15_000)
 
-  @doc "Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled — `yop` until the pull). Config `:kick_retry_ms`, default 2500 — startup wants frequency."
+  @doc "Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled — `engage` until the pull). Config `:kick_retry_ms`, default 2500 — startup wants frequency."
   @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
 
@@ -111,7 +111,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   Chooses the kick's keyword according to `polled` (= the agent has already called get_work_item) then
   sends it to the pod's tmux:
 
-    - not yet polled → `"yop"` : bootstrap-arm, IRREDUCIBLE (the only way to start/arm the agent);
+    - not yet polled → `"engage"` : bootstrap-arm, IRREDUCIBLE (the only way to start/arm the agent);
     - already polled (pod running) → `"wake"` : FALLBACK (the carrier/flag should have delivered), GATED by
       the global knob `:wake_send_keys` (off ⇒ flag-only: we validate the Monitor in isolation, no fallback)
       AND by the pod's cap-profile (`invocation.wake_send_keys: false` ⇒ flag-only for THIS pod —
@@ -119,11 +119,11 @@ defmodule Fleet.Spawner.Pod.Kick do
       lands in the human's prompt and costs a spurious turn, live 2026-07-19; the no-ACK
       `wake.failed` escalation remains the terminal net).
 
-  The bootstrap `"yop"` is never gated by the GLOBAL knob — muting it globally would leave every
+  The bootstrap `"engage"` is never gated by the GLOBAL knob — muting it globally would leave every
   fresh worker unarmed (nobody types into a fresh worker's tmux). The PER-POD cap-profile gate,
   however, DOES mute it for the human-terminal class (arch/starfleet): a fresh worker always arms,
   a human terminal never does (cf. the two-scope comment in the body and the `profile_allows? =
-  false` case of `kick_keyword/3` — nil for EVERYTHING, yop included). Discriminated
+  false` case of `kick_keyword/3` — nil for EVERYTHING, engage included). Discriminated
   keywords ⇒ we know, by reading the REPL/the logs, whether it is a kick (startup) or a fallback
   (Monitor missed). A send-keys failure is logged, never propagated (the monitor timeout covers).
   """
@@ -131,13 +131,13 @@ defmodule Fleet.Spawner.Pod.Kick do
   def kick_send(state, polled) do
     # TWO gates, two scopes (2026-07-19 — do not re-merge them):
     #  - PER-POD (cap-profile `invocation.wake_send_keys: false` — the human-terminal class:
-    #    arch, starfleet): gates EVERY send-keys, `yop` INCLUDED. The pod's REPL is a
+    #    arch, starfleet): gates EVERY send-keys, `engage` INCLUDED. The pod's REPL is a
     #    human-facing conversation (bridge/Desktop) — every keystroke lands as a spurious user
-    #    turn (live: a RESUMED starfleet took the bootstrap yop drizzle for ~3 min to the cap,
+    #    turn (live: a RESUMED starfleet took the bootstrap engage drizzle for ~3 min to the cap,
     #    because `polled?` is broker RAM, wiped at fleet restart). Arming comes from the
     #    human/bridge side; briefs ride the Monitor flag rail.
     #  - GLOBAL (knob `:wake_send_keys`): gates the `wake` FALLBACK only (Monitor-rail
-    #    validation in isolation) — NEVER the yop: muting the bootstrap globally would leave
+    #    validation in isolation) — NEVER the engage: muting the bootstrap globally would leave
     #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
     fallback_on? = Application.get_env(:fleet_spawner, :wake_send_keys, true)
 
@@ -149,7 +149,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   @doc """
   Does the pod's cap-profile allow kick send-keys at all? (`invocation.wake_send_keys`,
-  default true.) `false` = the human-terminal class (arch, starfleet): flag-only, yop included —
+  default true.) `false` = the human-terminal class (arch, starfleet): flag-only, engage included —
   also read by the pod's `:kick` handler to cancel a bootstrap loop that would have NO action.
   """
   @spec profile_send_keys?(map()) :: boolean()
@@ -159,12 +159,12 @@ defmodule Fleet.Spawner.Pod.Kick do
   @doc false
   # PURE decision of the keyword (testable). `polled` = the agent has already called get_work_item;
   # `fallback_on?` = global knob `:wake_send_keys` (wake fallback only); `profile_allows?` =
-  # cap-profile gate (EVERY send-keys, yop included — cf. kick_send/2). `nil` ⇒ no send-keys.
+  # cap-profile gate (EVERY send-keys, engage included — cf. kick_send/2). `nil` ⇒ no send-keys.
   @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
   def kick_keyword(polled, fallback_on?, profile_allows?) do
     cond do
       not profile_allows? -> nil
-      not polled -> "yop"
+      not polled -> "engage"
       fallback_on? -> "wake"
       true -> nil
     end

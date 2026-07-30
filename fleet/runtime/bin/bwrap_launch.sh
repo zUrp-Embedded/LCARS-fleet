@@ -256,9 +256,9 @@ AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$SANDBOX_HOME/.claude/.credentials.json")
 # Telemetry ↔ feature flags. The Statsig/GrowthBook flags (including `MONITOR_TOOL`, which exposes the
 # Monitor tool = waking the pod by flag) are fetched through the telemetry pipeline.
 # `DISABLE_TELEMETRY=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` CUT that fetch → `MONITOR_TOOL`
-# defaults OFF → the agent falls back to the `yop` kick (send-keys) instead of the Monitor. The content
+# defaults OFF → the agent falls back to the `engage` kick (send-keys) instead of the Monitor. The content
 # stays 100% MCP (get_work_item/submit_result) either way. Ruling: we PREFER the Monitor, so telemetry is
-# ON by default. Privacy mode is opt-in: `LCARS_POD_DISABLE_TELEMETRY=1` (no Monitor, yop fallback). The
+# ON by default. Privacy mode is opt-in: `LCARS_POD_DISABLE_TELEMETRY=1` (no Monitor, engage fallback). The
 # telemetry→Monitor coupling is on the Anthropic relay side, not our choice; the
 # `CLAUDE_INTERNAL_FC_OVERRIDES` override is gated on `USER_TYPE=ant` (internal, inert on the public
 # binary) → not usable.

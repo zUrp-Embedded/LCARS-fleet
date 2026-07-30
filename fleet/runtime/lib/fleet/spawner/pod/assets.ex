@@ -19,7 +19,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/0`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-07-30
   """
 
   alias Fleet.Spawner.Pod.Fs
@@ -95,20 +95,21 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  The pod's `protocole-user.md` (custom keywords `yop`/`SeeU`). Default =
+  The pod's `protocole-user.md` (the keywords its REPL answers to). Default =
   `priv/sp_builder/sp_drafts/protocole-user-worker.md` shipped in the bundled priv: the WORKER version
-  (`yop` = trigger the issue-driven workflow, `SeeU` = no-op). Override via config
+  (`engage` = trigger the issue-driven workflow, `SeeU` = no-op). Override via config
   `:fleet_spawner, :protocole_user_path` (custom user instance).
 
-  TRAP: pointing at a HUMAN instance's protocole-user (which redefines `yop` as
-  "session resume, read handoff", or neutralizes it) → the pod's claude REPL does NOT trigger
-  the worker workflow.
+  `engage` is MACHINE protocol — not a personalizable keyword, unlike a human's session keywords.
+  TRAP: pointing at a HUMAN instance's protocole-user replaces the whole contract by one that
+  never defines `engage` at all (it defines the human's own resume/close keywords instead) → the
+  pod's claude REPL does NOT trigger the worker workflow.
   """
   @spec read_protocole_user() ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
   def read_protocole_user do
     # Image FIRST — the protocole-user is prompt material: it redefines the pod's trigger keywords, so
-    # a mid-life edit used to change what `yop` MEANS for the next pod while the image version claimed
+    # a mid-life edit used to change what `engage` MEANS for the next pod while the image version claimed
     # a closed epoch. The image froze it at boot through this same override resolution, so a deployment
     # override still applies and a live edit no longer does. `:unpublished` (tests, tooling) reads disk.
     case Fleet.SPBuilder.image_worker_protocol() do

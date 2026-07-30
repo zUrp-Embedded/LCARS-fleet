@@ -495,7 +495,7 @@ if config_env() != :test do
 
   config :fleet_spawner, seed_store_root: seed_store_root
 
-  # Pod onboarding kick (the `yop` nudge → claude calls get_work_item). The default window
+  # Pod onboarding kick (the `engage` nudge → claude calls get_work_item). The default window
   # (first 2s + 12×2.5s ≈ 32s) is too short against the claude cold-start in bwrap on a deployed
   # service (238MB binary, cold caches) → kick abandoned before the REPL is ready → pod without a
   # brief. Widen in deploy. Integers via env.

@@ -10,7 +10,7 @@ defmodule Fleet.Spawner.Pod.Brief do
     prompt-injection): `issue_id_to_filename/1` (safe name) + `default_brief/1` (the body);
   - the **CANONICAL channel**: the idempotent enqueue into `Fleet.TaskQueue`
     (`maybe_enqueue_brief/1`) — the pod PULLs via the MCP tool `get_work_item` (triggered by the
-    keyword `yop`), never through the injected text.
+    keyword `engage`), never through the injected text.
 
   Each step returns a value or a tagged `:ok`/`{:error, reason}` that the `with` of the
   `:projecting` state propagates to `transition_failed`. No state, no Port, no timer. Depends on
@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.Brief do
   - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-07-30
   """
 
   require Logger
