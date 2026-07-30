@@ -121,9 +121,13 @@ defmodule Fleet.Pilot.ConflictApply do
            :ok <- GitOps.run(["-C", wt, "add", "--", file]) do
         {:cont, :ok}
       else
+        # TOTAL over what the `with` can produce, and no catch-all: `Conflict.resolve/1` only ever
+        # returns `{:ok, %Report{}}`, so the sole non-binary `merged` reaching here is `nil`, and
+        # every other step returns `{:error, _}`. A third defensive clause was here and Dialyzer
+        # proved it unreachable — a branch that cannot run defends nothing and hides the day the
+        # union genuinely widens (which the strict flags will then say out loud, right here).
         {:ok, %{merged: nil}} -> {:halt, {:error, {:residual, file}}}
         {:error, _} = err -> {:halt, err}
-        other -> {:halt, {:error, {:apply_failed, file, other}}}
       end
     end)
   end
