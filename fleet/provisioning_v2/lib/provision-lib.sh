@@ -84,8 +84,11 @@ run_quiet() {
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 || rc=$?
   if [[ "$rc" -ne 0 ]]; then
+    # B1 : l'échec COMPTE — via p_fail, qui incrémente PROV_FAILED. L'ancien printf nu laissait
+    # les compteurs à zéro : `run_quiet x || verdict_apply` sortait 0 (« convergé ») alors que
+    # x avait échoué — le verdict vert menteur, exactement le péché v1 que cette lib jure de tuer.
+    p_fail "commande en échec (rc=$rc) : $*"
     {
-      printf 'FAIL  %s: commande en échec (rc=%d) : %s\n' "$PROV_MODULE_TAG" "$rc" "$*"
       printf '───── sortie complète ─────\n'
       cat "$out"
       printf '───────────────────────────\n'
@@ -211,10 +214,18 @@ ensure_managed_block() {
       $0 == e            {skip=0; next}
       !skip              {print}
     ' "$file")"
+  # B3 : write_atomic se nourrit par REDIRECTION, jamais par pipe — le membre droit d'un pipe
+  # est un sous-shell : ses compteurs (PROV_FAILED/PROV_CHANGED) mouraient avec lui, et un
+  # fichier non posé se rapportait vert.
+  local tmp rc=0
+  tmp="$(mktemp "${TMPDIR:-/tmp}/prov-block.XXXXXX")" || { p_fail "ensure_managed_block: tmp impossible"; return 1; }
   {
     if [[ -n "$existing" ]]; then printf '%s\n' "$existing"; fi
     printf '%s\n%s\n%s\n' "$begin" "$block" "$end"
-  } | write_atomic "$file" "$mode" "$owner"
+  } > "$tmp"
+  write_atomic "$file" "$mode" "$owner" < "$tmp" || rc=$?
+  rm -f "$tmp"
+  return "$rc"
 }
 
 # ─── fetch_verify <url> <sha256> <dest> <mode> — download pinné obligatoire ──────────────────────
@@ -276,7 +287,9 @@ detect_substrate() {
 # Déjà cet utilisateur : exécution directe. Autre user non-root : impossible proprement → échec dit.
 as_human() {
   local home
-  home="$(getent passwd "$PROV_HUMAN" | cut -d: -f6)"
+  # `|| true` : même classe que B5 — sous pipefail, getent sur un user inconnu ferait échouer
+  # l'assignation avant la garde p_fail juste en dessous.
+  home="$(getent passwd "$PROV_HUMAN" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { p_fail "as_human: user inconnu: $PROV_HUMAN"; return 1; }
   if [[ "$(id -un)" == "$PROV_HUMAN" ]]; then
     "$@"
@@ -288,8 +301,10 @@ as_human() {
   fi
 }
 
-# home de PROV_HUMAN (vide si inconnu — l'appelant DOIT tester).
-human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6; }
+# home de PROV_HUMAN (vide si inconnu — l'appelant DOIT tester). B5 : `|| true`, sinon sous
+# `set -euo pipefail` (tous les modules) un user inconnu tue l'assignation `home="$(human_home)"`
+# AVANT la garde p_fail de l'appelant — abort muet, le contrat « vide si inconnu » était un mensonge.
+human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de
 # la lib (fleet/provisioning_v2/lib/ → ../../..), jamais re-devinée par heuristique dans un module.
