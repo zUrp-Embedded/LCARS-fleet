@@ -598,13 +598,31 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .evidence | contains("que sur ce disque")' >/dev/null
 }
 
-@test "50-projects : un miroir en retard est un DISQUE EN RETARD, il est nomme comme tel" {
+@test "50-projects : EN AVANCE sur le miroir = commits condamnes, pas un disque en retard" {
+  # Mesure sur le conteneur docker : son clone du livrable portait 4 commits presents nulle part
+  # ailleurs, et la sonde repondait « un ecart reste un disque en retard, jamais une perte ». Vrai
+  # pour le retard, FAUX pour l'avance : `reset --hard origin/main` detruit des commits aussi bien
+  # que des fichiers. Une ligne qui mesure juste et rassure a tort est pire qu'une ligne absente.
   mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
   mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
   git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
   run sotf50
   echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("QUE sur ce disque")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+}
+
+@test "50-projects : EN RETARD sur le miroir = benin, et c'est dit comme tel" {
+  # Le jumeau. Meme verdict `degraded`, lecture opposee : ici le sync repare tout seul.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" reset -q --hard HEAD~1
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("le prochain sync les rattrape")' >/dev/null
 }
 
 @test "50-projects : sans ref de suivi, unknown — jamais 'aligne' par defaut" {
@@ -672,4 +690,142 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   [ "$status" -eq 2 ]
   echo "$output" | jq -e 'select(.probe=="projects.instrument") | .verdict=="unreachable"' >/dev/null
   ! echo "$output" | jq -e 'select(.probe=="projects.inventory")' >/dev/null
+}
+
+# ── sotf.sh : le raisonnement de capacite ─────────────────────────────────────────────────────────
+# Teste sur un FLUX SYNTHETIQUE, jamais sur la machine : `diag` repond « qu'est-ce qui est
+# entreprenable », et cette reponse est une projection sur des verdicts de sondes. En la testant a
+# travers de vraies sondes on mesurerait l'etat du poste, pas la regle — et la regle est precisement
+# ce qui doit tenir sur un poste qu'on ne connait pas.
+
+load_sotf() { . "$SKILL_DIR/sotf.sh"; }   # garde de source : sourcer ne lance rien
+
+jl() { # construit une ligne de flux : <probe> <verdict> [evidence]
+  jq -cn --arg p "$1" --arg v "$2" --arg e "${3:-ev}" \
+    '{probe:$p,plane:"x",verdict:$v,vantage:"local",method:"m",evidence:$e,cannot_conclude:"c",ts:"t"}'
+}
+
+@test "sotf : tous les maillons verts → la capacite est entreprenable" {
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == operational\|* ]]
+}
+
+@test "sotf : un maillon bloquant casse NOMME le maillon ET son constat" {
+  # `diag` se lit par quelqu'un qui est sur le point d'agir. Une ligne qui se contente d'un id
+  # l'envoie fouiller le tableau — au moment precis ou il ne le fera pas.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health degraded 'HTTP 503 sur /api/health')
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == degraded\|* ]]
+  echo "$output" | grep -q "fleet.health"
+  echo "$output" | grep -q "503"
+}
+
+@test "sotf : un maillon INDICATIF rouge n'interdit pas — mais il interdit le vert" {
+  # La distinction qui porte tout le fichier : un outil mcp est execute par la FLEET, pas par moi.
+  # Ce que je mesure depuis ma place informe, ne tranche pas. La confondre avec du bloquant
+  # declarerait create_project mort en permanence dans tout pod (aucun n'a de credential forge).
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)
+$(jl fleet.subsystem.mcp.pod_facing operational)
+$(jl fleet.subsystem.spawn.dispatch operational)
+$(jl forge.reachable degraded)
+$(jl projects.root_projects operational)
+$(jl projects.root_work operational)
+$(jl fleet.subsystem.launch.backend operational)
+$(jl fleet.subsystem.pilot.step operational)"
+  run capability_verdict "$(chain_of create_project)"
+  [[ "$output" == unknown\|* ]]
+  echo "$output" | grep -q "forge.reachable"
+}
+
+@test "sotf : une chaine qui designe une sonde disparue le DIT, elle ne l'ignore pas" {
+  # Le detecteur de derive de la chaine elle-meme. Sans lui, renommer une sonde rendrait
+  # silencieusement toutes les capacites vertes : le maillon manquant ne bloquerait plus rien.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)"
+  RAN_PLANES=" instruments fleet "   # les deux sondes ONT tourne : l'absence est donc une derive
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == unreachable\|* ]]
+  echo "$output" | grep -q "fleet.subsystem.mcp.pod_facing"
+}
+
+@test "sotf : un maillon absent parce que sa sonde n'a pas tourne n'accuse rien" {
+  # Le jumeau du test precedent, et c'est leur DIFFERENCE qui est la regle : court-circuit voulu
+  # d'un cote, derive de l'autre. Les confondre ferait crier a la panne a chaque `diag` cible.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)"
+  RAN_PLANES=" instruments "
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == operational\|* ]]
+}
+
+@test "sotf : rien a atteindre reste inactive, ce n'est pas une panne" {
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket inactive 'hors pod')"
+  RAN_PLANES=" instruments "
+  run capability_verdict "$(chain_of create_project)"
+  [[ "$output" == inactive\|* ]]
+}
+
+@test "sotf : un fait constate passe devant un trou de mesure" {
+  # degraded > unreachable : « c'est casse, et voila lequel » est plus actionnable que « je ne sais
+  # pas ». L'inverse enterrerait la seule ligne exploitable du rapport.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket unreachable)
+$(jl fleet.health degraded 'muet')
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == degraded\|* ]]
+}
+
+@test "sotf : le code de sortie se derive du FLUX, pas des compteurs" {
+  # Les sondes tournent dans des processus separes : leurs compteurs n'arrivent jamais au runner.
+  # `--raw` rendait donc 0 sur un run aveugle — un succes ambigu, la faute que ce toolkit refuse.
+  load_sotf
+  JSONL="$(jl a.b operational)"; run jsonl_exit_code; [ "$output" = 0 ]
+  JSONL="$(jl a.b degraded)";    run jsonl_exit_code; [ "$output" = 1 ]
+  JSONL="$(jl a.b unreachable)"; run jsonl_exit_code; [ "$output" = 2 ]
+  JSONL="$(jl a.b degraded)
+$(jl c.d unreachable)"
+  run jsonl_exit_code; [ "$output" = 2 ]
+}
+
+@test "sotf : les lignes de capacite sont DANS le flux, pas a cote" {
+  # Hors du JSONL elles echapperaient au rendu, au comptage et au code de sortie — les trois choses
+  # qui font qu'un rapport engage quelqu'un. C'est arrive : elles sortaient sur stdout, au-dessus.
+  run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.create_project")' >/dev/null
+  # aucune ligne non-JSON ne traine
+  while read -r l; do [[ -z "$l" ]] || echo "$l" | jq -e . >/dev/null; done <<< "$output"
+}
+
+@test "sotf : le perimetre confronte les DEUX sens — outil sans chaine, chaine hors perimetre" {
+  mkdir -p "$TMP/pod"
+  printf '{"spec":{"scope":{"allowedTools":["Read","mcp__fleet__create_project","mcp__fleet__truc_inconnu"]}}}' \
+    > "$TMP/pod/.cap-profile.json"
+  run env LCARS_POD_HOME="$TMP/pod" "$SKILL_DIR/sotf.sh" diag --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .verdict=="unknown"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("truc_inconnu")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("open_project")' >/dev/null
+}
+
+@test "sotf : une capacite inconnue est nommee comme telle, jamais evaluee en silence" {
+  run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag pas_une_capacite --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.pas_une_capacite") | .verdict=="unreachable"' >/dev/null
+}
+
+@test "sotf : report refuse une cible, et une commande inconnue ne fait pas semblant" {
+  run "$SKILL_DIR/sotf.sh" report create_project
+  [ "$status" -eq 2 ]
+  run "$SKILL_DIR/sotf.sh" rapport
+  [ "$status" -eq 2 ]
 }

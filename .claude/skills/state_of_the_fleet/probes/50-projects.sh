@@ -24,10 +24,15 @@
 # JOURNAL — fabriquer une source plausible plutot que declarer l'absence — traite a la racine.
 #
 # L'ASYMETRIE QUI PORTE TOUT LE DIAGNOSTIC, et qu'aucune lecture de `git status` ne donne :
-#   cote `main`     — en retard = benin (le miroir se re-derive) ; SALE = destructible (`reset --hard`)
-#   cote `work/ops` — en avance = LE SEUL ETAT OU UNE PERTE EST POSSIBLE (rien n'est sur la forge)
-# Le meme fait git ne veut pas dire la meme chose des deux cotes. Une sonde qui les traite pareil
-# rend un rapport rouge pour du benin et vert pour ce qui se perd.
+#   cote `main`     — EN RETARD = benin, le miroir se re-derive tout seul au prochain sync
+#                     EN AVANCE ou SALE = DESTRUCTIBLE, `reset --hard origin/main` ecrase les deux
+#   cote `work/ops` — EN AVANCE = perte possible : depot autonome, rien ne le re-derive
+# Le meme fait git ne veut pas dire la meme chose des deux cotes, NI dans les deux sens du meme cote.
+#
+# Cette derniere precision a ete payee : la premiere version disait « un ecart reste un disque en
+# retard, jamais une perte » — vrai pour le retard, FAUX pour l'avance. Mesure sur le conteneur
+# docker : son clone du livrable portait 4 commits presents nulle part ailleurs, et la sonde
+# rassurait dessus. Une ligne qui mesure juste et rassure a tort est pire qu'une ligne absente.
 #
 # PERIMETRE (position de starfleet) : les projets sont des OBJETS — ils existent, ils sont a jour,
 # leur nom est pris. Jamais leur contenu, jamais l'avancement du travail dedans : ca appartient a
@@ -246,10 +251,15 @@ obs_mirror() {
   counts="$(git_ro "$d" rev-list --left-right --count "HEAD...$ref" 2>/dev/null)"
   [[ -n "$counts" ]] || { echo "unreachable|rev-list muet sur $d"; return; }
   ahead="${counts%%[[:space:]]*}"; behind="${counts##*[[:space:]]}"
+  # Les deux sens ne se resument PAS en un seul chiffre. En retard, le miroir se repare seul ; en
+  # avance, il porte du travail que le prochain `reset --hard` supprime — et sur un clone dont la
+  # raison d'etre est d'etre ecrase, personne ne va l'y chercher.
   if [[ "$ahead" == 0 && "$behind" == 0 ]]; then
     echo "operational|aligne sur $ref ($(git_ro "$d" rev-parse --short HEAD 2>/dev/null))"
+  elif [[ "$ahead" -gt 0 ]]; then
+    echo "degraded|$ahead commit(s) n'existent QUE sur ce disque${behind:+ (+$behind en retard)} — le prochain reset --hard de WorktreeSync les DETRUIT"
   else
-    echo "degraded|$ahead commit(s) en avance, $behind en retard sur $ref"
+    echo "degraded|$behind commit(s) en retard sur $ref — le prochain sync les rattrape"
   fi
 }
 
@@ -334,10 +344,10 @@ obs_forge() {
 # ── Le catalogue de liaisons ──────────────────────────────────────────────────────────────────────
 # suffixe ¤ ou vit la DECLARATION (citation, verifiable a la main) ¤ observateur ¤ ce qu'un ecart ne prouve pas
 BINDINGS=(
-"pair¤ProjectOnboard @moduledoc — dual-dir : deux depots locaux pour un depot forge¤obs_pair¤Presence des deux depots seulement. Ne dit pas qu'ils parlent du MEME projet : c'est la liaison 'identity' qui le confronte."
+"pair¤ProjectOnboard @moduledoc — dual-dir : deux depots locaux pour un depot forge¤obs_pair¤Presence des deux depots seulement. Ne dit pas qu'ils parlent du MEME projet ('identity' le confronte). Et surtout : l'invariant du dual-dir vient de l'ONBOARDING, alors que la sonde ne distingue pas un projet onboarde par la fleet d'un depot pose par le provisioning ou a la main — sur ce dernier, l'ecart n'est pas une faute de la fleet. Corroboration independante quand elle existe : priv/canon/fleets/memory-beta.yaml declare un corpus sous /home/projects.work/<projet>/work/beyond, qui ne peut pas exister sans le cote work."
 "identity¤ProjectOnboard.origin_full_name/2 — les deux derniers segments de remote.origin.url SONT l'identite forge¤obs_identity¤Compare un NOM a un NOM. Un origin juste ne prouve pas que le depot distant existe, ni qu'il est le bon contenu."
 "branch¤ProjectOnboard — git clone --branch <livrable> vers proj_dir¤obs_branch¤Nomme la branche courante. Ne dit pas qui l'a changee ni si un travail y est en cours."
-"mirror¤WorktreeSync.align/1 — fetch puis reset --hard origin/<livrable>, convergent et idempotent¤obs_mirror¤Compare a la DERNIERE ref de suivi connue localement : la sonde ne fetch PAS (ecriture dans le depot + credentials). Un origin perime fait passer un clone en retard pour aligne — la liaison 'forge' est la pour lever ce doute. Et un ecart reste un disque en retard : la verite est sur la forge, jamais une perte."
+"mirror¤WorktreeSync.align/1 — fetch puis reset --hard origin/<livrable>, convergent et idempotent¤obs_mirror¤Compare a la DERNIERE ref de suivi connue localement : la sonde ne fetch PAS (ecriture dans le depot + credentials). Un origin perime fait passer un clone en retard pour aligne — la liaison 'forge' est la pour lever ce doute. Les deux sens ne se lisent PAS pareil : en retard, la verite est sur la forge et le sync repare ; EN AVANCE, les commits n'existent qu'ici et le reset --hard les detruit. La sonde ne dit pas s'ils ont de la valeur, seulement qu'ils sont seuls."
 "clean¤WorktreeSync @moduledoc — « the worktree is a read-only showcase », reset --hard n'ecrase rien d'utile¤obs_clean¤Compte des entrees, ne les juge pas : artefacts de build et travail humain sont indiscernables ici. Dit qu'elles seront ECRASEES, pas qu'elles ont de la valeur."
 "work_branch¤ProjectOnboard — git init -b <work> pour le depot autonome¤obs_work_branch¤Branche seulement. Ne dit rien du contenu de work/ops ni de sa fraicheur face au travail reel."
 "work_unpushed¤ProjectOnboard — push -u <work> ; doctrine D1 : la verite durable vit sur la forge¤obs_work_unpushed¤Compte les commits absents de la ref de suivi LOCALE : ne voit pas un push fait depuis un autre clone, et ne voit pas le non-commite (il n'est pas dans git). Le compteur de fichiers sales est indicatif, pas un verdict."
