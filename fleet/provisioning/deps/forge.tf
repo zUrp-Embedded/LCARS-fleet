@@ -36,11 +36,12 @@ provider "gitea" {
 # formalité exigée par l'API de création.
 
 locals {
-  # scoper (2026-07-30) : la judge-ness extraite du rôle dual consultant — il gate les briefs
-  # de l'architect AVANT dispatch engineer. AJOUT pur : consultant garde tout (compte, token,
-  # team writers — la forge l'a toujours modélisé worker, c'est le runtime qui logeait deux
-  # métiers sous un nom).
-  roles = ["architect", "consultant", "engineer", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+  # scoper (2026-07-31) : RENOMMAGE complet de consultant — l'inspection des SP a montré que
+  # consultant était le juge de brief EN ENTIER (la « dualité » était une seconde carte pointant
+  # sur lui, BL-6-11 fermé). scoper = juge natif (team judges) ; le nom consultant est LIBRE,
+  # le runtime l'a retiré ({:error, :not_found}) AVANT cette dépose — un compte sans cap-profile
+  # est inerte, l'ordre inverse ne l'est pas.
+  roles = ["architect", "engineer", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {
@@ -179,7 +180,7 @@ resource "gitea_team" "humans" {
 
 # ── Memberships ────────────────────────────────────────────────────────────
 locals {
-  writers   = ["architect", "consultant", "engineer", "gatekeeper"]
+  writers   = ["architect", "engineer", "gatekeeper"]
   judges    = ["qualifier", "reviewer", "scoper"]
   externals = ["vulcan"]
 }
