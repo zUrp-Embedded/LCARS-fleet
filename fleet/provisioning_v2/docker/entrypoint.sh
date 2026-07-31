@@ -98,7 +98,17 @@ fi
 # le premier plan). Son échec n'est pas fatal — même règle que la convergence : la boîte doit
 # rester joignable pour être réparée. La console est un CONFORT, ssh reste la porte d'admin.
 if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
-  /opt/lcars/console.sh --human "$LCARS_HUMAN" || say "console web NON lancée (rc=$?) — ssh reste la porte"
+  # `--all` : UNE console par humain éligible, chacune sur SON port dérivé de son uid. La formule
+  # donne déjà des ports disjoints, donc le multi-humain ne coûte aucune coordination — pas de
+  # proxy, pas de registre, pas d'auth (étape 2). L'éligibilité et la garde anti-système (root et
+  # l'uid 1000 partagent le bloc 21000) vivent dans console-humans.sh, source unique.
+  /opt/lcars/console.sh --all || say "console web NON lancée (rc=$?) — ssh reste la porte"
+
+  # La home de la boîte : sidebar + statut, sur un port HORS de l'espace des blocs humains. Elle
+  # n'appartient à aucun humain — c'est la porte de la boîte. Échec non fatal comme le reste.
+  if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
+    /opt/lcars/console-landing.sh || say "home NON lancée (rc=$?) — les consoles restent joignables par leur port"
+  fi
 else
   say "console web désactivée (LCARS_CONSOLE=0)"
 fi

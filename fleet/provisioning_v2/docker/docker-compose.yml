@@ -52,11 +52,20 @@ services:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
-      # La CONSOLE web (ttyd sous l'humain) : port dérivé de son UID, `base+4` — 21004 pour
-      # l'humain par défaut (uid 1000). Publiée sur la LOOPBACK de l'hôte, jamais sur le LAN :
-      # à l'étape 1 il n'y a PAS d'auth, donc la frontière est le bind. L'étape 2 (auth + proxy
-      # sur :80) est ce qui autorisera à sortir de la loopback.
-      - "${LCARS_CONSOLE_PORT:-127.0.0.1:21004}:21004"
+      # LES CONSOLES — un bloc de 10 ports par humain (`21000 + (uid%500)*10`), console en `base+4`.
+      # Compose publie STATIQUEMENT : il ne peut pas découvrir les humains au boot. Une console par
+      # humain impose donc une PLAGE, pas un port. 21000-21029 = les 3 premiers blocs (uid 1000,
+      # 1001, 1002) — ce que la boîte porte réellement à court terme. Élargir = étendre la plage
+      # des deux côtés, par pas de 10.
+      # Ce qui est publié dans la plage, en plus des consoles : `base+0` l'API (read-only PAR
+      # CONSTRUCTION — les endpoints d'état répondent 501 et le spawn ne vit que sur AF_UNIX),
+      # `base+1` le deck d'observation (lecture), `base+3` le webhook (déclaré, aucun listener).
+      # Chaque port publié = un docker-proxy : 30 est le compromis assumé entre place et coût.
+      # LOOPBACK uniquement : à l'étape 1 il n'y a PAS d'auth, donc la frontière est le bind.
+      - "${LCARS_BIND:-127.0.0.1}:21000-21029:21000-21029"
+      # La HOME de la boîte (sidebar + statut). Hors de l'espace des blocs (21000..25999) parce
+      # qu'elle n'appartient à aucun humain : c'est la porte de la boîte, pas celle d'un compte.
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home
       # PAS de bind-mount de la source ici, et c'est MESURÉ, pas frileux : le daemon ne voit pas
