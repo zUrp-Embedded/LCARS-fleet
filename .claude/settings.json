@@ -10,29 +10,5 @@
     "~": {
       "hasTrustDialogAccepted": true
     }
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/agent-guard.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/runtime-guard.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
   }
 }
