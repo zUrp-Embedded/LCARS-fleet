@@ -251,16 +251,26 @@ obs_mirror() {
   counts="$(git_ro "$d" rev-list --left-right --count "HEAD...$ref" 2>/dev/null)"
   [[ -n "$counts" ]] || { echo "unreachable|rev-list muet sur $d"; return; }
   ahead="${counts%%[[:space:]]*}"; behind="${counts##*[[:space:]]}"
-  # Les deux sens ne se resument PAS en un seul chiffre. En retard, le miroir se repare seul ; en
-  # avance, il porte du travail que le prochain `reset --hard` supprime — et sur un clone dont la
-  # raison d'etre est d'etre ecrase, personne ne va l'y chercher.
   if [[ "$ahead" == 0 && "$behind" == 0 ]]; then
     echo "operational|aligne sur $ref ($(git_ro "$d" rev-parse --short HEAD 2>/dev/null))"
-  elif [[ "$ahead" -gt 0 ]]; then
-    echo "degraded|$ahead commit(s) n'existent QUE sur ce disque${behind:+ (+$behind en retard)} — le prochain reset --hard de WorktreeSync les DETRUIT"
-  else
-    echo "degraded|$behind commit(s) en retard sur $ref — le prochain sync les rattrape"
+    return
   fi
+  if [[ "$ahead" -gt 0 ]]; then
+    # « En avance » et « perdu au reset » sont DEUX choses, et la premiere version les confondait :
+    # elle annoncait « n'existent QUE sur ce disque » sur six commits qui dormaient tranquillement
+    # sur une branche poussee. Tester HEAD suffit — s'il est contenu dans une ref distante, tous ses
+    # ancetres le sont. Le miroir reste un ecart (ce n'est plus un miroir) sans etre une perte.
+    local elsewhere
+    elsewhere="$(git_ro "$d" for-each-ref --contains HEAD --format='%(refname:short)' refs/remotes 2>/dev/null \
+                 | grep -v "^origin/$DECL_MAIN_BRANCH$" | head -1)"
+    if [[ -n "$elsewhere" ]]; then
+      echo "degraded|$ahead commit(s) en avance sur $ref${behind:+ (+$behind en retard)} — presents sur '$elsewhere' : un reset --hard les retire de ce disque SANS les perdre"
+    else
+      echo "degraded|$ahead commit(s) en avance et sur AUCUNE ref distante connue${behind:+ (+$behind en retard)} — le prochain reset --hard de WorktreeSync les DETRUIT"
+    fi
+    return
+  fi
+  echo "degraded|$behind commit(s) en retard sur $ref — le prochain sync les rattrape"
 }
 
 # Sale cote livrable : `WorktreeSync` ECRASE. Ce n'est pas « du travail non commite », c'est du
@@ -347,7 +357,7 @@ BINDINGS=(
 "pair¤ProjectOnboard @moduledoc — dual-dir : deux depots locaux pour un depot forge¤obs_pair¤Presence des deux depots seulement. Ne dit pas qu'ils parlent du MEME projet ('identity' le confronte). Et surtout : l'invariant du dual-dir vient de l'ONBOARDING, alors que la sonde ne distingue pas un projet onboarde par la fleet d'un depot pose par le provisioning ou a la main — sur ce dernier, l'ecart n'est pas une faute de la fleet. Corroboration independante quand elle existe : priv/canon/fleets/memory-beta.yaml declare un corpus sous /home/projects.work/<projet>/work/beyond, qui ne peut pas exister sans le cote work."
 "identity¤ProjectOnboard.origin_full_name/2 — les deux derniers segments de remote.origin.url SONT l'identite forge¤obs_identity¤Compare un NOM a un NOM. Un origin juste ne prouve pas que le depot distant existe, ni qu'il est le bon contenu."
 "branch¤ProjectOnboard — git clone --branch <livrable> vers proj_dir¤obs_branch¤Nomme la branche courante. Ne dit pas qui l'a changee ni si un travail y est en cours."
-"mirror¤WorktreeSync.align/1 — fetch puis reset --hard origin/<livrable>, convergent et idempotent¤obs_mirror¤Compare a la DERNIERE ref de suivi connue localement : la sonde ne fetch PAS (ecriture dans le depot + credentials). Un origin perime fait passer un clone en retard pour aligne — la liaison 'forge' est la pour lever ce doute. Les deux sens ne se lisent PAS pareil : en retard, la verite est sur la forge et le sync repare ; EN AVANCE, les commits n'existent qu'ici et le reset --hard les detruit. La sonde ne dit pas s'ils ont de la valeur, seulement qu'ils sont seuls."
+"mirror¤WorktreeSync.align/1 — fetch puis reset --hard origin/<livrable>, convergent et idempotent¤obs_mirror¤Compare a la DERNIERE ref de suivi connue localement : la sonde ne fetch PAS (ecriture dans le depot + credentials). Un origin perime fait passer un clone en retard pour aligne — la liaison 'forge' est la pour lever ce doute. Les deux sens ne se lisent PAS pareil : en retard, la verite est sur la forge et le sync repare ; en avance, le reset --hard les retire — et la sonde separe alors 'presents ailleurs' de 'nulle part'. Ce 'ailleurs' est celui que CE clone connait : une ref distante poussee depuis un autre clone et jamais fetch ici passerait pour absente, donc la sonde peut annoncer une perte qui n'en est pas une — jamais l'inverse."
 "clean¤WorktreeSync @moduledoc — « the worktree is a read-only showcase », reset --hard n'ecrase rien d'utile¤obs_clean¤Compte des entrees, ne les juge pas : artefacts de build et travail humain sont indiscernables ici. Dit qu'elles seront ECRASEES, pas qu'elles ont de la valeur."
 "work_branch¤ProjectOnboard — git init -b <work> pour le depot autonome¤obs_work_branch¤Branche seulement. Ne dit rien du contenu de work/ops ni de sa fraicheur face au travail reel."
 "work_unpushed¤ProjectOnboard — push -u <work> ; doctrine D1 : la verite durable vit sur la forge¤obs_work_unpushed¤Compte les commits absents de la ref de suivi LOCALE : ne voit pas un push fait depuis un autre clone, et ne voit pas le non-commite (il n'est pas dans git). Le compteur de fichiers sales est indicatif, pas un verdict."

@@ -608,9 +608,24 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
   run sotf50
   echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("QUE sur ce disque")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("AUCUNE ref distante")' >/dev/null
   echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
   ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+}
+
+@test "50-projects : en avance MAIS presents sur une autre ref distante = ecart, pas perte" {
+  # La correction de la correction. « En avance » et « perdu au reset » sont deux choses : la sonde
+  # a annonce « n'existent QUE sur ce disque » sur six commits qui dormaient sur une branche poussee.
+  # Un miroir qui n'en est plus un reste un ecart ; ce n'est pas pour autant du travail en danger.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  # le meme commit vit aussi sur une ref distante : c'est ce qui change la lecture
+  mk_tracking "$TMP/p/alpha" chantier/x
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("SANS les perdre")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
 }
 
 @test "50-projects : EN RETARD sur le miroir = benin, et c'est dit comme tel" {
