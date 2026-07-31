@@ -83,21 +83,45 @@ puis rien — 404' "limite"
 
 # ── Port derivation ───────────────────────────────────────────────────────────────────────────────
 
-@test "les ports sont DERIVES de l'uid, jamais codes en dur" {
-  # Two humans on one box get two blocks; a fixed 21000 would silently probe the neighbour's fleet
-  # and report it as ours — a lie that looks perfectly healthy.
-  unset LCARS_API_URL LCARS_OBS_URL
+@test "url : trois sources, dans cet ordre — env > fichier de la fleet > derivation uid" {
+  # Each branch is isolated with LCARS_RUN_DIR, otherwise the test measures whatever the DEVELOPER's
+  # box happens to have — which is exactly the "the machine is not the reference" trap.
   local expected=$(( 21000 + ($(id -u) % 500) * 10 ))
-  [ "$(sotf_port_base)" -eq "$expected" ]
-  [ "$(sotf_api_url)" = "http://127.0.0.1:$expected" ]
-  [ "$(sotf_obs_url)" = "http://127.0.0.1:$(( expected + 1 ))" ]
+
+  # 3. derivation : ni env, ni fichier
+  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/vide" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://127.0.0.1:$expected|"* ]]
+  [[ "$output" == *"|http://127.0.0.1:$(( expected + 1 ))|"* ]]
+  [[ "$output" == *"|derive de"*"$(id -u)" ]]
+
+  # 2. le fichier que `bin/fleet_v2` ecrit lui-meme — il bat la derivation, parce qu'il est la
+  #    reponse de la fleet a "ou j'ecoute" et non une hypothese sur l'uid du lecteur.
+  mkdir -p "$TMP/run"; echo "http://ailleurs:9990" > "$TMP/run/api_url"
+  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/run" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://ailleurs:9990|http://ailleurs:9991|annonce par la fleet"* ]]
+
+  # 1. l'env de l'operateur bat tout
+  run env LCARS_API_URL="http://explicite:1234/" LCARS_RUN_DIR="$TMP/run" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://explicite:1234|env" ]]
 }
 
-@test "une url declaree par l'env l'emporte, et l'origine est tracee" {
-  LCARS_API_URL="http://ailleurs:1234/" run bash -c '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url) $(sotf_url_origin)"'
-  [[ "$output" == "http://ailleurs:1234 env" ]]
-  unset LCARS_API_URL LCARS_OBS_URL
-  [[ "$(sotf_url_origin)" == derive* ]]
+@test "la garde « rien a atteindre » : pas de run dir → inactive, jamais degraded ni unreachable" {
+  # THE rule the two specimens forced into existence, and the reason it lives in lib.sh: it was
+  # hand-copied into three probes and produced three DIFFERENT verdicts for one situation.
+  run env LCARS_RUN_DIR="$TMP/vide" bash -c \
+    '. '"$PROBES"'/lib.sh; sotf_init; sotf_skip_no_fleet x.y fleet "sans objet" && echo "SKIP=oui"'
+  echo "$output" | grep -q "SKIP=oui"
+  # La sortie melange la ligne JSON et le marqueur du test : on isole la ligne JSON avant jq,
+  # sinon jq echoue sur la ligne de texte et le test rougit pour la mauvaise raison.
+  echo "$output" | grep '^{' | jq -e 'select(.probe=="x.y") | .verdict=="inactive"' >/dev/null
+
+  mkdir -p "$TMP/run2"
+  run env LCARS_RUN_DIR="$TMP/run2" bash -c \
+    '. '"$PROBES"'/lib.sh; sotf_init; sotf_skip_no_fleet x.y fleet || echo "PROCEDE=oui"'
+  echo "$output" | grep -q "PROCEDE=oui"
 }
 
 # ── The git guarantee ─────────────────────────────────────────────────────────────────────────────
@@ -335,11 +359,16 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   ! echo "$output" | jq -e 'select(.probe=="pods.live") | .evidence | contains("0 pod")' >/dev/null
 }
 
-@test "40-forge : sans FORGE_BASE_URL, c'est unreachable (aveugle) et jamais degraded" {
-  # Saying `degraded` would be a claim about a forge we never contacted.
+@test "40-forge : sans FORGE_BASE_URL c'est inactive — rien de declare n'est pas un angle mort" {
+  # Corrige apres mesure : `unreachable` faisait basculer tout le rapport en AVEUGLE sur une boite
+  # saine dont personne n'avait configure de forge. Mon instrument n'est pas casse, il n'y a
+  # simplement rien a atteindre. Et `degraded` serait pire : une affirmation sur une forge jamais
+  # contactee.
   run env -u FORGE_BASE_URL "$PROBES/40-forge.sh"
-  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="unreachable"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unreachable"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="inactive"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
+  # et le run ne doit PAS etre rouge pour ca
+  [ "$status" -eq 0 ]
 }
 
 @test "40-forge : un 404 anonyme sur l'org rend unknown, avec ses DEUX lectures" {

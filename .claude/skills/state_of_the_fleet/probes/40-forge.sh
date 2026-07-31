@@ -30,9 +30,13 @@ FORGE="${FORGE%/}"
 # Absent, every probe below is blind and says so ONCE, here, instead of five confusing times.
 probe_configured() {
   if [[ -z "$FORGE" ]]; then
-    emit "forge.configured" "$PLANE" "unreachable" "local" 'test -n "$FORGE_BASE_URL"' \
-      "FORGE_BASE_URL absente de l'env" \
-      "Sans adresse je ne peux RIEN dire de la forge : ni qu'elle tourne, ni qu'elle est morte. C'est un angle mort, pas un constat."
+    # `inactive`, NOT `unreachable`, et la distinction a ete apprise sur deux specimens : mon
+    # instrument n'est pas casse, il n'y a simplement RIEN de declare a atteindre. Marquer ce cas
+    # aveugle faisait basculer tout le rapport en AVEUGLE sur une boite parfaitement saine dont
+    # personne n'a configure de forge — une fausse alarme deguisee en constat.
+    emit "forge.configured" "$PLANE" "inactive" "local" 'test -n "$FORGE_BASE_URL"' \
+      "aucune forge declaree (FORGE_BASE_URL vide ou absente)" \
+      "Absence de DECLARATION, pas de mesure ratee : je ne dis rien d'une forge qui existerait ailleurs sans etre annoncee a ce processus."
     return 1
   fi
   emit "forge.configured" "$PLANE" "operational" "local" 'echo $FORGE_BASE_URL' \
@@ -138,10 +142,17 @@ sotf_init
 if probe_configured && probe_reachable; then
   probe_identity
 else
-  emit "forge.org" "$PLANE" "unreachable" "reseau" "(non lancee)" \
-    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
-  emit "forge.human_account" "$PLANE" "unreachable" "reseau" "(non lancee)" \
-    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
+  # Meme trichotomie en aval : rien de declare → `inactive` (sans objet) ; declare mais muet →
+  # `unreachable` (je n'ai pas pu mesurer). Les confondre noie le cas interessant dans le banal.
+  if [[ -z "$FORGE" ]]; then
+    fv="inactive"; fr="aucune forge declaree — sonde sans objet"
+  else
+    fv="unreachable"; fr="forge declaree mais injoignable — sonde non lancee"
+  fi
+  emit "forge.org" "$PLANE" "$fv" "reseau" "(non lancee)" "$fr" \
+    "Non mesure. N'affirme ni presence ni absence de l'org."
+  emit "forge.human_account" "$PLANE" "$fv" "reseau" "(non lancee)" "$fr" \
+    "Non mesure. N'affirme ni presence ni absence du compte."
 fi
 probe_credentials
 exit "$(sotf_exit_code)"

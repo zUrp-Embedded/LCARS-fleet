@@ -103,17 +103,39 @@ sotf_port_base() {
   echo $(( 21000 + (uid % 500) * 10 ))
 }
 
+# The runtime dir a started fleet leaves behind. Its EXISTENCE is the discriminator between "no
+# fleet was ever started here" and "a fleet is started and unwell" — measured on two specimens: a
+# live box has `~/.lcars/run/{api.sock,api_url,fleet_v2.sock,mcp,tmux-sock}`, a fresh container has
+# no `run/` at all. Without it, a box that was never started reports `degraded` on every endpoint,
+# which is a false alarm dressed as a finding.
+sotf_run_dir() { echo "${LCARS_RUN_DIR:-$HOME/.lcars/run}"; }
+sotf_fleet_ever_started() { [[ -d "$(sotf_run_dir)" ]]; }
+
+# `bin/fleet_v2` WRITES the API url it computed into `~/.lcars/run/api_url` (line 125). That file is
+# the fleet's own answer to "where am I listening", and it beats deriving from the UID: the
+# derivation only holds while the reader shares the launcher's UID, which a pod does today and is
+# not a law. Order: env (explicit operator override) > the fleet's own file > derivation.
 sotf_api_url() {
-  if [[ -n "${LCARS_API_URL:-}" ]]; then echo "${LCARS_API_URL%/}"; else echo "http://127.0.0.1:$(sotf_port_base)"; fi
+  if [[ -n "${LCARS_API_URL:-}" ]]; then echo "${LCARS_API_URL%/}"; return; fi
+  local f; f="$(sotf_run_dir)/api_url"
+  if [[ -r "$f" ]]; then local u; u="$(head -1 "$f" 2>/dev/null)"; [[ -n "$u" ]] && { echo "${u%/}"; return; }; fi
+  echo "http://127.0.0.1:$(sotf_port_base)"
 }
 
+# No `obs_url` file is written by the launcher today, so the observation port is derived from the
+# API one when that came from a file (base+1, the launcher's own block layout), else from the UID.
 sotf_obs_url() {
-  if [[ -n "${LCARS_OBS_URL:-}" ]]; then echo "${LCARS_OBS_URL%/}"; else echo "http://127.0.0.1:$(( $(sotf_port_base) + 1 ))"; fi
+  if [[ -n "${LCARS_OBS_URL:-}" ]]; then echo "${LCARS_OBS_URL%/}"; return; fi
+  local api port; api="$(sotf_api_url)"; port="${api##*:}"
+  if [[ "$port" =~ ^[0-9]+$ ]]; then echo "${api%:*}:$(( port + 1 ))"; else echo "http://127.0.0.1:$(( $(sotf_port_base) + 1 ))"; fi
 }
 
-# How the URL was obtained — the reader must be able to tell a declared endpoint from a guessed one.
+# How the URL was obtained — a reader must be able to tell a declared endpoint from a guessed one,
+# because a wrong guess probes the NEIGHBOUR's fleet and reports it as ours.
 sotf_url_origin() {
-  if [[ -n "${LCARS_API_URL:-}" || -n "${LCARS_OBS_URL:-}" ]]; then echo "env"; else echo "derive de l'uid $(sotf_uid)"; fi
+  if [[ -n "${LCARS_API_URL:-}" || -n "${LCARS_OBS_URL:-}" ]]; then echo "env"
+  elif [[ -r "$(sotf_run_dir)/api_url" ]]; then echo "annonce par la fleet (~/.lcars/run/api_url)"
+  else echo "derive de l'uid $(sotf_uid)"; fi
 }
 
 # ── http_probe <url> — sets SOTF_HTTP_CODE and SOTF_HTTP_BODY ─────────────────────────────────────
@@ -139,6 +161,29 @@ http_probe() {
   # readiness endpoint answered correctly and the probe reported "forme inattendue". Callers trim
   # what they quote; they parse what they received.
   SOTF_HTTP_BODY="${out%$'\n'*}"
+  return 0
+}
+
+# ── sotf_skip_no_fleet <probe> <plane> [complement] — la garde « rien a atteindre » ───────────────
+# Returns 0 (and EMITS an `inactive` line) when no fleet was ever started under this human, so the
+# caller can `return` immediately. Returns 1 when there IS a fleet and the probe should proceed.
+#
+# WHY THIS IS SHARED AND NOT INLINE: it is the third time the same rule was needed in a third probe,
+# and hand-copying it produced three slightly different verdicts for one situation — `degraded` in
+# the fleet plane, `unreachable` in instruments, `degraded` again in pods, on a container where the
+# only true statement was "nobody started a fleet here". One rule, one place, or the toolkit
+# contradicts itself across its own planes.
+#
+# The rule itself, learned by measuring two specimens rather than by design:
+#   rien de DECLARE a atteindre   → inactive    (absence legitime, ne degrade pas le run)
+#   declare mais MUET             → degraded    (mesure prise, resultat mauvais)
+#   mon INSTRUMENT est casse      → unreachable (angle mort, aucun constat sur la cible)
+sotf_skip_no_fleet() {
+  local probe="$1" plane="$2" extra="${3:-}"
+  sotf_fleet_ever_started && return 1
+  emit "$probe" "$plane" "inactive" "local" "test -d $(sotf_run_dir)" \
+    "aucune fleet demarree sous cet humain${extra:+ — $extra}" \
+    "Absence de cible declaree, PAS une mesure ratee. Ne prejuge pas d'une fleet lancee par un autre humain : chacun a son bloc de ports et son repertoire de run."
   return 0
 }
 

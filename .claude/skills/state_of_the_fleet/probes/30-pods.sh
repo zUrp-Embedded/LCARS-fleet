@@ -27,6 +27,7 @@ API="$(sotf_api_url)"
 # Emitted as a REAL probe rather than left as a comment: if the runtime ever starts serving pods on
 # the API port, or stops returning 501, the day it changes is the day this line changes with it.
 probe_wrong_port_guard() {
+  sotf_skip_no_fleet "pods.port_guard" "$PLANE" "sonde sans objet" && return
   if ! http_probe "$API/api/pods" 4; then
     emit "pods.port_guard" "$PLANE" "unreachable" "hote-http" "curl $API/api/pods" \
       "curl absent" "Aveugle : je ne peux pas verifier que le port API refuse toujours de servir les pods."
@@ -40,7 +41,7 @@ probe_wrong_port_guard() {
            "HTTP $SOTF_HTTP_CODE — le port API sert des pods, contrairement au contrat 501" \
            "Signale un changement de contrat cote runtime : NE PAS lire cette reponse comme la liste de reference." ;;
     *)   emit "pods.port_guard" "$PLANE" "unknown" "hote-http" "curl $API/api/pods" \
-           "HTTP $SOTF_HTTP_CODE" \
+           "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
            "Ni 501 ni 2xx : contrat de surface indetermine, ne pas en tirer de conclusion sur les pods." ;;
   esac
 }
@@ -49,6 +50,7 @@ probe_wrong_port_guard() {
 # `Spawner.list_pods/0` behind the endpoint — a LIVE snapshot, not an event replay, because `pod.*`
 # only emits terminals (completed/failed/drift) and would never describe a pod that is merely alive.
 probe_live() {
+  sotf_skip_no_fleet "pods.live" "$PLANE" "sonde sans objet" && return
   if ! http_probe "$OBS/api/pods" 6; then
     emit "pods.live" "$PLANE" "unreachable" "hote-http" "curl $OBS/api/pods" \
       "curl absent" "Aveugle sur les pods : aucune conclusion possible, ni presence ni absence."
@@ -96,6 +98,7 @@ probe_live() {
 # The ETS projection the ReadModel maintains. Reported as VOLUME per deck, not as content: what a
 # gatekeeper decided belongs to its project, not to the front desk.
 probe_events() {
+  sotf_skip_no_fleet "pods.events" "$PLANE" "sonde sans objet" && return
   if ! http_probe "$OBS/api/projection" 6; then
     emit "pods.events" "$PLANE" "unreachable" "hote-http" "curl $OBS/api/projection" \
       "curl absent" "Aveugle sur le flux d'evenements."
@@ -103,7 +106,8 @@ probe_events() {
   fi
   if [[ "$SOTF_HTTP_CODE" != 2* ]]; then
     emit "pods.events" "$PLANE" "degraded" "hote-http" "curl $OBS/api/projection" \
-      "HTTP $SOTF_HTTP_CODE" "Sans projection je ne sais pas si la fleet a vu passer quoi que ce soit."
+      "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
+      "Sans projection je ne sais pas si la fleet a vu passer quoi que ce soit."
     return
   fi
   if [[ -z "${SOTF_HAS_JQ:-}" ]]; then
