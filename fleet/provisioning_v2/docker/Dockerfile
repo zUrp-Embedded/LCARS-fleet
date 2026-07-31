@@ -148,7 +148,8 @@ RUN curl -fsSL --proto '=https' -m 120 -o /tmp/ttyd \
 COPY fleet/provisioning_v2 /opt/lcars/fleet/provisioning_v2
 COPY fleet/runtime/etc     /opt/lcars/fleet/runtime/etc
 COPY fleet/provisioning_v2/docker/entrypoint.sh /opt/lcars/entrypoint.sh
-COPY fleet/provisioning_v2/docker/console.sh    /opt/lcars/console.sh
+COPY fleet/provisioning_v2/docker/console.sh       /opt/lcars/console.sh
+COPY fleet/provisioning_v2/docker/console.tmux.conf /opt/lcars/console.tmux.conf
 RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/fleet/provisioning_v2/provision \
                /opt/lcars/fleet/provisioning_v2/modules.d/*.sh \
                /opt/lcars/fleet/runtime/etc/provision-role-tokens.sh

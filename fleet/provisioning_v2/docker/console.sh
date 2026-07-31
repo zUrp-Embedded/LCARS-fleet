@@ -64,10 +64,17 @@ HOME_DIR="$(getent passwd "$HUMAN" | cut -d: -f6 || true)"
 [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { echo "console.sh: home introuvable pour $HUMAN" >&2; exit 1; }
 cd "$HOME_DIR"
 
+# `-f` : la config tmux DE LA CONSOLE (molette + historique — sans elle on est cloue a un ecran,
+# tmux possedant l'ecran, le scrollback du navigateur ne voit rien). Elle ne touche pas les pods :
+# eux ont leurs propres sockets tmux (`-S` par pod).
+TMUX_CONF="${LCARS_CONSOLE_TMUX_CONF:-/opt/lcars/console.tmux.conf}"
+TMUX_ARGS=(-u)
+[[ -r "$TMUX_CONF" ]] && TMUX_ARGS+=(-f "$TMUX_CONF")
+
 CMD=(env "HOME=$HOME_DIR" "USER=$HUMAN" "LOGNAME=$HUMAN"
      ttyd --writable -p "$PORT" -i 0.0.0.0 -t titleFixed="LCARS console — $HUMAN"
      -t fontSize=15 -t 'theme={"background":"#000000","foreground":"#FF9900"}'
-     tmux -u new-session -A -s console)
+     tmux "${TMUX_ARGS[@]}" new-session -A -s console)
 
 say "console de $HUMAN sur le port $PORT (http://127.0.0.1:$PORT une fois publie)"
 
