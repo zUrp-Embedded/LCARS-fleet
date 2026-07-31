@@ -26,6 +26,16 @@ ORIGIN="$(sotf_url_origin)"
 # NOTHING about wiring. Kept because its ABSENCE is informative — no health means no daemon, and
 # every probe below is then explained rather than mysterious.
 probe_health() {
+  # A box where nobody ran `fleet_v2 start` is NOT a degraded fleet — it is a box without a fleet.
+  # Measured on a fresh container: no `~/.lcars/run/` at all, and without this branch the run
+  # produced five red lines describing a daemon that was never asked to exist. `inactive` is the
+  # honest verdict, and it deliberately does not degrade the run.
+  if ! sotf_fleet_ever_started; then
+    emit "fleet.health" "$PLANE" "inactive" "hote-http" "test -d $(sotf_run_dir)" \
+      "aucune fleet demarree sous cet humain (pas de $(sotf_run_dir)) — endpoint non interroge" \
+      "Ne dit rien d'une fleet lancee par un AUTRE humain sur cette machine : chacun a son bloc de ports et son repertoire de run."
+    return 1
+  fi
   if ! http_probe "$API/api/health" 4; then
     emit "fleet.health" "$PLANE" "unreachable" "hote-http" "curl $API/api/health" \
       "curl absent" \
@@ -124,11 +134,16 @@ if probe_health; then
 else
   # Nothing below could produce anything but noise, and a probe that emits noise is worse than one
   # that abstains OUT LOUD: `unreachable` with the reason is the honest shape of "not asked".
-  emit "fleet.readiness" "$PLANE" "unreachable" "hote-http" "(non lancee)" \
-    "health rouge — sondes suivantes non lancees" \
+  # Two distinct reasons not to have measured, and conflating them would hide the interesting one:
+  # either no fleet exists here (expected, `inactive`), or one exists and did not answer (`unreachable`).
+  if sotf_fleet_ever_started; then
+    r="health rouge — sondes suivantes non lancees"; v="unreachable"
+  else
+    r="aucune fleet demarree ici — sondes suivantes sans objet"; v="inactive"
+  fi
+  emit "fleet.readiness" "$PLANE" "$v" "hote-http" "(non lancee)" "$r" \
     "Non mesure. N'affirme rien sur le cablage du daemon."
-  emit "fleet.build" "$PLANE" "unreachable" "hote-http" "(non lancee)" \
-    "health rouge — sonde non lancee" \
+  emit "fleet.build" "$PLANE" "$v" "hote-http" "(non lancee)" "$r" \
     "Non mesure. Le build servi reste inconnu."
 fi
 exit "$(sotf_exit_code)"

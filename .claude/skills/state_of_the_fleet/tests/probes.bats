@@ -83,21 +83,45 @@ puis rien — 404' "limite"
 
 # ── Port derivation ───────────────────────────────────────────────────────────────────────────────
 
-@test "les ports sont DERIVES de l'uid, jamais codes en dur" {
-  # Two humans on one box get two blocks; a fixed 21000 would silently probe the neighbour's fleet
-  # and report it as ours — a lie that looks perfectly healthy.
-  unset LCARS_API_URL LCARS_OBS_URL
+@test "url : trois sources, dans cet ordre — env > fichier de la fleet > derivation uid" {
+  # Each branch is isolated with LCARS_RUN_DIR, otherwise the test measures whatever the DEVELOPER's
+  # box happens to have — which is exactly the "the machine is not the reference" trap.
   local expected=$(( 21000 + ($(id -u) % 500) * 10 ))
-  [ "$(sotf_port_base)" -eq "$expected" ]
-  [ "$(sotf_api_url)" = "http://127.0.0.1:$expected" ]
-  [ "$(sotf_obs_url)" = "http://127.0.0.1:$(( expected + 1 ))" ]
+
+  # 3. derivation : ni env, ni fichier
+  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/vide" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://127.0.0.1:$expected|"* ]]
+  [[ "$output" == *"|http://127.0.0.1:$(( expected + 1 ))|"* ]]
+  [[ "$output" == *"|derive de"*"$(id -u)" ]]
+
+  # 2. le fichier que `bin/fleet_v2` ecrit lui-meme — il bat la derivation, parce qu'il est la
+  #    reponse de la fleet a "ou j'ecoute" et non une hypothese sur l'uid du lecteur.
+  mkdir -p "$TMP/run"; echo "http://ailleurs:9990" > "$TMP/run/api_url"
+  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/run" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://ailleurs:9990|http://ailleurs:9991|annonce par la fleet"* ]]
+
+  # 1. l'env de l'operateur bat tout
+  run env LCARS_API_URL="http://explicite:1234/" LCARS_RUN_DIR="$TMP/run" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_url_origin)"'
+  [[ "$output" == "http://explicite:1234|env" ]]
 }
 
-@test "une url declaree par l'env l'emporte, et l'origine est tracee" {
-  LCARS_API_URL="http://ailleurs:1234/" run bash -c '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url) $(sotf_url_origin)"'
-  [[ "$output" == "http://ailleurs:1234 env" ]]
-  unset LCARS_API_URL LCARS_OBS_URL
-  [[ "$(sotf_url_origin)" == derive* ]]
+@test "la garde « rien a atteindre » : pas de run dir → inactive, jamais degraded ni unreachable" {
+  # THE rule the two specimens forced into existence, and the reason it lives in lib.sh: it was
+  # hand-copied into three probes and produced three DIFFERENT verdicts for one situation.
+  run env LCARS_RUN_DIR="$TMP/vide" bash -c \
+    '. '"$PROBES"'/lib.sh; sotf_init; sotf_skip_no_fleet x.y fleet "sans objet" && echo "SKIP=oui"'
+  echo "$output" | grep -q "SKIP=oui"
+  # La sortie melange la ligne JSON et le marqueur du test : on isole la ligne JSON avant jq,
+  # sinon jq echoue sur la ligne de texte et le test rougit pour la mauvaise raison.
+  echo "$output" | grep '^{' | jq -e 'select(.probe=="x.y") | .verdict=="inactive"' >/dev/null
+
+  mkdir -p "$TMP/run2"
+  run env LCARS_RUN_DIR="$TMP/run2" bash -c \
+    '. '"$PROBES"'/lib.sh; sotf_init; sotf_skip_no_fleet x.y fleet || echo "PROCEDE=oui"'
+  echo "$output" | grep -q "PROCEDE=oui"
 }
 
 # ── The git guarantee ─────────────────────────────────────────────────────────────────────────────
@@ -335,19 +359,30 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   ! echo "$output" | jq -e 'select(.probe=="pods.live") | .evidence | contains("0 pod")' >/dev/null
 }
 
-@test "40-forge : sans FORGE_BASE_URL, c'est unreachable (aveugle) et jamais degraded" {
-  # Saying `degraded` would be a claim about a forge we never contacted.
+@test "40-forge : sans FORGE_BASE_URL c'est inactive — rien de declare n'est pas un angle mort" {
+  # Corrige apres mesure : `unreachable` faisait basculer tout le rapport en AVEUGLE sur une boite
+  # saine dont personne n'avait configure de forge. Mon instrument n'est pas casse, il n'y a
+  # simplement rien a atteindre. Et `degraded` serait pire : une affirmation sur une forge jamais
+  # contactee.
   run env -u FORGE_BASE_URL "$PROBES/40-forge.sh"
-  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="unreachable"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unreachable"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="inactive"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
+  # et le run ne doit PAS etre rouge pour ca
+  [ "$status" -eq 0 ]
 }
 
-@test "40-forge : un 404 anonyme sur l'org rend unknown, avec ses DEUX lectures" {
+@test "40-forge : un 404 anonyme sur une org DECLAREE rend unknown, avec ses DEUX lectures" {
   # THE case the manual report caught by discipline: absent vs invisible-without-auth.
+  #
+  # `FORGE_ORG` est POSE ici, et ce n'etait pas le cas avant : le meme commit qui a supprime le nom
+  # devine a laisse ce test asserter le contrat qu'il venait de remplacer. Une suite verte est une
+  # affirmation — celle-ci etait rouge pendant que j'affirmais le contraire. Sans org declaree, la
+  # sonde s'abstient desormais (`inactive`), et c'est le test voisin qui le verrouille ; l'ambiguite
+  # du 404 ne se mesure que sur une org qu'on a effectivement le droit de chercher.
   local d="$TMP/stub4"; mkdir -p "$d"
   printf '200\n{"version":"1.26.4"}' > "$d/api_v1_version"
   stub_server "$d"
-  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=someone "$PROBES/40-forge.sh"
+  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" FORGE_ORG=fleet LCARS_HUMAN=someone "$PROBES/40-forge.sh"
   stub_stop
   echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unknown"' >/dev/null
   echo "$output" | jq -e 'select(.probe=="forge.org") | .cannot_conclude | contains("invisible")' >/dev/null
@@ -364,4 +399,487 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
 @test "40-forge : aucun credential dans un pod est ATTENDU (inactive), pas une faute" {
   run env -u FORGE_TOKEN_FILE -u FORGE_ROLE_TOKENS_DIR HOME="$TMP" "$PROBES/40-forge.sh"
   echo "$output" | jq -e 'select(.probe=="forge.credentials") | .verdict=="inactive"' >/dev/null
+}
+
+# ── 60-self : les liaisons declare↔observe ───────────────────────────────────────────────────────
+
+@test "60-self : sans cap-profile, inactive — rien a confronter n'est pas une faute" {
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$TMP/vide" "$PROBES/60-self.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'select(.probe=="self.cap_profile") | .verdict=="inactive"' >/dev/null
+}
+
+@test "60-self : une divergence cap-profile ↔ launcher est NOMMEE des deux cotes" {
+  # Le format de `claude_launch.dbg` est MESURE (`allowed='a,b,c'`), pas suppose : la premiere
+  # version cherchait `--allowedTools`, une forme inventee, et rendait `unknown` sur une trace
+  # parfaitement lisible.
+  local h="$TMP/pod"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"probe","containment":"bwrap"},
+ "spec":{"scope":{"allowedTools":["Read","Bash"]},"knowledge":{"skills":[]}}}
+JSON
+  echo "[00:00:00] step jq tools OK allowed='Read,Bash,mcp__fleet__submit_result' disallowed='x'" > "$h/claude_launch.dbg"
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .evidence | contains("submit_result")' >/dev/null
+}
+
+@test "60-self : listes identiques → operational, sans reparer quoi que ce soit" {
+  local h="$TMP/pod2"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap"},
+ "spec":{"scope":{"allowedTools":["Read","Bash"]}}}
+JSON
+  echo "step jq tools OK allowed='Read,Bash' disallowed='x'" > "$h/claude_launch.dbg"
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="operational"' >/dev/null
+}
+
+@test "60-self : un champ tableau est APLATI, pas rendu en JSON brut" {
+  # `flatten` est load-bearing : `.spec.knowledge.skills` EST un tableau, donc `[...]` donnait un
+  # tableau de tableau et l'evidence affichait `["a" "b"]` au lieu des elements.
+  local h="$TMP/pod3"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p"},
+ "spec":{"knowledge":{"skills":["alpha","beta"]}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("alpha beta")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("[")' >/dev/null
+}
+
+@test "60-self : ce qui n'est observable QUE de l'interieur dit unreachable, jamais operational" {
+  # Inspecter un pod par son repertoire donne les fichiers, pas le noyau. Confondre les deux ferait
+  # rendre un verdict sur des mounts et des capabilities qui sont ceux de l'HOTE.
+  local h="$TMP/pod4"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap",
+ "mounts":[{"path":"/home/projects","mode":"rw"}]},"spec":{"invocation":{"effort":"high"}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  for p in self.mounts self.containment self.effort; do
+    echo "$output" | jq -e "select(.probe==\"$p\") | .verdict==\"unreachable\"" >/dev/null
+  done
+}
+
+@test "60-self : la couverture avoue son perimetre au lieu de le taire" {
+  # Un champ non couvert n'est pas conforme — il n'est pas regarde. Et le compteur doit etre JUSTE :
+  # `cut -d'¤'` echouait (separateur multi-octets) et annonçait 1 champ lie sur 27.
+  local h="$TMP/pod5"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap","role_index":3},
+ "spec":{"brief_kind":"worker","scope":{"allowedTools":["Read"]}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.coverage") | .verdict=="unknown"' >/dev/null
+  # les champs sans liaison sont NOMMES
+  echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | contains("spec.brief_kind")' >/dev/null
+  # et le compteur n'est pas 1
+  ! echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | startswith("1/")' >/dev/null
+}
+
+@test "40-forge : sans nom d'org declare, on ne DEVINE pas — et le compte humain reste teste" {
+  # Deux fautes en une, corrigees ensemble. `FORGE_ORG` n'existe nulle part : la premiere version
+  # testait `${FORGE_ORG:-fleet}`, nom de variable ET valeur inventes. Puis le correctif a couple
+  # deux questions independantes par un `return` : ne pas connaitre l'org faisait sauter la
+  # verification du compte, qui n'en depend pas.
+  local d="$TMP/stub6"; mkdir -p "$d"
+  printf '200\n{"version":"1.26.4"}' > "$d/api_v1_version"
+  printf '200\n{"login":"bob"}'      > "$d/api_v1_users_bob"
+  stub_server "$d"
+  run env -u FORGE_ORG FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=bob "$PROBES/40-forge.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.human_account") | .verdict=="operational"' >/dev/null
+}
+
+# ── 50-projects : les liaisons par construction ───────────────────────────────────────────────────
+# Toutes hermetiques : des depots git reels dans le TMP, et un arbre de source MINIMAL qui joue le
+# role de la declaration. C'est le point : la sonde ne porte aucune attente, elle va la lire — donc
+# un test peut la DEPLACER et verifier que le verdict suit. Un check code en dur serait intestable
+# de cette facon, et c'est exactement ce qui le rend fragile en production.
+
+mk_decl() { # <projects_root> <depot> <branche livrable> <branche work> [<work_root declare>]
+  local root="$1" name="$2" mb="$3" wb="$4" wr="${5:-$TMP/w}" d
+  d="$root/$name/fleet/runtime/lib/fleet"; mkdir -p "$d/pilot"
+  printf '%s\n' \
+    "    GitOps.run([\"clone\", \"--branch\", \"$mb\", url, proj_dir], auth: true)" \
+    "    with :ok <- GitOps.run([\"init\", \"-q\", \"-b\", \"$wb\", work_dir], auth: false) do" \
+    > "$d/pilot/project_onboard.ex"
+  printf '%s\n' "  @projects_root \"$root\"" "  @work_root \"$wr\"" > "$d/layout.ex"
+}
+
+mk_repo() { # <dir> <branche> [origin]
+  mkdir -p "$1"; git init -q -b "$2" "$1"
+  git -C "$1" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  [[ -n "${3:-}" ]] && git -C "$1" remote add origin "$3"
+  return 0
+}
+
+# Simule un `fetch` deja fait, sans reseau : la ref de suivi est un ref comme un autre.
+mk_tracking() { git -C "$1" update-ref "refs/remotes/origin/$2" "${3:-$(git -C "$1" rev-parse HEAD)}"; }
+
+sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOME="$TMP/nohome" "$PROBES/50-projects.sh"; }
+
+@test "50-projects : boite fraiche — 0 projet et aucune source n'est PAS un angle mort" {
+  # La faute d'origine, refaite ici sous une autre forme : declarer `unreachable` sur une declaration
+  # dont personne n'a besoin faisait basculer tout le run en AVEUGLE pour une question non posee.
+  mkdir -p "$TMP/p" "$TMP/w"
+  run sotf50
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="inactive"' >/dev/null
+}
+
+@test "50-projects : des projets SANS declaration lisible, c'est un vrai angle mort" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  run sotf50
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="unreachable"' >/dev/null
+  # et l'observable est rapporte SANS attente : jamais vert, jamais rouge
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.etat") | .verdict=="unknown"' >/dev/null
+}
+
+@test "50-projects : l'attente est LUE dans la source — la deplacer deplace le verdict" {
+  # LA propriete qui distingue une liaison d'un check. Meme disque, meme sonde, deux declarations :
+  # deux verdicts. Aucun litteral de branche n'existe dans la sonde pour qu'on puisse le faire.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" trunk
+  mk_decl "$TMP/p" src main work/ops
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="degraded"' >/dev/null
+  mk_decl "$TMP/p" src trunk work/ops
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="operational"' >/dev/null
+}
+
+@test "50-projects : un sous-dossier d'un depot n'est pas un projet" {
+  # `git rev-parse` repond « oui » depuis n'importe quel sous-dossier : sans l'egalite avec la
+  # RACINE, tout dossier interne passerait pour un depot et l'inventaire inventerait des projets.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main; mkdir -p "$TMP/p/alpha/sub"
+  run bash -c ". $PROBES/lib.sh; . /dev/stdin <<< \"\$(sed -n '/^is_repo()/,/^}/p' $PROBES/50-projects.sh)\"; is_repo $TMP/p/alpha && echo RACINE; is_repo $TMP/p/alpha/sub || echo PAS-SOUS-DOSSIER"
+  echo "$output" | grep -qx RACINE
+  echo "$output" | grep -qx PAS-SOUS-DOSSIER
+}
+
+@test "50-projects : un .git FICHIER (worktree lie) reste un depot" {
+  # Le cas qui a fait dire « cote work ABSENT » sur un depot parfaitement present.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" worktree add -q -b wt "$TMP/w/alpha" >/dev/null 2>&1
+  [ -f "$TMP/w/alpha/.git" ]
+  run bash -c ". $PROBES/lib.sh; . /dev/stdin <<< \"\$(sed -n '/^is_repo()/,/^}/p' $PROBES/50-projects.sh)\"; is_repo $TMP/w/alpha && echo OUI"
+  echo "$output" | grep -qx OUI
+}
+
+@test "50-projects : un dossier a point n'est pas un projet (Layout refuse le point initial)" {
+  mkdir -p "$TMP/p/.claude" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  run sotf50
+  ! echo "$output" | jq -e 'select(.probe|startswith("projects..claude"))' >/dev/null
+}
+
+@test "50-projects : sale cote livrable = drift, sale cote work = etat de travail normal" {
+  # L'ASYMETRIE. Le meme fait git ne dit pas la meme chose des deux cotes : `reset --hard` ECRASE le
+  # livrable, tandis que le cote work est un depot autonome ou l'on travaille. Traiter les deux
+  # pareil rend rouge du benin et vert ce qui se perd.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_repo "$TMP/w/alpha" work/ops
+  mk_tracking "$TMP/p/alpha" main; mk_tracking "$TMP/w/alpha" work/ops
+  touch "$TMP/p/alpha/sale" "$TMP/w/alpha/sale"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .evidence | contains("ecrase")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="operational"' >/dev/null
+}
+
+@test "50-projects : du work/ops non pousse est LE seul etat ou une perte est possible" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/w/alpha" work/ops; mk_tracking "$TMP/w/alpha" work/ops
+  git -C "$TMP/w/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m inedit
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .evidence | contains("que sur ce disque")' >/dev/null
+}
+
+@test "50-projects : EN AVANCE sur le miroir = commits condamnes, pas un disque en retard" {
+  # Mesure sur le conteneur docker : son clone du livrable portait 4 commits presents nulle part
+  # ailleurs, et la sonde repondait « un ecart reste un disque en retard, jamais une perte ». Vrai
+  # pour le retard, FAUX pour l'avance : `reset --hard origin/main` detruit des commits aussi bien
+  # que des fichiers. Une ligne qui mesure juste et rassure a tort est pire qu'une ligne absente.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("AUCUNE ref distante")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+}
+
+@test "50-projects : en avance MAIS presents sur une autre ref distante = ecart, pas perte" {
+  # La correction de la correction. « En avance » et « perdu au reset » sont deux choses : la sonde
+  # a annonce « n'existent QUE sur ce disque » sur six commits qui dormaient sur une branche poussee.
+  # Un miroir qui n'en est plus un reste un ecart ; ce n'est pas pour autant du travail en danger.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  # le meme commit vit aussi sur une ref distante : c'est ce qui change la lecture
+  mk_tracking "$TMP/p/alpha" chantier/x
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("SANS les perdre")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
+}
+
+@test "50-projects : EN RETARD sur le miroir = benin, et c'est dit comme tel" {
+  # Le jumeau. Meme verdict `degraded`, lecture opposee : ici le sync repare tout seul.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" reset -q --hard HEAD~1
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("le prochain sync les rattrape")' >/dev/null
+}
+
+@test "50-projects : sans ref de suivi, unknown — jamais 'aligne' par defaut" {
+  # Un depot jamais fetch n'a rien a comparer. Rendre `operational` la ferait passer pour a jour.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops; mk_repo "$TMP/p/alpha" main
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="unknown"' >/dev/null
+}
+
+@test "50-projects : l'identite compare a la CASSE — Layout.project_name ne replie rien" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/Alpha" main "http://forge.test/fleet/alpha.git"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.Alpha.identity") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : un identifiant dans l'origin ne sort NI dans l'evidence NI dans la methode" {
+  # Un rapport finit dans un log de conversation. L'evidence est verbatim par contrat, et le verbatim
+  # est exactement ce qu'un credential ne doit pas etre. Deuxieme effet, aussi important : l'URL
+  # SERVIE a curl est desidentifiee, sinon la lecture « anonyme » devient authentifiee en silence et
+  # tout ce que la liaison declare sur le 404 ambigu devient faux.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main "http://bob:s3cr3t@127.0.0.1:1/fleet/alpha.git"
+  run sotf50
+  ! echo "$output" | grep -q "s3cr3t"
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.identity") | .evidence | contains("***@")' >/dev/null
+}
+
+@test "50-projects : une racine non montee est un cloisonnement, pas une panne" {
+  # Seul starfleet monte les deux racines. Pour tout autre role l'absence est CONSTRUCTIVE, et la
+  # peindre en rouge apprendrait a ignorer le rouge.
+  mkdir -p "$TMP/p" "$TMP/pod"
+  printf '{"metadata":{"mounts":[{"path":"/home/projects"}]}}' > "$TMP/pod/.cap-profile.json"
+  run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
+  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="inactive"' >/dev/null
+}
+
+@test "50-projects : une racine DECLAREE au cap-profile et illisible est un drift" {
+  mkdir -p "$TMP/p" "$TMP/pod"
+  printf '{"metadata":{"mounts":[{"path":"%s"}]}}' "$TMP/absente" > "$TMP/pod/.cap-profile.json"
+  run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
+  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : sonder une autre racine que celle de Fleet.Layout invalide tout le reste" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops "/ailleurs"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.roots_agree") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : sans git, l'angle mort est TOTAL et il le dit — pas 'aucun projet'" {
+  # Sans ce garde, chaque liaison rendrait « pas de depot » sur des projets sains : le silence de
+  # l'instrument se lirait comme un constat d'absence.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  local bin="$TMP/nogit"; mkdir -p "$bin"
+  local t p
+  # `dirname` en tete : la sonde s'en sert pour se localiser AVANT de sourcer lib.sh. L'oublier ne
+  # produit pas un run sans git, il produit un run sans rien — et un test qui mesure l'effondrement
+  # d'un harnais croit mesurer le comportement qu'il visait.
+  for t in bash dirname jq date id find sed grep wc awk head tr sort comm env curl cut; do
+    p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$bin/$t"
+  done
+  run env -i PATH="$bin" HOME="$TMP" SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" \
+    "$bin/bash" "$PROBES/50-projects.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e 'select(.probe=="projects.instrument") | .verdict=="unreachable"' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.inventory")' >/dev/null
+}
+
+# ── sotf.sh : le raisonnement de capacite ─────────────────────────────────────────────────────────
+# Teste sur un FLUX SYNTHETIQUE, jamais sur la machine : `diag` repond « qu'est-ce qui est
+# entreprenable », et cette reponse est une projection sur des verdicts de sondes. En la testant a
+# travers de vraies sondes on mesurerait l'etat du poste, pas la regle — et la regle est precisement
+# ce qui doit tenir sur un poste qu'on ne connait pas.
+
+load_sotf() { . "$SKILL_DIR/sotf.sh"; }   # garde de source : sourcer ne lance rien
+
+jl() { # construit une ligne de flux : <probe> <verdict> [evidence]
+  jq -cn --arg p "$1" --arg v "$2" --arg e "${3:-ev}" \
+    '{probe:$p,plane:"x",verdict:$v,vantage:"local",method:"m",evidence:$e,cannot_conclude:"c",ts:"t"}'
+}
+
+@test "sotf : tous les maillons verts → la capacite est entreprenable" {
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == operational\|* ]]
+}
+
+@test "sotf : un maillon bloquant casse NOMME le maillon ET son constat" {
+  # `diag` se lit par quelqu'un qui est sur le point d'agir. Une ligne qui se contente d'un id
+  # l'envoie fouiller le tableau — au moment precis ou il ne le fera pas.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health degraded 'HTTP 503 sur /api/health')
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == degraded\|* ]]
+  echo "$output" | grep -q "fleet.health"
+  echo "$output" | grep -q "503"
+}
+
+@test "sotf : un maillon INDICATIF rouge n'interdit pas — mais il interdit le vert" {
+  # La distinction qui porte tout le fichier : un outil mcp est execute par la FLEET, pas par moi.
+  # Ce que je mesure depuis ma place informe, ne tranche pas. La confondre avec du bloquant
+  # declarerait create_project mort en permanence dans tout pod (aucun n'a de credential forge).
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)
+$(jl fleet.subsystem.mcp.pod_facing operational)
+$(jl fleet.subsystem.spawn.dispatch operational)
+$(jl forge.reachable degraded)
+$(jl projects.root_projects operational)
+$(jl projects.root_work operational)
+$(jl fleet.subsystem.launch.backend operational)
+$(jl fleet.subsystem.pilot.step operational)"
+  run capability_verdict "$(chain_of create_project)"
+  [[ "$output" == unknown\|* ]]
+  echo "$output" | grep -q "forge.reachable"
+}
+
+@test "sotf : une chaine qui designe une sonde disparue le DIT, elle ne l'ignore pas" {
+  # Le detecteur de derive de la chaine elle-meme. Sans lui, renommer une sonde rendrait
+  # silencieusement toutes les capacites vertes : le maillon manquant ne bloquerait plus rien.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)
+$(jl fleet.health operational)"
+  RAN_PLANES=" instruments fleet "   # les deux sondes ONT tourne : l'absence est donc une derive
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == unreachable\|* ]]
+  echo "$output" | grep -q "fleet.subsystem.mcp.pod_facing"
+}
+
+@test "sotf : un maillon absent parce que sa sonde n'a pas tourne n'accuse rien" {
+  # Le jumeau du test precedent, et c'est leur DIFFERENCE qui est la regle : court-circuit voulu
+  # d'un cote, derive de l'autre. Les confondre ferait crier a la panne a chaque `diag` cible.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket operational)"
+  RAN_PLANES=" instruments "
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == operational\|* ]]
+}
+
+@test "sotf : rien a atteindre reste inactive, ce n'est pas une panne" {
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket inactive 'hors pod')"
+  RAN_PLANES=" instruments "
+  run capability_verdict "$(chain_of create_project)"
+  [[ "$output" == inactive\|* ]]
+}
+
+@test "sotf : un fait constate passe devant un trou de mesure" {
+  # degraded > unreachable : « c'est casse, et voila lequel » est plus actionnable que « je ne sais
+  # pas ». L'inverse enterrerait la seule ligne exploitable du rapport.
+  load_sotf
+  JSONL="$(jl instruments.mcp_socket unreachable)
+$(jl fleet.health degraded 'muet')
+$(jl fleet.subsystem.mcp.pod_facing operational)"
+  run capability_verdict "$(chain_of list_workflow_cards)"
+  [[ "$output" == degraded\|* ]]
+}
+
+@test "sotf : le code de sortie se derive du FLUX, pas des compteurs" {
+  # Les sondes tournent dans des processus separes : leurs compteurs n'arrivent jamais au runner.
+  # `--raw` rendait donc 0 sur un run aveugle — un succes ambigu, la faute que ce toolkit refuse.
+  load_sotf
+  JSONL="$(jl a.b operational)"; run jsonl_exit_code; [ "$output" = 0 ]
+  JSONL="$(jl a.b degraded)";    run jsonl_exit_code; [ "$output" = 1 ]
+  JSONL="$(jl a.b unreachable)"; run jsonl_exit_code; [ "$output" = 2 ]
+  JSONL="$(jl a.b degraded)
+$(jl c.d unreachable)"
+  run jsonl_exit_code; [ "$output" = 2 ]
+}
+
+@test "sotf : les lignes de capacite sont DANS le flux, pas a cote" {
+  # Hors du JSONL elles echapperaient au rendu, au comptage et au code de sortie — les trois choses
+  # qui font qu'un rapport engage quelqu'un. C'est arrive : elles sortaient sur stdout, au-dessus.
+  run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.create_project")' >/dev/null
+  # aucune ligne non-JSON ne traine
+  while read -r l; do [[ -z "$l" ]] || echo "$l" | jq -e . >/dev/null; done <<< "$output"
+}
+
+@test "sotf : le perimetre confronte les DEUX sens — outil sans chaine, chaine hors perimetre" {
+  mkdir -p "$TMP/pod"
+  printf '{"spec":{"scope":{"allowedTools":["Read","mcp__fleet__create_project","mcp__fleet__truc_inconnu"]}}}' \
+    > "$TMP/pod/.cap-profile.json"
+  run env LCARS_POD_HOME="$TMP/pod" "$SKILL_DIR/sotf.sh" diag --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .verdict=="unknown"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("truc_inconnu")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("open_project")' >/dev/null
+}
+
+@test "sotf : une capacite inconnue est nommee comme telle, jamais evaluee en silence" {
+  run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag pas_une_capacite --raw
+  echo "$output" | jq -e 'select(.probe=="capacites.pas_une_capacite") | .verdict=="unreachable"' >/dev/null
+}
+
+@test "sotf : report refuse une cible, et une commande inconnue ne fait pas semblant" {
+  run "$SKILL_DIR/sotf.sh" report create_project
+  [ "$status" -eq 2 ]
+  run "$SKILL_DIR/sotf.sh" rapport
+  [ "$status" -eq 2 ]
+}
+
+# ── La doc et la CLI ──────────────────────────────────────────────────────────────────────────────
+
+@test "SKILL.md ne documente aucune invocation que la CLI refuse" {
+  # Une doc qui derive est un mensonge a retardement, et celle-ci est la seule chose qu'un agent lit
+  # avant d'agir. Le detecteur est mecanique : les invocations sont EXTRAITES du markdown et
+  # confrontees a ce que le case block accepte reellement. Renommer une entree des deux cotes est
+  # gratuit ; ne la renommer que d'un cote rougit ici.
+  local cmds opts c o
+  cmds="$(grep -oE 'sotf\.sh [a-z_]+' "$SKILL_DIR/SKILL.md" | awk '{print $2}' | sort -u)"
+  [ -n "$cmds" ]
+  for c in $cmds; do
+    grep -qE "^  $c\)|^  $c\|" "$SKILL_DIR/sotf.sh" || {
+      echo "SKILL.md documente '$c', absent du case de sotf.sh"; return 1
+    }
+  done
+  opts="$(grep -oE '^\s+\$S/sotf\.sh [^#]*' "$SKILL_DIR/SKILL.md" | grep -oE '\-\-[a-z]+' | sort -u)"
+  for o in $opts; do
+    grep -qE -- "$o\)|$o\|" "$SKILL_DIR/sotf.sh" "$SKILL_DIR/probes/render.sh" || {
+      echo "SKILL.md documente l'option '$o', acceptee nulle part"; return 1
+    }
+  done
+}
+
+@test "FORMAT.md decrit les cinq verdicts que emit accepte, ni plus ni moins" {
+  # Le vocabulaire a ete FORCE par deux specimens, pas conçu. Un sixieme verdict qui apparaitrait
+  # dans le code sans passer par ce fichier reintroduirait exactement l'ambiguite qu'il a coute
+  # cher de retirer.
+  local v
+  for v in operational inactive degraded unreachable unknown; do
+    grep -q "\`$v\`" "$SKILL_DIR/FORMAT.md" || { echo "FORMAT.md ne decrit pas '$v'"; return 1; }
+    grep -q "$v" "$PROBES/lib.sh" || { echo "lib.sh ne connait pas '$v'"; return 1; }
+  done
+  # aucun verdict dans le case de emit qui ne soit pas documente
+  run bash -c "sed -n '/case \"\$verdict\" in/,/esac/p' '$PROBES/lib.sh' | grep -oE '^\s+[a-z|]+\)' | tr -d ' )' | tr '|' '\n' | grep -v '^\*$'"
+  for v in $output; do
+    grep -q "\`$v\`" "$SKILL_DIR/FORMAT.md" || { echo "verdict '$v' emis mais absent de FORMAT.md"; return 1; }
+  done
 }

@@ -30,9 +30,13 @@ FORGE="${FORGE%/}"
 # Absent, every probe below is blind and says so ONCE, here, instead of five confusing times.
 probe_configured() {
   if [[ -z "$FORGE" ]]; then
-    emit "forge.configured" "$PLANE" "unreachable" "local" 'test -n "$FORGE_BASE_URL"' \
-      "FORGE_BASE_URL absente de l'env" \
-      "Sans adresse je ne peux RIEN dire de la forge : ni qu'elle tourne, ni qu'elle est morte. C'est un angle mort, pas un constat."
+    # `inactive`, NOT `unreachable`, et la distinction a ete apprise sur deux specimens : mon
+    # instrument n'est pas casse, il n'y a simplement RIEN de declare a atteindre. Marquer ce cas
+    # aveugle faisait basculer tout le rapport en AVEUGLE sur une boite parfaitement saine dont
+    # personne n'a configure de forge — une fausse alarme deguisee en constat.
+    emit "forge.configured" "$PLANE" "inactive" "local" 'test -n "$FORGE_BASE_URL"' \
+      "aucune forge declaree (FORGE_BASE_URL vide ou absente)" \
+      "Absence de DECLARATION, pas de mesure ratee : je ne dis rien d'une forge qui existerait ailleurs sans etre annoncee a ce processus."
     return 1
   fi
   emit "forge.configured" "$PLANE" "operational" "local" 'echo $FORGE_BASE_URL' \
@@ -69,13 +73,32 @@ probe_reachable() {
 # Reporting it as absence is how a diagnostic sends an operator provisioning an account that already
 # exists.
 probe_identity() {
-  local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-fleet}"
+  local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-}"
 
-  local u="$FORGE/api/v1/orgs/$org"
+  # L'org n'est declaree NULLE PART d'atteignable depuis un pod : elle vit dans `forge.tf`, cote
+  # provisioning. La premiere version testait `${FORGE_ORG:-fleet}` — j'avais invente la variable ET
+  # la valeur. Une sonde qui interroge un nom devine rend un 404 qui ne prouve rien, pas meme
+  # l'ambiguite qu'elle annonce. On ne devine plus : sans nom declare, on le dit.
+  if [[ -z "$org" ]]; then
+    emit "forge.org" "$PLANE" "inactive" "reseau" 'test -n "$FORGE_ORG"' \
+      "aucun nom d'org declare a ce processus (FORGE_ORG absente, et rien ne la porte cote runtime)" \
+      "Je ne sais pas QUELLE org chercher. Un test sur un nom devine ne prouverait rien — pas meme son absence."
+  else
+    probe_org "$org"
+  fi
+
+  probe_human_account "$human"
+}
+
+# L'org et le compte humain sont deux questions INDEPENDANTES. Le premier correctif les avait
+# couplees par un `return` : ne pas connaitre le nom de l'org faisait sauter la verification du
+# compte, qui n'en depend pas. Un correctif qui emporte une mesure voisine est un demi-correctif.
+probe_org() {
+  local org="$1" u="$FORGE/api/v1/orgs/$org"
   if http_probe "$u" 6; then
     case "$SOTF_HTTP_CODE" in
       2*)  emit "forge.org" "$PLANE" "operational" "reseau" "curl $u" \
-             "org '$org' visible en anonyme (HTTP $SOTF_HTTP_CODE)" \
+             "org '$org' (nom fourni par FORGE_ORG) visible en anonyme (HTTP $SOTF_HTTP_CODE)" \
              "Visible ne veut pas dire correctement peuplee : teams et memberships ne sont pas lisibles ici." ;;
       404) emit "forge.org" "$PLANE" "unknown" "reseau" "curl $u" \
              "HTTP 404 · $(trim "$SOTF_HTTP_BODY" 120)" \
@@ -87,6 +110,10 @@ probe_identity() {
     emit "forge.org" "$PLANE" "unreachable" "reseau" "curl $u" "curl absent" "Aveugle sur l'org."
   fi
 
+}
+
+probe_human_account() {
+  local human="$1" u
   if [[ -z "$human" ]]; then
     emit "forge.human_account" "$PLANE" "unreachable" "reseau" 'curl $FORGE/api/v1/users/$LCARS_HUMAN' \
       "nom du compte humain inconnu (ni LCARS_HUMAN ni USER)" \
@@ -138,10 +165,17 @@ sotf_init
 if probe_configured && probe_reachable; then
   probe_identity
 else
-  emit "forge.org" "$PLANE" "unreachable" "reseau" "(non lancee)" \
-    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
-  emit "forge.human_account" "$PLANE" "unreachable" "reseau" "(non lancee)" \
-    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
+  # Meme trichotomie en aval : rien de declare → `inactive` (sans objet) ; declare mais muet →
+  # `unreachable` (je n'ai pas pu mesurer). Les confondre noie le cas interessant dans le banal.
+  if [[ -z "$FORGE" ]]; then
+    fv="inactive"; fr="aucune forge declaree — sonde sans objet"
+  else
+    fv="unreachable"; fr="forge declaree mais injoignable — sonde non lancee"
+  fi
+  emit "forge.org" "$PLANE" "$fv" "reseau" "(non lancee)" "$fr" \
+    "Non mesure. N'affirme ni presence ni absence de l'org."
+  emit "forge.human_account" "$PLANE" "$fv" "reseau" "(non lancee)" "$fr" \
+    "Non mesure. N'affirme ni presence ni absence du compte."
 fi
 probe_credentials
 exit "$(sotf_exit_code)"

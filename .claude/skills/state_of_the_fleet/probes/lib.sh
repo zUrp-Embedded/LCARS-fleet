@@ -103,17 +103,39 @@ sotf_port_base() {
   echo $(( 21000 + (uid % 500) * 10 ))
 }
 
+# The runtime dir a started fleet leaves behind. Its EXISTENCE is the discriminator between "no
+# fleet was ever started here" and "a fleet is started and unwell" — measured on two specimens: a
+# live box has `~/.lcars/run/{api.sock,api_url,fleet_v2.sock,mcp,tmux-sock}`, a fresh container has
+# no `run/` at all. Without it, a box that was never started reports `degraded` on every endpoint,
+# which is a false alarm dressed as a finding.
+sotf_run_dir() { echo "${LCARS_RUN_DIR:-$HOME/.lcars/run}"; }
+sotf_fleet_ever_started() { [[ -d "$(sotf_run_dir)" ]]; }
+
+# `bin/fleet_v2` WRITES the API url it computed into `~/.lcars/run/api_url` (line 125). That file is
+# the fleet's own answer to "where am I listening", and it beats deriving from the UID: the
+# derivation only holds while the reader shares the launcher's UID, which a pod does today and is
+# not a law. Order: env (explicit operator override) > the fleet's own file > derivation.
 sotf_api_url() {
-  if [[ -n "${LCARS_API_URL:-}" ]]; then echo "${LCARS_API_URL%/}"; else echo "http://127.0.0.1:$(sotf_port_base)"; fi
+  if [[ -n "${LCARS_API_URL:-}" ]]; then echo "${LCARS_API_URL%/}"; return; fi
+  local f; f="$(sotf_run_dir)/api_url"
+  if [[ -r "$f" ]]; then local u; u="$(head -1 "$f" 2>/dev/null)"; [[ -n "$u" ]] && { echo "${u%/}"; return; }; fi
+  echo "http://127.0.0.1:$(sotf_port_base)"
 }
 
+# No `obs_url` file is written by the launcher today, so the observation port is derived from the
+# API one when that came from a file (base+1, the launcher's own block layout), else from the UID.
 sotf_obs_url() {
-  if [[ -n "${LCARS_OBS_URL:-}" ]]; then echo "${LCARS_OBS_URL%/}"; else echo "http://127.0.0.1:$(( $(sotf_port_base) + 1 ))"; fi
+  if [[ -n "${LCARS_OBS_URL:-}" ]]; then echo "${LCARS_OBS_URL%/}"; return; fi
+  local api port; api="$(sotf_api_url)"; port="${api##*:}"
+  if [[ "$port" =~ ^[0-9]+$ ]]; then echo "${api%:*}:$(( port + 1 ))"; else echo "http://127.0.0.1:$(( $(sotf_port_base) + 1 ))"; fi
 }
 
-# How the URL was obtained — the reader must be able to tell a declared endpoint from a guessed one.
+# How the URL was obtained — a reader must be able to tell a declared endpoint from a guessed one,
+# because a wrong guess probes the NEIGHBOUR's fleet and reports it as ours.
 sotf_url_origin() {
-  if [[ -n "${LCARS_API_URL:-}" || -n "${LCARS_OBS_URL:-}" ]]; then echo "env"; else echo "derive de l'uid $(sotf_uid)"; fi
+  if [[ -n "${LCARS_API_URL:-}" || -n "${LCARS_OBS_URL:-}" ]]; then echo "env"
+  elif [[ -r "$(sotf_run_dir)/api_url" ]]; then echo "annonce par la fleet (~/.lcars/run/api_url)"
+  else echo "derive de l'uid $(sotf_uid)"; fi
 }
 
 # ── http_probe <url> — sets SOTF_HTTP_CODE and SOTF_HTTP_BODY ─────────────────────────────────────
@@ -142,6 +164,29 @@ http_probe() {
   return 0
 }
 
+# ── sotf_skip_no_fleet <probe> <plane> [complement] — la garde « rien a atteindre » ───────────────
+# Returns 0 (and EMITS an `inactive` line) when no fleet was ever started under this human, so the
+# caller can `return` immediately. Returns 1 when there IS a fleet and the probe should proceed.
+#
+# WHY THIS IS SHARED AND NOT INLINE: it is the third time the same rule was needed in a third probe,
+# and hand-copying it produced three slightly different verdicts for one situation — `degraded` in
+# the fleet plane, `unreachable` in instruments, `degraded` again in pods, on a container where the
+# only true statement was "nobody started a fleet here". One rule, one place, or the toolkit
+# contradicts itself across its own planes.
+#
+# The rule itself, learned by measuring two specimens rather than by design:
+#   rien de DECLARE a atteindre   → inactive    (absence legitime, ne degrade pas le run)
+#   declare mais MUET             → degraded    (mesure prise, resultat mauvais)
+#   mon INSTRUMENT est casse      → unreachable (angle mort, aucun constat sur la cible)
+sotf_skip_no_fleet() {
+  local probe="$1" plane="$2" extra="${3:-}"
+  sotf_fleet_ever_started && return 1
+  emit "$probe" "$plane" "inactive" "local" "test -d $(sotf_run_dir)" \
+    "aucune fleet demarree sous cet humain${extra:+ — $extra}" \
+    "Absence de cible declaree, PAS une mesure ratee. Ne prejuge pas d'une fleet lancee par un autre humain : chacun a son bloc de ports et son repertoire de run."
+  return 0
+}
+
 # ── git_ro <dir> <args…> — the ONLY way this toolkit is allowed to call git ───────────────────────
 # Reading a repo with git is NOT automatically free: `status` and friends may refresh the on-disk
 # index and may take `index.lock`. That is tolerable on a repo nobody else touches, and it is NOT
@@ -154,9 +199,33 @@ http_probe() {
 # `-c core.fsmonitor=` disables any inherited filesystem monitor (another background writer we do
 # not want to wake), and `--git-dir/--work-tree` are deliberately NOT used: we `-C` into the repo so
 # a path that is not a repo fails as a probe error instead of silently resolving to an ancestor.
+#
+# The env hardening is a BELT, not a need of today's callers: every git call here is local. But a
+# probe must never be able to BLOCK, and git's default answer to a missing credential is to ask a
+# human — on a headless pod that is an infinite hang, and a diagnostic that hangs is worse than one
+# that fails. The day someone adds a network call (`ls-remote`), it fails in a second instead.
 git_ro() {
   local dir="$1"; shift
-  git --no-optional-locks -c core.fsmonitor= -C "$dir" "$@"
+  GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true GIT_SSH_COMMAND='ssh -oBatchMode=yes' \
+    git --no-optional-locks -c core.fsmonitor= -C "$dir" "$@"
+}
+
+# ── redact_url <url> — a report ends up in a conversation log ──────────────────────────────────────
+# A remote URL may carry `//user:token@host`. Evidence is verbatim BY CONTRACT, and verbatim is
+# exactly what must not happen to a credential: the one field of this toolkit that is quoted
+# everywhere is the one where a secret would travel furthest.
+redact_url() {
+  printf '%s' "${1:-}" | sed -E 's#(://)[^/@]*@#\1***@#'
+}
+
+# ── anon_url <url> — le jumeau de redact_url, pour l'USAGE et non pour l'affichage ─────────────────
+# Un `remote.origin.url` credente ne doit pas servir tel quel a une sonde qui annonce lire en
+# ANONYME : elle deviendrait authentifiee en silence, et son `cannot_conclude` (« 404 = absent OU
+# invisible sans jeton ») deviendrait faux — un mensonge produit par une commodite. Deuxieme raison,
+# aussi grave : l'URL construite finit dans `method` et dans les evidences d'erreur, ou curl la
+# recopie volontiers. On coupe l'identifiant AVANT de s'en servir, pas au moment de l'imprimer.
+anon_url() {
+  printf '%s' "${1:-}" | sed -E 's#(://)[^/@]*@#\1#'
 }
 
 # ── Roots. Imposed container layout (Fleet.Layout, hardcoded there ON PURPOSE — "a config file for
