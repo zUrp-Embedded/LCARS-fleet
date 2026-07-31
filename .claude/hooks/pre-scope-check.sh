@@ -189,6 +189,15 @@ check_scope() {
         if [[ "$path" == */work/doing/* ]]; then
             return 1  # allowed — active workspace
         fi
+        # Exception: the CURRENT beyond dossier — SYMETRIQUE de work-guard.sh, et c'est le point.
+        # Ces deux gardes decrivent la MEME intention ; n'en ouvrir qu'un a produit exactement
+        # l'incoherence qu'ils sont censes empecher — un agent voisin a pu poser son fichier par
+        # Bash (work-guard ouvert) apres s'etre fait refuser par Write (celui-ci, ferme). Un outil
+        # sur deux, c'est une regle qui ne veut plus rien dire. Le numero est code en dur ici aussi :
+        # changer d'ere doit se voir aux DEUX endroits. Bump a #7.
+        if [[ "$path" == */work/beyond_#6/* ]]; then
+            return 1  # allowed — dossier courant
+        fi
         echo "projects.work/ writes go through hooks only (v7 Phase 4a)"
         return 0
     fi
