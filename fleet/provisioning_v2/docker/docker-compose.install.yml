@@ -1,0 +1,82 @@
+# SOURCE: fleet/provisioning_v2/docker/docker-compose.install.yml
+# AUTHOR: consultant
+# STARDATE: 2026-08-01
+# STATUS: le compose d'INSTALLATION — il TIRE une image, il n'en fabrique aucune
+#
+# ─── POURQUOI UN SECOND FICHIER PLUTOT QU'UN DRAPEAU ────────────────────────────────────────────
+# `docker-compose.yml` porte `build:` ET `image:`. C'est juste pour un poste de DEV : l'image
+# manquante se fabrique. Pour qui INSTALLE, c'est un piege — il n'a pas les sources, donc compose
+# lui proposerait un build qui echouerait sur un contexte absent, et le message parlerait de
+# Dockerfile introuvable au lieu de dire « cette image ne se telecharge pas ».
+# Compose n'a pas de conditionnel : on ne peut pas rendre `build:` inerte selon un mode. La
+# separation est donc un FICHIER, pas une variable. Ce fichier n'a aucune section `build` — s'il
+# ne peut pas tirer l'image, il le dit, et c'est le seul diagnostic possible.
+#
+# ─── L'IMAGE ───────────────────────────────────────────────────────────────────────────────────
+# `LCARS_IMAGE` porte le nom COMPLET, registry comprise. Le defaut pointe la forge LAN de ce
+# deploiement (10.42.0.118) parce que c'est la seule registry ou l'image existe REELLEMENT
+# aujourd'hui. ADR 012 vise GHCR pour la release publique ; tant que `publish.yml` n'existe pas,
+# mettre un defaut GHCR serait un chemin qui rend 404 — un defaut qui ment est pire qu'un defaut
+# local. Le jour ou GHCR est alimente, ce defaut change, et lui seul.
+#
+# Registry en HTTP pur : Docker REFUSE par defaut. Il faut la declarer dans `insecure-registries`
+# (Docker Desktop → Settings → Docker Engine, puis Apply & Restart — le daemon redemarre, ce n'est
+# pas un rechargement a chaud). Sans ca, l'erreur parle de « HTTP response to HTTPS client » et
+# n'evoque nulle part la configuration.
+#
+# ─── LE NOM DE PROJET, ET LE VOLUME QU'IL COMMANDE ─────────────────────────────────────────────
+# `name: lcars` est le nom correct d'une VRAIE installation. Consequence a connaitre sur une
+# machine qui fait AUSSI tourner le compose de dev : meme nom de projet = MEME volume d'etat
+# (`lcars_lcars-home`), donc l'install ADOPTE le home de dev, ses credentials et sa fleet. Ce
+# n'est pas un bug, c'est ce que « meme projet » veut dire — mais ca ne se decouvre pas apres coup.
+# Pour installer A COTE du dev, forcer un autre projet a la ligne de commande :
+#   docker compose -f docker-compose.install.yml -p lcars-install up -d
+#
+# ─── CE QUI EST COPIE A L'IDENTIQUE DEPUIS LE COMPOSE DE DEV, ET POURQUOI ───────────────────────
+# ports, volumes, cap_add, security_opt, logging, restart : une install qui divergerait du dev sur
+# ces points ne testerait pas la meme boite. Les raisons de chaque ligne vivent dans l'en-tete et
+# les commentaires de `docker-compose.yml` — elles ne sont pas recopiees ici : deux copies d'une
+# meme justification derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
+#
+# USAGE : docker compose -f docker-compose.install.yml up -d
+# (depuis ce repertoire ; aucune source du projet n'est necessaire — ce fichier suffit)
+
+name: lcars
+
+services:
+  lcars:
+    image: "${LCARS_IMAGE:-10.42.0.118/fleet/lcars:2.1.0}"
+    # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
+    # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
+    # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
+    pull_policy: missing
+    hostname: "${LCARS_HOSTNAME:-bridge}"
+    environment:
+      LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
+      LCARS_UID: "${LCARS_UID:-1000}"
+      LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+    ports:
+      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+      - "${LCARS_BIND:-127.0.0.1}:21000-21029:21000-21029"
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
+    volumes:
+      - lcars-home:/home
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+    networks: [lcars]
+
+volumes:
+  lcars-home:
+
+networks:
+  lcars:
