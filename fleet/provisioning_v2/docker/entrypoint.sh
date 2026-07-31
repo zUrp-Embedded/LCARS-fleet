@@ -93,6 +93,16 @@ else
   say "provision apply : AU MOINS UN ÉCHEC (rc=$?) — la boîte démarre quand même ; diagnose : $PROVISION doctor"
 fi
 
+# ─── 3bis. La console web (ttyd sous l'humain, port dérivé de son UID) ───────────────────────────
+# Lancée APRÈS la convergence (elle a besoin de l'humain et de son home) et AVANT sshd (qui prend
+# le premier plan). Son échec n'est pas fatal — même règle que la convergence : la boîte doit
+# rester joignable pour être réparée. La console est un CONFORT, ssh reste la porte d'admin.
+if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
+  /opt/lcars/console.sh --human "$LCARS_HUMAN" || say "console web NON lancée (rc=$?) — ssh reste la porte"
+else
+  say "console web désactivée (LCARS_CONSOLE=0)"
+fi
+
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
 say "sshd prêt — ssh $LCARS_HUMAN@<hôte> -p <port mappé> puis « fleet_v2 start »"
 exec /usr/sbin/sshd -D -e

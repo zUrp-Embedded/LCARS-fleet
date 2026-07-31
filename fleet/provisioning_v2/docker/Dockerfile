@@ -129,12 +129,27 @@ RUN chown -R root:fleet /local/LCARS_v2 \
     && ln -sf /local/LCARS_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \
     && ln -sf /local/LCARS_v2/bin/lcars    /usr/local/bin/lcars
 
+# ─── La console web : ttyd, binaire STATIQUE pinné par sha256 ────────────────────────────────────
+# La porte d'entrée demandée : une page web avec un shell SOUS L'IDENTITÉ DE L'HUMAIN, dans lequel
+# il lance `claude`. ttyd n'est PAS dans bookworm (vérifié : « no installation candidate ») ; on
+# prend l'officiel statique — même discipline que le précompilé Elixir de 15-toolchain : version +
+# sha256 épinglés ICI, nulle part ailleurs. Bump = changer la paire.
+ARG TTYD_VERSION=1.7.7
+ARG TTYD_SHA256=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+RUN curl -fsSL --proto '=https' -m 120 -o /tmp/ttyd \
+      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+    && echo "${TTYD_SHA256}  /tmp/ttyd" | sha256sum -c - \
+    && install -m 0755 /tmp/ttyd /usr/local/bin/ttyd \
+    && rm -f /tmp/ttyd \
+    && ttyd --version
+
 # Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
 # les chemins inter-arbre (le module 50-forge délègue à fleet/runtime/etc/provision-role-tokens.sh).
 COPY fleet/provisioning_v2 /opt/lcars/fleet/provisioning_v2
 COPY fleet/runtime/etc     /opt/lcars/fleet/runtime/etc
 COPY fleet/provisioning_v2/docker/entrypoint.sh /opt/lcars/entrypoint.sh
-RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/fleet/provisioning_v2/provision \
+COPY fleet/provisioning_v2/docker/console.sh    /opt/lcars/console.sh
+RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/fleet/provisioning_v2/provision \
                /opt/lcars/fleet/provisioning_v2/modules.d/*.sh \
                /opt/lcars/fleet/runtime/etc/provision-role-tokens.sh
 
