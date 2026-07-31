@@ -371,12 +371,18 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   [ "$status" -eq 0 ]
 }
 
-@test "40-forge : un 404 anonyme sur l'org rend unknown, avec ses DEUX lectures" {
+@test "40-forge : un 404 anonyme sur une org DECLAREE rend unknown, avec ses DEUX lectures" {
   # THE case the manual report caught by discipline: absent vs invisible-without-auth.
+  #
+  # `FORGE_ORG` est POSE ici, et ce n'etait pas le cas avant : le meme commit qui a supprime le nom
+  # devine a laisse ce test asserter le contrat qu'il venait de remplacer. Une suite verte est une
+  # affirmation — celle-ci etait rouge pendant que j'affirmais le contraire. Sans org declaree, la
+  # sonde s'abstient desormais (`inactive`), et c'est le test voisin qui le verrouille ; l'ambiguite
+  # du 404 ne se mesure que sur une org qu'on a effectivement le droit de chercher.
   local d="$TMP/stub4"; mkdir -p "$d"
   printf '200\n{"version":"1.26.4"}' > "$d/api_v1_version"
   stub_server "$d"
-  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=someone "$PROBES/40-forge.sh"
+  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" FORGE_ORG=fleet LCARS_HUMAN=someone "$PROBES/40-forge.sh"
   stub_stop
   echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unknown"' >/dev/null
   echo "$output" | jq -e 'select(.probe=="forge.org") | .cannot_conclude | contains("invisible")' >/dev/null
@@ -485,4 +491,185 @@ JSON
   stub_stop
   echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
   echo "$output" | jq -e 'select(.probe=="forge.human_account") | .verdict=="operational"' >/dev/null
+}
+
+# ── 50-projects : les liaisons par construction ───────────────────────────────────────────────────
+# Toutes hermetiques : des depots git reels dans le TMP, et un arbre de source MINIMAL qui joue le
+# role de la declaration. C'est le point : la sonde ne porte aucune attente, elle va la lire — donc
+# un test peut la DEPLACER et verifier que le verdict suit. Un check code en dur serait intestable
+# de cette facon, et c'est exactement ce qui le rend fragile en production.
+
+mk_decl() { # <projects_root> <depot> <branche livrable> <branche work> [<work_root declare>]
+  local root="$1" name="$2" mb="$3" wb="$4" wr="${5:-$TMP/w}" d
+  d="$root/$name/fleet/runtime/lib/fleet"; mkdir -p "$d/pilot"
+  printf '%s\n' \
+    "    GitOps.run([\"clone\", \"--branch\", \"$mb\", url, proj_dir], auth: true)" \
+    "    with :ok <- GitOps.run([\"init\", \"-q\", \"-b\", \"$wb\", work_dir], auth: false) do" \
+    > "$d/pilot/project_onboard.ex"
+  printf '%s\n' "  @projects_root \"$root\"" "  @work_root \"$wr\"" > "$d/layout.ex"
+}
+
+mk_repo() { # <dir> <branche> [origin]
+  mkdir -p "$1"; git init -q -b "$2" "$1"
+  git -C "$1" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  [[ -n "${3:-}" ]] && git -C "$1" remote add origin "$3"
+  return 0
+}
+
+# Simule un `fetch` deja fait, sans reseau : la ref de suivi est un ref comme un autre.
+mk_tracking() { git -C "$1" update-ref "refs/remotes/origin/$2" "${3:-$(git -C "$1" rev-parse HEAD)}"; }
+
+sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOME="$TMP/nohome" "$PROBES/50-projects.sh"; }
+
+@test "50-projects : boite fraiche — 0 projet et aucune source n'est PAS un angle mort" {
+  # La faute d'origine, refaite ici sous une autre forme : declarer `unreachable` sur une declaration
+  # dont personne n'a besoin faisait basculer tout le run en AVEUGLE pour une question non posee.
+  mkdir -p "$TMP/p" "$TMP/w"
+  run sotf50
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="inactive"' >/dev/null
+}
+
+@test "50-projects : des projets SANS declaration lisible, c'est un vrai angle mort" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  run sotf50
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="unreachable"' >/dev/null
+  # et l'observable est rapporte SANS attente : jamais vert, jamais rouge
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.etat") | .verdict=="unknown"' >/dev/null
+}
+
+@test "50-projects : l'attente est LUE dans la source — la deplacer deplace le verdict" {
+  # LA propriete qui distingue une liaison d'un check. Meme disque, meme sonde, deux declarations :
+  # deux verdicts. Aucun litteral de branche n'existe dans la sonde pour qu'on puisse le faire.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" trunk
+  mk_decl "$TMP/p" src main work/ops
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="degraded"' >/dev/null
+  mk_decl "$TMP/p" src trunk work/ops
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="operational"' >/dev/null
+}
+
+@test "50-projects : un sous-dossier d'un depot n'est pas un projet" {
+  # `git rev-parse` repond « oui » depuis n'importe quel sous-dossier : sans l'egalite avec la
+  # RACINE, tout dossier interne passerait pour un depot et l'inventaire inventerait des projets.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main; mkdir -p "$TMP/p/alpha/sub"
+  run bash -c ". $PROBES/lib.sh; . /dev/stdin <<< \"\$(sed -n '/^is_repo()/,/^}/p' $PROBES/50-projects.sh)\"; is_repo $TMP/p/alpha && echo RACINE; is_repo $TMP/p/alpha/sub || echo PAS-SOUS-DOSSIER"
+  echo "$output" | grep -qx RACINE
+  echo "$output" | grep -qx PAS-SOUS-DOSSIER
+}
+
+@test "50-projects : un .git FICHIER (worktree lie) reste un depot" {
+  # Le cas qui a fait dire « cote work ABSENT » sur un depot parfaitement present.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" worktree add -q -b wt "$TMP/w/alpha" >/dev/null 2>&1
+  [ -f "$TMP/w/alpha/.git" ]
+  run bash -c ". $PROBES/lib.sh; . /dev/stdin <<< \"\$(sed -n '/^is_repo()/,/^}/p' $PROBES/50-projects.sh)\"; is_repo $TMP/w/alpha && echo OUI"
+  echo "$output" | grep -qx OUI
+}
+
+@test "50-projects : un dossier a point n'est pas un projet (Layout refuse le point initial)" {
+  mkdir -p "$TMP/p/.claude" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  run sotf50
+  ! echo "$output" | jq -e 'select(.probe|startswith("projects..claude"))' >/dev/null
+}
+
+@test "50-projects : sale cote livrable = drift, sale cote work = etat de travail normal" {
+  # L'ASYMETRIE. Le meme fait git ne dit pas la meme chose des deux cotes : `reset --hard` ECRASE le
+  # livrable, tandis que le cote work est un depot autonome ou l'on travaille. Traiter les deux
+  # pareil rend rouge du benin et vert ce qui se perd.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_repo "$TMP/w/alpha" work/ops
+  mk_tracking "$TMP/p/alpha" main; mk_tracking "$TMP/w/alpha" work/ops
+  touch "$TMP/p/alpha/sale" "$TMP/w/alpha/sale"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .evidence | contains("ecrase")' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="operational"' >/dev/null
+}
+
+@test "50-projects : du work/ops non pousse est LE seul etat ou une perte est possible" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/w/alpha" work/ops; mk_tracking "$TMP/w/alpha" work/ops
+  git -C "$TMP/w/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m inedit
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .evidence | contains("que sur ce disque")' >/dev/null
+}
+
+@test "50-projects : un miroir en retard est un DISQUE EN RETARD, il est nomme comme tel" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
+  git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+}
+
+@test "50-projects : sans ref de suivi, unknown — jamais 'aligne' par defaut" {
+  # Un depot jamais fetch n'a rien a comparer. Rendre `operational` la ferait passer pour a jour.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops; mk_repo "$TMP/p/alpha" main
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="unknown"' >/dev/null
+}
+
+@test "50-projects : l'identite compare a la CASSE — Layout.project_name ne replie rien" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/Alpha" main "http://forge.test/fleet/alpha.git"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.Alpha.identity") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : un identifiant dans l'origin ne sort NI dans l'evidence NI dans la methode" {
+  # Un rapport finit dans un log de conversation. L'evidence est verbatim par contrat, et le verbatim
+  # est exactement ce qu'un credential ne doit pas etre. Deuxieme effet, aussi important : l'URL
+  # SERVIE a curl est desidentifiee, sinon la lecture « anonyme » devient authentifiee en silence et
+  # tout ce que la liaison declare sur le 404 ambigu devient faux.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
+  mk_repo "$TMP/p/alpha" main "http://bob:s3cr3t@127.0.0.1:1/fleet/alpha.git"
+  run sotf50
+  ! echo "$output" | grep -q "s3cr3t"
+  echo "$output" | jq -e 'select(.probe=="projects.alpha.identity") | .evidence | contains("***@")' >/dev/null
+}
+
+@test "50-projects : une racine non montee est un cloisonnement, pas une panne" {
+  # Seul starfleet monte les deux racines. Pour tout autre role l'absence est CONSTRUCTIVE, et la
+  # peindre en rouge apprendrait a ignorer le rouge.
+  mkdir -p "$TMP/p" "$TMP/pod"
+  printf '{"metadata":{"mounts":[{"path":"/home/projects"}]}}' > "$TMP/pod/.cap-profile.json"
+  run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
+  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="inactive"' >/dev/null
+}
+
+@test "50-projects : une racine DECLAREE au cap-profile et illisible est un drift" {
+  mkdir -p "$TMP/p" "$TMP/pod"
+  printf '{"metadata":{"mounts":[{"path":"%s"}]}}' "$TMP/absente" > "$TMP/pod/.cap-profile.json"
+  run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
+  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : sonder une autre racine que celle de Fleet.Layout invalide tout le reste" {
+  mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops "/ailleurs"
+  run sotf50
+  echo "$output" | jq -e 'select(.probe=="projects.roots_agree") | .verdict=="degraded"' >/dev/null
+}
+
+@test "50-projects : sans git, l'angle mort est TOTAL et il le dit — pas 'aucun projet'" {
+  # Sans ce garde, chaque liaison rendrait « pas de depot » sur des projets sains : le silence de
+  # l'instrument se lirait comme un constat d'absence.
+  mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
+  local bin="$TMP/nogit"; mkdir -p "$bin"
+  local t p
+  # `dirname` en tete : la sonde s'en sert pour se localiser AVANT de sourcer lib.sh. L'oublier ne
+  # produit pas un run sans git, il produit un run sans rien — et un test qui mesure l'effondrement
+  # d'un harnais croit mesurer le comportement qu'il visait.
+  for t in bash dirname jq date id find sed grep wc awk head tr sort comm env curl cut; do
+    p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$bin/$t"
+  done
+  run env -i PATH="$bin" HOME="$TMP" SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" \
+    "$bin/bash" "$PROBES/50-projects.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e 'select(.probe=="projects.instrument") | .verdict=="unreachable"' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="projects.inventory")' >/dev/null
 }

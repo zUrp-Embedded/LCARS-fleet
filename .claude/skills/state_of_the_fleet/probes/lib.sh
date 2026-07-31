@@ -199,9 +199,33 @@ sotf_skip_no_fleet() {
 # `-c core.fsmonitor=` disables any inherited filesystem monitor (another background writer we do
 # not want to wake), and `--git-dir/--work-tree` are deliberately NOT used: we `-C` into the repo so
 # a path that is not a repo fails as a probe error instead of silently resolving to an ancestor.
+#
+# The env hardening is a BELT, not a need of today's callers: every git call here is local. But a
+# probe must never be able to BLOCK, and git's default answer to a missing credential is to ask a
+# human — on a headless pod that is an infinite hang, and a diagnostic that hangs is worse than one
+# that fails. The day someone adds a network call (`ls-remote`), it fails in a second instead.
 git_ro() {
   local dir="$1"; shift
-  git --no-optional-locks -c core.fsmonitor= -C "$dir" "$@"
+  GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true GIT_SSH_COMMAND='ssh -oBatchMode=yes' \
+    git --no-optional-locks -c core.fsmonitor= -C "$dir" "$@"
+}
+
+# ── redact_url <url> — a report ends up in a conversation log ──────────────────────────────────────
+# A remote URL may carry `//user:token@host`. Evidence is verbatim BY CONTRACT, and verbatim is
+# exactly what must not happen to a credential: the one field of this toolkit that is quoted
+# everywhere is the one where a secret would travel furthest.
+redact_url() {
+  printf '%s' "${1:-}" | sed -E 's#(://)[^/@]*@#\1***@#'
+}
+
+# ── anon_url <url> — le jumeau de redact_url, pour l'USAGE et non pour l'affichage ─────────────────
+# Un `remote.origin.url` credente ne doit pas servir tel quel a une sonde qui annonce lire en
+# ANONYME : elle deviendrait authentifiee en silence, et son `cannot_conclude` (« 404 = absent OU
+# invisible sans jeton ») deviendrait faux — un mensonge produit par une commodite. Deuxieme raison,
+# aussi grave : l'URL construite finit dans `method` et dans les evidences d'erreur, ou curl la
+# recopie volontiers. On coupe l'identifiant AVANT de s'en servir, pas au moment de l'imprimer.
+anon_url() {
+  printf '%s' "${1:-}" | sed -E 's#(://)[^/@]*@#\1#'
 }
 
 # ── Roots. Imposed container layout (Fleet.Layout, hardcoded there ON PURPOSE — "a config file for
