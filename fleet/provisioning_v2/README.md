@@ -1,7 +1,7 @@
 # fleet/provisioning_v2 — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-07-06
+**Dernière révision** : 2026-07-31
 **Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
 tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
 corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
@@ -47,32 +47,37 @@ Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=err
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
-`PROV_PREFIX` (/local/fleet_v2) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/home/private) ·
-`PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_ADMIN_TOKEN_FILE` (création des comptes) ·
+`PROV_PREFIX` (/local/LCARS_v2 — le défaut d'etc/install.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/home/private) ·
+`PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
 `PROV_WINDOWS_USER` (ready-room WSL, optionnelle) · pins toolchain (`PROV_ELIXIR_*`).
 
 ## Modules (`modules.d/NN-*.sh`)
 
 Chaque module est un PROCESSUS exécuté (`<module> check|apply`), qui déclare son terrain en tête
-(`# SUBSTRATE:`, `# NEEDS:` — greppable, filtré par le runner). Ordre = préfixe numérique.
+sur DEUX axes (D6 : « qui applique » ≠ « ce qui doit être vrai ») — `# APPLY-ON:` (où les
+mutations tournent), `# CHECK-ON:` (où l'état-cible doit tenir), `# NEEDS:` — greppable, filtré
+par le runner. Ordre = préfixe numérique. En apply, un module CHECK-ON-retenu hors APPLY-ON
+tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — rebuild l'image).
 
-| Module | Substrat | Pose |
-|---|---|---|
-| 00-preflight | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
-| 10-packages | wsl linux | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
-| 15-toolchain | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only |
-| 20-groups | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
-| 25-directories | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
-| 30-wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
-| 40-claude-bin | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
-| 50-forge | any | comptes de rôle + `lcars-system` (API admin), passwords check-before-create, tokens DÉLÉGUÉS à `etc/provision-role-tokens.sh` (A4) |
-| 60-deploy | wsl linux | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
-| 70-human | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
+| Module | APPLY-ON | CHECK-ON | Pose |
+|---|---|---|---|
+| 00-preflight | any | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
+| 10-packages | wsl linux | any | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
+| 15-toolchain | wsl linux | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only, jamais dans le conteneur runtime |
+| 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
+| 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
+| 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
+| 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
+| 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
+| 60-deploy | wsl linux | any | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 
-En **Docker**, `10/15/60` sont des layers de l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge à l'entrypoint — l'ISO WSL↔Docker est STRUCTURELLE (même liste
-de modules, filtrée), vérifiée par le MÊME doctor dans les deux substrats.
+En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
+install.sh) et le reste converge à l'entrypoint. L'ISO WSL↔Docker n'est plus seulement la liste
+filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
+`10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
+côtés.
 
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
@@ -83,8 +88,10 @@ de modules, filtrée), vérifiée par le MÊME doctor dans les deux substrats.
   sondés et instruits, jamais exécutés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
-- **Pas de runner CI** : infra de forge, hors du chemin machine-nue→fleet (unit systemd
-  d'exemple sur la boîte de dev, chantier séparé si besoin).
+- **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
+  le profil `forge` : act_runner officiel pinné, label `elixir` = la même image que le stage
+  build). Son enregistrement est un geste bootstrap (`docker.sh forge-bootstrap`), hors du
+  chemin machine-nue→fleet.
 - **Pas de gestion GitHub** (`gh`, branch-protection…) : la forge du triangle est Gitea.
 
 ## Dette de guerre encaissée (payée par v0→v1, à ne JAMAIS repayer)

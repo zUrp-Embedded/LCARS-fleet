@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — groupe fleet + membership de l'humain (AUCUN user créé : le modèle v2 est per-humain)
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: root
 #
 # Toute la strate « users » de la v1 meurt ici par soustraction : les rôles v2 ne sont PAS des

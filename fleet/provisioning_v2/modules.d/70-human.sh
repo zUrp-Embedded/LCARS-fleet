@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — enrôlement per-humain : ~/.lcars, ~/pods, env seed-once, sondes creds (instruct-only)
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: human
 #
 # Chaque humain lance SA fleet (modèle ADR-E) : ce module pose SON état et sonde SES accès.
@@ -72,6 +73,12 @@ check() {
       # fichier est à l'humain : l'apply n'y touche pas, il n'y a que lui pour l'éditer.
       p_drift "fleet_v2.env présent mais FORGE_BASE_URL manquant — fleet_v2 start refusera ; édite $ENV_FILE"
     fi
+    # D4, cas env-seedé-AVANT-bootstrap (l'ordre du cold boot docker : le premier boot seed
+    # l'env, la forge n'est bootstrappée qu'après) : le fichier est à l'humain, on ne le
+    # réécrit JAMAIS — on instruit les 2 lignes exactes. Révélé par le run de validation.
+    if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
+      p_warn "token système minté mais non câblé dans $ENV_FILE — ajoute : FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token et FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT (puis fleet_v2 stop/start)"
+    fi
   else
     p_drift "fleet_v2.env absent ($ENV_FILE)"
   fi
@@ -96,6 +103,18 @@ apply() {
         sed "s|^FORGE_BASE_URL=.*|FORGE_BASE_URL=$PROV_FORGE_URL|" "$TEMPLATE" > "$tmp"
       else
         cat "$TEMPLATE" > "$tmp"
+      fi
+      # D4 (ADR install/compile/release) : ce que le système fait est signé du SYSTÈME. Si le
+      # token lcars-system est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
+      # du cycle), on câble sa lecture ICI ; sinon le token minté ne serait jamais lu (le
+      # défaut runtime est ~/.gitea_token) — le travail mort que l'ADR pointait.
+      if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]]; then
+        {
+          echo ""
+          echo "# — posé par le seed 70-human (D4) : les marqueurs système sont signés lcars-system —"
+          echo "FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token"
+          echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
+        } >> "$tmp"
       fi
       as_human chmod 0600 "$tmp"
       as_human mv -f "$tmp" "$ENV_FILE"

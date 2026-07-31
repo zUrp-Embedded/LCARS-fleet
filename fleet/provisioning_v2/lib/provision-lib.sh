@@ -28,11 +28,16 @@ PROVISION_LIB_LOADED=1
 
 # ─── Données par défaut (chaque valeur est overridable par l'environnement — une SEULE définition,
 #     consommée par les modules ; jamais re-défautée module par module comme en v1) ───────────────
-: "${PROV_PREFIX:=/local/fleet_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
+# DOIT égaler le défaut d'etc/install.sh (SSoT du layout : etc/README.md §Install canonique —
+# /local/fleet_v2 est MORT, renommé *.OBSOLETE le 2026-07-18). Un fait, deux rendus : sync à la main.
+: "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
+: "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
-: "${PROV_ROLES:=architect consultant engineer gatekeeper qualifier reviewer vulcan}"
+: "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
+: "${PROV_ROLES:=architect engineer gatekeeper qualifier reviewer scoper vulcan}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
+: "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
 # Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
 # PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage
@@ -84,8 +89,11 @@ run_quiet() {
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 || rc=$?
   if [[ "$rc" -ne 0 ]]; then
+    # B1 : l'échec COMPTE — via p_fail, qui incrémente PROV_FAILED. L'ancien printf nu laissait
+    # les compteurs à zéro : `run_quiet x || verdict_apply` sortait 0 (« convergé ») alors que
+    # x avait échoué — le verdict vert menteur, exactement le péché v1 que cette lib jure de tuer.
+    p_fail "commande en échec (rc=$rc) : $*"
     {
-      printf 'FAIL  %s: commande en échec (rc=%d) : %s\n' "$PROV_MODULE_TAG" "$rc" "$*"
       printf '───── sortie complète ─────\n'
       cat "$out"
       printf '───────────────────────────\n'
@@ -211,10 +219,18 @@ ensure_managed_block() {
       $0 == e            {skip=0; next}
       !skip              {print}
     ' "$file")"
+  # B3 : write_atomic se nourrit par REDIRECTION, jamais par pipe — le membre droit d'un pipe
+  # est un sous-shell : ses compteurs (PROV_FAILED/PROV_CHANGED) mouraient avec lui, et un
+  # fichier non posé se rapportait vert.
+  local tmp rc=0
+  tmp="$(mktemp "${TMPDIR:-/tmp}/prov-block.XXXXXX")" || { p_fail "ensure_managed_block: tmp impossible"; return 1; }
   {
     if [[ -n "$existing" ]]; then printf '%s\n' "$existing"; fi
     printf '%s\n%s\n%s\n' "$begin" "$block" "$end"
-  } | write_atomic "$file" "$mode" "$owner"
+  } > "$tmp"
+  write_atomic "$file" "$mode" "$owner" < "$tmp" || rc=$?
+  rm -f "$tmp"
+  return "$rc"
 }
 
 # ─── fetch_verify <url> <sha256> <dest> <mode> — download pinné obligatoire ──────────────────────
@@ -276,7 +292,9 @@ detect_substrate() {
 # Déjà cet utilisateur : exécution directe. Autre user non-root : impossible proprement → échec dit.
 as_human() {
   local home
-  home="$(getent passwd "$PROV_HUMAN" | cut -d: -f6)"
+  # `|| true` : même classe que B5 — sous pipefail, getent sur un user inconnu ferait échouer
+  # l'assignation avant la garde p_fail juste en dessous.
+  home="$(getent passwd "$PROV_HUMAN" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { p_fail "as_human: user inconnu: $PROV_HUMAN"; return 1; }
   if [[ "$(id -un)" == "$PROV_HUMAN" ]]; then
     "$@"
@@ -288,8 +306,10 @@ as_human() {
   fi
 }
 
-# home de PROV_HUMAN (vide si inconnu — l'appelant DOIT tester).
-human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6; }
+# home de PROV_HUMAN (vide si inconnu — l'appelant DOIT tester). B5 : `|| true`, sinon sous
+# `set -euo pipefail` (tous les modules) un user inconnu tue l'assignation `home="$(human_home)"`
+# AVANT la garde p_fail de l'appelant — abort muet, le contrat « vide si inconnu » était un mensonge.
+human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de
 # la lib (fleet/provisioning_v2/lib/ → ../../..), jamais re-devinée par heuristique dans un module.

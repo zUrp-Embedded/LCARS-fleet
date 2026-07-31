@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — préflight fail-fast : plancher OS/arch/RAM/disque/WSL2, messages actionnables
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: human
 #
 # AUCUNE mutation — ce module ne fait que sonder (apply = check). Chaque échec dit : le problème

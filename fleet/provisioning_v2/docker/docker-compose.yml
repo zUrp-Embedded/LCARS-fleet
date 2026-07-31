@@ -54,6 +54,15 @@ services:
     environment:
       GITEA__server__ROOT_URL: "http://forge:3000/"
       GITEA__server__HTTP_PORT: "3000"
+      # INSTALL_LOCK : démarrage headless (recette officielle) — sans lui, une forge vierge
+      # sert le wizard /install (/ = 200, API = 404) : healthcheck rouge à vie, 50-forge en
+      # drift éternel, et RIEN d'automatisable. Défauts assumés : SQLite sous /var/lib/gitea.
+      # Le compte admin (bootstrap tofu/A4) n'existe pas encore : geste opérateur — la
+      # consigne complète est affichée par « ./docker.sh forge-bootstrap ».
+      GITEA__security__INSTALL_LOCK: "true"
+      # Explicite (défaut depuis 1.21, mais un fait posé ne dépend pas d'un défaut vendor) :
+      # les Actions sont le rail CI du triangle — le runner sidecar s'y enregistre.
+      GITEA__actions__ENABLED: "true"
     ports:
       - "${LCARS_FORGE_PORT:-127.0.0.1:3300}:3000"
     volumes:
@@ -68,10 +77,40 @@ services:
     restart: unless-stopped
     networks: [lcars]
 
+  runner:
+    profiles: [forge]
+    # PIN par digest — act_runner officiel (jamais d'image custom pour l'infra forge).
+    image: gitea/act_runner:0.6.1@sha256:b5c35d6bdbb9bb25e531230bfc7cc663cb751406cbec90a2a891b85fea54de86
+    hostname: runner
+    depends_on:
+      forge:
+        condition: service_healthy
+    environment:
+      GITEA_INSTANCE_URL: "http://forge:3000"
+      # Enregistrement : token minté PAR la forge (geste bootstrap, cf. ./docker.sh
+      # forge-bootstrap). Une fois enregistré, l'identité vit dans runner-data (.runner) —
+      # le token n'est plus requis aux boots suivants. Sans token au premier boot, le
+      # service boucle en le disant : bruyant et honnête, pas silencieux.
+      GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
+      GITEA_RUNNER_NAME: "lcars-runner"
+      # Le label `elixir` (celui que .gitea/workflows/gate.yml attend) tourne dans LA MÊME
+      # image que le stage build du Dockerfile : une seule vérité toolchain, trois rendus
+      # (15-toolchain WSL, stage build, CI). Bump = les DEUX pins ensemble.
+      GITEA_RUNNER_LABELS: "elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim"
+    volumes:
+      - runner-data:/data
+      # Le runner lance les jobs dans des conteneurs frères via LE daemon de la machine :
+      # ce mount = pouvoir daemon (root-équivalent hôte). Trade documenté et standard du
+      # déploiement act_runner ; la frontière de confiance du CI est le daemon, pas le job.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks: [lcars]
+
 volumes:
   lcars-home:
   forge-data:
   forge-config:
+  runner-data:
 
 networks:
   lcars:

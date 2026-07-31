@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — binaire claude PER-HUMAIN (~/.local/bin) via l'installer officiel, staging jetable
-# SUBSTRATE: any
+# APPLY-ON: any
+# CHECK-ON: any
 # NEEDS: human
 #
 # Frontière vendor N1 : ce module est le SEUL du provisioning à connaître Anthropic. Le contrat
@@ -31,7 +32,11 @@ human_bin() { echo "$(human_home)/.local/bin/claude"; }
 
 claude_ok() {
   local bin; bin="$(human_bin)"
-  [[ -x "$bin" ]] && as_human "$bin" --version >/dev/null 2>&1
+  # stderr NON étouffé sur la jambe as_human : un doctor lancé par un user tiers échouait
+  # l'impersonation en silence et posait un FAUX diagnostic (« binaire cassé ? ») — la vraie
+  # cause (identité, p_fail d'as_human) doit atteindre l'opérateur. Révélé par la première
+  # passe de parité WSL/docker.
+  [[ -x "$bin" ]] && as_human "$bin" --version >/dev/null
 }
 
 check() {
@@ -65,7 +70,10 @@ apply() {
     p_fail "download de l'installer en échec ($INSTALL_URL) — l'ancien binaire, s'il existait, est INTACT"
     verdict_apply
   fi
-  if ! run_quiet as_human env HOME="$staging" bash "$staging/install.sh"; then
+  # timeout EXTERNE : le script vendor télécharge le binaire (~100 Mo) par un curl SANS timeout
+  # à lui — le premier drill docker a laissé l'entrypoint wedgé >5 min dessus. Borne dure,
+  # échec verbeux, le boot continue (fail-loud, pas fail-wedged).
+  if ! run_quiet as_human timeout 600 env HOME="$staging" bash "$staging/install.sh"; then
     as_human rm -rf "$staging"
     p_fail "installer officiel en échec — l'ancien binaire, s'il existait, est INTACT"
     verdict_apply

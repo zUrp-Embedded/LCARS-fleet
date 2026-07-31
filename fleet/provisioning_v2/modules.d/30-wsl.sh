@@ -3,7 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — substrat WSL : lockdown C: (wsl.conf), purge snap, masque gpg-agent, ready-room optionnelle
-# SUBSTRATE: wsl
+# APPLY-ON: wsl
+# CHECK-ON: wsl
 # NEEDS: root
 #
 # Ce module encaisse la dette de guerre WSL payée par les générations v0→v1 (commentaires de
@@ -148,8 +149,13 @@ EOF
   fi
 
   # 4. wsl.conf EN DERNIER (le contrat de la dette de guerre : rien n'arme le reboot tant que
-  #    tout le reste n'est pas posé).
-  desired_wsl_conf | write_atomic "$WSL_CONF" 0644 root:root || verdict_apply
+  #    tout le reste n'est pas posé). B3 : redirection, jamais de pipe vers write_atomic (le
+  #    sous-shell du pipe perdait PROV_FAILED → wsl.conf non posé rapporté vert).
+  local wsl_tmp
+  wsl_tmp="$(mktemp "${TMPDIR:-/tmp}/prov-wslconf.XXXXXX")" || { p_fail "tmp wsl.conf impossible"; verdict_apply; }
+  desired_wsl_conf > "$wsl_tmp"
+  write_atomic "$WSL_CONF" 0644 root:root < "$wsl_tmp" || { rm -f "$wsl_tmp"; verdict_apply; }
+  rm -f "$wsl_tmp"
 
   # 5. État réel + consigne de reprise (pas de sentinelle, pas de trigger bashrc : l'humain
   #    relance le MÊME apply après le reboot, l'idempotence fait le reste).
