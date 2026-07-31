@@ -20,14 +20,15 @@
 # mécanisme, ISO vérifiée par le même doctor sur place (d'où APPLY-ON sans docker, CHECK-ON any).
 #
 # PAS de yq (la donnée v2 est plate : env + listes — le blueprint YAML v1 meurt avec les
-# users-par-rôle), PAS de gh (la forge est Gitea, parlée en curl), PAS de python (plus de
-# patch-json : les fichiers gérés sont écrits entiers, atomiquement).
+# users-par-rôle), PAS de gh (la forge est Gitea, parlée en curl). python3 EST requis — pas
+# pour du patch-json (mort), mais comme interpréteur du bridge MCP des pods
+# (fleet_mcp_stdio_bridge.py) : l'ancien « PAS de python » ici mentait au sanctuaire.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates)
+PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates python3)
 
 # Sonde RÉELLE du containment : un bwrap minimal DOIT tourner sous un user NON-root (les pods
 # tournent comme l'humain). Lire une config ou un dpkg -s ne prouve rien — Ubuntu ≥23.10 peut

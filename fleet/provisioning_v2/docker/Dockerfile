@@ -61,9 +61,12 @@ ENV LANG=C.UTF-8 LCARS_DOCKER=1
 # (reaper + signaux), procps = sondes pgrep du provisioning. Un seul layer apt, cache purgé.
 # util-linux-extra = runuser (B4) : absent de bookworm-slim, et TOUT le per-humain du provision
 # convergent (as_human) passe par lui — sans ce paquet l'entrypoint casse au premier module humain.
+# python3 = l'interpréteur du bridge MCP des pods (fleet_mcp_stdio_bridge.py, lancé « python3
+# <path> » dans le sanctuaire, qui projette CE /usr) — absent, AUCUN pod n'a ses outils
+# mcp__fleet__* (premier pod réel : « exec: python3: not found », canal nominal mort).
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra \
+       tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && mkdir -p /run/sshd

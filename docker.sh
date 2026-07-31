@@ -133,8 +133,10 @@ les instruit, il ne les exécute jamais — même famille que « claude /login �
   2. La STRUCTURE (comptes, org fleet, teams, hardening) — OpenTofu, rejouable à l'infini :
        cd fleet/provisioning/deps && tofu init && \\
        TF_VAR_gitea_url=http://127.0.0.1:${port} TF_VAR_gitea_token='<token-du-1>' \\
-       TF_VAR_seed_password='<seed>' TF_VAR_human_username='<toi>' \\
+       TF_VAR_seed_password='<seed>' TF_VAR_human_username='<ton-login-DANS-la-boite>' \\
        TF_VAR_human_email='<ton-email>' tofu apply
+     (⚠ human_username = le login DE L'HUMAIN DU CONTENEUR — LCARS_HUMAN, défaut « lcars » :
+      c'est LUI que le runtime vérifie à l'onboarding, pas ton login hôte)
      puis pose le SEED dans le conteneur lcars — c'est le handoff vers la jambe tokens, qui
      converge ensuite TOUTE SEULE à chaque apply/boot (plus aucun geste) :
        printf '%s' '<le-même-seed>' > /tmp/.forge-seed
