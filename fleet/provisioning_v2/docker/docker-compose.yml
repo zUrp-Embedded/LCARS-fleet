@@ -69,6 +69,15 @@ services:
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+    # Les logs d'une boite qui tourne 24/7 grossissent SANS FIN par defaut : `docker inspect`
+    # rend `json-file` avec ZERO option (mesure du 2026-07-31). L'entrypoint, ttyd, le provision
+    # et le BEAM ecrivent jusqu'a remplir le disque du NAS — panne certaine, au pire moment, et
+    # invisible jusque-la. 5 x 10 Mo = 50 Mo plafonnes, largement au-dessus d'un cycle de debug.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
     networks: [lcars]
 
