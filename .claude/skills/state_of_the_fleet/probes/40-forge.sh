@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# SOURCE: .claude/skills/state_of_the_fleet/probes/40-forge.sh
+# AUTHOR: starfleet toolkit
+# DATE: 2026-07-31
+# STATUS: actif — sonde 40 : la forge
+#
+# THE PLANE WHERE AMBIGUITY IS THE NORM, which is why `unknown` exists at all. Measured on a live
+# pod: `GET /api/v1/orgs/fleet` answers 404 while `GET /api/v1/orgs/fleet/repos` answers `200 []`.
+# Contradictory only if one forgets that ANONYMOUS 404 conflates "absent" with "not visible to you".
+# The agent that hit this had the discipline to say so. A probe must not depend on discipline: every
+# anonymous verdict here carries its own two readings.
+#
+# NO CREDENTIALS IN A POD — measured: no `.netrc`, no `.git-credentials`, `GIT_CONFIG_GLOBAL=/dev/null`.
+# So this probe reads what an anonymous caller can read, and says `unreachable` for the rest rather
+# than pretending an unauthenticated answer is the whole picture.
+#
+# We never WRITE. Not even a harmless-looking create: `create_project` makes a real repo, a dual-dir
+# and a scaffold. A diagnostic that mutates to measure is not a diagnostic.
+
+SOTF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "$SOTF_DIR/lib.sh"
+
+PLANE="forge"
+FORGE="${FORGE_BASE_URL:-}"
+FORGE="${FORGE%/}"
+
+# ── L'adresse est-elle seulement connue ───────────────────────────────────────────────────────────
+# Unlike the fleet's ports, the forge URL cannot be derived from anything: it is a deployment fact.
+# Absent, every probe below is blind and says so ONCE, here, instead of five confusing times.
+probe_configured() {
+  if [[ -z "$FORGE" ]]; then
+    emit "forge.configured" "$PLANE" "unreachable" "local" 'test -n "$FORGE_BASE_URL"' \
+      "FORGE_BASE_URL absente de l'env" \
+      "Sans adresse je ne peux RIEN dire de la forge : ni qu'elle tourne, ni qu'elle est morte. C'est un angle mort, pas un constat."
+    return 1
+  fi
+  emit "forge.configured" "$PLANE" "operational" "local" 'echo $FORGE_BASE_URL' \
+    "adresse declaree : $FORGE" \
+    "Une adresse declaree n'est pas une forge qui repond. La joignabilite est mesuree juste apres."
+}
+
+# ── Joignable ─────────────────────────────────────────────────────────────────────────────────────
+# `/api/v1/version` is the cheapest authenticated-free endpoint and it answers with the software's
+# own version — enough to prove the thing on the other end is a forge, not merely a socket.
+probe_reachable() {
+  if ! http_probe "$FORGE/api/v1/version" 6; then
+    emit "forge.reachable" "$PLANE" "unreachable" "reseau" "curl $FORGE/api/v1/version" \
+      "curl absent" "Aveugle : ni joignable ni injoignable prouve."
+    return 1
+  fi
+  case "$SOTF_HTTP_CODE" in
+    2*) emit "forge.reachable" "$PLANE" "operational" "reseau" "curl $FORGE/api/v1/version" \
+          "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 120)" \
+          "La forge repond. Ne dit rien de son CONTENU : comptes, org et repos sont des questions distinctes." ;;
+    000) emit "forge.reachable" "$PLANE" "degraded" "reseau" "curl $FORGE/api/v1/version" \
+          "aucune reponse : $(trim "$SOTF_HTTP_BODY" 200)" \
+          "Ne separe pas forge arretee, DNS mort et reseau coupe : les trois donnent ce meme silence."
+         return 1 ;;
+    *)  emit "forge.reachable" "$PLANE" "degraded" "reseau" "curl $FORGE/api/v1/version" \
+          "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
+          "Un service repond a cette adresse sans se comporter en forge : proxy, mauvaise cible, ou forge en vrac."
+        return 1 ;;
+  esac
+}
+
+# ── L'identite du provisioning, en anonyme ────────────────────────────────────────────────────────
+# THE probe that must not conclude. A 404 without credentials means "absent OR invisible", full stop.
+# Reporting it as absence is how a diagnostic sends an operator provisioning an account that already
+# exists.
+probe_identity() {
+  local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-fleet}"
+
+  local u="$FORGE/api/v1/orgs/$org"
+  if http_probe "$u" 6; then
+    case "$SOTF_HTTP_CODE" in
+      2*)  emit "forge.org" "$PLANE" "operational" "reseau" "curl $u" \
+             "org '$org' visible en anonyme (HTTP $SOTF_HTTP_CODE)" \
+             "Visible ne veut pas dire correctement peuplee : teams et memberships ne sont pas lisibles ici." ;;
+      404) emit "forge.org" "$PLANE" "unknown" "reseau" "curl $u" \
+             "HTTP 404 · $(trim "$SOTF_HTTP_BODY" 120)" \
+             "En anonyme, 404 ne distingue PAS 'org absente' de 'org privee, invisible sans auth'. Seul un token tranche — ne pas provisionner sur cette base." ;;
+      *)   emit "forge.org" "$PLANE" "unknown" "reseau" "curl $u" \
+             "HTTP $SOTF_HTTP_CODE" "Code inattendu : etat de l'org indetermine." ;;
+    esac
+  else
+    emit "forge.org" "$PLANE" "unreachable" "reseau" "curl $u" "curl absent" "Aveugle sur l'org."
+  fi
+
+  if [[ -z "$human" ]]; then
+    emit "forge.human_account" "$PLANE" "unreachable" "reseau" 'curl $FORGE/api/v1/users/$LCARS_HUMAN' \
+      "nom du compte humain inconnu (ni LCARS_HUMAN ni USER)" \
+      "Je ne sais pas QUEL compte chercher : l'absence de reponse ne dit rien du provisioning."
+    return
+  fi
+  u="$FORGE/api/v1/users/$human"
+  if http_probe "$u" 6; then
+    case "$SOTF_HTTP_CODE" in
+      2*)  emit "forge.human_account" "$PLANE" "operational" "reseau" "curl $u" \
+             "compte '$human' visible" \
+             "Le compte existe. Son appartenance a l'equipe 'humans' n'est PAS lisible en anonyme : l'onboarding peut encore echouer dessus." ;;
+      404) emit "forge.human_account" "$PLANE" "unknown" "reseau" "curl $u" \
+             "HTTP 404 pour '$human' · $(trim "$SOTF_HTTP_BODY" 120)" \
+             "Anonyme : absent OU non-visible. C'est la cause la plus frequente d'un onboarding refuse, mais elle se CONFIRME avec un token admin avant tout geste." ;;
+      *)   emit "forge.human_account" "$PLANE" "unknown" "reseau" "curl $u" \
+             "HTTP $SOTF_HTTP_CODE" "Etat du compte indetermine." ;;
+    esac
+  else
+    emit "forge.human_account" "$PLANE" "unreachable" "reseau" "curl $u" "curl absent" "Aveugle sur le compte humain."
+  fi
+}
+
+# ── Les credentials dont JE dispose ───────────────────────────────────────────────────────────────
+# Presence and readability only — never the value, never a test call that would spend it. A report
+# ends up in a conversation log.
+probe_credentials() {
+  local tokdir="${FORGE_ROLE_TOKENS_DIR:-}" tokfile="${FORGE_TOKEN_FILE:-$HOME/.gitea_token}"
+  local found=""
+  [[ -r "$tokfile" ]] && found="token systeme lisible ($tokfile)"
+  if [[ -n "$tokdir" && -d "$tokdir" ]]; then
+    local n; n="$(find "$tokdir" -maxdepth 1 -name '*.gitea_token' 2>/dev/null | wc -l)"
+    found="${found:+$found · }$n role-token(s) dans $tokdir"
+  fi
+
+  if [[ -z "$found" ]]; then
+    emit "forge.credentials" "$PLANE" "inactive" "local" 'test -r "$FORGE_TOKEN_FILE"' \
+      "aucun credential forge accessible depuis ici" \
+      "ATTENDU dans un pod (aucun credential n'y est monte, par design). Consequence : tout ce qui precede est ANONYME, donc partiellement aveugle."
+  else
+    emit "forge.credentials" "$PLANE" "operational" "local" 'test -r "$FORGE_TOKEN_FILE"' \
+      "$found" \
+      "Presence et lisibilite seulement. Ni validite, ni portee, ni expiration : les eprouver demanderait de les depenser."
+  fi
+}
+
+# ── Runner ────────────────────────────────────────────────────────────────────────────────────────
+sotf_init
+if probe_configured && probe_reachable; then
+  probe_identity
+else
+  emit "forge.org" "$PLANE" "unreachable" "reseau" "(non lancee)" \
+    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
+  emit "forge.human_account" "$PLANE" "unreachable" "reseau" "(non lancee)" \
+    "forge non joignable ou non configuree — sonde non lancee" "Non mesure."
+fi
+probe_credentials
+exit "$(sotf_exit_code)"

@@ -269,3 +269,99 @@ JSONL
   run bash -c "$(declare -f fixture); diff <(fixture | $PROBES/render.sh --md) <(fixture | $PROBES/render.sh --md)"
   [ -z "$output" ]
 }
+
+# ── 30-pods / 40-forge : sondes HTTP, testees contre un serveur bouchon ───────────────────────────
+# Hermetic on purpose: the gate must be green on a box with no fleet and no forge. A stub answering
+# chosen codes exercises the REAL curl path — stubbing `http_probe` would test the harness instead.
+
+stub_server() {
+  local dir="$1" port
+  python3 - "$dir" <<'PY' &
+import http.server, socketserver, sys, os, json, threading
+d = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        route = self.path.split('?')[0]
+        f = os.path.join(d, route.strip('/').replace('/', '_') or 'root')
+        if os.path.exists(f):
+            code, body = open(f).read().split('\n', 1)
+            self.send_response(int(code)); self.end_headers(); self.wfile.write(body.encode())
+        else:
+            self.send_response(404); self.end_headers(); self.wfile.write(b'{"message":"nope"}')
+with socketserver.TCPServer(("127.0.0.1", 0), H) as s:
+    open(os.path.join(d, ".port"), "w").write(str(s.server_address[1]))
+    s.serve_forever()
+PY
+  STUB_PID=$!
+  for _ in $(seq 1 50); do [ -s "$dir/.port" ] && break; sleep 0.05; done
+  STUB_PORT="$(cat "$dir/.port" 2>/dev/null)"
+}
+stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null || true; }
+
+@test "30-pods : un 501 sur le port API est le CONTRAT, pas une panne" {
+  local d="$TMP/stub"; mkdir -p "$d"
+  printf '501\nnot implemented' > "$d/api_pods"
+  printf '200\n{"pods":[]}'     > "$d/api_pods_obs"
+  stub_server "$d"
+  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
+    "$PROBES/30-pods.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="pods.port_guard") | .verdict=="operational"' >/dev/null
+}
+
+@test "30-pods : si le port API se met a SERVIR des pods, le changement de contrat est signale" {
+  # The day the runtime changes, this line changes with it — instead of a probe silently reading the
+  # wrong surface as the reference list.
+  local d="$TMP/stub2"; mkdir -p "$d"
+  printf '200\n{"pods":[]}' > "$d/api_pods"
+  stub_server "$d"
+  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
+    "$PROBES/30-pods.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="pods.port_guard") | .verdict=="degraded"' >/dev/null
+}
+
+@test "30-pods : zero pod est un etat legitime, jamais un drift" {
+  # An idle fleet must not be permanently red.
+  local d="$TMP/stub3"; mkdir -p "$d"
+  printf '501\nx'           > "$d/api_pods"
+  printf '200\n{"total":0}' > "$d/api_projection"
+  stub_server "$d"
+  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
+    "$PROBES/30-pods.sh"
+  stub_stop
+  # `/api/pods` on the obs side is absent from the stub → 404 → degraded, never a silent "0 pod".
+  ! echo "$output" | jq -e 'select(.probe=="pods.live") | .evidence | contains("0 pod")' >/dev/null
+}
+
+@test "40-forge : sans FORGE_BASE_URL, c'est unreachable (aveugle) et jamais degraded" {
+  # Saying `degraded` would be a claim about a forge we never contacted.
+  run env -u FORGE_BASE_URL "$PROBES/40-forge.sh"
+  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="unreachable"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unreachable"' >/dev/null
+}
+
+@test "40-forge : un 404 anonyme sur l'org rend unknown, avec ses DEUX lectures" {
+  # THE case the manual report caught by discipline: absent vs invisible-without-auth.
+  local d="$TMP/stub4"; mkdir -p "$d"
+  printf '200\n{"version":"1.26.4"}' > "$d/api_v1_version"
+  stub_server "$d"
+  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=someone "$PROBES/40-forge.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unknown"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .cannot_conclude | contains("invisible")' >/dev/null
+}
+
+@test "40-forge : un service qui repond sans etre une forge est degraded, pas operational" {
+  local d="$TMP/stub5"; mkdir -p "$d"
+  stub_server "$d"   # rien de servi → 404 partout, y compris /api/v1/version
+  run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" "$PROBES/40-forge.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="forge.reachable") | .verdict=="degraded"' >/dev/null
+}
+
+@test "40-forge : aucun credential dans un pod est ATTENDU (inactive), pas une faute" {
+  run env -u FORGE_TOKEN_FILE -u FORGE_ROLE_TOKENS_DIR HOME="$TMP" "$PROBES/40-forge.sh"
+  echo "$output" | jq -e 'select(.probe=="forge.credentials") | .verdict=="inactive"' >/dev/null
+}
