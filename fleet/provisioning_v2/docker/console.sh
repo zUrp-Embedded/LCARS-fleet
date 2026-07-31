@@ -55,7 +55,17 @@ fi
 # `-m 1` : une seule connexion tmux servie, sinon tmux clampe la taille au plus petit client.
 # Le bind est 0.0.0.0 DANS le conteneur ; la frontiere reelle est la publication compose, qui
 # n'expose que sur la loopback de l'hote (etape 1 : pas d'auth, donc pas d'exposition LAN).
-CMD=(ttyd --writable -p "$PORT" -i 0.0.0.0 -t titleFixed="LCARS console — $HUMAN"
+# L'IDENTITE N'EST PAS QUE L'UID : `setpriv` change l'uid/gid et RIEN D'AUTRE — HOME, USER et
+# LOGNAME restent ceux de l'appelant (l'entrypoint tourne en root → HOME=/root). Mesure en direct :
+# `cd ~` dans la console repondait « /root: Permission denied ». Meme piege que `USER` dans un
+# Dockerfile, qui ne change pas HOME non plus. On pose donc l'environnement EXPLICITEMENT, et le
+# cwd de depart avec (sinon le shell s'ouvre sur `/`).
+HOME_DIR="$(getent passwd "$HUMAN" | cut -d: -f6 || true)"
+[[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { echo "console.sh: home introuvable pour $HUMAN" >&2; exit 1; }
+cd "$HOME_DIR"
+
+CMD=(env "HOME=$HOME_DIR" "USER=$HUMAN" "LOGNAME=$HUMAN"
+     ttyd --writable -p "$PORT" -i 0.0.0.0 -t titleFixed="LCARS console — $HUMAN"
      -t fontSize=15 -t 'theme={"background":"#000000","foreground":"#FF9900"}'
      tmux -u new-session -A -s console)
 
