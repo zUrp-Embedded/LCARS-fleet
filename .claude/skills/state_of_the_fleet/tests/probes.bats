@@ -394,3 +394,80 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   run env -u FORGE_TOKEN_FILE -u FORGE_ROLE_TOKENS_DIR HOME="$TMP" "$PROBES/40-forge.sh"
   echo "$output" | jq -e 'select(.probe=="forge.credentials") | .verdict=="inactive"' >/dev/null
 }
+
+# ── 60-self : les liaisons declare↔observe ───────────────────────────────────────────────────────
+
+@test "60-self : sans cap-profile, inactive — rien a confronter n'est pas une faute" {
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$TMP/vide" "$PROBES/60-self.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'select(.probe=="self.cap_profile") | .verdict=="inactive"' >/dev/null
+}
+
+@test "60-self : une divergence cap-profile ↔ launcher est NOMMEE des deux cotes" {
+  # Le format de `claude_launch.dbg` est MESURE (`allowed='a,b,c'`), pas suppose : la premiere
+  # version cherchait `--allowedTools`, une forme inventee, et rendait `unknown` sur une trace
+  # parfaitement lisible.
+  local h="$TMP/pod"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"probe","containment":"bwrap"},
+ "spec":{"scope":{"allowedTools":["Read","Bash"]},"knowledge":{"skills":[]}}}
+JSON
+  echo "[00:00:00] step jq tools OK allowed='Read,Bash,mcp__fleet__submit_result' disallowed='x'" > "$h/claude_launch.dbg"
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="degraded"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .evidence | contains("submit_result")' >/dev/null
+}
+
+@test "60-self : listes identiques → operational, sans reparer quoi que ce soit" {
+  local h="$TMP/pod2"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap"},
+ "spec":{"scope":{"allowedTools":["Read","Bash"]}}}
+JSON
+  echo "step jq tools OK allowed='Read,Bash' disallowed='x'" > "$h/claude_launch.dbg"
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="operational"' >/dev/null
+}
+
+@test "60-self : un champ tableau est APLATI, pas rendu en JSON brut" {
+  # `flatten` est load-bearing : `.spec.knowledge.skills` EST un tableau, donc `[...]` donnait un
+  # tableau de tableau et l'evidence affichait `["a" "b"]` au lieu des elements.
+  local h="$TMP/pod3"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p"},
+ "spec":{"knowledge":{"skills":["alpha","beta"]}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("alpha beta")' >/dev/null
+  ! echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("[")' >/dev/null
+}
+
+@test "60-self : ce qui n'est observable QUE de l'interieur dit unreachable, jamais operational" {
+  # Inspecter un pod par son repertoire donne les fichiers, pas le noyau. Confondre les deux ferait
+  # rendre un verdict sur des mounts et des capabilities qui sont ceux de l'HOTE.
+  local h="$TMP/pod4"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap",
+ "mounts":[{"path":"/home/projects","mode":"rw"}]},"spec":{"invocation":{"effort":"high"}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  for p in self.mounts self.containment self.effort; do
+    echo "$output" | jq -e "select(.probe==\"$p\") | .verdict==\"unreachable\"" >/dev/null
+  done
+}
+
+@test "60-self : la couverture avoue son perimetre au lieu de le taire" {
+  # Un champ non couvert n'est pas conforme — il n'est pas regarde. Et le compteur doit etre JUSTE :
+  # `cut -d'¤'` echouait (separateur multi-octets) et annonçait 1 champ lie sur 27.
+  local h="$TMP/pod5"; mkdir -p "$h"
+  cat > "$h/.cap-profile.json" <<'JSON'
+{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap","role_index":3},
+ "spec":{"brief_kind":"worker","scope":{"allowedTools":["Read"]}}}
+JSON
+  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
+  echo "$output" | jq -e 'select(.probe=="self.coverage") | .verdict=="unknown"' >/dev/null
+  # les champs sans liaison sont NOMMES
+  echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | contains("spec.brief_kind")' >/dev/null
+  # et le compteur n'est pas 1
+  ! echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | startswith("1/")' >/dev/null
+}
