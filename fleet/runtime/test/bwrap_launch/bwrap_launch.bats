@@ -244,6 +244,31 @@ teardown() { rm -rf "$TMP_BASE"; }
   [[ "$status" -eq 1 ]]; [[ "$output" == *"path-traversal"* ]]
 }
 
+@test "security: bwrap is started with an EMPTY environment (S2: /proc/1/environ leak)" {
+  # bwrap is PID 1 of the pod's namespace and keeps its OWN env: --clearenv scrubs the CHILD,
+  # not bwrap. Measured in a live pod, /proc/1/environ handed the agent RELEASE_COOKIE (the
+  # Erlang distribution secret) + the central's topology. `env -i` closes it at the source.
+  run grep -E '^exec env -i "\$BWRAP_BIN"' "$SCRIPT"
+  [[ "$status" -eq 0 ]]
+}
+
+@test "security: a secret in the spawner's ambient env never reaches the bwrap process" {
+  # End-to-end on the assembly: the stub records ITS OWN environment; with `env -i` the secret
+  # exported here must not appear in it (the pod's /proc/1/environ is that very environment).
+  # The dump path is BAKED IN (unquoted heredoc → expanded now): under `env -i` the stub itself
+  # inherits nothing, so it could not read a variable to find where to write.
+  cat > "$LCARS_BWRAP_BIN" <<STUB
+#!/usr/bin/env bash
+env > "$TMP_BASE/bwrap.env"
+exit 0
+STUB
+  chmod +x "$LCARS_BWRAP_BIN"
+  RELEASE_COOKIE="cookie-must-not-leak" run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  run grep -c 'cookie-must-not-leak' "$TMP_BASE/bwrap.env"
+  [[ "$output" == "0" ]]
+}
+
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   grep -q "^# SOURCE:" "$SCRIPT"; grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"; grep -q "^# STATUS:" "$SCRIPT"
