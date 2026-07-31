@@ -91,10 +91,10 @@ probe_endpoints() {
             "curl $u" "HTTP $SOTF_HTTP_CODE · url $origin" \
             "Prouve qu'un serveur repond a cette adresse. Ne prouve PAS que c'est MA fleet si l'url est derivee." ;;
       000) emit "instruments.endpoint_$name" "$PLANE" "degraded" "hote-http" \
-            "curl $u" "aucune reponse ($SOTF_HTTP_BODY) · url $origin" \
+            "curl $u" "aucune reponse ($(trim "$SOTF_HTTP_BODY" 200)) · url $origin" \
             "Sans reponse je ne distingue pas fleet arretee, mauvais port derive, ou reseau coupe." ;;
       *) emit "instruments.endpoint_$name" "$PLANE" "degraded" "hote-http" \
-            "curl $u" "HTTP $SOTF_HTTP_CODE · $SOTF_HTTP_BODY · url $origin" \
+            "curl $u" "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200) · url $origin" \
             "Un code non-2xx sur health peut venir d'un autre service ecoutant sur ce port derive." ;;
     esac
   done

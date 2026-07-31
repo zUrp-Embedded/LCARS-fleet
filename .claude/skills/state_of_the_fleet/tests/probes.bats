@@ -194,3 +194,78 @@ JSON
   run env LCARS_POD_ID=p1 LCARS_POD_HOME="$home" "$PROBES/10-instruments.sh"
   echo "$output" | jq -e 'select(.probe=="instruments.mcp_bridge") | .verdict=="unknown"' >/dev/null
 }
+
+# ── render.sh : le rendu ne doit jamais inventer ni masquer ───────────────────────────────────────
+# The JSONL stays the source of truth; these pin that presenting it cannot lose a verdict.
+
+fixture() {
+  cat <<'JSONL'
+{"probe":"instruments.context","plane":"instruments","verdict":"operational","vantage":"local","method":"m1","evidence":"hote","cannot_conclude":"limite-A","ts":"2026-01-01T00:00:00Z"}
+{"probe":"fleet.health","plane":"fleet","verdict":"degraded","vantage":"hote-http","method":"m2","evidence":"HTTP 500","cannot_conclude":"limite-B","ts":"2026-01-01T00:00:01Z"}
+{"probe":"fleet.build","plane":"fleet","verdict":"unreachable","vantage":"hote-http","method":"m3","evidence":"curl absent","cannot_conclude":"limite-C","ts":"2026-01-01T00:00:02Z"}
+JSONL
+}
+
+@test "render terminal : une ligne par sonde, groupee par plan" {
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh"
+  echo "$output" | grep -q "\[instruments\]"
+  echo "$output" | grep -q "\[fleet\]"
+  [ "$(echo "$output" | grep -cE 'instruments\.context|fleet\.health|fleet\.build')" -eq 3 ]
+}
+
+@test "render terminal : la limite est cachee sur un OK, montree des que ce n'est plus vert" {
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh"
+  ! echo "$output" | grep -q "limite-A"
+  echo "$output" | grep -q "limite-B"
+  echo "$output" | grep -q "limite-C"
+}
+
+@test "render terminal --full : toutes les limites, y compris sur les verts" {
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh --full"
+  echo "$output" | grep -q "limite-A"
+}
+
+@test "render markdown : TOUTES les limites, toujours — un rapport archive sans elles ment" {
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh --md"
+  echo "$output" | grep -q "limite-A"
+  echo "$output" | grep -q "limite-B"
+  echo "$output" | grep -q "ne prouve pas"
+}
+
+@test "verdict global : aveugle l'emporte sur drift, et le code de sortie suit" {
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh --md"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "AVEUGLE"
+
+  run bash -c "$(declare -f fixture); fixture | grep -v unreachable | $PROBES/render.sh --md"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "DEGRADE"
+
+  run bash -c "$(declare -f fixture); fixture | grep operational | $PROBES/render.sh --md"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "CONFORME"
+}
+
+@test "render : une ligne non-JSON est CONSERVEE, jamais avalee" {
+  run bash -c "$(declare -f fixture); { fixture; printf 'sonde.x\tdegraded\tlocal\tbrut\tlimite\n'; } | $PROBES/render.sh --md"
+  echo "$output" | grep -q "lignes non-JSON"
+  echo "$output" | grep -q "sonde.x"
+}
+
+@test "render : entree vide = erreur, pas un rapport vert" {
+  run bash -c ": | $PROBES/render.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "aucune sonde"
+}
+
+@test "render --out ecrit le fichier et le signale" {
+  local f="$TMP/rapport.md"
+  run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh --out '$f'"
+  [ -s "$f" ]
+  grep -q "Etat de la fleet" "$f"
+}
+
+@test "deux rendus du meme JSONL sont identiques (repetable)" {
+  run bash -c "$(declare -f fixture); diff <(fixture | $PROBES/render.sh --md) <(fixture | $PROBES/render.sh --md)"
+  [ -z "$output" ]
+}

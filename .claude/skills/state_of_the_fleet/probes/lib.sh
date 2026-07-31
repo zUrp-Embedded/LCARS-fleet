@@ -134,7 +134,11 @@ http_probe() {
     return 0
   }
   SOTF_HTTP_CODE="${out##*$'\n'}"
-  SOTF_HTTP_BODY="$(trim "${out%$'\n'*}" 600)"
+  # FULL body, deliberately untrimmed. Truncation is a PRESENTATION concern and belongs at `emit`;
+  # doing it here cut a JSON payload mid-object and made every downstream `jq` fail silently — the
+  # readiness endpoint answered correctly and the probe reported "forme inattendue". Callers trim
+  # what they quote; they parse what they received.
+  SOTF_HTTP_BODY="${out%$'\n'*}"
   return 0
 }
 
