@@ -103,6 +103,13 @@ LABEL org.opencontainers.image.title="LCARS fleet v2" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.authors="lordzurp"
 
+# La révision, LISIBLE DEPUIS L'INTÉRIEUR. Le label OCI ci-dessus porte déjà la vérité, mais un
+# conteneur ne peut pas lire son propre label : il faudrait interroger le daemon, et il n'a pas
+# de socket (c'est voulu). `build_info.txt` ne peut pas jouer ce rôle non plus — il shelle sur git
+# à l'assemblage de la release, et le contexte de build n'embarque pas `.git`, donc il rend
+# `sha: "unknown"` pour toute image bâtie depuis une ref. Cette ENV est la seule voie par laquelle
+# l'entrypoint peut comparer ce qui TOURNE avec la source qu'il vient de cloner.
+ENV LCARS_IMAGE_REVISION="${GIT_SHA}"
 ENV LANG=C.UTF-8 LCARS_DOCKER=1
 # Paquets du RUNTIME (la liste miroir de modules.d/10-packages.sh + le substrat conteneur :
 # openssh-server = le login-manager du modèle « l'humain SSH en tant que lui », tini = PID 1

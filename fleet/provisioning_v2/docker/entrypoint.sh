@@ -55,18 +55,63 @@ fi
 install -d -m 2775 -g fleet /home/projects /home/projects.work
 say "zones catalogue : /home/projects /home/projects.work (2775 root:fleet)"
 
-# La SOURCE montée (compose) — l'auto-maintenance en dépend : c'est le checkout que la fleet
-# lit, met à jour (`provision update`) et sur lequel ses agents travaillent. On ne la CRÉE pas
-# (elle appartient à l'humain, hors de la boîte) : on constate, on déclare l'autorité git qui
-# va avec, et on le DIT quand elle manque plutôt que de laisser la fleet le découvrir en panne.
-if [[ -d /home/projects/LCARS/.git ]]; then
+# La SOURCE — l'auto-maintenance en dépend : c'est le checkout que la fleet lit, met à jour
+# (`provision update`) et sur lequel ses agents travaillent.
+#
+# DEUX CHEMINS, ET UN SEUL EST CELUI D'UNE INSTALLATION. Le geste de dév est `./docker.sh
+# source-push` : un `docker cp` depuis le clone de l'humain. Qui INSTALLE depuis une image tirée
+# d'une registry n'a aucun clone à pousser — il a une URL. Le chemin nominal est donc un CLONE,
+# fait ici, et il est possible sans credential : le dépôt est public en lecture (`git ls-remote`
+# anonyme mesuré vivant sur la forge).
+#
+# LA RÈGLE QUI COMPTE : on ne clone que si le dossier est ABSENT. Une source déjà là n'est JAMAIS
+# écrasée ni remise à niveau — un redémarrage du conteneur détruirait le travail en cours d'un
+# agent, et ce serait le genre de perte qu'on ne remarque qu'après. Mettre à jour est un geste
+# explicite (`provision update`), pas un effet de bord du boot.
+LCARS_SOURCE_DIR="${LCARS_SOURCE_DIR:-/home/projects/LCARS}"
+
+if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
+  # `--branch` accepte une branche OU un tag, pas un sha nu : c'est la forme d'une ref publiée,
+  # et un sha arbitraire exigerait `allowReachableSHA1InWant` côté serveur — dépendance qu'on ne
+  # présume pas. Ref vide = branche par défaut du dépôt.
+  clone_args=(--depth 1)
+  [[ -n "${LCARS_SOURCE_REF:-}" ]] && clone_args+=(--branch "$LCARS_SOURCE_REF")
+  say "clonage de la source : $LCARS_SOURCE_REMOTE${LCARS_SOURCE_REF:+ (ref $LCARS_SOURCE_REF)} → $LCARS_SOURCE_DIR"
+  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "$LCARS_SOURCE_DIR" 2>&1 | sed 's/^/[git] /'; then
+    # Le clone est fait par root ; la source appartient à l'humain qui travaillera dedans. Le
+    # groupe `fleet` parce que c'est celui des zones catalogue posées juste au-dessus.
+    chown -R "$LCARS_HUMAN:fleet" "$LCARS_SOURCE_DIR"
+    say "source clonée"
+  else
+    say "CLONAGE ÉCHOUÉ — la boîte démarre sans source (la fleet ne pourra pas se maintenir)"
+  fi
+fi
+
+if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
   # git refuse un repo d'un autre owner (« dubious ownership ») : le clone vient de l'hôte,
   # son uid n'a aucune raison d'être celui du conteneur. Déclaré safe pour TOUS les humains.
-  git config --system --replace-all safe.directory /home/projects/LCARS 2>/dev/null || true
-  say "source LCARS montée : /home/projects/LCARS ($(git -C /home/projects/LCARS rev-parse --short HEAD 2>/dev/null || echo '?')) — auto-maintenance possible"
+  git config --system --replace-all safe.directory "$LCARS_SOURCE_DIR" 2>/dev/null || true
+  src_rev="$(git -C "$LCARS_SOURCE_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo '?')"
+  say "source LCARS : $LCARS_SOURCE_DIR ($src_rev) — auto-maintenance possible"
+
+  # LE CONTRÔLE QUI FERME LA BOUCLE. Le binaire qui tourne vient de l'IMAGE ; la source vient du
+  # clone. Rien ne garantit que ce sont les mêmes commits — et une source en avance est le cas
+  # NORMAL (c'est le but de l'auto-maintenance), pas une panne. Ce qui n'est pas normal, c'est de
+  # ne pas le savoir : on lit du code qui n'est pas celui qui s'exécute. On déclare l'écart, on ne
+  # le corrige pas et on ne bloque rien.
+  img_rev="${LCARS_IMAGE_REVISION:-unknown}"
+  if [[ "$img_rev" == "unknown" ]]; then
+    say "  révision de l'image INCONNUE — écart image/source invérifiable (image bâtie sans GIT_SHA)"
+  elif [[ "$src_rev" != "$img_rev" ]]; then
+    say "  ÉCART image/source : le runtime qui tourne est bâti sur $img_rev, la source est sur $src_rev"
+    say "  (ce n'est pas une panne : lire la source ne renseigne pas sur le binaire, et inversement)"
+  else
+    say "  image et source sur la même révision ($img_rev)"
+  fi
 else
-  say "PAS de source LCARS sous /home/projects/LCARS — la fleet ne peut PAS se maintenir elle-même"
-  say "  (monte ton clone : LCARS_SOURCE_DIR=/chemin/vers/ton/clone ./docker.sh up)"
+  say "PAS de source LCARS sous $LCARS_SOURCE_DIR — la fleet ne peut PAS se maintenir elle-même"
+  say "  install : LCARS_SOURCE_REMOTE=<url> [LCARS_SOURCE_REF=<branche|tag>] au démarrage"
+  say "  dév     : ./docker.sh source-push (docker cp depuis ton clone)"
 fi
 
 # ─── 2. Identité SSH du conteneur : clés d'hôte PERSISTANTES dans le volume ──────────────────────
