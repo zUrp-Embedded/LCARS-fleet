@@ -19,10 +19,18 @@
 # DÉTRUIRE : docker compose -f fleet/provisioning_v2/docker/dev/forge-compose.yml -p lcars-devforge down -v
 #            (le `-v` est ici, dans TON geste délibéré, jamais dans une commande LCARS)
 #
-# BRANCHER LCARS DESSUS : FORGE_BASE_URL=http://host.docker.internal:3300 ./docker.sh up
-#   (`host.docker.internal` = l'hôte, vu depuis le conteneur LCARS — mesuré joignable ;
-#    les deux projets n'ont PAS de réseau commun, et c'est voulu : ils ne se connaissent que
-#    par une URL, exactement comme une forge de production.)
+# BRANCHER LCARS DESSUS : attacher le conteneur LCARS au réseau de CE projet, puis pointer
+#   l'URL sur le nom de service :
+#     docker network connect lcars-devforge_default <conteneur-lcars>
+#     FORGE_BASE_URL=http://forge:3000
+#   (`host.docker.internal` n'est PAS une option par défaut sous Linux — il faut un
+#    `extra_hosts: host-gateway`. Le réseau partagé est le chemin qui marche sans supposition.)
+#
+# DEUX VARIABLES, PAS UNE — corrigé le 2026-07-31 après démarrage réel :
+#   la version initiale de ce fichier réutilisait `LCARS_DEVFORGE_PORT` à la fois comme port nu
+#   (dans ROOT_URL) et comme adresse de bind complète (dans `ports`), avec des défauts
+#   incohérents. Passer `127.0.0.1:3301` produisait `ROOT_URL=http://127.0.0.1:127.0.0.1:3301/`
+#   et Gitea refusait de démarrer en boucle. Écrit, jamais lancé — donc jamais vu.
 
 name: lcars-devforge
 
@@ -32,7 +40,11 @@ services:
     image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
     hostname: devforge
     environment:
-      GITEA__server__ROOT_URL: "http://127.0.0.1:${LCARS_DEVFORGE_PORT:-3300}/"
+      # ROOT_URL sert aux liens que Gitea FABRIQUE (clone_url, redirections). Le consommateur
+      # principal d'une forge de dév est la fleet, qui l'atteint par le réseau docker sous le nom
+      # de service — pas l'humain depuis son navigateur. Le défaut vise donc l'intérieur ; passe
+      # LCARS_DEVFORGE_ROOT_URL si tu veux des liens cliquables depuis l'hôte.
+      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://forge:3000/}"
       GITEA__server__HTTP_PORT: "3000"
       # Démarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le
       # wizard /install — `/` répond 200, l'API 404, le healthcheck reste rouge à vie et il n'y
@@ -42,7 +54,7 @@ services:
       # besoin pour que LCARS soit développable.
       GITEA__actions__ENABLED: "true"
     ports:
-      - "${LCARS_DEVFORGE_PORT:-127.0.0.1:3300}:3000"
+      - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
     volumes:
       - data:/var/lib/gitea
       - config:/etc/gitea
