@@ -55,6 +55,20 @@ fi
 install -d -m 2775 -g fleet /home/projects /home/projects.work
 say "zones catalogue : /home/projects /home/projects.work (2775 root:fleet)"
 
+# La SOURCE montée (compose) — l'auto-maintenance en dépend : c'est le checkout que la fleet
+# lit, met à jour (`provision update`) et sur lequel ses agents travaillent. On ne la CRÉE pas
+# (elle appartient à l'humain, hors de la boîte) : on constate, on déclare l'autorité git qui
+# va avec, et on le DIT quand elle manque plutôt que de laisser la fleet le découvrir en panne.
+if [[ -d /home/projects/LCARS/.git ]]; then
+  # git refuse un repo d'un autre owner (« dubious ownership ») : le clone vient de l'hôte,
+  # son uid n'a aucune raison d'être celui du conteneur. Déclaré safe pour TOUS les humains.
+  git config --system --replace-all safe.directory /home/projects/LCARS 2>/dev/null || true
+  say "source LCARS montée : /home/projects/LCARS ($(git -C /home/projects/LCARS rev-parse --short HEAD 2>/dev/null || echo '?')) — auto-maintenance possible"
+else
+  say "PAS de source LCARS sous /home/projects/LCARS — la fleet ne peut PAS se maintenir elle-même"
+  say "  (monte ton clone : LCARS_SOURCE_DIR=/chemin/vers/ton/clone ./docker.sh up)"
+fi
+
 # ─── 2. Identité SSH du conteneur : clés d'hôte PERSISTANTES dans le volume ──────────────────────
 # (Un conteneur recréé qui change de clés d'hôte = « WARNING: REMOTE HOST IDENTIFICATION HAS
 # CHANGED » chez chaque humain — l'identité vit avec l'état, pas avec l'éphémère.)

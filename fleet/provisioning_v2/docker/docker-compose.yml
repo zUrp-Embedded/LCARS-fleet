@@ -38,6 +38,11 @@ services:
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
     volumes:
       - lcars-home:/home
+      # PAS de bind-mount de la source ici, et c'est MESURÉ, pas frileux : le daemon ne voit pas
+      # forcément le FS d'où l'on parle (Docker Desktop + WSL non intégrée → le bind se résout
+      # dans le VM du daemon et rend un dossier VIDE, silencieusement — pire que pas de montage,
+      # la fleet croirait sa source présente). La source vit donc DANS le volume d'état, posée
+      # par le geste « ./docker.sh source-push » qui marche quelle que soit la topologie.
     cap_add:
       - SYS_ADMIN
     security_opt:
