@@ -37,6 +37,7 @@ PROVISION_LIB_LOADED=1
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 : "${PROV_ROLES:=architect engineer gatekeeper qualifier reviewer scoper vulcan}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
+: "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
 # Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
 # PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage

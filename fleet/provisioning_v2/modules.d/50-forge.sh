@@ -115,7 +115,33 @@ check() {
   else
     p_fail "script A4 introuvable/inexécutable : $A4_SCRIPT (checkout incomplet ?)"
   fi
+
+  check_human_onboardable
   verdict_check
+}
+
+# L'HUMAIN sur la forge — ce que le runtime exige à l'onboarding d'un projet, sondé ICI plutôt
+# que découvert par un pod au milieu d'un create_project ({:human_not_provisioned, …} puis
+# {:human_team_unverifiable, …}, vécus au premier E2E docker). L'appartenance se sonde au
+# niveau ORG (204/404, lisible par le token système) et non au niveau TEAM : `GET
+# /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
+# et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
+check_human_onboardable() {
+  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok code
+  if ! account_exists "$PROV_HUMAN"; then
+    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : ajoute-le à TF_VAR_human_username et « tofu apply »"
+    return 0
+  fi
+  p_ok "compte forge de l'humain ($PROV_HUMAN)"
+  [[ -r "$tokfile" ]] || { p_drift "token système illisible ($tokfile) — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0; }
+  tok="$(tr -d '[:space:]' < "$tokfile")"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" \
+          "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
+  case "$code" in
+    204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
+    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; ajoute-le à la team humans (forge.tf) et « tofu apply »" ;;
+    *)   p_drift "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non vérifiable (HTTP $code) — scope du token système ?" ;;
+  esac
 }
 
 apply() {
