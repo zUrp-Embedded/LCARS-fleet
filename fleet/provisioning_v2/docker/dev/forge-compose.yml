@@ -1,0 +1,59 @@
+# SOURCE: fleet/provisioning_v2/docker/dev/forge-compose.yml
+# AUTHOR: consultant
+# STARDATE: 2026-07-31
+# STATUS: forge JETABLE de DÉVELOPPEMENT — ne fait PAS partie de LCARS
+#
+# ┌──────────────────────────────────────────────────────────────────────────────────────────┐
+# │ CE FICHIER N'EST PAS LE DÉPLOIEMENT DE TA FORGE.                                          │
+# │ En production, TU provisionnes ta forge avec l'outil que tu veux (app TrueNAS, Docker      │
+# │ Desktop, machine dédiée) et tu donnes à LCARS deux choses : son URL et un token master.    │
+# │ LCARS ne fabrique pas la forge, il vérifie qu'elle tient le contrat.                       │
+# └──────────────────────────────────────────────────────────────────────────────────────────┘
+#
+# POURQUOI CE FICHIER EXISTE QUAND MÊME : pour développer sur LCARS, il faut une forge en face.
+# Celle-ci se monte en une commande et se jette sans regret. Elle vit dans son PROPRE projet
+# compose (`-p lcars-devforge`), donc ses volumes lui appartiennent (`lcars-devforge_*`) et
+# AUCUNE commande de docker.sh ne peut les atteindre — c'est tout l'intérêt.
+#
+# LANCER :   docker compose -f fleet/provisioning_v2/docker/dev/forge-compose.yml -p lcars-devforge up -d
+# DÉTRUIRE : docker compose -f fleet/provisioning_v2/docker/dev/forge-compose.yml -p lcars-devforge down -v
+#            (le `-v` est ici, dans TON geste délibéré, jamais dans une commande LCARS)
+#
+# BRANCHER LCARS DESSUS : FORGE_BASE_URL=http://host.docker.internal:3300 ./docker.sh up
+#   (`host.docker.internal` = l'hôte, vu depuis le conteneur LCARS — mesuré joignable ;
+#    les deux projets n'ont PAS de réseau commun, et c'est voulu : ils ne se connaissent que
+#    par une URL, exactement comme une forge de production.)
+
+name: lcars-devforge
+
+services:
+  forge:
+    # PIN par digest — 1.26.1 = la version validée avec le runtime (marqueurs, tokens, webhooks).
+    image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
+    hostname: devforge
+    environment:
+      GITEA__server__ROOT_URL: "http://127.0.0.1:${LCARS_DEVFORGE_PORT:-3300}/"
+      GITEA__server__HTTP_PORT: "3000"
+      # Démarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le
+      # wizard /install — `/` répond 200, l'API 404, le healthcheck reste rouge à vie et il n'y
+      # a RIEN à automatiser. Mesuré au premier drill.
+      GITEA__security__INSTALL_LOCK: "true"
+      # Le rail CI du triangle. Le runner, lui, est à l'opérateur : une forge de dév n'en a pas
+      # besoin pour que LCARS soit développable.
+      GITEA__actions__ENABLED: "true"
+    ports:
+      - "${LCARS_DEVFORGE_PORT:-127.0.0.1:3300}:3000"
+    volumes:
+      - data:/var/lib/gitea
+      - config:/etc/gitea
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  data:
+  config:
