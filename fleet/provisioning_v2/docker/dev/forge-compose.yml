@@ -4,10 +4,10 @@
 # STATUS: forge JETABLE de DÉVELOPPEMENT — ne fait PAS partie de LCARS
 #
 # ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-# │ CE FICHIER N'EST PAS LE DÉPLOIEMENT DE TA FORGE.                                          │
-# │ En production, TU provisionnes ta forge avec l'outil que tu veux (app TrueNAS, Docker      │
-# │ Desktop, machine dédiée) et tu donnes à LCARS deux choses : son URL et un token master.    │
-# │ LCARS ne fabrique pas la forge, il vérifie qu'elle tient le contrat.                       │
+# │ CE FICHIER N'EST PAS LE DÉPLOIEMENT DE TA FORGE.                                         │
+# │ En production, TU provisionnes ta forge avec l'outil que tu veux (app TrueNAS, Docker    │
+# │ Desktop, machine dédiée) et tu donnes à LCARS deux choses : son URL et un token master.  │
+# │ LCARS ne fabrique pas la forge, il vérifie qu'elle tient le contrat.                     │
 # └──────────────────────────────────────────────────────────────────────────────────────────┘
 #
 # POURQUOI CE FICHIER EXISTE QUAND MÊME : pour développer sur LCARS, il faut une forge en face.
