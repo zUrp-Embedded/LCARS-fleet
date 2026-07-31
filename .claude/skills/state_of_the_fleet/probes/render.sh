@@ -57,7 +57,10 @@ elif [[ "$N_DEG" -gt 0 ]]; then GLOBAL="DEGRADE"; GRC=1
 else                            GLOBAL="CONFORME"; GRC=0; fi
 
 CTX="$(printf '%s\n' "$JSON" | jq -r 'select(.probe=="instruments.context") | .evidence' 2>/dev/null | head -1)"
-BUILD="$(printf '%s\n' "$JSON" | jq -r 'select(.probe=="fleet.build") | .evidence' 2>/dev/null | head -1)"
+BUILD="$(printf '%s\n' "$JSON" | jq -r 'select(.probe=="fleet.build" and .verdict=="operational") | .evidence' 2>/dev/null | head -1)"
+# Not measured is not a build. Quoting the probe's evidence regardless of verdict printed
+# "build : health rouge — sonde non lancee" in the header, which reads as a build string.
+[[ -z "$BUILD" ]] && BUILD="inconnu (non mesure)"
 TS="$(printf '%s\n' "$JSON" | jq -r '.ts' 2>/dev/null | sort | tail -1)"
 
 badge() {

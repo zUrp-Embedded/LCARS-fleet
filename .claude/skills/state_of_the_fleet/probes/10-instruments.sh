@@ -80,6 +80,7 @@ probe_endpoints() {
   local u name
   for name in api obs; do
     [[ "$name" == api ]] && u="$api/api/health" || u="$obs/health"
+    sotf_skip_no_fleet "instruments.endpoint_$name" "$PLANE" "endpoint non interroge" && continue
     if ! http_probe "$u" 3; then
       emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
         "curl $u" "curl absent" \
@@ -90,12 +91,12 @@ probe_endpoints() {
       2*) emit "instruments.endpoint_$name" "$PLANE" "operational" "hote-http" \
             "curl $u" "HTTP $SOTF_HTTP_CODE · url $origin" \
             "Prouve qu'un serveur repond a cette adresse. Ne prouve PAS que c'est MA fleet si l'url est derivee." ;;
-      000) emit "instruments.endpoint_$name" "$PLANE" "degraded" "hote-http" \
+      000) emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
             "curl $u" "aucune reponse ($(trim "$SOTF_HTTP_BODY" 200)) · url $origin" \
-            "Sans reponse je ne distingue pas fleet arretee, mauvais port derive, ou reseau coupe." ;;
-      *) emit "instruments.endpoint_$name" "$PLANE" "degraded" "hote-http" \
+            "Angle mort, PAS un constat sur la fleet : cette sonde mesure si mon instrument atteint l'endpoint, pas si le daemon va bien. Le verdict sur la fleet est celui du plan fleet." ;;
+      *) emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
             "curl $u" "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200) · url $origin" \
-            "Un code non-2xx sur health peut venir d'un autre service ecoutant sur ce port derive." ;;
+            "Un code non-2xx sur health peut venir d'un autre service ecoutant sur ce port. Angle mort de l'instrument, pas verdict sur la fleet." ;;
     esac
   done
 }
@@ -171,9 +172,29 @@ probe_mcp_bridge() {
   fi
 }
 
+# ── A-t-on jamais demarre une fleet ici ───────────────────────────────────────────────────────────
+# Learned from a second specimen, and it is the difference between a finding and a false alarm. A
+# fresh container has no `~/.lcars/run/` AT ALL; a box where `fleet_v2 start` ran leaves `api.sock`,
+# `api_url`, `fleet_v2.sock`, `mcp/`, `tmux-sock/` there. Without this, a machine that never started
+# a fleet reports `degraded` on every endpoint — five red lines describing a fleet that was never
+# asked to exist. `inactive` is the honest verdict for that, and it does not degrade the run.
+probe_fleet_ever_started() {
+  local d; d="$(sotf_run_dir)"
+  if sotf_fleet_ever_started; then
+    emit "instruments.fleet_started" "$PLANE" "operational" "local" "test -d $d" \
+      "repertoire de run present : $(ls "$d" 2>/dev/null | tr '\n' ' ')" \
+      "Prouve qu'une fleet a DEMARRE sous cet humain, pas qu'elle tourne encore. Des sockets survivent a un daemon mort."
+  else
+    emit "instruments.fleet_started" "$PLANE" "inactive" "local" "test -d $d" \
+      "aucun repertoire de run ($d) — aucune fleet n'a jamais demarre sous cet humain" \
+      "N'est PAS une panne : une boite ou personne n'a lance la fleet est un etat legitime. Explique les endpoints muets qui suivent ; ne prejuge pas d'une fleet lancee ailleurs (autre humain, autre uid)."
+  fi
+}
+
 # ── Runner ────────────────────────────────────────────────────────────────────────────────────────
 sotf_init
 probe_context
+probe_fleet_ever_started
 probe_shell_tools
 probe_endpoints
 probe_mcp_socket
