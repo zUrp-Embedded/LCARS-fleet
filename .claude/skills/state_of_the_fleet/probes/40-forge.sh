@@ -73,13 +73,32 @@ probe_reachable() {
 # Reporting it as absence is how a diagnostic sends an operator provisioning an account that already
 # exists.
 probe_identity() {
-  local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-fleet}"
+  local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-}"
 
-  local u="$FORGE/api/v1/orgs/$org"
+  # L'org n'est declaree NULLE PART d'atteignable depuis un pod : elle vit dans `forge.tf`, cote
+  # provisioning. La premiere version testait `${FORGE_ORG:-fleet}` — j'avais invente la variable ET
+  # la valeur. Une sonde qui interroge un nom devine rend un 404 qui ne prouve rien, pas meme
+  # l'ambiguite qu'elle annonce. On ne devine plus : sans nom declare, on le dit.
+  if [[ -z "$org" ]]; then
+    emit "forge.org" "$PLANE" "inactive" "reseau" 'test -n "$FORGE_ORG"' \
+      "aucun nom d'org declare a ce processus (FORGE_ORG absente, et rien ne la porte cote runtime)" \
+      "Je ne sais pas QUELLE org chercher. Un test sur un nom devine ne prouverait rien — pas meme son absence."
+  else
+    probe_org "$org"
+  fi
+
+  probe_human_account "$human"
+}
+
+# L'org et le compte humain sont deux questions INDEPENDANTES. Le premier correctif les avait
+# couplees par un `return` : ne pas connaitre le nom de l'org faisait sauter la verification du
+# compte, qui n'en depend pas. Un correctif qui emporte une mesure voisine est un demi-correctif.
+probe_org() {
+  local org="$1" u="$FORGE/api/v1/orgs/$org"
   if http_probe "$u" 6; then
     case "$SOTF_HTTP_CODE" in
       2*)  emit "forge.org" "$PLANE" "operational" "reseau" "curl $u" \
-             "org '$org' visible en anonyme (HTTP $SOTF_HTTP_CODE)" \
+             "org '$org' (nom fourni par FORGE_ORG) visible en anonyme (HTTP $SOTF_HTTP_CODE)" \
              "Visible ne veut pas dire correctement peuplee : teams et memberships ne sont pas lisibles ici." ;;
       404) emit "forge.org" "$PLANE" "unknown" "reseau" "curl $u" \
              "HTTP 404 · $(trim "$SOTF_HTTP_BODY" 120)" \
@@ -91,6 +110,10 @@ probe_identity() {
     emit "forge.org" "$PLANE" "unreachable" "reseau" "curl $u" "curl absent" "Aveugle sur l'org."
   fi
 
+}
+
+probe_human_account() {
+  local human="$1" u
   if [[ -z "$human" ]]; then
     emit "forge.human_account" "$PLANE" "unreachable" "reseau" 'curl $FORGE/api/v1/users/$LCARS_HUMAN' \
       "nom du compte humain inconnu (ni LCARS_HUMAN ni USER)" \

@@ -471,3 +471,18 @@ JSON
   # et le compteur n'est pas 1
   ! echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | startswith("1/")' >/dev/null
 }
+
+@test "40-forge : sans nom d'org declare, on ne DEVINE pas — et le compte humain reste teste" {
+  # Deux fautes en une, corrigees ensemble. `FORGE_ORG` n'existe nulle part : la premiere version
+  # testait `${FORGE_ORG:-fleet}`, nom de variable ET valeur inventes. Puis le correctif a couple
+  # deux questions independantes par un `return` : ne pas connaitre l'org faisait sauter la
+  # verification du compte, qui n'en depend pas.
+  local d="$TMP/stub6"; mkdir -p "$d"
+  printf '200\n{"version":"1.26.4"}' > "$d/api_v1_version"
+  printf '200\n{"login":"bob"}'      > "$d/api_v1_users_bob"
+  stub_server "$d"
+  run env -u FORGE_ORG FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=bob "$PROBES/40-forge.sh"
+  stub_stop
+  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
+  echo "$output" | jq -e 'select(.probe=="forge.human_account") | .verdict=="operational"' >/dev/null
+}
