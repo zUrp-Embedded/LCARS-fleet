@@ -829,3 +829,42 @@ $(jl c.d unreachable)"
   run "$SKILL_DIR/sotf.sh" rapport
   [ "$status" -eq 2 ]
 }
+
+# ── La doc et la CLI ──────────────────────────────────────────────────────────────────────────────
+
+@test "SKILL.md ne documente aucune invocation que la CLI refuse" {
+  # Une doc qui derive est un mensonge a retardement, et celle-ci est la seule chose qu'un agent lit
+  # avant d'agir. Le detecteur est mecanique : les invocations sont EXTRAITES du markdown et
+  # confrontees a ce que le case block accepte reellement. Renommer une entree des deux cotes est
+  # gratuit ; ne la renommer que d'un cote rougit ici.
+  local cmds opts c o
+  cmds="$(grep -oE 'sotf\.sh [a-z_]+' "$SKILL_DIR/SKILL.md" | awk '{print $2}' | sort -u)"
+  [ -n "$cmds" ]
+  for c in $cmds; do
+    grep -qE "^  $c\)|^  $c\|" "$SKILL_DIR/sotf.sh" || {
+      echo "SKILL.md documente '$c', absent du case de sotf.sh"; return 1
+    }
+  done
+  opts="$(grep -oE '^\s+\$S/sotf\.sh [^#]*' "$SKILL_DIR/SKILL.md" | grep -oE '\-\-[a-z]+' | sort -u)"
+  for o in $opts; do
+    grep -qE -- "$o\)|$o\|" "$SKILL_DIR/sotf.sh" "$SKILL_DIR/probes/render.sh" || {
+      echo "SKILL.md documente l'option '$o', acceptee nulle part"; return 1
+    }
+  done
+}
+
+@test "FORMAT.md decrit les cinq verdicts que emit accepte, ni plus ni moins" {
+  # Le vocabulaire a ete FORCE par deux specimens, pas conçu. Un sixieme verdict qui apparaitrait
+  # dans le code sans passer par ce fichier reintroduirait exactement l'ambiguite qu'il a coute
+  # cher de retirer.
+  local v
+  for v in operational inactive degraded unreachable unknown; do
+    grep -q "\`$v\`" "$SKILL_DIR/FORMAT.md" || { echo "FORMAT.md ne decrit pas '$v'"; return 1; }
+    grep -q "$v" "$PROBES/lib.sh" || { echo "lib.sh ne connait pas '$v'"; return 1; }
+  done
+  # aucun verdict dans le case de emit qui ne soit pas documente
+  run bash -c "sed -n '/case \"\$verdict\" in/,/esac/p' '$PROBES/lib.sh' | grep -oE '^\s+[a-z|]+\)' | tr -d ' )' | tr '|' '\n' | grep -v '^\*$'"
+  for v in $output; do
+    grep -q "\`$v\`" "$SKILL_DIR/FORMAT.md" || { echo "verdict '$v' emis mais absent de FORMAT.md"; return 1; }
+  done
+}
