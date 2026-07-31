@@ -77,11 +77,23 @@ elif [[ "$FAIL_N" -gt 0 || "$PY_RC" -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2) Tests bats des launchers (bwrap_launch, claude_launch). Ranges en sous-dossiers → recherche
-#    recursive (pas un simple glob test/*.bats). LE test bats de bwrap_launch ne se contourne pas :
-#    s'il est joignable (bats present) il DOIT etre vert.
+# 2) Tests bats : les launchers (bwrap_launch, claude_launch) ET les skills du depot. Ranges en
+#    sous-dossiers → recherche recursive (pas un simple glob test/*.bats). LE test bats de
+#    bwrap_launch ne se contourne pas : s'il est joignable (bats present) il DOIT etre vert.
+#
+#    Les skills de `.claude/skills/*/tests/` sont inclus parce qu'un skill qui MESURE (le toolkit
+#    d'etat de starfleet) est un instrument : non teste, il rapporte des verdicts que rien ne
+#    verifie. Le repertoire est hors du runtime, d'ou la seconde recherche ; son absence n'est pas
+#    une erreur (un depot sans skills reste valide).
 # ---------------------------------------------------------------------------
-mapfile -t BATS_FILES < <(find "$HERE" -type f -name '*.bats' | sort)
+REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+SKILLS_TESTS="$REPO_ROOT/.claude/skills"
+mapfile -t BATS_FILES < <(
+  find "$HERE" -type f -name '*.bats'
+  [[ -d "$SKILLS_TESTS" ]] && find "$SKILLS_TESTS" -type f -path '*/tests/*.bats'
+  true
+)
+mapfile -t BATS_FILES < <(printf '%s\n' "${BATS_FILES[@]}" | sort -u)
 BATS_FILE_COUNT="${#BATS_FILES[@]}"
 # Nombre de cas @test (info plus fine que le nb de fichiers pour l'avertissement « N tests manques »).
 if [[ "$BATS_FILE_COUNT" -gt 0 ]]; then
@@ -93,7 +105,7 @@ fi
 if [[ "$BATS_FILE_COUNT" -eq 0 ]]; then
   echo "--- bats : aucun fichier .bats trouve sous $HERE (rien a lancer) ---"
 elif command -v bats >/dev/null 2>&1; then
-  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers — execution ---"
+  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills — execution ---"
   set +e
   bats "${BATS_FILES[@]}"
   BATS_RC=$?
