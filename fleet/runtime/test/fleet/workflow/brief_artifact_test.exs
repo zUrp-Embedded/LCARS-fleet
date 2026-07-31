@@ -208,7 +208,25 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     {_, 0} = g.(["commit", "-qm", "init"])
 
     wt = Path.join(tmp, "workops")
-    {_, 0} = g.(["worktree", "add", "--orphan", "-b", "work/ops", wt])
+    # `worktree add --orphan` needs git >= 2.42; Debian bookworm (the container's base, and the
+    # image that runs this gate) ships 2.39 and answers exit 129. The two-step below builds the
+    # SAME shape on every version — a worktree whose `.git` is a FILE, on an orphan branch — so
+    # the case under test is unchanged and the gate stops depending on the runner's git.
+    case g.(["worktree", "add", "--orphan", "-b", "work/ops", wt]) do
+      {_, 0} ->
+        :ok
+
+      {_, _} ->
+        {_, 0} = g.(["worktree", "add", "--detach", wt])
+
+        {_, 0} =
+          System.cmd(
+            "git",
+            ["-c", "user.name=t", "-c", "user.email=t@t", "checkout", "--orphan", "work/ops"],
+            cd: wt
+          )
+    end
+
     # THE point: in a worktree, `.git` is a FILE (`gitdir: …`), not a directory.
     assert File.regular?(Path.join(wt, ".git"))
 

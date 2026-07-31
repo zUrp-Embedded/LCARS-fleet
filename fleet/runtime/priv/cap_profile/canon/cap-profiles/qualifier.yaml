@@ -40,6 +40,12 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
+      # Jumeaux CLIENT des deux premiers : `web_search`/`web_fetch` denient les outils
+      # SERVER-SIDE d'Anthropic ; `WebSearch`/`WebFetch` sont les outils Claude Code, qui
+      # tournent DANS le pod et n'etaient denies nulle part. Ce role ne navigue pas :
+      # les deux faces sont fermees (mesure sur pod vivant, 2026-07-31).
+      - WebSearch
+      - WebFetch
     # `push --force` and `reset --hard` come from the universal baseline
     # (`_baseline-git-denied.yaml`) — not duplicated here. Qualifier-specific
     # restrictions remain: no push (verdict-only) and no rebase (preserves

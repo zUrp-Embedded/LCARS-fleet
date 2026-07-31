@@ -33,6 +33,11 @@ defmodule Fleet.Spawner.Pod.Assets do
   freezes on "By proceeding, you accept..." (option 1/2 + Enter).
   `hasCompletedOnboarding: true` also skips onboarding (the legacy `.claude.json` — the
   host user's global config — is not meant to be touched here).
+
+  `extensions.marketplace.autoInstall: false` — measured on a live pod: every spawn cloned
+  Anthropic's official plugin marketplace from GitHub (~40 plugin trees, 2 s after boot) to
+  install exactly ZERO plugin. A fleet of ten pods paid ten clones for nothing, and a pod that
+  is supposed to run inside a projected world does not fetch code from the internet at boot.
   """
   @spec pod_settings_json() :: String.t()
   def pod_settings_json do
@@ -40,7 +45,8 @@ defmodule Fleet.Spawner.Pod.Assets do
       %{
         "hasCompletedOnboarding" => true,
         "hasAcknowledgedCostThreshold" => true,
-        "skipDangerousModePermissionPrompt" => true
+        "skipDangerousModePermissionPrompt" => true,
+        "extensions" => %{"marketplace" => %{"autoInstall" => false}}
       },
       pretty: true
     )
