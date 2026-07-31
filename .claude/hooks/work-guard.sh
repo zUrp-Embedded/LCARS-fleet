@@ -70,11 +70,18 @@ case "$TOOL" in
         if printf '%s' "$FILE_PATH" | grep -qE '/handoffs/[^/]+-handoff\.md$'; then
             exit 0
         fi
-        # Exception: doing/ is the active workspace — plans in progress are editable
-        if printf '%s' "$FILE_PATH" | grep -qE '/work/doing/[^/]+$'; then
+        # Exception: doing/ is the active workspace — plans in progress are editable.
+        # RECURSIVE, and it was not: the old pattern matched `doing/<file>` only, while a chantier
+        # IS a directory (`doing/chantier-x/00-NOTE.md`). An agent with nowhere legitimate to put a
+        # chantier note puts it somewhere illegitimate — the guard was producing the mess it exists
+        # to prevent.
+        if printf '%s' "$FILE_PATH" | grep -qE '/work/doing/'; then
             exit 0
         fi
-        if printf '%s' "$FILE_PATH" | grep -qE '/projects\.work/[^/]+/work/doing/[^/]+$'; then
+        # Exception: the CURRENT beyond dossier — where the live work is recorded (plans, journals,
+        # chantier folders). The number is hardcoded ON PURPOSE: changing era must be a deliberate,
+        # visible edit here, not a silent widening to every archived dossier. Bump it at #7.
+        if printf '%s' "$FILE_PATH" | grep -qE '/work/beyond_#6/'; then
             exit 0
         fi
         # Exception: reference/ is append-only L2 corpus — versioned external sources
@@ -96,6 +103,13 @@ case "$TOOL" in
             # Exception: reference/ is append-only L2 corpus — allow cp/mkdir
             REF_RE="/work/reference/"
             if printf '%s' "$CMD" | grep -qE "$REF_RE" && ! printf '%s' "$CMD" | grep -qE "(rm|sed\s+-i)\s.*${REF_RE}"; then
+                exit 0
+            fi
+            # Same opening as Write/Edit above, for the same reason: an agent allowed to write a
+            # file but not to `mkdir` its chantier folder cannot land anything. `rm` stays blocked —
+            # creating and editing is the need, erasing is not.
+            OPEN_RE="(/work/doing/|/work/beyond_#6/)"
+            if printf '%s' "$CMD" | grep -qE "$OPEN_RE" && ! printf '%s' "$CMD" | grep -qE "(^|;|&&|\|\|)\s*rm\s.*${OPEN_RE}"; then
                 exit 0
             fi
             # 1. Always-destructive commands with work path as argument
