@@ -115,6 +115,7 @@ ENV LANG=C.UTF-8 LCARS_DOCKER=1
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra python3 \
+       less bash-completion \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && mkdir -p /run/sshd
@@ -150,6 +151,12 @@ COPY fleet/runtime/etc     /opt/lcars/fleet/runtime/etc
 COPY fleet/provisioning_v2/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/provisioning_v2/docker/console.sh       /opt/lcars/console.sh
 COPY fleet/provisioning_v2/docker/console.tmux.conf /opt/lcars/console.tmux.conf
+# Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
+# donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
+# le Debian etendu (ll/la/l, couleurs, completion, lesspipe) que bookworm-slim n'a PAS, plus le
+# prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
+# sans eux, deux blocs de ce fichier seraient des no-op silencieux.
+COPY fleet/provisioning_v2/docker/skel.bashrc      /etc/skel/.bashrc
 RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/fleet/provisioning_v2/provision \
                /opt/lcars/fleet/provisioning_v2/modules.d/*.sh \
                /opt/lcars/fleet/runtime/etc/provision-role-tokens.sh

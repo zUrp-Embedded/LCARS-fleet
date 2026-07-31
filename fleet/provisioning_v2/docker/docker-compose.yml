@@ -25,7 +25,10 @@ services:
         GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
         BUILD_DATE: "${LCARS_BUILD_DATE:-unknown}"
     image: lcars-fleet:2
-    hostname: lcars
+    # Le hostname se LIT dans le prompt (`\h`) et dans le titre des sessions : sans lui, docker
+    # colle le hash du conteneur (`aa23b9d888c9`), illisible et different a chaque recreation.
+    # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
+    hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:
       LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
       LCARS_UID: "${LCARS_UID:-1000}"
