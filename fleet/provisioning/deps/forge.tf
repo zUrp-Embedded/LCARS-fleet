@@ -86,6 +86,23 @@ resource "gitea_user" "starfleet" {
   admin                = true # site-admin : l'identité d'ONBOARDING (créer des users = op site-admin)
 }
 
+# lcars : le compte d'INSTALLEUR, site-admin. C'est lui qui tient le master-token du bootstrap
+# (tofu apply, mint des role-tokens, avatars) — jusqu'ici un compte ad-hoc créé à la main, donc
+# hors recette et hors reproduction. Il est déclaré ici pour que la forge se rebâtisse entière.
+#
+# DISTINCT de l'humain daily (`gitea_user.human`, admin = false), et la distinction est le lock :
+# un site-admin Gitea passe outre TOUTES les permissions de team, donc un humain daily qui serait
+# aussi admin rendrait `humans` décoratif — il pourrait relabelliser `stage/*`, c'est-à-dire
+# déclarer terminé un travail qui ne l'est pas.
+resource "gitea_user" "installer" {
+  username             = "lcars"
+  login_name           = "lcars"
+  email                = "lcars@lcars.local"
+  password             = var.seed_password
+  must_change_password = false
+  admin                = true
+}
+
 resource "gitea_user" "human" {
   username             = var.human_username
   login_name           = var.human_username
