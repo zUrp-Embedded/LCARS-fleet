@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -849,7 +849,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # protocol labels copied WITH their tooltips, fresh history). `:generated` → the clone
   # already carries the scaffold, `maybe_scaffold_main` is a no-op. Template missing on the
   # forge → LOUD fallback to the bare create + LOCAL scaffold (same files: the SSoT is
-  # priv/project_template, two vehicles) — degraded, never a wall.
+  # priv/catalogue/project_template, two vehicles) — degraded, never a wall.
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
     template = project_template(opts)
@@ -895,7 +895,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Full name of the forge TEMPLATE repo new projects are generated from. Opt
   `:project_template` (test), else config `:fleet_pilot, :project_template`
   (default `"fleet/project-template"`). The template is the FORGE PROJECTION of
-  `priv/project_template/**` — `mix lcars.project_template.sync` keeps them aligned.
+  `priv/catalogue/project_template/**` — `mix lcars.project_template.sync` keeps them aligned.
   """
   @spec project_template(keyword()) :: String.t()
   def project_template(opts \\ []) do

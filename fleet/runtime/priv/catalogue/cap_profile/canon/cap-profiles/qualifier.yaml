@@ -1,17 +1,17 @@
-# Cap-profile: reviewer
+# Cap-profile: qualifier
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
 # Schema: ../../schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
-  name: reviewer
+  name: qualifier
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
-  role_index: 5
+  role_index: 4
 spec:
-  # PR judge ("the code does the brief" — a REVIEW). Receives a DEFUSED GateBrief (context +
+  # PR judge ("the tests are honest" — a REVIEW). Receives a DEFUSED GateBrief (context +
   # deliverable + verdict contract, NO executable instruction — I-CBC) instead of the issue
-  # body: without it (default `worker`) the reviewer would EXECUTE the build instead of
+  # body: without it (default `worker`) the qualifier would EXECUTE the build instead of
   # judging it. Entry dual of deliverable_mode (output = `payload` default: a verdict, not a git patch).
   brief_kind: judge
   # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
@@ -22,9 +22,9 @@ spec:
       - Read
       - Glob
       - Grep
-      # GENERIC Bash (a SCOPED pattern-list hangs in --permission-mode default). Real
-      # enforcement = the MOUNT (RO/RW) + git_ops_denied (push/rebase/commit hard-denied
-      # -> forge-blind AND commit-less).
+      # GENERIC Bash (git read + mix test/pytest + shell). A SCOPED Bash pattern-list hangs in
+      # --permission-mode default (off-pattern command -> prompt). Real enforcement = the MOUNT
+      # (RO/RW) + git_ops_denied (push/rebase hard-denied -> forge-blind).
       - Bash
       # Report writing: Write/Edit bounded by the RW MOUNT (not by the tool-list).
       - Write
@@ -40,27 +40,26 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-      # Jumeaux CLIENT des deux premiers : `web_search`/`web_fetch` denient les outils
-      # SERVER-SIDE d'Anthropic ; `WebSearch`/`WebFetch` sont les outils Claude Code, qui
-      # tournent DANS le pod et n'etaient denies nulle part. Ce role ne navigue pas :
-      # les deux faces sont fermees (mesure sur pod vivant, 2026-07-31).
+      # CLIENT twins of the two above: `web_search`/`web_fetch` deny Anthropic's SERVER-SIDE
+      # tools, `WebSearch`/`WebFetch` are the Claude Code tools running INSIDE the pod. Denying
+      # one face leaves the other open. This role does not browse: both faces are closed.
       - WebSearch
       - WebFetch
     # `push --force` and `reset --hard` come from the universal baseline
-    # (`_baseline-git-denied.yaml`) — not duplicated here. Reviewer-specific
-    # restrictions remain (writes its narrative note only, never touches
-    # the workspace): no push/rebase/commit.
-    git_ops_denied: ["push", "rebase", "commit"]
+    # (`baseline/git-denied.yaml`) — not duplicated here. Qualifier-specific
+    # restrictions remain: no push (verdict-only) and no rebase (preserves
+    # the tested history).
+    git_ops_denied: ["push", "rebase"]
   knowledge:
     skills: []  # modops are listed in modop_set
     monk_registry: null
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
-    model: opus        # catalogue -> --model (alias or full name; tunable)
+    model: sonnet        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
-    subagent_template: code-quality-reviewer
+    subagent_template: spec-reviewer
     host_native: false
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (ephemeral, churny judge) — no --remote-control

@@ -12,12 +12,12 @@ defmodule Fleet.SPBuilder.RepoSections do
   **Pure** functions (FS read only for `read/1`, no process) — except the "nothing matched" warning,
   which `read/1` emits (never `extract/1`, which stays a pure parser).
 
-  The kept list is a BET, not a convention LCARS imposes: `priv/project_template` ships no `CLAUDE.md`,
+  The kept list is a BET, not a convention LCARS imposes: `priv/catalogue/project_template` ships no `CLAUDE.md`,
   so a target repo is free to name its sections otherwise and then contributes nothing. That outcome is
   legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching with zero repo context
   used to be indistinguishable from a pod that was given no repo file at all.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -52,7 +52,7 @@ defmodule Fleet.SPBuilder.RepoSections do
   # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections was silently
   # indistinguishable from the first: the pod launched with no repo context at all and nothing said so.
   # The closed list is a BET on the target repo's headings — LCARS does not impose them (its
-  # `priv/project_template` ships no CLAUDE.md), so a repo naming its sections `## Setup` /
+  # `priv/catalogue/project_template` ships no CLAUDE.md), so a repo naming its sections `## Setup` /
   # `## Architecture` contributes nothing, legitimately and invisibly. Not an error (a repo owes us no
   # heading), so `{:ok, ""}` stands — but it is now VISIBLE. `extract/1` stays pure: the log lives here,
   # on the side that already does I/O.

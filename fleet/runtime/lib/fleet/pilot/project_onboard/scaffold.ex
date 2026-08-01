@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   ## The two faces of the dual-dir (replicated LCARS architecture)
 
     * `main/3` — `main` branch worktree (the deliverable): the FALLBACK writer of
-      `priv/project_template/**` (the SSoT — the same files the forge TEMPLATE repo
+      `priv/catalogue/project_template/**` (the SSoT — the same files the forge TEMPLATE repo
       serves natively via `generate_repo`; run `mix lcars.project_template.sync` to
       project them onto the forge). Expands the Gitea `${VAR}` subset locally
       (REPO_NAME, REPO_DESCRIPTION, YEAR/MONTH/DAY — `${...}` form only) and never
@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   The only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   @doc """
@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def main(dir, name, opts), do: write_face(dir, "main", name, opts, "(à compléter)")
 
-  # ONE mechanic per face: read the face's files under priv/project_template/<face>,
+  # ONE mechanic per face: read the face's files under priv/catalogue/project_template/<face>,
   # expand the Gitea `${VAR}` subset locally, write. The `.gitea/template` control file
   # (main face) is never copied — native semantics.
   defp write_face(dir, face, name, opts, pitch_default) do
@@ -68,7 +68,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
   end
 
-  defp face_root(face), do: Application.app_dir(:lcars_fleet, "priv/project_template/#{face}")
+  defp face_root(face), do: Path.join(Fleet.Catalogue.project_template_root(), face)
 
   # Local expansion of the Gitea variable subset — `${VAR}` form ONLY (our template files
   # never use the bare `$VAR` form; expanding it here could corrupt shell-looking content).

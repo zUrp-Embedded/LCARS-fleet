@@ -13,7 +13,17 @@
 
 import Config
 
-if config_env() != :test do
+# TOOL MODE — a release `eval` runs the config providers (this whole file) BEFORE evaluating its
+# expression. A verify/tooling invocation is NOT a fleet boot: it must not demand the deployment
+# env (ports, forge, credentials). One flag skips the ENTIRE deployment-config body — deliberately
+# coarse, so every present AND future deployment requirement below is covered at once, never a new
+# variable to simulate per requirement (that whack-a-mole is what would re-create a dialect). Set
+# by the tool entrypoint (`Fleet.Application.CatalogueVerify` via `bin/fleet_umbrella eval`), absent
+# on the daemon path, so the daemon still fails loud on a missing port. Cooperative threat model:
+# setting this and then `start`ing the daemon is a deliberate misuse, out of scope like R-no-root.
+tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
+
+if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
   # ============================================================
@@ -70,6 +80,16 @@ if config_env() != :test do
   config :logger, level: log_level
 
   # ============================================================
+  # fleet_catalogue — THE catalogue root (coarse knob)
+  # ============================================================
+  # One variable brings ONE catalogue: every business tree derives its sub-path from here
+  # (`Fleet.Catalogue`, SSoT of the layout). Unset = the bundled priv, which is what the current
+  # instance runs. The per-tree keys below stay as FINE overrides and keep precedence over this one.
+  if path = System.get_env("LCARS_CATALOGUE_ROOT") do
+    config :fleet_catalogue, root: Fleet.EnvParse.path("LCARS_CATALOGUE_ROOT", path)
+  end
+
+  # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
@@ -84,9 +104,10 @@ if config_env() != :test do
 
     # ⚠ SCOPE of this override: it moves the cap-profile YAMLs ONLY. The SP overlay artifacts the
     # profiles reference — modop bundles (`:fleet_sp_builder, :modop_root`) and subagent templates —
-    # stay resolved from the bundled priv (or their own config keys). An operator overriding the
-    # profiles WITHOUT the matching SP roots runs overridden profiles over BUNDLED SP fragments: a
-    # coherent-looking skew. Override the sp_builder roots alongside, or override neither.
+    # stay resolved from the catalogue root (or their own config keys). An operator overriding the
+    # profiles WITHOUT the matching SP roots runs overridden profiles over the catalogue's SP
+    # fragments: a coherent-looking skew. That narrowness is now a CHOICE, not the only option —
+    # to bring a whole catalogue, set `LCARS_CATALOGUE_ROOT` above and none of the fine keys.
   end
 
   # ============================================================
@@ -440,9 +461,9 @@ if config_env() != :test do
     config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
-  # NB cap-profiles / workflow_maps: already covered by `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
-  # :root_dir, above) and `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_workflow :workflow_maps_root). No
-  # duplicated knob here (one source per config).
+  # NB catalogue trees: covered by `LCARS_CATALOGUE_ROOT` (coarse, all of them) and the three fine
+  # keys above — `LCARS_CAPPROFILES_ROOT`, `LCARS_WORKFLOW_MAPS_ROOT`, `LCARS_COORD_POLICIES_PATH`.
+  # No duplicated knob here (one source per config).
 
   # (No `LCARS_POD_HUMAN` knob: the human = the runtime process user, derived in-code, never
   #  a config. Cf. pod.ex `runtime_user`/`runtime_home`.)

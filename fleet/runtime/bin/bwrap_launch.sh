@@ -312,11 +312,12 @@ if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
   done <<< "$LCARS_POD_MOUNTS"
 fi
 
-# `env -i` — bwrap becomes PID 1 of the pod's namespace, and a process keeps its OWN environment:
-# --clearenv scrubs the CHILD's env, never bwrap's. Measured from inside a live pod: /proc/1/environ
-# handed the agent RELEASE_COOKIE (the Erlang distribution secret), LCARS_SSH_AUTHORIZED_KEYS and
-# the central's whole topology. Starting bwrap with an EMPTY environment closes it at the source —
-# everything the pod legitimately needs already crosses explicitly through --setenv below.
+# `env -i` — bwrap becomes PID 1 of the pod's namespace and keeps its OWN environment: --clearenv
+# scrubs the CHILD's env, never bwrap's, and the pod reads that env back through /proc/1/environ.
+# So the spawner's whole ambient env (RELEASE_COOKIE, SSH keys, central topology) is pod-readable
+# unless bwrap itself starts empty. Everything the pod legitimately needs crosses explicitly
+# through --setenv below. Locked by `test/bwrap_launch/bwrap_launch.bats` (assembly + a secret
+# exported around the spawner must not reach the sandbox).
 exec env -i "$BWRAP_BIN" \
   --unshare-all --share-net \
   --hostname "lcars-pod-$POD_ID" \

@@ -5,6 +5,7 @@ defmodule Fleet.CapProfile do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache
     ],
@@ -44,7 +45,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -215,6 +216,58 @@ defmodule Fleet.CapProfile do
 
     case spec do
       %{"capabilities" => caps} when is_list(caps) -> want in caps
+      _ -> false
+    end
+  end
+
+  @doc """
+  Roles of the catalogue that DECLARE the capability `cap`, sorted. The RESOLVER twin of the
+  `has_capability?/2` predicate: the predicate answers "does this role carry it", this answers
+  "who carries it" — the question a structural role (the producer, the sealer) actually asks.
+
+  Reads the proven-good image when one is published (`:persistent_term`, no IO — the same regime as
+  `list_from_published/0`), the disk catalogue otherwise. The two agree by construction: the image
+  is a snapshot of that same catalogue, frozen at boot.
+
+  Fail-CLOSED like the predicate: a role whose profile does not load is absent from the result
+  rather than raising. An unloadable catalogue role is a broken deploy, and it is already refused
+  before readiness by `Fleet.Spawner.CanonProof` — swallowing it here would only duplicate that
+  guard in a second dialect.
+
+  Returns the LIST, never the singleton: a capability may legitimately be carried by several roles
+  (`onboarder` is, in the bundled catalogue). Whether it must be unique is a property of the
+  CALLER's concept, not of the catalogue — `Fleet.Pilot.Roles` enforces it for the structural ones.
+  """
+  @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def roles_with_capability(cap) do
+    case Fleet.CapProfile.Image.published() do
+      %{index: index} ->
+        {:ok,
+         index
+         |> Enum.filter(fn {_role, raw} -> raw_has_capability?(raw, cap) end)
+         |> Enum.map(&elem(&1, 0))
+         |> Enum.sort()}
+
+      nil ->
+        with {:ok, roles} <- list() do
+          {:ok, Enum.filter(roles, &role_declares?(&1, cap))}
+        end
+    end
+  end
+
+  defp role_declares?(role, cap) do
+    case load(role) do
+      {:ok, profile} -> has_capability?(profile, cap)
+      {:error, _} -> false
+    end
+  end
+
+  # The image holds the RAW validated map, not a `%CapProfile{}` — same read, one level up.
+  defp raw_has_capability?(raw, cap) do
+    want = to_string(cap)
+
+    case raw do
+      %{"spec" => %{"capabilities" => caps}} when is_list(caps) -> want in caps
       _ -> false
     end
   end
@@ -424,7 +477,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The `disallowedTools` patterns of the intangible universal baseline
-  (`priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`) — **raises** fail-closed if
+  (`priv/cap_profile/baseline/git-denied.yaml`) — **raises** fail-closed if
   the baseline is absent/corrupt. **Delegates** to
   `Fleet.CapProfile.DisallowedTools.baseline_patterns/0`. Public (tests + internal).
   """

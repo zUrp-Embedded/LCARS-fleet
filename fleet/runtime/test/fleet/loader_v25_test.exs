@@ -15,7 +15,10 @@ defmodule Fleet.Workflow.LoaderV25Test do
   alias Fleet.Workflow.Loader
 
   # R0.8-brick6: canon pipelines reabsorbed in-repo.
-  @canon_pipelines Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
+  @canon_pipelines Application.app_dir(
+                     :lcars_fleet,
+                     "priv/catalogue/workflow/canon/workflow_maps"
+                   )
 
   test "canon standard-qa.yaml (V2.5) normalized → DISPATCHABLE steps only (brief-review gate + build)" do
     # rev3 rehabilitation: the old architect/starfleet steps were NOT servable by the

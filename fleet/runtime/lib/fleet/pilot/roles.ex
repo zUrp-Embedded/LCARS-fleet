@@ -1,29 +1,162 @@
 defmodule Fleet.Pilot.Roles do
   @moduledoc """
   **Roles of the single-brick model** — accessors for the workshop's roles (producer, judges,
-  gatekeeper). SINGLE data source = `config/config.exs`; this module is the SINGLE accessor (without it
-  the default would be hard-rewritten in each caller). Override per project/test via the opts.
+  gatekeeper). This module is the SINGLE accessor (without it the resolution would be rewritten in
+  each caller). Override per project/test via the opts.
 
   The three roles live HERE: producer (`producer_role/1`), jury (`jury/2`) and gatekeeper
   (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
-  (never an `engineer`/`gatekeeper` default rewritten at the caller).
+  (never an `engineer`/`gatekeeper` literal rewritten at the caller).
 
-  **Last revised**: 2026-07-21
+  ## The structural roles are RESOLVED, not defaulted
+
+  `producer_role/1` and `gatekeeper_role/1` carry **no literal default**. A default here would be
+  a requirement that gave up on being verified: a catalogue naming no producer would boot green and
+  fail at the first spawn, far from the deploy fault — what `Fleet.Spawner.CanonProof` prevents
+  everywhere else.
+
+  They resolve by CAPABILITY (`spec.capabilities`, the B-03 mechanism): `producer` for the one that
+  codes the brick, `exception_judge` for the one that signs the merge. Substituting a role is a
+  cap-profile edit, and there is no name the code falls back to when the catalogue is silent.
+
+  Resolution is **fail-loud on zero AND on several**: for a structural role, an ambiguity is a broken
+  catalogue, not a choice to arbitrate at random. `Fleet.Pilot.Application.validate_structural_roles!/0`
+  runs it at boot, so a catalogue that cannot name its producer refuses readiness instead of dying at
+  the first dispatch.
+
+  **Last revised**: 2026-08-01
   """
 
   require Logger
 
-  @default_producer_role "engineer"
-  @default_gatekeeper_role "gatekeeper"
+  # The capability each structural role is resolved BY. Not a role name: the point of B-03 is that a
+  # gate resolves a responsibility, never a magic name.
+  @producer_capability :producer
+  @gatekeeper_capability :exception_judge
+  @delegate_capability :project_delegate
 
   @doc """
-  PRODUCER role of the single-brick model (the one that codes the brick, e.g. `engineer`). Override by the opt
-  `:producer_role` (project/test); otherwise config `:fleet_pilot, :producer_role` (default `"engineer"`).
+  Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
+  `:fleet_pilot, :producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
+
+  ⚠ **This is NOT who produces.** The CARD names its producer per step (`steps.<name>.role`,
+  schema-required), and the run carries it in the feature branch `lcars/issue-N-<producer>`. This
+  accessor is the fallback of a single call site — `StepRunCompleter.producer_stop_role/2`, when the
+  branch is absent or unparseable and a stopwatch stop still needs a real tokened identity.
+
+  So SEVERAL producers is a legitimate catalogue: `eng_hw` and `eng_sw` both carry the capability,
+  and every card says which one it dispatches. It raises only when this fallback is actually reached
+  on such a catalogue — because there, genuinely, no answer exists, and signing as the wrong producer
+  is worse than saying so.
   """
   @spec producer_role(keyword()) :: String.t()
   def producer_role(opts \\ []) do
     Keyword.get(opts, :producer_role) ||
-      Application.get_env(:fleet_pilot, :producer_role, @default_producer_role)
+      Application.get_env(:fleet_pilot, :producer_role) ||
+      resolve_producer!()
+  end
+
+  # Several producers is NOT a broken catalogue — it is a catalogue with `eng_hw` and `eng_sw`. The
+  # refusal belongs to this fallback path, not to boot: the cards name their producer, and a fleet
+  # that specialises its producers must not be refused readiness for it.
+  defp resolve_producer! do
+    case Fleet.CapProfile.roles_with_capability(@producer_capability) do
+      {:ok, [role]} ->
+        role
+
+      {:ok, []} ->
+        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+                "(#{inspect(@producer_capability)}) — no card can name a producer. Fix the catalogue."
+
+      {:ok, roles} ->
+        raise "Fleet.Pilot.Roles: #{length(roles)} roles declare the producer capability " <>
+                "(#{inspect(roles)}), and this is the LAST-RESORT path — the card names the producer " <>
+                "per step, the run carries it in the feature branch, and both were unavailable here. " <>
+                "On a catalogue with several producers there is no fleet-wide default to fall back " <>
+                "on; set `:fleet_pilot, :producer_role` if this deployment has one."
+
+      {:error, reason} ->
+        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+                "resolving the producer role — broken deploy, fail-loud."
+    end
+  end
+
+  @doc """
+  PER-PROJECT DELEGATE role — the one a project's escalations are addressed to, and the one
+  `ProjectArchitect.ensure/2` keeps alive per repo. Override by the opt `:project_delegate_role`,
+  then config `:fleet_pilot, :project_delegate_role`; otherwise RESOLVED by the `project_delegate`
+  capability.
+
+  EXACTLY one, like the sealer and unlike the producer: nothing SELECTS a delegate the way a card
+  selects a producer — it is ensured per repo, not dispatched by name — so two roles carrying the
+  capability is an ambiguity about who arbitrates, not a specialisation.
+
+  `Fleet.MCP.PodTools.Delegation.require_architect/1` already gated on this capability rather than on
+  `role == "architect"` (B-03). The two call sites that still named the role — the ensure and the
+  escalation mandate — now read the same source.
+  """
+  @spec project_delegate_role(keyword()) :: String.t()
+  def project_delegate_role(opts \\ []) do
+    Keyword.get(opts, :project_delegate_role) ||
+      Application.get_env(:fleet_pilot, :project_delegate_role) ||
+      resolve_structural!(@delegate_capability, "project delegate")
+  end
+
+  @doc """
+  Boot check of the two capabilities the fleet cannot work without. Called at rail boot
+  (`Fleet.Pilot.Application`), and the two demands DIFFER because the two concepts do:
+
+    * `producer` — **at least one**. Several is a legitimate catalogue (`eng_hw` + `eng_sw`): the
+      card names which one it dispatches, per step. Refusing readiness for a specialised fleet would
+      be the guard inventing a policy nobody asked for.
+    * `exception_judge` — **exactly one**. `Fleet.Pilot.GatekeeperSeal` is the sole writer of the
+      signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
+
+  Returns the gatekeeper (resolved) and the producers (the set) for the caller.
+  """
+  @spec resolve_structural_roles!(keyword()) :: %{producers: [String.t()], gatekeeper: String.t()}
+  def resolve_structural_roles!(opts \\ []) do
+    %{producers: producers!(), gatekeeper: gatekeeper_role(opts)}
+  end
+
+  # AT LEAST one — the cards choose among them.
+  defp producers! do
+    case Fleet.CapProfile.roles_with_capability(@producer_capability) do
+      {:ok, []} ->
+        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+                "(#{inspect(@producer_capability)}) — no card could name a producer, the fleet " <>
+                "produces nothing. Fix the catalogue."
+
+      {:ok, roles} ->
+        roles
+
+      {:error, reason} ->
+        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+                "resolving the producers — broken deploy, fail-loud."
+    end
+  end
+
+  # EXACTLY one — the sealer is a singleton by design, not by convention.
+  defp resolve_structural!(capability, label) do
+    case Fleet.CapProfile.roles_with_capability(capability) do
+      {:ok, [role]} ->
+        role
+
+      {:ok, []} ->
+        raise "Fleet.Pilot.Roles: no catalogue role declares the #{label} capability " <>
+                "(#{inspect(capability)}) — the single-brick model has no #{label}. A catalogue " <>
+                "must NAME it; there is no default to fall back on. Fix the catalogue."
+
+      {:ok, roles} ->
+        raise "Fleet.Pilot.Roles: #{length(roles)} catalogue roles declare the #{label} capability " <>
+                "(#{inspect(capability)}): #{inspect(roles)} — this one is unique BY DESIGN (single " <>
+                "writer of the signed merge), and picking one at random would be an arbitrary " <>
+                "fleet-wide policy. Fix the catalogue."
+
+      {:error, reason} ->
+        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+                "resolving the #{label} role — broken deploy, fail-loud."
+    end
   end
 
   @doc """
@@ -119,12 +252,14 @@ defmodule Fleet.Pilot.Roles do
 
   @doc """
   GATEKEEPER role (PR guardian, signs the merges). Override by the opt `:gatekeeper_role`
-  (project/test); otherwise config `:fleet_pilot, :gatekeeper_role` (default `"gatekeeper"`).
+  (project/test), then config `:fleet_pilot, :gatekeeper_role`; otherwise RESOLVED from the catalogue
+  by the `exception_judge` capability. Raises if no role declares it, or if several do.
   """
   @spec gatekeeper_role(keyword()) :: String.t()
   def gatekeeper_role(opts \\ []) do
     Keyword.get(opts, :gatekeeper_role) ||
-      Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
+      Application.get_env(:fleet_pilot, :gatekeeper_role) ||
+      resolve_structural!(@gatekeeper_capability, "gatekeeper")
   end
 
   # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was

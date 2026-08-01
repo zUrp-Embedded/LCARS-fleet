@@ -151,4 +151,31 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     # though `Roles.producer_role` defaults to "engineer". Pre-B-04 this asserted "tok-engineer".
     assert_received {:stop_stopwatch, 99, "tok-documentalist"}
   end
+
+  describe "Emissions.post_eng_summary/2 — the note is a role's voice" do
+    defmodule CountingForge do
+      def post_comment(_repo, _n, body, _opts) do
+        send(self(), {:posted, body})
+        {:ok, :posted}
+      end
+    end
+
+    test "a step_run with NO role posts nothing, and says so" do
+      # The note carries a role's name AND is posted with that role's token. Defaulting the role
+      # would sign one producer's summary as another's — the same refusal the missing-token path
+      # already applies. Absence is skipped and LOGGED, never dressed up.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok =
+                   Fleet.Pilot.StepRunCompleter.Emissions.post_eng_summary(
+                     %{repo: "org/repo", issue_number: 7, eng_summary: "done"},
+                     forge_client: CountingForge
+                   )
+        end)
+
+      refute_received {:posted, _}
+      assert log =~ "carries no role"
+      refute log =~ "engineer"
+    end
+  end
 end

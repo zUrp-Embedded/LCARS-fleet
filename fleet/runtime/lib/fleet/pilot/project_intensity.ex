@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
   the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
   default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -130,10 +130,13 @@ defmodule Fleet.Pilot.ProjectIntensity do
     # fabricated into an C0 the human did not say) — `declared_by` stays truthful.
     declared? = is_binary(level) or is_binary(card)
 
-    # B-03 (catalogue chantier 2026-07-20): `declared_by` = the ACTUAL onboarder role that called
-    # create_project (threaded as `:onboarded_by`), not a hardcoded "architect" — starfleet onboards
-    # too since the 2026-07-19 reorg. Fallback "architect" for a legacy/direct call without the opt.
-    onboarded_by = Keyword.get(opts, :onboarded_by) || "architect"
+    # `declared_by` is an ATTRIBUTION, and it ships in the project's repo for good. It carries the
+    # role that actually onboarded (threaded as `:onboarded_by` by the delegation path). A caller
+    # that declares without saying who leaves it UNKNOWN — naming a role that may not have declared
+    # anything writes a permanent false record, and the schema requires a non-empty string, so the
+    # absence is RECORDED rather than filled. Same rule the level follows one branch below, and the
+    # same refusal `GatekeeperSeal` applies to signing under the system token.
+    onboarded_by = Keyword.get(opts, :onboarded_by) || "unknown"
 
     base = %{
       "_schema" => "lcars/intensity-v1",

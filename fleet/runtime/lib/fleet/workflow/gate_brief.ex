@@ -4,7 +4,7 @@ defmodule Fleet.Workflow.GateBrief do
   The judge pulls it via MCP `get_work_item`, judges (rubber-duck modop), and returns a
   strict JSON decision `gate-decision-v1.json`.
 
-  The FRAMING prose lives in `priv/workflow/brief_templates/gate-brief-{deliverable,brief}.md`
+  The FRAMING prose lives in `priv/catalogue/workflow/brief_templates/gate-brief-{deliverable,brief}.md`
   (F-23: wording is calibration DATA — cf. `Fleet.Workflow.BriefTemplate`); this module
   fills the mechanical slots (context values, JSON renderings, decision vocab) and
   DEFUSES the quoted material (blockquotes — the executable state is unrepresentable).
@@ -22,7 +22,7 @@ defmodule Fleet.Workflow.GateBrief do
   Pure function over its inputs + the template files (fail-loud on a missing/miswired
   template — a judge never receives a half-rendered order).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Workflow.BriefTemplate

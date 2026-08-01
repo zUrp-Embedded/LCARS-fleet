@@ -34,11 +34,13 @@ defmodule Fleet.CapProfile.Catalog do
 
   ## Configuration
 
-  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it
-  via `Application.put_env/3`), default = the BUNDLED canon resolved by
-  `:code.priv_dir(:lcars_fleet)` under `cap_profile/` (resolves in a release as in dev, without env).
+  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it via
+  `Application.put_env/3`) — the FINE override, which keeps precedence. Default =
+  `Fleet.Catalogue.cap_profiles_root/0`: the bundled canon unless `LCARS_CATALOGUE_ROOT` brings
+  another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
+  without env).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -136,7 +138,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
-  # No `monks/` scan: the monks are FROZEN under `priv/cap_profile/canon/_frozen-monks/`,
+  # No `monks/` scan: the monks are FROZEN under `priv/catalogue/cap_profile/canon/_frozen-monks/`,
   # deliberately out of the boot loop (cf. `Fleet.SPBuilder.Monk`); the thaw that re-homes
   # them adds their scan then. The `modop/` dir stays excluded: overlays have no role
   # identity. A fragment without `metadata.name` → ignored (baseline/overlay).
@@ -169,8 +171,8 @@ defmodule Fleet.CapProfile.Catalog do
             _ ->
               base = Path.basename(path)
 
-              # A no-name file is a DELIBERATE baseline/overlay fragment ONLY by the `_`-prefix convention
-              # (`_baseline-*.yaml`, mirror of `_frozen-monks/`). A NON-prefixed file with no
+              # A no-name file is a DELIBERATE overlay fragment ONLY by the `_`-prefix convention
+              # (mirror of `_frozen-monks/`). A NON-prefixed file with no
               # `metadata.name` looks like a role whose name was lost → make the silent skip VISIBLE
               # (warning), otherwise that role vanishes from the index (load → `:not_found`) with no signal.
               unless String.starts_with?(base, "_") do
@@ -335,9 +337,10 @@ defmodule Fleet.CapProfile.Catalog do
   def root_dir do
     # A `:root_dir` explicitly set to nil (e.g. a cross-test env leak) must NEVER
     # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
-    # Default = the BUNDLED priv (`:code.priv_dir`) → resolves in a RELEASE (lib/lcars_fleet-vsn/priv/…)
-    # as in dev (_build/…/priv) WITHOUT any env — a CWD-relative default would :enoent in a release.
-    Application.get_env(:fleet_cap_profile, :root_dir) ||
-      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/canon/cap-profiles")
+    # Default = the CATALOGUE root's cap-profiles tree (bundled priv unless `LCARS_CATALOGUE_ROOT`
+    # says otherwise) → resolves in a RELEASE as in dev WITHOUT any env. `:root_dir` stays the FINE
+    # override and keeps precedence: the coarse knob brings a whole catalogue, this one moves this
+    # tree alone.
+    Application.get_env(:fleet_cap_profile, :root_dir) || Fleet.Catalogue.cap_profiles_root()
   end
 end

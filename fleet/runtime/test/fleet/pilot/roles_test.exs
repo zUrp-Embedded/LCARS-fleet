@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.RolesTest do
   @moduledoc """
-  Locks the single AUTHORITY for workshop roles (`Fleet.Pilot.Roles`): canonical defaults +
-  opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no default rewritten elsewhere).
+  Locks the single AUTHORITY for workshop roles (`Fleet.Pilot.Roles`): capability RESOLUTION +
+  opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
   """
   use ExUnit.Case, async: true
 
@@ -9,12 +9,14 @@ defmodule Fleet.Pilot.RolesTest do
 
   alias Fleet.Pilot.Roles
 
-  test "producer_role: config default `engineer`, overridden by the opt" do
+  test "producer_role: RESOLU par capability, jamais un litteral — et l'opt garde la main" do
+    # `engineer` n'est plus un defaut du code : c'est le seul role du catalogue qui declare
+    # `capabilities: [producer]`. Renommer le role est une edition de cap-profile ; ce test suivra.
     assert "engineer" == Roles.producer_role()
     assert "designer" == Roles.producer_role(producer_role: "designer")
   end
 
-  test "gatekeeper_role: config default `gatekeeper`, overridden by the opt" do
+  test "gatekeeper_role: resolu par `exception_judge`, l'opt garde la main" do
     assert "gatekeeper" == Roles.gatekeeper_role()
     assert "sentinel" == Roles.gatekeeper_role(gatekeeper_role: "sentinel")
   end

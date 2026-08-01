@@ -35,7 +35,7 @@ defmodule Fleet.CapProfile.Invariants do
   `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile.validate/1`
   calls `violations/1` (runtime-dep).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.CapProfile
@@ -56,7 +56,7 @@ defmodule Fleet.CapProfile.Invariants do
   # lists cannot drift apart, and reading any single cap-profile shows what its pod is denied.
   #
   # Do not confuse this with the OTHER mechanism on the same field: the git denials are INJECTED at
-  # resolve time (`CapProfile.DisallowedTools.with_resolved/1`, from `_baseline-git-denied.yaml`) and
+  # resolve time (`CapProfile.DisallowedTools.with_resolved/1`, from `baseline/git-denied.yaml`) and
   # appear in no cap-profile. Same key, two mechanisms — one declared and checked here, one injected
   # and absent from the source. Adding the server-tools minimum to the injection instead would make the
   # catalogue stop stating its own denials.
@@ -125,7 +125,7 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   # g24_5 retired: workers MAY push when their cap-profile allows it. The successor is the
-  # disallowedTools mechanism (`with_resolved_disallowed_tools/1` + `_baseline-git-denied.yaml`):
+  # disallowedTools mechanism (`with_resolved_disallowed_tools/1` + `baseline/git-denied.yaml`):
   # the destructive patterns (`push --force`, `reset --hard`, `--no-verify`, …) are universally
   # denied without forbidding `push` wholesale.
 

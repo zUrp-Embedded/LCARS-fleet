@@ -12,8 +12,9 @@ defmodule Fleet.Workflow.Loader do
 
   ## Configuration
 
-    * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root
-      (default `Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")`)
+    * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root; FINE override, it keeps
+      precedence (default `Fleet.Catalogue.workflow_maps_root/0`, i.e. the bundled priv unless
+      `LCARS_CATALOGUE_ROOT` brings another catalogue)
     * `:fleet_workflow, :schema_path` — JSON schema path
       (default `priv/workflow/schema/workflow-map-v2.5.json` from the package)
 
@@ -27,7 +28,7 @@ defmodule Fleet.Workflow.Loader do
   coupling to the global Application env). `load!/1` remains for the prod call
   sites that can live with the Application env (read at boot).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-01
   """
 
   # The workflow_map carries a single envelope: `kind: WorkflowMap` / `metadata` / `spec`.
@@ -283,7 +284,7 @@ defmodule Fleet.Workflow.Loader do
   defp workflow_maps_root(opts) do
     Keyword.get(opts, :workflow_maps_root) ||
       Application.get_env(:fleet_workflow, :workflow_maps_root) ||
-      Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")
+      Fleet.Catalogue.workflow_maps_root()
   end
 
   # Resolved schema (read+decode+resolve) via the foundation authority `Fleet.SchemaCache`,

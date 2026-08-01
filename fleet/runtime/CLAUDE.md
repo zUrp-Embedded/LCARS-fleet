@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-21 (règle de langue : ce qui part avec la boîte est en anglais — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
+**Dernière révision** : 2026-08-01 (règle de langue : ce qui part avec la boîte est en anglais — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -41,6 +41,14 @@ L'ex-umbrella (14 apps) est collapsée en une app unique ; les ex-apps sont des 
 **Topologie (l'enforcement est dans boundary ; la carte est GÉNÉRÉE)** : la vue en couches vit dans `lib/fleet/README.md`, projetée depuis les `use Boundary` par `mix lcars.topology` (le gate refuse toute divergence — la carte ne peut pas mentir). Vocabulaire : la position d'un domaine ne se déclare JAMAIS en prose (elle EST sa déclaration boundary) ; une relation se nomme par DOMAINE (`Pilot.GateBrief`), jamais par numéro d'étage ; seul nom de couche mécaniquement vérifiable : **foundation** ≡ `deps: []` (le terme « Ring N » est banni du code — héritage `topologie-ring.md` #3.1, acceptions divergentes, cf. chantier doc-coherence 2026-07-18). Repères : `pilot` = driver forge (off sans `:step_dispatch?`), `api` REST/WS no-auth by design, `observation` read-only, launchers `bin/` sous `spawner`.
 
 **Seams runtime ASSUMÉS** — deux natures distinctes. (1) Seams MONTANTS (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:forge_client`/`:project_onboard` — Pilot ∉ deps de MCP). (2) Seams d'INJECTION sur une dep compile EXISTANTE (swap d'implémentation, pas de frontière contournée) : `:coord_backend` (starfleet→coord, dep déclarée ; relais d'escalade doctrine D1 — la trace durable est l'audit log, écrit AVANT le routage ; un routage raté est loggué warning par Cat5Escalator/DriftMonitor ; défaut câblé `Fleet.Coord` par runtime.exs, `NotWiredYet` sinon) ; `:launch_backend` (hermétisme test).
+
+### Frontière runtime / catalogue
+
+Le code porte la mécanique, le métier est de la **donnée de catalogue** — et le catalogue est UN objet, pointé UNE fois. `Fleet.Catalogue` (foundation) est la seule autorité de son layout : une racine (`LCARS_CATALOGUE_ROOT`, défaut = le `priv/` bundlé) dont chaque arbre dérive son sous-chemin, plus le manifeste `catalogue.yaml` (`api_version`) vérifié au boot AVANT que les images ne gèlent quoi que ce soit. Les clés par-arbre (`:fleet_cap_profile, :root_dir` etc.) restent des **surcharges fines** et gardent la priorité : la grosse molette apporte un catalogue entier, une fine déplace exactement son arbre.
+
+Le discriminant est mécanique et tient partout dans `priv/` : `canon/`, `config/`, `templates/` = **catalogue** (et eux seuls passent par `Fleet.Catalogue`) ; tout le reste est **runtime**, résolu par `:code.priv_dir` sans knob — `<dom>/schema/` (le contrat contre lequel un catalogue est validé) et `cap_profile/baseline/` (un plancher qu'un catalogue ne peut pas abaisser : la denylist git universelle). Même règle pour les deux : **ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat, et un contrat qu'on peut remplacer ne contraint pas.**
+
+Deux fautes symétriques, et la seconde est silencieuse. Ajouter un arbre de métier sans le déclarer dans `Fleet.Catalogue` : un opérateur qui apporte SON catalogue tourne sur cet arbre-là resté bundlé, sans qu'aucun message ne le dise. Poser un plancher ou un contrat sous `canon/` : il part avec le catalogue exporté, son auteur l'édite, **et rien ne change** — un mensonge dit par le rangement, que ni le gate ni la review n'attrapent.
 
 ### Frontière vendor (N0 / N1)
 
@@ -100,4 +108,7 @@ Quand un test a besoin du vrai backend, il l'instancie directement (`start_super
 - **Boundary fait partie du contrat** : toucher `use Boundary` (deps/exports) = changement d'API du domaine — le motiver dans le commit comme tel. Ne JAMAIS « réparer » une `forbidden reference` en élargissant la boundary sans comprendre pourquoi l'appel n'était pas prévu.
 - En-têtes des scripts shell au format LCARS (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). La stardate est posée par la skill `/push-github` — ne pas l'éditer à la main.
 - **Commentaires self-contained** (doctrine BL-058) : la CICATRICE — le POURQUOI / l'invariant / le piège — vit INLINE et autonome, en forme PRINCIPE pas histoire. L'ANCRE de régression (`#578`, `BL-055`, `F-C…`, `Z…` du chantier migration) se GARDE. Un commentaire périmé = mensonge → tuer/corriger.
+  - **Pourquoi cette règle est la plus chère à enfreindre** : le commentaire est le seul artefact du dépôt que ni le gate ni la review ne filtrent, et un agent le lit comme vrai au présent. Un code faux casse ; un commentaire faux oriente **toutes** les sessions suivantes, sans date et sans signature. L'histoire, elle, a deux maisons datées par construction : le message de commit et le JOURNAL du chantier.
+  - **Trois formes que « pas histoire » ne couvrait pas explicitement, et qui ont mordu** (expurge 2026-08-01) : (1) **l'état d'un AUTRE artefact** (« le template porte X en dur », « deux rôles portent cette capability ») — ça ment en silence dès que l'autre bouge, souvent dans le même commit ; énoncer la règle, pas l'inventaire. (2) **la sortie d'un instrument citée comme motif** (message de sonde, de doctor, de linter) — un instrument MESURE, il ne norme pas ; le motif est la contrainte système, jamais le cri de l'outil. (3) **le pointeur vers un artefact non embarqué** (`work/`, un JOURNAL, une issue locale) — illisible depuis un fork, un pod ou un release : ce qui est nécessaire à la compréhension est inline, l'ancre de régression reste la seule référence externe admise.
+  - **Corollaire hors commentaires** : un message de commit qui déclare une vérification (« gate vert », « testé ») engage la vérification **relancée dans ce geste**. Un vert recopié est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
 - `tmp/` racine = artefacts ExUnit `@tag :tmp_dir` gitignorés — ne jamais committer.

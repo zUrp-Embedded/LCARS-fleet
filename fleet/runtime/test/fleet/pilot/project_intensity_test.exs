@@ -19,7 +19,8 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
              ProjectIntensity.write(tmp,
                intensity_level: "C3",
                intensity_justification: "dashboard client multi-year",
-               intensity_nature: "web-gui"
+               intensity_nature: "web-gui",
+               onboarded_by: "architect"
              )
 
     d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
@@ -27,6 +28,22 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
     assert d["declared_by"] == "architect"
     assert d["nature"] == "web-gui"
     assert d["pipeline_default"] == "brief-gate"
+  end
+
+  @tag :tmp_dir
+  test "a declaration whose declarer is unknown records UNKNOWN, never a plausible role",
+       %{tmp_dir: tmp} do
+    # `declared_by` ships in the project repo for good. A caller that declares a level without
+    # saying who must not have a role name written on its behalf: that is a permanent false
+    # attribution, the same one `GatekeeperSeal` refuses when it declines the system token.
+    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
+
+    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    assert d["level"] == "C3"
+    assert d["declared_by"] == "unknown"
+
+    refute d["declared_by"] in ["architect", "starfleet", "engineer"],
+           "a role name was fabricated for a declaration nobody claimed"
   end
 
   test "undeclared: an HONEST C0 default, explicitly marked — absence recorded, never fabricated",
@@ -39,21 +56,27 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
     assert d["justification"] =~ "NON DÉCLARÉ"
   end
 
-  test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declared_by architect, NO off-matrix noise",
+  test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declarer recorded, NO off-matrix noise",
        %{tmp_dir: tmp} do
     # standard-qa claims [C2..C4]: under the old behavior the fabricated C0 default made
     # this off-matrix LOUD — a "disagreement" nobody expressed. A system default can never
     # be off-matrix against a human choice.
     log =
       capture_log(fn ->
-        assert :ok = ProjectIntensity.write(tmp, workflow_map: "standard-qa")
+        assert :ok =
+                 ProjectIntensity.write(tmp,
+                   workflow_map: "standard-qa",
+                   onboarded_by: "starfleet"
+                 )
       end)
 
     refute log =~ "OFF-MATRIX"
 
     d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
-    assert d["declared_by"] == "architect"
+    # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
+    # 2026-07-19 reorg, and this field ships in the project's repo for good.
+    assert d["declared_by"] == "starfleet"
     assert d["justification"] =~ "carte choisie explicitement"
     assert d["pipeline_default"] == "standard-qa"
   end

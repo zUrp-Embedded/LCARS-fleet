@@ -8,6 +8,7 @@ defmodule Fleet.SPBuilder do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.CapProfile
@@ -61,7 +62,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-01
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -463,7 +464,7 @@ defmodule Fleet.SPBuilder do
 
   defp subagent_template_root do
     Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates")
+      Fleet.Catalogue.subagent_templates_root()
   end
 
   defp modop_fragments_concat([]), do: ""
@@ -501,33 +502,43 @@ defmodule Fleet.SPBuilder do
     e -> {:error, {:template_render_failed, Exception.message(e)}}
   end
 
-  defp template_path(name) do
-    Path.join([to_string(:code.priv_dir(:lcars_fleet)), "sp_builder/templates", name])
-  end
+  defp template_path(name), do: Path.join(Fleet.Catalogue.sp_templates_root(), name)
 
   # ============================================================
   # Path resolution (config knobs for testability)
   # ============================================================
 
-  # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
-  # the BUNDLED cap-profiles canon (`Application.app_dir(:lcars_fleet, "priv/cap_profile/…")`, the
-  # SAME source as `Fleet.CapProfile.root_dir/0`'s DEFAULT — true of the defaults ONLY:
-  # `LCARS_CAPPROFILES_ROOT` repoints the YAML catalogue (`:fleet_cap_profile, :root_dir`) but NOT
-  # this root nor its siblings (modop, subagent_template, monk_registry), which stay on the bundled
-  # priv) → resolves in RELEASE as in dev WITHOUT env (a CWD-relative default would not).
-  # Config override (test).
-  defp sp_role_root do
-    Application.get_env(:fleet_sp_builder, :sp_role_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
+  @doc """
+  Root of the generated agent drafts (`agent-<role>-base.md`) — **SINGLE AUTHORITY**, public because
+  it has two readers in two domains: `Fleet.SPBuilder.Image` (what the boot image freezes) and
+  `Fleet.Spawner.Pod.Assets` (what a spawn reads when no image is published).
+
+  ONE resolution for both, and it must stay that way: a second resolution of this root moves what
+  the image FREEZES without moving what the spawn READS on the unpublished path, so a repointed
+  catalogue would be frozen from its drafts and served the bundled ones — two drafts for one role,
+  and production always publishes, so the divergence shows only where nobody looks. Locked by
+  `test/fleet/sp_builder_image_parity_test.exs` under a MOVED root.
+  """
+  @spec sp_drafts_root() :: String.t()
+  def sp_drafts_root do
+    Application.get_env(:fleet_sp_builder, :sp_drafts_root) || Fleet.Catalogue.sp_drafts_root()
   end
 
-  # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). Config-overridable, with a
-  # BUNDLED DEFAULT = `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")` — the
-  # SAME source as `sp_role_root` (the modop-bundles canon is co-located with the cap-profiles
-  # under the cap_profile priv, F-C146). The prod spawn chain passes the cap-profile's
-  # `modop_set.default` (`compose(cap, modops, …)`) → this root IS required and resolves.
+  # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
+  # the catalogue's cap-profiles tree, the SAME source as `Fleet.CapProfile.root_dir/0`'s DEFAULT.
+  # True of the DEFAULTS only: `LCARS_CAPPROFILES_ROOT` repoints the YAML catalogue
+  # (`:fleet_cap_profile, :root_dir`) but NOT this root nor its siblings (modop, subagent_template,
+  # monk_registry). That narrowness is now intentional rather than accidental — `LCARS_CATALOGUE_ROOT`
+  # is the knob that moves them together, and a fine key moves exactly its tree.
+  defp sp_role_root do
+    Application.get_env(:fleet_sp_builder, :sp_role_root) || Fleet.Catalogue.cap_profiles_root()
+  end
+
+  # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). Config-overridable, with
+  # the catalogue's modop-bundles tree as default — co-located with the cap-profiles under the
+  # cap_profile subtree (F-C146). The prod spawn chain passes the cap-profile's `modop_set.default`
+  # (`compose(cap, modops, …)`) → this root IS required and resolves.
   defp modop_root do
-    Application.get_env(:fleet_sp_builder, :modop_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")
+    Application.get_env(:fleet_sp_builder, :modop_root) || Fleet.Catalogue.modop_root()
   end
 end

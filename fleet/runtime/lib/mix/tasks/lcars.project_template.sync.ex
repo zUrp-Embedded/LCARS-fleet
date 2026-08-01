@@ -2,14 +2,14 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   # Z4 — Mix task classified into the boundary of its subject (the onboarding forge surface).
   use Boundary, classify_to: Fleet.Pilot
 
-  @shortdoc "Projects priv/project_template onto the forge template repo (fleet/project-template)"
+  @shortdoc "Projects priv/catalogue/project_template onto the forge template repo (fleet/project-template)"
 
   @moduledoc """
-  Pushes `priv/project_template/**` to the forge TEMPLATE repo, marks it `template: true`
+  Pushes `priv/catalogue/project_template/**` to the forge TEMPLATE repo, marks it `template: true`
   and seeds the static protocol labels — the native-scaffolding source `ProjectOnboard`
   generates new projects from (`generate_repo`).
 
-  The SSoT stays `priv/project_template` in THIS repo; the forge template is its
+  The SSoT stays `priv/catalogue/project_template` in THIS repo; the forge template is its
   PROJECTION (force-pushed: a diverging forge copy is overwritten, never merged).
   Operator task — run at deploy when the template files change; a missing template only
   degrades onboarding to the bare-create + local-scaffold fallback (LOUD, never a wall).
@@ -20,12 +20,10 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   (pollers, consumers, listener bind) next to the live one. Run on the deploy host:
   `set -a; . ~/.lcars/fleet_v2.env; set +a; mix lcars.project_template.sync`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   use Mix.Task
-
-  @template_dir "priv/project_template"
 
   # Every git op runs on the WORLD side (outside any sandbox) — compose the runtime's SINGLE-SOURCE
   # config neutralization (hooks/fsmonitor/sshCommand/diff.external) so a `.gitattributes`/config
@@ -122,7 +120,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   # projection semantic (overwrite the forge copy, never merge — L13); a lease would need a
   # remote-tracking ref this fresh `git init` never had, so the blind force is correct HERE.
   defp push_face(url, auth_env, face, branch) do
-    src = Application.app_dir(:lcars_fleet, Path.join(@template_dir, face))
+    src = Path.join(Fleet.Catalogue.project_template_root(), face)
     tmp = Path.join(System.tmp_dir!(), "lcars-tpl-#{face}-#{System.unique_integer([:positive])}")
 
     try do
@@ -144,7 +142,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
                  "commit",
                  "-q",
                  "-m",
-                 "chore(template): sync #{face} face from priv/project_template"
+                 "chore(template): sync #{face} face from priv/catalogue/project_template"
                ],
                cd: tmp,
                timeout_ms: @local_timeout_ms

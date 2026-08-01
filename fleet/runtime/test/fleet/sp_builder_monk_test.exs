@@ -8,7 +8,7 @@ defmodule Fleet.SPBuilder.MonkTest do
   use ExUnit.Case, async: true
 
   # FROZEN (BL — Memory-X frozen): this test's fixtures = the real monk cap-profiles
-  # (`cap-profiles/monks/alpha.yaml`…), ARCHIVED in `priv/cap_profile/canon/_frozen-monks/` (Memory-X out
+  # (`cap-profiles/monks/alpha.yaml`…), ARCHIVED in `priv/catalogue/cap_profile/canon/_frozen-monks/` (Memory-X out
   # of the boot loop: must be per-project + system-wide under lcars, not per-fleet). The
   # `resolve_monk_injection/2` code stays in place; re-enable these tests (and re-point the
   # fixtures) when Memory-X is re-homed. cf. work/backlog.md.
@@ -19,7 +19,10 @@ defmodule Fleet.SPBuilder.MonkTest do
 
   # R0.8-brick1: canon root in-repo (R0.7 reabsorption), not the doctrine path
   # 05_data-canon/... (nonexistent in a standard install).
-  @monks_dir Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
+  @monks_dir Application.app_dir(
+               :lcars_fleet,
+               "priv/catalogue/cap_profile/canon/cap-profiles/monks"
+             )
 
   defp monk_cp(instance) do
     %Fleet.CapProfile{

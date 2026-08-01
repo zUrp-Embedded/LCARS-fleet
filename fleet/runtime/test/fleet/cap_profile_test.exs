@@ -390,7 +390,7 @@ defmodule Fleet.CapProfileTest do
     # G24-5 removed: Face 2 doctrine — workers MAY push when the cap-profile
     # allows it via the claude CLI allowedTools. The old invariant requiring
     # `"push"` in git_ops_denied is obsolete. The baseline mechanism
-    # `_baseline-git-denied.yaml` + `with_resolved_disallowed_tools/1`
+    # `baseline/git-denied.yaml` + `with_resolved_disallowed_tools/1`
     # replaces it: forbids destructive patterns without blocking push.
 
     # R13: canonical v2.5 structure — `modop_set` is a MAP
@@ -764,7 +764,7 @@ defmodule Fleet.CapProfileTest do
   end
 
   describe "baseline_git_ops_denied_patterns/0" do
-    test "reads _baseline-git-denied.yaml + translates into Bash(git X:*) patterns" do
+    test "reads baseline/git-denied.yaml + translates into Bash(git X:*) patterns" do
       patterns = Fleet.CapProfile.baseline_git_ops_denied_patterns()
 
       assert is_list(patterns)
@@ -774,6 +774,39 @@ defmodule Fleet.CapProfileTest do
       assert "Bash(git push --force:*)" in patterns
       assert "Bash(git reset --hard:*)" in patterns
       assert "Bash(git rebase main:*)" in patterns
+    end
+
+    test "the floor lives OUTSIDE every catalogue tree — a catalogue cannot carry it" do
+      # THE point of `priv/cap_profile/baseline/` sitting outside `canon/`, asserted on the LAYOUT
+      # and not on a read: the resolver caches its parse in `:persistent_term` for the life of the
+      # VM, so a test that repoints the root and re-reads would pass on a warm cache without
+      # exercising a single path. What can be checked, and is what actually protects the floor:
+      # the file is under no tree `Fleet.Catalogue` exports, so no catalogue export can carry a
+      # copy for its author to edit to no effect.
+      priv = to_string(:code.priv_dir(:lcars_fleet))
+      floor = Path.join(priv, "cap_profile/baseline/git-denied.yaml")
+
+      assert File.regular?(floor)
+
+      catalogue_trees = [
+        Fleet.Catalogue.cap_profiles_root(),
+        Fleet.Catalogue.modop_root(),
+        Fleet.Catalogue.subagent_templates_root(),
+        Fleet.Catalogue.sp_drafts_root(),
+        Fleet.Catalogue.sp_templates_root(),
+        Fleet.Catalogue.workflow_maps_root(),
+        Fleet.Catalogue.brief_templates_root(),
+        Fleet.Catalogue.project_template_root()
+      ]
+
+      for tree <- catalogue_trees do
+        refute String.starts_with?(floor, Path.expand(tree) <> "/"),
+               "the git-denied floor is under the catalogue tree #{tree} — an operator's catalogue " <>
+                 "would ship its own copy, its author would edit it, and nothing would change"
+
+        assert Path.wildcard(Path.join([tree, "**", "*git-denied*"])) == [],
+               "a copy of the floor reappeared under #{tree}"
+      end
     end
   end
 

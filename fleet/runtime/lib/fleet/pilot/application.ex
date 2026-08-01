@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   use Supervisor
@@ -172,6 +172,7 @@ defmodule Fleet.Pilot.Application do
 
     validate_card_juries!()
     validate_card_steps!()
+    validate_structural_roles!()
 
     # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
     # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
@@ -230,6 +231,37 @@ defmodule Fleet.Pilot.Application do
   # both card guards vacuously true (readiness green with zero loadable card, first
   # route raises far from the deploy fault) — refused HERE at rail boot, same
   # dead-man's-switch contract as the base_url guard above.
+  # The two STRUCTURAL roles of the single-brick model — the one that codes the brick, the one that
+  # signs the merge — resolved from the catalogue by capability at rail boot. Same dead-man's-switch
+  # as the two card guards above: a catalogue naming neither would otherwise reach readiness GREEN
+  # and die at the first dispatch, far from the deploy fault. `Fleet.Pilot.Roles` carries the
+  # resolution and the refusal messages; here we only make it happen before readiness.
+  # (No log line: this module has none, and the resolution is not a milestone — its FAILURE is, and
+  # the raise carries it. `Fleet.Pilot.Roles` remains the place to ask who they are.)
+  @doc """
+  The catalogue's card + structural-role checks, off the supervision path — for the standalone
+  verifier. Runs EXACTLY what `start_link/1` runs at rail boot, in the same order and through the
+  same functions: publish the workflow image, then the jury/step/structural guards. It lives HERE
+  and not in the verifier because these read `Fleet.Workflow` (a dep of Pilot, not of the OTP root)
+  — the boundary is what keeps the workflow catalogue on this side.
+
+  Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
+  the raise into a finding.
+  """
+  @spec verify_cards_and_roles!(keyword()) :: :ok
+  def verify_cards_and_roles!(opts \\ []) do
+    Fleet.Workflow.Loader.publish_image!()
+    validate_card_juries!()
+    validate_card_steps!(opts)
+    validate_structural_roles!()
+    :ok
+  end
+
+  defp validate_structural_roles! do
+    _ = Fleet.Pilot.Roles.resolve_structural_roles!()
+    :ok
+  end
+
   defp validate_card_juries! do
     for map_name <- Fleet.Workflow.Loader.canon_names!(),
         role <- Fleet.Workflow.Loader.load!(map_name)["jury"] do

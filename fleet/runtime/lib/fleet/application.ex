@@ -20,7 +20,10 @@ defmodule Fleet.Application do
       # Proven-good images at boot (tier B): the ROOT publishes both snapshots before any child
       # can spawn a pod — a boot concern by nature (do-not-boot on invalid), hence the two edges.
       Fleet.CapProfile,
-      Fleet.SPBuilder
+      Fleet.SPBuilder,
+      # The catalogue is verified before either image freezes from it (cf. start/2) — a boot
+      # concern for the same reason, on the foundation that resolves it.
+      Fleet.Catalogue
     ],
     exports: []
 
@@ -66,7 +69,7 @@ defmodule Fleet.Application do
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-08-01
   """
 
   use Application
@@ -76,6 +79,12 @@ defmodule Fleet.Application do
     # Single-threaded materialization of the drain's activity counter (two concurrent
     # lazy inits would orphan a ref and undercount its wrap).
     :ok = Fleet.Shutdown.Quiesce.init_busy!()
+
+    # The CATALOGUE is checked before anything reads it: the root exists, it carries a manifest, and
+    # that manifest targets a contract generation this runtime consumes. Ordering is the whole point
+    # — the images below FREEZE their snapshot from this disk, and a snapshot taken from an unchecked
+    # root would carry the fault forward under a proven-good name.
+    _ = Fleet.Catalogue.verify!()
 
     # PROVEN-GOOD IMAGES at boot (images doctrine, tier B): the cap-profile catalogue and the SP
     # artifacts are loaded, validated and frozen into versioned snapshots BEFORE any child can

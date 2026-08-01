@@ -189,12 +189,11 @@ check_scope() {
         if [[ "$path" == */work/doing/* ]]; then
             return 1  # allowed — active workspace
         fi
-        # Exception: the CURRENT beyond dossier — SYMETRIQUE de work-guard.sh, et c'est le point.
-        # Ces deux gardes decrivent la MEME intention ; n'en ouvrir qu'un a produit exactement
-        # l'incoherence qu'ils sont censes empecher — un agent voisin a pu poser son fichier par
-        # Bash (work-guard ouvert) apres s'etre fait refuser par Write (celui-ci, ferme). Un outil
-        # sur deux, c'est une regle qui ne veut plus rien dire. Le numero est code en dur ici aussi :
-        # changer d'ere doit se voir aux DEUX endroits. Bump a #7.
+        # Exception: the CURRENT beyond dossier. MUST stay symmetric with work-guard.sh — the two
+        # guards carry one intent over two tools (Write here, Bash there), so a path open in only
+        # one of them is a rule that no longer holds: what Write refuses, Bash lands. The era
+        # number is hardcoded in BOTH on purpose: changing era is a deliberate, visible edit in
+        # two places. Bump to #7.
         if [[ "$path" == */work/beyond_#6/* ]]; then
             return 1  # allowed — dossier courant
         fi

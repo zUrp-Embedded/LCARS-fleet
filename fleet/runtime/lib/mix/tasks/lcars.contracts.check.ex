@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   use Mix.Task
@@ -657,7 +657,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
   defp check_gatekeeper_not_a_step(root) do
-    dir = "priv/workflow/canon/workflow_maps"
+    dir = "priv/catalogue/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
 
     # Anti-hollow-green (mirror of `check_verdict_envelope_unwrapped`): an ABSENT/empty workflow-map
@@ -1016,7 +1016,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     catalogue =
       root
-      |> Path.join("priv/cap_profile/canon/cap-profiles/*.yaml")
+      |> Path.join("priv/catalogue/cap_profile/canon/cap-profiles/*.yaml")
       |> Path.wildcard()
       |> Enum.map(&Path.basename(&1, ".yaml"))
       |> Enum.reject(&String.starts_with?(&1, "_"))

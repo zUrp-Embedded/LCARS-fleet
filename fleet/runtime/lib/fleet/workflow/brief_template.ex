@@ -1,6 +1,6 @@
 defmodule Fleet.Workflow.BriefTemplate do
   @moduledoc """
-  Loader of the brief-document templates (`priv/workflow/brief_templates/*.md`) — the
+  Loader of the brief-document templates (`priv/catalogue/workflow/brief_templates/*.md`) — the
   engine side of F-23: the PROSE of the briefs (wording, tone, structure) is CALIBRATION
   DATA, editable by the human without compiling; the code only fills mechanical slots.
 
@@ -14,13 +14,11 @@ defmodule Fleet.Workflow.BriefTemplate do
   calibration edit must take effect immediately — a cache would freeze the human's
   adjustment until reboot, the exact opposite of the surface's purpose.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
-  @templates_subdir Path.join("workflow", "brief_templates")
-
   @doc """
-  Renders template `name` (`priv/workflow/brief_templates/<name>.md`) with `assigns`
+  Renders template `name` (`<catalogue>/workflow/brief_templates/<name>.md`) with `assigns`
   (string-keyed). Raises on: missing file, token absent from assigns, leftover braces.
   """
   @spec render(String.t(), %{String.t() => String.t()}) :: String.t()
@@ -41,9 +39,8 @@ defmodule Fleet.Workflow.BriefTemplate do
     rendered
   end
 
-  defp priv_path(name) do
-    Path.join([to_string(:code.priv_dir(:lcars_fleet)), @templates_subdir, name <> ".md"])
-  end
+  defp priv_path(name),
+    do: Path.join(Fleet.Catalogue.brief_templates_root(), name <> ".md")
 
   # The file's lineage header (`<!-- Date: … -->` leading comment, GO-7) is FILE metadata,
   # never brief content — stripped before render, same convention as the SP-block composer.

@@ -1,6 +1,6 @@
 defmodule Fleet.CapProfile.IntensitySchemaTest do
   @moduledoc """
-  Proves that the canon template `priv/cap_profile/canon/config/intensity-template.json`
+  Proves that the canon template `priv/catalogue/cap_profile/canon/config/intensity-template.json`
   validates against `priv/schema/intensity-v1.json`, and that an invalid config is rejected.
   """
   use ExUnit.Case, async: true

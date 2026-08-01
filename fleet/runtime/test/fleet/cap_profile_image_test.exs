@@ -16,7 +16,10 @@ defmodule Fleet.CapProfileImageTest do
     File.mkdir_p!(Path.join(tmp, "modop/tdd"))
 
     real =
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/engineer.yaml")
+      Application.app_dir(
+        :lcars_fleet,
+        "priv/catalogue/cap_profile/canon/cap-profiles/engineer.yaml"
+      )
       |> File.read!()
 
     File.write!(Path.join(tmp, "engineer.yaml"), real)

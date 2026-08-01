@@ -166,7 +166,7 @@ defmodule Fleet.SPBuilderTest do
 
     test "modop_root has a DEFAULT (fleet_cap_profile/modop-bundles): modop without explicit config → composed (F-C146/PORT)" do
       # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
-      # app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles") (where the bundles live).
+      # app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/modop-bundles") (where the bundles live).
       # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
       # default, like sp_role_root.
       #
@@ -189,7 +189,7 @@ defmodule Fleet.SPBuilderTest do
 
     test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud" do
       # reviewer→code-quality-reviewer: subagent-code-quality-reviewer.md exists in the canon (default root
-      # = app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates"), not overridden by the setup).
+      # = app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/subagent-templates"), not overridden by the setup).
       profile =
         valid_cap_profile(%{
           "systemPrompt" => nil,

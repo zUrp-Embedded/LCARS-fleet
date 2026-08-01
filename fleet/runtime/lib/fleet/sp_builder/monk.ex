@@ -14,15 +14,15 @@ defmodule Fleet.SPBuilder.Monk do
 
   ## Monks are FROZEN — reactivation is dormant by design
 
-  The registry root defaults to `app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`, a tree
-  that is **intentionally ABSENT**: the monks were FROZEN into `priv/cap_profile/canon/_frozen-monks/`
+  The registry root defaults to `Fleet.Catalogue.monk_registry_root/0` (`<catalogue>/cap_profile/canon/cap-profiles/monks`), a tree
+  that is **intentionally ABSENT**: the monks were FROZEN into `priv/catalogue/cap_profile/canon/_frozen-monks/`
   (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
   so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
   byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent
   `cap-profiles/monks/` and fail — this is the DORMANT-by-design state (kept, documented) until an explicit
   thaw wires the frozen tree back as the registry root. See also the LEGACY banner in `runtime/priv/canon/README.md`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-01
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}
@@ -40,7 +40,7 @@ defmodule Fleet.SPBuilder.Monk do
 
     * `:monk_registry_root` — root resolving the registry's relative path
       (test-seam; defaults to config `:fleet_sp_builder, :monk_registry_root`
-      then `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`).
+      then `Fleet.Catalogue.monk_registry_root/0`).
 
   The `monk_registry` field in the cap-profile = basename (e.g. `alpha.yaml`)
   — the code resolves it via `:monk_registry_root`. It is NOT an absolute path:
@@ -59,7 +59,7 @@ defmodule Fleet.SPBuilder.Monk do
       root =
         Keyword.get(opts, :monk_registry_root) ||
           Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
-          Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
+          Fleet.Catalogue.monk_registry_root()
 
       path = Path.join(root, registry_rel)
 
