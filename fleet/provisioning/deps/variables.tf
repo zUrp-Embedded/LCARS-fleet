@@ -17,10 +17,12 @@ variable "seed_password" {
 
 variable "human_username" {
   type        = string
-  description = "Login de l'humain, miroir de l'user OS opérateur (ex. lordzurp)."
+  default     = "lcars"
+  description = "Login de l'humain daily, miroir de l'user OS de la boîte (`id -un`, sans table de correspondance). Défaut = l'humain DÉMO ; un déploiement réel passe le sien."
 }
 
 variable "human_email" {
   type        = string
-  description = "Email de l'humain."
+  default     = "lcars@lcars.local"
+  description = "Email du compte forge de l'humain — celui qui mappe ses commits (LCARS_HUMAN_EMAIL côté boîte doit porter le même)."
 }
