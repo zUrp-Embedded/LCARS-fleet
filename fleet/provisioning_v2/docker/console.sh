@@ -72,6 +72,13 @@ launch_one() {
   home_dir="$(getent passwd "$human" | cut -d: -f6 || true)"
   [[ -n "$home_dir" && -d "$home_dir" ]] || { echo "console.sh: home introuvable pour $human" >&2; return 1; }
 
+  # SHELL, LU DANS PASSWD COMME LE HOME (champ 7, meme source que le champ 6 juste au-dessus).
+  # Il n'etait PAS pose, et l'entrypoint tourne avec `SHELL` non defini (mesure du 2026-08-01 :
+  # « SHELL vu par l'entrypoint : (non defini) »). Un login-manager pose SHELL — sshd le fait, et
+  # c'est une des raisons pour lesquelles ssh et la console ne rendaient pas le meme environnement.
+  login_shell="$(getent passwd "$human" | cut -d: -f7 || true)"
+  [[ -n "$login_shell" && -x "$login_shell" ]] || login_shell=/bin/bash
+
   # `-f` : la config tmux DE LA CONSOLE (molette, historique, barre de statut — sans elle on est
   # cloue a un ecran, tmux possedant l'ecran, le scrollback du navigateur ne voit rien). Elle ne
   # touche pas les pods : eux ont leurs propres sockets tmux (`-S` par pod).
@@ -90,7 +97,7 @@ launch_one() {
   # mesure. On decrit ce qui est, pas ce qu'on aimerait.
   # Le bind est 0.0.0.0 DANS le conteneur ; la frontiere reelle est la publication compose, qui
   # n'expose que sur la loopback de l'hote (etape 1 : pas d'auth, donc pas d'exposition LAN).
-  cmd=(env "HOME=$home_dir" "USER=$human" "LOGNAME=$human"
+  cmd=(env "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
        ttyd --writable -p "$port" -i 0.0.0.0 -t titleFixed="LCARS console — $human"
        -t fontSize=15 -t 'theme={"background":"#000000","foreground":"#FF9900"}'
        tmux "${tmux_args[@]}" new-session -A -s console)
