@@ -100,7 +100,10 @@ apply() {
       local tmp
       tmp="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env"; verdict_apply; }
       if [[ -n "$PROV_FORGE_URL" ]]; then
-        sed "s|^FORGE_BASE_URL=.*|FORGE_BASE_URL=$PROV_FORGE_URL|" "$TEMPLATE" > "$tmp"
+        # Le template ne porte AUCUN FORGE_BASE_URL actif (une valeur en dur viserait une forge
+        # réelle pour toute boîte seedée) : l'URL connue du provisioning s'APPEND. Un sed sur la
+        # ligne du template réécrirait du commentaire et n'injecterait rien.
+        { cat "$TEMPLATE"; echo ""; echo "FORGE_BASE_URL=$PROV_FORGE_URL"; } > "$tmp"
       else
         cat "$TEMPLATE" > "$tmp"
       fi
