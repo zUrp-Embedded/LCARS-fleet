@@ -40,6 +40,22 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
       do: {:error, {:http, 403, %{"message" => "Forbidden"}}}
   end
 
+  # The human's OWN token path: the runtime must ask `self_team_member?` (about the authenticated
+  # account) and NEVER `team_member?` (about a third party). `team_member?` here raises: if the
+  # preference silently fell back, the test would not merely fail, it would say why.
+  defmodule SelfUsers do
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def self_team_member?(_org, "humans", fc), do: {:ok, Keyword.has_key?(fc, :token_file)}
+
+    def team_member?(_org, _team, _u, _fc),
+      do: raise("team_member? called while the human token was available")
+  end
+
+  defmodule SelfDeniesUsers do
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def self_team_member?(_org, "humans", _fc), do: {:ok, false}
+  end
+
   defp opts(tmp, users),
     do: [
       human: "ghost-human",
@@ -127,6 +143,51 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
 
     assert log =~ "EXPLICIT DEGRADED MODE"
     assert log =~ "403"
+  end
+
+  # ── The human proves their own membership (GET /user/teams) ────────────────────────────────
+  # Gitea refuses `GET /teams/<id>/members/<u>` to a plain org member (403, "Must be a team
+  # member") and no token scope lifts it. Asking the HUMAN about themselves needs no privilege,
+  # so the service account no longer has to sit in the team it observes.
+
+  @tag :tmp_dir
+  test "human token present → the check goes through self_team_member? with THAT token", %{
+    tmp_dir: tmp
+  } do
+    token = Path.join(tmp, "gitea_token")
+    File.write!(token, "t0k3n")
+
+    o = Keyword.merge(opts(tmp, SelfUsers), human_token_file: token)
+
+    # Passing the preflight is what is asserted: the sequence moves on and dies further down on
+    # the forge, not on admission. A raise inside SelfUsers would surface instead.
+    assert {:error, reason} = ProjectOnboard.onboard("poc-f2", o)
+    refute match?({:human_not_provisioned, _, _}, reason)
+    refute match?({:human_team_unverifiable, _, _}, reason)
+  end
+
+  @tag :tmp_dir
+  test "human token present but the human is NOT in humans → refused, same error as before", %{
+    tmp_dir: tmp
+  } do
+    token = Path.join(tmp, "gitea_token")
+    File.write!(token, "t0k3n")
+
+    o = Keyword.merge(opts(tmp, SelfDeniesUsers), human_token_file: token)
+
+    assert {:error, {:human_not_provisioned, "ghost-human", gestures}} =
+             ProjectOnboard.onboard("poc-f2", o)
+
+    assert gestures =~ "humans"
+  end
+
+  @tag :tmp_dir
+  test "no human token → the old path, unchanged", %{tmp_dir: tmp} do
+    # `false` is what config/test.exs poses; a missing FILE must behave the same way.
+    o = Keyword.merge(opts(tmp, OkUsers), human_token_file: Path.join(tmp, "absent"))
+
+    assert {:error, reason} = ProjectOnboard.onboard("poc-f2", o)
+    refute match?({:human_not_provisioned, _, _}, reason)
   end
 
   @tag :tmp_dir
