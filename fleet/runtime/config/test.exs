@@ -108,12 +108,3 @@ config :fleet_event_router, load_event_registry: false
 # de l'image la publient EXPLICITEMENT depuis des racines tmp (proven-good image at boot, tier B).
 config :fleet_cap_profile, publish_image: false
 config :fleet_sp_builder, publish_image: false
-
-# The human's operator token is NOT read in test. `ProjectOnboard.ensure_human_provisioned/2`
-# prefers proving the human's `humans` membership with the HUMAN's own token (`GET /user/teams`,
-# no privilege required) over asking the runtime token about them (403 unless the service account
-# sits in that team). The default source is `~/.gitea_token` — a path whose EXISTENCE would depend
-# on the developer's home, so the suite would take one branch here and another there, and the
-# `:forge_users` stubs would be called on a function they do not define. Hermeticity: the machine's
-# home never decides which code path a test exercises.
-config :fleet_pilot, human_token_file: false

@@ -228,53 +228,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     end
   end
 
-  @doc """
-  Membership of the AUTHENTICATED account in `org`/`team`, read with ITS OWN token
-  (`GET /user/teams`). `{:ok, boolean}` | `{:error, reason}`.
-
-  Complement of `team_member?/4`, which asks ABOUT someone else and therefore needs the right to
-  read that team — Gitea grants it only to a member of the team or an org owner (measured: a plain
-  org member gets `403 "Must be a team member"`, and no token scope lifts it; a token never exceeds
-  its account). `/user/teams` is the other direction: every account may read its own teams, with no
-  privilege at all, and the narrowest scope in the catalogue (`read:user`).
-
-  So an admission about a human is proven by the HUMAN's token (`~/.gitea_token`, the operator
-  identity gesture of `70-human.sh`), not by the service account being let into the team it must
-  observe.
-
-  Same pagination guard as `team_member?/4`: a single page hid teams past the first, and a truncated
-  view here reads as "not a member" — the failure that denies a legitimate human.
-  """
-  @spec self_team_member?(String.t(), String.t(), keyword()) ::
-          {:ok, boolean()} | {:error, term()}
-  def self_team_member?(org, team, opts \\ []) when is_binary(org) and is_binary(team) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, teams} <- paginated_self_teams(config) do
-      {:ok, Enum.any?(teams, &self_team_match?(&1, org, team))}
-    end
-  end
-
-  defp self_team_match?(%{"name" => name, "organization" => %{} = o}, org, team) do
-    # Gitea fills BOTH `name` and `username` on the embedded org and they are the same string.
-    # Accepting either avoids a silent false negative if one is ever dropped from the payload.
-    name == team and (o["name"] == org or o["username"] == org)
-  end
-
-  defp self_team_match?(_, _, _), do: false
-
-  defp paginated_self_teams(config) do
-    case paginate(config, "/user/teams", "") do
-      {:ok, teams} ->
-        {:ok, teams}
-
-      {:error, {:unexpected_page_shape, _p, _page, body}} ->
-        {:error, {:unexpected_teams_shape, body}}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
   # `paginate` fail-louds a non-list page as `:unexpected_page_shape`; map it to the team-specific
   # `:unexpected_teams_shape` (never `{:ok, []}` — an empty team view here would wrongly deny membership).
   defp paginated_teams(config, org) do

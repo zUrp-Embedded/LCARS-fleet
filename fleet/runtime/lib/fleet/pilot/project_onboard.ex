@@ -697,7 +697,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
         {:error, {:forge_preflight_failed, reason}}
 
       {:ok, true} ->
-        case human_team_check(users, org, human, fc, opts) do
+        case users.team_member?(org, "humans", human, fc) do
           {:ok, true} ->
             :ok
 
@@ -734,60 +734,6 @@ defmodule Fleet.Pilot.ProjectOnboard do
         end
     end
   end
-
-  # WHO PROVES THE HUMAN'S ADMISSION. Two readings answer the same question and they do not cost the
-  # same thing:
-  #
-  #   - `team_member?` asks ABOUT the human, with the RUNTIME's token. Gitea grants that read only to
-  #     a member of the team or an org owner (measured: a plain org member gets 403 "Must be a team
-  #     member", and NO token scope lifts it — a token never exceeds its account). Making it work
-  #     means putting the service account into `humans`, i.e. a team of humans that contains a bot,
-  #     purely so it may look at itself.
-  #   - `self_team_member?` asks the HUMAN, with the HUMAN's token. Every account may read its own
-  #     teams (`GET /user/teams`), no privilege, narrowest scope in the catalogue (`read:user`).
-  #     The bearer of the proof becomes the party it is about.
-  #
-  # We prefer the second WHEN the human's operator token is there — `~/.gitea_token`, the identity
-  # gesture already contracted by `70-human.sh`. Absent, we fall back to the first: a deployment
-  # that has not posed that token keeps exactly the behaviour it had, including DR-018's refusal.
-  # No new failure mode is introduced by this preference; one is removed when the token exists.
-  defp human_team_check(users, org, human, fc, opts) do
-    case human_token_file(opts) do
-      nil ->
-        users.team_member?(org, "humans", human, fc)
-
-      path ->
-        # `:token` would WIN over `:token_file` in the transport's resolution — dropping it is what
-        # makes this read the human's token and not the runtime's.
-        human_fc = fc |> Keyword.delete(:token) |> Keyword.put(:token_file, path)
-        users.self_team_member?(org, "humans", human_fc)
-    end
-  end
-
-  # The human's own token, or nil. The runtime runs UNDER the human (`Fleet.Credentials.Human`:
-  # the OS user of the process IS the human), so `~` is their home — the same path `70-human.sh`
-  # writes and probes.
-  #
-  # `false` DISABLES the preference explicitly, and `config/test.exs` sets it: without that, a
-  # developer who happens to have a `~/.gitea_token` would silently take a different code path than
-  # one who does not, and the `:forge_users` stubs would be called on a function they do not define.
-  # A test whose result depends on the machine's home is not a test.
-  defp human_token_file(opts) do
-    configured =
-      Keyword.get(
-        opts,
-        :human_token_file,
-        Application.get_env(:fleet_pilot, :human_token_file, :home)
-      )
-
-    case configured do
-      :home -> existing_file(Path.expand("~/.gitea_token"))
-      path when is_binary(path) -> existing_file(path)
-      _ -> nil
-    end
-  end
-
-  defp existing_file(path), do: if(File.regular?(path), do: path, else: nil)
 
   # The exact admin gestures, in the error itself: the operator (or the relaying architect) has
   # NOTHING to look up. Phrased as Gitea API calls — the stable form; UI/CLI equivalents exist.
