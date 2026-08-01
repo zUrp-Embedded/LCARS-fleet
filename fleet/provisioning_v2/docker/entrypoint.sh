@@ -20,6 +20,24 @@
 
 set -euo pipefail
 
+# ─── MODE OUTIL : `verify <racine>` — valider un catalogue SANS booter la boîte ─────────────────
+# `docker run --rm -v $PWD:/cat <image> verify /cat` : le code de sortie est le verdict
+# (0 = catalogue OK, 1 = refusé), exploitable en CI ; le rapport s'imprime sur stdout et
+# déclare ses hypothèses (la racine lue, les surcharges fines ignorées). Ne converge rien,
+# ne crée personne : la seule chose exécutée est la release, en eval. Le binaire de release
+# est appelé directement — `fleet_v2`, lui, porte le lancement per-humain (RELEASE_TMP dans
+# ~/.lcars), des hypothèses qu'un mode outil n'a pas le droit d'avoir.
+if [[ "${1:-}" == "verify" ]]; then
+  root="${2:?verify: chemin de racine catalogue requis — usage : docker run --rm -v \$PWD:/cat IMAGE verify /cat}"
+  # Le runtime REFUSE root (R-no-root-runtime, runtime.exs) et le mode outil respecte
+  # l'invariant au lieu de le contourner : l'eval tombe sur nobody:fleet — le gid fleet
+  # donne la lecture de l'install RO (/local, root:fleet), nobody ne possède rien d'autre.
+  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+    env HOME=/tmp RELEASE_TMP=/tmp \
+    /local/LCARS_v2/rel/fleet_umbrella/bin/fleet_umbrella eval \
+    "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
+fi
+
 LCARS_HUMAN="${LCARS_HUMAN:-lcars}"
 LCARS_UID="${LCARS_UID:-1000}"
 PROVISION=/opt/lcars/fleet/provisioning_v2/provision
