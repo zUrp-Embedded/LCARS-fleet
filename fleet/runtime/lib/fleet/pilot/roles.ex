@@ -10,17 +10,14 @@ defmodule Fleet.Pilot.Roles do
 
   ## The structural roles are RESOLVED, not defaulted
 
-  `producer_role/1` and `gatekeeper_role/1` used to fall back on the literals `"engineer"` and
-  `"gatekeeper"`. A default is **a requirement that gave up on being verified**: the runtime needs a
-  producer, and instead of demanding one it guessed. A catalogue carrying no producer booted green
-  and failed at the first spawn — far from the deploy fault, exactly what `Fleet.Spawner.CanonProof`
-  was written to prevent everywhere else.
+  `producer_role/1` and `gatekeeper_role/1` carry **no literal default**. A default here would be
+  a requirement that gave up on being verified: a catalogue naming no producer would boot green and
+  fail at the first spawn, far from the deploy fault — what `Fleet.Spawner.CanonProof` prevents
+  everywhere else.
 
-  They now resolve by CAPABILITY (`spec.capabilities`, the B-03 mechanism): `producer` for the one
-  that codes the brick, `exception_judge` for the one that signs the merge. The catalogue already
-  declared both — the resolver was what was missing, not the field. Substituting a role stays a
-  cap-profile edit; there is simply no longer a name the code falls back to when the catalogue is
-  silent.
+  They resolve by CAPABILITY (`spec.capabilities`, the B-03 mechanism): `producer` for the one that
+  codes the brick, `exception_judge` for the one that signs the merge. Substituting a role is a
+  cap-profile edit, and there is no name the code falls back to when the catalogue is silent.
 
   Resolution is **fail-loud on zero AND on several**: for a structural role, an ambiguity is a broken
   catalogue, not a choice to arbitrate at random. `Fleet.Pilot.Application.validate_structural_roles!/0`

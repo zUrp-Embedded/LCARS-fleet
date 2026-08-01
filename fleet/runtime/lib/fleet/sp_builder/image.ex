@@ -308,7 +308,7 @@ defmodule Fleet.SPBuilder.Image do
   defp human_protocol_path, do: Path.join(drafts_root(), "protocole-user-human.md")
 
   # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root). The drafts
-  # root is no longer resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
+  # root is NOT resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
   # unpublished path), so it lives on the facade as the single authority — see `drafts_root/0` below.
   defp modop_root do
     Application.get_env(:fleet_sp_builder, :modop_root) || Fleet.Catalogue.modop_root()

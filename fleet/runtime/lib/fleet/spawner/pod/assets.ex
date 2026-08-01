@@ -92,8 +92,8 @@ defmodule Fleet.Spawner.Pod.Assets do
 
         :unpublished ->
           # THE SAME root the image freezes from (`Fleet.SPBuilder.sp_drafts_root/0`, single
-          # authority). An `app_dir` literal here read the bundled tree while the image had been
-          # frozen from a repointed one — the published and unpublished paths would have served two
+          # authority). An `app_dir` literal here would read the bundled tree while the image was
+          # frozen from a repointed one: the published and unpublished paths would serve two
           # different drafts for one role.
           read_tagged(
             Path.join(Fleet.SPBuilder.sp_drafts_root(), "agent-#{role}-base.md"),

@@ -234,9 +234,9 @@ defmodule Fleet.CapProfile do
   before readiness by `Fleet.Spawner.CanonProof` — swallowing it here would only duplicate that
   guard in a second dialect.
 
-  Returns the LIST, never the singleton: `onboarder` is legitimately carried by two roles today
-  (architect and starfleet). Whether a capability must be unique is a property of the CALLER's
-  concept, not of the catalogue — `Fleet.Pilot.Roles` enforces it for the structural ones.
+  Returns the LIST, never the singleton: a capability may legitimately be carried by several roles
+  (`onboarder` is, in the bundled catalogue). Whether it must be unique is a property of the
+  CALLER's concept, not of the catalogue — `Fleet.Pilot.Roles` enforces it for the structural ones.
   """
   @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def roles_with_capability(cap) do

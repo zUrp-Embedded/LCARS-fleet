@@ -705,10 +705,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # the other two runtime-generated commits (`Workflow.OpsObject`, `Pilot.ProjectOnboard`), through
   # the single accessor rather than a literal retyped at the caller.
   #
-  # It named a ROLE here (`LCARS-starfleet` / `role_email("starfleet")`), which is the one thing
-  # `ForgeIdentity` forbids: author = the human, role = a VERIFIED TRAILER, committer = the system.
-  # `role_email/1` exists to build that trailer; its only other caller is `coauthor_trailer/1`. Using
-  # it as an author email signed a system act under a pod that does not touch the forge at all.
+  # Never a ROLE here: `ForgeIdentity` splits the three identities on purpose — author = the human,
+  # role = a VERIFIED TRAILER, committer = the system. `role_email/1` builds that trailer (its only
+  # other caller is `coauthor_trailer/1`); as an author email it would sign a system act under a pod
+  # that does not touch the forge at all.
   defp author(opts),
     do:
       opts[:author] ||

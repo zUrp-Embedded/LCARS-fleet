@@ -232,12 +232,10 @@ defmodule Fleet.Pilot.Application do
   # route raises far from the deploy fault) — refused HERE at rail boot, same
   # dead-man's-switch contract as the base_url guard above.
   # The two STRUCTURAL roles of the single-brick model — the one that codes the brick, the one that
-  # signs the merge — resolved from the catalogue by capability at rail boot. They used to be literal
-  # defaults (`"engineer"`, `"gatekeeper"`): a catalogue naming neither booted GREEN and died at the
-  # first dispatch, far from the deploy fault. Same dead-man's-switch as the two card guards above,
-  # and the reason is identical — a default is a requirement that gave up on being verified.
-  # `Fleet.Pilot.Roles` carries the resolution and the refusal messages; here we only make it happen
-  # before readiness.
+  # signs the merge — resolved from the catalogue by capability at rail boot. Same dead-man's-switch
+  # as the two card guards above: a catalogue naming neither would otherwise reach readiness GREEN
+  # and die at the first dispatch, far from the deploy fault. `Fleet.Pilot.Roles` carries the
+  # resolution and the refusal messages; here we only make it happen before readiness.
   # (No log line: this module has none, and the resolution is not a milestone — its FAILURE is, and
   # the raise carries it. `Fleet.Pilot.Roles` remains the place to ask who they are.)
   defp validate_structural_roles! do

@@ -88,9 +88,9 @@ defmodule Fleet.Pilot.ProjectArchitect do
         {:error, {:repo_id_unresolved, repo}}
 
       true ->
-        # The role is RESOLVED by the `project_delegate` capability, not named. `Delegation`'s own
-        # gate already worked that way (B-03, `require_architect/1`); this site kept the literal, so
-        # a catalogue renaming its delegate would have gated correctly and then ensured nothing.
+        # The role is RESOLVED by the `project_delegate` capability, never named — same source as
+        # the gate that admits the call (`Delegation.require_architect/1`, B-03). Naming it here
+        # would gate correctly on a renamed delegate and then ensure a role the catalogue lacks.
         with {:ok, cap} <-
                Fleet.CapProfile.resolve(loader, Fleet.Pilot.Roles.project_delegate_role()) do
           pod_id = pod_id_for(name)

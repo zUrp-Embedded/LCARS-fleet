@@ -513,11 +513,11 @@ defmodule Fleet.SPBuilder do
   it has two readers in two domains: `Fleet.SPBuilder.Image` (what the boot image freezes) and
   `Fleet.Spawner.Pod.Assets` (what a spawn reads when no image is published).
 
-  It was resolved TWICE, and only one honoured the knob: the image read
-  `:fleet_sp_builder, :sp_drafts_root`, Assets kept an `app_dir` literal. Repointing the key moved
-  what the image FROZE and not what the spawn READ — two copies of one contract, one of which moves.
-  A catalogue pointed at a foreign drafts tree would have been frozen from it and, on the
-  unpublished path, read from the bundled one instead. One resolution, two callers.
+  ONE resolution for both, and it must stay that way: a second resolution of this root moves what
+  the image FREEZES without moving what the spawn READS on the unpublished path, so a repointed
+  catalogue would be frozen from its drafts and served the bundled ones — two drafts for one role,
+  and production always publishes, so the divergence shows only where nobody looks. Locked by
+  `test/fleet/sp_builder_image_parity_test.exs` under a MOVED root.
   """
   @spec sp_drafts_root() :: String.t()
   def sp_drafts_root do
