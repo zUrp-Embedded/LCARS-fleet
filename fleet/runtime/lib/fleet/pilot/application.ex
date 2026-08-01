@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   use Supervisor
@@ -172,6 +172,7 @@ defmodule Fleet.Pilot.Application do
 
     validate_card_juries!()
     validate_card_steps!()
+    validate_structural_roles!()
 
     # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
     # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
@@ -230,6 +231,20 @@ defmodule Fleet.Pilot.Application do
   # both card guards vacuously true (readiness green with zero loadable card, first
   # route raises far from the deploy fault) — refused HERE at rail boot, same
   # dead-man's-switch contract as the base_url guard above.
+  # The two STRUCTURAL roles of the single-brick model — the one that codes the brick, the one that
+  # signs the merge — resolved from the catalogue by capability at rail boot. They used to be literal
+  # defaults (`"engineer"`, `"gatekeeper"`): a catalogue naming neither booted GREEN and died at the
+  # first dispatch, far from the deploy fault. Same dead-man's-switch as the two card guards above,
+  # and the reason is identical — a default is a requirement that gave up on being verified.
+  # `Fleet.Pilot.Roles` carries the resolution and the refusal messages; here we only make it happen
+  # before readiness.
+  # (No log line: this module has none, and the resolution is not a milestone — its FAILURE is, and
+  # the raise carries it. `Fleet.Pilot.Roles` remains the place to ask who they are.)
+  defp validate_structural_roles! do
+    _ = Fleet.Pilot.Roles.resolve_structural_roles!()
+    :ok
+  end
+
   defp validate_card_juries! do
     for map_name <- Fleet.Workflow.Loader.canon_names!(),
         role <- Fleet.Workflow.Loader.load!(map_name)["jury"] do
