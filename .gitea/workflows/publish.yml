@@ -1,0 +1,78 @@
+name: Publish image (ADR 012)
+
+# Un TAG semver poussé → l'image se bâtit DEPUIS CETTE REF (clone frais, jamais un arbre de
+# travail) et part sur la registry configurée. Destination et identité vivent dans la
+# configuration du dépôt/de l'org, jamais ici :
+#   vars.REGISTRY           adresse, port compris si HTTP (ex. 10.42.0.118:80)
+#   vars.REGISTRY_USER      compte qui pousse (l'identité réelle est portée par le token)
+#   secrets.REGISTRY_TOKEN  token à portée write:package
+# Changer de destination (forge LAN → GHCR) = changer ces valeurs, pas ce fichier.
+#
+# Mono-arch : le multi-arch d'ADR 012 (buildx --platform amd64,arm64) viendra avec la release
+# publique — il change ce fichier, et lui seul.
+#
+# Runner : label `dood` — le job tourne dans `docker:cli` et parle au daemon de l'HÔTE
+# (socket monté par la config du runner). Le build réutilise donc le cache de layers de la
+# machine, et l'image nommée doit être résoluble par CE daemon — d'où l'adresse publiée
+# dans vars.REGISTRY, pas un nom de service compose.
+#
+# Pas d'actions/checkout : le job-image n'a pas de node, et le livrable est un build de LA REF —
+# un clone shallow de la ref est la garantie, pas un checkout d'arbre de CI.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+
+jobs:
+  publish:
+    runs-on: dood
+    steps:
+      - name: Configuration présente (refus explicite plutôt qu'un échec obscur en aval)
+        run: |
+          ok=1
+          [ -n "${{ vars.REGISTRY }}" ]          || { echo 'REFUS : vars.REGISTRY absent'; ok=0; }
+          [ -n "${{ vars.REGISTRY_USER }}" ]     || { echo 'REFUS : vars.REGISTRY_USER absent'; ok=0; }
+          [ -n "${{ secrets.REGISTRY_TOKEN }}" ] || { echo 'REFUS : secrets.REGISTRY_TOKEN absent'; ok=0; }
+          [ "$ok" = 1 ]
+
+      - name: Outillage du job
+        run: apk add --no-cache git >/dev/null
+
+      - name: Clone de la ref
+        run: git clone --branch "${GITHUB_REF_NAME}" --depth 1 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" src
+
+      - name: Build depuis la ref
+        run: |
+          GIT_SHA="$(git -C src rev-parse --short=8 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          IMAGE="${{ vars.REGISTRY }}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]'):${GITHUB_REF_NAME}"
+          echo "IMAGE=$IMAGE"     >> "$GITHUB_ENV"
+          echo "GIT_SHA=$GIT_SHA" >> "$GITHUB_ENV"
+          docker build \
+            -f src/fleet/provisioning_v2/docker/Dockerfile \
+            --build-arg GIT_SHA="$GIT_SHA" \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            --build-arg VERSION="${GITHUB_REF_NAME}" \
+            -t "$IMAGE" src
+
+      - name: Login registry
+        run: printf '%s' "${{ secrets.REGISTRY_TOKEN }}" | docker login "${{ vars.REGISTRY }}" -u "${{ vars.REGISTRY_USER }}" --password-stdin
+
+      - name: Immutabilité (ADR 012) — un tag publié ne se réécrit jamais
+        run: |
+          if docker manifest inspect --insecure "$IMAGE" >/dev/null 2>&1; then
+            echo "REFUS : $IMAGE existe déjà sur la registry — se tromper de ref coûte un tag brûlé, pas une réécriture."
+            exit 1
+          fi
+
+      - name: Push
+        run: docker push "$IMAGE"
+
+      - name: Preuves — le manifest répond, la révision de l'image est celle de la ref
+        run: |
+          docker manifest inspect --insecure "$IMAGE" >/dev/null
+          rev="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          [ "$rev" = "$GIT_SHA" ] || { echo "REFUS : label revision ($rev) != ref buildée ($GIT_SHA)"; exit 1; }
+          echo "publié : $IMAGE (revision $rev)"
