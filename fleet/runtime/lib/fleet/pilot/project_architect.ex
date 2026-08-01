@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:projects_root` / `:work_root` — FS roots (defaults `Fleet.Layout`), same keys as
       `ProjectOnboard` (the onboard opts thread through unchanged).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -88,7 +88,11 @@ defmodule Fleet.Pilot.ProjectArchitect do
         {:error, {:repo_id_unresolved, repo}}
 
       true ->
-        with {:ok, cap} <- Fleet.CapProfile.resolve(loader, "architect") do
+        # The role is RESOLVED by the `project_delegate` capability, not named. `Delegation`'s own
+        # gate already worked that way (B-03, `require_architect/1`); this site kept the literal, so
+        # a catalogue renaming its delegate would have gated correctly and then ensured nothing.
+        with {:ok, cap} <-
+               Fleet.CapProfile.resolve(loader, Fleet.Pilot.Roles.project_delegate_role()) do
           pod_id = pod_id_for(name)
 
           spawn_opts = [

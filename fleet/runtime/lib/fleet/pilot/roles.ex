@@ -36,6 +36,7 @@ defmodule Fleet.Pilot.Roles do
   # gate resolves a responsibility, never a magic name.
   @producer_capability :producer
   @gatekeeper_capability :exception_judge
+  @delegate_capability :project_delegate
 
   @doc """
   Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
@@ -81,6 +82,27 @@ defmodule Fleet.Pilot.Roles do
         raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
                 "resolving the producer role — broken deploy, fail-loud."
     end
+  end
+
+  @doc """
+  PER-PROJECT DELEGATE role — the one a project's escalations are addressed to, and the one
+  `ProjectArchitect.ensure/2` keeps alive per repo. Override by the opt `:project_delegate_role`,
+  then config `:fleet_pilot, :project_delegate_role`; otherwise RESOLVED by the `project_delegate`
+  capability.
+
+  EXACTLY one, like the sealer and unlike the producer: nothing SELECTS a delegate the way a card
+  selects a producer — it is ensured per repo, not dispatched by name — so two roles carrying the
+  capability is an ambiguity about who arbitrates, not a specialisation.
+
+  `Fleet.MCP.PodTools.Delegation.require_architect/1` already gated on this capability rather than on
+  `role == "architect"` (B-03). The two call sites that still named the role — the ensure and the
+  escalation mandate — now read the same source.
+  """
+  @spec project_delegate_role(keyword()) :: String.t()
+  def project_delegate_role(opts \\ []) do
+    Keyword.get(opts, :project_delegate_role) ||
+      Application.get_env(:fleet_pilot, :project_delegate_role) ||
+      resolve_structural!(@delegate_capability, "project delegate")
   end
 
   @doc """

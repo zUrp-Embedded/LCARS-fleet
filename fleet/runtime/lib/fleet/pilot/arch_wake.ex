@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.ArchWake do
   actually left (`:offered`/`:woken_pending`), never on `:busy` / `:wake_unreached` / an
   enqueue error.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -159,7 +159,9 @@ defmodule Fleet.Pilot.ArchWake do
   defp enqueue_mandate(task_queue, pod_id, repo, n) do
     attrs = %{
       issue_id: "issue-#{n}",
-      role: "architect",
+      # Same source as the ensure (`ProjectArchitect`): the delegate is resolved by capability, so a
+      # mandate is never enqueued for a role the catalogue no longer carries.
+      role: Fleet.Pilot.Roles.project_delegate_role(),
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
           "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou " <>

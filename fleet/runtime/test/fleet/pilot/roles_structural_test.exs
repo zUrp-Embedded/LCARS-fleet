@@ -98,4 +98,21 @@ defmodule Fleet.Pilot.RolesStructuralTest do
 
     assert {:ok, ["alpha", "beta"]} == Fleet.CapProfile.roles_with_capability(:onboarder)
   end
+
+  test "le delegue per-projet est resolu par capability, exactement un", %{dir: dir} do
+    # Les deux sites qui le nommaient — l'ensure de ProjectArchitect et le mandat d'escalade
+    # d'ArchWake — lisent maintenant la meme source que la garde de Delegation (B-03), qui gatait
+    # deja sur la capability et non sur `role == "architect"`.
+    write_role!(dir, "arbitre", ["project_delegate"])
+    assert "arbitre" == Roles.project_delegate_role()
+  end
+
+  test "deux delegues : ambiguite sur QUI arbitre, pas une specialisation", %{dir: dir} do
+    # Contrairement au producteur, rien ne SELECTIONNE un delegue : il est ensure par repo, aucune
+    # carte ne le nomme. Deux porteurs = personne ne sait a qui l'escalade s'adresse.
+    write_role!(dir, "arch-hw", ["project_delegate"])
+    write_role!(dir, "arch-sw", ["project_delegate"])
+
+    assert_raise RuntimeError, ~r/unique BY DESIGN/, fn -> Roles.project_delegate_role() end
+  end
 end
