@@ -44,12 +44,11 @@ CHECK_ONLY=0
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 declare -a ENTRIES=(
   "architect:architect.png"
-  # consultant → scoper (renommage 2026-07-31) : entrée retirée avec le compte ; scoper.png = asset
-  # de charte à produire, l'entrée reviendra avec lui.
   "engineer:engineer.png"
   "gatekeeper:gatekeeper.png"
   "qualifier:qualifier.png"
   "reviewer:reviewer.png"
+  "scoper:scoper.png"
   "vulcan:vulcan.png"
   "starfleet:starfleet.png"
   "lcars-system:favicon.png"
