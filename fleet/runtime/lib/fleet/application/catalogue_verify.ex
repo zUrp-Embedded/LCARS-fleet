@@ -54,6 +54,38 @@ defmodule Fleet.Application.CatalogueVerify do
           | {:error, %{root: Path.t(), findings: [finding()], assumptions: [String.t()]}}
 
   @doc """
+  The RELEASE door: run `verify/1`, print the same report the `mix` task prints, and halt with the
+  boot's verdict (0 pass, 1 refused). Called from the image's entrypoint via a release eval —
+
+      bin/fleet_umbrella eval 'Fleet.Application.CatalogueVerify.eval_main("/cat")'
+
+  so the entrypoint's `verify <root>` is a one-liner and the exit code is the whole contract on the
+  shell side. Uses `IO.puts` + `System.halt/1` because a release has no `Mix.shell` — the ONLY
+  difference from the dev door, the checks themselves being identical (they are `verify/1`).
+  """
+  @spec eval_main(Path.t()) :: no_return()
+  def eval_main(root) when is_binary(root) do
+    case verify(root) do
+      {:ok, %{assumptions: assumptions}} ->
+        print(assumptions)
+        IO.puts("catalogue OK — every check the boot runs passed.")
+        System.halt(0)
+
+      {:error, %{findings: findings, assumptions: assumptions}} ->
+        print(assumptions)
+        IO.puts("catalogue REFUSED — #{length(findings)} check(s) failed:")
+        for %{stage: stage, error: error} <- findings, do: IO.puts("  x #{stage}: #{error}")
+        System.halt(1)
+    end
+  end
+
+  defp print(assumptions) do
+    IO.puts("- verifier assumptions -")
+    for a <- assumptions, do: IO.puts("  . #{a}")
+    IO.puts("")
+  end
+
+  @doc """
   Verifies the catalogue at `root`. Sets `:fleet_catalogue, :root` to it for the duration, restores
   the previous value on the way out. Collects findings instead of raising on the first — an operator
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
