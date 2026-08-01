@@ -23,17 +23,15 @@
 # (Docker Desktop → Settings → Docker Engine, puis Apply & Restart — le daemon redemarre, ce n'est
 # pas un rechargement a chaud).
 #
-# LE PORT EST DANS LE NOM, ET CE N'EST PAS COSMETIQUE (mesure du 2026-08-01, moteur 29.2.1, store
-# containerd). Les deux formes echouent, pour deux raisons DIFFERENTES :
-#   - `10.42.0.118/...`    → le daemon compose `https://10.42.0.118:443`. Rien n'ecoute en 443 :
-#                            REFUS reseau. Le repli HTTP ne se declenche pas sur un refus de
-#                            connexion, seulement quand le serveur repond en clair.
-#   - `10.42.0.118:80/...` → le daemon compose `https://10.42.0.118:80`, obtient une reponse HTTP
-#                            (« server gave HTTP response to HTTPS client ») — mais ne se replie
-#                            que si CETTE clef exacte, port compris, est declaree insecure.
+# LE PORT EST DANS LE NOM, ET CE N'EST PAS COSMETIQUE. Le daemon parle HTTPS et ne se replie en
+# HTTP que si la clef EXACTE du nom d'image, port compris, est declaree insecure :
+#   - `10.42.0.118/...`    → il vise :443, ou rien n'ecoute ici : refus reseau, et le repli HTTP
+#                            ne se declenche jamais sur un refus de connexion.
+#   - `10.42.0.118:80/...` → il obtient une reponse en clair sur :80 et ne se replie que si
+#                            `10.42.0.118:80`, port compris, figure dans les registries insecure.
 # Il faut donc `"insecure-registries": ["10.42.0.118", "10.42.0.118:80"]`, et referencer l'image
-# AVEC le port. Meme piege sur les credentials : `docker login` indexe par clef exacte, donc un
-# login sur la forme sans port ne vaut pas pour la forme avec port (« no basic auth credentials »).
+# AVEC le port. Meme regle de clef exacte pour les credentials : un `docker login` sur la forme
+# sans port ne vaut pas pour la forme avec port.
 #
 # La vraie sortie de tout ce contournement est du TLS sur la forge — a instruire separement.
 #

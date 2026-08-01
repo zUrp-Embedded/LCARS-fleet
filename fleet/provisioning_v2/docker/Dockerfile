@@ -103,12 +103,10 @@ LABEL org.opencontainers.image.title="LCARS fleet v2" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.authors="lordzurp"
 
-# La révision, LISIBLE DEPUIS L'INTÉRIEUR. Le label OCI ci-dessus porte déjà la vérité, mais un
+# La révision, LISIBLE DEPUIS L'INTÉRIEUR. Le label OCI ci-dessus la porte déjà, mais un
 # conteneur ne peut pas lire son propre label : il faudrait interroger le daemon, et il n'a pas
-# de socket (c'est voulu). `build_info.txt` ne peut pas jouer ce rôle non plus — il shelle sur git
-# à l'assemblage de la release, et le contexte de build n'embarque pas `.git`, donc il rend
-# `sha: "unknown"` pour toute image bâtie depuis une ref. Cette ENV est la seule voie par laquelle
-# l'entrypoint peut comparer ce qui TOURNE avec la source qu'il vient de cloner.
+# de socket (c'est voulu). Cette ENV est la voie par laquelle l'entrypoint compare ce qui TOURNE
+# avec la source qu'il clone.
 ENV LCARS_IMAGE_REVISION="${GIT_SHA}"
 ENV LANG=C.UTF-8 LCARS_DOCKER=1
 # Paquets du RUNTIME (la liste miroir de modules.d/10-packages.sh + le substrat conteneur :
@@ -169,14 +167,12 @@ COPY fleet/provisioning_v2/docker/console.tmux.conf  /opt/lcars/console.tmux.con
 COPY fleet/provisioning_v2/docker/skel.bashrc      /etc/skel/.bashrc
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
-# `~/.profile` (Debian, l. 25-26) pose deja cette regle, mais il n'est lu QUE par un shell de
-# login. Or la boite a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console
-# web en ouvrent un ; `su lcars` (sans tiret) et `docker exec` n'en ouvrent pas.
-# Mesure du 2026-08-01, dans une boite installee : `claude: command not found` dans un shell issu
-# de `su lcars`, alors que le binaire etait pose depuis le boot (`~/.local/bin/claude`, 275 Mo,
-# provisioning « POSÉ 40-claude-bin »). Present et invisible, selon la porte empruntee.
+# `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la
+# boite a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console web en
+# ouvrent un ; `su <humain>` (sans tiret) et `docker exec` n'en ouvrent pas. Sans cette ligne, ce
+# qui est installe sous ~/.local/bin est visible ou non SELON LA PORTE empruntee.
 #
-# POURQUOI ICI ET PAS DANS skel.bashrc : le squelette n'est copie qu'a la CREATION de l'humain
+# ICI ET PAS DANS skel.bashrc : le squelette n'est copie qu'a la CREATION de l'humain
 # (`useradd -m`), jamais ensuite — une boite deja installee ne le verrait jamais. `/etc/bash.bashrc`
 # est lu par tout bash interactif, vit dans l'IMAGE (donc suit les mises a jour) et ne touche pas
 # au `.bashrc` de l'humain, qui reste le sien.

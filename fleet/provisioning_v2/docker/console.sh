@@ -73,9 +73,8 @@ launch_one() {
   [[ -n "$home_dir" && -d "$home_dir" ]] || { echo "console.sh: home introuvable pour $human" >&2; return 1; }
 
   # SHELL, LU DANS PASSWD COMME LE HOME (champ 7, meme source que le champ 6 juste au-dessus).
-  # Il n'etait PAS pose, et l'entrypoint tourne avec `SHELL` non defini (mesure du 2026-08-01 :
-  # « SHELL vu par l'entrypoint : (non defini) »). Un login-manager pose SHELL — sshd le fait, et
-  # c'est une des raisons pour lesquelles ssh et la console ne rendaient pas le meme environnement.
+  # Un login-manager pose SHELL — sshd le fait. Sans lui ici, les deux portes de la boite (ssh,
+  # console web) ne rendent pas le meme environnement.
   login_shell="$(getent passwd "$human" | cut -d: -f7 || true)"
   [[ -n "$login_shell" && -x "$login_shell" ]] || login_shell=/bin/bash
 
