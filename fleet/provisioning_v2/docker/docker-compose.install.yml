@@ -69,6 +69,17 @@ services:
       LCARS_UID: "${LCARS_UID:-1000}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
+      # Le geste de dev (`./docker.sh source-push`, un `docker cp` depuis le clone de l'humain)
+      # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
+      # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
+      # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.
+      # L'entrypoint ne clone QUE si le dossier est absent : une source deja la n'est jamais
+      # ecrasee, sinon un redemarrage detruirait le travail en cours d'un agent.
+      LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-http://10.42.0.118/fleet/lcars.git}"
+      # Vide = branche par defaut du depot. Mettre ici la MEME ref que celle de l'image donne une
+      # boite coherente ; l'entrypoint declare l'ecart au boot dans tous les cas.
+      LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
     ports:
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
       - "${LCARS_BIND:-127.0.0.1}:21000-21029:21000-21029"
