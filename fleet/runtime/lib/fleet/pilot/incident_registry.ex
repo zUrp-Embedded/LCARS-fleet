@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
   facade (defdelegate) for WakeRecovery and the failure consumers.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
   use GenServer
   require Logger
@@ -700,14 +700,23 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
         Path.join(Fleet.Layout.state_dir(), "system-incidents.json")
 
+  # The registry sync is a commit the RUNTIME makes: no human initiated it, no pod produced it, and
+  # no pod could — a pod never holds the forge token. Its identity is therefore the SYSTEM one, like
+  # the other two runtime-generated commits (`Workflow.OpsObject`, `Pilot.ProjectOnboard`), through
+  # the single accessor rather than a literal retyped at the caller.
+  #
+  # It named a ROLE here (`LCARS-starfleet` / `role_email("starfleet")`), which is the one thing
+  # `ForgeIdentity` forbids: author = the human, role = a VERIFIED TRAILER, committer = the system.
+  # `role_email/1` exists to build that trailer; its only other caller is `coauthor_trailer/1`. Using
+  # it as an author email signed a system act under a pod that does not touch the forge at all.
   defp author(opts),
     do:
       opts[:author] ||
-        Application.get_env(:fleet_pilot, :incident_registry_author, %{
-          name: "LCARS-starfleet",
-          # Role email: AUTHORITY = ForgeIdentity (never retype the domain here).
-          email: Fleet.Credentials.ForgeIdentity.role_email("starfleet")
-        })
+        Application.get_env(
+          :fleet_pilot,
+          :incident_registry_author,
+          Fleet.Credentials.ForgeIdentity.system_identity()
+        )
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")
 

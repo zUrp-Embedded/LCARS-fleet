@@ -56,6 +56,36 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
+    # The registry sync is a commit the RUNTIME makes — no human initiated it, no pod produced it,
+    # and no pod could (a pod never holds the forge token). It signed `LCARS-starfleet` /
+    # `starfleet@lcars.local`, which is the one shape `ForgeIdentity` forbids: author = the human,
+    # role = a verified TRAILER, committer = the system. Nothing caught it because nothing looked at
+    # the identity of this put — only at its content.
+    test "sync: the put is signed by the SYSTEM, never by a pod role", %{tmp_dir: tmp} do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, o -> send(pid, {:put_opts, o}) && {:ok, "c"} end
+        )
+
+      assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
+      assert_receive {:put_opts, opts}, 1000
+
+      system = Fleet.Credentials.ForgeIdentity.system_identity()
+      assert Keyword.fetch!(opts, :author) == system
+      assert Keyword.fetch!(opts, :committer) == system
+
+      # Adverse: no catalogue role may appear in this identity, whatever the catalogue names them.
+      {:ok, roles} = Fleet.CapProfile.list()
+
+      for role <- roles do
+        refute system.email == Fleet.Credentials.ForgeIdentity.role_email(role),
+               "the system commit is signed under the role #{role}"
+      end
+    end
+
     test "sync: forge getter UNREADABLE (not a 404) → NO put (never overwrite an unread forge)",
          %{
            tmp_dir: tmp
