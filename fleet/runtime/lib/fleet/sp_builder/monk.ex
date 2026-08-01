@@ -14,7 +14,7 @@ defmodule Fleet.SPBuilder.Monk do
 
   ## Monks are FROZEN — reactivation is dormant by design
 
-  The registry root defaults to `app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`, a tree
+  The registry root defaults to `Fleet.Catalogue.monk_registry_root/0` (`<catalogue>/cap_profile/canon/cap-profiles/monks`), a tree
   that is **intentionally ABSENT**: the monks were FROZEN into `priv/cap_profile/canon/_frozen-monks/`
   (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
   so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
@@ -40,7 +40,7 @@ defmodule Fleet.SPBuilder.Monk do
 
     * `:monk_registry_root` — root resolving the registry's relative path
       (test-seam; defaults to config `:fleet_sp_builder, :monk_registry_root`
-      then `Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")`).
+      then `Fleet.Catalogue.monk_registry_root/0`).
 
   The `monk_registry` field in the cap-profile = basename (e.g. `alpha.yaml`)
   — the code resolves it via `:monk_registry_root`. It is NOT an absolute path:

@@ -12,8 +12,9 @@ defmodule Fleet.Workflow.Loader do
 
   ## Configuration
 
-    * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root
-      (default `Application.app_dir(:lcars_fleet, "priv/workflow/canon/workflow_maps")`)
+    * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root; FINE override, it keeps
+      precedence (default `Fleet.Catalogue.workflow_maps_root/0`, i.e. the bundled priv unless
+      `LCARS_CATALOGUE_ROOT` brings another catalogue)
     * `:fleet_workflow, :schema_path` — JSON schema path
       (default `priv/workflow/schema/workflow-map-v2.5.json` from the package)
 

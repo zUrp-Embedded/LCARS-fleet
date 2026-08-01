@@ -34,9 +34,11 @@ defmodule Fleet.CapProfile.Catalog do
 
   ## Configuration
 
-  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it
-  via `Application.put_env/3`), default = the BUNDLED canon resolved by
-  `:code.priv_dir(:lcars_fleet)` under `cap_profile/` (resolves in a release as in dev, without env).
+  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it via
+  `Application.put_env/3`) — the FINE override, which keeps precedence. Default =
+  `Fleet.Catalogue.cap_profiles_root/0`: the bundled canon unless `LCARS_CATALOGUE_ROOT` brings
+  another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
+  without env).
 
   **Last revised**: 2026-08-01
   """

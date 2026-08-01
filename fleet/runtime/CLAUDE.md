@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-21 (règle de langue : ce qui part avec la boîte est en anglais — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
+**Dernière révision** : 2026-08-01 (règle de langue : ce qui part avec la boîte est en anglais — cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -41,6 +41,12 @@ L'ex-umbrella (14 apps) est collapsée en une app unique ; les ex-apps sont des 
 **Topologie (l'enforcement est dans boundary ; la carte est GÉNÉRÉE)** : la vue en couches vit dans `lib/fleet/README.md`, projetée depuis les `use Boundary` par `mix lcars.topology` (le gate refuse toute divergence — la carte ne peut pas mentir). Vocabulaire : la position d'un domaine ne se déclare JAMAIS en prose (elle EST sa déclaration boundary) ; une relation se nomme par DOMAINE (`Pilot.GateBrief`), jamais par numéro d'étage ; seul nom de couche mécaniquement vérifiable : **foundation** ≡ `deps: []` (le terme « Ring N » est banni du code — héritage `topologie-ring.md` #3.1, acceptions divergentes, cf. chantier doc-coherence 2026-07-18). Repères : `pilot` = driver forge (off sans `:step_dispatch?`), `api` REST/WS no-auth by design, `observation` read-only, launchers `bin/` sous `spawner`.
 
 **Seams runtime ASSUMÉS** — deux natures distinctes. (1) Seams MONTANTS (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:forge_client`/`:project_onboard` — Pilot ∉ deps de MCP). (2) Seams d'INJECTION sur une dep compile EXISTANTE (swap d'implémentation, pas de frontière contournée) : `:coord_backend` (starfleet→coord, dep déclarée ; relais d'escalade doctrine D1 — la trace durable est l'audit log, écrit AVANT le routage ; un routage raté est loggué warning par Cat5Escalator/DriftMonitor ; défaut câblé `Fleet.Coord` par runtime.exs, `NotWiredYet` sinon) ; `:launch_backend` (hermétisme test).
+
+### Frontière runtime / catalogue
+
+Le code porte la mécanique, le métier est de la **donnée de catalogue** — et le catalogue est UN objet, pointé UNE fois. `Fleet.Catalogue` (foundation) est la seule autorité de son layout : une racine (`LCARS_CATALOGUE_ROOT`, défaut = le `priv/` bundlé) dont chaque arbre dérive son sous-chemin, plus le manifeste `catalogue.yaml` (`api_version`) vérifié au boot AVANT que les images ne gèlent quoi que ce soit. Les clés par-arbre (`:fleet_cap_profile, :root_dir` etc.) restent des **surcharges fines** et gardent la priorité : la grosse molette apporte un catalogue entier, une fine déplace exactement son arbre.
+
+Le discriminant est mécanique et tient partout dans `priv/` : `<dom>/schema/` = **contrat runtime** (résolu par `:code.priv_dir`, sans knob — un schéma qu'on peut remplacer est un contrat qui ne contraint pas) ; `canon/`, `config/`, `templates/` = **catalogue**. Ajouter un arbre de métier sans le déclarer dans `Fleet.Catalogue` re-crée l'écart que la racine unique existe pour tuer : un opérateur qui apporte SON catalogue tournerait sur cet arbre-là resté bundlé, sans qu'aucun message ne le dise.
 
 ### Frontière vendor (N0 / N1)
 
