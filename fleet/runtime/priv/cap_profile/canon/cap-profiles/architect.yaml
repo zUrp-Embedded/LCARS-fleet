@@ -63,7 +63,7 @@ spec:
       - tool_search_python
       - tool_search_bash
     # Destructive patterns come from the universal baseline
-    # (`_baseline-git-denied.yaml`, intangible) — not duplicated here.
+    # (`baseline/git-denied.yaml`, intangible) — not duplicated here.
     git_ops_denied: []
   knowledge:
     skills:

@@ -48,7 +48,7 @@ spec:
       - WebSearch
       - WebFetch
     # `push --force`, `reset --hard`, `rebase main` etc. come from the universal
-    # baseline (`_baseline-git-denied.yaml`) — not duplicated here. Scoper-specific
+    # baseline (`baseline/git-denied.yaml`) — not duplicated here. Scoper-specific
     # restrictions remain: no push/reset/rebase/commit (it judges a brief, it never
     # touches the workspace).
     git_ops_denied: ["push", "reset", "rebase", "commit"]

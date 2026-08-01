@@ -7,10 +7,16 @@ defmodule Fleet.Catalogue do
   ## Runtime vs catalogue
 
   The runtime is the machine that runs agents; the catalogue is the business it runs. The
-  discriminator is mechanical and holds everywhere in `priv/`: a `schema/` directory is a CONTRACT
-  (runtime side, resolved by `:code.priv_dir` with no knob — a schema an operator can swap is a
-  contract that does not constrain), while `canon/`, `config/` and `templates/` hold the business
-  material an operator legitimately replaces. Only the second kind resolves through this module.
+  discriminator is mechanical and holds everywhere in `priv/`: `canon/`, `config/` and `templates/`
+  hold the business material an operator legitimately replaces, and ONLY those resolve through this
+  module. Everything else under `priv/` is runtime, resolved by `:code.priv_dir` with no knob —
+  `schema/` (the contract a catalogue is validated against) and `baseline/` (a floor a catalogue may
+  not lower, e.g. the universal git denylist). Both by the same rule: **what an operator must not be
+  able to replace is a contract, and a contract an operator can swap does not constrain.**
+
+  Corollary for anything added later: a floor or a contract placed under `canon/` would be exported
+  with a catalogue and edited by its author to no effect — a lie told by the layout rather than by
+  a comment.
 
   ## Why ONE root and not one variable per tree
 

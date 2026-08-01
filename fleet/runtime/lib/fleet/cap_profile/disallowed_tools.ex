@@ -15,11 +15,13 @@ defmodule Fleet.CapProfile.DisallowedTools do
   `Fleet.CapProfile.*` does not move. Calls NEITHER `Schema` NOR `Invariants` NOR the
   `load`/`compose` core.
 
-  I/O: reads the IMMUTABLE priv baseline `priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`
-  (resolved via `:code.priv_dir(:lcars_fleet)`), read+parse cached once via
-  `Fleet.SchemaCache.cached/2` (lazy-init; errors not cached — the bang re-raises on the next call).
+  I/O: reads the IMMUTABLE baseline `priv/cap_profile/baseline/git-denied.yaml`, resolved via
+  `:code.priv_dir(:lcars_fleet)` and NOT through `Fleet.Catalogue` — this floor is a runtime
+  contract, so an operator's catalogue cannot lower it, and a copy of the file inside a catalogue
+  is read by nobody. Read+parse cached once via `Fleet.SchemaCache.cached/2` (lazy-init; errors not
+  cached — the bang re-raises on the next call).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-01
   """
 
   # Source struct (compile-dep): the fns pattern-match `%CapProfile{}` and the
@@ -47,7 +49,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
 
   @doc """
   Returns a `%CapProfile{}` whose `spec.scope.disallowedTools` is augmented with:
-  - the patterns of the **universal baseline** (`_baseline-git-denied.yaml`,
+  - the patterns of the **universal baseline** (`baseline/git-denied.yaml`,
     intangible by guiding principle)
   - THEN the patterns from `git_ops_denied_patterns/1` (worker-specific cap-profile).
   Deduplicated union, order preserved: existing, baseline, profile.
@@ -75,7 +77,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
 
   @doc """
   The `disallowedTools` patterns from the universal baseline
-  (`priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`). Intangible patterns
+  (`priv/cap_profile/baseline/git-denied.yaml`). Intangible patterns
   denied to ALL workers regardless of the cap-profile — removing a pattern is an
   explicit architectural decision (edit the baseline file, not a cap-profile
   option).
@@ -95,7 +97,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
     |> Enum.map(&"Bash(git #{&1}:*)")
   end
 
-  # IMMUTABLE priv baseline: read+parse once via the foundation cache authority
+  # IMMUTABLE baseline: read+parse once via the foundation cache authority
   # (`Fleet.SchemaCache` is a declared dep of the facade boundary). The bang loader
   # raises on failure, so an error is never cached — the next call retries.
   defp load_baseline_git_ops_denied! do
@@ -106,11 +108,14 @@ defmodule Fleet.CapProfile.DisallowedTools do
   end
 
   defp read_baseline_git_ops_denied! do
+    # BUNDLED priv, deliberately not `Fleet.Catalogue`: the floor travels with the runtime, so a
+    # catalogue cannot widen it by shipping its own copy — and the file lives outside `canon/` so
+    # that no catalogue export carries one.
     path =
       :lcars_fleet
       |> :code.priv_dir()
       |> to_string()
-      |> Path.join("cap_profile/canon/cap-profiles/_baseline-git-denied.yaml")
+      |> Path.join("cap_profile/baseline/git-denied.yaml")
 
     case YamlElixir.read_from_file(path) do
       {:ok, %{"git_ops_denied" => entries}} when is_list(entries) ->

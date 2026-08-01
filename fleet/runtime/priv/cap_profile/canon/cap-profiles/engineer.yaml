@@ -46,7 +46,7 @@ spec:
       # les deux faces sont fermees (mesure sur pod vivant, 2026-07-31).
       - WebSearch
       - WebFetch
-    # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`,
+    # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`,
     # intangible) — not duplicated here. `push` added here = the MECHANICAL forge-blind
     # barrier: `Bash(git push:*)` becomes disallowed (disallow > allow), not merely absent
     # from the allowlist. The pod CANNOT push.

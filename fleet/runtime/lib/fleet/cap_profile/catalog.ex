@@ -171,8 +171,8 @@ defmodule Fleet.CapProfile.Catalog do
             _ ->
               base = Path.basename(path)
 
-              # A no-name file is a DELIBERATE baseline/overlay fragment ONLY by the `_`-prefix convention
-              # (`_baseline-*.yaml`, mirror of `_frozen-monks/`). A NON-prefixed file with no
+              # A no-name file is a DELIBERATE overlay fragment ONLY by the `_`-prefix convention
+              # (mirror of `_frozen-monks/`). A NON-prefixed file with no
               # `metadata.name` looks like a role whose name was lost → make the silent skip VISIBLE
               # (warning), otherwise that role vanishes from the index (load → `:not_found`) with no signal.
               unless String.starts_with?(base, "_") do

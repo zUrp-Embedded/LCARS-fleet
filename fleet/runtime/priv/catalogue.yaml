@@ -17,9 +17,12 @@
 #   coord/config/coord-policies.yaml        escalation policy map (a FILE)
 #   project_template/<face>                 scaffolding for a freshly onboarded project
 #
-# The runtime schemas (priv/*/schema/) are NOT part of the catalogue: they are the contract the
-# catalogue is validated against, and they resolve without passing through this root. The bundled
-# root is priv/ itself, so they sit next to it — a root declares what it CONTAINS, never that it
-# contains nothing else.
+# NOT part of the catalogue, and deliberately outside every tree above:
+#   priv/*/schema/                 the contract a catalogue is validated against
+#   priv/cap_profile/baseline/     floors a catalogue may not lower (universal git denylist)
+# Both resolve without passing through this root. A copy shipped inside a catalogue is read by
+# nobody — the layout is what makes that true, so neither may move under canon/. The bundled root
+# is priv/ itself, so they sit next to it: a root declares what it CONTAINS, never that it contains
+# nothing else.
 
 api_version: 1

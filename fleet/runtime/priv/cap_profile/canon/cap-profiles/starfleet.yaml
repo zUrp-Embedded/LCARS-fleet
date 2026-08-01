@@ -62,7 +62,7 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-    # Destructive patterns come from the universal baseline (`_baseline-git-denied.yaml`) — not duplicated.
+    # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`) — not duplicated.
     git_ops_denied: []
     # (no `outputs`: the ready-room/outbox line was a SYSADMIN reliquat left over from starfleet's
     # previous role — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)

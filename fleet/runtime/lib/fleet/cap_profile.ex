@@ -477,7 +477,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The `disallowedTools` patterns of the intangible universal baseline
-  (`priv/cap_profile/canon/cap-profiles/_baseline-git-denied.yaml`) — **raises** fail-closed if
+  (`priv/cap_profile/baseline/git-denied.yaml`) — **raises** fail-closed if
   the baseline is absent/corrupt. **Delegates** to
   `Fleet.CapProfile.DisallowedTools.baseline_patterns/0`. Public (tests + internal).
   """

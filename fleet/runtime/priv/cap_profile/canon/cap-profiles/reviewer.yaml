@@ -47,7 +47,7 @@ spec:
       - WebSearch
       - WebFetch
     # `push --force` and `reset --hard` come from the universal baseline
-    # (`_baseline-git-denied.yaml`) — not duplicated here. Reviewer-specific
+    # (`baseline/git-denied.yaml`) — not duplicated here. Reviewer-specific
     # restrictions remain (writes its narrative note only, never touches
     # the workspace): no push/rebase/commit.
     git_ops_denied: ["push", "rebase", "commit"]
