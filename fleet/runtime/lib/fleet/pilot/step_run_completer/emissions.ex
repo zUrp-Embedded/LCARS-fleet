@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   Same keyword seams as the completer (`:forge_client` / `:forge_opts`) — no
   dedicated struct: the module lives in the completer's orbit and reads the same opts.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -110,14 +110,20 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         forge_opts = Keyword.get(opts, :forge_opts, [])
         repo = Map.fetch!(step_run, :repo)
         n = Map.fetch!(step_run, :issue_number)
-        role = Map.get(step_run, :role, "engineer")
+        # The role is the note's VOICE and it selects the TOKEN that posts it. A default would
+        # publish one producer's summary under another producer's identity — the very thing the
+        # token fail-closed below refuses. A step_run without a role is therefore the same skip,
+        # not a guess: the rail always carries one, so its absence is a caller defect, said out
+        # loud and never dressed up as an engineer.
+        role = Map.get(step_run, :role)
 
         # FULL NOTE on the ISSUE (canonical record of the work) — the sole post of this function.
         # Fail-closed on the token: no role token → skip (do not post the eng voice under the system
         # account; RoleToken logs the missing token). A failed post is LOGGED: it leaves the ticket
         # without the note and no rail re-posts it; the completion is unaffected (the deliverable
         # truth = the pushed commit + open PR), but the loss must be visible.
-        with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
+        with true <- role_present?(role, repo, n),
+             {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
              {:error, reason} <-
                forge.post_comment(
                  repo,
@@ -136,5 +142,17 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
       _ ->
         :noop
     end
+  end
+
+  defp role_present?(role, _repo, _n) when is_binary(role) and role != "", do: true
+
+  defp role_present?(_role, repo, n) do
+    Logger.warning(
+      "StepRunCompleter: #{repo}##{n} eng note NOT posted — the step_run carries no role, and " <>
+        "the note is a role's VOICE posted with a role's TOKEN. Attributing it to a default " <>
+        "would sign one producer's work as another's (deliverable truth unaffected)."
+    )
+
+    false
   end
 end
