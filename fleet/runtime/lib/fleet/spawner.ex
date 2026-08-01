@@ -76,7 +76,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Spawner.Pod
@@ -565,6 +565,14 @@ defmodule Fleet.Spawner do
   """
   @spec restart_strategy_for(String.t() | nil) :: :temporary
   def restart_strategy_for(_scope), do: :temporary
+
+  @doc """
+  Proves every canon role spawn-ready against the currently-resolved catalogue — the boot check
+  (`Spawner.Application`) reachable off the supervision path, for the standalone catalogue
+  verifier. Delegates to `Fleet.Spawner.CanonProof`: the SAME function the boot calls, never a
+  copy — a divergent proof would be one more dialect of "spawnable".
+  """
+  defdelegate prove_canon!(), to: Fleet.Spawner.CanonProof, as: :prove_all!
 
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile

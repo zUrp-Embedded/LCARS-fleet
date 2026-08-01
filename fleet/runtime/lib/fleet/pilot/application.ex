@@ -238,6 +238,25 @@ defmodule Fleet.Pilot.Application do
   # resolution and the refusal messages; here we only make it happen before readiness.
   # (No log line: this module has none, and the resolution is not a milestone — its FAILURE is, and
   # the raise carries it. `Fleet.Pilot.Roles` remains the place to ask who they are.)
+  @doc """
+  The catalogue's card + structural-role checks, off the supervision path — for the standalone
+  verifier. Runs EXACTLY what `start_link/1` runs at rail boot, in the same order and through the
+  same functions: publish the workflow image, then the jury/step/structural guards. It lives HERE
+  and not in the verifier because these read `Fleet.Workflow` (a dep of Pilot, not of the OTP root)
+  — the boundary is what keeps the workflow catalogue on this side.
+
+  Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
+  the raise into a finding.
+  """
+  @spec verify_cards_and_roles!(keyword()) :: :ok
+  def verify_cards_and_roles!(opts \\ []) do
+    Fleet.Workflow.Loader.publish_image!()
+    validate_card_juries!()
+    validate_card_steps!(opts)
+    validate_structural_roles!()
+    :ok
+  end
+
   defp validate_structural_roles! do
     _ = Fleet.Pilot.Roles.resolve_structural_roles!()
     :ok

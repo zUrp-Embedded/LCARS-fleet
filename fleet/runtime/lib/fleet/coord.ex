@@ -63,4 +63,11 @@ defmodule Fleet.Coord do
   # Strict canonical arities — the correlation_id is always explicit.
   defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
+
+  @doc """
+  Loads and validates the escalation policy table from the resolved catalogue — the boot check
+  (`Coord.Application`) reachable off the supervision path, for the standalone catalogue verifier.
+  The SAME function the boot calls.
+  """
+  defdelegate init_policies!(), to: Fleet.Coord.Policies
 end
