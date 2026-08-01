@@ -311,13 +311,12 @@ defmodule Fleet.SPBuilder.Image do
   # root is no longer resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
   # unpublished path), so it lives on the facade as the single authority — see `drafts_root/0` below.
   defp modop_root do
-    Application.get_env(:fleet_sp_builder, :modop_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")
+    Application.get_env(:fleet_sp_builder, :modop_root) || Fleet.Catalogue.modop_root()
   end
 
   defp subagent_root do
     Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates")
+      Fleet.Catalogue.subagent_templates_root()
   end
 
   # Single authority on the facade — the image and the spawn's disk fallback MUST read one root.
@@ -326,10 +325,8 @@ defmodule Fleet.SPBuilder.Image do
   # SAME roots the composer's disk fallback reads (`SPBuilder.sp_role_root/0` and its template path)
   # — one resolution per asset, mirrored here, for the reason above.
   defp sp_role_root do
-    Application.get_env(:fleet_sp_builder, :sp_role_root) ||
-      Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
+    Application.get_env(:fleet_sp_builder, :sp_role_root) || Fleet.Catalogue.cap_profiles_root()
   end
 
-  defp template_root,
-    do: Path.join([to_string(:code.priv_dir(:lcars_fleet)), "sp_builder/templates"])
+  defp template_root, do: Fleet.Catalogue.sp_templates_root()
 end

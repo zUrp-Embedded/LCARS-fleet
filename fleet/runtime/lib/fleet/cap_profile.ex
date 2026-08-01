@@ -5,6 +5,7 @@ defmodule Fleet.CapProfile do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache
     ],

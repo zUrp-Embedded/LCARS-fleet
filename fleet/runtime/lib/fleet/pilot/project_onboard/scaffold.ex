@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
 
   The only effect is `write_all` (mkdir_p + write, fail-loud per file).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   @doc """
@@ -68,7 +68,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
   end
 
-  defp face_root(face), do: Application.app_dir(:lcars_fleet, "priv/project_template/#{face}")
+  defp face_root(face), do: Path.join(Fleet.Catalogue.project_template_root(), face)
 
   # Local expansion of the Gitea variable subset — `${VAR}` form ONLY (our template files
   # never use the bare `$VAR` form; expanding it here could corrupt shell-looking content).

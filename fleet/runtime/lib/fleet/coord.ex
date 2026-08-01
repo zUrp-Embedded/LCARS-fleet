@@ -8,6 +8,7 @@ defmodule Fleet.Coord do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      Fleet.Catalogue,
       Fleet.Event,
       # Validated verdict, a foundation value: `Policies.handle_decision/2` REQUIRES it (raw map
       # refused). The type lives at the foundation layer because it cannot live in Starfleet
@@ -56,7 +57,7 @@ defmodule Fleet.Coord do
 
   N0 (vendor-agnostic, no inference — pure declarative rule).
 
-  **Last revised**: 2026-07-19
+  **Last revised**: 2026-08-01
   """
 
   # Strict canonical arities — the correlation_id is always explicit.

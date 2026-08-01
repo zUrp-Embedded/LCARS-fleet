@@ -38,7 +38,7 @@ defmodule Fleet.CapProfile.Catalog do
   via `Application.put_env/3`), default = the BUNDLED canon resolved by
   `:code.priv_dir(:lcars_fleet)` under `cap_profile/` (resolves in a release as in dev, without env).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -335,9 +335,10 @@ defmodule Fleet.CapProfile.Catalog do
   def root_dir do
     # A `:root_dir` explicitly set to nil (e.g. a cross-test env leak) must NEVER
     # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
-    # Default = the BUNDLED priv (`:code.priv_dir`) → resolves in a RELEASE (lib/lcars_fleet-vsn/priv/…)
-    # as in dev (_build/…/priv) WITHOUT any env — a CWD-relative default would :enoent in a release.
-    Application.get_env(:fleet_cap_profile, :root_dir) ||
-      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/canon/cap-profiles")
+    # Default = the CATALOGUE root's cap-profiles tree (bundled priv unless `LCARS_CATALOGUE_ROOT`
+    # says otherwise) → resolves in a RELEASE as in dev WITHOUT any env. `:root_dir` stays the FINE
+    # override and keeps precedence: the coarse knob brings a whole catalogue, this one moves this
+    # tree alone.
+    Application.get_env(:fleet_cap_profile, :root_dir) || Fleet.Catalogue.cap_profiles_root()
   end
 end

@@ -22,7 +22,7 @@ defmodule Fleet.SPBuilder.Monk do
   `cap-profiles/monks/` and fail — this is the DORMANT-by-design state (kept, documented) until an explicit
   thaw wires the frozen tree back as the registry root. See also the LEGACY banner in `runtime/priv/canon/README.md`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-01
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}
@@ -59,7 +59,7 @@ defmodule Fleet.SPBuilder.Monk do
       root =
         Keyword.get(opts, :monk_registry_root) ||
           Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
-          Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles/monks")
+          Fleet.Catalogue.monk_registry_root()
 
       path = Path.join(root, registry_rel)
 

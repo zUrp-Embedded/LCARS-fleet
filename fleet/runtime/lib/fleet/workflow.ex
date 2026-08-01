@@ -12,7 +12,7 @@ defmodule Fleet.Workflow do
   the gatekeeper is a one-shot per-project judge, spawned per gate eval by the pilot's
   `GatekeeperEscalation` — the module was the documented MVP awaiting the project model.)
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-08-01
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
@@ -24,6 +24,7 @@ defmodule Fleet.Workflow do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.CapProfile,

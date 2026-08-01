@@ -30,7 +30,7 @@ defmodule Fleet.Coord.Policies do
   lookup and the wire-event construction share no helper). The
   actions → event-types table lives over there.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Coord.Emitter
@@ -198,9 +198,5 @@ defmodule Fleet.Coord.Policies do
     Fleet.SchemaCache.fetch!(@policies_key, "Fleet.Coord.Policies.init_policies!/0")
   end
 
-  defp default_policies_path do
-    :code.priv_dir(:lcars_fleet)
-    |> to_string()
-    |> Path.join("coord/config/coord-policies.yaml")
-  end
+  defp default_policies_path, do: Fleet.Catalogue.coord_policies_path()
 end
