@@ -13,7 +13,17 @@
 
 import Config
 
-if config_env() != :test do
+# TOOL MODE — a release `eval` runs the config providers (this whole file) BEFORE evaluating its
+# expression. A verify/tooling invocation is NOT a fleet boot: it must not demand the deployment
+# env (ports, forge, credentials). One flag skips the ENTIRE deployment-config body — deliberately
+# coarse, so every present AND future deployment requirement below is covered at once, never a new
+# variable to simulate per requirement (that whack-a-mole is what would re-create a dialect). Set
+# by the tool entrypoint (`Fleet.Application.CatalogueVerify` via `bin/fleet_umbrella eval`), absent
+# on the daemon path, so the daemon still fails loud on a missing port. Cooperative threat model:
+# setting this and then `start`ing the daemon is a deliberate misuse, out of scope like R-no-root.
+tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
+
+if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
   # ============================================================
