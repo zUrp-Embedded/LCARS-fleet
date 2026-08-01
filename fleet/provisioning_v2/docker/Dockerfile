@@ -167,6 +167,32 @@ COPY fleet/provisioning_v2/docker/console.tmux.conf  /opt/lcars/console.tmux.con
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 COPY fleet/provisioning_v2/docker/skel.bashrc      /etc/skel/.bashrc
+
+# ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
+# `~/.profile` (Debian, l. 25-26) pose deja cette regle, mais il n'est lu QUE par un shell de
+# login. Or la boite a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console
+# web en ouvrent un ; `su lcars` (sans tiret) et `docker exec` n'en ouvrent pas.
+# Mesure du 2026-08-01, dans une boite installee : `claude: command not found` dans un shell issu
+# de `su lcars`, alors que le binaire etait pose depuis le boot (`~/.local/bin/claude`, 275 Mo,
+# provisioning « POSÉ 40-claude-bin »). Present et invisible, selon la porte empruntee.
+#
+# POURQUOI ICI ET PAS DANS skel.bashrc : le squelette n'est copie qu'a la CREATION de l'humain
+# (`useradd -m`), jamais ensuite — une boite deja installee ne le verrait jamais. `/etc/bash.bashrc`
+# est lu par tout bash interactif, vit dans l'IMAGE (donc suit les mises a jour) et ne touche pas
+# au `.bashrc` de l'humain, qui reste le sien.
+#
+# Ce n'est pas une copie concurrente de la regle de `.profile` : c'est la MEME regle, rendue vraie
+# pour les shells que `.profile` ne voit jamais. Le test d'appartenance evite d'empiler le chemin
+# a chaque relecture (shell imbrique, tmux, screen).
+RUN printf '%s\n' \
+    '' \
+    '# LCARS : ~/.local/bin pour TOUT shell interactif — cf. le Dockerfile pour le pourquoi.' \
+    'case ":$PATH:" in' \
+    '  *":$HOME/.local/bin:"*) ;;' \
+    '  *) [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH" ;;' \
+    'esac' \
+    >> /etc/bash.bashrc
+
 RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console-humans.sh \
                /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
                /opt/lcars/fleet/provisioning_v2/provision \
