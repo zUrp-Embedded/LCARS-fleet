@@ -38,27 +38,86 @@ defmodule Fleet.Pilot.Roles do
   @gatekeeper_capability :exception_judge
 
   @doc """
-  PRODUCER role of the single-brick model (the one that codes the brick). Override by the opt
-  `:producer_role` (project/test), then config `:fleet_pilot, :producer_role`; otherwise RESOLVED
-  from the catalogue by the `producer` capability. Raises if no role declares it, or if several do.
+  Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
+  `:fleet_pilot, :producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
+
+  ⚠ **This is NOT who produces.** The CARD names its producer per step (`steps.<name>.role`,
+  schema-required), and the run carries it in the feature branch `lcars/issue-N-<producer>`. This
+  accessor is the fallback of a single call site — `StepRunCompleter.producer_stop_role/2`, when the
+  branch is absent or unparseable and a stopwatch stop still needs a real tokened identity.
+
+  So SEVERAL producers is a legitimate catalogue: `eng_hw` and `eng_sw` both carry the capability,
+  and every card says which one it dispatches. It raises only when this fallback is actually reached
+  on such a catalogue — because there, genuinely, no answer exists, and signing as the wrong producer
+  is worse than saying so.
   """
   @spec producer_role(keyword()) :: String.t()
   def producer_role(opts \\ []) do
     Keyword.get(opts, :producer_role) ||
       Application.get_env(:fleet_pilot, :producer_role) ||
-      resolve_structural!(@producer_capability, "producer")
+      resolve_producer!()
+  end
+
+  # Several producers is NOT a broken catalogue — it is a catalogue with `eng_hw` and `eng_sw`. The
+  # refusal belongs to this fallback path, not to boot: the cards name their producer, and a fleet
+  # that specialises its producers must not be refused readiness for it.
+  defp resolve_producer! do
+    case Fleet.CapProfile.roles_with_capability(@producer_capability) do
+      {:ok, [role]} ->
+        role
+
+      {:ok, []} ->
+        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+                "(#{inspect(@producer_capability)}) — no card can name a producer. Fix the catalogue."
+
+      {:ok, roles} ->
+        raise "Fleet.Pilot.Roles: #{length(roles)} roles declare the producer capability " <>
+                "(#{inspect(roles)}), and this is the LAST-RESORT path — the card names the producer " <>
+                "per step, the run carries it in the feature branch, and both were unavailable here. " <>
+                "On a catalogue with several producers there is no fleet-wide default to fall back " <>
+                "on; set `:fleet_pilot, :producer_role` if this deployment has one."
+
+      {:error, reason} ->
+        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+                "resolving the producer role — broken deploy, fail-loud."
+    end
   end
 
   @doc """
-  Resolves BOTH structural roles, raising on the first that cannot be. Called at rail boot
-  (`Fleet.Pilot.Application`) so a catalogue that names neither refuses readiness rather than
-  wedging the first dispatch. Returns them for the log.
-  """
-  @spec resolve_structural_roles!(keyword()) :: %{producer: String.t(), gatekeeper: String.t()}
-  def resolve_structural_roles!(opts \\ []),
-    do: %{producer: producer_role(opts), gatekeeper: gatekeeper_role(opts)}
+  Boot check of the two capabilities the fleet cannot work without. Called at rail boot
+  (`Fleet.Pilot.Application`), and the two demands DIFFER because the two concepts do:
 
-  # ONE resolution for both — a second copy would be a second dialect of "structural role".
+    * `producer` — **at least one**. Several is a legitimate catalogue (`eng_hw` + `eng_sw`): the
+      card names which one it dispatches, per step. Refusing readiness for a specialised fleet would
+      be the guard inventing a policy nobody asked for.
+    * `exception_judge` — **exactly one**. `Fleet.Pilot.GatekeeperSeal` is the sole writer of the
+      signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
+
+  Returns the gatekeeper (resolved) and the producers (the set) for the caller.
+  """
+  @spec resolve_structural_roles!(keyword()) :: %{producers: [String.t()], gatekeeper: String.t()}
+  def resolve_structural_roles!(opts \\ []) do
+    %{producers: producers!(), gatekeeper: gatekeeper_role(opts)}
+  end
+
+  # AT LEAST one — the cards choose among them.
+  defp producers! do
+    case Fleet.CapProfile.roles_with_capability(@producer_capability) do
+      {:ok, []} ->
+        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+                "(#{inspect(@producer_capability)}) — no card could name a producer, the fleet " <>
+                "produces nothing. Fix the catalogue."
+
+      {:ok, roles} ->
+        roles
+
+      {:error, reason} ->
+        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+                "resolving the producers — broken deploy, fail-loud."
+    end
+  end
+
+  # EXACTLY one — the sealer is a singleton by design, not by convention.
   defp resolve_structural!(capability, label) do
     case Fleet.CapProfile.roles_with_capability(capability) do
       {:ok, [role]} ->
@@ -67,13 +126,13 @@ defmodule Fleet.Pilot.Roles do
       {:ok, []} ->
         raise "Fleet.Pilot.Roles: no catalogue role declares the #{label} capability " <>
                 "(#{inspect(capability)}) — the single-brick model has no #{label}. A catalogue " <>
-                "must NAME its structural roles; there is no default to fall back on. Fix the catalogue."
+                "must NAME it; there is no default to fall back on. Fix the catalogue."
 
       {:ok, roles} ->
         raise "Fleet.Pilot.Roles: #{length(roles)} catalogue roles declare the #{label} capability " <>
-                "(#{inspect(capability)}): #{inspect(roles)} — a structural role is unique by " <>
-                "construction, and picking one at random would be an arbitrary fleet-wide policy. " <>
-                "Fix the catalogue."
+                "(#{inspect(capability)}): #{inspect(roles)} — this one is unique BY DESIGN (single " <>
+                "writer of the signed merge), and picking one at random would be an arbitrary " <>
+                "fleet-wide policy. Fix the catalogue."
 
       {:error, reason} ->
         raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>

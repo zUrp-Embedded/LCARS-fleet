@@ -61,13 +61,33 @@ defmodule Fleet.Pilot.RolesStructuralTest do
     end
   end
 
-  test "plusieurs roles la declarent → refus, on ne tire pas au sort", %{dir: dir} do
-    write_role!(dir, "alpha", ["producer"])
-    write_role!(dir, "beta", ["producer"])
+  test "PLUSIEURS producteurs est un catalogue legitime — le boot l'accepte", %{dir: dir} do
+    # Le cas `eng_hw` + `eng_sw`. La carte nomme son producteur par step (`role`, schema-required)
+    # et le run le porte dans la branche `lcars/issue-N-<producer>` : exiger un singleton fleet-wide
+    # refuserait la readiness a une fleet specialisee, pour une politique que personne n'a demandee.
+    write_role!(dir, "eng-hw", ["producer"])
+    write_role!(dir, "eng-sw", ["producer"])
+    write_role!(dir, "sealer", ["exception_judge"])
 
-    assert_raise RuntimeError, ~r/2 catalogue roles declare the producer capability/, fn ->
-      Roles.producer_role()
-    end
+    assert %{producers: ["eng-hw", "eng-sw"], gatekeeper: "sealer"} =
+             Roles.resolve_structural_roles!()
+  end
+
+  test "…mais le repli de DERNIER RECOURS refuse de deviner lequel", %{dir: dir} do
+    # `producer_role/0` n'est pas « qui produit » : c'est le repli d'un seul appelant, quand la
+    # branche du run est illisible. La, avec deux producteurs, aucune reponse n'existe — et signer
+    # sous le mauvais producteur est pire que le dire.
+    write_role!(dir, "eng-hw", ["producer"])
+    write_role!(dir, "eng-sw", ["producer"])
+
+    assert_raise RuntimeError, ~r/LAST-RESORT path/, fn -> Roles.producer_role() end
+  end
+
+  test "deux scelleurs restent un refus : le singleton est PAR CONCEPTION", %{dir: dir} do
+    write_role!(dir, "alpha", ["exception_judge"])
+    write_role!(dir, "beta", ["exception_judge"])
+
+    assert_raise RuntimeError, ~r/unique BY DESIGN/, fn -> Roles.gatekeeper_role() end
   end
 
   test "une capability legitimement multiple n'est PAS une erreur", %{dir: dir} do
