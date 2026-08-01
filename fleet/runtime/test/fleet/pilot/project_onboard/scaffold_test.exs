@@ -25,7 +25,15 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert spec =~ "2026-07-18"
     # `.gitea/template` is the template CONTROL file: never copied (native semantics)
     refute File.exists?(Path.join(dir, ".gitea/template"))
-    refute File.dir?(Path.join(dir, ".gitea"))
+    # ...but `.gitea/` itself IS delivered — it carries the CI rail every project is born with.
+    # The old form of this test refuted the whole directory, which held only the control file at
+    # the time: an incidental truth, not the invariant. The invariant is the line above.
+    workflow = Path.join(dir, ".gitea/workflows/ci.yml")
+    assert File.exists?(workflow)
+    # The workflow's `${GITHUB_*}` are the RUNNER's variables, expanded at job time. Neither the
+    # local expansion (5 known vars) nor the forge's (`.gitea/template` lists README + spec only)
+    # may touch them — a scaffold that emptied them would ship a rail that reports nothing.
+    assert File.read!(workflow) =~ "${GITHUB_REPOSITORY}"
   end
 
   test "work/3: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
