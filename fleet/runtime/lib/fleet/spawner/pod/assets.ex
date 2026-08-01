@@ -20,7 +20,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Spawner.Pod.Fs
@@ -34,10 +34,9 @@ defmodule Fleet.Spawner.Pod.Assets do
   `hasCompletedOnboarding: true` also skips onboarding (the legacy `.claude.json` — the
   host user's global config — is not meant to be touched here).
 
-  `extensions.marketplace.autoInstall: false` — measured on a live pod: every spawn cloned
-  Anthropic's official plugin marketplace from GitHub (~40 plugin trees, 2 s after boot) to
-  install exactly ZERO plugin. A fleet of ten pods paid ten clones for nothing, and a pod that
-  is supposed to run inside a projected world does not fetch code from the internet at boot.
+  `extensions.marketplace.autoInstall: false` — left on, every spawn clones Anthropic's plugin
+  marketplace from GitHub (~40 plugin trees) to install zero plugin: the fleet installs none. A
+  pod runs inside a projected world and must not fetch code from the internet at boot.
   """
   @spec pod_settings_json() :: String.t()
   def pod_settings_json do

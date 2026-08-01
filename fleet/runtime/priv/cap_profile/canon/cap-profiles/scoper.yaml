@@ -41,10 +41,9 @@ spec:
       - text_editor_code_execution
       - tool_search_python
       - tool_search_bash
-      # Jumeaux CLIENT des deux premiers : `web_search`/`web_fetch` denient les outils
-      # SERVER-SIDE d'Anthropic ; `WebSearch`/`WebFetch` sont les outils Claude Code, qui
-      # tournent DANS le pod et n'etaient denies nulle part. Ce role ne navigue pas :
-      # les deux faces sont fermees (mesure sur pod vivant, 2026-07-31).
+      # CLIENT twins of the two above: `web_search`/`web_fetch` deny Anthropic's SERVER-SIDE
+      # tools, `WebSearch`/`WebFetch` are the Claude Code tools running INSIDE the pod. Denying
+      # one face leaves the other open. This role does not browse: both faces are closed.
       - WebSearch
       - WebFetch
     # `push --force`, `reset --hard`, `rebase main` etc. come from the universal
