@@ -58,7 +58,9 @@ name: lcars
 
 services:
   lcars:
-    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.3}"
+    # Le defaut pointe la derniere image PUBLIEE, et ne bouge que dans le geste qui publie —
+    # un defaut en avance sur la registry rend un 404 a la premiere install venue.
+    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.2}"
     # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
     # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
     # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
@@ -70,18 +72,18 @@ services:
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
       # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci
-      # est la seule variable par laquelle le runtime ECRIT (comptes, org, depots, PR, issues).
-      # Un defaut qui vise une forge de production ferait qu'une install de test l'ecrit sans que
-      # personne l'ait demande. Vide = les modules forge passent en instruct-only et le doctor le
-      # DIT (« DRIFT 50-forge: FORGE_BASE_URL non pose ») — un drift declare, pas une panne, et
-      # surement pas un tir silencieux sur la vraie forge.
-      # Pour tester : la forge jetable de `docker/dev/forge-compose.yml`, projet separe.
+      # est la seule variable par laquelle la boite ECRIT sur une forge (comptes, org, depots,
+      # PR, issues). Un defaut qui vise une forge de production ferait qu'une install de test
+      # l'ecrit sans que personne l'ait demande. Vide = les modules forge du provisioning passent
+      # en instruct-only et le declarent en drift.
+      # Pour tester : la forge jetable de `dev/forge-compose.yml`, projet separe.
       #
-      # A SAVOIR, et ce n'est pas corrige ici : le RUNTIME ne lit pas cette variable. Il prend la
-      # sienne dans `~/.lcars/fleet_v2.env`, genere depuis `fleet/runtime/etc/fleet_v2.env.template`
-      # — qui porte `FORGE_BASE_URL=http://10.42.0.118` EN DUR (l. 32). Une boite installee vise
-      # donc cette adresse quoi qu'on mette ici. C'est le template qu'il faut desserrer, pas ce
-      # fichier, et ce n'est pas le territoire de ce compose.
+      # QUI LIT QUOI : le provisioning lit l'environnement du conteneur (cette variable, reprise
+      # en PROV_FORGE_URL par provision-lib). Le runtime ne la lit pas : il lit
+      # `~/.lcars/fleet_v2.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
+      # valeur si elle est posee a ce moment-la ; ensuite ce fichier appartient a l'humain et
+      # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
+      # jamais pour une boite deja seedee.
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`./docker.sh source-push`, un `docker cp` depuis le clone de l'humain)
