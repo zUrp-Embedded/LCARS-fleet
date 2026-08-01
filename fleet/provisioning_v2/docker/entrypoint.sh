@@ -32,8 +32,11 @@ if [[ "${1:-}" == "verify" ]]; then
   # Le runtime REFUSE root (R-no-root-runtime, runtime.exs) et le mode outil respecte
   # l'invariant au lieu de le contourner : l'eval tombe sur nobody:fleet — le gid fleet
   # donne la lecture de l'install RO (/local, root:fleet), nobody ne possède rien d'autre.
+  # LCARS_TOOL_EVAL=1 : `release eval` execute les config providers (runtime.exs ENTIER) avant
+  # l'expression — ce drapeau saute le corps de config deploiement (ports, forge, credentials),
+  # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
   exec setpriv --reuid 65534 --regid 2000 --clear-groups \
-    env HOME=/tmp RELEASE_TMP=/tmp \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/fleet_umbrella/bin/fleet_umbrella eval \
     "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
 fi
