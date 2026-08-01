@@ -98,12 +98,19 @@ if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   clone_args=(--depth 1)
   [[ -n "${LCARS_SOURCE_REF:-}" ]] && clone_args+=(--branch "$LCARS_SOURCE_REF")
   say "clonage de la source : $LCARS_SOURCE_REMOTE${LCARS_SOURCE_REF:+ (ref $LCARS_SOURCE_REF)} → $LCARS_SOURCE_DIR"
-  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "$LCARS_SOURCE_DIR" 2>&1 | sed 's/^/[git] /'; then
+  # ATOMIQUE (clone en .part puis mv) : un boot tué EN PLEIN clone laisserait un .git partiel
+  # que la règle de non-écrasement protégerait ensuite comme du travail — la boîte vivrait sur
+  # un cadavre de repo. Le .part orphelin d'un boot précédent se nettoie, lui : il n'est jamais
+  # du travail, par construction.
+  rm -rf "${LCARS_SOURCE_DIR}.part"
+  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "${LCARS_SOURCE_DIR}.part" 2>&1 | sed 's/^/[git] /' \
+     && mv "${LCARS_SOURCE_DIR}.part" "$LCARS_SOURCE_DIR"; then
     # Le clone est fait par root ; la source appartient à l'humain qui travaillera dedans. Le
     # groupe `fleet` parce que c'est celui des zones catalogue posées juste au-dessus.
     chown -R "$LCARS_HUMAN:fleet" "$LCARS_SOURCE_DIR"
     say "source clonée"
   else
+    rm -rf "${LCARS_SOURCE_DIR}.part"
     say "CLONAGE ÉCHOUÉ — la boîte démarre sans source (la fleet ne pourra pas se maintenir)"
   fi
 fi
@@ -117,10 +124,13 @@ LCARS_WORK_DIR="/home/projects.work/$(basename "$LCARS_SOURCE_DIR")"
 if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" work/ops >/dev/null 2>&1; then
     say "clonage du corpus work/ops → $LCARS_WORK_DIR"
-    if git clone --depth 1 --branch work/ops "$LCARS_SOURCE_REMOTE" "$LCARS_WORK_DIR" 2>&1 | sed 's/^/[git] /'; then
+    rm -rf "${LCARS_WORK_DIR}.part"
+    if git clone --depth 1 --branch work/ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
+       && mv "${LCARS_WORK_DIR}.part" "$LCARS_WORK_DIR"; then
       chown -R "$LCARS_HUMAN:fleet" "$LCARS_WORK_DIR"
       say "corpus work/ops posé"
     else
+      rm -rf "${LCARS_WORK_DIR}.part"
       say "CLONAGE work/ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
     fi
   else
