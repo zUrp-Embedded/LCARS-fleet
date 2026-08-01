@@ -108,6 +108,40 @@ if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   fi
 fi
 
+# LE CORPUS work/ops — même contrat que les projets nés ici : un projet canon a DEUX arbres,
+# `main` (le code, ci-dessus) et `work/ops` (plans, journaux, gate-briefs), checkouté dans le
+# dual-dir /home/projects.work/<nom>. Si le remote porte la branche, on la pose ; sinon on le
+# dit et la boîte vit sans (une source sans corpus reste maintenable, elle est juste amnésique).
+# Même règle de non-écrasement : un dual-dir déjà là n'est jamais touché.
+LCARS_WORK_DIR="/home/projects.work/$(basename "$LCARS_SOURCE_DIR")"
+if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
+  if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" work/ops >/dev/null 2>&1; then
+    say "clonage du corpus work/ops → $LCARS_WORK_DIR"
+    if git clone --depth 1 --branch work/ops "$LCARS_SOURCE_REMOTE" "$LCARS_WORK_DIR" 2>&1 | sed 's/^/[git] /'; then
+      chown -R "$LCARS_HUMAN:fleet" "$LCARS_WORK_DIR"
+      say "corpus work/ops posé"
+    else
+      say "CLONAGE work/ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
+    fi
+  else
+    say "pas de branche work/ops sur le remote — dual-dir non posé (le corpus arrive par l'adopt)"
+  fi
+fi
+
+# L'IDENTITÉ GIT DE L'HUMAIN — seed-once, comme fleet_v2.env : sans user.email, git signe
+# `<user>@<hostname>` et la forge ne peut mapper le commit sur AUCUN compte (l'attribution
+# auteur-humain devient un fantôme sans avatar). L'email doit être CELUI du compte forge de
+# l'humain ; il arrive par l'environnement d'install. Absent = dit, jamais inventé.
+if [[ -n "${LCARS_HUMAN_EMAIL:-}" ]]; then
+  HOME_DIR="$(getent passwd "$LCARS_HUMAN" | cut -d: -f6)"
+  if ! su - "$LCARS_HUMAN" -c 'git config --global user.email' >/dev/null 2>&1; then
+    su - "$LCARS_HUMAN" -c "git config --global user.name '$LCARS_HUMAN' && git config --global user.email '$LCARS_HUMAN_EMAIL'"
+    say "identité git seedée : $LCARS_HUMAN <$LCARS_HUMAN_EMAIL> (à l'humain ensuite)"
+  fi
+else
+  say "LCARS_HUMAN_EMAIL non posé — les commits de l'humain signeront <user>@<hostname>, la forge ne les mappera pas"
+fi
+
 if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
   # git refuse un repo d'un autre owner (« dubious ownership ») : le clone vient de l'hôte,
   # son uid n'a aucune raison d'être celui du conteneur. Déclaré safe pour TOUS les humains.

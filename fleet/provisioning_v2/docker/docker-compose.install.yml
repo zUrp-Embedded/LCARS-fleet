@@ -67,6 +67,9 @@ services:
     environment:
       LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
       LCARS_UID: "${LCARS_UID:-1000}"
+      # L'email du compte FORGE de l'humain — c'est lui qui mappe ses commits sur son compte
+      # (avatar, attribution). Vide = les commits signent <user>@<hostname>, non mappables.
+      LCARS_HUMAN_EMAIL: "${LCARS_HUMAN_EMAIL:-}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
       # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci
