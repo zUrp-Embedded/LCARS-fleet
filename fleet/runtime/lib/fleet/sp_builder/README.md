@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-29
+**Last revised**: 2026-08-01
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -15,7 +15,7 @@ a pod `CLAUDE.md`, and a filtered skills list. No process, no state.
 there, not restated here.
 
 ## Modules
-- `Fleet.SPBuilder` — the facade + `Composer` impl (`compose/3`, `compose_claude_md/3`, `filter_skills/2`, `resolve_monk_injection/2` defdelegate); EEx templating (`priv/sp_builder/templates/*.eex`) + role-SP / modop reads + path resolution
+- `Fleet.SPBuilder` — the facade + `Composer` impl (`compose/3`, `compose_claude_md/3`, `filter_skills/2`, `resolve_monk_injection/2` defdelegate); EEx templating (`priv/catalogue/sp_builder/templates/*.eex`) + role-SP / modop reads + path resolution
 - `Fleet.SPBuilder.Blocks` — block-based composition of the per-role SPs (`priv/sp_builder/sp_blocks/` + `sp-map.yaml`; `mix lcars.sp.gen` writes the flat drafts that `Fleet.Spawner.Pod.Assets` reads, N2); fail-loud no-fallback (no SP → no pod)
 - `Fleet.SPBuilder.Monk` — monk-injection resolution (`resolve/2`, `resolve_or_empty/2`, `persona_section/1`); the composer's only YAML-registry I/O. NB: the monks are FROZEN — dormant by design, empty injection everywhere (its `@moduledoc`)
 - `Fleet.SPBuilder.RepoSections` — markdown mini-parser lifting the target repo `CLAUDE.md` named sections into the pod `CLAUDE.md`

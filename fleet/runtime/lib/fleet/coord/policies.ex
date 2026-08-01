@@ -4,7 +4,7 @@ defmodule Fleet.Coord.Policies do
   `{verdict, reason} → {action, escalation_path}`.
 
   Lookup table loaded once at boot via `init_policies!/0`
-  from `priv/coord/config/coord-policies.yaml` (or the configured path) and
+  from `priv/catalogue/coord/config/coord-policies.yaml` (or the configured path) and
   persisted in `:persistent_term` (key
   `{__MODULE__, :policies}`): O(1) read with no process, table frozen
   at boot (same pattern as the read-only caches loaded once).

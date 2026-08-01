@@ -164,8 +164,10 @@ defmodule Fleet.Spawner.Pod.Assets do
         {:ok, content}
 
       :unpublished ->
-        :lcars_fleet
-        |> Application.app_dir("priv/sp_builder/sp_drafts/protocole-user-human.md")
+        # SAME root the image freezes from, like the agent draft above: an `app_dir` literal here
+        # would read the bundled tree while the image was frozen from a repointed catalogue.
+        Fleet.SPBuilder.sp_drafts_root()
+        |> Path.join("protocole-user-human.md")
         |> read_tagged(:protocole_user_human_missing)
     end
   end
@@ -173,8 +175,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   defp read_worker_protocol_from_disk do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
-        :lcars_fleet
-        |> Application.app_dir("priv/sp_builder/sp_drafts/protocole-user-worker.md")
+        Fleet.SPBuilder.sp_drafts_root()
+        |> Path.join("protocole-user-worker.md")
         |> read_tagged(:protocole_user_worker_missing)
 
       path when is_binary(path) ->

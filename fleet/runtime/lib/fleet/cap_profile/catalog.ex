@@ -138,7 +138,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
-  # No `monks/` scan: the monks are FROZEN under `priv/cap_profile/canon/_frozen-monks/`,
+  # No `monks/` scan: the monks are FROZEN under `priv/catalogue/cap_profile/canon/_frozen-monks/`,
   # deliberately out of the boot loop (cf. `Fleet.SPBuilder.Monk`); the thaw that re-homes
   # them adds their scan then. The `modop/` dir stays excluded: overlays have no role
   # identity. A fragment without `metadata.name` → ignored (baseline/overlay).

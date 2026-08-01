@@ -37,7 +37,7 @@ defmodule Fleet.Pilot.RolesStructuralTest do
   # Les fixtures DERIVENT d'un profil canon reel : `load/1` valide contre le schema, donc un YAML
   # minimal echouerait a charger et `roles_with_capability` — fail-closed par contrat — le compterait
   # comme ne declarant rien. Le test mesurerait alors le mauvais refus.
-  @canon_dir Path.join(File.cwd!(), "priv/cap_profile/canon/cap-profiles")
+  @canon_dir Path.join(File.cwd!(), "priv/catalogue/cap_profile/canon/cap-profiles")
 
   defp write_role!(dir, name, caps) do
     body =

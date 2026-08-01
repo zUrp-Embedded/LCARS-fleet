@@ -33,17 +33,17 @@ defmodule Fleet.Catalogue do
   is a legitimate — if rarely wise — deployment. The coarse knob moves everything; a fine knob
   moves exactly its tree. Both narrownesses are now intentional instead of accidental.
 
-  ## The default, and what it costs to change later
+  ## The default
 
-  `root/0` defaults to the BUNDLED `priv/` — the current instance behaves identically whether or not
-  the variable is set. This is deliberate: as long as the default is the bundled priv, the whole
-  split is revertible by a `git revert`. The layout is expressed ONCE here, so the eventual physical
-  move (catalogue trees under one directory of the repo) changes the default and the `@rel_*`
-  literals in THIS module and nowhere else.
+  `root/0` defaults to the BUNDLED `priv/catalogue` — a directory that holds the nine trees and
+  nothing else. The physical move that made it so (2026-08-01) changed exactly one line of this
+  module: the `@rel_*` sub-paths were already root-relative, so they did not move. That was the
+  point of expressing the layout once.
 
-  Consequence to state plainly: today the bundled root is `priv/`, which ALSO holds the runtime
-  schemas. They do not resolve through here, and the manifest does not claim them — a catalogue root
-  declares what it CONTAINS, never that it contains nothing else.
+  What the directory buys beyond tidiness: **exporting a catalogue is copying one directory**. The
+  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/sp_builder/sp_blocks/`
+  (build-time only), `priv/canon/` (frozen legacy) — sits OUTSIDE it, so no export can carry a
+  contract an author would edit to no effect.
 
   ## The manifest
 
@@ -90,7 +90,7 @@ defmodule Fleet.Catalogue do
   @rel_project_template "project_template"
 
   @doc """
-  Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:fleet_catalogue, :root`) or the bundled priv.
+  Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:fleet_catalogue, :root`) or `priv/catalogue`.
 
   The default is `:code.priv_dir`-derived, NOT CWD-relative: it must resolve in a release
   (`lib/lcars_fleet-<vsn>/priv`) exactly as in dev, with no environment at all.
@@ -99,7 +99,8 @@ defmodule Fleet.Catalogue do
   def root do
     # An explicit nil (a cross-test config leak) must never reach Path.join — coalesced here, at the
     # boundary, the same guard `CapProfile.Catalog.root_dir/0` carries for its own key.
-    Application.get_env(:fleet_catalogue, :root) || Application.app_dir(:lcars_fleet, "priv")
+    Application.get_env(:fleet_catalogue, :root) ||
+      Application.app_dir(:lcars_fleet, "priv/catalogue")
   end
 
   @doc "Cap-profile YAMLs (`<root>/#{@rel_cap_profiles}`)."

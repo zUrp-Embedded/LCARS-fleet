@@ -337,7 +337,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
     # canon/cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
     # (nonexistent in a standard install). Same pattern as brick1
     # MonkTest (resolve via Application.app_dir).
-    @canon_dir Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/cap-profiles")
+    @canon_dir Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/cap-profiles")
 
     defp canon_spec(name) do
       @canon_dir

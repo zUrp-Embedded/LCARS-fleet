@@ -2,7 +2,7 @@ defmodule Fleet.SPBuilder.Blocks do
   @moduledoc """
   Block-based composition of per-role system prompts. Source: `priv/sp_builder/sp_blocks/` (`core/*`, `method/*`,
   `role/*`) + the `sp-map.yaml` map (role → ORDERED block list; `role/*` last). The generator
-  (`mix lcars.sp.gen`) writes `priv/sp_builder/sp_drafts/agent-<role>-base.md` — the flat draft that
+  (`mix lcars.sp.gen`) writes `priv/catalogue/sp_builder/sp_drafts/agent-<role>-base.md` — the flat draft that
   `Fleet.Spawner.Pod.Assets` reads and injects (N2). Split = debuggable + a single source of truth.
 
   Layer boundary: the SP is an APPLICATIVE primitive (it consumes the cap-profile and lives just
@@ -14,7 +14,7 @@ defmodule Fleet.SPBuilder.Blocks do
   HARD RULE (no-fallback, cf. memory `no-sp-no-pod-no-fleet`): a role with no blocks, or a listed block
   absent from disk → `compose!/3` RAISES. No SP → no pod → no fleet; never a silent degradation.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-01
   """
 
   # `Date:` up front → satisfies the GO-7 hook (`<!--\s*Date\s*:`) without polluting the SP with a visible

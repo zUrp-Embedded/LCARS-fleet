@@ -1,6 +1,6 @@
 defmodule Fleet.Workflow.BriefTemplate do
   @moduledoc """
-  Loader of the brief-document templates (`priv/workflow/brief_templates/*.md`) — the
+  Loader of the brief-document templates (`priv/catalogue/workflow/brief_templates/*.md`) — the
   engine side of F-23: the PROSE of the briefs (wording, tone, structure) is CALIBRATION
   DATA, editable by the human without compiling; the code only fills mechanical slots.
 

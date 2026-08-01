@@ -15,7 +15,7 @@ defmodule Fleet.SPBuilder.Monk do
   ## Monks are FROZEN — reactivation is dormant by design
 
   The registry root defaults to `Fleet.Catalogue.monk_registry_root/0` (`<catalogue>/cap_profile/canon/cap-profiles/monks`), a tree
-  that is **intentionally ABSENT**: the monks were FROZEN into `priv/cap_profile/canon/_frozen-monks/`
+  that is **intentionally ABSENT**: the monks were FROZEN into `priv/catalogue/cap_profile/canon/_frozen-monks/`
   (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
   so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
   byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent

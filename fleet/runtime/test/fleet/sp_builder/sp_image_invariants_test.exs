@@ -37,7 +37,10 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
     {:ok, %{sp_md: overlay}} = Fleet.SPBuilder.compose(profile, defaults)
 
     draft =
-      Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts/agent-#{role}-base.md")
+      Application.app_dir(
+        :lcars_fleet,
+        "priv/catalogue/sp_builder/sp_drafts/agent-#{role}-base.md"
+      )
       |> File.read!()
 
     draft <> "\n" <> overlay
@@ -92,7 +95,7 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
     # Same computation as the consumption test: activable = union of every canon cap-profile's
     # modop_set default ∪ optional. Orphans (nothing can activate them) are out of scope here.
     test "no retired dialect in any ACTIVE bundle's sp.md" do
-      canon = Application.app_dir(:lcars_fleet, "priv/cap_profile/canon")
+      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
 
       referenced =
         Path.join([canon, "cap-profiles", "*.yaml"])
