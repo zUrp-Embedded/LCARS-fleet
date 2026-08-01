@@ -10,7 +10,15 @@ defmodule Fleet.CapProfile.MonksFrozenTest do
 
   alias Fleet.CapProfile
 
-  @canon_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles"])
+  @canon_dir Path.join([
+               __DIR__,
+               "..",
+               "priv",
+               "catalogue",
+               "cap_profile",
+               "canon",
+               "cap-profiles"
+             ])
              |> Path.expand()
 
   setup do

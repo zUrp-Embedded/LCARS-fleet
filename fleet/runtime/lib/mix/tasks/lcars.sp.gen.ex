@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   Reads `priv/sp_blocks/sp-map.yaml` + the blocks, writes `priv/sp_drafts/agent-<role>-base.md`. Fail-loud on
   a missing block/role (no-fallback). The generated flats are committed; a test checks for drift.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-01
   """
   use Mix.Task
 
@@ -18,17 +18,18 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   # `lib/mix/tasks/`. The `/sp_builder` segment is required (Z3: priv is namespaced per domain);
   # this RELATIVE Path.expand is not a `:code.priv_dir`, so no sweep tooling tracks it — without
   # the segment the task crashes on a missing sp-map.yaml (the ONLY tool that regenerates the SPs).
-  @priv Path.expand("../../../priv/sp_builder", __DIR__)
+  # The two ends live on OPPOSITE sides of the runtime/catalogue frontier since `5103eac50`, so one
+  # root can no longer serve both: `sp_blocks` is BUILD-TIME material (its only reader is this task,
+  # it ships in no catalogue), while the generated `sp_drafts` are catalogue — they move with it.
+  @blocks Path.expand("../../../priv/sp_builder/sp_blocks", __DIR__)
+  @drafts Path.expand("../../../priv/catalogue/sp_builder/sp_drafts", __DIR__)
 
   @impl Mix.Task
   def run(_argv) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
     roles =
-      Fleet.SPBuilder.Blocks.generate!(
-        Path.join(@priv, "sp_blocks"),
-        Path.join(@priv, "sp_drafts")
-      )
+      Fleet.SPBuilder.Blocks.generate!(@blocks, @drafts)
 
     Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
   end

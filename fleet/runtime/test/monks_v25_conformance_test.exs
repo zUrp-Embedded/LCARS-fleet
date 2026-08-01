@@ -27,7 +27,16 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
                  "schema",
                  "cap-profile-v2.5.json"
                ])
-  @monks_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles", "monks"])
+  @monks_dir Path.join([
+               __DIR__,
+               "..",
+               "priv",
+               "catalogue",
+               "cap_profile",
+               "canon",
+               "cap-profiles",
+               "monks"
+             ])
 
   setup_all do
     schema = @schema_path |> File.read!() |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
