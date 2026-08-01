@@ -1,0 +1,37 @@
+name: CI
+
+# Le rail CI de TOUT projet créé par la fleet — posé par le scaffold, et poussé au dépôt template
+# que la forge recopie. Une seule source : `priv/catalogue/project_template/main/`.
+#
+# CE QU'IL FAIT, ET C'EST DÉLIBÉRÉMENT PEU : il prouve que la chaîne existe — un push atteint la
+# forge, la forge dispatche, un runner exécute, un verdict revient. Rien de plus. Un projet neuf n'a
+# ni langage, ni dépendances, ni suite : un workflow qui suppose l'un des trois échouerait sur un
+# scaffold vide, et un rail qui naît rouge n'apprend rien à personne.
+#
+# CE QU'IL DEVIENT : chaque projet le RÉÉCRIT quand il sait ce qu'il est (le lint de son langage,
+# ses tests, son build). C'est un point de départ livré vert, pas un gabarit à respecter.
+#
+# LE LABEL — `shell`, générique, jamais la toolchain de LCARS. Un runner sert des projets qui ne
+# sont pas LCARS : nommer ici `elixir` ferait hériter chaque projet créé d'une dépendance à une
+# toolchain qui ne le regarde pas. L'opérateur qui pose son runner doit servir `shell` ; c'est le
+# contrat minimal du côté CI, et il est petit exprès.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: shell
+    # `alpine` n'a pas bash — les steps ci-dessous sont POSIX, comme le job qui les exécute.
+    defaults:
+      run:
+        shell: sh
+    steps:
+      # Pas d'`actions/checkout` : l'action est du node, que l'image du job ne porte pas, et ce
+      # workflow n'a rien à lire dans l'arbre. Le jour où un projet en a besoin, il réécrit ce
+      # fichier — et il aura choisi une image qui sait le faire.
+      - name: Le rail répond
+        run: |
+          echo "CI: le push a atteint la forge, la forge a dispatché, le runner exécute."
+          echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
