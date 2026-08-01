@@ -28,6 +28,11 @@ on:
 jobs:
   publish:
     runs-on: dood
+    # `docker:cli` ne porte pas bash ; sans cette ligne, chaque `run:` meurt en exec bash
+    # introuvable. Les steps ci-dessous sont POSIX.
+    defaults:
+      run:
+        shell: sh
     steps:
       - name: Configuration présente (refus explicite plutôt qu'un échec obscur en aval)
         run: |
