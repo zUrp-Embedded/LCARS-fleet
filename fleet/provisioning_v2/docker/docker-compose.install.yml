@@ -21,8 +21,21 @@
 #
 # Registry en HTTP pur : Docker REFUSE par defaut. Il faut la declarer dans `insecure-registries`
 # (Docker Desktop → Settings → Docker Engine, puis Apply & Restart — le daemon redemarre, ce n'est
-# pas un rechargement a chaud). Sans ca, l'erreur parle de « HTTP response to HTTPS client » et
-# n'evoque nulle part la configuration.
+# pas un rechargement a chaud).
+#
+# LE PORT EST DANS LE NOM, ET CE N'EST PAS COSMETIQUE (mesure du 2026-08-01, moteur 29.2.1, store
+# containerd). Les deux formes echouent, pour deux raisons DIFFERENTES :
+#   - `10.42.0.118/...`    → le daemon compose `https://10.42.0.118:443`. Rien n'ecoute en 443 :
+#                            REFUS reseau. Le repli HTTP ne se declenche pas sur un refus de
+#                            connexion, seulement quand le serveur repond en clair.
+#   - `10.42.0.118:80/...` → le daemon compose `https://10.42.0.118:80`, obtient une reponse HTTP
+#                            (« server gave HTTP response to HTTPS client ») — mais ne se replie
+#                            que si CETTE clef exacte, port compris, est declaree insecure.
+# Il faut donc `"insecure-registries": ["10.42.0.118", "10.42.0.118:80"]`, et referencer l'image
+# AVEC le port. Meme piege sur les credentials : `docker login` indexe par clef exacte, donc un
+# login sur la forme sans port ne vaut pas pour la forme avec port (« no basic auth credentials »).
+#
+# La vraie sortie de tout ce contournement est du TLS sur la forge — a instruire separement.
 #
 # ─── LE NOM DE PROJET, ET LE VOLUME QU'IL COMMANDE ─────────────────────────────────────────────
 # `name: lcars` est le nom correct d'une VRAIE installation. Consequence a connaitre sur une
@@ -45,7 +58,7 @@ name: lcars
 
 services:
   lcars:
-    image: "${LCARS_IMAGE:-10.42.0.118/fleet/lcars:2.1.0}"
+    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.0}"
     # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
     # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
     # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
