@@ -48,9 +48,9 @@ CTX="$(sotf_self_context)"
 obs_launcher_tools() {
   local declared="$1" dbg="$POD_HOME/claude_launch.dbg"
   [[ -r "$dbg" ]] || { echo "unreachable|claude_launch.dbg absent ($dbg)"; return; }
-  # Format MESURE sur une trace reelle, pas suppose : `step jq tools OK allowed='a,b,c' disallowed=...`
-  # La premiere version cherchait `--allowedTools`, une forme que j'avais inventee. Une sonde qui
-  # devine le format de sa source rend `unknown` sur une source parfaitement lisible.
+  # Format de la trace, MESURE et pas suppose : `step jq tools OK allowed='a,b,c' disallowed=...`
+  # (et non la forme `--allowedTools` de la ligne de commande). Une sonde qui devine le format de
+  # sa source rend `unknown` sur une source parfaitement lisible.
   local line; line="$(grep -oE "allowed='[^']*'" "$dbg" 2>/dev/null | head -1 | sed "s/allowed='//; s/'$//")"
   [[ -n "$line" ]] || { echo "unknown|aucune ligne --allowedTools trouvee dans $dbg"; return; }
   local missing="" extra="" t

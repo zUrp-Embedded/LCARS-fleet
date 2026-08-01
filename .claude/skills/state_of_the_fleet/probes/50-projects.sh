@@ -20,8 +20,8 @@
 #
 # Recopier ces litteraux ici en ferait des copies, et deux copies d'un contrat derivent. On les
 # EXTRAIT de la source. Quand la source n'est pas atteignable, on ne devine pas : la declaration est
-# `unreachable` et les etats git sont rapportes SANS attente. C'est le motif de faute identifie au
-# JOURNAL — fabriquer une source plausible plutot que declarer l'absence — traite a la racine.
+# `unreachable` et les etats git sont rapportes SANS attente — fabriquer une source plausible
+# rendrait un verdict qui a l'air mesure et ne l'est pas.
 #
 # L'ASYMETRIE QUI PORTE TOUT LE DIAGNOSTIC, et qu'aucune lecture de `git status` ne donne :
 #   cote `main`     — EN RETARD = benin, le miroir se re-derive tout seul au prochain sync
@@ -29,10 +29,9 @@
 #   cote `work/ops` — EN AVANCE = perte possible : depot autonome, rien ne le re-derive
 # Le meme fait git ne veut pas dire la meme chose des deux cotes, NI dans les deux sens du meme cote.
 #
-# Cette derniere precision a ete payee : la premiere version disait « un ecart reste un disque en
-# retard, jamais une perte » — vrai pour le retard, FAUX pour l'avance. Mesure sur le conteneur
-# docker : son clone du livrable portait 4 commits presents nulle part ailleurs, et la sonde
-# rassurait dessus. Une ligne qui mesure juste et rassure a tort est pire qu'une ligne absente.
+# Le sens du DELTA est donc porteur des deux cotes : « le miroir se re-derive » vaut pour le
+# RETARD et jamais pour l'AVANCE — des commits en avance sur un clone ne vivent que la, et une
+# ligne qui mesure juste en rassurant a tort est pire qu'une ligne absente.
 #
 # PERIMETRE (position de starfleet) : les projets sont des OBJETS — ils existent, ils sont a jour,
 # leur nom est pris. Jamais leur contenu, jamais l'avancement du travail dedans : ca appartient a
@@ -256,10 +255,10 @@ obs_mirror() {
     return
   fi
   if [[ "$ahead" -gt 0 ]]; then
-    # « En avance » et « perdu au reset » sont DEUX choses, et la premiere version les confondait :
-    # elle annoncait « n'existent QUE sur ce disque » sur six commits qui dormaient tranquillement
-    # sur une branche poussee. Tester HEAD suffit — s'il est contenu dans une ref distante, tous ses
-    # ancetres le sont. Le miroir reste un ecart (ce n'est plus un miroir) sans etre une perte.
+    # « En avance » et « perdu au reset » sont DEUX choses : des commits en avance sur `main`
+    # peuvent dormir sur une autre branche poussee, et ne sont alors perdus par personne. Tester
+    # HEAD suffit — s'il est contenu dans une ref distante, tous ses ancetres le sont. Le miroir
+    # reste un ecart (ce n'est plus un miroir) sans etre une perte.
     local elsewhere
     elsewhere="$(git_ro "$d" for-each-ref --contains HEAD --format='%(refname:short)' refs/remotes 2>/dev/null \
                  | grep -v "^origin/$DECL_MAIN_BRANCH$" | head -1)"
@@ -312,8 +311,9 @@ obs_work_unpushed() {
 }
 
 # ── La forge, adresse DECLAREE PAR LE DEPOT ───────────────────────────────────────────────────────
-# On ne devine plus l'org (faute du JOURNAL, cf. `FORGE_ORG` invente) : `remote.origin.url` porte
-# l'org ET l'hote, projet par projet. Et cette sonde ferme la limite que `mirror` declare : elle
+# L'org ne se devine pas (un `FORGE_ORG` fleet-wide serait faux des qu'un projet vit ailleurs) :
+# `remote.origin.url` porte l'org ET l'hote, projet par projet. Et cette sonde ferme la limite
+# que `mirror` declare : elle
 # compare la ref de suivi LOCALE au sha que la forge annonce, donc elle dit si `mirror` a raisonne
 # sur une ref perimee.
 obs_forge() {
