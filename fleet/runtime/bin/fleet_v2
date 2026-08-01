@@ -206,6 +206,18 @@ cmd_start() {
   fi
   setup_env
 
+  # Claude credentials preflight — the ONE input no pod can think without. The runtime already
+  # fails loud per-pod (Fleet.Credentials, credentials_unreadable), but that lands in tmux logs
+  # AFTER a start that looked green from this door: the operator sees a running fleet that
+  # silently spawns nothing. The door says it BEFORE, names the gesture, and refuses — same
+  # contract as the missing FORGE_BASE_URL. Explicit escape for credential-less debugging.
+  local cred="$HOME/.claude/.credentials.json"
+  if [[ ! -s "$cred" && -z "${LCARS_START_WITHOUT_CLAUDE:-}" ]]; then
+    die "credentials claude absentes ($cred) — la fleet demarrerait, mais AUCUN pod ne peut penser (fail silencieux).
+  Geste d'identite : lance 'claude', /login, bonjour, /exit — puis relance 'fleet_v2 start'.
+  Demarrage sans agents assume : LCARS_START_WITHOUT_CLAUDE=1 fleet_v2 start"
+  fi
+
   local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
 
   # Mode follows the deployment (derived from where this launcher sits — nothing hardcoded):
