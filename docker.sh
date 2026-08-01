@@ -97,8 +97,8 @@ cmd_down() {
 cmd_reset() {
   # Destructif pour LCARS, et LCARS SEULEMENT. La forge — les repos, les issues, les PR, la
   # seule copie durable du travail — n'est pas dans ce projet compose et ne peut donc PAS être
-  # emportée par un reset. Elle l'a été trois fois le 2026-07-31, quand un drapeau tenait lieu
-  # de frontière : un drapeau n'est pas une frontière.
+  # emportée par un reset. La frontière est structurelle (projet compose séparé) : un drapeau de
+  # sécurité dans un projet commun ne l'est pas, il se contourne d'une commande.
   echo "docker.sh: RESET — conteneur lcars + image + volume /home. La forge n'est pas concernée"
   echo "           (elle est à toi, dans son propre déploiement). Ton travail poussé y survit."
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
@@ -125,9 +125,9 @@ cmd_source_push() {
   compose exec -T lcars rm -rf /home/projects/.LCARS.incoming
   docker cp "$src/." "$ctr:/home/projects/.LCARS.incoming" || { echo "docker.sh: copie échouée" >&2; exit 1; }
   # Bascule ATOMIQUE (rename), après la copie : la fleet ne voit jamais un arbre à moitié copié.
-  # Deux pièges payés en vrai ici : `mv src dst` NICHE dans dst quand dst est un dossier existant
-  # (d'où `mv -T`), et `[ -e x ] && mv … || true` AVALE l'échec du mv (un ancien LCARS qui est un
-  # point de montage rend EBUSY) — la copie se rapportait alors verte en ayant imbriqué l'arbre.
+  # `mv -T` obligatoire : `mv src dst` NICHE dans dst quand dst est un dossier existant, et
+  # l'arbre se retrouve imbriqué. Et pas de `[ -e x ] && mv … || true` : la forme AVALE l'échec
+  # du mv (un ancien LCARS monté rend EBUSY) et la copie se rapporte verte sans avoir basculé.
   compose exec -T lcars bash -c "
     set -euo pipefail
     chown -R '$human':fleet /home/projects/.LCARS.incoming

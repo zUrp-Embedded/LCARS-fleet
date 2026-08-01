@@ -26,11 +26,10 @@
 #   (`host.docker.internal` n'est PAS une option par défaut sous Linux — il faut un
 #    `extra_hosts: host-gateway`. Le réseau partagé est le chemin qui marche sans supposition.)
 #
-# DEUX VARIABLES, PAS UNE — corrigé le 2026-07-31 après démarrage réel :
-#   la version initiale de ce fichier réutilisait `LCARS_DEVFORGE_PORT` à la fois comme port nu
-#   (dans ROOT_URL) et comme adresse de bind complète (dans `ports`), avec des défauts
-#   incohérents. Passer `127.0.0.1:3301` produisait `ROOT_URL=http://127.0.0.1:127.0.0.1:3301/`
-#   et Gitea refusait de démarrer en boucle. Écrit, jamais lancé — donc jamais vu.
+# DEUX VARIABLES, PAS UNE, et elles ne sont pas interchangeables :
+#   ROOT_URL veut un PORT NU, `ports` veut une adresse de bind complète. Une seule variable pour
+#   les deux produit `ROOT_URL=http://127.0.0.1:127.0.0.1:3301/` dès qu'on passe une adresse, et
+#   Gitea refuse de démarrer en boucle.
 
 name: lcars-devforge
 
