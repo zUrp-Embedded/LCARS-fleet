@@ -45,6 +45,48 @@ teardown() { rm -rf "$TMP_BASE"; }
   [[ "$output" == *"sourced-ok"* ]]
 }
 
+# --- cmd_start: the claude credentials preflight ---
+# The one input no pod can think without. Without the door-side check, `start` looks green and
+# every pod then dies in tmux logs nobody reads. These tests pin the refusal AND its escape: a
+# guard whose override is untested is a guard that can silently become unbypassable.
+# The launch itself is neutralised (dtmux/fleet_up_notice redefined after sourcing) — what is
+# under test is the door, not the BEAM.
+# ⚠ The stub must ANSWER `has-session` NEGATIVELY. A blanket `dtmux() { :; }` reports a live
+# session, cmd_start takes its already-up early return, and every test below passes without ever
+# reaching the guard — green, and measuring nothing.
+NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { echo reached-launch; }; cmd_start'
+
+@test "start REFUSES without claude credentials, and names the identity gesture" {
+  run bash -c "source '$SCRIPT'; $NEUTRALISED_START"
+  # message first: a death for ANOTHER reason (missing tmux) would also be non-zero
+  [[ "$output" == *"credentials claude absentes"* ]]
+  [[ "$output" == *"/login"* ]]
+  [[ "$output" != *"reached-launch"* ]]
+  [ "$status" -ne 0 ]
+}
+
+@test "an EMPTY credentials file refuses too (presence is not validity)" {
+  mkdir -p "$HOME/.claude"
+  : > "$HOME/.claude/.credentials.json"
+  run bash -c "source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" == *"credentials claude absentes"* ]]
+  [ "$status" -ne 0 ]
+}
+
+@test "LCARS_START_WITHOUT_CLAUDE=1 passes the door with no credentials (documented escape)" {
+  run bash -c "export LCARS_START_WITHOUT_CLAUDE=1; source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" != *"credentials claude absentes"* ]]
+  [[ "$output" == *"reached-launch"* ]]
+}
+
+@test "real credentials pass the door untouched (no escape needed)" {
+  mkdir -p "$HOME/.claude"
+  echo '{"claudeAiOauth":{"accessToken":"t"}}' > "$HOME/.claude/.credentials.json"
+  run bash -c "source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" != *"credentials claude absentes"* ]]
+  [[ "$output" == *"reached-launch"* ]]
+}
+
 # --- cmd_stop: the graceful door of the NOMINAL stop ---
 # Real processes and real signals: a fake pane (bash) parenting a fake beam (sleep).
 # The tmux stub equates "session alive" with "fake beam alive" — exactly the coupling
