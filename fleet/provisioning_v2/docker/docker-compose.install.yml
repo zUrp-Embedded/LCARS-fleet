@@ -58,7 +58,7 @@ name: lcars
 
 services:
   lcars:
-    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.0}"
+    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.1}"
     # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
     # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
     # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
