@@ -412,7 +412,14 @@ defmodule Fleet.API.ControlRouterTest do
     # this describe repoints), so the fixture tracks the real schema, never a 2nd hardcoded copy.
     defp write_hostnative_fixture(dir) do
       yaml =
-        [:code.priv_dir(:lcars_fleet), "cap_profile", "canon", "cap-profiles", "engineer.yaml"]
+        [
+          :code.priv_dir(:lcars_fleet),
+          "catalogue",
+          "cap_profile",
+          "canon",
+          "cap-profiles",
+          "engineer.yaml"
+        ]
         |> Path.join()
         |> File.read!()
         |> String.replace("name: engineer", "name: hostnative-probe")

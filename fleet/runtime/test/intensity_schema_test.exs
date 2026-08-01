@@ -10,6 +10,7 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
                 __DIR__,
                 "..",
                 "priv",
+                "catalogue",
                 "cap_profile",
                 "canon",
                 "config",

@@ -8,7 +8,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
     do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_blocks")
 
   defp drafts_dir,
-    do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_drafts")
+    do: :lcars_fleet |> Application.app_dir("priv/catalogue/sp_builder") |> Path.join("sp_drafts")
 
   test "each role in the map composes a non-empty, titled SP" do
     roles = Blocks.role_map(blocks_dir())

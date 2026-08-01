@@ -18,7 +18,7 @@ defmodule Fleet.Support.CapProfileFixture do
 
   alias Fleet.CapProfile
 
-  @canon_rel Path.join(["cap_profile", "canon", "cap-profiles"])
+  @canon_rel Path.join(["catalogue", "cap_profile", "canon", "cap-profiles"])
 
   @doc """
   Canon profile `base_role` (default `"engineer"`) deep-merged with `overrides` (stringified keys) then

@@ -20,7 +20,15 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
                  "schema",
                  "cap-profile-v2.5.json"
                ])
-  @canon_dir Path.join([__DIR__, "..", "priv", "cap_profile", "canon", "cap-profiles"])
+  @canon_dir Path.join([
+               __DIR__,
+               "..",
+               "priv",
+               "catalogue",
+               "cap_profile",
+               "canon",
+               "cap-profiles"
+             ])
 
   @profiles ~w(architect engineer gatekeeper qualifier reviewer scoper starfleet)
 
@@ -252,6 +260,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
           __DIR__,
           "..",
           "priv",
+          "catalogue",
           "cap_profile",
           "canon",
           "modop-bundles",
