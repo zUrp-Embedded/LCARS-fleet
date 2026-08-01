@@ -68,14 +68,21 @@ services:
       LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
       LCARS_UID: "${LCARS_UID:-1000}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
-      # LA FORGE. Deux consommateurs, et ils ne lisent PAS au meme endroit (mesure 2026-08-01) :
-      # le RUNTIME la prend dans `~/.lcars/fleet_v2.env`, genere depuis
-      # `fleet/runtime/etc/fleet_v2.env.template` qui porte deja `http://10.42.0.118` en dur ; le
-      # PROVISIONNEMENT (module 50-forge) la prend dans l'env du CONTENEUR. Passer vide ici donnait
-      # donc une boite ou le runtime visait la forge pendant que le provisioning declarait
-      # « DRIFT 50-forge: FORGE_BASE_URL non pose — comptes/tokens forge non converges ». Meme
-      # defaut que l'image et que la source, pour la meme raison : c'est la forge de ce deploiement.
-      FORGE_BASE_URL: "${FORGE_BASE_URL:-http://10.42.0.118}"
+      # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
+      # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci
+      # est la seule variable par laquelle le runtime ECRIT (comptes, org, depots, PR, issues).
+      # Un defaut qui vise une forge de production ferait qu'une install de test l'ecrit sans que
+      # personne l'ait demande. Vide = les modules forge passent en instruct-only et le doctor le
+      # DIT (« DRIFT 50-forge: FORGE_BASE_URL non pose ») — un drift declare, pas une panne, et
+      # surement pas un tir silencieux sur la vraie forge.
+      # Pour tester : la forge jetable de `docker/dev/forge-compose.yml`, projet separe.
+      #
+      # A SAVOIR, et ce n'est pas corrige ici : le RUNTIME ne lit pas cette variable. Il prend la
+      # sienne dans `~/.lcars/fleet_v2.env`, genere depuis `fleet/runtime/etc/fleet_v2.env.template`
+      # — qui porte `FORGE_BASE_URL=http://10.42.0.118` EN DUR (l. 32). Une boite installee vise
+      # donc cette adresse quoi qu'on mette ici. C'est le template qu'il faut desserrer, pas ce
+      # fichier, et ce n'est pas le territoire de ce compose.
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`./docker.sh source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
