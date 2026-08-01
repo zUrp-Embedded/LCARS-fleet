@@ -86,22 +86,16 @@ resource "gitea_user" "starfleet" {
   admin                = true # site-admin : l'identité d'ONBOARDING (créer des users = op site-admin)
 }
 
-# `lcars` : le login sous lequel l'HUMAIN ADMIN se connecte — sur la boîte comme sur la forge.
-# Site-admin : c'est lui qui tient le master-token du bootstrap. Il était créé à la main, donc hors
-# recette et hors reproduction.
+# PAS de compte admin dans la recette — le premier admin est un PRÉREQUIS D'ENTRÉE, pas un
+# produit : une forge fonctionnelle a déjà son master-admin (le wizard d'install gitea le crée
+# chez l'opérateur ; une forge jetable headless le reçoit d'un `gitea admin user create`, compte
+# `bootstrap` au nom explicite). La recette reproduit la STRUCTURE ; l'identité admin appartient
+# au pet et à son opérateur, comme l'URL et le master token.
 #
-# Distinct des humains DAILY (`gitea_user.human`, admin = false) : un site-admin Gitea passe outre
-# toutes les permissions de team, donc un daily qui serait aussi admin rendrait `humans` décoratif —
-# il pourrait relabelliser `stage/*` et déclarer terminé un travail qui ne l'est pas.
-resource "gitea_user" "admin_human" {
-  username             = "lcars"
-  login_name           = "lcars"
-  email                = "lcars@lcars.local"
-  password             = var.seed_password
-  must_change_password = false
-  admin                = true
-}
-
+# La garde qui reste vraie quoi qu'il arrive : le daily ci-dessous n'est JAMAIS site-admin — un
+# site-admin Gitea passe outre toutes les permissions de team, donc un daily-admin rendrait
+# `humans` décoratif : il pourrait relabelliser `stage/*` et déclarer terminé un travail qui ne
+# l'est pas.
 resource "gitea_user" "human" {
   username             = var.human_username
   login_name           = var.human_username

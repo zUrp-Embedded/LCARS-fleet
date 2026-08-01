@@ -98,14 +98,58 @@ if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   clone_args=(--depth 1)
   [[ -n "${LCARS_SOURCE_REF:-}" ]] && clone_args+=(--branch "$LCARS_SOURCE_REF")
   say "clonage de la source : $LCARS_SOURCE_REMOTE${LCARS_SOURCE_REF:+ (ref $LCARS_SOURCE_REF)} → $LCARS_SOURCE_DIR"
-  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "$LCARS_SOURCE_DIR" 2>&1 | sed 's/^/[git] /'; then
+  # ATOMIQUE (clone en .part puis mv) : un boot tué EN PLEIN clone laisserait un .git partiel
+  # que la règle de non-écrasement protégerait ensuite comme du travail — la boîte vivrait sur
+  # un cadavre de repo. Le .part orphelin d'un boot précédent se nettoie, lui : il n'est jamais
+  # du travail, par construction.
+  rm -rf "${LCARS_SOURCE_DIR}.part"
+  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "${LCARS_SOURCE_DIR}.part" 2>&1 | sed 's/^/[git] /' \
+     && mv "${LCARS_SOURCE_DIR}.part" "$LCARS_SOURCE_DIR"; then
     # Le clone est fait par root ; la source appartient à l'humain qui travaillera dedans. Le
     # groupe `fleet` parce que c'est celui des zones catalogue posées juste au-dessus.
     chown -R "$LCARS_HUMAN:fleet" "$LCARS_SOURCE_DIR"
     say "source clonée"
   else
+    rm -rf "${LCARS_SOURCE_DIR}.part"
     say "CLONAGE ÉCHOUÉ — la boîte démarre sans source (la fleet ne pourra pas se maintenir)"
   fi
+fi
+
+# LE CORPUS work/ops — même contrat que les projets nés ici : un projet canon a DEUX arbres,
+# `main` (le code, ci-dessus) et `work/ops` (plans, journaux, gate-briefs), checkouté dans le
+# dual-dir /home/projects.work/<nom>. Si le remote porte la branche, on la pose ; sinon on le
+# dit et la boîte vit sans (une source sans corpus reste maintenable, elle est juste amnésique).
+# Même règle de non-écrasement : un dual-dir déjà là n'est jamais touché.
+LCARS_WORK_DIR="/home/projects.work/$(basename "$LCARS_SOURCE_DIR")"
+if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
+  if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" work/ops >/dev/null 2>&1; then
+    say "clonage du corpus work/ops → $LCARS_WORK_DIR"
+    rm -rf "${LCARS_WORK_DIR}.part"
+    if git clone --depth 1 --branch work/ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
+       && mv "${LCARS_WORK_DIR}.part" "$LCARS_WORK_DIR"; then
+      chown -R "$LCARS_HUMAN:fleet" "$LCARS_WORK_DIR"
+      say "corpus work/ops posé"
+    else
+      rm -rf "${LCARS_WORK_DIR}.part"
+      say "CLONAGE work/ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
+    fi
+  else
+    say "pas de branche work/ops sur le remote — dual-dir non posé (le corpus arrive par l'adopt)"
+  fi
+fi
+
+# L'IDENTITÉ GIT DE L'HUMAIN — seed-once, comme fleet_v2.env : sans user.email, git signe
+# `<user>@<hostname>` et la forge ne peut mapper le commit sur AUCUN compte (l'attribution
+# auteur-humain devient un fantôme sans avatar). L'email doit être CELUI du compte forge de
+# l'humain ; il arrive par l'environnement d'install. Absent = dit, jamais inventé.
+if [[ -n "${LCARS_HUMAN_EMAIL:-}" ]]; then
+  HOME_DIR="$(getent passwd "$LCARS_HUMAN" | cut -d: -f6)"
+  if ! su - "$LCARS_HUMAN" -c 'git config --global user.email' >/dev/null 2>&1; then
+    su - "$LCARS_HUMAN" -c "git config --global user.name '$LCARS_HUMAN' && git config --global user.email '$LCARS_HUMAN_EMAIL'"
+    say "identité git seedée : $LCARS_HUMAN <$LCARS_HUMAN_EMAIL> (à l'humain ensuite)"
+  fi
+else
+  say "LCARS_HUMAN_EMAIL non posé — les commits de l'humain signeront <user>@<hostname>, la forge ne les mappera pas"
 fi
 
 if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
