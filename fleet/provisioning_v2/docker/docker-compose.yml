@@ -5,12 +5,12 @@
 #
 # Détail d'implémentation derrière ./docker.sh (racine repo) — l'humain ne le touche pas.
 #
-# LA FORGE N'EST PAS DANS CE FICHIER, ET C'EST LA DÉCISION QUI COMPTE (user, 2026-07-31) :
+# LA FORGE N'EST PAS DANS CE FICHIER, ET C'EST LA DÉCISION QUI COMPTE (user) :
 # LCARS est CATTLE (on ne le soigne pas, on le nuke et on redéploie) ; la forge est le PET —
 # elle porte les repos, les issues, les PR, c'est-à-dire la seule copie durable du travail.
-# Tant qu'ils partageaient un projet compose, ils partageaient l'interrupteur de destruction :
-# un `down -v` emportait les deux (vécu TROIS fois dans la session du 2026-07-31). Un drapeau
-# de sécurité n'est pas une frontière. La forge est donc provisionnée par l'OPÉRATEUR, avec
+# Deux natures dans un même projet compose partagent l'interrupteur de destruction : `down -v`
+# emporte les deux, et un drapeau de sécurité ne l'empêche pas — seule la séparation des projets
+# le fait. La forge est donc provisionnée par l'OPÉRATEUR, avec
 # l'outil qu'il veut (app TrueNAS, Docker Desktop, machine dédiée), et LCARS ne la connaît que
 # par deux entrées : son URL, et un token master fourni au déploiement.
 # Pour un besoin de DÉV (une forge jetable en une commande) : `docker/dev/forge-compose.yml`,

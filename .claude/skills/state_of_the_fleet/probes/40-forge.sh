@@ -76,9 +76,9 @@ probe_identity() {
   local human="${LCARS_HUMAN:-${USER:-}}" org="${FORGE_ORG:-}"
 
   # L'org n'est declaree NULLE PART d'atteignable depuis un pod : elle vit dans `forge.tf`, cote
-  # provisioning. La premiere version testait `${FORGE_ORG:-fleet}` — j'avais invente la variable ET
-  # la valeur. Une sonde qui interroge un nom devine rend un 404 qui ne prouve rien, pas meme
-  # l'ambiguite qu'elle annonce. On ne devine plus : sans nom declare, on le dit.
+  # provisioning. Pas de defaut ici, meme vraisemblable : une sonde qui interroge un nom devine
+  # rend un 404 qui ne prouve rien — ni que l'org manque, ni qu'elle est la sous un autre nom.
+  # Sans nom declare, on le dit.
   if [[ -z "$org" ]]; then
     emit "forge.org" "$PLANE" "inactive" "reseau" 'test -n "$FORGE_ORG"' \
       "aucun nom d'org declare a ce processus (FORGE_ORG absente, et rien ne la porte cote runtime)" \
