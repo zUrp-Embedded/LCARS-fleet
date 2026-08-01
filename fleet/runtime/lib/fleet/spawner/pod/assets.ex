@@ -20,7 +20,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Spawner.Pod.Fs
@@ -91,8 +91,12 @@ defmodule Fleet.Spawner.Pod.Assets do
             :enoent}}
 
         :unpublished ->
+          # THE SAME root the image freezes from (`Fleet.SPBuilder.sp_drafts_root/0`, single
+          # authority). An `app_dir` literal here read the bundled tree while the image had been
+          # frozen from a repointed one — the published and unpublished paths would have served two
+          # different drafts for one role.
           read_tagged(
-            Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts/agent-#{role}-base.md"),
+            Path.join(Fleet.SPBuilder.sp_drafts_root(), "agent-#{role}-base.md"),
             :agent_draft_missing
           )
       end

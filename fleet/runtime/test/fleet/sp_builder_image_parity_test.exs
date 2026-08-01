@@ -90,4 +90,36 @@ defmodule Fleet.SPBuilderImageParityTest do
       assert from_image == from_disk, "interlocutor #{who}: image and disk regimes disagree"
     end
   end
+
+  test "un root de drafts REPOINTE deplace aussi le chemin disque du spawn" do
+    # Le cas que la parite sur la racine PAR DEFAUT ne pouvait pas voir : les deux resolveurs
+    # coincidaient tant que personne ne deplacait la racine. L'image lisait
+    # `:fleet_sp_builder, :sp_drafts_root`, `Pod.Assets` gardait un literal `app_dir` — repointer la
+    # cle deplacait ce que l'image GELAIT et pas ce que le spawn LISAIT. Un catalogue pointe sur un
+    # arbre de drafts etranger aurait ete gele depuis lui, et lu depuis le bundle sur le chemin
+    # non-publie : deux drafts differents pour un seul role.
+    role = "engineer"
+    tmp = Path.join(System.tmp_dir!(), "drafts-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp)
+    marker = "MARQUEUR-PARITE-#{System.unique_integer([:positive])}"
+    File.write!(Path.join(tmp, "agent-#{role}-base.md"), marker)
+
+    prev = Application.get_env(:fleet_sp_builder, :sp_drafts_root)
+    Application.put_env(:fleet_sp_builder, :sp_drafts_root, tmp)
+    SPBuilder.Image.unpublish()
+
+    on_exit(fn ->
+      File.rm_rf(tmp)
+
+      if prev,
+        do: Application.put_env(:fleet_sp_builder, :sp_drafts_root, prev),
+        else: Application.delete_env(:fleet_sp_builder, :sp_drafts_root)
+    end)
+
+    assert {:ok, cap} = CapProfile.load(role)
+    assert {:ok, content} = Fleet.Spawner.Pod.Assets.read_agent_draft(cap)
+
+    assert content =~ marker,
+           "Pod.Assets a lu un autre arbre que celui que `:sp_drafts_root` designe"
+  end
 end

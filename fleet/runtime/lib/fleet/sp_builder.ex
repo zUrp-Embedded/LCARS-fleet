@@ -61,7 +61,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-01
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -508,6 +508,23 @@ defmodule Fleet.SPBuilder do
   # ============================================================
   # Path resolution (config knobs for testability)
   # ============================================================
+
+  @doc """
+  Root of the generated agent drafts (`agent-<role>-base.md`) — **SINGLE AUTHORITY**, public because
+  it has two readers in two domains: `Fleet.SPBuilder.Image` (what the boot image freezes) and
+  `Fleet.Spawner.Pod.Assets` (what a spawn reads when no image is published).
+
+  It was resolved TWICE, and only one honoured the knob: the image read
+  `:fleet_sp_builder, :sp_drafts_root`, Assets kept an `app_dir` literal. Repointing the key moved
+  what the image FROZE and not what the spawn READ — two copies of one contract, one of which moves.
+  A catalogue pointed at a foreign drafts tree would have been frozen from it and, on the
+  unpublished path, read from the bundled one instead. One resolution, two callers.
+  """
+  @spec sp_drafts_root() :: String.t()
+  def sp_drafts_root do
+    Application.get_env(:fleet_sp_builder, :sp_drafts_root) ||
+      Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts")
+  end
 
   # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
   # the BUNDLED cap-profiles canon (`Application.app_dir(:lcars_fleet, "priv/cap_profile/…")`, the

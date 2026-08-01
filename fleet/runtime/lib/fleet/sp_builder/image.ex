@@ -42,7 +42,7 @@ defmodule Fleet.SPBuilder.Image do
   proven-good content, and the divergence is said out loud instead of vanishing into the mechanism
   that was supposed to guard against it.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-01
   """
 
   require Logger
@@ -307,8 +307,9 @@ defmodule Fleet.SPBuilder.Image do
   # a second knob now would be inventing the mechanism twice before either exists.
   defp human_protocol_path, do: Path.join(drafts_root(), "protocole-user-human.md")
 
-  # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root; the
-  # drafts root gains its knob here — Assets' app_dir literal stays its fallback).
+  # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root). The drafts
+  # root is no longer resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
+  # unpublished path), so it lives on the facade as the single authority — see `drafts_root/0` below.
   defp modop_root do
     Application.get_env(:fleet_sp_builder, :modop_root) ||
       Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/modop-bundles")
@@ -319,10 +320,8 @@ defmodule Fleet.SPBuilder.Image do
       Application.app_dir(:lcars_fleet, "priv/cap_profile/canon/subagent-templates")
   end
 
-  defp drafts_root do
-    Application.get_env(:fleet_sp_builder, :sp_drafts_root) ||
-      Application.app_dir(:lcars_fleet, "priv/sp_builder/sp_drafts")
-  end
+  # Single authority on the facade — the image and the spawn's disk fallback MUST read one root.
+  defp drafts_root, do: Fleet.SPBuilder.sp_drafts_root()
 
   # SAME roots the composer's disk fallback reads (`SPBuilder.sp_role_root/0` and its template path)
   # — one resolution per asset, mirrored here, for the reason above.
