@@ -26,9 +26,15 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
     :ok
   end
 
+  # LOAD first, deliberately. `:code.delete/1` returns false when the module has no CURRENT
+  # version — which includes "never loaded", and an `alias` loads nothing. Asserting its return
+  # made this helper depend on whether an earlier test in this file had happened to load the stub,
+  # i.e. on the ExUnit seed. Starting from a known state removes the order dependency, and the
+  # postcondition below is what the tests actually need anyway.
   defp unload!(mod) do
+    {:module, ^mod} = Code.ensure_loaded(mod)
     :code.purge(mod)
-    true = :code.delete(mod)
+    :code.delete(mod)
     :code.purge(mod)
     refute :erlang.module_loaded(mod), "the module must be OUT of the code table for this test"
   end
