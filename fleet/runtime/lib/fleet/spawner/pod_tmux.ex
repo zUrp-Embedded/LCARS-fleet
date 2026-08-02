@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PodTmux do
   Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
   the rescue gesture (tmux kill-server + anchored `pkill -f`).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -261,17 +261,32 @@ defmodule Fleet.Spawner.PodTmux do
   """
   @spec capture_pane(String.t()) :: String.t()
   def capture_pane(pod_id) when is_binary(pod_id) do
-    case tmux(pod_id, ["capture-pane", "-p", "-t", session_name(pod_id)]) do
-      {out, 0} ->
+    case capture_pane_quiet(pod_id) do
+      {:ok, out} ->
         out
 
-      {err, rc} ->
+      {:error, rc, err} ->
         Logger.warning(
           "pod #{pod_id} capture_pane FAILED (rc=#{rc}: #{String.trim(err)}) — " <>
             "escalation will carry an EMPTY pane (not a blank screen; no re-capture rail)"
         )
 
         ""
+    end
+  end
+
+  @doc """
+  Same capture, TYPED and SILENT — for the POLLING consumer (the liveness probe samples this
+  every tick). The loud version above is the one-shot escalation contract, where an empty pane
+  must be told apart from a blank screen; a failure repeated at tick cadence is a log flood,
+  not new information (measured: a test-suite pod with no tmux logged it every 30 s). The
+  caller decides what a failure means — for liveness it means "no signal", never "silence".
+  """
+  @spec capture_pane_quiet(String.t()) :: {:ok, String.t()} | {:error, integer(), String.t()}
+  def capture_pane_quiet(pod_id) when is_binary(pod_id) do
+    case tmux(pod_id, ["capture-pane", "-p", "-t", session_name(pod_id)]) do
+      {out, 0} -> {:ok, out}
+      {err, rc} -> {:error, rc, err}
     end
   end
 

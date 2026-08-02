@@ -130,16 +130,19 @@ defmodule Fleet.Spawner.Pod.Liveness do
   defp pane_changed?(prev, now) when is_integer(prev) and is_integer(now), do: prev != now
   defp pane_changed?(_, _), do: false
 
-  # Hash of the visible REPL screen (`tmux capture-pane -p`, via the PodTmux authority — "" on
-  # any failure -> nil). An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive);
-  # a generating pod repaints every second (elapsed counter) -> the signal the jsonl cannot
-  # carry mid-message.
+  # Hash of the visible REPL screen — via the SILENT capture (`capture_pane_quiet`): this runs at
+  # tick cadence, and the loud variant's warning (an escalation contract: an empty pane must be
+  # told apart from a blank screen) turned into a per-tick flood for every pod without tmux.
+  # An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive); a generating pod
+  # repaints every second (elapsed counter) -> the signal the jsonl cannot carry mid-message.
+  # Failure/absence -> nil = NO SIGNAL, never silence (anti-kill bias, cf. `liveness_moved?/2`).
   defp pane_hash(state) do
     case Map.get(state, :pod_id) do
       pod_id when is_binary(pod_id) ->
-        case Fleet.Spawner.PodTmux.capture_pane(pod_id) do
-          "" -> nil
-          content -> :erlang.phash2(content)
+        case Fleet.Spawner.PodTmux.capture_pane_quiet(pod_id) do
+          {:ok, ""} -> nil
+          {:ok, content} -> :erlang.phash2(content)
+          {:error, _rc, _err} -> nil
         end
 
       _ ->

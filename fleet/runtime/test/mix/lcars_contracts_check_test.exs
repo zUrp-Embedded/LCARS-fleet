@@ -32,15 +32,26 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # absence broke the image build (measured: `forge.tf: list not readable` inside the Docker
   # build). Absence is scoped at the TREE level: no sibling tree = out of scope, SKIPPED and
   # NAMED in the note; the equality still runs on what the artifact does carry.
-  test "runtime-only artifact: the sibling-tree lists are skipped and NAMED, never a silent pass" do
+  test "sibling-tree lists: checked when the trees are here, SKIPPED-and-NAMED when they are not" do
     {status, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
     lock = Enum.find(checks, &(&1.id == "roles.provisioning_locked"))
 
-    # On the real repo (all trees present) nothing is skipped and the note says so by omission.
     assert status == :pass
     assert lock.status == :pass
-    refute lock.note =~ "NOT CHECKED"
-    assert lock.note =~ "PROV_ROLES"
+
+    # The assertion follows the ARTIFACT: a full checkout must check all four lists; a
+    # runtime-only one (the image build stage copies fleet/runtime alone) must NAME what it
+    # could not see — the one thing that must never happen is a silent pass on absent ground.
+    # SAME derivation as the check: the runtime root, then its SIBLING provisioning tree
+    # (test/mix -> runtime = "../..", then "../provisioning").
+    runtime_root = Path.expand("../..", __DIR__)
+
+    if File.dir?(Path.expand("../provisioning", runtime_root)) do
+      refute lock.note =~ "NOT CHECKED"
+    else
+      assert lock.note =~ "NOT CHECKED"
+      assert lock.note =~ "forge.tf"
+    end
   end
 
   describe "code_match?/4 — anti-hollow-green: a marker in PROSE does not count (BND-111)" do
