@@ -56,7 +56,6 @@ if not PORT:
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 CARD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-DRAFTS_DIR = os.path.expanduser("~/card-drafts")
 
 # ─── La porte eval — le seul chemin vers le parseur et les chemins du catalogue ─────────────────
 
@@ -86,7 +85,8 @@ DUMP_EXPR = (
     'rd = fn dir -> dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".yaml")) '
     '|> Map.new(fn f -> p = Path.join(dir, f); '
     '{Path.rootname(f), %{"data" => YamlElixir.read_from_file!(p), "text" => File.read!(p)}} end) end; '
-    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr}, "schema" => sch, '
+    'av = Path.join(to_string(:code.priv_dir(:lcars_fleet)), "observation/static/assets"); '
+    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr, "assets" => av}, "schema" => sch, '
     '"cards" => rd.(mr), "profiles" => rd.(pr)}))'
 )
 
@@ -119,17 +119,7 @@ def catalogue():
         payload = json.loads(out.strip().splitlines()[-1])
         _CATALOGUE["payload"] = payload
         _CATALOGUE["stamp"] = _tree_stamp([payload["roots"]["maps"], payload["roots"]["profiles"]])
-    # Les drafts sont TOUJOURS relus (pas caches) : c'est la partie vivante de la page.
-    drafts = {}
-    if os.path.isdir(DRAFTS_DIR):
-        for f in sorted(os.listdir(DRAFTS_DIR)):
-            if f.endswith(".yaml"):
-                p = os.path.join(DRAFTS_DIR, f)
-                drafts[f[:-5]] = {"text": open(p, encoding="utf-8").read(),
-                                  "mtime": int(os.stat(p).st_mtime)}
-    out = dict(payload)
-    out["drafts"] = drafts
-    return out
+    return payload
 
 def validate_card(name, text):
     # Le draft est pose dans un repertoire jetable et charge par le VRAI Loader (schema + graphe).
@@ -160,11 +150,21 @@ def _role_warnings(text):
     return [f"role « {r} » sans cap-profile — validate_card_steps! refusera ce boot au deploy"
             for r in sorted(roles) if r and r not in profs]
 
-def save_draft(name, text):
-    os.makedirs(DRAFTS_DIR, exist_ok=True)
-    path = os.path.join(DRAFTS_DIR, f"{name}.yaml")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+def save_card(name, text):
+    # YOLO assume (arbitrage user) : le clic ne produit que du valide, le vrai parseur a dit oui —
+    # on ecrit DIRECTEMENT dans le workflow_maps root de la boite (chemin donne par le BEAM, jamais
+    # reconstruit). Le contrat du Loader reste entier : la fleet sert son image de boot, cette
+    # ecriture ne prend effet qu'au prochain start. Boite d'exploration, catalogue jetable.
+    roots = (_CATALOGUE["payload"] or {}).get("roots") or {}
+    maps_dir = roots.get("maps")
+    if not maps_dir:
+        return {"ok": False, "error": "racine du catalogue inconnue (dump pas encore fait ?)"}
+    path = os.path.join(maps_dir, f"{name}.yaml")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        return {"ok": False, "error": f"ecriture refusee : {e}"}
     return {"ok": True, "path": path}
 
 # ─── L'etat vivant (onglet AGENTS) ──────────────────────────────────────────────────────────────
@@ -355,6 +355,8 @@ PAGE = r"""<!doctype html>
   .chip{display:inline-block;border:1px solid var(--line);border-radius:9px;padding:1px 9px;
         margin:2px 4px 2px 0;font-size:11px;color:var(--cy)}
   .chip.int{color:var(--am)}
+  .av{width:20px;height:20px;border-radius:5px;vertical-align:-5px;margin-right:7px}
+  .av.big{width:34px;height:34px;border-radius:8px;vertical-align:-11px;margin-right:10px}
   .empty{color:var(--faint);padding:22px 14px;font-size:12.5px;line-height:1.7}
   .empty b{color:var(--dim);font-weight:400}
 
@@ -447,6 +449,8 @@ let CAT = null, csel = null, editing = false;  // cartes
 let view = 'agents';
 
 const el = (t,c,x) => { const e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; };
+const avatar = (name, big) => { const i=document.createElement('img'); i.className='av'+(big?' big':'');
+  i.src='/avatar/'+name+'.svg'; i.alt=''; i.onerror=()=>{ i.style.display='none'; }; return i; };
 const phCls = p => 'ph-' + (['monitoring','launching','projecting','injecting','allocating','cleaning','releasing','publishing'].includes(p) ? p : 'unknown');
 const evCls = t => /fail|crash|dead|error/.test(t) ? 'bad' : (/wake|retry|drift|stale/.test(t) ? 'warn' : '');
 
@@ -495,7 +499,7 @@ function drawAgents(){
     r.appendChild(el('div','grp',grp+' · '+g[grp].length));
     for(const n of g[grp]){
       const b = el('button','row'+(n===psel?' on':''));
-      b.appendChild(el('span','id',n));
+      const idl = el('span','id'); idl.appendChild(avatar(n)); idl.append(n); b.appendChild(idl);
       const inv=(((CAT.profiles[n]||{}).data||{}).spec||{}).invocation||{};
       b.appendChild(el('span','meta',(inv.model||'?')+' · '+(inv.effort||'?')+' · '+(inv.lifetime_scope||'?')));
       b.onclick=()=>{ psel=n; drawAgents(); };
@@ -512,6 +516,7 @@ function agentCenter(){
   const c = document.getElementById('center'); c.innerHTML='';
   const prof = (CAT.profiles||{})[psel];
   const head = el('div','pane-head');
+  if(psel) head.appendChild(avatar(psel, true));
   head.appendChild(el('b',(psel||'—').toUpperCase()));
   head.appendChild(el('span','k','cap-profile — la declaration complete, rien du vivant'));
   c.appendChild(head);
@@ -591,10 +596,26 @@ async function loadCatalogue(force){
   if(view==='cards') drawCards(); else drawAgents();
 }
 
+function newCard(){
+  const name = (prompt('nom de la nouvelle carte (slug : [a-z0-9-])')||'').trim();
+  if(!name) return;
+  if(!/^[a-z0-9][a-z0-9-]*$/.test(name)){ alert('slug invalide'); return; }
+  if((CAT.cards||{})[name]){ alert('cette carte existe deja'); return; }
+  const P = pools();
+  csel = name; editing = true;
+  ED = {mode:'form', fits:true, text:'',
+        state:{ints:[], desc:'', pres:'', jury:[], juryOn:false, rework:2,
+               pre:null, audit:null, extra:[],
+               producers:[{name:'build', role:P.producers[0]||'', face:'', inputs:[]}]}};
+  drawCards();
+}
+
 function drawCards(){
   const r = document.getElementById('crail'); r.innerHTML='';
-  const cards = CAT.cards||{}, drafts = CAT.drafts||{};
-  r.appendChild(el('div','grp','cartes canon · '+Object.keys(cards).length));
+  const cards = CAT.cards||{};
+  const nb = el('button','btn warn','+ nouvelle carte'); nb.style.margin='12px 12px 2px';
+  nb.onclick = newCard; r.appendChild(nb);
+  r.appendChild(el('div','grp','cartes du catalogue · '+Object.keys(cards).length));
   for(const name of Object.keys(cards).sort()){
     const meta = (cards[name].data||{}).metadata||{};
     const b = el('button','row'+(name===csel&&!editing?' on':''));
@@ -603,29 +624,19 @@ function drawCards(){
     b.onclick = () => { csel = name; editing=false; ED=null; drawCards(); };
     r.appendChild(b);
   }
-  if(Object.keys(drafts).length){
-    r.appendChild(el('div','grp','drafts (non servis)'));
-    for(const name of Object.keys(drafts).sort()){
-      const b = el('button','row ghost'+(name===csel&&editing?' on':''));
-      b.appendChild(el('span','id', name+' ✎'));
-      b.appendChild(el('span','meta','draft local'));
-      b.onclick = () => { csel = name; editing=true; ED=null; drawCards(); };
-      r.appendChild(b);
-    }
-  }
   cardCenter(); cardCtx();
 }
 
 function cardCenter(){
   const c = document.getElementById('ccenter'); c.innerHTML='';
-  const cards = CAT.cards||{}, drafts = CAT.drafts||{};
-  const src = editing && drafts[csel] ? drafts[csel] : cards[csel];
-  if(!src){ c.appendChild(el('div','empty','selectionne une carte')); return; }
+  const cards = CAT.cards||{};
+  const src = cards[csel] || (editing && ED ? {data:null, text:ED.text||''} : null);
+  if(!src){ c.appendChild(el('div','empty','selectionne une carte, ou cree-en une')); return; }
   const data = src.data||{}, meta = data.metadata||{}, spec = data.spec||{};
 
   const head = el('div','pane-head');
   head.appendChild(el('b', (csel||'').toUpperCase()));
-  head.appendChild(el('span','k', editing ? 'EDITION — draft local, jamais servi' : 'carte canon'));
+  head.appendChild(el('span','k', editing ? ((CAT.cards||{})[csel] ? 'EDITION' : 'NOUVELLE CARTE — pas encore au catalogue') : 'carte du catalogue'));
   const act = el('span','act');
   if(!editing){
     const eb = el('button','btn','éditer'); eb.onclick = () => { editing=true; ED=null; cardCenter(); };
@@ -674,7 +685,7 @@ function cardCenter(){
 function stepBox(sname, st){
   const b = el('div','pbox');
   b.appendChild(el('div','pname', sname));
-  b.appendChild(el('div','prole', st.role||'?'));
+  const pr = el('div','prole'); if(st.role) pr.appendChild(avatar(st.role)); pr.append(st.role||'?'); b.appendChild(pr);
   const f = {};
   if(st.judge_target) f['juge'] = st.judge_target;
   if(st.brief_kind) f['brief_kind'] = st.brief_kind;
@@ -687,7 +698,7 @@ function stepBox(sname, st){
 function judgeBox(name){
   const b = el('div','pbox judge');
   b.appendChild(el('div','pname','juge'));
-  b.appendChild(el('div','prole', name));
+  const pr = el('div','prole'); pr.appendChild(avatar(name)); pr.append(name); b.appendChild(pr);
   const prof = CAT.profiles && CAT.profiles[name];
   const f = {};
   if(prof){
@@ -829,8 +840,8 @@ function editor(body, src){
   if(ED === null){
     const canonData = ((CAT.cards||{})[csel]||{}).data;
     const model = canonData ? stageModel(canonData) : null;
-    const fits = model && !model.extra.length;
-    ED = {mode: fits ? 'form' : 'yaml', state: model, fits: !!fits, text: src.text || ''};
+    const fits = !!(model && !model.extra.length);
+    ED = {mode: fits ? 'form' : 'yaml', state: model, fits: fits, text: src.text || ''};
   }
 
   const mbar = el('div'); mbar.style.cssText='display:flex;gap:8px;margin-bottom:10px;align-items:center';
@@ -844,19 +855,18 @@ function editor(body, src){
 
   const bar = el('div'); bar.style.cssText='display:flex;gap:10px;margin-top:10px';
   const vb = el('button','btn','valider (vrai parseur)');
-  const sb = el('button','btn warn','sauver en draft');
+  const sb = el('button','btn warn','sauver au catalogue');
   const cb = el('button','btn','fermer');
   bar.appendChild(vb); bar.appendChild(sb); bar.appendChild(cb);
   body.appendChild(bar);
   const res = el('div','vres'); res.style.display='none'; body.appendChild(res);
 
   const notice = el('div','notice');
-  notice.innerHTML = "La page ne possede AUCUN fait : sieges = capabilities des cap-profiles, "
-    + "champs et valeurs = enums du schema v2.5, ordre des etages = mesure du canon. Le clic ne "
-    + "peut produire que des cartes que ces proprietaires autorisent — et le bouton Valider "
-    + "repasse quand meme par le parseur reel. Un draft n'est jamais servi (image au boot — "
-    + "redeploy = restart). ⚠ Le formulaire regenere le YAML : les commentaires ne survivent "
-    + "pas — pour retoucher une carte commentee, « yaml brut ».";
+  notice.innerHTML = "La page ne possede AUCUN fait : sieges = capabilities, champs = enums du "
+    + "schema v2.5, ordre des etages = mesure du canon — et sauver repasse par le parseur reel "
+    + "avant d ecrire. L ecriture va DIRECTEMENT au catalogue de la boite (YOLO assume) ; la "
+    + "fleet, elle, sert son image de boot : effet au prochain start. ⚠ Le formulaire regenere "
+    + "le YAML : les commentaires ne survivent pas — carte commentee = « yaml brut ».";
   body.appendChild(notice);
 
   let ta = null;
@@ -1017,9 +1027,10 @@ function editor(body, src){
   };
   sb.onclick = async () => {
     res.style.display='block'; res.className='vres'; res.textContent='validation puis sauvegarde…';
-    const r = await (await fetch('/api/cards/draft', {method:'POST', headers:{'Content-Type':'application/json'},
+    const r = await (await fetch('/api/cards/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({name: csel, text: currentText()})})).json();
-    if(r.ok){ res.className='vres ok'; res.textContent='DRAFT SAUVE : '+r.path+'\n(non servi — deploiement = geste operateur + restart)'; }
+    if(r.ok){ res.className='vres ok'; res.textContent='ECRIT AU CATALOGUE : '+r.path+'\n(la fleet le servira a son prochain start — image au boot)';
+      editing=false; ED=null; loadCatalogue(true); }
     else { res.className='vres ko'; res.textContent=r.error||'refus'; }
   };
   cb.onclick = () => { editing=false; ED=null; loadCatalogue(); };
@@ -1083,6 +1094,24 @@ class Agents(BaseHTTPRequestHandler):
             if "refresh=1" in self.path:
                 _CATALOGUE["payload"] = None
             self._json(catalogue())
+        elif path.startswith("/avatar/"):
+            name = path.split("/avatar/", 1)[1].removesuffix(".svg")
+            if not CARD_NAME_RE.match(name):
+                self._send(404, "no\n", "text/plain"); return
+            if _CATALOGUE["payload"] is None:
+                catalogue()
+            adir = ((_CATALOGUE["payload"] or {}).get("roots") or {}).get("assets") or ""
+            fp = os.path.join(adir, f"{name}.svg")
+            try:
+                raw = open(fp, "rb").read()
+            except OSError:
+                self._send(404, "no\n", "text/plain"); return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "max-age=3600")
+            self.end_headers()
+            self.wfile.write(raw)
         elif path in ("/", "/index.html"):
             self._send(200, PAGE, "text/html; charset=utf-8")
         elif path == "/health":
@@ -1101,12 +1130,12 @@ class Agents(BaseHTTPRequestHandler):
         name, text = body.get("name", ""), body.get("text", "")
         if path == "/api/cards/validate":
             self._json(validate_card(name, text))
-        elif path == "/api/cards/draft":
+        elif path == "/api/cards/save":
             v = validate_card(name, text)
             if not v.get("ok"):
                 self._json(v)
                 return
-            r = save_draft(name, text)
+            r = save_card(name, text)
             r["warnings"] = v.get("warnings", [])
             self._json(r)
         else:
