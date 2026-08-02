@@ -165,9 +165,27 @@ defmodule Fleet.Pilot.StepRunCompleter do
     }
 
     # Published best-effort (F-15): the statement only serves auditors if it is READABLE from the
-    # forge; a push failure warns inside emit and never fails the completion.
-    case Fleet.Workflow.Provenance.emit(work_dir, attrs, push: :work_ops) do
+    # forge; a push failure warns inside emit and never fails the completion. `:subject_workspace`
+    # arms the BL-6-34 wall inside Provenance: the subject must be a commit reachable from the
+    # workspace the publish ran in — true by construction today (the sha IS that workspace's
+    # pushed HEAD), pinned against any future claimed-sha threading. A refusal is logged ERROR
+    # (a proof from the wrong viewpoint is a protocol violation, not a degrade), the completion
+    # itself stays unharmed either way (the deliverable is real and pushed).
+    emit_opts = [
+      push: :work_ops,
+      subject_workspace: Map.get(dopts, :workspace) || Map.get(dopts, "workspace")
+    ]
+
+    case Fleet.Workflow.Provenance.emit(work_dir, attrs, emit_opts) do
       {:ok, _} ->
+        :ok
+
+      {:error, {:subject_unreachable, workspace}} ->
+        Logger.error(
+          "StepRunCompleter: provenance subject #{livrable_sha} is NOT a commit of the publish " <>
+            "workspace #{workspace} — engrave REFUSED (proof from the wrong viewpoint)"
+        )
+
         :ok
 
       {:error, reason} ->
@@ -323,23 +341,23 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # Gap BEFORE the PR: the content push takes a `created_at` strictly earlier than the
          # PR-opened action (a same-second tie renders inverted in the feed).
          :ok <- space_writes(opts),
-         # SLSA triplet: (brief_sha, base_sha=input_sha, livrable_sha=sha) → in-toto provenance
-         # committed under work/ops `provenance/`. HERE = the ONLY point where a real producer git
-         # deliverable is published (PR-native path); `complete/2` carries ONLY verdicts without
-         # deliverable_opts (abandon/brief), never a deliverable. BEST-EFFORT (degrades LOUD) — NOT
-         # load-bearing: never a blocked PR over a trace file.
-         _ = maybe_emit_provenance(step_run, sha, opts),
-         {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
+         # Both post-push legs record their failure ON THE ISSUE (BL-6-34): between a landed push
+         # and a born PR, an {:error, _} used to be a host-log line — pushed branch, mute ticket,
+         # wedged brick. The marker turns the stall into a named refusal.
+         {:ok, role_opts} <-
+           ForgeClient.as_role(forge_opts, role) |> record_pr_open_failure(step_run, sha, opts),
          {:ok, pr} <-
-           open_pr_step(
-             forge,
-             repo,
-             head,
-             base,
-             title,
-             body,
-             role_opts
-           ) do
+           open_pr_step(forge, repo, head, base, title, body, role_opts)
+           |> record_pr_open_failure(step_run, sha, opts) do
+      # SLSA triplet: (brief_sha, base_sha=input_sha, livrable_sha=sha) → in-toto provenance
+      # committed under work/ops `provenance/`. HERE = the ONLY point where a real producer git
+      # deliverable is published (PR-native path); `complete/2` carries ONLY verdicts without
+      # deliverable_opts (abandon/brief), never a deliverable. Engraved AFTER the PR exists
+      # (BL-6-34): a completion that stalls between push and PR must never leave a "delivered"
+      # attestation with no integration surface. BEST-EFFORT (degrades LOUD) — NOT load-bearing:
+      # never a blocked PR over a trace file.
+      _ = maybe_emit_provenance(step_run, sha, opts)
+
       # `set_stage(stage_review)` is NOT done here: it lives in `complete_producer`, AFTER the
       # comment (eng voice) — same order "comment THEN stage transition" as `complete/2`
       # (scoper gate), with the same `space_writes` anti-same-second gap. Dashboard coherence.
@@ -1057,6 +1075,47 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp record_publish_failure(outcome, _step_run, _opts), do: outcome
+
+  # Records ONE post-push propagation failure on the issue (BL-6-34): the deliverable IS pushed
+  # (the branch survives on the forge) but the PR was never born (role token unavailable, PR API
+  # refusal). Without the marker the stall was a host-side warning — pushed branch, MUTE ticket,
+  # brick wedged under its lock with no automatic retry (unlike the publish leg, whose brake
+  # replays rework). Same posture as `record_publish_failure`, its pre-push twin: BEST-EFFORT and
+  # error-transparent — the original error passes through untouched, a failed post degrades to the
+  # log, loud. Posted with the CALLER's (system) token on purpose: the missing ROLE token is one
+  # of the exact failures this marker must survive.
+  defp record_pr_open_failure({:error, reason} = err, step_run, sha, opts) do
+    with repo when is_binary(repo) <- Map.get(step_run, :repo),
+         n when is_integer(n) <- Map.get(step_run, :issue_number) do
+      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge_opts = Keyword.get(opts, :forge_opts, [])
+      branch = get_in(step_run, [:deliverable_opts, :target_branch])
+      marker = ForgeProtocol.pr_open_fail_marker(n, sha)
+
+      body =
+        "⚠ Livrable POUSSÉ (`#{branch}` @ `#{String.slice(sha, 0, 12)}`) mais la PR n'est PAS " <>
+          "née (`#{inspect(reason)}`) — rien n'est perdu, la branche survit sur la forge, mais " <>
+          "la brique reste verrouillée sans surface d'intégration. Intervention requise.\n\n" <>
+          marker
+
+      case forge.post_comment(repo, n, body, forge_opts) do
+        {:ok, _} ->
+          :ok
+
+        {:error, post_reason} ->
+          Logger.warning(
+            "StepRunCompleter: pr-open-fail marker NOT recorded on #{repo}##{n} " <>
+              "(#{inspect(post_reason)}) — the stall stays host-log-only for this round"
+          )
+      end
+    else
+      _ -> :ok
+    end
+
+    err
+  end
+
+  defp record_pr_open_failure(outcome, _step_run, _sha, _opts), do: outcome
 
   defp step1_publish(step_run, deliverable) do
     case Map.get(step_run, :deliverable_opts) do

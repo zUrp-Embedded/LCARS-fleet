@@ -156,6 +156,49 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     assert_received {:stop_stopwatch, 99, "tok-documentalist"}
   end
 
+  # BL-6-34 — the measured bench signature: a producer role whose forge account/token does NOT
+  # exist (the scoper lesson: a role added to the catalogue without its forge account loops in
+  # role_token_unavailable). The deliverable is pushed, then the PR is refused FAIL-CLOSED between
+  # push and PR-open — and the stall must be named ON the issue, posted with the SYSTEM token:
+  # the missing ROLE token is exactly what the marker has to survive, or the ticket goes mute.
+  test "producer WITHOUT role token → PR refused fail-closed, pr-open-fail marker under the SYSTEM token" do
+    defmodule PushOnlyDeliverable do
+      def publish(_opts), do: {:ok, %{commit_sha: "deadbeef", pushed?: true, mode: :git_native}}
+    end
+
+    defmodule MarkerCaptureForge do
+      def post_comment(_repo, n, body, opts) do
+        send(self(), {:marker, n, body, opts[:token]})
+        {:ok, :posted}
+      end
+    end
+
+    step_run = %{
+      repo: "fleet/poc",
+      issue_number: 9,
+      role: "eng_doc",
+      base_branch: "work/ops",
+      deliverable_opts: %{
+        mode: :git_native,
+        workspace: "/tmp/ws",
+        base_sha: "cafe",
+        target_branch: "lcars/issue-9-eng_doc"
+      }
+    }
+
+    assert {:error, :role_token_unavailable} =
+             Fleet.Pilot.StepRunCompleter.open_deliverable_pr(step_run,
+               deliverable: PushOnlyDeliverable,
+               forge_client: MarkerCaptureForge,
+               forge_opts: [token: "system-token"]
+             )
+
+    assert_received {:marker, 9, body, "system-token"}
+    assert body =~ Fleet.Pilot.ForgeProtocol.pr_open_fail_marker(9, "deadbeef")
+    assert body =~ "role_token_unavailable"
+    assert body =~ "lcars/issue-9-eng_doc"
+  end
+
   describe "Emissions.post_eng_summary/2 — the note is a role's voice" do
     defmodule CountingForge do
       def post_comment(_repo, _n, body, _opts) do
