@@ -152,11 +152,11 @@ defmodule LcarsFleet.MixProject do
       end
 
     if overall == :fail do
-      rouges = checks |> Enum.filter(&(&1.status == :fail)) |> Enum.map(& &1.id)
+      failed = checks |> Enum.filter(&(&1.status == :fail)) |> Enum.map(& &1.id)
 
       Mix.raise(
         "contracts.check lock: release REFUSED — red contracts: " <>
-          "#{inspect(rouges)}. Fix before building (cf. mix lcars.contracts.check)."
+          "#{inspect(failed)}. Fix before building (cf. mix lcars.contracts.check)."
       )
     end
 
