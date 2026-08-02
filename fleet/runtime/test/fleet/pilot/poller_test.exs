@@ -686,8 +686,17 @@ defmodule Fleet.Pilot.PollerTest do
       refute_received {:remove_label, 8, _}
 
       # 2nd consecutive tick: orphan CONFIRMED → lock reclaimed (the next tick will re-dispatch).
-      Poller.force_poll(name)
-      assert_received {:remove_label, 8, "lcars-in-flight"}
+      # frein-publish P3 — the log reports what was MEASURED (no live pod here), never the old
+      # asserted "pod dead without completion" that declared dead a pipe idling between two
+      # rework rounds (faceproof bench). The message is the diagnosis an operator will read.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Poller.force_poll(name)
+          assert_received {:remove_label, 8, "lcars-in-flight"}
+        end)
+
+      assert log =~ "no live pod (dead/reaped)"
+      refute log =~ "pod dead without completion"
 
       GenServer.stop(pid)
     end
