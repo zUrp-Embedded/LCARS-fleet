@@ -44,7 +44,7 @@ defmodule Fleet.API.SpawnAdmission do
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.EventRouter.Bus
@@ -59,6 +59,7 @@ defmodule Fleet.API.SpawnAdmission do
           | {:invalid_issue_id, term()}
           | :missing_cap_profile
           | {:cap_profile, String.t(), term()}
+          | {:role_reserved, String.t()}
           | {:host_native_forbidden, String.t()}
           | :brief_required
 
@@ -213,6 +214,12 @@ defmodule Fleet.API.SpawnAdmission do
             if Fleet.CapProfile.bwrap?(cap),
               do: {:ok, cap},
               else: {:error, {:host_native_forbidden, name}}
+
+          # A ReservedSeat is its OWN refusal (BL-6-28), not an "unknown cap_profile": the seat
+          # exists, the box is closed — wrapped as {:cap_profile, ...} the router would render
+          # a declared state as an unknown-name error.
+          {:error, {:role_reserved, _} = reserved} ->
+            {:error, reserved}
 
           {:error, reason} ->
             {:error, {:cap_profile, name, reason}}

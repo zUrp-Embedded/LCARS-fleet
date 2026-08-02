@@ -29,7 +29,7 @@ defmodule Fleet.API.ControlRouter do
   each verdict to an HTTP status + JSON body. A refusal = NOTHING was broadcast (admission
   precedes emission by construction). Quiescing (shutdown drain) → 503.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   use Plug.Router
@@ -112,6 +112,18 @@ defmodule Fleet.API.ControlRouter do
           conn,
           422,
           Jason.encode!(%{error: "unknown cap_profile: #{name}", reason: inspect(reason)})
+        )
+
+      {:error, {:role_reserved, name}} ->
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{
+            error: "reserved seat: #{name}",
+            reason:
+              "the role is declared in the catalogue as a ReservedSeat (kept identity, " <>
+                "closed box) — not spawnable until its full CapabilityProfile exists"
+          })
         )
 
       {:error, {:host_native_forbidden, name}} ->

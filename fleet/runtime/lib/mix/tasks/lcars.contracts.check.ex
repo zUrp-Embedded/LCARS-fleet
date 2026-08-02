@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   use Mix.Task
@@ -98,7 +98,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Topology lock ──
         check_boot_order_f8(root),
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
-        check_roles_provisioning_in_catalogue(root),
+        check_roles_provisioning_locked(root),
+        check_roles_role_index_unique(root),
         check_mcp_wire_inputschema(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
@@ -995,59 +996,151 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # Z7 (F-C165 / D6 arbitration) — role-token provisioning carries a SECOND role list
-  # (etc/provision-role-tokens.sh ROLES=), which CAN diverge from the canon (lived bug
-  # class: a name in the .sh that is not a pod role — e.g. an external agent, which by
-  # construction has no vendor bridge and thus no canon entry → exit 2 on an unknown role).
-  # Minimal verifiable SSOT: every role in the .sh EXISTS in the canon catalogue.
-  # The FULL SSOT would be a `needs_role_token` flag in the canon, from which the .sh list is derived
-  # rather than maintained beside it. That is an open decision, not a scheduled change: it adds a field
-  # to the cap-profile schema (whose root is `additionalProperties: false`) for one consumer. Until it
-  # is made, this check covers the direction that has actually bitten.
-  # Boundary can NEVER see this: the .sh is outside the BEAM — exactly THIS checker's job.
-  defp check_roles_provisioning_in_catalogue(root) do
+  # Z7 (F-C165 → BL-6-28) — FOUR lists declare which roles exist, and every pairwise drift has
+  # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
+  # etc/provision-role-tokens.sh `ROLES` (token mint default), and provisioning_v2's
+  # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
+  # a fresh deploy; measured: eng_doc missing there while present in the three others = the
+  # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
+  # a canon role dropped from any provisioning list looped the fleet in role_token_unavailable
+  # (scoper 07-31, eng_doc 08-02 — one diagnosis session each).
+  # The rule: {canon roles with forge_identity} == tf == sh == lib, STRICT EQUALITY, every
+  # delta named with its own remediation. The asymmetry lives in the DATA, never in this
+  # control: starfleet declares `forge_identity: false` (its forge writes go through the
+  # system), a ReservedSeat (vulcan) counts as a seat = an account + a token, both inert.
+  # Boundary can NEVER see any of this: three of the four lists are outside the BEAM.
+  defp check_roles_provisioning_locked(root) do
+    # Decoded reads (kind/forge_identity are yaml fields, not greppable shapes) — the task
+    # context does not start :yaml_elixir by itself; same explicit start as lcars.sp.gen.
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+
+    catalogue = scan_catalogue_roles(root)
+
+    canon =
+      catalogue
+      |> Enum.filter(& &1.forge_identity)
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
+    tf_path = Path.expand("../provisioning/deps/forge.tf", root)
+    lib_path = Path.expand("../provisioning_v2/lib/provision-lib.sh", root)
 
-    roles =
-      case Regex.run(~r/^ROLES="([^"]*)"/m, File.read!(sh_path)) do
-        [_, list] -> String.split(list)
-        _ -> nil
-      end
+    lists = [
+      {"provision-role-tokens.sh ROLES", read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
+       "add/remove the role in ROLES=\"…\" (token mint default)"},
+      {"forge.tf local.roles", read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
+       "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
+         "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
+      {"provision-lib.sh PROV_ROLES", read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
+       "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
+         "absent here gets no token on a fresh fleet)"}
+    ]
 
-    catalogue =
-      root
-      |> Path.join("priv/catalogue/cap_profile/canon/cap-profiles/*.yaml")
-      |> Path.wildcard()
-      |> Enum.map(&Path.basename(&1, ".yaml"))
-      |> Enum.reject(&String.starts_with?(&1, "_"))
+    {evidence, remediations} =
+      Enum.reduce(lists, {[], []}, fn {label, roles, remediation}, {ev, rem} ->
+        case roles do
+          nil ->
+            {ev ++ ["#{label}: list not readable — fail-closed (partial checkout?)"],
+             rem ++ [remediation]}
 
-    phantoms = if roles, do: roles -- catalogue, else: nil
+          list ->
+            missing = canon -- list
+            extra = list -- canon
+            ev2 = if missing != [], do: ["#{label}: MISSING #{inspect(missing)}"], else: []
+            ev3 = if extra != [], do: ["#{label}: EXTRA #{inspect(extra)}"], else: []
+            rem2 = if missing != [] or extra != [], do: [remediation], else: []
+            {ev ++ ev2 ++ ev3, rem ++ rem2}
+        end
+      end)
+
+    evidence =
+      if canon == [], do: ["canon catalogue empty/not found — fail-closed"], else: evidence
 
     %{
-      id: "roles.provisioning_in_catalogue",
+      id: "roles.provisioning_locked",
       remediation:
-        "remove phantom roles (absent from the canon catalogue) from the .sh — or if a new " <>
-          "role is legitimate, its canon cap-profile MUST exist first (the canon is the source)",
-      status:
-        if(is_list(phantoms) and phantoms == [] and catalogue != [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          is_nil(roles) ->
-            ["#{sh_path}: ROLES=\"…\" line not found — fail-closed"]
-
-          catalogue == [] ->
-            ["canon catalogue empty/not found — fail-closed"]
-
-          phantoms != [] ->
-            ["phantom roles in the .sh (absent from the canon): #{inspect(phantoms)}"]
-
-          true ->
-            []
+        case remediations do
+          [] -> "—"
+          rems -> Enum.join(Enum.uniq(rems), " ; ")
         end,
+      status: if(evidence == [] and canon != [], do: :pass, else: :fail),
+      evidence: evidence,
       note:
-        "provisioning .sh ⊆ canon catalogue (#{length(catalogue)} roles) — ONE direction: a " <>
-          "phantom in the .sh fails; a canon role DROPPED from the .sh does not (subset test)"
+        "four-list STRICT equality (BL-6-28): canon{forge_identity} (#{length(canon)} roles, " <>
+          "seats included) == forge.tf == ROLES == PROV_ROLES — any delta is a defect, named"
     }
+  end
+
+  # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
+  # nothing enforced uniqueness across the catalogue (BL-6-28 F7): two roles on one slot would
+  # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
+  defp check_roles_role_index_unique(root) do
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+
+    duplicates =
+      scan_catalogue_roles(root)
+      |> Enum.filter(&is_integer(&1.role_index))
+      |> Enum.group_by(& &1.role_index, & &1.name)
+      |> Enum.filter(fn {_idx, names} -> length(names) > 1 end)
+
+    %{
+      id: "roles.role_index_unique",
+      remediation:
+        "two catalogue entries claim the same role_index slot — reassign one (0..15, " <>
+          "see each file's metadata comment for the taken slots)",
+      status: if(duplicates == [], do: :pass, else: :fail),
+      evidence:
+        Enum.map(duplicates, fn {idx, names} ->
+          "role_index #{idx} claimed by: #{Enum.join(Enum.sort(names), ", ")}"
+        end),
+      note: "role_index (hexspeak UUID slot) unique across the canon catalogue, seats included"
+    }
+  end
+
+  # One provisioning list, read fail-closed: nil when the file or its anchor pattern is absent
+  # (partial checkout / renamed variable — the caller renders the named fail, never a silent
+  # empty list that would flag every canon role as missing with the wrong message).
+  defp read_list(path, regex, format) do
+    with {:ok, content} <- File.read(path),
+         [_, inner] <- Regex.run(regex, content) do
+      case format do
+        :plain ->
+          inner |> String.split() |> Enum.sort()
+
+        :quoted ->
+          ~r/"([^"]+)"/ |> Regex.scan(inner) |> Enum.map(fn [_, s] -> s end) |> Enum.sort()
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  # The canon catalogue read ONCE for both role checks: name (metadata.name, basename fallback),
+  # kind, forge_identity (absent = true), role_index. Underscore basenames = overlay fragments
+  # (the `_frozen-monks` convention), excluded like name_index does; undecodable yaml = entry
+  # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
+  defp scan_catalogue_roles(root) do
+    root
+    |> Path.join("priv/catalogue/cap_profile/canon/cap-profiles/*.yaml")
+    |> Path.wildcard()
+    |> Enum.reject(&String.starts_with?(Path.basename(&1), "_"))
+    |> Enum.flat_map(fn path ->
+      case YamlElixir.read_from_file(path) do
+        {:ok, %{} = raw} ->
+          [
+            %{
+              name: get_in(raw, ["metadata", "name"]) || Path.basename(path, ".yaml"),
+              kind: Map.get(raw, "kind"),
+              forge_identity: get_in(raw, ["metadata", "forge_identity"]) != false,
+              role_index: get_in(raw, ["metadata", "role_index"])
+            }
+          ]
+
+        _ ->
+          []
+      end
+    end)
   end
 
   # Z7 (F1 / F-C138-format) — the MCP wire requires inputSchema (camelCase) where the

@@ -722,8 +722,18 @@ defmodule Fleet.CapProfile do
   @spec list_from_published() :: {:ok, [String.t()]} | {:error, :not_published}
   def list_from_published do
     case Fleet.CapProfile.Image.published() do
-      %{index: index} -> {:ok, index |> Map.keys() |> Enum.sort()}
-      nil -> {:error, :not_published}
+      %{index: index} ->
+        # Same rule as `Catalog.list/1`, same trap (BL-6-28): filter the ENTRIES on the shared
+        # predicate BEFORE projecting the keys — an unfiltered image index hands a ReservedSeat
+        # to PermanentBoot.load_all, whose fail-loud turns the seat into fleet.boot_failed.
+        {:ok,
+         index
+         |> Enum.filter(fn {_name, raw} -> Catalog.spawnable?(raw) end)
+         |> Enum.map(&elem(&1, 0))
+         |> Enum.sort()}
+
+      nil ->
+        {:error, :not_published}
     end
   end
 

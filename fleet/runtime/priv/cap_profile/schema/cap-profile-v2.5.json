@@ -33,6 +33,10 @@
           "minimum": 0,
           "maximum": 15
         },
+        "forge_identity": {
+          "type": "boolean",
+          "description": "Does this role hold a forge identity (account + role token)? Absent = true. The four-list equality check (roles.provisioning_locked, BL-6-28) counts only forge_identity roles against forge.tf/ROLES/PROV_ROLES. false is the EXPLICIT declaration of the asymmetry (starfleet: an orchestrator whose forge writes all go through the system account)."
+        },
         "mounts": {
           "type": "array",
           "description": "CATALOGUE mounts projected into the bwrap sandbox (the world provided TO the pod). bwrap_launch binds them at the SAME path, RO/RW, after the /home tmpfs. Inert when containment: none (host = native access). Empty/absent = no extra mount (bare worker).",

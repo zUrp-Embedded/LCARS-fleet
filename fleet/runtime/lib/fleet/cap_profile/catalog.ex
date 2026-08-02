@@ -40,7 +40,7 @@ defmodule Fleet.CapProfile.Catalog do
   another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
   without env).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -61,13 +61,20 @@ defmodule Fleet.CapProfile.Catalog do
   ## Exit codes
     * `{:ok, raw}` — the role exists in the catalogue.
     * `{:error, :not_found}` — no profile carries this `name`.
+    * `{:error, {:role_reserved, name}}` — the entry exists as a `kind: ReservedSeat`
+      (BL-6-28): the seat is kept, the box is closed — named, never conflated with absence.
     * `{:error, :invalid_schema}` — corrupt catalogue (an undecodable YAML) →
       we CANNOT resolve by name. The `load`/`compose` contract classes "malformed
       YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
   """
   @spec read_role(String.t()) ::
           {:ok, map()}
-          | {:error, :not_found | :invalid_schema | :catalogue_missing | :name_collision}
+          | {:error,
+             :not_found
+             | :invalid_schema
+             | :catalogue_missing
+             | :name_collision
+             | {:role_reserved, String.t()}}
   def read_role(role) do
     # IMAGE-FIRST (proven-good image at boot): once `Fleet.CapProfile.Image.publish!/0` ran, the
     # image IS the catalogue — a closed world, one epoch for the whole deployment (a disk mutation
@@ -77,13 +84,21 @@ defmodule Fleet.CapProfile.Catalog do
     case Fleet.CapProfile.Image.published() do
       %{index: index} ->
         case Map.fetch(index, role) do
-          {:ok, raw} -> {:ok, raw}
+          {:ok, raw} -> refuse_reserved(role, raw)
           :error -> {:error, :not_found}
         end
 
       nil ->
         read_role_from_disk(role)
     end
+  end
+
+  # A ReservedSeat found by NAME answers its own refusal, never `:not_found` (the seat exists,
+  # the box is closed — BL-6-28) and never `:invalid_schema` (validating a seat against the
+  # PROFILE schema downstream would misname a declared state as corruption). Lives on BOTH
+  # regimes (image branch above, disk branch below): the raw carries its kind in both.
+  defp refuse_reserved(role, raw) do
+    if spawnable?(raw), do: {:ok, raw}, else: {:error, {:role_reserved, role}}
   end
 
   defp read_role_from_disk(role) do
@@ -99,7 +114,7 @@ defmodule Fleet.CapProfile.Catalog do
       case name_index(root_dir()) do
         {:ok, index} ->
           case Map.fetch(index, role) do
-            {:ok, raw} -> {:ok, raw}
+            {:ok, raw} -> refuse_reserved(role, raw)
             :error -> {:error, :not_found}
           end
 
@@ -130,12 +145,28 @@ defmodule Fleet.CapProfile.Catalog do
     # (same broken-config signal as here), NOT `:not_found`.)
     if File.dir?(dir) do
       with {:ok, index} <- name_index(dir) do
-        {:ok, index |> Map.keys() |> Enum.sort()}
+        # Filter on the ENTRIES ({name, raw}) BEFORE projecting the keys — the predicate reads
+        # the raw's kind, `Map.keys/1` would hand it strings. An unfiltered list here feeds a
+        # ReservedSeat to every enumerator (CanonProof, PermanentBoot) → the seat has no SP
+        # draft → fleet.boot_failed. Filter BEFORE enumerate (BL-6-28).
+        {:ok,
+         index
+         |> Enum.filter(fn {_name, raw} -> spawnable?(raw) end)
+         |> Enum.map(&elem(&1, 0))
+         |> Enum.sort()}
       end
     else
       {:error, :enoent}
     end
   end
+
+  @doc """
+  Is this raw catalogue entry a SPAWNABLE profile? (`kind` ≠ `ReservedSeat` — BL-6-28.)
+  The ONE predicate both enumeration projections apply (`list/1` here,
+  `Fleet.CapProfile.list_from_published/0` on the image index): two projections, one rule.
+  """
+  @spec spawnable?(map()) :: boolean()
+  def spawnable?(raw) when is_map(raw), do: Map.get(raw, "kind") != "ReservedSeat"
 
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
   # No `monks/` scan: the monks are FROZEN under `priv/catalogue/cap_profile/canon/_frozen-monks/`,
