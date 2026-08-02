@@ -178,6 +178,10 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule StubForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
+
     @impl true
     def create_issue(repo, title, body, opts) do
       send(self(), {:create_issue, repo, title, body, opts})
@@ -232,6 +236,10 @@ defmodule Fleet.MCP.PodToolsTest do
   # scan CANNOT match; the `[merge:pr-6]` seal marker resolves it (merged_pr_of_issue).
   defmodule MergedMarkerForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
     def get_issue(_repo, _n, _opts),
@@ -304,6 +312,10 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule MergedNoStageLabelForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
+
     @impl true
     def get_issue(_repo, _n, _opts),
       do:
@@ -338,6 +350,10 @@ defmodule Fleet.MCP.PodToolsTest do
   # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
   defmodule InFlightSupersedeForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
@@ -390,6 +406,10 @@ defmodule Fleet.MCP.PodToolsTest do
   # (a re-take of an abandoned brick is legitimate).
   defmodule ClosedTargetForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "closed"}}
@@ -538,6 +558,10 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule RecordingForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
+
     @impl true
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
@@ -596,6 +620,10 @@ defmodule Fleet.MCP.PodToolsTest do
   # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
   defmodule IdempotencyForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
     def create_issue(_repo, title, body, _opts) do
@@ -1024,8 +1052,9 @@ defmodule Fleet.MCP.PodToolsTest do
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
 
-      # type:feature = a VISUAL label, NEVER routing: nothing mechanical reads it, its result is
-      # discarded and its absence is directly visible on the issue in the forge UI.
+      # The visual type is DERIVED from the genre — absent genre = a code ticket = `type:feature`.
+      # NEVER routing: nothing mechanical reads it, its result is discarded, and its absence is
+      # directly visible on the issue in the forge UI.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
       # Axiom (reorg): the result never names the repo — the issue NUMBER is the whole correlation.
@@ -1034,6 +1063,31 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["issue"] == 77
       refute Map.has_key?(result, "repo")
       assert result["assignee"] == human
+    end
+
+    test "genre `ops` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
+      # The branch that had no test until 2026-08-03, and could not have one: `repo_label_id` was
+      # missing from the seam contract, so every stub raised UndefinedFunctionError here. What
+      # shipped in that blind spot: a documentary ticket wearing `type:feature` — the interface
+      # telling every human who scanned the list the opposite of what the burn was about to do.
+      pod = uniq("pod-arch")
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "create_issue",
+                 %{"title" => "doc", "brief" => "documente Y", "genre" => "ops"},
+                 pod_state(pod)
+               )
+
+      # The genre label rides the CREATE call as an id — never a post-create add: a poller tick
+      # landing between the two burns the PROJECT card and sends an ops brief down the code path.
+      assert_received {:create_issue, "fleet/demo", "doc", _body, opts}
+      assert [id] = opts[:labels]
+      assert id == :erlang.phash2(Fleet.Labels.genre_ops(), 10_000)
+
+      # And the decoration agrees with the routing instead of contradicting it.
+      assert_received {:add_label, "fleet/demo", 77, "type:doc", _}
+      refute_received {:add_label, _, _, "type:feature", _}
     end
 
     test "a stale wire `project` is IGNORED — the binding wins (no wire override of identity)" do
@@ -1757,6 +1811,10 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule ReadChannelForge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
+    @impl true
+    def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
+
     @impl true
     def get_issue("fleet/alpha", 5, _opts) do
       {:ok,
@@ -1765,7 +1823,10 @@ defmodule Fleet.MCP.PodToolsTest do
          "title" => "vraie feature",
          "state" => "open",
          "body" => "le brief complet du ticket",
-         "labels" => [%{"name" => "type:feature"}, %{"name" => "genre/ops"}]
+         # Coherent pair: a `genre/ops` ticket wears `type:doc`. The fixture used to pin
+         # `type:feature` here — a read-side fixture teaching the very contradiction the write
+         # side was producing.
+         "labels" => [%{"name" => "type:doc"}, %{"name" => "genre/ops"}]
        }}
     end
 
@@ -1888,7 +1949,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["title"] == "vraie feature"
       assert result["state"] == "open"
       assert result["body"] == "le brief complet du ticket"
-      assert result["labels"] == ["type:feature", "genre/ops"]
+      assert result["labels"] == ["type:doc", "genre/ops"]
 
       assert [
                %{

@@ -57,7 +57,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -1294,10 +1294,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
               # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
               # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
               # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
-              # onboarded the same way.) type:feature = a visual LABEL (human) — NEVER routing: the
-              # result is discarded, nothing mechanical reads this label, and its absence is directly
-              # visible on the issue in the forge UI.
-              _ = forge.add_label(repo, number, "type:feature", [])
+              # onboarded the same way.) The visual TYPE is a label for humans — NEVER routing: the
+              # result is discarded, nothing mechanical reads it, and its absence is directly
+              # visible on the issue in the forge UI. It is DERIVED from the genre, not fixed: a
+              # documentary ticket wearing `type:feature` contradicts the card its own genre routes
+              # it to, and the contradiction is only visible to the human it misleads.
+              _ = forge.add_label(repo, number, Fleet.Labels.type_for_genre(genre), [])
 
               # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
               # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title

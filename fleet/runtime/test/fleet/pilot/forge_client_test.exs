@@ -62,26 +62,30 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "ensure_protocol_labels/2 — convergent verification, not per-POST optimism" do
+    # DERIVED from `Fleet.Labels` wherever a source exists, never re-typed. A mirror list in a test
+    # goes stale the day the code seeds one label more — and its stale form is a GREEN test, which
+    # is the only kind of staleness nobody notices. Measured 2026-08-03: seeding the two `type:*`
+    # broke this list AND the word "seven" in both test names, three copies of one count.
     @protocol_labels [
-      "lcars-in-flight",
-      "lcars-awaits-arch",
-      "genre/ops",
-      "stage/brief-review",
-      "stage/build",
-      "stage/review",
-      "stage/merged"
-    ]
+                       Fleet.Labels.in_flight(),
+                       Fleet.Labels.awaits_arch(),
+                       Fleet.Labels.genre_ops(),
+                       Fleet.Labels.stage_prefix() <> "brief-review",
+                       Fleet.Labels.stage_prefix() <> "build",
+                       Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
+                       Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
+                     ] ++ Fleet.Labels.visual_types()
 
-    test "all seven labels present after the sync → :ok" do
+    test "every protocol label present after the sync → :ok" do
       all = Enum.map(@protocol_labels, &%{"name" => &1})
-      # Every label already exists → no POST needed; the convergent read confirms all seven.
+      # Every label already exists → no POST needed; the convergent read confirms them all.
       h = %{{"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, all}}
 
       assert :ok = ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
     end
 
     test "a label still missing after the sync → error, never a bare :ok" do
-      # The read always returns five (no stage/merged) and the create POST fails — tolerated by
+      # The read never yields stage/merged and the create POST fails — tolerated by
       # create_repo_label, so the label stays absent. The convergent read must surface it.
       five =
         @protocol_labels |> Enum.reject(&(&1 == "stage/merged")) |> Enum.map(&%{"name" => &1})
@@ -93,6 +97,52 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       assert {:error, {:labels_missing, ["stage/merged"]}} =
                ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
+    end
+
+    test "a STALE label color is repainted; one already right is left alone (idempotent)" do
+      # Why this path exists at all: the operator palette landed on 2026-08-03, and `genre/ops` —
+      # the marker whose near-white made it invisible on the very tickets it declares — ALREADY
+      # existed on every repo ever seeded. A fix that only reaches repos nobody has created yet is
+      # not a fix. Repaint only: the label keeps its id, and with it every issue wearing it.
+      test_pid = self()
+
+      # Only `genre/ops` carries an id+color, so exactly one label is a repaint candidate.
+      labels_with = fn color ->
+        Enum.map(@protocol_labels, fn name ->
+          if name == Fleet.Labels.genre_ops(),
+            do: %{"id" => 7, "name" => name, "color" => color},
+            else: %{"name" => name}
+        end)
+      end
+
+      patch = fn ->
+        send(test_pid, :repainted)
+        {200, %{"id" => 7}}
+      end
+
+      assert :ok =
+               ForgeClient.ensure_protocol_labels(
+                 "fleet/tmpl",
+                 opts(%{
+                   {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, labels_with.("ededed")},
+                   {"PATCH", "/api/v1/repos/fleet/tmpl/labels/7"} => patch
+                 })
+               )
+
+      assert_received :repainted
+
+      # Already the palette → no write. Gitea answers the color WITHOUT the leading `#`; comparing
+      # the two raw forms would repaint every label on every pass, forever.
+      assert :ok =
+               ForgeClient.ensure_protocol_labels(
+                 "fleet/tmpl",
+                 opts(%{
+                   {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, labels_with.("33bbcc")},
+                   {"PATCH", "/api/v1/repos/fleet/tmpl/labels/7"} => patch
+                 })
+               )
+
+      refute_received :repainted
     end
   end
 

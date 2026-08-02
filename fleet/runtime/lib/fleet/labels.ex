@@ -23,7 +23,7 @@ defmodule Fleet.Labels do
   lives in the label, native Gitea mutex `exclusive:true`). Outside these two families, a label
   does not exist.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   @in_flight "lcars-in-flight"
@@ -47,6 +47,25 @@ defmodule Fleet.Labels do
   """
   @spec genre_ops() :: String.t()
   def genre_ops, do: @genre_ops
+
+  @doc """
+  VISUAL type of a ticket, derived from its genre — `type:doc` for a documentary ticket
+  (`genre/ops`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
+  so Gitea creates it non-exclusive and no code reads it back. It exists for the human who scans
+  a list of issues and wants to know what kind of thing each one is.
+
+  DERIVED, never posted as a constant: the genre is resolved at create time, and a visual type
+  contradicting it is a lie told by the interface — a doc ticket wearing `type:feature` (measured
+  2026-08-03) says "feature" to every human who reads the list, while the burn routes it to the
+  ops card. One decision, one source; the label follows.
+  """
+  @spec type_for_genre(String.t() | nil) :: String.t()
+  def type_for_genre("ops"), do: "type:doc"
+  def type_for_genre(_), do: "type:feature"
+
+  @doc "The visual types, for the seeding that must create them before anyone can wear them."
+  @spec visual_types() :: [String.t()]
+  def visual_types, do: ["type:feature", "type:doc"]
 
   # --- workflow_map position: 2 mutex label scopes (via `exclusive:true`, set PER-REPO by
   # ForgeClient.ensure_repo_label). `wfmap/<map>` = WHICH map (data, per-issue → multi-map);

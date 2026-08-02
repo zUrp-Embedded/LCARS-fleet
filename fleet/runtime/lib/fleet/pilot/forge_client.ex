@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -1025,17 +1025,18 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
-      statics = [
-        "lcars-in-flight",
-        "lcars-awaits-arch",
-        # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
-        # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-        "genre/ops",
-        "stage/brief-review",
-        "stage/build",
-        "stage/review",
-        "stage/merged"
-      ]
+      statics =
+        [
+          "lcars-in-flight",
+          "lcars-awaits-arch",
+          # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
+          # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
+          "genre/ops",
+          "stage/brief-review",
+          "stage/build",
+          "stage/review",
+          "stage/merged"
+        ] ++ Fleet.Labels.visual_types()
 
       Enum.each(statics, &ensure_repo_label(config, repo, &1))
       verify_labels_present(config, repo, statics)
@@ -1073,14 +1074,43 @@ defmodule Fleet.Pilot.ForgeClient do
   # through to the POST (the label matters more than the dedup); a failed POST stays tolerated
   # (`:ok` — it's the re-POST + its verification that decide, cf. `add_issue_label`).
   defp ensure_repo_label(config, repo, label_name) do
-    exists? =
-      case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
-        {:ok, labels} when is_list(labels) -> Enum.any?(labels, &(&1["name"] == label_name))
-        _ -> false
-      end
+    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
+      {:ok, labels} when is_list(labels) ->
+        case Enum.find(labels, &(&1["name"] == label_name)) do
+          nil -> create_repo_label(config, repo, label_name)
+          existing -> reconcile_label_color(config, repo, existing, label_name)
+        end
 
-    if exists?, do: :ok, else: create_repo_label(config, repo, label_name)
+      _ ->
+        create_repo_label(config, repo, label_name)
+    end
   end
+
+  # An already-present label keeps its id, and with it every issue wearing it — only its COLOR is
+  # reconciled. Creating-only would leave every repo seeded before the palette wearing the old
+  # near-white default, and the marker that motivated the palette (`genre/ops`) is precisely one
+  # that already exists on all of them: a fix that only reaches repos nobody has created yet is not
+  # a fix. Best-effort by design — a repo whose labels cannot be repainted still routes correctly,
+  # so this never turns a working forge into a failed seeding.
+  defp reconcile_label_color(config, repo, %{"id" => id, "color" => current}, label_name) do
+    wanted = label_color(label_name)
+
+    if normalize_color(current) == normalize_color(wanted) do
+      :ok
+    else
+      _ = http_patch(config, "/repos/#{encode_repo(repo)}/labels/#{id}", %{color: wanted})
+      :ok
+    end
+  end
+
+  defp reconcile_label_color(_config, _repo, _existing, _label_name), do: :ok
+
+  # Gitea answers `"ededed"` and accepts `"#ededed"` — comparing the two raw would repaint every
+  # label on every pass, forever.
+  defp normalize_color(color) when is_binary(color),
+    do: color |> String.trim_leading("#") |> String.downcase()
+
+  defp normalize_color(_), do: ""
 
   defp create_repo_label(config, repo, label_name) do
     # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
@@ -1100,13 +1130,29 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Cosmetic color (the NAME carries the protocol). The `stage/*` get a per-step tint for the
-  # human glance (blue→amber→purple→green = brief-review→build→review→merged); the rest, neutral gray.
-  defp label_color("stage/brief-review"), do: "#4a90d9"
-  defp label_color("stage/build"), do: "#e08e0b"
-  defp label_color("stage/review"), do: "#8e44ad"
-  defp label_color("stage/merged"), do: "#2e9e5b"
-  defp label_color(_), do: "#ededed"
+  # The NAME carries the protocol; the color carries the GLANCE. Operator palette, 2026-08-03.
+  #
+  # The former default was `#ededed` — near-white on a white UI. Every label outside the four
+  # `stage/*` landed there, so `genre/ops` was invisible on the very tickets whose genre it
+  # declares: present in the API, absent to the human. A label nobody can see is a label that is
+  # not there, and it fails silently in the one direction that matters (an operator scanning a
+  # list concludes the marker was never posed).
+  #
+  # One tint per PROTOCOL family, and the four `stage/*` keep a progression readable without a
+  # legend (blue → yellow → purple → green = brief-review → build → review → merged). The palette
+  # is reserved for labels that MEAN something mechanically; the decorative `type:*` register gets
+  # a visible neutral instead of borrowing a protocol tint, so a color rhyme never suggests a
+  # kinship the code does not have.
+  defp label_color("lcars-in-flight"), do: "#FF9900"
+  defp label_color("lcars-awaits-arch"), do: "#CC6666"
+  defp label_color("genre/ops"), do: "#33BBCC"
+  defp label_color("stage/brief-review"), do: "#6699CC"
+  defp label_color("stage/build"), do: "#FFCC33"
+  defp label_color("stage/review"), do: "#9966CC"
+  defp label_color("stage/merged"), do: "#99CC66"
+  defp label_color("wfmap/" <> _map), do: "#CC99CC"
+  defp label_color("type:" <> _kind), do: "#999999"
+  defp label_color(_), do: "#999999"
 
   # Description PER FAMILY (Gitea tooltip on hover) — the NAME stays the protocol (LCARS vocab intact,
   # parsed as-is by the code), the description is the ONLY place where we explain in plain terms to a human
@@ -1141,6 +1187,14 @@ defmodule Fleet.Pilot.ForgeClient do
         "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
     end
   end
+
+  defp label_description("genre/ops"),
+    do:
+      "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie ops (branche work/ops) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
+
+  defp label_description("type:" <> _kind),
+    do:
+      "Type VISUEL du ticket — décoratif, aucun mécanisme ne le lit. Il suit le genre : ce qui ROUTE est `genre/*`."
 
   defp label_description(_),
     do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
