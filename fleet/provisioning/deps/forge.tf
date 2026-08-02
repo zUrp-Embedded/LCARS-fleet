@@ -226,3 +226,15 @@ resource "gitea_team_membership" "human" {
   team_id  = gitea_team.humans.id
   username = gitea_user.human.username
 }
+
+# lcars-system ∈ humans : le token système doit LIRE les membres de `humans` — c'est la
+# vérification d'admission de l'onboard (`{:human_team_unverifiable, …}` refuse l'onboard quand
+# cette lecture échoue). BL-6-27 : deux agents ont posé ce membership à la main, séparément, sur
+# deux bancs — un contournement réinventé deux fois est un trou de recette. Aucun privilège
+# nouveau : la team est `read` et `system` (write, can_create_repos) la domine déjà — seule la
+# visibilité de la liste des membres est acquise. Le volet delete_project (repo-admin exigé par
+# Gitea) reste OUVERT dans BL-6-27 : il se règle par une identité, pas en élargissant `system`.
+resource "gitea_team_membership" "system_reads_humans" {
+  team_id  = gitea_team.humans.id
+  username = gitea_user.system.username
+}
