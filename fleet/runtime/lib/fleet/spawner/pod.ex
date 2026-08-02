@@ -245,17 +245,6 @@ defmodule Fleet.Spawner.Pod do
   # All other states: entry does nothing (the work lives in `:proceed`).
   def handle_event(:enter, _old_state, _state, _data), do: :keep_state_and_data
 
-  # Local "issue-N" → N parse (feed context only): Spawner cannot reach Pilot's IssueId
-  # (upward edge), and the feed needs a best-effort integer — nil when the shape differs.
-  defp issue_number_of("issue-" <> rest) do
-    case Integer.parse(rest) do
-      {n, ""} -> n
-      _ -> nil
-    end
-  end
-
-  defp issue_number_of(_), do: nil
-
   # ============================================================
   # Boot chain — internal :proceed event (priority over the mailbox)
   # ============================================================
@@ -1002,6 +991,17 @@ defmodule Fleet.Spawner.Pod do
     # a raise here would propagate out of `terminate`.
     McpProvision.release_pod_socket(data)
   end
+
+  # Local "issue-N" → N parse (feed context only): Spawner cannot reach Pilot's IssueId
+  # (upward edge), and the feed needs a best-effort integer — nil when the shape differs.
+  defp issue_number_of("issue-" <> rest) do
+    case Integer.parse(rest) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp issue_number_of(_), do: nil
 
   defp do_publish_deadline_lift(data) do
     if Publishing.publishing?(data) do
