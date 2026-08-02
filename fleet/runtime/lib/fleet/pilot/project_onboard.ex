@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -374,6 +374,224 @@ defmodule Fleet.Pilot.ProjectOnboard do
          local: %{project: proj, work: work}
        }}
     end
+  end
+
+  @doc """
+  REVISES the validation-card declaration of an EXISTING project (BL-6-29): the card was engraved
+  once at onboarding with NO revision path — a C0 PoC that grew serious kept its fast-track for
+  life. The gesture: re-compose `intensity.json` (same schema, same validation, `declared_by` =
+  the revising role — `ProjectIntensity.write/2` is already dir-agnostic), commit it on `main`
+  through a SCOPED protection lift, re-place the canonical rule — which re-sizes
+  `required_approvals` on the NEW card in the same act (`protect_main` reads the committed
+  declaration via the project jury).
+
+  Mechanics — a THROWAWAY clone, never the showcase worktree: the showcase is WorktreeSync's
+  territory (reset-synced), working there would race it, and a failed revision would leave a
+  dirty human-facing dir. The scratch clone is discarded either way; the showcase is synced
+  explicitly on success (`:sync_showcase` seam) so the next burn reads the NEW card.
+
+  The `main` traversal: `enable_push: false` denies everyone at pre-receive, and that floor is
+  placed BY THIS MODULE — the lift projects a push whitelist reduced to the SYSTEM account, the
+  push lands, the canonical rule is re-placed immediately (push failed → local state is the
+  scratch, discarded; the rule is restored before returning). A crash between lift and restore
+  leaves `main` pushable by the system account ALONE, and the periodic
+  `reconcile_main_protection` pass re-projects `enable_push: false` — the floor self-heals.
+
+  Refusals (nothing touched): unknown/unloadable card (`{:error, {:unknown_card, name}}` — a
+  revision has a working state to preserve, failing costs nothing; the CREATION path stays
+  tolerant by design, cf. `ProjectIntensity`), missing `:justification` (a revision without its
+  WHY is exactly the untraced mutation this path exists to prevent), project not on the machine.
+  An identical re-declaration is an honest no-op (`outcome: :unchanged` — no lift, no push).
+
+  Engraved routes do NOT re-route: the burn is per-issue, the revision binds FUTURE tickets only
+  (an issue in flight keeps its contract) — the caller relays that to the human.
+  """
+  @spec revise_card(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def revise_card(full_name, opts \\ []) when is_binary(full_name) do
+    name = Fleet.Layout.project_name(full_name)
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    card = Keyword.get(opts, :workflow_map)
+
+    with :ok <- require_on_machine(full_name, proj_dir),
+         :ok <- require_justification(opts),
+         :ok <- require_loadable_card(card),
+         {:ok, url} <- repo_url(full_name, opts) do
+      previous = declared_card(proj_dir)
+      scratch = scratch_dir(name)
+
+      try do
+        with :ok <- clone_main(url, scratch),
+             :ok <- Fleet.Pilot.ProjectIntensity.write(scratch, revision_write_opts(opts)),
+             {:ok, :changed} <- revision_changed(scratch) do
+          publish_revision(full_name, scratch, card, previous, opts)
+        else
+          {:ok, :unchanged} ->
+            {:ok, %{repo: full_name, card: card, previous_card: previous, outcome: :unchanged}}
+
+          {:error, _} = err ->
+            err
+        end
+      after
+        _ = File.rm_rf(scratch)
+      end
+    end
+  end
+
+  defp require_on_machine(full_name, proj_dir) do
+    if File.dir?(proj_dir), do: :ok, else: {:error, {:not_on_machine, full_name}}
+  end
+
+  defp require_justification(opts) do
+    case Keyword.get(opts, :justification) do
+      j when is_binary(j) and j != "" -> :ok
+      _ -> {:error, :justification_required}
+    end
+  end
+
+  # DIVERGES from the creation path deliberately: creation tolerates an unloadable card (walling
+  # the declaration teaches the human to lie, the burn falls back loud) — a REVISION has a working
+  # state to preserve, so failing the gesture costs nothing and a typo'd card must not silently
+  # send the project's judgment layer to the fallback.
+  defp require_loadable_card(card) when is_binary(card) and card != "" do
+    _ = Fleet.Workflow.Loader.load!(card)
+    :ok
+  rescue
+    _ -> {:error, {:unknown_card, card}}
+  end
+
+  defp require_loadable_card(_absent), do: {:error, :workflow_map_required}
+
+  # The CURRENT declaration, for the trace (commit message + result) — read from the showcase.
+  # nil (absent/unreadable file) renders as undeclared; the revision itself never depends on it.
+  defp declared_card(proj_dir) do
+    with {:ok, raw} <- File.read(Path.join(proj_dir, "intensity.json")),
+         {:ok, %{"pipeline_default" => card}} when is_binary(card) <- Jason.decode(raw) do
+      card
+    else
+      _ -> nil
+    end
+  end
+
+  defp scratch_dir(name) do
+    Path.join(
+      System.tmp_dir!(),
+      "lcars-card-revision-#{name}-#{System.unique_integer([:positive])}"
+    )
+  end
+
+  defp revision_write_opts(opts) do
+    [
+      workflow_map: Keyword.get(opts, :workflow_map),
+      intensity_justification: Keyword.get(opts, :justification),
+      intensity_level: Keyword.get(opts, :intensity_level),
+      intensity_nature: Keyword.get(opts, :nature),
+      onboarded_by: Keyword.get(opts, :revised_by) || "unknown"
+    ]
+  end
+
+  # Same-content re-declaration (same card, same justification, same day) → an honest no-op:
+  # committing nothing would fail obscurely, and lifting the protection for nothing is a
+  # needless window.
+  defp revision_changed(scratch) do
+    case GitOps.read(["-C", scratch, "status", "--porcelain"], auth: false) do
+      {:ok, ""} -> {:ok, :unchanged}
+      {:ok, _dirty} -> {:ok, :changed}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp publish_revision(full_name, scratch, card, previous, opts) do
+    msg = "card revision: #{previous || "(undeclared)"} -> #{card}"
+
+    with :ok <- commit(scratch, msg),
+         :ok <- lift_protection(full_name, opts) do
+      case push(scratch, "main", false) do
+        :ok ->
+          sync_showcase(full_name, opts)
+          protection = restore_protection(full_name, opts)
+
+          {:ok,
+           %{
+             repo: full_name,
+             card: card,
+             previous_card: previous,
+             outcome: :revised,
+             protection: protection
+           }}
+
+        {:error, reason} ->
+          # The revision only lives in the discarded scratch — restore the rule, report loud.
+          _ = restore_protection(full_name, opts)
+          {:error, {:card_push_failed, reason}}
+      end
+    end
+  end
+
+  # The lift projects ONLY the push door: `enable_push: true` + whitelist reduced to the system
+  # account. The jury sizing fields are NOT projected here (untouched), so the door is the whole
+  # diff between lift and canon — and the canonical restore closes it (`enable_push: false` makes
+  # a leftover whitelist inert).
+  defp lift_protection(repo, opts) do
+    rule = %{
+      rule_name: "main",
+      enable_push: true,
+      enable_push_whitelist: true,
+      push_whitelist_usernames: [Fleet.Credentials.ForgeIdentity.system_identity().name]
+    }
+
+    case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do
+      {:ok, _outcome} -> :ok
+      {:error, reason} -> {:error, {:protection_lift_failed, reason}}
+    end
+  end
+
+  # Re-places the canonical rule (single projection point: `protect_main` — jury re-sized on the
+  # card the showcase now declares). A restore failure after a LANDED push is reported, never
+  # collapsed into an error that would misread the revision as not-landed: the periodic
+  # `reconcile_main_protection` pass converges the rule, the caller sees `:restore_failed`.
+  defp restore_protection(repo, opts) do
+    case protect_main(repo, opts) do
+      :ok ->
+        :restored
+
+      {:error, reason} ->
+        Logger.error(
+          "ProjectOnboard: card revision of #{repo} — protection restore FAILED " <>
+            "(#{inspect(reason)}) — the periodic protection pass will converge the rule"
+        )
+
+        :restore_failed
+    end
+  end
+
+  # Success-path showcase alignment: the burn reads the card from the SHOWCASE
+  # (`ProjectIntensity.pipeline_default`), so a landed revision must reach it — otherwise every
+  # ticket until the next dispatch-sync burns the OLD card. Failure degrades loud, never fails
+  # the landed revision (the next WorktreeSync pass catches up). `:sync_showcase` = test seam.
+  defp sync_showcase(repo, opts) do
+    sync =
+      Keyword.get(opts, :sync_showcase, fn r -> Fleet.Pilot.WorktreeSync.sync_now(r, "main") end)
+
+    case sync.(repo) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "ProjectOnboard: card revision of #{repo} landed but the showcase sync degraded " <>
+            "(#{inspect(other)}) — burns read the OLD card until the next worktree sync"
+        )
+
+        :ok
+    end
+  catch
+    kind, why ->
+      Logger.warning(
+        "ProjectOnboard: card revision of #{repo} landed but the showcase sync degraded " <>
+          "(#{inspect(kind)}: #{inspect(why)}) — burns read the OLD card until the next worktree sync"
+      )
+
+      :ok
   end
 
   # Removes `dir` ONLY when its ownership is PROVEN — two proofs, never a guess.
