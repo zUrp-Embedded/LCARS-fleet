@@ -318,7 +318,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
       opts
     )
 
-    with {:ok, sha} <- step1_publish(step_run, deliverable),
+    with {:ok, sha} <-
+           step1_publish(step_run, deliverable) |> record_publish_failure(step_run, opts),
          # Gap BEFORE the PR: the content push takes a `created_at` strictly earlier than the
          # PR-opened action (a same-second tie renders inverted in the feed).
          :ok <- space_writes(opts),
@@ -1016,6 +1017,46 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     :ok
   end
+
+  # Records ONE publish failure on the issue (chantier frein-publish): a `[publish-fail:issue-N:
+  # base-<sha12>]` marker comment, system-signed, dedup-free ON PURPOSE — each failed round is a
+  # distinct fact and the brake (`Remediation.dispatch_rework`) counts the same-base group. The
+  # base is the GATE base (`deliverable_opts.base_sha`): it moves only on a successful push, so
+  # same-base ≡ consecutive. BEST-EFFORT and error-transparent: the marker is the LEDGER of the
+  # failure, never a second failure mode — the original error passes through untouched, and a
+  # failed post degrades to the pre-brake behaviour (unbounded retry), logged loud.
+  defp record_publish_failure({:error, {:publish, reason}} = err, step_run, opts) do
+    with repo when is_binary(repo) <- Map.get(step_run, :repo),
+         n when is_integer(n) <- Map.get(step_run, :issue_number),
+         base when is_binary(base) and base != "" <-
+           get_in(step_run, [:deliverable_opts, :base_sha]) do
+      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge_opts = Keyword.get(opts, :forge_opts, [])
+      marker = ForgeProtocol.publish_fail_marker(n, base)
+
+      body =
+        "⚠ Publication du livrable REFUSÉE (`#{inspect(reason)}`) — le travail du pod n'a pas " <>
+          "atteint la forge. Compteur de frein : les échecs sur une même base s'accumulent, " <>
+          "l'architecte est saisi au-delà du budget.\n\n" <> marker
+
+      case forge.post_comment(repo, n, body, forge_opts) do
+        {:ok, _} ->
+          :ok
+
+        {:error, post_reason} ->
+          Logger.warning(
+            "StepRunCompleter: publish-fail marker NOT recorded on #{repo}##{n} " <>
+              "(#{inspect(post_reason)}) — the brake cannot count this round (degrades to retry)"
+          )
+      end
+    else
+      _ -> :ok
+    end
+
+    err
+  end
+
+  defp record_publish_failure(outcome, _step_run, _opts), do: outcome
 
   defp step1_publish(step_run, deliverable) do
     case Map.get(step_run, :deliverable_opts) do

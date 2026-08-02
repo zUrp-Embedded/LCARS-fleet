@@ -110,6 +110,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def count_change_request_rounds(_repo, _index, opts),
       do: Keyword.get(opts, :_test_rework_rounds, {:ok, 0})
 
+    # Publish brake (chantier frein-publish): largest same-base [publish-fail:...] group.
+    # Default 0 = no failure recorded → the brake never fires (legacy tests unchanged).
+    def count_publish_failures(_repo, _n, opts),
+      do: Keyword.get(opts, :_test_publish_fails, {:ok, 0})
+
     # Tier 1 (conflict-rework budget): counts the `[conflict-rework:pr-N` markers. Seam
     # `_test_conflict_rounds` (default {:ok, 0} = first conflict → producer rework, not escalation).
     def count_comments_marked(_repo, _index, _prefix, opts),
@@ -1360,6 +1365,65 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StepDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "frein-publish P2: publish streak > budget -> PUBLISH-BRAKE escalation, no re-spawn (the verdict counter is frozen)" do
+      # The measured hole: a rework whose PUBLICATION fails produces no verdict → `rounds` freezes
+      # under budget → the old brake never fires → a real producer session burned per tick,
+      # unbounded (faceproof bench, 5 identical rounds). The publish streak is the counter that
+      # moves — over the SAME budget, it must escalate BEFORE any re-spawn.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_route: {:ok, {"g", "build"}},
+            # rounds frozen at 1 (under budget 2) — exactly the loop's shape...
+            _test_rework_rounds: {:ok, 1},
+            # ...while the publish failures accumulated past the budget.
+            _test_publish_fails: {:ok, 3}
+          ]
+        )
+
+      assert {:skipped, {:publish_brake_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
+      refute_received {:spawned, _, _}
+    end
+
+    test "frein-publish P2: streak AT budget -> rework proceeds (the brake bounds, it does not preempt)" do
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_route: {:ok, {"g", "build"}},
+            _test_rework_rounds: {:ok, 1},
+            _test_publish_fails: {:ok, 2}
+          ]
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
+               StepDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "frein-publish P2: unreadable publish counter -> escalation, never a blind loop" do
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_route: {:ok, {"g", "build"}},
+            _test_rework_rounds: {:ok, 1},
+            _test_publish_fails: {:error, {:http, 500, "boom"}}
+          ]
+        )
+
+      assert {:skipped, {:rework_exhausted_escalated, 6}} =
+               StepDispatcher.dispatch_review(pr, opts)
+
+      refute_received {:spawned, _, _}
     end
 
     test "MA-06: N PR rework rounds (rounds > budget) -> ARCH ESCALATION (bounded, no infinite churn)" do

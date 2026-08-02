@@ -55,16 +55,35 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       {:ok, {issue_n, producer_role}} ->
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, rounds} <-
-               ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts) do
-          if rounds <= budget do
-            RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
-          else
-            ArchEscalation.escalate_rework(
-              arch_seams(ctx),
-              pr_number,
-              head,
-              %{rounds: rounds, budget: budget}
-            )
+               ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts),
+             # The PUBLISH brake (chantier frein-publish) — checked with the SAME budget, on the
+             # OTHER counter: `rounds` counts judge verdicts and freezes the moment a rework's
+             # publication fails (no delivery → no re-judge), which is exactly when the spend
+             # runs away. The streak is the largest same-base `[publish-fail:...]` marker group
+             # on the issue (the gate base moves only on a successful push, so same-base ≡
+             # consecutive). An unreadable counter escalates like an unreadable budget: never a
+             # blind loop.
+             {:ok, publish_fails} <-
+               count_publish_failures(ctx, issue_n) do
+          cond do
+            publish_fails > budget ->
+              ArchEscalation.escalate_publish_failures(
+                arch_seams(ctx),
+                pr_number,
+                head,
+                %{publish_failures: publish_fails, budget: budget}
+              )
+
+            rounds <= budget ->
+              RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
+
+            true ->
+              ArchEscalation.escalate_rework(
+                arch_seams(ctx),
+                pr_number,
+                head,
+                %{rounds: rounds, budget: budget}
+              )
           end
         else
           # Budget not verifiable (unreadable route/map) OR unreadable counter → we do NOT enter a
@@ -86,6 +105,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # PR rework budget = the SAME `spec.max_rework_rounds` as the issue brake (the pipeline's SINGLE churn
   # policy, read as DATA — never a hand-aligned hard-coded default). Issue route → map name →
   # budget. Routeless / unreadable map → `{:error}`: the caller escalates (never a blind loop).
+  # Seam-tolerant read of the publish-failure streak: a forge stub without the counter (every
+  # pre-brake test, and any minimal seam) reads as ZERO failures — the brake only ever FIRES on a
+  # forge that records the markers, it never blocks a rework for lack of instrumentation. A real
+  # counter error, though, propagates (the `with` escalates it like an unreadable budget).
+  defp count_publish_failures(%Ctx{} = ctx, issue_n) do
+    if function_exported?(ctx.forge, :count_publish_failures, 3) do
+      ctx.forge.count_publish_failures(ctx.repo, issue_n, ctx.forge_opts)
+    else
+      {:ok, 0}
+    end
+  end
+
   defp pr_rework_budget(%Ctx{} = ctx, issue_n) do
     with {:ok, {map_name, _step}} when is_binary(map_name) <-
            Fleet.Pilot.StepDispatcher.Spawn.route_for(

@@ -324,13 +324,36 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:open_pr, "feature/issue-42", "develop", _}
     end
 
-    test "publish fails → {:error, {:publish, _}}, NO PR opened" do
+    test "publish fails → {:error, {:publish, _}}, NO PR opened — and the FAIL MARKER is recorded (frein-publish P2)" do
       opts = [deliverable: FailDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:error, {:publish, :base_not_ancestor}} =
                StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
 
       refute_received {:open_pr, _, _, _}
+
+      # The ledger of the brake: one [publish-fail:issue-N:base-<sha12>] marker comment on the
+      # ISSUE, carrying the gate base (deliverable_opts.base_sha "cafe"). Without it the brake
+      # counts nothing and the loop is unbounded — this is the half the poster owns.
+      assert_received {:comment, 42, body, _}
+      assert body =~ Fleet.Pilot.ForgeProtocol.publish_fail_marker(42, "cafe")
+      assert body =~ ":base_not_ancestor"
+    end
+
+    test "frein-publish P2: a marker post that FAILS degrades to the error untouched (never a second failure mode)" do
+      defmodule CommentFailForge2 do
+        def post_comment(_r, _n, _b, _o), do: {:error, {:http, 500, "boom"}}
+      end
+
+      opts = [deliverable: FailDeliverable, forge_client: CommentFailForge2, forge_opts: []]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:publish, :base_not_ancestor}} =
+                   StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
+        end)
+
+      assert log =~ "publish-fail marker NOT recorded"
     end
 
     test "open_pr fails → {:error, {:open_pr, _}}" do
