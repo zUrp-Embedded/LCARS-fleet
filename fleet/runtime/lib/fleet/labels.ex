@@ -18,10 +18,27 @@ defmodule Fleet.Labels do
 
   or runtime direct (`Fleet.Labels.awaits_arch()`).
 
-  Two families: the FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` (concurrency / escalation,
-  unscoped), and the workflow_map POSITION as SCOPED labels `wfmap/<map>` + `stage/<step>` (the state
-  lives in the label, native Gitea mutex `exclusive:true`). Outside these two families, a label
-  does not exist.
+  FOUR families, and the split that matters is scoped-vs-flat, because Gitea reads it: a name
+  containing `/` is created `exclusive:true` (setting one removes the others of its scope), a flat
+  name accumulates.
+
+    * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` — concurrency / escalation.
+    * SCOPED POSITION `wfmap/<map>` + `stage/<step>` — the workflow_map position; the state lives
+      in the label and the mutex is native.
+    * SCOPED GENRE `genre/ops` — an INPUT to the burn (which card gets engraved).
+    * FLAT VISUAL `type:*` — decoration, `:` and not `/` so the namespace cannot be mistaken for a
+      routing scope. Nothing mechanical reads it back.
+
+  The first three MEAN something to the machine; the fourth means something only to a human. That
+  asymmetry is a trap, not a detail: a wrong routing label breaks something and gets found, a wrong
+  visual label breaks nothing and simply misinforms every reader (measured 2026-08-03 — a doc
+  ticket wearing `type:feature`). Hence `type_for_genre/1`: the decoration is DERIVED from the
+  routing decision, never posted as its own constant.
+
+  This list said "two families" until 2026-08-03, and closed with "outside these two families, a
+  label does not exist" — while `genre/ops` had been shipping for a chantier and `type:feature` was
+  posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
+  is the first thing a reader trusts and the last thing anyone updates.
 
   **Last revised**: 2026-08-03
   """
