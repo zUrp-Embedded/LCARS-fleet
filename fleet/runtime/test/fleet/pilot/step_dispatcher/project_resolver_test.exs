@@ -36,4 +36,20 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolverTest do
                )
     end
   end
+
+  describe "single-default-site doctrine (chantier face-projet)" do
+    test ":base_branch missing → RAISES naming the doctrine, never a silent `main`" do
+      # This used to default to "main": when the face decision did not reach the resolver, it
+      # silently pinned the code face — the exact substituting-default the inventory (§D) killed.
+      err =
+        assert_raise ArgumentError, fn ->
+          ProjectResolver.default_project_resolver("fleet/x",
+            forge_opts: [base_url: "http://unreachable.invalid"]
+          )
+        end
+
+      assert err.message =~ ":base_branch missing"
+      assert err.message =~ "single-default-site"
+    end
+  end
 end

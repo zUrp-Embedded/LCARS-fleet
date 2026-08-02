@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
   dependency on fleet_pilot.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   # ============================================================
@@ -110,6 +110,54 @@ defmodule Fleet.Pilot.ForgeProtocol do
     # => "[step_run:<role>:<sha>]"
     "#{@step_run_prefix}#{role}:#{sha}]"
   end
+
+  # ============================================================
+  # PUBLISH-FAIL marker `[publish-fail:issue-<n>:base-<sha12>]` — forge-native consecutive-failure
+  # counter (chantier frein-publish). The gate BASE moves ONLY on a successful push, so "consecutive
+  # failures" ≡ "failures sharing a base": no success marker, no RAM state — the max same-base group
+  # among an issue's markers IS the streak, and a delivered brick starts a fresh group by construction.
+  # ============================================================
+
+  @publish_fail_prefix "[publish-fail:issue-"
+  # {4,12}: the parser accepts what the builder can PRODUCE — the builder slices to ≤12, and a
+  # test base can legitimately be shorter than 12 (git's shortest abbreviation is 4). A parser
+  # stricter than its builder silently uncounts markers the poster just recorded.
+  @publish_fail_rx Regex.compile!(
+                     Regex.escape(@publish_fail_prefix) <> "(\\d+):base-([0-9a-f]{4,12})\\]"
+                   )
+
+  @doc """
+  Marker of ONE publish failure for issue `n` on gate base `base_sha` (truncated 12 hex) —
+  builder and parser derive from the same literal. Posted by `StepRunCompleter` when the
+  deliverable publication fails; counted by `Remediation.dispatch_rework` (the brake).
+
+      iex> m = Fleet.Pilot.ForgeProtocol.publish_fail_marker(7, String.duplicate("a", 40))
+      iex> m
+      "[publish-fail:issue-7:base-aaaaaaaaaaaa]"
+      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker(m)
+      {:ok, {7, "aaaaaaaaaaaa"}}
+      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker("un commentaire")
+      :error
+      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker(
+      ...>   Fleet.Pilot.ForgeProtocol.publish_fail_marker(42, "cafe")
+      ...> )
+      {:ok, {42, "cafe"}}
+  """
+  @spec publish_fail_marker(integer(), String.t()) :: String.t()
+  def publish_fail_marker(n, base_sha) when is_integer(n) and is_binary(base_sha) do
+    "#{@publish_fail_prefix}#{n}:base-#{String.slice(base_sha, 0, 12)}]"
+  end
+
+  @doc "Extracts `{issue_n, base12}` from a body carrying a publish-fail marker; `:error` otherwise."
+  @spec parse_publish_fail_marker(String.t()) :: {:ok, {integer(), String.t()}} | :error
+  def parse_publish_fail_marker(body) when is_binary(body) do
+    case Regex.run(@publish_fail_rx, body) do
+      [_, n, base12] -> {:ok, {String.to_integer(n), base12}}
+      _ -> :error
+    end
+  end
+
+  def parse_publish_fail_marker(_), do: :error
 
   @doc false
   # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native

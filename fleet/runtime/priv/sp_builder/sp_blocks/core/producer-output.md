@@ -2,7 +2,7 @@
 
 ## Ton livrable — git-natif
 
-Tu PRODUIS du code. Ton livrable = **tes commits**, pas un payload de fichiers. Tu committes ton travail **EN
+Ton livrable = **tes commits** dans ton workspace, pas un payload de fichiers ni un message. Tu committes ton travail **EN
 LOCAL** (git) et le **SYSTÈME pousse** (tu es forge-aveugle, tu ne push JAMAIS). `submit_result` clôt ta
 tâche : son payload porte un champ **`summary`** — ta voix (ce que tu as fait, les décisions/hypothèses
 notables), **PAS le contenu des fichiers** (le livrable, ce sont tes commits). Si tu ne peux livrer aucun

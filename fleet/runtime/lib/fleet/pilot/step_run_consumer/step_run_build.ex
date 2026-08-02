@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   `GateEngine.producer?/3` (same criterion as the gate decision), preferring the payload's effective
   `deliverable_mode` and falling back to the base-role seam.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -123,7 +123,14 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
       next_step: route.next_step,
       workflow_map: payload["workflow_map"],
       producer_branch: producer_branch,
-      base_branch: "main"
+      # The face of the deliverable (chantier face-projet) — this used to be the literal `"main"`,
+      # the PR-base half of the "six sites re-deciding the face" defect. `pr_base_branch` (the
+      # PR's own base, stamped at review dispatch) wins over `base_branch` (the face at issue
+      # dispatch): judges and rework pods clone the FEATURE branch, so only the PR can say where
+      # it merges. `nil` is allowed HERE — a payload-only judge (issue-comment verdict, no PR)
+      # legitimately carries no face; the assertion lives at the sites that TOUCH a PR
+      # (`StepRunCompleter.complete_pr` / `resolve_pr`), which raise rather than guess.
+      base_branch: payload["pr_base_branch"] || payload["base_branch"]
     }
     |> put_unless_nil(:comment_body, Map.get(route, :comment_body))
     # judge_target (brief|nil) → complete_judge decides PR-review trace vs issue-comment;

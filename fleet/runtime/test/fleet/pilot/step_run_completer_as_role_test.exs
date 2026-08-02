@@ -60,6 +60,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   test "await_arch posts the verdict IN THE JUDGE'S NAME (role token overwrites the system)" do
     step_run = %{
       repo: "fleet/poc",
+      base_branch: "main",
       issue_number: 3,
       role: "consultant",
       decision: "redirect",
@@ -79,6 +80,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   test "complete: the step_run's signed comment is IN THE NAME OF THE finishing ROLE" do
     step_run = %{
       repo: "fleet/poc",
+      base_branch: "main",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
@@ -99,6 +101,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   test "judge :promote (terminal) → PR stopwatch stop signed JUDGE, ISSUE stopwatch stop signed PRODUCER" do
     step_run = %{
       repo: "fleet/proj",
+      base_branch: "main",
       issue_number: 42,
       role: "reviewer",
       pr_role: :judge,
@@ -133,6 +136,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   test "judge :promote → ISSUE stopwatch stop signed by the CARD's producer (documentalist), not the config default" do
     step_run = %{
       repo: "fleet/docs-proj",
+      base_branch: "main",
       issue_number: 99,
       role: "reviewer",
       pr_role: :judge,

@@ -1,0 +1,46 @@
+# Pipeline V2 — ops-direct (chantier face-projet, 2026-08-02)
+#
+# Date: 2026-08-02
+# Statut: actif — rail cable et PROUVE le 2026-08-02 sur fleet neuve docker (banc faceproof) :
+#         ticket genre/ops -> burn ops-direct -> eng_doc -> PR base=work/ops -> merge scelle
+#         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
+# Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
+# Consommé par: Fleet.Workflow.Loader (schema v2.5, clé `face` du step).
+#
+# LE CHEMIN DIRECT, et pourquoi il est direct — deux absences, toutes deux des DÉCISIONS :
+#
+#   PAS de scoper (pas de step brief-review) : sur un ticket ops, l'AUTEUR du brief est aussi le
+#   juge du retour (l'arch écrit la demande de doc, l'arch relit le doc livré dans son mount RW).
+#   Une porte de brief entre les deux arbitrerait un différend qui n'a qu'une partie. Propriété de
+#   CE chemin, pas règle globale — un ticket ops routé un jour vers un jury retrouverait sa porte.
+#
+#   PAS de jury (`jury: []`, configuration supportée — précédent : audit-only, c0-poc) : les juges
+#   sont calibrés sur du mécanique (tests, secrets, ancêtre) ; sur de la prose ils n'ont pas de
+#   vérité terrain — trois opinions convergent vers la moyenne, chacune ajoutant la sienne, et le
+#   livrable devient la bouillie des trois. L'arch juge le doc mergé, directement, dans son mount.
+#   Le plancher mécanique (identité, secrets, ancêtre, sceau) tient seul, comme sur tout jury vide.
+
+kind: WorkflowMap
+metadata:
+  name: ops-direct
+  description: "Ticket documentaire — l'eng_doc rédige sur work/ops, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
+  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : l'eng_doc rédige sur work/ops (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre ops), jamais par projet — toute carte de criticité garde son pipeline code."
+  applicable_intensity: [C0, C1, C2, C3, C4]
+
+spec:
+  # Jury VIDE délibéré — cf. l'en-tête. Le plancher mécanique tient seul (précédent c0-poc).
+  jury: []
+  # Budget anti-emballement (obligatoire, donnée map-level). Sans jury il n'y a pas de
+  # déclencheur de rework mécanique ; le budget borne les relances arch → nouveau ticket.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step unique (racine ET terminal) : rédaction sur la face ops ---
+    build:
+      role: eng_doc
+      # LA clé du chantier : le workspace du producteur clone work/ops, sa PR y retourne,
+      # le réalignement post-merge suit cette face, et `main` devient sa référence RO.
+      face: ops
+      needs: []                     # racine DAG — et pas de successeur : chemin direct
+      inputs:
+        - ticket.body               # le brief rédigé par l'arch

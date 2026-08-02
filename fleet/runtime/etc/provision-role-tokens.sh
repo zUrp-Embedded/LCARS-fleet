@@ -65,7 +65,7 @@ TOKENS_DIR="/home/private"
 # on a role listed here that has no canon cap-profile (a phantom). It CANNOT catch the reverse — drop a
 # canon role from ROLES below and the check stays green, because it is a subset test. Closing that
 # direction needs a `needs_role_token` flag in the canon, which is not built.
-ROLES="architect engineer gatekeeper qualifier reviewer scoper"
+ROLES="architect engineer eng_doc gatekeeper qualifier reviewer scoper"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"

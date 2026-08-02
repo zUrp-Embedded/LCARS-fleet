@@ -172,6 +172,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         repo: "lordzurp/lcars-test",
         issue_number: 42,
         role: "engineer",
+        # chantier face-projet : la face est assertee par le completer, la fixture la dit comme la prod
+        base_branch: "main",
         deliverable_opts: %{mode: :git_native, workspace: "/tmp/ws", base_sha: "cafe"}
       },
       extra
@@ -322,13 +324,36 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:open_pr, "feature/issue-42", "develop", _}
     end
 
-    test "publish fails → {:error, {:publish, _}}, NO PR opened" do
+    test "publish fails → {:error, {:publish, _}}, NO PR opened — and the FAIL MARKER is recorded (frein-publish P2)" do
       opts = [deliverable: FailDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:error, {:publish, :base_not_ancestor}} =
                StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
 
       refute_received {:open_pr, _, _, _}
+
+      # The ledger of the brake: one [publish-fail:issue-N:base-<sha12>] marker comment on the
+      # ISSUE, carrying the gate base (deliverable_opts.base_sha "cafe"). Without it the brake
+      # counts nothing and the loop is unbounded — this is the half the poster owns.
+      assert_received {:comment, 42, body, _}
+      assert body =~ Fleet.Pilot.ForgeProtocol.publish_fail_marker(42, "cafe")
+      assert body =~ ":base_not_ancestor"
+    end
+
+    test "frein-publish P2: a marker post that FAILS degrades to the error untouched (never a second failure mode)" do
+      defmodule CommentFailForge2 do
+        def post_comment(_r, _n, _b, _o), do: {:error, {:http, 500, "boom"}}
+      end
+
+      opts = [deliverable: FailDeliverable, forge_client: CommentFailForge2, forge_opts: []]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:publish, :base_not_ancestor}} =
+                   StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
+        end)
+
+      assert log =~ "publish-fail marker NOT recorded"
     end
 
     test "open_pr fails → {:error, {:open_pr, _}}" do
@@ -393,6 +418,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         role: "reviewer",
         review_event: :request_changes,
         review_body: "il manque un test de la branche d'erreur"
@@ -415,6 +441,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         issue_number: 42,
         producer_branch: "lcars/issue-42-engineer"
       }
@@ -431,6 +458,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         issue_number: 42,
         producer_branch: "lcars/issue-42-engineer"
       }
@@ -453,6 +481,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           repo: "fleet/proj",
           issue_number: 42,
           role: "engineer",
+          base_branch: "main",
           pr_role: :producer,
           intent: intent,
           next_assignee: nil,
@@ -474,6 +503,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           repo: "fleet/proj",
           issue_number: 42,
           role: "reviewer",
+          base_branch: "main",
           pr_role: :judge,
           intent: intent,
           next_assignee: nil,
@@ -658,6 +688,30 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :request_changes, _}
       refute_received {:merge, _}
+    end
+
+    test "producer :review on a ROUTED map → the ENGRAVED card's jury, never the project's (faceproof bench)" do
+      # chantier face-projet: the step_run carries the engraved map (ops-direct, jury []) — the
+      # review request must convene THAT card's jury, not the project card's. Reading the project
+      # card laid brief-gate's qualifier+reviewer onto a zero-judge ops PR: REQUEST_CHANGES x2 on
+      # prose, rework loop. Measured on the faceproof bench before this test existed.
+      step_run = producer_step_run(:review, %{workflow_map: "ops-zero"})
+
+      zero_loader = fn "ops-zero" ->
+        %{"jury" => [], "steps" => %{"build" => %{"role" => "eng_doc", "needs" => []}}}
+      end
+
+      # NO reviewer_roles seam here — it would win over both cards and prove nothing. The
+      # discriminant is real: without the fix, the fallback `project_jury` loads the delegation
+      # default card (brief-gate, jury qualifier+reviewer) and a request_review fires.
+      assert {:ok, :review_requested} =
+               StepRunCompleter.complete_pr(
+                 step_run,
+                 orch_opts(workflow_map_loader: zero_loader)
+               )
+
+      # Zero-judge engraved card → NOBODY convened. The promote is dispatch_review's (:no_jury).
+      refute_received {:request_review, _, _}
     end
 
     test "②.1d producer :review (no-workflow_map) → opens PR, request_review(qualifier+reviewer), assigns the human, unlocks PR ONLY (issue persists), NO merge" do

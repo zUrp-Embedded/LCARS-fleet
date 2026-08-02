@@ -39,7 +39,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   use ExMCP.Server
@@ -128,7 +128,18 @@ defmodule Fleet.MCP.PodTools do
         "summary" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"},
-        "supersedes" => %{"type" => "integer"}
+        "supersedes" => %{"type" => "integer"},
+        "genre" => %{
+          "type" => "string",
+          "enum" => ["code", "ops"],
+          "description" =>
+            "Genre of the deliverable. \"ops\" = DOCUMENTARY ticket (spec rework, addendum, " <>
+              "design note): routed to the ops producer on the work/ops face, direct path — " <>
+              "no scoper (you authored the brief, you judge the return in your own mount), " <>
+              "no PR jury (no mechanical ground truth on prose). \"code\" or absent = the " <>
+              "project's declared card, unchanged. Use ops for every ticket whose deliverable " <>
+              "is a document, never a hack around the code path."
+        }
       },
       "required" => ["title", "brief"]
     })
@@ -401,7 +412,8 @@ defmodule Fleet.MCP.PodTools do
              state,
              brief_pointer(args),
              summary,
-             args["supersedes"]
+             args["supersedes"],
+             args["genre"]
            ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}

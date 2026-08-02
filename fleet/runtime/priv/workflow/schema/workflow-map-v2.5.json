@@ -195,6 +195,14 @@
            ]
           }
          ]
+        },
+        "face": {
+         "type": "string",
+         "enum": [
+          "code",
+          "ops"
+         ],
+         "description": "OPTIONAL project face the step's producer works ON (chantier face-projet 2026-08-02). `code` (default when absent) = the `main` branch: workspace clone base, PR target and post-merge realignment all follow it, the ops face is the RO reference. `ops` = the `work/ops` branch: same mechanics, faces swapped — the deliverable is committed on a branch off work/ops and merges back into it, `main` becomes the RO reference. One knob, threaded once (dispatch -> resolver -> project map); downstream consumers assert its presence rather than re-defaulting (single-default-site doctrine, cf. 01-INVENTAIRE §D). A face on a JUDGE step is meaningless and ignored: judges clone the producer's branch (`base_branch: head`), whatever face it lives on."
         }
        }
       }

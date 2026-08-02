@@ -24,6 +24,15 @@ The brief `{{step}}` was written by the architect and has NOT been executed yet.
 ## Expected decision — strict JSON (`gate-decision-v1.json`)
 `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 
+The envelope is schema-VALIDATED and fail-closed: a mistyped field halts the step run, it is not
+coerced. `decision` and `reason` are required; the two optional fields have an enforced shape.
+
+- `details` — a FLAT object of scalars, rendered as one `- **key** : value` line each.
+  Example: `{"rule_missing": "acceptance criteria", "brief_size": "3 bricks"}`
+- `chain` — an array of PLAIN STRINGS, one reasoning step per entry, rendered as bullets under
+  "Raisonnement". An array of objects is REFUSED (`#/chain/0: expected String`).
+  Example: `["the brief names a deliverable", "no acceptance criterion is stated", "→ redirect"]`
+
 `decision` ∈ {{decisions}}
 - `continue`: the brief is executable as-is (clear, complete, actionable) → advance to the next step
 - `redirect`: send back to the architect (e.g. brief too big → ask for a split)

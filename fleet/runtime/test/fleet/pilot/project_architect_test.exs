@@ -97,19 +97,53 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       refute_received {:spawn_pod, _, _, _}
     end
 
-    test "numeric repo id unresolved (forge down) → clear refusal, no spawn", %{tmp_dir: tmp} do
+    test "numeric repo id unresolved → refusal CARRYING the forge's reason, no spawn", %{
+      tmp_dir: tmp
+    } do
       {_proj, _work, roots} = mk_dirs(tmp)
 
       defmodule NoIdForge do
         def repo_id(_repo, _opts), do: {:error, :forge_down}
       end
 
-      # dirs exist for "demo" but the forge cannot resolve fleet/demo… use a repo the stub refuses.
-      assert {:error, {:repo_id_unresolved, "fleet/demo"}} =
-               ProjectArchitect.ensure(
-                 "fleet/demo",
-                 [spawner: CaptureSpawner, forge_client: NoIdForge] ++ roots
-               )
+      # The reason must SURVIVE to the caller and to the log. It used to be flattened to `nil` by
+      # `resolve_repo_id/3`, after which the log filled the hole with "(forge down?)" — a guess that
+      # was quoted as a diagnosis over a forge that was answering.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:repo_id_unresolved, "fleet/demo", :forge_down}} =
+                   ProjectArchitect.ensure(
+                     "fleet/demo",
+                     [spawner: CaptureSpawner, forge_client: NoIdForge] ++ roots
+                   )
+        end)
+
+      assert log =~ ":forge_down"
+      refute log =~ "?", "the log must report what the forge said, never suppose"
+
+      refute_received {:spawn_pod, _, _, _}
+    end
+
+    test "a seam with no repo_id/2 is a WIRING fact, never reported as a forge failure", %{
+      tmp_dir: tmp
+    } do
+      {_proj, _work, roots} = mk_dirs(tmp)
+
+      defmodule NoRepoIdFunctionForge do
+        # deliberately exports nothing: the historical stub shape
+        def unrelated, do: :ok
+      end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:repo_id_unresolved, "fleet/demo", :repo_id_unsupported}} =
+                   ProjectArchitect.ensure(
+                     "fleet/demo",
+                     [spawner: CaptureSpawner, forge_client: NoRepoIdFunctionForge] ++ roots
+                   )
+        end)
+
+      assert log =~ ":repo_id_unsupported"
 
       refute_received {:spawn_pod, _, _, _}
     end

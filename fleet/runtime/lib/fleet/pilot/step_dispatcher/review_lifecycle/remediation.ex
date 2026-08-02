@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -55,16 +55,35 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       {:ok, {issue_n, producer_role}} ->
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, rounds} <-
-               ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts) do
-          if rounds <= budget do
-            RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
-          else
-            ArchEscalation.escalate_rework(
-              arch_seams(ctx),
-              pr_number,
-              head,
-              %{rounds: rounds, budget: budget}
-            )
+               ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts),
+             # The PUBLISH brake (chantier frein-publish) — checked with the SAME budget, on the
+             # OTHER counter: `rounds` counts judge verdicts and freezes the moment a rework's
+             # publication fails (no delivery → no re-judge), which is exactly when the spend
+             # runs away. The streak is the largest same-base `[publish-fail:...]` marker group
+             # on the issue (the gate base moves only on a successful push, so same-base ≡
+             # consecutive). An unreadable counter escalates like an unreadable budget: never a
+             # blind loop.
+             {:ok, publish_fails} <-
+               count_publish_failures(ctx, issue_n) do
+          cond do
+            publish_fails > budget ->
+              ArchEscalation.escalate_publish_failures(
+                arch_seams(ctx),
+                pr_number,
+                head,
+                %{publish_failures: publish_fails, budget: budget}
+              )
+
+            rounds <= budget ->
+              RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
+
+            true ->
+              ArchEscalation.escalate_rework(
+                arch_seams(ctx),
+                pr_number,
+                head,
+                %{rounds: rounds, budget: budget}
+              )
           end
         else
           # Budget not verifiable (unreadable route/map) OR unreadable counter → we do NOT enter a
@@ -86,6 +105,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # PR rework budget = the SAME `spec.max_rework_rounds` as the issue brake (the pipeline's SINGLE churn
   # policy, read as DATA — never a hand-aligned hard-coded default). Issue route → map name →
   # budget. Routeless / unreadable map → `{:error}`: the caller escalates (never a blind loop).
+  # Seam-tolerant read of the publish-failure streak: a forge stub without the counter (every
+  # pre-brake test, and any minimal seam) reads as ZERO failures — the brake only ever FIRES on a
+  # forge that records the markers, it never blocks a rework for lack of instrumentation. A real
+  # counter error, though, propagates (the `with` escalates it like an unreadable budget).
+  defp count_publish_failures(%Ctx{} = ctx, issue_n) do
+    if function_exported?(ctx.forge, :count_publish_failures, 3) do
+      ctx.forge.count_publish_failures(ctx.repo, issue_n, ctx.forge_opts)
+    else
+      {:ok, 0}
+    end
+  end
+
   defp pr_rework_budget(%Ctx{} = ctx, issue_n) do
     with {:ok, {map_name, _step}} when is_binary(map_name) <-
            Fleet.Pilot.StepDispatcher.Spawn.route_for(
@@ -184,7 +215,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
-    case diagnoser().probe(ctx.repo, head, []) do
+    case diagnoser().probe(ctx.repo, head, conflict_face_opts(ctx)) do
       {:ok, diagnosis} -> tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx)
       {:error, _} -> :fall_through
     end
@@ -218,7 +249,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   defp tier0_act(:apply, pr_number, head, _reason, ctx) do
-    case applier().apply(ctx.repo, head, []) do
+    case applier().apply(ctx.repo, head, conflict_face_opts(ctx)) do
       {:ok, :auto_resolved} ->
         Logger.info(
           "Remediation: PR #{ctx.repo}##{pr_number} conflict auto-resolved (tier-0, all trivial)"
@@ -234,6 +265,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp tier0_act(:fall_through, _pr_number, _head, _reason, _ctx), do: :fall_through
 
   defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
+
+  # The FACE of the conflict (chantier face-projet, inventory #7/#8): the probe/apply helpers used
+  # to be called with `[]` and fall back to their `origin/main` default IN the code-face worktree —
+  # on an ops PR that would resolve a conflict by merging the CODE face into a doc branch, silently,
+  # and report `{:ok, :auto_resolved}`. The PR's own base (stamped at dispatch_review) names both
+  # the merge target and the worktree the resolution runs in.
+  defp conflict_face_opts(%Ctx{} = ctx) do
+    base = Keyword.fetch!(ctx.opts, :pr_base_branch)
+
+    dir =
+      if Fleet.Layout.ops_branch?(base),
+        do: Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(ctx.repo)),
+        else: Path.join(Fleet.Layout.projects_root(), Fleet.Layout.project_name(ctx.repo))
+
+    [base_branch: "origin/" <> base, dir: dir]
+  end
 
   defp diagnoser,
     do: Application.get_env(:fleet_pilot, :conflict_diagnoser, Fleet.Pilot.ConflictProbe)
@@ -408,7 +455,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
                ctx.repo,
                pr_number,
                issue_n,
-               ctx.forge_opts
+               ctx.forge_opts,
+               # The PR's own base (dispatch_review single site): the face worktree to align.
+               base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
              ) do
           :ok -> {:ok, {:merged, pr_number}}
           {:error, _} = err -> err

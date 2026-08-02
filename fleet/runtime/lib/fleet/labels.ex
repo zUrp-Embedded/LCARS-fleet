@@ -23,11 +23,12 @@ defmodule Fleet.Labels do
   lives in the label, native Gitea mutex `exclusive:true`). Outside these two families, a label
   does not exist.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-02
   """
 
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
+  @genre_ops "genre/ops"
 
   @doc "\"Pod in flight\" lock: set BEFORE the spawn (anti double-spawn), lifted at end-of-step-run."
   @spec in_flight() :: String.t()
@@ -36,6 +37,16 @@ defmodule Fleet.Labels do
   @doc "HUMAN lock: the issue awaits an action via the arch (escalate/halt/redirect verdict)."
   @spec awaits_arch() :: String.t()
   def awaits_arch, do: @awaits_arch
+
+  @doc """
+  Genre marker of a DOCUMENTARY ticket (`genre/ops`, chantier face-projet): an INPUT to the
+  workflow-map burn — present on a routeless issue, the poller engraves the ops card instead of
+  the project's declared card; absent, nothing changes. Read ONCE at burn time: the engraved
+  `wfmap/*` stays the only route (the forge is the state machine). Distinct namespace from
+  `type:*` on purpose — those are documented visual-never-routing, and this one routes.
+  """
+  @spec genre_ops() :: String.t()
+  def genre_ops, do: @genre_ops
 
   # --- workflow_map position: 2 mutex label scopes (via `exclusive:true`, set PER-REPO by
   # ForgeClient.ensure_repo_label). `wfmap/<map>` = WHICH map (data, per-issue → multi-map);

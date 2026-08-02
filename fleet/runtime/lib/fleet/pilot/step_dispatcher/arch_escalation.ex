@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
   rails — not a physical merge.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
@@ -98,6 +98,36 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
       case escalate_to_arch(seams, issue_n, signature, body) do
         :ok -> {:skipped, {:rework_exhausted_escalated, pr_number}}
+        {:error, reason} -> {:error, {:escalation_incomplete, pr_number, reason}}
+      end
+    end
+  end
+
+  @doc """
+  Publish brake tripped (chantier frein-publish): the producer's deliverable REPEATEDLY failed to
+  publish on the same gate base — the work never reaches the forge, the judges never re-judge, and
+  without this brake the rework loop burns a real producer session per tick with `max_rework_rounds`
+  frozen (it counts VERDICTS, and a failed publish produces none — measured on the faceproof
+  bench, 5 identical rounds). Own signature: a publish brake and a rework-exhausted are different
+  failure modes and each deserves its own trace. Same mechanism as every escalation: dedup comment
+  + `lcars-awaits-arch` on the ISSUE — the label IS the throttle.
+  """
+  @spec escalate_publish_failures(Seams.t(), integer(), String.t(), map()) ::
+          {:skipped, term()} | {:error, term()}
+  def escalate_publish_failures(%Seams{} = seams, pr_number, head, detail) do
+    with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
+      signature = "[publish-brake-escalation:pr-#{pr_number}]"
+
+      body =
+        "**Architecte** — ⚠ Frein publish : le livrable du producteur échoue à se publier en " <>
+          "boucle sur la PR ##{pr_number} (issue ##{issue_n}) — #{inspect(detail)}. Le travail " <>
+          "du pod n'atteint jamais la forge (les juges ne re-jugent donc jamais). Les marqueurs " <>
+          "`[publish-fail:...]` de l'issue portent chaque échec avec sa raison. Reprends : lis le " <>
+          "dernier échec (le diagnostic nomme HEAD et son parent), tranche, ou ferme la PR. " <>
+          "L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <> signature
+
+      case escalate_to_arch(seams, issue_n, signature, body) do
+        :ok -> {:skipped, {:publish_brake_escalated, pr_number}}
         {:error, reason} -> {:error, {:escalation_incomplete, pr_number, reason}}
       end
     end

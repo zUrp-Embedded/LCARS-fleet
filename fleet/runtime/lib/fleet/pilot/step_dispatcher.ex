@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   delegated to `Fleet.Pilot.StepDispatcher.ReviewLifecycle`. The modules
   `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` are **seams** (defaults = real modules).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -174,7 +174,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                  number,
                  route,
                  workflow_map_loader,
-                 forge_opts
+                 forge_opts,
+                 issue
                ),
              {:ok, {role, profile, step_spec}} <-
                Opts.tag_err(
@@ -203,7 +204,16 @@ defmodule Fleet.Pilot.StepDispatcher do
                  pod_id
                ),
              :ok <- Spawn.gate_scope_decision(decision),
-             {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
+             # THE single default site of the project FACE (inventory §D): the card's step says
+             # which face its producer works on; absent = the code face — decided HERE, once, and
+             # threaded as `:base_branch`. Every downstream consumer ASSERTS the value instead of
+             # re-defaulting (the resolver raises without it): six sites used to substitute `main`
+             # in two spellings when the value did not reach them, each coherent alone, wrong at
+             # the junction. `face_branch/1` raises on a value outside the schema enum — a card
+             # that bypassed validation must not dispatch onto a guessed branch.
+             face = Map.get(step_spec || %{}, "face", "code"),
+             face_opts = Keyword.put(opts, :base_branch, Fleet.Layout.face_branch(face)),
+             {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
              :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
@@ -326,6 +336,13 @@ defmodule Fleet.Pilot.StepDispatcher do
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}} | {:skipped, atom()} | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
+    # The PR's OWN base (chantier face-projet): the face the deliverable merges into, read off the
+    # PR at this single site and threaded via opts → project map → pod.completed → step_run. Every
+    # pod dispatched OFF an existing PR (judges, rework, conflict-rework) clones the FEATURE branch,
+    # so its clone-base cannot answer "which face does this PR land on" — the PR itself is the only
+    # honest source, and it is in hand exactly here.
+    opts = Keyword.put(opts, :pr_base_branch, get_in(pr, ["base", "ref"]))
+
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
     # `ctx.<typo>` does not compile. PURE data — no captures threaded: both flows take
@@ -520,15 +537,33 @@ defmodule Fleet.Pilot.StepDispatcher do
          _number,
          route,
          _workflow_map_loader,
-         _forge_opts
+         _forge_opts,
+         _issue
        )
        when not is_nil(route),
        do: {:ok, route}
 
-  defp ensure_workflow_map_or_onboard(forge, repo, number, nil, workflow_map_loader, forge_opts) do
-    # THE PROJECT'S declared card (intensity.json, F-29 chain) — legacy/undeclared project →
-    # the delegation default card. The criticality mechanic IS the card choice.
-    workflow_map_name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
+  defp ensure_workflow_map_or_onboard(
+         forge,
+         repo,
+         number,
+         nil,
+         workflow_map_loader,
+         forge_opts,
+         issue
+       ) do
+    # The GENRE gate first (chantier face-projet): a `genre/ops` label on the routeless issue
+    # burns the OPS card — the documentary path is a base function of every project, whatever its
+    # declared card, so it never transits intensity.json. Read ONCE, here: the engraved `wfmap/*`
+    # stays the only route afterwards. Otherwise: THE PROJECT'S declared card (intensity.json,
+    # F-29 chain) — legacy/undeclared project → the delegation default card. The criticality
+    # mechanic IS the card choice.
+    labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
+
+    workflow_map_name =
+      if Fleet.Labels.genre_ops() in labels,
+        do: Fleet.Pilot.Roles.ops_workflow_map(),
+        else: Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
 
     with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),

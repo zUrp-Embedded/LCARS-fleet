@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -353,6 +353,25 @@ defmodule Fleet.Pilot.ForgeClient do
       case http_post(config, "/repos/#{encode_repo(repo)}/issues", attrs) do
         {:ok, %{"number" => number}} -> {:ok, number}
         {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Resolves a repo label NAME to its numeric id (`GET /repos/{repo}/labels`, paginated).
+  `{:error, {:label_unknown, name}}` when absent — the caller decides whether that blocks
+  (a GENRE label must ride the CREATE call: posted after it, a poller tick in between burns
+  the wrong card — chantier face-projet). The protocol labels are seeded by
+  `ensure_protocol_labels/2`; an unknown one here means an unseeded repo, worth surfacing.
+  """
+  @spec repo_label_id(String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer()} | {:error, term()}
+  def repo_label_id(repo, name, opts \\ []) when is_binary(repo) and is_binary(name) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, labels} <- paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
+      case Enum.find(labels, &(&1["name"] == name)) do
+        %{"id" => id} -> {:ok, id}
+        _ -> {:error, {:label_unknown, name}}
       end
     end
   end
@@ -729,6 +748,30 @@ defmodule Fleet.Pilot.ForgeClient do
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 
+  @doc """
+  Consecutive publish failures of issue `n` (chantier frein-publish): reads the issue's comments,
+  parses the `[publish-fail:issue-<n>:base-<sha12>]` markers (`ForgeProtocol`), and returns the
+  size of the LARGEST same-base group. The gate base moves only on a successful push, so failures
+  sharing a base ARE the consecutive streak — a delivered brick starts a fresh group by
+  construction, no success marker and no purge needed. Forge-native (durable, verifiable),
+  symmetric to `count_change_request_rounds/3`.
+  """
+  @spec count_publish_failures(String.t(), integer(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count_publish_failures(repo, n, opts \\ []) when is_binary(repo) and is_integer(n) do
+    with {:ok, comments} <- list_comments(repo, n, opts) do
+      streak =
+        comments
+        |> Enum.map(&ForgeProtocol.parse_publish_fail_marker(Map.get(&1, "body", "")))
+        |> Enum.filter(&match?({:ok, {^n, _}}, &1))
+        |> Enum.frequencies()
+        |> Map.values()
+        |> Enum.max(fn -> 0 end)
+
+      {:ok, streak}
+    end
+  end
+
   @doc "Counts the rework rounds. See `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
@@ -985,6 +1028,9 @@ defmodule Fleet.Pilot.ForgeClient do
       statics = [
         "lcars-in-flight",
         "lcars-awaits-arch",
+        # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
+        # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
+        "genre/ops",
         "stage/brief-review",
         "stage/build",
         "stage/review",

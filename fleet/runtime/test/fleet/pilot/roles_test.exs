@@ -10,10 +10,22 @@ defmodule Fleet.Pilot.RolesTest do
   alias Fleet.Pilot.Roles
 
   test "producer_role: RESOLU par capability, jamais un litteral — et l'opt garde la main" do
-    # `engineer` n'est plus un defaut du code : c'est le seul role du catalogue qui declare
-    # `capabilities: [producer]`. Renommer le role est une edition de cap-profile ; ce test suivra.
-    assert "engineer" == Roles.producer_role()
+    # Le catalogue declare DEUX producers depuis eng_doc (chantier face-projet 2026-08-02) : le
+    # LAST-RESORT sans carte ni branche n'a plus de reponse honnete, et resolve_producer! REFUSE
+    # par design (« a catalogue with eng_hw and eng_sw ») plutot que d'elire un producer au hasard.
+    # Ce test epinglait `engineer` quand il etait seul ; il epingle desormais le refus — ET que le
+    # message nomme les candidats, parce que c'est lui que l'operateur lira.
+    err = assert_raise RuntimeError, fn -> Roles.producer_role() end
+    assert err.message =~ "eng_doc"
+    assert err.message =~ "engineer"
+    assert err.message =~ ":producer_role"
+
+    # Les deux echappatoires designees, dans l'ordre de priorite : l'opt, puis la config deploy.
     assert "designer" == Roles.producer_role(producer_role: "designer")
+
+    Application.put_env(:fleet_pilot, :producer_role, "engineer")
+    on_exit(fn -> Application.delete_env(:fleet_pilot, :producer_role) end)
+    assert "engineer" == Roles.producer_role()
   end
 
   test "gatekeeper_role: resolu par `exception_judge`, l'opt garde la main" do
