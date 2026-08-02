@@ -748,6 +748,30 @@ defmodule Fleet.Pilot.ForgeClient do
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 
+  @doc """
+  Consecutive publish failures of issue `n` (chantier frein-publish): reads the issue's comments,
+  parses the `[publish-fail:issue-<n>:base-<sha12>]` markers (`ForgeProtocol`), and returns the
+  size of the LARGEST same-base group. The gate base moves only on a successful push, so failures
+  sharing a base ARE the consecutive streak — a delivered brick starts a fresh group by
+  construction, no success marker and no purge needed. Forge-native (durable, verifiable),
+  symmetric to `count_change_request_rounds/3`.
+  """
+  @spec count_publish_failures(String.t(), integer(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count_publish_failures(repo, n, opts \\ []) when is_binary(repo) and is_integer(n) do
+    with {:ok, comments} <- list_comments(repo, n, opts) do
+      streak =
+        comments
+        |> Enum.map(&ForgeProtocol.parse_publish_fail_marker(Map.get(&1, "body", "")))
+        |> Enum.filter(&match?({:ok, {^n, _}}, &1))
+        |> Enum.frequencies()
+        |> Map.values()
+        |> Enum.max(fn -> 0 end)
+
+      {:ok, streak}
+    end
+  end
+
   @doc "Counts the rework rounds. See `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)

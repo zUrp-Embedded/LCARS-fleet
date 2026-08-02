@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -188,7 +188,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
               false
 
             {_repo, _type, n} ->
-              reclaim_lock(seams, n) == :failed
+              reclaim_lock(seams, n, lock_diagnosis(seams, n)) == :failed
           end)
           |> MapSet.new()
 
@@ -412,12 +412,37 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
   end
 
-  defp reclaim_lock(%Seams{forge: forge, repo: repo, forge_opts: forge_opts}, number) do
+  # What the reconciliation actually MEASURED about the orphan's pod — for the log, never the
+  # decision (the reclaim itself is correct for BOTH causes: dead pod AND live-but-idle pod, the
+  # deliberate parked-pod repair of the moduledoc). The old message asserted "pod dead without
+  # completion" over pods that were demonstrably ALIVE (faceproof bench: the pipe idled between
+  # two rework rounds while the log declared it dead every tick) — a diagnosis the code never
+  # made, quoted as one. Same discipline as the arch-onboard log: report what was measured, and
+  # when the enumeration itself fails, say UNKNOWN rather than guess.
+  defp lock_diagnosis(%Seams{spawner: spawner, repo: repo}, number) do
+    live_for_ref =
+      spawner.list_pods()
+      |> Enum.filter(fn pod ->
+        parse_pod_ref(pod[:pod_id], repo)
+        |> Enum.any?(fn {_repo, _type, n} -> n == number end)
+      end)
+
+    case live_for_ref do
+      [] -> "no live pod (dead/reaped)"
+      _ -> "pod ALIVE but idle — no pulled task (parked wake, or completed without publish)"
+    end
+  rescue
+    _ -> "pod state UNKNOWN (enumeration failed)"
+  catch
+    _, _ -> "pod state UNKNOWN (enumeration failed)"
+  end
+
+  defp reclaim_lock(%Seams{forge: forge, repo: repo, forge_opts: forge_opts}, number, diagnosis) do
     # "reclaiming", NOT "reclaimed": the announce precedes the WRITE (remove_label). A premature "reclaimed"
     # would over-report — on a forge-down the label survives and the lock is NOT actually released.
     Logger.warning(
       "Poller: reconciliation : lock #{@in_flight} ORPHAN on " <>
-        "#{repo}##{number} (pod dead without completion) → reclaiming (re-dispatch on next tick)"
+        "#{repo}##{number} (#{diagnosis}) → reclaiming (re-dispatch on next tick)"
     )
 
     # Stopwatch: stopped ALSO here (dead pod = never went through `unlock`) — otherwise it would run until

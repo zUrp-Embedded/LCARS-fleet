@@ -102,6 +102,30 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     # a mute `{:base_not_ancestor, ""}` (empty merge-base output) is undiagnosable: the message
     # MUST name the offending base (12 hex) → the cause is visible in a single log line.
     assert msg =~ String.slice(base, 0, 12)
+
+    # ... AND what HEAD actually was (chantier frein-publish, phase 1). The faceproof rework loop
+    # failed five rounds with "<base> ⊄ HEAD" and the discriminating fact — amend (same parent,
+    # new sha) vs reset-to-elsewhere — died unlogged; the bench was gone before anyone could ask.
+    {head_out, 0} = g(dir, ["rev-parse", "--short=12", "HEAD"])
+    assert msg =~ "HEAD=#{String.trim(head_out)}"
+    # This rewrite amended the ROOT commit → no parent: the diag says so instead of omitting it.
+    assert msg =~ "(root)"
+  end
+
+  test "frein-publish P1 — the HEAD diag names the PARENT on a non-root amend (the amend signature)",
+       %{tmp_dir: tmp} do
+    {dir, _c0} = setup_repo(Path.join(tmp, "diag-parent"))
+    # a second commit, then amend IT: parent survives, sha changes — the exact suspect signature
+    # of the rework loop (the pod finds its own commit at HEAD and "fixes" it).
+    {_, 0} = g(dir, ["commit", "-q", "--allow-empty", "-m", "delivered"])
+    {delivered, 0} = g(dir, ["rev-parse", "HEAD"])
+    {_, 0} = g(dir, ["commit", "--amend", "-q", "--allow-empty", "-m", "fixed"])
+
+    assert {:error, {:base_not_ancestor, msg}} =
+             Gate.check_base_ancestor(dir, String.trim(delivered))
+
+    {parent, 0} = g(dir, ["rev-parse", "--short=12", "HEAD~1"])
+    assert msg =~ "(parent #{String.trim(parent)})"
   end
 
   test "F-PARALLEL — rebase resolution: the gate ACCEPTS with base=main, REJECTS with base=feature_tip (clone/gate deconflation)",
