@@ -27,6 +27,22 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     assert fails == [], "non-green checks: #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
   end
 
+  # BL-6-28 / bench 2026-08-02: the check reads TWO lists outside `fleet/runtime`, and the image
+  # BUILD stage copies fleet/runtime ALONE before running this gate — a fail-closed on their
+  # absence broke the image build (measured: `forge.tf: list not readable` inside the Docker
+  # build). Absence is scoped at the TREE level: no sibling tree = out of scope, SKIPPED and
+  # NAMED in the note; the equality still runs on what the artifact does carry.
+  test "runtime-only artifact: the sibling-tree lists are skipped and NAMED, never a silent pass" do
+    {status, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
+    lock = Enum.find(checks, &(&1.id == "roles.provisioning_locked"))
+
+    # On the real repo (all trees present) nothing is skipped and the note says so by omission.
+    assert status == :pass
+    assert lock.status == :pass
+    refute lock.note =~ "NOT CHECKED"
+    assert lock.note =~ "PROV_ROLES"
+  end
+
   describe "code_match?/4 — anti-hollow-green: a marker in PROSE does not count (BND-111)" do
     @tag :tmp_dir
     test "a marker present ONLY in a @moduledoc/@doc → false (no false-green)", %{

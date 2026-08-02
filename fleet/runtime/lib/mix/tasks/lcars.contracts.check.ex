@@ -1026,16 +1026,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     tf_path = Path.expand("../provisioning/deps/forge.tf", root)
     lib_path = Path.expand("../provisioning_v2/lib/provision-lib.sh", root)
 
-    lists = [
-      {"provision-role-tokens.sh ROLES", read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
-       "add/remove the role in ROLES=\"…\" (token mint default)"},
-      {"forge.tf local.roles", read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
-       "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
-         "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
-      {"provision-lib.sh PROV_ROLES", read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
-       "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
-         "absent here gets no token on a fresh fleet)"}
-    ]
+    # The two SIBLING-TREE lists are outside `fleet/runtime`, and one legitimate context does not
+    # carry them: the image BUILD stage copies `fleet/runtime` ALONE (Dockerfile), then runs this
+    # gate — a runtime-only artifact cannot prove anything about a provisioning list it does not
+    # ship. So absence is read at the TREE level: no sibling tree at all = out of scope, SKIPPED
+    # and named in the note (never a silent pass on unmeasured ground); tree present but file or
+    # pattern unreadable = the real defect (partial checkout, renamed variable) = FAIL. The
+    # `.sh` lives inside `etc/` and is always present.
+    lists =
+      [
+        {"provision-role-tokens.sh ROLES", :required,
+         read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
+         "add/remove the role in ROLES=\"…\" (token mint default)"},
+        {"forge.tf local.roles", tree_scope(Path.expand("../provisioning", root)),
+         read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
+         "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
+           "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
+        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../provisioning_v2", root)),
+         read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
+         "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
+           "absent here gets no token on a fresh fleet)"}
+      ]
+
+    {lists, skipped} = split_out_of_scope(lists)
 
     {evidence, remediations} =
       Enum.reduce(lists, {[], []}, fn {label, roles, remediation}, {ev, rem} ->
@@ -1068,9 +1081,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       evidence: evidence,
       note:
         "four-list STRICT equality (BL-6-28): canon{forge_identity} (#{length(canon)} roles, " <>
-          "seats included) == forge.tf == ROLES == PROV_ROLES — any delta is a defect, named"
+          "seats included) == forge.tf == ROLES == PROV_ROLES — any delta is a defect, named" <>
+          skipped_note(skipped)
     }
   end
+
+  # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
+  defp tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
+
+  defp split_out_of_scope(lists) do
+    {out, kept} = Enum.split_with(lists, fn {_l, scope, _r, _rem} -> scope == :out_of_scope end)
+    {Enum.map(kept, fn {l, _scope, r, rem} -> {l, r, rem} end), Enum.map(out, &elem(&1, 0))}
+  end
+
+  defp skipped_note([]), do: ""
+
+  defp skipped_note(labels),
+    do:
+      " · NOT CHECKED here (tree absent from this artifact — runtime-only context): " <>
+        Enum.join(labels, ", ")
 
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
   # nothing enforced uniqueness across the catalogue (BL-6-28 F7): two roles on one slot would
