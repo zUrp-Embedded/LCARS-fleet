@@ -109,7 +109,7 @@ defmodule Fleet.LayoutTest do
       refute Layout.ops_branch?("main")
       # A judge clones the producer's branch, whatever face it forked from: neither face → the
       # code-face treatment (work-ops RO mount, reset realignment) — deliberate, cf. @doc.
-      refute Layout.ops_branch?("lcars/issue-3-eng_doc")
+      refute Layout.ops_branch?("lcars/issue-3-scribe")
       refute Layout.ops_branch?(nil)
     end
   end

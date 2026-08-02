@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
       payload = %{
         "pod_id" => "p1",
         # the judge's clone base: the FEATURE branch — must never become the PR base
-        "base_branch" => "lcars/issue-9-eng_doc",
+        "base_branch" => "lcars/issue-9-scribe",
         # the PR's own base, stamped at review dispatch
         "pr_base_branch" => "work/ops"
       }

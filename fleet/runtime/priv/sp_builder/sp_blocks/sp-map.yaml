@@ -44,14 +44,14 @@ engineer:
 # --- Producer documentaire (git-native sur la face ops : commits locaux, le systeme pousse) ---
 # Meme socle que l'engineer (producteur pipe, wake-longlived) : seuls le bloc methode et le bloc
 # role changent — la mecanique de livraison est IDENTIQUE, c'est la these du chantier face-projet.
-eng_doc:
+scribe:
   - core/pod-sanctuary
   - core/runtime-contract
   - core/wake-longlived
   - core/evidence
   - core/producer-output
-  - method/eng_doc-redact
-  - role/eng_doc
+  - method/scribe-redact
+  - role/scribe
 
 # --- Brief judge (pre-PR, read-only: no diff, the input is the brief) ---
 scoper:
