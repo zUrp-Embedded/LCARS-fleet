@@ -509,8 +509,32 @@ function drawAgents(){
   agentCenter(); agentRight();
 }
 
-function kvRow(box,k,v){ const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,String(v))); box.appendChild(r); }
-function chipRow(box, arr, color){ const d=el('div'); for(const a of arr){ const c=el('span','chip',a); if(color)c.style.color=color; d.appendChild(c);} if(!(arr||[]).length) d.appendChild(el('span','mini','aucun')); box.appendChild(d); }
+/* L'ENTONNOIR NE MENT PLUS : trois fois dans la soiree, String() a aplati une structure en
+   mensonge lisible (jury, paires, mounts). Regle : une valeur structuree qui n'a pas recu de
+   rendu dedie s'affiche en JSON EXACT, ambre, moche EXPRES — elle crie « donne-moi un rendu »
+   au lieu de se faire passer pour du texte. */
+function kvRow(box,k,v){
+  const r=el('div','kv'); r.appendChild(el('span','k',k));
+  if(v!==null && typeof v==='object'){
+    const code=document.createElement('code');
+    code.style.cssText='font:11px/1.4 var(--mono);color:var(--am);white-space:pre-wrap';
+    code.textContent=JSON.stringify(v,null,1);
+    r.appendChild(code);
+  } else r.appendChild(el('span',null,String(v)));
+  box.appendChild(r);
+}
+function chipRow(box, arr, color){
+  const d=el('div');
+  for(const a of (arr||[])){
+    const label = (a!==null && typeof a==='object') ? JSON.stringify(a) : String(a);
+    const c=el('span','chip',label);
+    if(a!==null && typeof a==='object') c.style.color='var(--am)';
+    else if(color) c.style.color=color;
+    d.appendChild(c);
+  }
+  if(!(arr||[]).length) d.appendChild(el('span','mini','aucun'));
+  box.appendChild(d);
+}
 
 function agentCenter(){
   const c = document.getElementById('center'); c.innerHTML='';
