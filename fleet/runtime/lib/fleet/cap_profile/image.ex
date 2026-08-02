@@ -47,7 +47,7 @@ defmodule Fleet.CapProfile.Image do
       end
 
     Enum.each(index, fn {role, raw} ->
-      # Branch on kind (BL-6-28): a ReservedSeat is validated against ITS schema — every entry
+      # Branch on kind (BL-6-45): a ReservedSeat is validated against ITS schema — every entry
       # is proven at boot, none rots unvalidated behind its exclusion from the spawnable world.
       # Three exits, the third a raise: an unknown kind is a broken deploy artifact, refused
       # loud here rather than mis-validated against whichever schema a default would pick.
@@ -87,7 +87,7 @@ defmodule Fleet.CapProfile.Image do
     version = version_of(index, overlays)
     :persistent_term.put(@key, %{index: index, overlays: overlays, version: version})
 
-    # Reserved seats named ONCE, loud, at the publish (BL-6-28): the state "declared but not
+    # Reserved seats named ONCE, loud, at the publish (BL-6-45): the state "declared but not
     # spawnable" is voiced here instead of surfacing as a confusing :not_found downstream.
     seats = for {name, raw} <- index, not Catalog.spawnable?(raw), do: name
 

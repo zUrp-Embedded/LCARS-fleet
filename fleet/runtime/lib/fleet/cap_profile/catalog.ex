@@ -62,7 +62,7 @@ defmodule Fleet.CapProfile.Catalog do
     * `{:ok, raw}` — the role exists in the catalogue.
     * `{:error, :not_found}` — no profile carries this `name`.
     * `{:error, {:role_reserved, name}}` — the entry exists as a `kind: ReservedSeat`
-      (BL-6-28): the seat is kept, the box is closed — named, never conflated with absence.
+      (BL-6-45): the seat is kept, the box is closed — named, never conflated with absence.
     * `{:error, :invalid_schema}` — corrupt catalogue (an undecodable YAML) →
       we CANNOT resolve by name. The `load`/`compose` contract classes "malformed
       YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
@@ -94,7 +94,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # A ReservedSeat found by NAME answers its own refusal, never `:not_found` (the seat exists,
-  # the box is closed — BL-6-28) and never `:invalid_schema` (validating a seat against the
+  # the box is closed — BL-6-45) and never `:invalid_schema` (validating a seat against the
   # PROFILE schema downstream would misname a declared state as corruption). Lives on BOTH
   # regimes (image branch above, disk branch below): the raw carries its kind in both.
   defp refuse_reserved(role, raw) do
@@ -148,7 +148,7 @@ defmodule Fleet.CapProfile.Catalog do
         # Filter on the ENTRIES ({name, raw}) BEFORE projecting the keys — the predicate reads
         # the raw's kind, `Map.keys/1` would hand it strings. An unfiltered list here feeds a
         # ReservedSeat to every enumerator (CanonProof, PermanentBoot) → the seat has no SP
-        # draft → fleet.boot_failed. Filter BEFORE enumerate (BL-6-28).
+        # draft → fleet.boot_failed. Filter BEFORE enumerate (BL-6-45).
         {:ok,
          index
          |> Enum.filter(fn {_name, raw} -> spawnable?(raw) end)
@@ -161,7 +161,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Is this raw catalogue entry a SPAWNABLE profile? (`kind` ≠ `ReservedSeat` — BL-6-28.)
+  Is this raw catalogue entry a SPAWNABLE profile? (`kind` ≠ `ReservedSeat` — BL-6-45.)
   The ONE predicate both enumeration projections apply (`list/1` here,
   `Fleet.CapProfile.list_from_published/0` on the image index): two projections, one rule.
   """

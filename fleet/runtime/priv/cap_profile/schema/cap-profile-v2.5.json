@@ -35,7 +35,7 @@
         },
         "forge_identity": {
           "type": "boolean",
-          "description": "Does this role hold a forge identity (account + role token)? Absent = true. The four-list equality check (roles.provisioning_locked, BL-6-28) counts only forge_identity roles against forge.tf/ROLES/PROV_ROLES. false is the EXPLICIT declaration of the asymmetry (starfleet: an orchestrator whose forge writes all go through the system account)."
+          "description": "Does this role hold a forge identity (account + role token)? Absent = true. The four-list equality check (roles.provisioning_locked, BL-6-45) counts only forge_identity roles against forge.tf/ROLES/PROV_ROLES. false is the EXPLICIT declaration of the asymmetry (starfleet: an orchestrator whose forge writes all go through the system account)."
         },
         "mounts": {
           "type": "array",

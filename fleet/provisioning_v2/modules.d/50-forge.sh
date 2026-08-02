@@ -21,7 +21,7 @@
 #      le GARDENT : must_change_password=false dans forge.tf), le module le DÉRIVE :
 #      {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge donc les
 #      tokens dans le MÊME cycle — plus aucun geste.
-#   3. converge la VISIBILITÉ des adhésions d'org des comptes machine (BL-6-29 : une adhésion
+#   3. converge la VISIBILITÉ des adhésions d'org des comptes machine (BL-6-46 : une adhésion
 #      créée par API est PRIVÉE par défaut — on se cachait sans l'avoir décidé). Le provider
 #      n'expose pas cette visibilité → recette, pas tofu. L'humain est sondé + instruit,
 #      jamais convergé (son password lui appartient).
@@ -91,7 +91,7 @@ ensure_passwords_entries() {
   p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
 }
 
-# La visibilité des adhésions (BL-6-29 : « savoir QUI existe est un prérequis de sûreté ») —
+# La visibilité des adhésions (BL-6-46 : « savoir QUI existe est un prérequis de sûreté ») —
 # sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui :
 # 403, même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal
 # A4 (write:repository,write:issue) répond 403 même sur soi. La seule voie recette est donc la
@@ -231,7 +231,7 @@ apply() {
   fi
 
   # AVANT l'early-return des tokens : la visibilité converge à CHAQUE apply, pas seulement
-  # quand des tokens manquent (les deux jambes sont indépendantes — BL-6-29).
+  # quand des tokens manquent (les deux jambes sont indépendantes — BL-6-46).
   converge_members_visible
 
   if a4_check; then

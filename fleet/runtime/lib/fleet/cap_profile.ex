@@ -723,7 +723,7 @@ defmodule Fleet.CapProfile do
   def list_from_published do
     case Fleet.CapProfile.Image.published() do
       %{index: index} ->
-        # Same rule as `Catalog.list/1`, same trap (BL-6-28): filter the ENTRIES on the shared
+        # Same rule as `Catalog.list/1`, same trap (BL-6-45): filter the ENTRIES on the shared
         # predicate BEFORE projecting the keys — an unfiltered image index hands a ReservedSeat
         # to PermanentBoot.load_all, whose fail-loud turns the seat into fleet.boot_failed.
         {:ok,

@@ -12,7 +12,7 @@ defmodule Fleet.CapProfile.Schema do
       forbidden: `kind`, `metadata.containment`, `metadata.name` — so a modop
       cannot override the base profile's containment/name/kind).
     * `reserved-seat-v1.json` — strict schema of a `kind: ReservedSeat` catalogue entry
-      (BL-6-28): a kept, non-spawnable seat — a seat carrying a `spec` is rejected.
+      (BL-6-45): a kept, non-spawnable seat — a seat carrying a `spec` is rejected.
 
   Single dependency direction (no cycle): this module is UPSTREAM of the core — it
   calls neither the single-authority accessors (`name/1`, `containment/1`…) nor

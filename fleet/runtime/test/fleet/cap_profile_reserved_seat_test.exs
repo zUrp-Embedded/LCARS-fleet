@@ -3,7 +3,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  BL-6-28 — the ReservedSeat kind: a kept, non-spawnable seat in the role catalogue.
+  BL-6-45 — the ReservedSeat kind: a kept, non-spawnable seat in the role catalogue.
 
   The contract under test: indexed AND validated (no rot behind the exclusion), never
   enumerated (list/list_from_published filter on the shared predicate — an unfiltered

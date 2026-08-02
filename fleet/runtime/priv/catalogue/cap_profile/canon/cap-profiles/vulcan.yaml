@@ -13,7 +13,7 @@
 # Why a seat and not a hollow profile: a spawnable vulcan would need a spec, an SP block and a
 # generated draft — three invented objects for a closed box. The reservation is ~10 honest
 # lines instead, expressed IN the source of truth (the catalogue), never as an exception a
-# control has to learn (BL-6-28).
+# control has to learn (BL-6-45).
 kind: ReservedSeat
 metadata:
   name: vulcan

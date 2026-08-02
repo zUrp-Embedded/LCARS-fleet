@@ -996,7 +996,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # Z7 (F-C165 → BL-6-28) — FOUR lists declare which roles exist, and every pairwise drift has
+  # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
   # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
   # etc/provision-role-tokens.sh `ROLES` (token mint default), and provisioning_v2's
   # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
@@ -1080,7 +1080,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [] and canon != [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "four-list STRICT equality (BL-6-28): canon{forge_identity} (#{length(canon)} roles, " <>
+        "four-list STRICT equality (BL-6-45): canon{forge_identity} (#{length(canon)} roles, " <>
           "seats included) == forge.tf == ROLES == PROV_ROLES — any delta is a defect, named" <>
           skipped_note(skipped)
     }
@@ -1102,7 +1102,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Enum.join(labels, ", ")
 
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
-  # nothing enforced uniqueness across the catalogue (BL-6-28 F7): two roles on one slot would
+  # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
   defp check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)

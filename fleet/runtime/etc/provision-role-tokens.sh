@@ -54,7 +54,7 @@ set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="/home/private"
-# vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-28) — account + token minted,
+# vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-45) — account + token minted,
 # both inert until the box opens. A seat = a full identity, no branch here. (The older note
 # claiming vulcan "absent rightly, external Codex agent" described the pre-seat world and is
 # gone with it.) starfleet: real fleet role, `forge_identity: false` in its canon — every forge

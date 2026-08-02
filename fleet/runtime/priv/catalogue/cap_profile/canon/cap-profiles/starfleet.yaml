@@ -17,7 +17,7 @@ metadata:
   # `pkill -f 1badcafe`/`2badcafe` never touch it). The old `protected`/`fleet_level` bits are GONE
   # (reorg 2026-07-19): both collapsed into "role_index 0" once every other role went per-project.
   role_index: 0
-  # NO forge identity (the EXPLICIT declaration of the one asymmetry, BL-6-28): starfleet holds
+  # NO forge identity (the EXPLICIT declaration of the one asymmetry, BL-6-45): starfleet holds
   # no forge account and no role token — every forge write it causes goes through the SYSTEM
   # (its MCP tools delegate; zero as_role("starfleet") site, measured). The four-list equality
   # check (catalogue == forge.tf == ROLES == PROV_ROLES) excludes it on THIS field — the

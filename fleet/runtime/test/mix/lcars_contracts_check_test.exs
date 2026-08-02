@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     assert fails == [], "non-green checks: #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
   end
 
-  # BL-6-28 / bench 2026-08-02: the check reads TWO lists outside `fleet/runtime`, and the image
+  # BL-6-45 / bench 2026-08-02: the check reads TWO lists outside `fleet/runtime`, and the image
   # BUILD stage copies fleet/runtime ALONE before running this gate — a fail-closed on their
   # absence broke the image build (measured: `forge.tf: list not readable` inside the Docker
   # build). Absence is scoped at the TREE level: no sibling tree = out of scope, SKIPPED and

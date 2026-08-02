@@ -215,7 +215,7 @@ defmodule Fleet.API.SpawnAdmission do
               do: {:ok, cap},
               else: {:error, {:host_native_forbidden, name}}
 
-          # A ReservedSeat is its OWN refusal (BL-6-28), not an "unknown cap_profile": the seat
+          # A ReservedSeat is its OWN refusal (BL-6-45), not an "unknown cap_profile": the seat
           # exists, the box is closed — wrapped as {:cap_profile, ...} the router would render
           # a declared state as an unknown-name error.
           {:error, {:role_reserved, _} = reserved} ->

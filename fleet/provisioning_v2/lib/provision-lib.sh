@@ -39,7 +39,7 @@ PROVISION_LIB_LOADED=1
 # cap-profiles) — et elle GAGNE : 50-forge passe --roles "$PROV_ROLES" au mint A4, écrasant le
 # défaut du .sh. un producteur absent ICI = pas de token sur une fleet fraîche = rail ops en
 # role_token_unavailable (la cause racine de BL-6-34 — vécu deux fois : eng_doc, puis son rename scribe). Le verrou
-# d'égalité des listes est BL-6-28 ; d'ici sa dérivation, cette ligne se tient à la main.
+# d'égalité des listes est BL-6-45 ; d'ici sa dérivation, cette ligne se tient à la main.
 : "${PROV_ROLES:=architect engineer scribe gatekeeper qualifier reviewer scoper vulcan}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
