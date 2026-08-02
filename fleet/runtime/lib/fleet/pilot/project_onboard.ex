@@ -448,6 +448,202 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   @doc """
+  ADOPTS a project that lives on DISK but not on the forge (BL-6-32) — the inverse of `import/2`
+  (forge→disk; this publishes disk→forge). The measured wedge: such a project had NO working
+  verb — `create` refused on the existing dirs (F-C084's wall, correct), `import` demanded the
+  forge repo, and `open` produced a dead rail (arch up, repo never discovered by the org scan).
+
+  The gesture: create the org repo EMPTY (`auto_init: false` — the content EXISTS; a seeded
+  README would make the local push non-fast-forward), seed the protocol labels (a bare repo has
+  ZERO — BL-6-33's lesson applies to every bare create), point origin, ensure the criticality
+  declaration, push `main`, bring up the work/ops face (created if absent, pushed as-is if the
+  dir already holds a `work/ops` git repo), protect, ensure the architect.
+
+  The local content is NEVER scaffolded over (F-C084's lesson, mirrored: there, never scaffold
+  over a remote main; here, never touch the local one). Compensation unwinds ONLY what this
+  call created — the forge repo, and the work_dir IF this call made it; the pre-existing
+  proj_dir is the user's and is never removed (a local intensity commit made by this call is
+  KEPT: valid content, and the retry converges on it).
+
+  Refusals (nothing touched): proj_dir absent or without a local `main`
+  (`{:not_adoptable, {:no_local_main, _}}`); an origin naming ANOTHER repo
+  (`{:origin_conflict, _}` — adopting under a different identity would orphan the history's
+  true home); the forge repo already existing (`{:repo_already_exists, _}` — that project
+  wants `import` or `open`); a present work_dir that is not a `work/ops` git repo.
+  """
+  @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  def adopt_project(name, opts \\ []) when is_binary(name) do
+    org = Keyword.get(opts, :org, "fleet")
+    full_name = "#{org}/#{name}"
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+
+    with :ok <- validate_name(name),
+         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- require_local_main(proj_dir),
+         :ok <- require_adoptable_origin(full_name, proj_dir, opts),
+         {:ok, work_state} <- classify_adopt_work_dir(work_dir),
+         :ok <- require_forge_absent(full_name, opts),
+         {:ok, url} <- repo_url(full_name, opts),
+         {:ok, full_name} <- create_empty_repo(name, org, opts) do
+      case finish_adopt(full_name, url, proj_dir, work_dir, work_state, name, opts) do
+        {:ok, result} ->
+          {:ok, result}
+
+        {:error, reason} = err ->
+          compensate_adopt(full_name, work_dir, work_state, reason, opts)
+          err
+      end
+    end
+  end
+
+  defp require_local_main(proj_dir) do
+    with true <- File.dir?(proj_dir),
+         {:ok, _sha} <-
+           GitOps.read(["-C", proj_dir, "rev-parse", "--verify", "--quiet", "refs/heads/main"]) do
+      :ok
+    else
+      _ -> {:error, {:not_adoptable, {:no_local_main, proj_dir}}}
+    end
+  end
+
+  # No origin at all is the NOMINAL adopt case (never pushed anywhere); an origin already naming
+  # the target is a re-adopt (forge lost, e.g. nuked bench) — both fine. An origin naming
+  # something ELSE is the refusal this guard exists for.
+  defp require_adoptable_origin(full_name, proj_dir, opts) do
+    case origin_full_name(proj_dir, opts) do
+      {:ok, ^full_name} -> :ok
+      {:ok, other} -> {:error, {:origin_conflict, other}}
+      {:error, _no_origin} -> :ok
+    end
+  end
+
+  defp classify_adopt_work_dir(work_dir) do
+    cond do
+      not File.exists?(work_dir) ->
+        {:ok, :absent}
+
+      match?(
+        {:ok, _},
+        GitOps.read([
+          "-C",
+          work_dir,
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          "refs/heads/work/ops"
+        ])
+      ) ->
+        {:ok, :present_git}
+
+      true ->
+        {:error, {:not_adoptable, {:work_dir_not_workops, work_dir}}}
+    end
+  end
+
+  # Presence probed like `satisfied_end_state?` does: only a clean positive blocks; a 404 is the
+  # nominal green light, and an OUTAGE also refuses (adopting onto an unverifiable forge could
+  # collide with an existing repo).
+  defp require_forge_absent(full_name, opts) do
+    case repo_mod(opts).default_branch(full_name, fc_opts(opts)) do
+      {:ok, _branch} -> {:error, {:repo_already_exists, full_name}}
+      {:error, {:http, 404, _}} -> :ok
+      {:error, reason} -> {:error, {:forge_unverifiable, reason}}
+    end
+  end
+
+  # EMPTY by contract: `auto_init: false` — the one create in this module that must NOT seed
+  # a main (the local one is about to be pushed and must fast-forward onto nothing).
+  defp create_empty_repo(name, org, opts) do
+    desc = Keyword.get(opts, :description, "")
+
+    result =
+      repo_mod(opts).create_repo(
+        name,
+        Keyword.merge(opts, org: org, description: desc, auto_init: false)
+      )
+
+    classify_create_repo(result, org, name)
+  end
+
+  defp finish_adopt(full_name, url, proj_dir, work_dir, work_state, name, opts) do
+    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
+         :ok <- set_origin(proj_dir, url),
+         :ok <- ensure_intensity(proj_dir, opts),
+         :ok <- push(proj_dir, "main", true),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- adopt_work_ops(work_state, full_name, url, work_dir, name, opts),
+         :ok <- lock_main(full_name, opts) do
+      arch = ensure_architect(full_name, opts)
+
+      Logger.info(
+        "ProjectOnboard: #{full_name} ADOPTED from disk — main published, work/ops up, " <>
+          "protection placed"
+      )
+
+      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+    end
+  end
+
+  defp set_origin(dir, url) do
+    case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
+      {:ok, _present} -> GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false)
+      {:error, _} -> GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
+    end
+  end
+
+  # A present declaration is LEFT AS-IS (the burn validates loudly; adopt does not overwrite the
+  # user's engraving) — an absent one is written from the relayed declaration (or the honest C0
+  # default) and committed, BEFORE the single main push.
+  defp ensure_intensity(proj_dir, opts) do
+    if File.exists?(Path.join(proj_dir, "intensity.json")) do
+      :ok
+    else
+      with :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts) do
+        commit(proj_dir, "chore(adopt): déclaration de criticité (intensity.json)")
+      end
+    end
+  end
+
+  defp adopt_work_ops(:absent, full_name, url, work_dir, name, opts) do
+    with :ok <- add_work_ops(work_dir, url),
+         :ok <- Scaffold.work(work_dir, name, opts),
+         :ok <- commit(work_dir, "chore(adopt): init work/ops") do
+      publish_work_ops(full_name, work_dir, opts)
+    end
+  end
+
+  defp adopt_work_ops(:present_git, full_name, url, work_dir, _name, opts) do
+    with :ok <- set_origin(work_dir, url) do
+      publish_work_ops(full_name, work_dir, opts)
+    end
+  end
+
+  # Unwinds ONLY what THIS call created: the forge repo, and the work_dir if the call made it
+  # (`:absent` at entry). The pre-existing proj_dir is the USER'S — never removed; the origin it
+  # gained points at a deleted repo until the retry re-sets it (harmless, converged then).
+  # Direct `delete_repo` primitive, NOT `delete_forge`: its presence probe reads default_branch,
+  # and the repo this call just created may still be EMPTY (failure before the main push) — an
+  # empty repo probes "absent" and would LEAK through the unwind (measured in the adopt suite).
+  # The primitive is idempotent (404 → :ok), and this call owns what it created seconds ago.
+  defp compensate_adopt(full_name, work_dir, work_state, reason, opts) do
+    forge =
+      case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
+        :ok -> :deleted
+        {:error, e} -> {:delete_failed, e}
+      end
+
+    work = if work_state == :absent, do: compensate_dir(work_dir), else: :kept_preexisting
+
+    Logger.warning(
+      "ProjectOnboard: adopt #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
+        "forge #{inspect(forge)}, work_dir #{inspect(work)} (proj_dir untouched — the user's; " <>
+        "a clean retry is possible)"
+    )
+  end
+
+  @doc """
   DELETE a project — the general, reusable teardown of a project's whole runtime footprint. A
   first-class capability (no such thing existed): callable by ANY process — the MCP tool
   `delete_project`, a starfleet gesture, the onboard-reset (CI-07). Stops the project's resident

@@ -29,6 +29,8 @@ defmodule Fleet.MCP.PodTools do
         engraved declaration gets a tracked revision path; future tickets only).
       - `close_project`    : parks a project (BL-6-30 — marker issue holds the state, the
         poller skips the repo; disk + forge intact, `open_project` reopens).
+      - `adopt_project`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
+        of import; local content never overwritten).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `list_issues`      : the arch reads its project's open-ticket board (BL-6-28: the
@@ -234,6 +236,38 @@ defmodule Fleet.MCP.PodTools do
         "full_name" => %{"type" => "string"}
       },
       "required" => ["full_name"]
+    })
+  end
+
+  deftool "adopt_project" do
+    meta do
+      name("Adopt Project")
+
+      description(
+        "ADOPT a project that lives on the agent machine's DISK but not on the forge — the " <>
+          "inverse of import_project: publishes the existing local content (repo created EMPTY, " <>
+          "the local main is pushed as-is, work/ops face brought up, forge gate placed). Use it " <>
+          "for a project someone built locally (or whose forge was lost) that the fleet should " <>
+          "now work. The local content is NEVER overwritten. `name` = the local dirs' basename " <>
+          "(kebab-case). The card/criticality declaration relays like create_project (present " <>
+          "the catalogue first when the human declares; an existing committed declaration in the " <>
+          "project is kept as-is). Refusals name the right verb: repo already on the forge → use " <>
+          "import_project or open_project; no local main → nothing to adopt. Returns " <>
+          "{\"status\":\"adopted\",\"repo\":...} like create_project."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "name" => %{"type" => "string"},
+        "description" => %{"type" => "string"},
+        "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
+        "intensity_justification" => %{"type" => "string"},
+        "nature" => %{"type" => "string"},
+        "workflow_map" => %{"type" => "string"}
+      },
+      "required" => ["name"]
     })
   end
 
@@ -583,6 +617,17 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("import_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("adopt_project", %{"name" => name} = args, state) when is_binary(name) do
+    case Delegation.adopt_project(name, args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("adopt_project", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

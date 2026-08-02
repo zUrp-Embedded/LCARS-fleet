@@ -56,6 +56,7 @@ spec:
       - mcp__fleet__open_project         # third verb: RELAUNCH a project already on the machine
       - mcp__fleet__revise_project_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
       - mcp__fleet__close_project        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
+      - mcp__fleet__adopt_project        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
     disallowedTools:
       - web_search
       - web_fetch

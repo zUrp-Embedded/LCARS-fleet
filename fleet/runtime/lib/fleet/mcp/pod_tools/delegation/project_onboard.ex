@@ -64,6 +64,17 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               {:ok, map()} | {:error, term()}
 
   @doc """
+  ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:
+  publishes the existing local pair (empty org repo, labels seeded, origin set, main + work/ops
+  pushed, protection, architect). `name` = the dirs' basename; `opts` may relay the criticality
+  declaration (same keys as `onboard/2`). The local content is never scaffolded over. Same 3
+  return keys as `onboard/2` (+ `architect`).
+  """
+  @callback adopt_project(name :: String.t(), opts :: keyword()) ::
+              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              | {:error, term()}
+
+  @doc """
   CLOSES a project (BL-6-30) — stops the fleet ON it, disk and forge intact (≠ delete: nothing
   destroyed). The closed state is a forge object (open `[lcars-parked]` marker issue) the poller
   respects; the running brick finishes, the next one never starts; the architect stops

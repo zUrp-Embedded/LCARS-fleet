@@ -505,6 +505,18 @@ defmodule Fleet.MCP.PodToolsTest do
 
       {:ok, %{repo: full_name, outcome: :closed, marker_issue: 12, architect: :stopped}}
     end
+
+    @impl true
+    def adopt_project(name, opts) do
+      send(self(), {:adopt_project, name, opts})
+
+      {:ok,
+       %{
+         repo: "fleet/#{name}",
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}"
+       }}
+    end
   end
 
   # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
@@ -1298,6 +1310,7 @@ defmodule Fleet.MCP.PodToolsTest do
          "justification" => "le poc est devenu serieux"
        }},
       {"close_project", %{"full_name" => "fleet/demo-proj"}},
+      {"adopt_project", %{"name" => "demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [

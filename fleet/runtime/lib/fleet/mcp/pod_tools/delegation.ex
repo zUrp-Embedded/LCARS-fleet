@@ -789,6 +789,50 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  ADOPTS a disk-only project (BL-6-32) — onboarder gate (portfolio head). The mechanics live
+  pilot-side (`adopt_project` seam callback); the criticality declaration is RELAYED like
+  `create_project`'s (nil entries = undeclared → honest C0 default, never fabricated). Typed
+  errors pass through unflattened (`{:not_adoptable, _}`, `{:origin_conflict, _}`,
+  `{:repo_already_exists, _}` — the caller must tell "wrong verb" from "broken state").
+  """
+  @spec adopt_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def adopt_project(name, args, state) when is_binary(name) and is_map(args) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, role} -> do_adopt_project(name, args, role)
+    end
+  end
+
+  defp do_adopt_project(name, args, role) do
+    with {:ok, onboard} <- conforming_onboard() do
+      opts = [
+        description: Map.get(args, "description", ""),
+        intensity_level: Map.get(args, "intensity_level"),
+        intensity_justification: Map.get(args, "intensity_justification"),
+        intensity_nature: Map.get(args, "nature"),
+        workflow_map: Map.get(args, "workflow_map"),
+        onboarded_by: role
+      ]
+
+      case onboard.adopt_project(name, opts) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+          {:ok,
+           %{
+             "status" => "adopted",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }
+           |> put_architect(result)}
+
+        {:error, _reason} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
   CLOSES a project (BL-6-30) — onboarder gate (portfolio head, like open/delete). The mechanics
   live pilot-side (`close_project` seam callback): parked marker issue posted (the forge object
   the poller respects), then the architect stops best-effort. Typed errors pass through
