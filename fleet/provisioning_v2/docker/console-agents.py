@@ -424,8 +424,8 @@ PAGE = r"""<!doctype html>
     <button class="tab on" id="tab-agents">AGENTS</button>
     <button class="tab" id="tab-cards">CARTES</button>
   </nav>
-  <span class="sub" id="sub">&mdash;</span>
-  <span class="right"><span id="counts"></span><span class="live" id="live">&bull; LIVE</span><span id="clock"></span></span>
+  <span class="sub" id="sub">config &mdash; le vivant se rebranche plus tard</span>
+  <span class="right"><span class="sub">catalogue seul</span></span>
 </header>
 
 <main id="v-agents">
@@ -457,7 +457,7 @@ function switchTo(v){
   document.getElementById('v-cards').classList.toggle('hidden', v!=='cards');
   document.getElementById('tab-agents').classList.toggle('on', v==='agents');
   document.getElementById('tab-cards').classList.toggle('on', v==='cards');
-  if(v==='cards' && !CAT) loadCatalogue();
+  if(!CAT) loadCatalogue(); else (v==='agents' ? drawAgents() : drawCards());
 }
 document.getElementById('tab-agents').onclick = () => switchTo('agents');
 document.getElementById('tab-cards').onclick = () => switchTo('cards');
@@ -466,141 +466,119 @@ if(h === '#cartes') switchTo('cards');
 else if(h.startsWith('#carte-')){ csel = h.slice(7); switchTo('cards'); }
 else if(h.startsWith('#edit-')){ csel = h.slice(6); editing = true; switchTo('cards'); }
 
-/* ─── AGENTS ─── */
-function rail(){
+/* ─── AGENTS — CONFIG SEULE (arbitrage user : ce deck est la configuration ;
+   pods vivants, flux, machines se rebrancheront ailleurs plus tard) ─── */
+let psel = null;
+
+function groupsOf(){
+  const P = CAT.profiles||{}; const names=Object.keys(P).sort();
+  const spec = n => ((P[n]||{}).data||{}).spec||{};
+  const caps = n => spec(n).capabilities||[];
+  const g = {'promoteur':[], 'juges':[], 'producteurs':[], 'orchestrateurs':[], 'autres':[]};
+  for(const n of names){
+    if(caps(n).includes('exception_judge')) g['promoteur'].push(n);
+    else if(spec(n).brief_kind==='judge') g['juges'].push(n);
+    else if(caps(n).includes('producer')) g['producteurs'].push(n);
+    else if(caps(n).includes('onboarder')||caps(n).includes('project_delegate')) g['orchestrateurs'].push(n);
+    else g['autres'].push(n);
+  }
+  return g;
+}
+
+function drawAgents(){
+  if(!CAT) return;
   const r = document.getElementById('rail'); r.innerHTML='';
-  r.appendChild(el('div','grp', S.fleet ? `pods · ${S.pods.length}` : 'fleet eteinte'));
-  if(!S.pods.length) r.appendChild(el('div','empty', S.fleet ? 'aucun pod vivant' : 'demarre la fleet : fleet_v2 start'));
-  for(const p of S.pods){
-    const b = el('button','row' + (p.pod_id===sel ? ' on' : ''));
-    const id = el('span','id'); id.appendChild(el('span','dot '+phCls(p.phase))); id.append(p.role);
-    b.appendChild(id);
-    b.appendChild(el('span','meta', p.phase + ' · ' + p.pod_id));
-    b.onclick = () => { sel = p.pod_id; draw(); };
-    r.appendChild(b);
-  }
-  const M = S.machines||{};
-  r.appendChild(el('div','grp','machines'));
-  const mrow = (k,v,cls) => { const d=el('div','row'); d.style.cursor='default';
-    d.appendChild(el('span','id',k)); const m=el('span','meta',v); if(cls) m.style.color=cls; d.appendChild(m); r.appendChild(d); };
-  mrow('boîte', (M.load!=null?`load ${M.load}/${M.cpus}`:'—')
-    + (M.mem_used_gb!=null?` · ram ${M.mem_used_gb}/${M.mem_total_gb}G`:'')
-    + (M.disk_pct!=null?` · disk ${M.disk_pct}%`:''),
-    (M.disk_pct>85||M.load>(M.cpus||8)) ? 'var(--am)' : null);
-  mrow('fleet', S.fleet ? `BEAM up · ${S.pods.length} pod${S.pods.length>1?'s':''}` : 'éteinte',
-    S.fleet ? 'var(--gr)' : 'var(--rd)');
-  if(M.forge) mrow('forge', M.forge.down ? (M.forge.url+' INJOIGNABLE') : `${M.forge.version} · ${M.forge.ms}ms`,
-    M.forge.down ? 'var(--rd)' : 'var(--gr)');
-  else mrow('forge','aucune configurée',null);
-  if(M.ci) mrow('ci (runner)', `${M.ci.status} · ${M.ci.at}`,
-    M.ci.status==='success' ? 'var(--gr)' : (M.ci.status==='failure' ? 'var(--rd)' : 'var(--am)'));
-
-  if(CAT && CAT.profiles){
-    const live = new Set(S.pods.map(p=>p.role));
-    const dormant = Object.keys(CAT.profiles).sort().filter(n=>!live.has(n));
-    if(dormant.length){
-      r.appendChild(el('div','grp','roles declares · dormants'));
-      for(const name of dormant){
-        const b = el('button','row ghost' + (sel==='profile:'+name ? ' on' : ''));
-        b.appendChild(el('span','id', name));
-        const spec = (CAT.profiles[name].data||{}).spec||{};
-        b.appendChild(el('span','meta', (spec.brief_kind||'?') + ' · dormant'));
-        b.onclick = () => { sel = 'profile:'+name; draw(); };
-        r.appendChild(b);
-      }
+  const g = groupsOf();
+  if(!psel) psel = (g['juges'][0]||Object.keys(CAT.profiles||{})[0]||null);
+  for(const grp of Object.keys(g)){
+    if(!g[grp].length) continue;
+    r.appendChild(el('div','grp',grp+' · '+g[grp].length));
+    for(const n of g[grp]){
+      const b = el('button','row'+(n===psel?' on':''));
+      b.appendChild(el('span','id',n));
+      const inv=(((CAT.profiles[n]||{}).data||{}).spec||{}).invocation||{};
+      b.appendChild(el('span','meta',(inv.model||'?')+' · '+(inv.effort||'?')+' · '+(inv.lifetime_scope||'?')));
+      b.onclick=()=>{ psel=n; drawAgents(); };
+      r.appendChild(b);
     }
   }
+  agentCenter(); agentRight();
 }
 
-function center(){
+function kvRow(box,k,v){ const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,String(v))); box.appendChild(r); }
+function chipRow(box, arr, color){ const d=el('div'); for(const a of arr){ const c=el('span','chip',a); if(color)c.style.color=color; d.appendChild(c);} if(!(arr||[]).length) d.appendChild(el('span','mini','aucun')); box.appendChild(d); }
+
+function agentCenter(){
   const c = document.getElementById('center'); c.innerHTML='';
-  const p = S.pods.find(x=>x.pod_id===sel);
+  const prof = (CAT.profiles||{})[psel];
   const head = el('div','pane-head');
-  head.appendChild(el('b', p ? p.role.toUpperCase() : ((sel||'').startsWith('profile:') ? sel.slice(8).toUpperCase() : 'FLUX')));
-  head.appendChild(el('span','k', p ? p.pod_id : ((sel||'').startsWith('profile:') ? 'role declare, aucun pod' : 'tous les evenements')));
-  if(p && S.pod_console_port){
-    const act = el('span','act');
-    const a = document.createElement('a'); a.className='btn'; a.textContent='ouvrir la console ↗';
-    a.href = `http://${HOST}:${S.pod_console_port}?arg=${encodeURIComponent(p.pod_id)}`;
-    a.target='_blank'; a.rel='noopener'; act.appendChild(a); head.appendChild(act);
-  }
+  head.appendChild(el('b',(psel||'—').toUpperCase()));
+  head.appendChild(el('span','k','cap-profile — la declaration complete, rien du vivant'));
   c.appendChild(head);
-  const evs = S.stream.filter(e => !p || e.pod_id === p.pod_id);
-  if(!evs.length){
-    const e = el('div','empty');
-    e.innerHTML = p
-      ? "aucun evenement pour ce pod.<br><b>Entre deux tool calls, rien n'emet</b> — un pod en longue reflexion est invisible d'ici ; sa console est le seul temoin."
-      : ((sel||'').startsWith('profile:') ? "role declare au catalogue — aucun pod ne l'incarne en ce moment." : 'flux vide');
-    c.appendChild(e); return;
-  }
-  for(const e of evs){
-    const row = el('div','ev ' + evCls(e.type||''));
-    row.appendChild(el('span','t', (e.ts||'').slice(11,19)));
-    row.appendChild(el('span','ty', e.type||''));
-    row.appendChild(el('span','src', e.source||''));
-    row.appendChild(el('span','pod', e.pod_id||''));
-    c.appendChild(row);
-  }
+  if(!prof){ c.appendChild(el('div','empty','selectionne un role')); return; }
+  const d = prof.data||{}, meta=d.metadata||{}, spec=d.spec||{};
+  const body = el('div','cbody');
+  const sec = (title) => { const f=el('div','fs'); f.appendChild(el('div','ftitle',title)); body.appendChild(f); return f; };
+
+  const s1 = sec('identite');
+  kvRow(s1,'name', meta.name||'?'); kvRow(s1,'containment', meta.containment||'?');
+  if(meta.role_index!=null) kvRow(s1,'role_index', meta.role_index+' — slot du role dans l UUID hexspeak');
+  if((meta.mounts||[]).length) kvRow(s1,'mounts', meta.mounts.join(', '));
+
+  const s2 = sec('mandat');
+  kvRow(s2,'brief_kind', spec.brief_kind||'—'); kvRow(s2,'interlocutor', spec.interlocutor||'—');
+  s2.appendChild(el('div','mini','capabilities — les faits que les autres surfaces derivent'));
+  chipRow(s2, spec.capabilities||[], 'var(--am)');
+  if(spec.deliverable_mode) kvRow(s2,'deliverable_mode', spec.deliverable_mode);
+
+  const sc = spec.scope||{};
+  const s3 = sec('scope — outils');
+  s3.appendChild(el('div','mini','allowedTools · '+(sc.allowedTools||[]).length));
+  chipRow(s3, sc.allowedTools||[]);
+  s3.appendChild(el('div','mini','disallowedTools · '+(sc.disallowedTools||[]).length));
+  chipRow(s3, sc.disallowedTools||[], 'var(--rd)');
+  s3.appendChild(el('div','mini','git_ops_denied'));
+  chipRow(s3, sc.git_ops_denied||[], 'var(--rd)');
+
+  const inv = spec.invocation||{};
+  const s4 = sec('invocation');
+  for(const k of ['model','effort','lifetime_scope','permission_mode','boot_at_start','host_native',
+                  'bridge_enabled','remote_control','wake_send_keys','subagent_template'])
+    if(inv[k]!==undefined) kvRow(s4,k, inv[k]===null?'null':inv[k]);
+  if((spec.timeouts||{}).response_sec) kvRow(s4,'timeouts.response_sec', spec.timeouts.response_sec+' s');
+
+  const kn = spec.knowledge||{};
+  const s5 = sec('knowledge');
+  s5.appendChild(el('div','mini','skills')); chipRow(s5, kn.skills||[]);
+  kvRow(s5,'monk_registry', kn.monk_registry==null?'null':kn.monk_registry);
+  kvRow(s5,'monk_instance', kn.monk_instance==null?'null':kn.monk_instance);
+  if('sp_template' in kn) kvRow(s5,'sp_template', kn.sp_template==null?'null':kn.sp_template);
+
+  const mo = spec.modop_set||{};
+  const s6 = sec('modop_set');
+  s6.appendChild(el('div','mini','default')); chipRow(s6, mo.default||[]);
+  s6.appendChild(el('div','mini','optional')); chipRow(s6, mo.optional||[]);
+  s6.appendChild(el('div','mini','incompatible')); chipRow(s6, mo.incompatible||[], 'var(--rd)');
+
+  const s7 = sec('project');
+  if(spec.project){ for(const k of Object.keys(spec.project)) kvRow(s7, k, spec.project[k]==null?'null':spec.project[k]); }
+  else s7.appendChild(el('div','mini','null — fleet-level, ou projete au spawn par le dispatch'));
+
+  c.appendChild(body);
 }
 
-function ctx(){
+function agentRight(){
   const d = document.getElementById('ctx'); d.innerHTML='';
-  if((sel||'').startsWith('profile:')){ profileCtx(d, sel.slice(8)); return; }
-  const p = S.pods.find(x=>x.pod_id===sel);
-  if(!p){ d.appendChild(el('div','empty','selectionne un agent')); return; }
-  const idc = el('div','card'); idc.appendChild(el('h4',null,'identite'));
-  for(const [k,v] of [['role',p.role],['phase',p.phase],['mandat',p.issue||'—']]){
-    const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); idc.appendChild(r);
-  }
-  d.appendChild(idc);
-  const sc = el('div','card'); sc.appendChild(el('h4',null,'slot de session'));
-  if(p.session){
-    for(const [k,v] of [['classe',p.session.classe],['humain','uid '+p.session.uid],
-                        ['projet',p.session.repo],['slot',p.session.slot]]){
-      const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); sc.appendChild(r);
-    }
-  }
-  const raw=el('div','kv'); raw.appendChild(el('span','k','brut'));
-  raw.appendChild(el('span',null,p.session_raw||'—')); sc.appendChild(raw);
-  d.appendChild(sc);
-  const cc = el('div','card'); cc.appendChild(el('h4',null,'conditions'));
-  if(p.conditions.length) p.conditions.forEach(x=>cc.appendChild(el('span','cond',x)));
-  else cc.appendChild(el('span','kv','aucune'));
-  d.appendChild(cc);
-  if(CAT) profileCtx(d, p.role, true);
+  const prof=(CAT.profiles||{})[psel];
+  if(!prof){ d.appendChild(el('div','empty','—')); return; }
+  const rc = el('div','card'); rc.appendChild(el('h4',null,'yaml source (lecture)'));
+  const pre = document.createElement('pre');
+  pre.style.cssText='font:11px/1.45 var(--mono);color:var(--dim);white-space:pre-wrap;max-height:78vh;overflow-y:auto;margin:0';
+  pre.textContent = prof.text||'';
+  rc.appendChild(pre); d.appendChild(rc);
 }
 
-function profileCtx(d, name, compact){
-  const prof = CAT && CAT.profiles && CAT.profiles[name];
-  if(!prof){ if(!compact) d.appendChild(el('div','empty','profil hors catalogue (charge l onglet CARTES pour peupler)')); return; }
-  const spec = (prof.data||{}).spec||{}, inv = spec.invocation||{}, scope = spec.scope||{};
-  const pc = el('div','card'); pc.appendChild(el('h4',null,'cap-profile · '+name));
-  const rows = [['mandat', spec.brief_kind||'?'],['modele', (inv.model||'?')+' · '+(inv.effort||'?')],
-                ['vie', inv.lifetime_scope||'?'],['boot', inv.boot_at_start ? 'au demarrage' : 'a la demande'],
-                ['outils', (scope.allowedTools||[]).length + ' permis · ' + (scope.disallowedTools||[]).length + ' interdits'],
-                ['git', (scope.git_ops_denied||[]).length ? 'denie: '+scope.git_ops_denied.join(', ') : 'libre']];
-  for(const [k,v] of rows){
-    const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); pc.appendChild(r);
-  }
-  d.appendChild(pc);
-}
-
-function draw(){
-  if(S.pods.length && !sel) sel = S.pods[0].pod_id;
-  document.getElementById('sub').textContent = S.status ? 'read-model ' + S.status : 'read-model injoignable';
-  const live = document.getElementById('live');
-  live.className = 'live' + (S.fleet ? '' : ' off');
-  live.textContent = S.fleet ? '• LIVE' : '• FLEET OFF';
-  const n = Object.values(S.counts).reduce((a,b)=>a+b,0);
-  document.getElementById('counts').textContent = n ? n + ' evenements' : '';
-  document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
-  rail(); center(); ctx();
-}
-
-async function tick(){
-  try { S = await (await fetch('/api/state',{cache:'no-store'})).json(); if(view==='agents') draw(); } catch(e){}
-}
-tick(); setInterval(tick, 3000);
+loadCatalogue();
 
 /* ─── CARTES ─── */
 async function loadCatalogue(force){
@@ -610,8 +588,7 @@ async function loadCatalogue(force){
   catch(e){ c.innerHTML = '<div class="empty">catalogue injoignable</div>'; return; }
   if(CAT.error){ c.innerHTML = '<div class="empty">le BEAM refuse le dump :<br>'+CAT.error+'</div>'; return; }
   if(!csel){ const names = Object.keys(CAT.cards||{}).sort(); csel = names[0] || null; }
-  drawCards();
-  if(view==='agents') draw();
+  if(view==='cards') drawCards(); else drawAgents();
 }
 
 function drawCards(){
