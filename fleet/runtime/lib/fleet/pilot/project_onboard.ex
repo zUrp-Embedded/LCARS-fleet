@@ -132,6 +132,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
     with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
+         :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- maybe_scaffold_main(provision, proj_dir, name, opts),
          # Criticality declaration (intensity.json, ON MAIN — an auditor reads it beside the
@@ -1244,6 +1245,27 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp maybe_scaffold_main(:generated, _proj_dir, _name, _opts), do: :ok
   defp maybe_scaffold_main(:bare, proj_dir, name, opts), do: Scaffold.main(proj_dir, name, opts)
+
+  # BL-6-33 (measured on the consultant's bench): the GENERATE path inherits the 7 protocol
+  # labels from the template (`labels: true`); the bare fallback used to seed NONE — the repo
+  # scaffolded fine and the FIRST `genre/ops` ticket died on `{:genre_label_unresolved,
+  # {:label_unknown, _}}`, a diagnosis session later. The fallback exists to produce a WORKABLE
+  # repo, so it CONVERGES (seeds the labels, same single authority the template sync uses) and a
+  # seeding that cannot be proven FAILS the onboard loud — a decorative repo never ships. Runs
+  # inside `finish_onboard` (the compensated window): a failure here unwinds repo + dirs, the
+  # retry stays clean — inside `create_repo` it would wedge the retry on the 409 wall instead.
+  # Seam `:ensure_labels` (tests); default = the real converge-and-verify.
+  defp maybe_seed_protocol_labels(:generated, _full_name, _opts), do: :ok
+
+  defp maybe_seed_protocol_labels(:bare, full_name, opts) do
+    seeder =
+      Keyword.get(opts, :ensure_labels, &Fleet.Pilot.ForgeClient.ensure_protocol_labels/2)
+
+    case seeder.(full_name, fc_opts(opts)) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:protocol_labels, reason}}
+    end
+  end
 
   defp onboard_commit_msg(:generated),
     do: "chore(onboard): déclaration de criticité (intensity.json)"

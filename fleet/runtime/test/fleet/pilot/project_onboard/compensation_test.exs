@@ -92,8 +92,37 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       forge_repo: FileForge,
       forge_users: Humans,
       sleeper: fn _ms -> :ok end,
+      ensure_labels: fn repo, _o -> send(self(), {:labels_seeded, repo}) && :ok end,
       ensure_architect: fn _repo, _o -> {:ok, "arch-stub"} end
     ]
+  end
+
+  test "BL-6-33: the BARE fallback SEEDS the protocol labels (a workable repo, not a decorative one)",
+       %{tmp_dir: tmp} do
+    # FileForge.generate_repo → :template_missing → the bare path. The generate path inherits
+    # the labels from the template; the fallback must seed them itself or the first genre/ops
+    # ticket dies on {:genre_label_unresolved, _} (measured on a real bench).
+    o = opts(tmp)
+
+    assert {:ok, %{repo: "fleet/labelled"}} = ProjectOnboard.onboard("labelled", o)
+    assert_received {:labels_seeded, "fleet/labelled"}
+  end
+
+  test "BL-6-33: a label seeding that cannot be proven FAILS the onboard — and compensates",
+       %{tmp_dir: tmp} do
+    o =
+      Keyword.put(opts(tmp), :ensure_labels, fn _repo, _o ->
+        {:error, {:labels_missing_after_ensure, ["genre/ops"]}}
+      end)
+
+    assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["genre/ops"]}}} =
+             ProjectOnboard.onboard("nolabel", o)
+
+    # Inside the compensated window: the forge repo this call created is unwound, dirs absent —
+    # the retry hits no wall (409 / refute_existing).
+    assert_received {:forge_deleted, "fleet/nolabel"}
+    refute File.exists?(Path.join(o[:projects_root], "nolabel"))
+    refute File.exists?(Path.join(o[:work_root], "nolabel"))
   end
 
   test "a LATE onboard failure (protect_branch) compensates: forge repo deleted, dirs removed, retry possible",
