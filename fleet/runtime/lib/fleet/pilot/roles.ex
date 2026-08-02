@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.Roles do
   runs it at boot, so a catalogue that cannot name its producer refuses readiness instead of dying at
   the first dispatch.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -248,6 +248,19 @@ defmodule Fleet.Pilot.Roles do
   def delegation_workflow_map(opts \\ []) do
     Keyword.get(opts, :delegation_workflow_map) ||
       Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
+  end
+
+  @doc """
+  Name of the OPS workflow map — burned on a routeless issue carrying the `genre/ops` label
+  (chantier face-projet): the documentary path is a base function of EVERY project, whatever card
+  its criticality declared, so it does not live in `intensity.json`. Opt `:ops_workflow_map`
+  (test), else config `:fleet_pilot, :ops_workflow_map` (default `"ops-direct"`). SINGLE accessor,
+  same shape as `delegation_workflow_map/1`.
+  """
+  @spec ops_workflow_map(keyword()) :: String.t()
+  def ops_workflow_map(opts \\ []) do
+    Keyword.get(opts, :ops_workflow_map) ||
+      Application.get_env(:fleet_pilot, :ops_workflow_map, "ops-direct")
   end
 
   @doc """

@@ -174,7 +174,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                  number,
                  route,
                  workflow_map_loader,
-                 forge_opts
+                 forge_opts,
+                 issue
                ),
              {:ok, {role, profile, step_spec}} <-
                Opts.tag_err(
@@ -536,15 +537,33 @@ defmodule Fleet.Pilot.StepDispatcher do
          _number,
          route,
          _workflow_map_loader,
-         _forge_opts
+         _forge_opts,
+         _issue
        )
        when not is_nil(route),
        do: {:ok, route}
 
-  defp ensure_workflow_map_or_onboard(forge, repo, number, nil, workflow_map_loader, forge_opts) do
-    # THE PROJECT'S declared card (intensity.json, F-29 chain) — legacy/undeclared project →
-    # the delegation default card. The criticality mechanic IS the card choice.
-    workflow_map_name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
+  defp ensure_workflow_map_or_onboard(
+         forge,
+         repo,
+         number,
+         nil,
+         workflow_map_loader,
+         forge_opts,
+         issue
+       ) do
+    # The GENRE gate first (chantier face-projet): a `genre/ops` label on the routeless issue
+    # burns the OPS card — the documentary path is a base function of every project, whatever its
+    # declared card, so it never transits intensity.json. Read ONCE, here: the engraved `wfmap/*`
+    # stays the only route afterwards. Otherwise: THE PROJECT'S declared card (intensity.json,
+    # F-29 chain) — legacy/undeclared project → the delegation default card. The criticality
+    # mechanic IS the card choice.
+    labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
+
+    workflow_map_name =
+      if Fleet.Labels.genre_ops() in labels,
+        do: Fleet.Pilot.Roles.ops_workflow_map(),
+        else: Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
 
     with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),

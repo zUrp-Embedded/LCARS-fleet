@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -85,7 +85,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
           String.t() | nil
         ) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(title, brief, state, brief_pointer \\ nil, summary \\ nil, supersedes \\ nil)
+  def create_issue(
+        title,
+        brief,
+        state,
+        brief_pointer \\ nil,
+        summary \\ nil,
+        supersedes \\ nil,
+        genre \\ nil
+      )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
     # gate (the pod's spawn binding — reorg 2026-07-19): the arch has "the project", it never names
@@ -129,7 +137,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           full_body =
             body |> with_pointer(pointer) |> with_supersedes(supersedes) |> with_op_marker(marker)
 
-          case do_create_issue(forge, repo, title, full_body, token: identity.token) do
+          case do_create_issue(forge, repo, title, full_body, [token: identity.token], genre) do
             {:ok, result} ->
               {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
 
@@ -952,7 +960,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # Places the issue (author = role account via `author_opts`, assignee = human owner) and its visual label.
-  defp do_create_issue(forge, repo, title, brief, author_opts) do
+  defp do_create_issue(forge, repo, title, brief, author_opts, genre) do
     # assignee = the HUMAN owner (fixed point: routing + ownership, never the role). Forge login
     # = OS login of the human who launches the fleet (doctrine: everything derives from the OS, no catalogue;
     # Gitea matches the assignee case-insensitively → `starfleet` resolves `Starfleet`). No label:
@@ -961,30 +969,49 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        case forge.create_issue(repo, title, brief, issue_opts) do
-          {:ok, number} ->
-            # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
-            # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
-            # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
-            # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
-            # onboarded the same way.) type:feature = a visual LABEL (human) — NEVER routing: the
-            # result is discarded, nothing mechanical reads this label, and its absence is directly
-            # visible on the issue in the forge UI.
-            _ = forge.add_label(repo, number, "type:feature", [])
+        # GENRE (chantier face-projet): "ops" = a documentary ticket — the burn routes it to the
+        # ops card off the `genre/ops` label. The label rides the CREATE call (resolved to its id
+        # here), never a post-create add: a poller tick between the two would burn the PROJECT
+        # card and send an ops brief down the code path. An unseeded label is SURFACED (the repo
+        # missed ensure_protocol_labels), never a silently code-routed ops ticket.
+        issue_opts_result =
+          case genre do
+            "ops" ->
+              case forge.repo_label_id(repo, Fleet.Labels.genre_ops(), author_opts) do
+                {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
+                {:error, reason} -> {:error, {:genre_label_unresolved, inspect(reason)}}
+              end
 
-            # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
-            # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
-            # association instead of presuming it (protocol-carried correlation, not memory).
-            {:ok,
-             %{
-               "status" => "issue_created",
-               "issue" => number,
-               "title" => title,
-               "assignee" => human
-             }}
+            _ ->
+              {:ok, issue_opts}
+          end
 
-          {:error, reason} ->
-            {:error, {:issue_creation_failed, inspect(reason)}}
+        with {:ok, issue_opts} <- issue_opts_result do
+          case forge.create_issue(repo, title, brief, issue_opts) do
+            {:ok, number} ->
+              # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
+              # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
+              # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
+              # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
+              # onboarded the same way.) type:feature = a visual LABEL (human) — NEVER routing: the
+              # result is discarded, nothing mechanical reads this label, and its absence is directly
+              # visible on the issue in the forge UI.
+              _ = forge.add_label(repo, number, "type:feature", [])
+
+              # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
+              # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
+              # association instead of presuming it (protocol-carried correlation, not memory).
+              {:ok,
+               %{
+                 "status" => "issue_created",
+                 "issue" => number,
+                 "title" => title,
+                 "assignee" => human
+               }}
+
+            {:error, reason} ->
+              {:error, {:issue_creation_failed, inspect(reason)}}
+          end
         end
 
       {:error, reason} ->
