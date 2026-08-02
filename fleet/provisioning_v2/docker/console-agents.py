@@ -528,7 +528,15 @@ function agentCenter(){
   const s1 = sec('identite');
   kvRow(s1,'name', meta.name||'?'); kvRow(s1,'containment', meta.containment||'?');
   if(meta.role_index!=null) kvRow(s1,'role_index', meta.role_index+' — slot du role dans l UUID hexspeak');
-  if((meta.mounts||[]).length) kvRow(s1,'mounts', meta.mounts.join(', '));
+  if((meta.mounts||[]).length){
+    s1.appendChild(el('div','mini','mounts — la focale du pod (ce que bwrap projette en plus du sanctuaire)'));
+    for(const m of meta.mounts){
+      const label = (typeof m==='object' && m) ? ((m.path||'?') + ' · ' + (m.mode||'ro')) : String(m);
+      const c = el('span','chip', label);
+      if((m||{}).mode==='rw') c.style.color='var(--am)';
+      s1.appendChild(c);
+    }
+  }
 
   const s2 = sec('mandat');
   kvRow(s2,'brief_kind', spec.brief_kind||'—'); kvRow(s2,'interlocutor', spec.interlocutor||'—');
