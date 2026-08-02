@@ -31,6 +31,19 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name
     end
 
+    # Walks the forge-sync puts until the STAMPED one (bounded). The sync can legitimately fire
+    # twice around an escalation: `{:observe, …}` schedules a debounce, the stamp lands in a
+    # second `{:mark_escalated, …}` call which re-schedules — under load the first put is a
+    # PRE-STAMP snapshot (measured: directory-scope run, seed 763143). The contract is not "the
+    # first write carries the stamp": it is "the stamp survives the sync that FOLLOWS it".
+    defp receive_stamped_put(puts_left \\ 5)
+    defp receive_stamped_put(0), do: flunk("no forge sync carried the escalation stamp")
+
+    defp receive_stamped_put(puts_left) do
+      assert_receive {:put, content}, 1_000
+      if content =~ "last_escalated_at", do: content, else: receive_stamped_put(puts_left - 1)
+    end
+
     test "note → :ok, seen_before? = memory lookup, local WAL written, async forge sync", %{
       tmp_dir: tmp
     } do
@@ -542,8 +555,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       # The sync (5ms debounce) merges WAL ∪ forge-without-stamp and REWRITES the memory: the stamp
       # must survive the merge (last_escalated_at/escalated_issue pair carried by merge_entry).
-      assert_receive {:put, content}, 1_000
-      assert content =~ "last_escalated_at"
+      # Walked, not first-put-asserted: a pre-stamp snapshot may precede it (cf. receive_stamped_put).
+      content = receive_stamped_put()
       assert content =~ "escalated_issue"
 
       assert {:escalation_suppressed, 43} =
