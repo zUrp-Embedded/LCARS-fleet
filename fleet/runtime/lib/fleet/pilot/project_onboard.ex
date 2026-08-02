@@ -282,14 +282,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   @doc """
   OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
-  2026-07-19: create / import / **open**). No forge write, no disk write: verifies the dual-dir
-  exists, then ensures the project's per-project architect (`Fleet.Pilot.ProjectArchitect.ensure`
-  — idempotent: alive → no-op; dead/never — fleet reboot, crash — → fresh spawn, context back via
-  the slot). THE human-driven path back to a project after `fleet_v2` restarts.
+  2026-07-19: create / import / **open**). Verifies the dual-dir exists, UNPARKS if closed
+  (BL-6-30 — closes every open `[lcars-parked]` marker; this is open's ONE forge write, absent
+  on a project that was never closed), then ensures the project's per-project architect
+  (`Fleet.Pilot.ProjectArchitect.ensure` — idempotent: alive → no-op; dead/never — fleet
+  reboot, crash — → fresh spawn, context back via the slot). THE human-driven path back to a
+  project after `fleet_v2` restarts, and the full reopen after `close_project`.
 
   Refusals: dirs absent → `{:error, {:not_on_machine, full_name}}` (that project needs `import`,
-  or `create` if it does not exist at all — open never creates). Same `result()` shape as
-  `onboard`/`import` (the MCP channel pattern-matches it identically).
+  or `create` if it does not exist at all — open never creates); parked state unreadable or a
+  marker that will not close → `{:error, {:unpark_failed, _}}` (a WALL: an architect ensured
+  over a still-parked rail would be a project "opened" that dispatches nothing). Same `result()`
+  shape as `onboard`/`import` (the MCP channel pattern-matches it identically).
   """
   @spec open(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def open(full_name, opts \\ []) when is_binary(full_name) do
@@ -298,11 +302,148 @@ defmodule Fleet.Pilot.ProjectOnboard do
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
     with :ok <- validate_name(name),
-         :ok <- require_on_machine(full_name, proj_dir, work_dir) do
+         :ok <- require_on_machine(full_name, proj_dir, work_dir),
+         :ok <- unpark(full_name, opts) do
       arch = ensure_architect(full_name, opts)
       Logger.info("ProjectOnboard: #{full_name} opened — architect #{arch.status}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
     end
+  end
+
+  # BL-6-30 — open's UNPARK half (the exact inverse of close_project): closes ALL the open
+  # parked markers BEFORE ensuring the architect (concurrent closes can legitimately leave
+  # more than one — the state holds while any is open, so open clears them all). Both failure
+  # modes are WALLS, symmetric by design: a parked state we cannot READ is not a state we may
+  # declare open, and a marker we cannot CLOSE leaves the rail parked — proceeding on either
+  # would hand back a live architect on a project that dispatches nothing, the exact lie this
+  # verb exists to prevent. No marker present (read OK) → zero forge write, the historical
+  # open contract unchanged.
+  defp unpark(full_name, opts) do
+    forge = forge_issues(opts)
+
+    case forge.list_open_issues(full_name, fc_opts(opts)) do
+      {:ok, issues} ->
+        issues
+        |> Enum.filter(&Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        |> close_markers(full_name, forge, opts)
+
+      {:error, reason} ->
+        {:error, {:unpark_failed, {:parked_state_unreadable, reason}}}
+    end
+  end
+
+  defp close_markers([], _full_name, _forge, _opts), do: :ok
+
+  defp close_markers(markers, full_name, forge, opts) do
+    Enum.reduce_while(markers, :ok, fn %{"number" => n}, :ok ->
+      case forge.close_issue(full_name, n, fc_opts(opts)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, {:unpark_failed, {n, reason}}}}
+      end
+    end)
+    |> case do
+      :ok ->
+        Logger.info("ProjectOnboard: #{full_name} UNPARKED (#{length(markers)} marker(s) closed)")
+
+        :ok
+
+      err ->
+        err
+    end
+  end
+
+  # Issue-side forge seam of the close/open verbs (the repo seam `:forge_repo` carries only the
+  # provisioning ops). Default = the real client; injectable for tests.
+  defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, Fleet.Pilot.ForgeClient)
+
+  @doc """
+  CLOSES a project (BL-6-30) — the verb between `open` and `delete`: stops the fleet ON this
+  project while disk and forge stay intact. The closed state is a FORGE OBJECT (the forge IS
+  the state machine): an OPEN marker issue (`ForgeProtocol.parked_issue_title/0`, assignee =
+  the human — the same fixed point `create_issue` uses, and REQUIRED for the poller's
+  `assigned_by` scoping to see it). The poller reads it in the per-repo listing it already
+  does and skips the whole step rail; the marker is posted BEFORE the architect stops, so a
+  tick between the two gestures dispatches nothing. In-flight workers are NOT reaped — the
+  running brick finishes, the skip stops the NEXT one (same philosophy as the lease). Reopen:
+  `open_project` (immediate, closes the marker(s) then ensures the architect), or the human
+  closing the marker in the forge UI (a LEGITIMATE unpark — the rail resumes, and the
+  architect self-respawns at the first pending escalation via the ArchWake net).
+
+  Identity preflight at the delete standard (proj_dir's git origin must PROVE `full_name` — a
+  basename homonym is never the project we close); already parked → honest no-op
+  (`outcome: :already_closed`, the architect stop still converges). The architect stop is
+  best-effort (`:stopped` / `:none` / `:error` — a spawner hiccup never fails the close: the
+  MARKER is the state, and it is already posted).
+  """
+  @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def close_project(full_name, opts \\ []) when is_binary(full_name) do
+    name = Fleet.Layout.project_name(full_name)
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    forge = forge_issues(opts)
+
+    with :ok <- validate_name(name),
+         :ok <- require_on_machine(full_name, proj_dir),
+         :ok <- require_proven_identity(full_name, proj_dir, opts),
+         {:ok, issues} <- read_parked_state(forge, full_name, opts) do
+      if Enum.any?(issues, &Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"])) do
+        # Convergent no-op: the state already holds; the arch stop still runs (a prior close
+        # that crashed between marker and stop is repaired here).
+        {:ok,
+         %{
+           repo: full_name,
+           outcome: :already_closed,
+           architect: stop_architect(full_name, opts)
+         }}
+      else
+        do_close(full_name, forge, opts)
+      end
+    end
+  end
+
+  defp require_proven_identity(full_name, proj_dir, opts) do
+    if origin_full_name(proj_dir, opts) == {:ok, full_name},
+      do: :ok,
+      else: {:error, {:identity_unproven, full_name}}
+  end
+
+  # An unreadable forge is a REFUSAL (same stance as the supersede preflight): a half-checked
+  # close could double the marker for nothing or miss an existing one — the caller retries.
+  defp read_parked_state(forge, full_name, opts) do
+    case forge.list_open_issues(full_name, fc_opts(opts)) do
+      {:ok, issues} -> {:ok, issues}
+      {:error, reason} -> {:error, {:close_failed, {:parked_state_unreadable, reason}}}
+    end
+  end
+
+  defp do_close(full_name, forge, opts) do
+    case Fleet.Credentials.Human.current() do
+      {:ok, human} ->
+        issue_opts = Keyword.put(fc_opts(opts), :assignees, [human])
+        title = Fleet.Pilot.ForgeProtocol.parked_issue_title()
+
+        case forge.create_issue(full_name, title, parked_marker_body(), issue_opts) do
+          {:ok, n} ->
+            arch = stop_architect(full_name, opts)
+
+            Logger.info("ProjectOnboard: #{full_name} CLOSED (marker ##{n}) — architect #{arch}")
+
+            {:ok, %{repo: full_name, outcome: :closed, marker_issue: n, architect: arch}}
+
+          {:error, reason} ->
+            {:error, {:close_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:close_failed, {:human_unresolved, inspect(reason)}}}
+    end
+  end
+
+  # FR: forge payload rendered to the human. The body documents BOTH reopening paths — the
+  # UI-close of this very ticket is a designed, legitimate unpark (v2.1 RR#2).
+  defp parked_marker_body do
+    "Projet fermé par la fleet (`close_project`) — le rail ne dispatche plus de ticket ici.\n\n" <>
+      "Réouverture : fermer CE ticket relance le rail (l'architecte revient de lui-même à la " <>
+      "première escalade) ; `open_project` fait la réouverture complète et immédiate."
   end
 
   @doc """

@@ -26,9 +26,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   the socket acceptor — NOT a wire field), then matched. The tools split along the arch's two heads:
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
-      `open_project` / `delete_project` / `revise_project_card` / `list_workflow_cards`: the
-      PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
-      OR `architect` (transitionally, until it goes per-project). Refusal → `:forbidden_not_onboarder`.
+      `open_project` / `close_project` / `delete_project` / `revise_project_card` /
+      `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of
+      onboarding) OR `architect` (transitionally, until it goes per-project).
+      Refusal → `:forbidden_not_onboarder`.
     * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
       `list_issues` / `get_issue` / `comment_issue`: the per-project head. Admits ONLY `architect`.
       Refusal → `:forbidden_not_architect`.
@@ -781,6 +782,49 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # Preserve the TYPED reason (do NOT flatten): the caller must distinguish
         # `{:force_required, _}` (pass `force: true` to confirm the destruction) from
         # `{:forge_check_failed, _}` (forge down, retry) — a destructive op's most useful signal.
+        {:error, _reason} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
+  CLOSES a project (BL-6-30) — onboarder gate (portfolio head, like open/delete). The mechanics
+  live pilot-side (`close_project` seam callback): parked marker issue posted (the forge object
+  the poller respects), then the architect stops best-effort. Typed errors pass through
+  unflattened (`{:not_on_machine, _}`, `{:identity_unproven, _}`, `{:close_failed, _}`).
+  """
+  @spec close_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def close_project(full_name, state) when is_binary(full_name) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, _role} -> do_close_project(full_name)
+    end
+  end
+
+  defp do_close_project(full_name) do
+    with {:ok, onboard} <- conforming_onboard() do
+      case onboard.close_project(full_name, []) do
+        {:ok, %{repo: repo, outcome: outcome} = result} ->
+          {:ok,
+           %{
+             "status" => "closed",
+             "repo" => repo,
+             "outcome" => to_string(outcome),
+             # FR: operator-facing — the one semantic the human must hear at this moment.
+             "note" =>
+               "la brique en vol finit, la suivante ne part pas ; réouverture par open_project " <>
+                 "ou en fermant le ticket-marqueur"
+           }
+           |> put_present("marker_issue", Map.get(result, :marker_issue))
+           |> put_present(
+             "architect",
+             case Map.get(result, :architect) do
+               nil -> nil
+               a -> to_string(a)
+             end
+           )}
+
         {:error, _reason} = err ->
           err
       end

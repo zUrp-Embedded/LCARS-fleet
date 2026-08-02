@@ -498,6 +498,13 @@ defmodule Fleet.MCP.PodToolsTest do
          protection: :restored
        }}
     end
+
+    @impl true
+    def close_project(full_name, opts) do
+      send(self(), {:close_project, full_name, opts})
+
+      {:ok, %{repo: full_name, outcome: :closed, marker_issue: 12, architect: :stopped}}
+    end
   end
 
   # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
@@ -1290,6 +1297,7 @@ defmodule Fleet.MCP.PodToolsTest do
          "workflow_map" => "ops-direct",
          "justification" => "le poc est devenu serieux"
        }},
+      {"close_project", %{"full_name" => "fleet/demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [

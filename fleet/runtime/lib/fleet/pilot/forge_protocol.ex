@@ -165,6 +165,28 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
   def step_run_marker?(_), do: false
 
+  @parked_prefix "[lcars-parked]"
+
+  @doc """
+  Title of the PARKED marker issue (BL-6-30) — an OPEN issue whose title carries the
+  `[lcars-parked]` prefix IS the project's closed state ("the forge IS the state machine";
+  same protocol-object class as the in-flight lock label). Built by `close_project`,
+  recognized by `parked_issue_title?/1` on the PREFIX alone (suffix and body free — the body
+  documents the reopening paths to the human), closed by `open_project` (ALL of them:
+  concurrent closes can legitimately leave two, the state holds while at least one is open).
+  Trust model: same as the `stage/*` labels — a human mutating the marker mutates the state,
+  deliberately (UI-close = legitimate unpark).
+  """
+  @spec parked_issue_title() :: String.t()
+  def parked_issue_title, do: "#{@parked_prefix} projet fermé — la fleet ne dispatche plus ici"
+
+  @doc "Does this issue TITLE carry the parked prefix? (the state test, prefix-only)"
+  @spec parked_issue_title?(term()) :: boolean()
+  def parked_issue_title?(title) when is_binary(title),
+    do: String.starts_with?(title, @parked_prefix)
+
+  def parked_issue_title?(_), do: false
+
   @merge_marker_rx ~r/\[merge:pr-(\d+)\]/
 
   @doc """

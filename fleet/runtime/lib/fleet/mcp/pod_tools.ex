@@ -27,6 +27,8 @@ defmodule Fleet.MCP.PodTools do
         intact — ≠ create_project which starts a fresh one).
       - `revise_project_card` : revises an existing project's validation card (BL-6-29 — the
         engraved declaration gets a tracked revision path; future tickets only).
+      - `close_project`    : parks a project (BL-6-30 — marker issue holds the state, the
+        poller skips the repo; disk + forge intact, `open_project` reopens).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `list_issues`      : the arch reads its project's open-ticket board (BL-6-28: the
@@ -223,6 +225,32 @@ defmodule Fleet.MCP.PodTools do
           "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
           "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
           "the fleet org, default branch `main`. Returns {\"status\":\"imported\",\"repo\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"}
+      },
+      "required" => ["full_name"]
+    })
+  end
+
+  deftool "close_project" do
+    meta do
+      name("Close Project")
+
+      description(
+        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ delete_project: " <>
+          "nothing is destroyed, this is a pause, fully reversible). The running brick finishes; " <>
+          "the NEXT ticket never starts. Mechanics: an OPEN marker issue (`[lcars-parked]` title) " <>
+          "holds the closed state on the forge — visible in the UI, no hidden state. The " <>
+          "project's architect stops (it comes back at reopen). REOPEN: `open_project` (immediate " <>
+          "full reopen, clears the marker), or a human closing the marker issue in the forge UI " <>
+          "(the rail resumes; the architect self-respawns at the first pending escalation). " <>
+          "`full_name` = `owner/name`. Returns {\"status\":\"closed\",\"outcome\":\"closed\"|" <>
+          "\"already_closed\",\"marker_issue\":N,\"architect\":...}."
       )
     end
 
@@ -555,6 +583,24 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("import_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("close_project", %{"full_name" => full_name}, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.close_project(full_name, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("close_project", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

@@ -650,6 +650,44 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    test "BL-6-30: a PARKED repo (open marker issue) → FULL step-rail skip, zero tally, no onboard" do
+      issues = [
+        %{
+          "number" => 3,
+          "title" => Fleet.Pilot.ForgeProtocol.parked_issue_title(),
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        },
+        # An issue that would be ONBOARDED (routeless → default map recorded) on a live repo —
+        # the skip must stop even that write, not just spawns.
+        %{
+          "number" => 7,
+          "body" => "fais le hello",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      {name, pid} = start_step_poller({:ok, issues})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          # ZERO across the tally: the repo is not walked at all (skipped would count items).
+          assert %{dispatched: 0, skipped: 0, errors: 0} = Poller.force_poll(name)
+        end)
+
+      assert log =~ "PARKED"
+      refute_received {:spawned, _, _}
+      # The routeless onboard of #7 never ran (no route recorded on a parked repo).
+      refute_received {:route, _, _}
+
+      # Loud-once: the second tick over the same park stays silent.
+      log2 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      refute log2 =~ "PARKED"
+
+      GenServer.stop(pid)
+    end
+
     test "lcars-in-flight lock → skip, no spawn" do
       issues = [
         %{
