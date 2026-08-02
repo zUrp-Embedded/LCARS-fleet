@@ -46,6 +46,18 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
+  # Returns the REAL HEAD of the workspace it publishes — the prod contract (`Deliverable.publish`
+  # reads `head_sha(workspace)` post-push). The BL-6-34 belt checks the provenance subject against
+  # that workspace: a hardcoded fake sha trips it by design, so the provenance-walking tests use
+  # THIS stub over a real fixture repo.
+  defmodule HeadDeliverable do
+    def publish(opts) do
+      send(self(), {:published, opts})
+      {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: opts.workspace)
+      {:ok, %{commit_sha: String.trim(sha), pushed?: true, mode: :git_native}}
+    end
+  end
+
   # PR-native forge stub: records the PR calls (send to the test). Returns the REAL
   # `ForgeClient` contract: `post_review`/`merge_pr`/`request_review` → `:ok` (not `{:ok, _}`).
   defmodule PrForge do
@@ -182,6 +194,26 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
   defp seams do
     [deliverable: StubDeliverable, forge_client: OrderForge, forge_opts: []]
+  end
+
+  # A real one-commit git repo standing for the publish workspace — its HEAD is what
+  # `HeadDeliverable` returns and what the BL-6-34 belt verifies the subject against.
+  defp init_workspace_repo!(tmp) do
+    ws = Path.join(tmp, "ws-real")
+    File.mkdir_p!(ws)
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: ws)
+    File.write!(Path.join(ws, "doc.md"), "contenu")
+    {_, 0} = System.cmd("git", ["add", "."], cd: ws)
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "livrable"],
+        cd: ws
+      )
+
+    {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
+    {ws, String.trim(sha)}
   end
 
   defp pr_step_run(extra \\ %{}) do
@@ -376,20 +408,35 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
-      brief_sha = String.duplicate("b", 40)
-      step_run = pr_step_run(%{brief_sha: brief_sha, brief_ref: "briefs/issue-42-engineer.md"})
-      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+      # real publish workspace: the subject sha is ITS head (BL-6-34 belt — a fake sha is refused).
+      {ws, sha} = init_workspace_repo!(tmp)
+      sha7 = String.slice(sha, 0, 7)
 
-      assert {:ok, %{commit_sha: "deadbeef"}} =
-               StepRunCompleter.open_deliverable_pr(step_run, opts)
+      brief_sha = String.duplicate("b", 40)
+
+      step_run =
+        pr_step_run(%{
+          brief_sha: brief_sha,
+          brief_ref: "briefs/issue-42-engineer.md",
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: ws,
+            base_sha: "cafe",
+            target_branch: "feature/issue-42"
+          }
+        })
+
+      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+
+      assert {:ok, %{commit_sha: ^sha}} = StepRunCompleter.open_deliverable_pr(step_run, opts)
 
       # The provenance appears, human-named on the issue (sha7 of the livrable), committed,
       # COMPLETE triplet.
-      prov = Path.join(work_dir, "provenance/issue-42-deadbee.json")
+      prov = Path.join(work_dir, "provenance/issue-42-#{sha7}.json")
       assert File.exists?(prov)
       json = prov |> File.read!() |> Jason.decode!()
       # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
-      assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == "deadbeef"
+      assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == sha
 
       assert get_in(json, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) ==
                brief_sha
@@ -397,7 +444,71 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
       # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
-      assert log =~ "provenance: provenance/issue-42-deadbee.json"
+      assert log =~ "provenance: provenance/issue-42-#{sha7}.json"
+    end
+
+    # BL-6-34 ordering pin: the engrave lives AFTER the PR is born. A completion that stalls
+    # between push and PR must never leave a "delivered" attestation with no integration surface —
+    # the measured signature was exactly that (branch on the forge, zero PR, provenance engraved,
+    # ticket mute). The marker is the anti-mute half: the stall is named ON the issue.
+    @tag :tmp_dir
+    test "open_pr fails → NO provenance engraved + pr-open-fail marker on the issue (BL-6-34)",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "lcars-test")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      opts = [
+        deliverable: StubDeliverable,
+        forge_client: PrFailForge,
+        forge_opts: [],
+        work_root: tmp
+      ]
+
+      assert {:error, {:open_pr, {:http, 422, _}}} =
+               StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
+
+      refute File.exists?(Path.join(work_dir, "provenance"))
+
+      assert_received {:comment, 42, body, _}
+      assert body =~ Fleet.Pilot.ForgeProtocol.pr_open_fail_marker(42, "deadbeef")
+      assert body =~ "422"
+      assert body =~ "feature/issue-42"
+    end
+
+    # BL-6-34 belt: a subject that is NOT a commit of the publish workspace is a proof from the
+    # wrong point of view — the engrave is REFUSED loud, the completion itself is unharmed (the
+    # deliverable is real and pushed; provenance stays best-effort, F-15).
+    @tag :tmp_dir
+    test "subject not a commit of the publish workspace → engrave REFUSED loud, completion unharmed",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "lcars-test")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      # real workspace whose HEAD is NOT the sha the stub claims ("deadbeef").
+      {ws, _sha} = init_workspace_repo!(tmp)
+
+      step_run =
+        pr_step_run(%{
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: ws,
+            base_sha: "cafe",
+            target_branch: "feature/issue-42"
+          }
+        })
+
+      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{commit_sha: "deadbeef", pr_number: 7}} =
+                   StepRunCompleter.open_deliverable_pr(step_run, opts)
+        end)
+
+      assert log =~ "engrave REFUSED"
+      refute File.exists?(Path.join(work_dir, "provenance"))
     end
   end
 

@@ -159,6 +159,22 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   def parse_publish_fail_marker(_), do: :error
 
+  @doc """
+  Marker of ONE post-push propagation failure for issue `n` (BL-6-34): the deliverable IS pushed
+  (`sha`, truncated 12 hex — the branch survives on the forge) but the PR was never born
+  (role token unavailable, PR API refusal). Posted by `StepRunCompleter.record_pr_open_failure`
+  so the stall is named ON THE TICKET, never a host-log-only wedge.
+
+  Builder WITHOUT a parser on purpose: no counting rail consumes it today (the publish brake
+  counts `publish_fail_marker` — a distinct class: there the push itself failed and rework
+  re-runs it; here the push landed and no automatic retry exists). The day a brake covers this
+  leg, its parser is born HERE, glued to this literal.
+  """
+  @spec pr_open_fail_marker(integer(), String.t()) :: String.t()
+  def pr_open_fail_marker(n, sha) when is_integer(n) and is_binary(sha) do
+    "[pr-open-fail:issue-#{n}:sha-#{String.slice(sha, 0, 12)}]"
+  end
+
   @doc false
   # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native
   # counting (`ForgeClient.count_signed_step_runs`).

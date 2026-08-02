@@ -118,7 +118,10 @@ defmodule Fleet.MCP.PodTools do
           "what/why/done-when (without it the ticket shows a raw excerpt). If you ALREADY " <>
           "authored+committed the doc yourself (multi-doc brief), pass `brief_ref` (entry doc, e.g. " <>
           "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
-          "human summary, unchanged. Returns {\"status\":\"issue_created\",\"issue\":N," <>
+          "human summary, unchanged. Inline `brief` → the SYSTEM owns the commit; `brief_ref`/" <>
+          "`brief_sha` supplied → they name a doc ALREADY on the forge — this pointer is NEVER a " <>
+          "vehicle to get your local commits pushed. " <>
+          "Returns {\"status\":\"issue_created\",\"issue\":N," <>
           "\"title\":<echoed as registered — confirm your number-to-title association on it>}. " <>
           "REWORK of a rejected/abandoned ticket: pass `supersedes: <old issue number>` — the " <>
           "fleet then RETIRES the old ticket itself (system comment + close; never two live " <>

@@ -24,7 +24,7 @@ defmodule Fleet.Workflow.Provenance do
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
@@ -53,7 +53,9 @@ defmodule Fleet.Workflow.Provenance do
   REQUIRED (the anchor); the rest enriches the Statement (degrades when absent).
 
   `opts`: `:author` `{name, email}` (system default); `:push` `{remote, refspec}` — BEST-EFFORT
-  publication (a push failure logs LOUD, never fails the emit).
+  publication (a push failure logs LOUD, never fails the emit); `:subject_workspace` (path, opt) —
+  arms the BL-6-34 wall: the subject must be a commit reachable from that workspace, else
+  `{:error, {:subject_unreachable, workspace}}` (or `{:subject_unverifiable, reason}`).
   `{:error, term()}`: work_dir missing / write failure / git failure — propagated (fail-loud,
   non-fatal caller-side).
   """
@@ -61,6 +63,8 @@ defmodule Fleet.Workflow.Provenance do
           {:ok, %{path: String.t(), ref: String.t()}} | {:error, term()}
   def emit(work_dir, %{livrable_sha: livrable_sha} = attrs, opts \\ [])
       when is_binary(work_dir) and is_binary(livrable_sha) and livrable_sha != "" do
+    {subject_workspace, opts} = Keyword.pop(opts, :subject_workspace)
+
     cond do
       not safe_path_segment?(livrable_sha) ->
         # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
@@ -73,7 +77,8 @@ defmodule Fleet.Workflow.Provenance do
       true ->
         ref = Fleet.Layout.provenance_ref(statement_name(livrable_sha, attrs))
 
-        with {:ok, json} <- encode(statement(attrs)),
+        with :ok <- subject_reachable(subject_workspace, livrable_sha),
+             {:ok, json} <- encode(statement(attrs)),
              {:ok, _commit_sha} <-
                OpsObjectSync.commit_object(
                  work_dir,
@@ -88,6 +93,22 @@ defmodule Fleet.Workflow.Provenance do
 
   # Path-SAFE segment for the provenance filename (BND-120): no separator, no traversal.
   defp safe_path_segment?(s), do: not String.contains?(s, ["/", "\\", ".."])
+
+  # BL-6-34 wall, twin of the BND-120 refusal above: when the caller names the workspace its
+  # publication ran in (`:subject_workspace` opt), the SUBJECT must be a commit reachable there.
+  # A statement engraved from a viewpoint that never saw its subject attests "delivered" for a
+  # publication that did not happen — refused as a typed error (the caller decides how loud), and
+  # an UNVERIFIABLE subject is refused too: never a statement we could not check. Opt absent/nil
+  # → no viewpoint claimed, no check (the pre-wall contract, kept for viewpoint-less callers).
+  defp subject_reachable(nil, _sha), do: :ok
+
+  defp subject_reachable(workspace, sha) when is_binary(workspace) do
+    case Fleet.Workflow.Git.commit_exists?(workspace, sha) do
+      {:ok, true} -> :ok
+      {:ok, false} -> {:error, {:subject_unreachable, workspace}}
+      {:error, reason} -> {:error, {:subject_unverifiable, reason}}
+    end
+  end
 
   @doc "The in-toto Statement (JSON-able map) — pure, no I/O (testable + reusable)."
   @spec statement(attrs()) :: map()
