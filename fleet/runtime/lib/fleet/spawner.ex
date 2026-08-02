@@ -8,6 +8,9 @@ defmodule Fleet.Spawner do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
+      # Foundation (deps: []) — the skills-root default resolves at SPAWN time (BL-6-22, the
+      # `:catalogue` sentinel in Pod :projecting): the one Catalogue read this domain makes.
+      Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.CapProfile,
@@ -76,7 +79,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Spawner.Pod

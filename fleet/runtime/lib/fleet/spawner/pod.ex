@@ -136,7 +136,10 @@ defmodule Fleet.Spawner.Pod do
           # LauncherPortBackend). Used for kick/wake (PodTmux) and sock-aware teardown.
           tmux_session: String.t() | nil,
           # Last liveness sample (jsonl size, CPU jiffies); nil before the 1st tick.
-          liveness_sample: term()
+          liveness_sample: term(),
+          # Filtered skill dirs to bind into the pod (BL-6-22) — set by :projecting, read by
+          # :launching (LaunchEnv → skills_paths_env). [] until projection, and for skill-less pods.
+          skills_paths: [Path.t()]
         }
 
   # ============================================================
@@ -283,7 +286,21 @@ defmodule Fleet.Spawner.Pod do
   # `issues/<issue_id>.md` (read as project content, not as a prompt-injection) AND pushed to
   # TaskQueue (the pod PULLS via the MCP tool get_work_item, triggered by the `engage` keyword).
   def handle_event(:internal, :proceed, :projecting, data) do
-    skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
+    # Skills root — THREE-way resolution (BL-6-22), and the `:catalogue` sentinel is deliberate
+    # (get_env/3 returns the default ONLY when the key is ABSENT, never when it is present-nil):
+    #   * key ABSENT → `:catalogue` → `Fleet.Catalogue.skills_root()` — resolved HERE at spawn,
+    #     AFTER Config.Reader's batch-apply, so LCARS_CATALOGUE_ROOT is honored (a Catalogue call
+    #     from runtime.exs would read the pre-runtime ETS and silently serve the bundled tree);
+    #   * key = nil EXPLICIT (config/test.exs) → skills OFF (hermeticity — tests never filter or
+    #     mount against the real tree);
+    #   * key = a binary (LCARS_SKILLS_ROOT fine override) → that path.
+    # Do not "simplify" the sentinel to nil: the two nil meanings would collapse.
+    skills_root =
+      case Application.get_env(:fleet_spawner, :skills_root, :catalogue) do
+        :catalogue -> Fleet.Catalogue.skills_root()
+        other -> other
+      end
+
     repo_md = Path.join(data.pod_dir, "CLAUDE.md.repo-source")
 
     # `.claude/` is POD-OWNED. bwrap binds ONLY `.credentials.json` inside it (not the whole
@@ -317,7 +334,7 @@ defmodule Fleet.Spawner.Pod do
            ),
          {:ok, claude_md} <-
            SPBuilder.compose_claude_md(data.cap_profile, Assets.maybe_path(repo_md)),
-         {:ok, _skills_paths} <- Assets.maybe_filter_skills(data.cap_profile, skills_root),
+         {:ok, skills_paths} <- Assets.maybe_filter_skills(data.cap_profile, skills_root),
          {:ok, agent_draft} <- Assets.read_agent_draft(data.cap_profile),
          {:ok, protocole_user} <- Assets.read_protocole_user(data.cap_profile),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
@@ -367,8 +384,10 @@ defmodule Fleet.Spawner.Pod do
          # Deliberate recall — restores the seed BEFORE the launch (after workspace = cwd set).
          :ok <- Scaffold.maybe_recall_restore(data) do
       # SP no longer stored in data (no longer in argv): the SOURCE = .lcars/system-prompt.md (written above),
-      # read by claude_launch via --system-prompt-file.
-      data = add_condition(data, :home_projected)
+      # read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
+      # :launching (BL-6-22 — they used to be validated then thrown away; the delivery half is
+      # `LaunchSpec.skills_paths_env/1` consuming them from here).
+      data = %{add_condition(data, :home_projected) | skills_paths: skills_paths}
       {:next_state, :launching, data, [{:next_event, :internal, :proceed}]}
     else
       {:error, reason} -> transition_failed(data, {:project_failed, reason})
@@ -1232,7 +1251,8 @@ defmodule Fleet.Spawner.Pod do
       extract_retries: 0,
       last_result: nil,
       tmux_session: nil,
-      liveness_sample: nil
+      liveness_sample: nil,
+      skills_paths: []
     }
   end
 

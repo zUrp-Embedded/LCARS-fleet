@@ -36,6 +36,7 @@ defmodule Fleet.CatalogueTest do
         Catalogue.brief_templates_root(),
         Catalogue.coord_policies_path(),
         Catalogue.project_template_root(),
+        Catalogue.skills_root(),
         Catalogue.manifest_path()
       ]
 

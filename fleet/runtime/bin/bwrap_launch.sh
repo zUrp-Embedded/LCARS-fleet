@@ -226,6 +226,28 @@ done
 set +f
 
 # =============================================================
+# Fleet skills (RO bind host->pod, filtered by the cap-profile whitelist — BL-6-22).
+# LCARS_SKILLS_PATHS is NEWLINE-delimited, one `name:abs_path` per line (the LCARS_POD_MOUNTS
+# pattern — paths may carry spaces, a word-split loop would shatter them). The first `:`
+# separates: the name is a fleet slug (no `:` in its alphabet), the path keeps any `:` it has.
+# bwrap CREATES the bind target inside the namespace when absent (same invariant the plugin
+# loop above relies on; pinned by the bats). Empty/absent var -> zero bind, zero loop.
+# =============================================================
+SKILL_BINDS=()
+while IFS= read -r skill_line; do
+  [[ -z "$skill_line" ]] && continue
+  skill_name="${skill_line%%:*}"
+  skill_path="${skill_line#*:}"
+  # Same belt as the plugin names (S5): the name lands in a bind path — refuse traversal shapes
+  # before any path is built. The Elixir side already slugs it; this is the launcher's own wall.
+  case "$skill_name" in
+    *..* | */* | .* | "") echo "ERR: invalid skill name '$skill_name' (path-traversal)" >&2; exit 1 ;;
+  esac
+  [[ -d "$skill_path" ]] || { echo "ERR: skill '$skill_name' has no dir at '$skill_path' (filtered upstream — projection/launch skew)" >&2; exit 1; }
+  SKILL_BINDS+=(--ro-bind "$skill_path" "$SANDBOX_HOME/.claude/skills/$skill_name")
+done <<< "${LCARS_SKILLS_PATHS:-}"
+
+# =============================================================
 # exec bwrap → HOLDER sh → (detached `tmux new-session -d` + exec sleep infinity) → command.
 #   HOLDER: `new-session -d` returns immediately; were it bwrap's foreground process, bwrap would exit
 #   and KILL the namespace and the tmux server (hence the pod). The `exec sleep infinity` after creation
@@ -361,6 +383,7 @@ exec env -i "$BWRAP_BIN" \
   --bind "$POD_SOCK_DIR" "$POD_SOCK_DIR" \
   --bind "$MCP_SOCK_DIR" "$MCP_SOCK_DIR" \
   ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
+  ${SKILL_BINDS[@]+"${SKILL_BINDS[@]}"} \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
   --setenv HOME "$SANDBOX_HOME" \

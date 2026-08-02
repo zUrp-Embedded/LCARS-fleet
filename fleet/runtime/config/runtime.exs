@@ -92,6 +92,15 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================
+  # fleet_spawner — skills tree fine override (BL-6-22). ONLY the fine key is mapped here: the
+  # DEFAULT is resolved at SPAWN time (`:catalogue` sentinel in Spawner.Pod → Fleet.Catalogue,
+  # AFTER Config.Reader's batch-apply — a Catalogue call in THIS file would read the pre-runtime
+  # ETS and ignore LCARS_CATALOGUE_ROOT, silently mounting the bundled skills under a custom
+  # catalogue). An unconditional default here would also clobber every earlier layer (F6).
+  if path = System.get_env("LCARS_SKILLS_ROOT") do
+    config :fleet_spawner, skills_root: Fleet.EnvParse.path("LCARS_SKILLS_ROOT", path)
+  end
+
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
     path = Fleet.EnvParse.path("LCARS_CAPPROFILES_ROOT", path)
     # Key `:root_dir` (not `:capprofiles_root`) — what

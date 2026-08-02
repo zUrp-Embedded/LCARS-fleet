@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -63,6 +63,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
         env =
           state.env_vars
           |> Map.merge(LaunchSpec.skills_plugins_env(state.cap_profile))
+          |> Map.merge(LaunchSpec.skills_paths_env(Map.get(state, :skills_paths, [])))
           |> Map.merge(
             McpProvision.mcp_channel_env(
               state.pod_id,

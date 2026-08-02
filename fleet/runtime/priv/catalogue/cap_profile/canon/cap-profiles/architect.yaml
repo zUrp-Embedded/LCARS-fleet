@@ -68,10 +68,12 @@ spec:
     # (`baseline/git-denied.yaml`, intangible) — not duplicated here.
     git_ops_denied: []
   knowledge:
-    skills:
-      - memory-query
-      - brainstorming
-      - plan
+    # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that NEVER
+    # existed on disk — with the skills root wired, a whitelist naming a ghost fails the spawn
+    # loud (skills_missing, by design). A skill returns here the day it is WRITTEN under the
+    # catalogue skills tree. NB: `brainstorming` below in modop_set.optional is a DIFFERENT
+    # object (a real modop-bundle) — it stays.
+    skills: []
     monk_registry: null
     monk_instance: null
   invocation:

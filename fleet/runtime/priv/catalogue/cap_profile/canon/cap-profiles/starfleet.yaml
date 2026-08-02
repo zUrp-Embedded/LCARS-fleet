@@ -70,10 +70,12 @@ spec:
     # (no `outputs`: the ready-room/outbox line was a SYSADMIN reliquat left over from starfleet's
     # previous role — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
   knowledge:
+    # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that never
+    # existed (cf. architect.yaml, same note). card-revision is the FIRST real one — the
+    # card-revision interview for revise_project_card (BL-6-29's skill half), mounted RO at
+    # ~/.claude/skills/card-revision by the launcher.
     skills:
-      - memory-query
-      - brainstorming
-      - plan
+      - card-revision
     monk_registry: null
     monk_instance: null
   invocation:

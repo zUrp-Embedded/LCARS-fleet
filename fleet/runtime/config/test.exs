@@ -36,6 +36,11 @@ config :fleet_observation, start_readmodel: false
 # les tests le re-settent en setup, ne le delete plus en on_exit.
 config :fleet_spawner, launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 
+# skills_root: EXPLICIT nil — hermeticity (BL-6-22). The spawn-time default is the `:catalogue`
+# sentinel (→ the bundled skills tree, which EXISTS since card-revision landed): without this
+# explicit nil, every spawn test would silently filter/mount against the real tree.
+config :fleet_spawner, skills_root: nil
+
 # Canon proof OFF in the hermetic baseline: the boot-time proof reads the real priv
 # catalogue and SP assets — a spawn-readiness concern, not one every test boot should
 # pay. CanonProof tests call prove_all!/0 directly.
