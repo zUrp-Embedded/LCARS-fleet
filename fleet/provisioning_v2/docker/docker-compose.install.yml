@@ -70,6 +70,13 @@ services:
       # L'email du compte FORGE de l'humain — c'est lui qui mappe ses commits sur son compte
       # (avatar, attribution). Vide = les commits signent <user>@<hostname>, non mappables.
       LCARS_HUMAN_EMAIL: "${LCARS_HUMAN_EMAIL:-}"
+      # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
+      # ses listeners (API, deck d'observation) en loopback par defaut : dans une boite, cette
+      # loopback est celle du CONTENEUR — le deck repond a l'interieur et reste injoignable depuis
+      # un navigateur, alors que le deck de la boite en propose l'onglet. La frontiere reelle
+      # d'une install docker n'est pas le bind mais la PUBLICATION compose ci-dessous, qui n'expose
+      # que sur la loopback de l'hote. Meme raisonnement que ttyd (cf. console.sh).
+      LCARS_BIND_HOST: "${LCARS_BIND_HOST:-0.0.0.0}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
       # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci

@@ -121,6 +121,38 @@ launch_one() {
     return 1
   fi
   say "console de $human vivante (pid $pid)"
+
+  launch_pod_console "$human" "$home_dir" "$login_shell" "$(( port + 1 ))"
+}
+
+# ─── LA CONSOLE D'UN POD : UN SEUL TTYD POUR TOUS LES AGENTS ────────────────────────────────────
+# `--url-arg` laisse le client nommer le pod dans l'URL (`?arg=<pod_id>`), donc UNE instance sert
+# N agents. Un ttyd par pod epuiserait le bloc de 10 ports de l'humain a la sixieme mission —
+# c'est la seule forme qui tienne dans le bloc, et elle garde le deck (base+5) a un port fixe.
+#
+# L'ARGUMENT EST UNE ENTREE DU MONDE : il ne va JAMAIS directement a `lcars attach`. `console-pod.sh`
+# le valide (forme, unicite, socket existant) et refuse a l'ecran. Sans cette garde, le client
+# choisirait les arguments d'une commande locale.
+launch_pod_console() {
+  local human="$1" home_dir="$2" login_shell="$3" port="$4"
+  local pod_sh="${LCARS_CONSOLE_POD:-/opt/lcars/console-pod.sh}"
+
+  [[ -x "$pod_sh" ]] || { say "consoles de pod indisponibles pour $human ($pod_sh absent)"; return 0; }
+
+  local cmd=(env "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
+             ttyd --writable --url-arg -p "$port" -i 0.0.0.0
+             -t titleFixed="LCARS pod — $human" -t fontSize=15
+             -t 'theme={"background":"#000000","foreground":"#FF9900"}'
+             "$pod_sh")
+
+  ( cd "$home_dir" && setpriv --reuid "$human" --regid "$human" --init-groups -- "${cmd[@]}" ) &
+  local pid=$!
+  sleep 0.4
+  if ! kill -0 "$pid" 2>/dev/null; then
+    say "consoles de pod de $human MORTES au demarrage — port $port deja pris ? (motif au-dessus)"
+    return 0
+  fi
+  say "consoles de pod de $human sur le port $port (un onglet par agent, via le deck)"
 }
 
 # ─── Mode ───────────────────────────────────────────────────────────────────────────────────────
