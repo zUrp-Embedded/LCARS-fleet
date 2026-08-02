@@ -41,7 +41,11 @@ locals {
   # sur lui, BL-6-11 fermé). scoper = juge natif (team judges) ; le nom consultant est LIBRE,
   # le runtime l'a retiré ({:error, :not_found}) AVANT cette dépose — un compte sans cap-profile
   # est inerte, l'ordre inverse ne l'est pas.
-  roles = ["architect", "engineer", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+  # eng_doc (2026-08-02, chantier face-projet) : le producteur DOCUMENTAIRE — meme mecanique de
+  # livraison que l'engineer (git-native, forge-blind), sur la face work/ops. Team writers, comme
+  # tout producteur. Lecon scoper (BL du 2026-08-02) : un role ajoute au catalogue SANS son compte
+  # forge boucle en role_token_unavailable — le compte nait ICI, avec le role.
+  roles = ["architect", "engineer", "eng_doc", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {
@@ -190,7 +194,7 @@ resource "gitea_team" "humans" {
 
 # ── Memberships ────────────────────────────────────────────────────────────
 locals {
-  writers   = ["architect", "engineer", "gatekeeper"]
+  writers   = ["architect", "engineer", "eng_doc", "gatekeeper"]
   judges    = ["qualifier", "reviewer", "scoper"]
   externals = ["vulcan"]
 }
