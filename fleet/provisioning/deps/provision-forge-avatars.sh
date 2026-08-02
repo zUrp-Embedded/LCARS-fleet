@@ -38,7 +38,7 @@ AVATARS_DIR=""
 ORG="fleet"
 CHECK_ONLY=0
 
-# Mapping compte→fichier (DONNÉE, pas cas spécial) : les 7 rôles + starfleet portent leur avatar de
+# Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles + starfleet portent leur avatar de
 # charte ; lcars-system porte le favicon LCARS (identité système = la marque, pas un rôle métier).
 # L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
@@ -49,6 +49,7 @@ declare -a ENTRIES=(
   "qualifier:qualifier.png"
   "reviewer:reviewer.png"
   "scoper:scoper.png"
+  "scribe:scribe.png"
   "vulcan:vulcan.png"
   "starfleet:starfleet.png"
   "lcars-system:favicon.png"
