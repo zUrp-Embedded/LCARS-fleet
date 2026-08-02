@@ -65,15 +65,16 @@ defmodule Fleet.Pilot.ForgeClientTest do
     @protocol_labels [
       "lcars-in-flight",
       "lcars-awaits-arch",
+      "genre/ops",
       "stage/brief-review",
       "stage/build",
       "stage/review",
       "stage/merged"
     ]
 
-    test "all six labels present after the sync → :ok" do
+    test "all seven labels present after the sync → :ok" do
       all = Enum.map(@protocol_labels, &%{"name" => &1})
-      # Every label already exists → no POST needed; the convergent read confirms all six.
+      # Every label already exists → no POST needed; the convergent read confirms all seven.
       h = %{{"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, all}}
 
       assert :ok = ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))

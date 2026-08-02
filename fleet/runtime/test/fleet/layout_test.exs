@@ -89,4 +89,28 @@ defmodule Fleet.LayoutTest do
                Layout.parse_brief_pointer("Brief: ../evil.md @ #{sha}")
     end
   end
+
+  describe "project faces (chantier face-projet — the branch half of the layout)" do
+    test "face_branch/1: the card vocabulary maps to the two structural branches" do
+      assert Layout.face_branch("code") == "main"
+      assert Layout.face_branch("ops") == "work/ops"
+      assert Layout.code_branch() == "main"
+      assert Layout.ops_branch() == "work/ops"
+    end
+
+    test "face_branch/1: an unknown face RAISES — it bypassed the schema enum, never soften it" do
+      err = assert_raise ArgumentError, fn -> Layout.face_branch("doc") end
+      assert err.message =~ "unknown face"
+      assert err.message =~ "schema enum"
+    end
+
+    test "ops_branch?/1: feature branches and nil are NOT the ops face (code-face treatment)" do
+      assert Layout.ops_branch?("work/ops")
+      refute Layout.ops_branch?("main")
+      # A judge clones the producer's branch, whatever face it forked from: neither face → the
+      # code-face treatment (work-ops RO mount, reset realignment) — deliberate, cf. @doc.
+      refute Layout.ops_branch?("lcars/issue-3-eng_doc")
+      refute Layout.ops_branch?(nil)
+    end
+  end
 end

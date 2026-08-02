@@ -20,7 +20,7 @@ defmodule Fleet.Layout do
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   @projects_root "/home/projects"
@@ -44,9 +44,50 @@ defmodule Fleet.Layout do
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
                 )
 
+  # The two FACES of a project (chantier face-projet 2026-08-02). A project is ONE forge repo with
+  # two orthogonal branches — code (`main`) and ops (`work/ops`, orphan) — each checked out in its
+  # own host worktree (@projects_root vs @work_root). The pairing branch<->worktree is structural,
+  # exactly like the roots above: which face a PRODUCER works on is business (the card's `face`
+  # key), but what the faces ARE is layout, and it lives here so no consumer ever re-derives
+  # "main"/"work/ops" from convention. Six sites used to re-decide it in two spellings
+  # (cf. work/beyond_#6/chantier-face-projet 01-INVENTAIRE §D); they now read this single source.
+  @face_branches %{"code" => "main", "ops" => "work/ops"}
+
   @doc "Root of the working repos (`/home/projects`) — imposed container layout."
   @spec projects_root() :: Path.t()
   def projects_root, do: @projects_root
+
+  @doc "Branch of the CODE face (`main`) — pairs with `projects_root/0`."
+  @spec code_branch() :: String.t()
+  def code_branch, do: @face_branches["code"]
+
+  @doc "Branch of the OPS face (`work/ops`, orphan) — pairs with `work_root/0`."
+  @spec ops_branch() :: String.t()
+  def ops_branch, do: @face_branches["ops"]
+
+  @doc """
+  Branch of a face named by the card's `face` step key (`"code"` | `"ops"`). Raises on anything
+  else: the workflow-map schema enum guards the vocabulary upstream, so an unknown face here is a
+  BYPASS of the schema (or a drift between it and this map), never an operator input to soften.
+  """
+  @spec face_branch(String.t()) :: String.t()
+  def face_branch(face) when is_map_key(@face_branches, face), do: @face_branches[face]
+
+  def face_branch(other) do
+    raise ArgumentError,
+          "Fleet.Layout.face_branch/1: unknown face #{inspect(other)} — the schema enum allows " <>
+            "#{inspect(Map.keys(@face_branches))}; an unknown value here bypassed it. Fix the caller."
+  end
+
+  @doc """
+  Whether `branch` IS the ops face. The discriminant the face-dependent consumers ask (mounts:
+  which side is the RO reference; realignment: which worktree, and rebase-not-reset — the host
+  ops worktree is a WRITER, cf. inventory §C). A feature branch is neither face → `false`,
+  which yields the code-face treatment everywhere: correct for judges cloning a producer's
+  branch, whatever face it forked from.
+  """
+  @spec ops_branch?(String.t() | nil) :: boolean()
+  def ops_branch?(branch), do: branch == @face_branches["ops"]
 
   @doc """
   A pod's deliverable workspace: `<pod_dir>/workspace`. PURE computation, SINGLE authority for the

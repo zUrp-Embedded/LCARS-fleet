@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -353,6 +353,25 @@ defmodule Fleet.Pilot.ForgeClient do
       case http_post(config, "/repos/#{encode_repo(repo)}/issues", attrs) do
         {:ok, %{"number" => number}} -> {:ok, number}
         {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Resolves a repo label NAME to its numeric id (`GET /repos/{repo}/labels`, paginated).
+  `{:error, {:label_unknown, name}}` when absent — the caller decides whether that blocks
+  (a GENRE label must ride the CREATE call: posted after it, a poller tick in between burns
+  the wrong card — chantier face-projet). The protocol labels are seeded by
+  `ensure_protocol_labels/2`; an unknown one here means an unseeded repo, worth surfacing.
+  """
+  @spec repo_label_id(String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer()} | {:error, term()}
+  def repo_label_id(repo, name, opts \\ []) when is_binary(repo) and is_binary(name) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, labels} <- paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
+      case Enum.find(labels, &(&1["name"] == name)) do
+        %{"id" => id} -> {:ok, id}
+        _ -> {:error, {:label_unknown, name}}
       end
     end
   end
@@ -985,6 +1004,9 @@ defmodule Fleet.Pilot.ForgeClient do
       statics = [
         "lcars-in-flight",
         "lcars-awaits-arch",
+        # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
+        # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
+        "genre/ops",
         "stage/brief-review",
         "stage/build",
         "stage/review",

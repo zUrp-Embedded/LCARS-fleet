@@ -88,6 +88,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
         "result" => %{"ok" => true},
         "workspace" => "/pods/pod-abc/workspace",
         "base_sha" => "cafe1234",
+        "base_branch" => "main",
         "role" => "engineer"
       },
       extra

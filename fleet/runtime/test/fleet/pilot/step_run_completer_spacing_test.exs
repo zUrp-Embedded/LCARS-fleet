@@ -46,6 +46,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     step_run = %{
       repo: "fleet/poc",
+      base_branch: "main",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
@@ -75,6 +76,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     step_run = %{
       repo: "fleet/poc",
+      base_branch: "main",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
@@ -158,6 +160,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     step_run = %{
       repo: "fleet/proj",
+      base_branch: "main",
       issue_number: 42,
       role: "engineer",
       pr_role: :producer,
@@ -221,6 +224,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     step_run = %{
       repo: "fleet/proj",
+      base_branch: "main",
       issue_number: 42,
       role: "engineer",
       pr_role: :producer,
@@ -317,6 +321,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     step_run = %{
       repo: "fleet/proj",
+      base_branch: "main",
       issue_number: 42,
       pr_role: :judge,
       intent: :promote,

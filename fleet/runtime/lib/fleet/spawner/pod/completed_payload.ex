@@ -30,7 +30,7 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   - `Fleet.Spawner.Pod.Paths.pod_workspace_path/1` (single authority over the workspace subfolder),
   - `Fleet.CapProfile.name/1` (single source of the role carved at spawn).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -64,6 +64,17 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
           # Single authority over the workspace subfolder (Pod.Paths), not a copied-around literal.
           "workspace" => Paths.pod_workspace_path(data.pod_dir),
           "base_sha" => proj["base_sha"],
+          # The FACE the pod worked on (chantier face-projet) — engraved by the resolver at
+          # dispatch, rides the event to the StepRunConsumer: the PR base, the merge target and
+          # the post-merge realignment all follow it. The event carries the state (stateless
+          # consumer doctrine of this module) — re-deriving the face downstream would be the
+          # substituting default the inventory killed.
+          "base_branch" => proj["base_branch"],
+          # The base of the PR the pod was dispatched OFF (judges/rework — stamped by the review
+          # dispatch; absent on a fresh producer). The completer reads pr_base || base: the PR's
+          # own base wins when a PR exists, because those pods clone the FEATURE branch and their
+          # clone-base answers a different question.
+          "pr_base_branch" => proj["pr_base_branch"],
           # Base of the delivery GATE, DECONFLICTED from the clone-base (`base_sha`) — a direct caller
           # can pin it (`gate_base_branch` → resolver → `gate_base_sha`); the forward path (build/rework)
           # equals it to `base_sha`. Fallback `base_sha`.

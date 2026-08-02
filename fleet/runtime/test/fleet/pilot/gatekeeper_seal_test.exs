@@ -79,7 +79,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # RAW forge_opts (system token): the gatekeeper signature must be applied INTERNALLY by
     # `seal_and_merge` (single writer `as_gatekeeper`) — the role token OVERWRITES the system's.
     forge_opts = [token: "system-token"]
-    assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", forge_opts)
+
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", forge_opts,
+               base_branch: "main"
+             )
 
     assert_received {:merge, "fleet/p", 7, m_opts}
     assert m_opts[:token] == "GK-TOKEN"
@@ -103,7 +107,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do
     assert {:error, {:merge, {:http, 409, _}}} =
-             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/p", 7, 42, "engineer", [])
+             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/p", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
     # THE crucial point (F-MERGE-CLAIM-BEFORE-REALITY): failed merge → we did NOT claim "delivered
     # and merged".
@@ -157,7 +163,8 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
                    7,
                    42,
                    "engineer",
-                   token: "system-token"
+                   [token: "system-token"],
+                   base_branch: "main"
                  )
       end)
 
@@ -178,7 +185,8 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
                7,
                42,
                "engineer",
-               token: "system-token"
+               [token: "system-token"],
+               base_branch: "main"
              )
 
     refute_received {:comment, _, _, _, _}
@@ -192,7 +200,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert :ok =
-                 GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [])
+                 GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [],
+                   base_branch: "main"
+                 )
       end)
 
     assert_received :merged
@@ -204,7 +214,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # the caller believed the brick sealed while the issue stayed OPEN → re-dispatch →
     # double-delivery. Instead: HONEST typed return (the merge succeeded, but the close did not).
     assert {:error, {:close_after_merge, {:http, 500, "close boom"}}} =
-             GatekeeperSeal.seal_and_merge(CloseFailForge, "fleet/p", 7, 42, "engineer", [])
+             GatekeeperSeal.seal_and_merge(CloseFailForge, "fleet/p", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
     # BOUNDED retry: 3 close attempts before giving up (then honest return).
     assert_received {:close_attempt, 42}
@@ -217,7 +229,10 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # Pre-CI-06 the set_stage failure was discarded UN-retried → the load-bearing `stage/merged` label
     # was lost on a transient blip → Delegation read `closed_without_merge` forever (arch waits on a
     # merged brick). Now retried (mirror of the close retry): a transient failure self-heals.
-    assert :ok = GatekeeperSeal.seal_and_merge(StageFlakyForge, "fleet/p", 7, 42, "engineer", [])
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(StageFlakyForge, "fleet/p", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
     assert_received {:stage_attempt, 42, 1}
     assert_received {:stage_attempt, 42, 2}
@@ -226,7 +241,10 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   end
 
   test "F-C066: flaky close (fails 2×, succeeds the 3rd) → retry → :ok (self-heal of a transient blip)" do
-    assert :ok = GatekeeperSeal.seal_and_merge(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [])
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
     assert_received {:close_attempt, 42, 1}
     assert_received {:close_attempt, 42, 2}
@@ -324,7 +342,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
                9,
                "engineer",
                wall_opts(tmp, head),
-               wall_opts(tmp, head)
+               Keyword.put(wall_opts(tmp, head), :base_branch, "main")
              )
 
     # THE point: nothing merged; the wall's user-facing trace is on the PR.
@@ -345,7 +363,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
                9,
                "engineer",
                wall_opts(tmp, head),
-               wall_opts(tmp, head)
+               Keyword.put(wall_opts(tmp, head), :base_branch, "main")
              )
 
     assert_received {:merge, 4}

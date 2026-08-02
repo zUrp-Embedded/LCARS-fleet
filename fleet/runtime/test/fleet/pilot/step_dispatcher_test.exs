@@ -542,6 +542,38 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
+    test "the step's FACE reaches the resolver as :base_branch — and its absence means code (THE default site)" do
+      # chantier face-projet: the card step is the ONLY place the face is decided. `face: ops` →
+      # the resolver is asked for work/ops; no face → main. Downstream nobody re-defaults (the
+      # resolver raises without :base_branch — its own test) : this is the one site, so this test
+      # is the one that guards the default.
+      payload = eng_issue()
+      me = self()
+
+      capturing_resolver = fn _repo, r_opts ->
+        send(me, {:resolver_base, Keyword.get(r_opts, :base_branch)})
+        {:ok, nil}
+      end
+
+      ops_loader = fn _name ->
+        %{
+          # role engineer ON PURPOSE: the face belongs to the STEP, not the role (a card may put
+          # any producer on any face) — and the StubLoader only knows the canon test roles.
+          "steps" => %{"build" => %{"role" => "engineer", "face" => "ops", "needs" => []}},
+          "max_rework_rounds" => 2
+        }
+      end
+
+      opts = dispatch_opts(project_resolver: capturing_resolver, workflow_map_loader: ops_loader)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
+      assert_received {:resolver_base, "work/ops"}
+
+      # Face-less step (every pre-existing card) → the code face, decided here and only here.
+      opts2 = dispatch_opts(project_resolver: capturing_resolver)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts2)
+      assert_received {:resolver_base, "main"}
+    end
+
     test "resolved project → injected into spawn_opts (:project, F-03 pinned base_sha)" do
       payload = eng_issue()
 
@@ -754,6 +786,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # the default workflow_map was RECORDED (next tick will dispatch the consultant); NO eng spawn.
       assert_received {:routed, 42, "brief-gate", "brief-review"}
+      refute_received {:spawned, _, _}
+    end
+
+    test "ROUTELESS issue with `genre/ops` → onboarded onto the OPS card, not the project's (chantier face-projet)" do
+      # The genre gate of the burn: the label is the INPUT, the engraved wfmap/* the OUTPUT — read
+      # once, here. A face-projet mutation that drops the gate re-routes ops tickets down the code
+      # path silently; this is the test that falls.
+      payload = eng_issue(%{"labels" => [%{"name" => "genre/ops"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: :none],
+          workflow_map_loader: fn "ops-direct" ->
+            %{"steps" => %{"build" => %{"role" => "engineer", "face" => "ops", "needs" => []}}}
+          end
+        )
+
+      assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
+      assert_received {:routed, 42, "ops-direct", "build"}
       refute_received {:spawned, _, _}
     end
 

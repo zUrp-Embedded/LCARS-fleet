@@ -23,13 +23,12 @@ defmodule Fleet.Pilot.ConflictProbe do
   `probe/3` returns `{:error, reason}` on any git failure; the caller (`Remediation`) falls back to
   the current behaviour. The probe only ever SHORTENS a path, never breaks one.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Conflict
   alias Fleet.Conflict.Report
   alias Fleet.Credentials.Shell
-  alias Fleet.Layout
   alias Fleet.Pilot.GitOps
 
   @type totals :: %{
@@ -80,13 +79,18 @@ defmodule Fleet.Pilot.ConflictProbe do
   # ── git-backed diagnosis ──────────────────────────────────
 
   @doc """
-  Fetches `feature_ref` into a throwaway ref, then diagnoses the merge against `:base_branch`
-  (default `"origin/main"`). Returns `{:ok, diagnosis}` or `{:error, reason}` (fail-safe).
+  Fetches `feature_ref` into a throwaway ref, then diagnoses the merge against `:base_branch`.
+
+  `:base_branch` AND `:dir` are REQUIRED (chantier face-projet): this used to default to
+  `"origin/main"` probed in the CODE-face worktree — on an ops PR both halves were silently wrong
+  (wrong merge target, wrong repository). The caller (Remediation) reads the PR's own base and
+  derives the face worktree; a caller that cannot say either has skipped the face decision.
+  Returns `{:ok, diagnosis}` or `{:error, reason}` (fail-safe).
   """
   @spec probe(String.t(), String.t(), keyword()) :: {:ok, diagnosis()} | {:error, term()}
-  def probe(repo, feature_ref, opts \\ []) do
-    base_branch = Keyword.get(opts, :base_branch, "origin/main")
-    dir = Path.join(Layout.projects_root(), Layout.project_name(repo))
+  def probe(_repo, feature_ref, opts) do
+    base_branch = Keyword.fetch!(opts, :base_branch)
+    dir = Keyword.fetch!(opts, :dir)
     probe_ref = "refs/lcars/conflict-probe/" <> sanitize(feature_ref)
 
     if File.dir?(Path.join(dir, ".git")) do

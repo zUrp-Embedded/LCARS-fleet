@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -146,6 +146,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
            ),
          :ok <- Spawn.gate_scope_decision(decision),
          {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
+         # The PR's own base rides the project map to `pod.completed` (chantier face-projet): a
+         # review/rework pod clones the FEATURE branch, so its `base_branch` cannot say which face
+         # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
+         # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).
+         project = stamp_pr_base(project, review_opts),
          :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work") do
       # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
       case review_brief(
@@ -231,6 +236,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # deliverable-judge path (a forge read-error on the criterion DEFERS, never a criterion-less
   # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _, "worker"}` (a rework
   # brief is EXECUTABLE, addressed to the producer — it lands under `briefs/`, not `gate-briefs/`).
+  # Stamps the PR base (set by `dispatch_review`, threaded in opts) into the project map — the
+  # vehicle `CompletedPayload` already reads. `nil` project (resolver skip: no forge) stays nil:
+  # a pod with no project emits a bare payload, nothing downstream reads a face from it.
+  defp stamp_pr_base(nil, _opts), do: nil
+
+  defp stamp_pr_base(project, opts) when is_map(project) do
+    case Keyword.get(opts, :pr_base_branch) do
+      base when is_binary(base) and base != "" -> Map.put(project, "pr_base_branch", base)
+      _ -> project
+    end
+  end
+
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
       BriefBuilder.build_brief(

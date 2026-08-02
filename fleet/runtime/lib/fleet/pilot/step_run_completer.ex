@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -279,7 +279,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
     repo = Map.fetch!(step_run, :repo)
     n = Map.fetch!(step_run, :issue_number)
     role = Map.fetch!(step_run, :role)
-    base = Map.get(step_run, :base_branch, "main")
+    # Asserted at the PR contact point (chantier face-projet): opening a PR IS choosing the face
+    # the deliverable merges into. StepRunBuild threads it off the event (pr_base || face-at-
+    # dispatch, nil for payload-only judges) — a producer reaching PR-open without one has skipped
+    # the face decision, and a re-default here would silently PR an ops deliverable against main.
+    base =
+      Map.fetch!(step_run, :base_branch) ||
+        raise(ArgumentError,
+          message:
+            "StepRunCompleter.complete_pr: step_run ##{n} (role #{inspect(role)}) carries no " <>
+              "base_branch — the face is decided at dispatch and threaded, never re-defaulted " <>
+              "here (single-default-site doctrine, chantier face-projet)."
+        )
+
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
     title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role}")
 
@@ -406,7 +418,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # `StepDispatcher.promote_pr`. The gatekeeper signature is set INTERNALLY by `seal_and_merge`
     # (sole writer `GatekeeperSeal.as_gatekeeper/1`): this `:promote` terminal (e.g. after escalation)
     # cannot merge on a raw system token without a comment (merge attributed to `lcars-system`).
-    seal_opts = Keyword.put(opts, :head_branch, Map.get(step_run, :producer_branch))
+    seal_opts =
+      opts
+      |> Keyword.put(:head_branch, Map.get(step_run, :producer_branch))
+      # The face the PR merges into, threaded from the event (chantier face-projet) — the seal
+      # aligns the FACE worktree with it, and requires it (a PR always has a base).
+      |> Keyword.put(:base_branch, Map.fetch!(step_run, :base_branch))
 
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
            forge,
@@ -546,7 +563,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
-    base = Map.get(step_run, :base_branch, "main")
+    # Key presence asserted (build always sets it); nil TOLERATED until the PR contact —
+    # a payload-only judge (issue-comment verdict) has no face and never touches a PR.
+    # `resolve_pr` raises on the head-without-base combination (chantier face-projet).
+    base = Map.fetch!(step_run, :base_branch)
     head = Map.get(step_run, :producer_branch)
 
     case resolve_pr(forge, repo, head, base, forge_opts) do
@@ -577,6 +597,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp resolve_pr(_forge, _repo, head, _base, _opts) when not is_binary(head),
     do: {:error, {:pr_lookup, :no_producer_branch}}
+
+  # A producer branch WITHOUT a face: the lookup would match a PR on a guessed base — raise, never
+  # guess (single-default-site doctrine, chantier face-projet). Nil base is only legitimate when
+  # head is nil too (payload-only judge, clause above).
+  defp resolve_pr(_forge, repo, head, nil, _opts) when is_binary(head) do
+    raise ArgumentError,
+          "StepRunCompleter.resolve_pr: PR lookup for #{inspect(repo)} head #{inspect(head)} " <>
+            "carries no base_branch — the face is decided at dispatch and threaded, never " <>
+            "re-defaulted here (chantier face-projet)."
+  end
 
   defp resolve_pr(forge, repo, head, base, forge_opts) do
     case forge.get_pr_for_branch(repo, head, base, forge_opts) do
@@ -627,7 +657,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
       repo: step_run.repo,
       pr_number: pr,
       issue_number: step_run.issue_number,
-      producer_branch: Map.get(step_run, :producer_branch)
+      producer_branch: Map.get(step_run, :producer_branch),
+      # The face rides through (chantier face-projet): the seal aligns the face worktree.
+      base_branch: Map.fetch!(step_run, :base_branch)
     }
 
     # Gap BEFORE unlock: `promote` merges + posts the seal + sets `stage/merged` + closes the issue
@@ -711,7 +743,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # case: the lock was on the PR (set by `dispatch_review` :rework, held by the re-dispatched
     # producer). The ISSUE lock, though, is NOT lifted here (doctrine above, cf. `:advance`): the
     # brick stays in-flight until the final `:promote`, first delivery or not.
-    with :ok <- request_reviews_step(forge, repo, pr, Roles.project_jury(repo, opts), forge_opts),
+    with :ok <- request_reviews_step(forge, repo, pr, step_run_jury(step_run, opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
          # Producer → judges hand-off: closes ITS build stopwatch (on the ISSUE), decoupled from the lock (the
          # ISSUE lock persists until the merge; the PR unlock below covers only the rework re-delivery
@@ -763,6 +795,35 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # would engulf the whole review (time when it does nothing) → CYCLE time disguised as WORK time.
     stop_build_stopwatch(forge, repo, step_run.issue_number, forge_opts, step_run.role)
     :ok
+  end
+
+  # The jury of THE ISSUE'S engraved card when the step_run carries one (a terminal producer on a
+  # routed map lands in `route(:review)` too — MA-12), the project's declared card otherwise
+  # (single-brick, no map). Reading the project card unconditionally convened brief-gate's judges
+  # onto an ops-direct PR — the exact prose jury the ops card refuses by design (measured on the
+  # faceproof bench: qualifier+reviewer laid on a zero-judge card, REQUEST_CHANGES x2, rework
+  # loop). An unloadable engraved card falls back to the project card LOUD — same never-stall
+  # doctrine as `load_project_card`.
+  defp step_run_jury(step_run, opts) do
+    loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
+
+    with name when is_binary(name) and name != "" <- Map.get(step_run, :workflow_map),
+         {:ok, %{"jury" => jury} = map} when is_list(jury) <-
+           Fleet.Pilot.WorkflowMapNav.safe_load(loader, name) do
+      # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
+      Roles.jury(map, opts)
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "StepRunCompleter: engraved card unloadable (#{inspect(reason)}) — jury falls back " <>
+            "to the project card"
+        )
+
+        Roles.project_jury(step_run.repo, opts)
+
+      _no_map ->
+        Roles.project_jury(step_run.repo, opts)
+    end
   end
 
   # Requests the review of ALL the card's judges at once (into requested_reviewers).
