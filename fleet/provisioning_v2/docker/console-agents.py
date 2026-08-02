@@ -81,10 +81,12 @@ def run_eval(expr, timeout=60):
 DUMP_EXPR = (
     'mr = Fleet.Catalogue.workflow_maps_root(); '
     'pr = Fleet.Catalogue.cap_profiles_root(); '
+    'sch = Jason.decode!(File.read!(Path.join(:code.priv_dir(:lcars_fleet), '
+    '"workflow/schema/workflow-map-v2.5.json"))); '
     'rd = fn dir -> dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".yaml")) '
     '|> Map.new(fn f -> p = Path.join(dir, f); '
     '{Path.rootname(f), %{"data" => YamlElixir.read_from_file!(p), "text" => File.read!(p)}} end) end; '
-    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr}, '
+    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr}, "schema" => sch, '
     '"cards" => rd.(mr), "profiles" => rd.(pr)}))'
 )
 
@@ -597,9 +599,10 @@ function cardCenter(){
   pipe.appendChild(el('div','plink','tous verdicts rendus'));
   const term = el('div','pbox term');
   term.appendChild(el('div','pname','promote'));
-  term.appendChild(el('div','prole','gatekeeper scelle · rebase merge'));
+  term.appendChild(el('div','prole',(pools().promoters.join(' + ')||'gatekeeper')+' scelle · rebase merge'));
   term.appendChild(fact({'rework max': String(spec.max_rework_rounds ?? '—'),
-                         'protection': 'main verrouillee par la forge'}));
+                         'protection': 'verrouillee par la forge',
+                         'promotion': 'jamais une option — capability exception_judge'}));
   pipe.appendChild(term);
   body.appendChild(pipe);
   c.appendChild(body);
@@ -612,6 +615,7 @@ function stepBox(sname, st){
   const f = {};
   if(st.judge_target) f['juge'] = st.judge_target;
   if(st.brief_kind) f['brief_kind'] = st.brief_kind;
+  if(st.face) f['face'] = st.face + (st.face==='ops' ? ' → livrable sur work/ops' : ' → livrable sur main');
   if((st.inputs||[]).length) f['inputs'] = st.inputs.join(', ');
   b.appendChild(fact(f));
   return b;
@@ -664,32 +668,53 @@ function topoOrder(steps){
    est le vrai Loader : toute betise d'emission rougit au bouton Valider. */
 let ED = null;
 
-function edStateFrom(data){
-  const meta = (data||{}).metadata||{}, spec = (data||{}).spec||{};
-  const steps = spec.steps||{};
+/* Les POOLS viennent des cap-profiles (un fait = un proprietaire) :
+   juge = brief_kind: judge SANS exception_judge · producteur = capabilities: producer ·
+   promoteur = capabilities: exception_judge (toujours present, jamais un choix). */
+function pools(){
+  const P = CAT.profiles||{};
+  const spec = n => ((P[n]||{}).data||{}).spec||{};
+  const caps = n => spec(n).capabilities||[];
+  const names = Object.keys(P).sort();
   return {
-    ints: (meta.applicable_intensity||[]).slice(),
-    desc: meta.description||'', pres: meta.presentation||'',
-    jury: (spec.jury||[]).slice(),
-    rework: spec.max_rework_rounds ?? 2,
-    steps: topoOrder(steps).map(n => ({name: n, role: steps[n].role||'',
-      brief_kind: steps[n].brief_kind||'', judge_target: steps[n].judge_target||'',
-      needs: (steps[n].needs||[]).slice(), inputs: (steps[n].inputs||[]).slice()}))
+    judges: names.filter(n => spec(n).brief_kind==='judge' && !caps(n).includes('exception_judge')),
+    producers: names.filter(n => caps(n).includes('producer')),
+    promoters: names.filter(n => caps(n).includes('exception_judge')),
   };
 }
 
-function judgeRoles(){
-  return Object.keys(CAT.profiles||{}).filter(n => ((CAT.profiles[n].data||{}).spec||{}).brief_kind==='judge').sort();
-}
-function allRoles(){ return Object.keys(CAT.profiles||{}).sort(); }
-function inputVocab(){
-  const v = new Set();
-  for(const c of Object.values(CAT.cards||{}))
-    for(const st of Object.values(((c.data||{}).spec||{}).steps||{}))
-      for(const i of (st.inputs||[])) v.add(i);
-  return [...v].sort();
+/* Les ENUMS viennent du schema v2.5 (embarque dans le dump, lu par le BEAM). */
+function enumOf(key){
+  let out=null;
+  (function walk(o){ if(!o||typeof o!=='object'||out) return;
+    for(const k of Object.keys(o)){
+      if(k===key){ const v=o[k]; const e=(v&&v.enum)||(v&&v.items&&v.items.enum); if(e){ out=e; return; } }
+      walk(o[k]);
+    } })(CAT.schema||{});
+  return out||[];
 }
 
+/* Le MODELE A ETAGES est une MESURE des steps (judge_target du schema + pools), pas une grammaire
+   posee ici : un step qui ne se classe pas rend la carte « hors grammaire » → yaml brut. */
+function stageModel(data){
+  const meta=(data||{}).metadata||{}, spec=(data||{}).spec||{};
+  const steps=spec.steps||{}; const P=pools();
+  const st={ints:(meta.applicable_intensity||[]).slice(), desc:meta.description||'',
+            pres:meta.presentation||'', rework: spec.max_rework_rounds ?? 2,
+            jury:(spec.jury||[]).slice(), pre:null, producers:[], audit:null, extra:[]};
+  for(const n of topoOrder(steps)){
+    const sd=steps[n]||{};
+    const item={name:n, role:sd.role||'', face:sd.face||'', inputs:(sd.inputs||[]).slice()};
+    if(sd.judge_target==='brief' && !st.pre) st.pre=item;
+    else if(sd.judge_target==='deliverable' && !st.audit) st.audit=item;
+    else if(P.producers.includes(sd.role)) st.producers.push(item);
+    else st.extra.push(n);
+  }
+  return st;
+}
+
+/* Emission NAIVE depuis les etages — needs cables par l ordre, jamais edites. Le droit d etre
+   naive vient du vrai parseur : toute betise rougit au bouton Valider. */
 function emitYaml(st){
   const q = s => JSON.stringify(String(s));
   const L = ['kind: WorkflowMap','metadata:',`  name: ${csel}`];
@@ -700,31 +725,37 @@ function emitYaml(st){
   L.push(`  jury: [${st.jury.join(', ')}]`);
   L.push(`  max_rework_rounds: ${st.rework}`);
   L.push('  steps:');
-  for(const s of st.steps){
-    L.push(`    ${s.name}:`);
-    L.push(`      role: ${s.role}`);
-    if(s.brief_kind) L.push(`      brief_kind: ${s.brief_kind}`);
-    if(s.judge_target) L.push(`      judge_target: ${s.judge_target}`);
-    L.push(`      needs: [${s.needs.join(', ')}]`);
-    if(s.inputs.length){ L.push('      inputs:'); for(const i of s.inputs) L.push(`        - ${i}`); }
-  }
-  if(!st.steps.length) L.push('    {}');
+  let prev = null;
+  const emitStep = (item, extra) => {
+    L.push(`    ${item.name}:`);
+    L.push(`      role: ${item.role}`);
+    for(const x of extra) L.push('      '+x);
+    L.push(`      needs: [${prev ? prev : ''}]`);
+    const inputs = item.inputs.length ? item.inputs : ['ticket.body'];
+    L.push('      inputs:'); for(const i of inputs) L.push('        - '+i);
+    prev = item.name;
+  };
+  if(st.pre) emitStep(st.pre, ['brief_kind: judge','judge_target: brief']);
+  for(const pr of st.producers) emitStep(pr, pr.face ? [`face: ${pr.face}`] : []);
+  if(st.audit) emitStep(st.audit, ['brief_kind: judge','judge_target: deliverable']);
+  if(!st.pre && !st.producers.length && !st.audit) L.push('    {}');
   return L.join('\n') + '\n';
 }
 
 function editor(body, src){
-  const isDraft = !(CAT.cards||{})[csel] || (editing && (CAT.drafts||{})[csel] && src===(CAT.drafts||{})[csel]);
+  const P = pools();
   if(ED === null){
     const canonData = ((CAT.cards||{})[csel]||{}).data;
-    ED = {mode: (isDraft || !canonData) ? 'yaml' : 'form',
-          state: canonData ? edStateFrom(canonData) : null,
-          text: src.text || ''};
+    const model = canonData ? stageModel(canonData) : null;
+    const fits = model && !model.extra.length;
+    ED = {mode: fits ? 'form' : 'yaml', state: model, fits: !!fits, text: src.text || ''};
   }
 
-  const mbar = el('div'); mbar.style.cssText='display:flex;gap:8px;margin-bottom:10px';
+  const mbar = el('div'); mbar.style.cssText='display:flex;gap:8px;margin-bottom:10px;align-items:center';
   const fb = el('button','btn'+(ED.mode==='form'?' warn':''),'formulaire');
   const yb = el('button','btn'+(ED.mode==='yaml'?' warn':''),'yaml brut');
   mbar.appendChild(fb); mbar.appendChild(yb);
+  if(!ED.fits) mbar.appendChild(el('span','mini','carte HORS GRAMMAIRE (step inclassable) — yaml brut seul'));
   body.appendChild(mbar);
 
   const zone = el('div'); body.appendChild(zone);
@@ -738,14 +769,41 @@ function editor(body, src){
   const res = el('div','vres'); res.style.display='none'; body.appendChild(res);
 
   const notice = el('div','notice');
-  notice.innerHTML = "Un draft n'est <b>jamais servi</b> (image publiee au boot — redeploy = restart). "
-    + "« Valider » passe par le <b>parseur reel</b> (schema v2.5 + GraphValidator, release eval). "
-    + "⚠ Le formulaire regenere le YAML : les <b>commentaires du canon ne survivent pas</b> — pour "
-    + "retoucher une carte commentee sans perdre ses cicatrices, passer par « yaml brut ».";
+  notice.innerHTML = "La page ne possede AUCUN fait : sieges = capabilities des cap-profiles, "
+    + "champs et valeurs = enums du schema v2.5, ordre des etages = mesure du canon. Le clic ne "
+    + "peut produire que des cartes que ces proprietaires autorisent — et le bouton Valider "
+    + "repasse quand meme par le parseur reel. Un draft n'est jamais servi (image au boot — "
+    + "redeploy = restart). ⚠ Le formulaire regenere le YAML : les commentaires ne survivent "
+    + "pas — pour retoucher une carte commentee, « yaml brut ».";
   body.appendChild(notice);
 
   let ta = null;
   const currentText = () => ED.mode==='yaml' ? ta.value : emitYaml(ED.state);
+
+  function seatSelect(current, pool, onpick){
+    const rs = document.createElement('select');
+    for(const r of ['', ...pool]){ const o=document.createElement('option'); o.value=r;
+      o.textContent=r||'— siege —'; if(r===current) o.selected=true; rs.appendChild(o); }
+    rs.onchange = () => onpick(rs.value);
+    return rs;
+  }
+
+  function stageBox(title, on, toggleable, buildBody, onToggle){
+    const g = el('div','fs'); if(!on) g.style.opacity='.55';
+    const head = el('div'); head.style.cssText='display:flex;align-items:center;gap:10px';
+    head.appendChild(el('div','ftitle',title));
+    if(toggleable){
+      const lb = el('label','ck'); lb.style.marginLeft='auto';
+      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+      ck.onchange = () => onToggle(ck.checked);
+      lb.appendChild(ck); lb.append(on ? ' active' : ' desactive'); head.appendChild(lb);
+    } else {
+      head.appendChild(el('span','mini', title.startsWith('④')||title.startsWith('⑤') ? 'toujours' : ''));
+    }
+    g.appendChild(head);
+    if(on) buildBody(g);
+    return g;
+  }
 
   function renderZone(){
     zone.innerHTML='';
@@ -760,7 +818,7 @@ function editor(body, src){
 
     const g = el('div','fs'); g.appendChild(el('div','ftitle','gouvernance'));
     const ints = el('div','ckrow');
-    for(const i of ['C0','C1','C2','C3','C4']){
+    for(const i of enumOf('applicable_intensity')){
       const on = st.ints.includes(i);
       const lb = el('label','ck'+(on?'':' off'));
       const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
@@ -769,79 +827,72 @@ function editor(body, src){
       lb.appendChild(ck); lb.append(' '+i); ints.appendChild(lb);
     }
     g.appendChild(ints);
-    const rw = el('div','frow'); const rl = el('label',null,'rework max');
+    const rw = el('div','frow'); rw.appendChild(el('label',null,'rework max'));
     const ri = document.createElement('input'); ri.type='number'; ri.min=0; ri.max=9; ri.value=st.rework;
     ri.onchange = () => { st.rework = parseInt(ri.value||'0',10); };
-    rw.appendChild(rl); rw.appendChild(ri); g.appendChild(rw);
+    rw.appendChild(ri); g.appendChild(rw);
     zone.appendChild(g);
 
-    const j = el('div','fs'); j.appendChild(el('div','ftitle','jury de PR — verdicts paralleles'));
-    const jr = el('div','ckrow');
-    for(const name of judgeRoles()){
-      const on = st.jury.includes(name);
-      const lb = el('label','ck'+(on?'':' off'));
-      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
-      ck.onchange = () => { ck.checked ? st.jury.push(name) : st.jury.splice(st.jury.indexOf(name),1); renderZone(); };
-      lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
-    }
-    j.appendChild(jr);
-    j.appendChild(el('div','mini','choix = les cap-profiles brief_kind: judge du catalogue'));
-    zone.appendChild(j);
+    zone.appendChild(stageBox('① PRE-FLIGHT — le brief est juge avant tout', !!st.pre, true, (box)=>{
+      const f = el('div','frow'); f.appendChild(el('label',null,'juge du brief'));
+      f.appendChild(seatSelect(st.pre.role, P.judges, v => { st.pre.role = v; }));
+      box.appendChild(f);
+      box.appendChild(el('div','mini','sieges = brief_kind: judge · inputs auto: ticket.body · needs cable par l ordre'));
+    }, on => { st.pre = on ? {name:'brief-review', role:P.judges[0]||'', face:'', inputs:[]} : null; renderZone(); }));
 
-    const sfs = el('div','fs'); sfs.appendChild(el('div','ftitle','steps — la chaine'));
-    st.steps.forEach((s, idx) => {
+    const prodBox = el('div','fs');
+    const ph = el('div'); ph.style.cssText='display:flex;align-items:center;gap:10px';
+    ph.appendChild(el('div','ftitle','② PRODUCTION — la chaine des producteurs'));
+    prodBox.appendChild(ph);
+    st.producers.forEach((pr, idx) => {
       const sf = el('div','stepfs');
       const sh = el('div','shead');
-      const ni = document.createElement('input'); ni.type='text'; ni.value=s.name; ni.size=16;
-      ni.onchange = () => { s.name = ni.value.trim(); renderZone(); };
-      const rs = document.createElement('select');
-      for(const r of ['', ...allRoles()]){ const o=document.createElement('option'); o.value=r; o.textContent=r||'— role —';
-        if(r===s.role) o.selected=true; rs.appendChild(o); }
-      rs.onchange = () => { s.role = rs.value; };
-      const del = el('button','btn del','retirer'); del.onclick = () => { st.steps.splice(idx,1); renderZone(); };
-      sh.appendChild(ni); sh.appendChild(el('span','mini','→')); sh.appendChild(rs);
+      const ni = document.createElement('input'); ni.type='text'; ni.value=pr.name; ni.size=14;
+      ni.onchange = () => { pr.name = ni.value.trim(); };
+      sh.appendChild(ni); sh.appendChild(el('span','mini','→'));
+      sh.appendChild(seatSelect(pr.role, P.producers, v => { pr.role = v; }));
+      const faces = enumOf('face');
+      if(faces.length){
+        sh.appendChild(el('span','mini','face'));
+        sh.appendChild(seatSelect(pr.face, faces, v => { pr.face = v; }));
+      }
+      const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
       const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
       sf.appendChild(sh);
-
-      const f2 = el('div','frow'); f2.appendChild(el('label',null,'judge_target'));
-      const jt = document.createElement('select');
-      for(const v of ['','brief','pr']){ const o=document.createElement('option'); o.value=v; o.textContent=v||'aucun (producteur)';
-        if(v===s.judge_target) o.selected=true; jt.appendChild(o); }
-      jt.onchange = () => { s.judge_target = jt.value; s.brief_kind = jt.value ? 'judge' : ''; };
-      f2.appendChild(jt); sf.appendChild(f2);
-
-      const nd = el('div','frow'); nd.appendChild(el('label',null,'apres (needs)'));
-      const ndr = el('div','ckrow');
-      for(const other of st.steps.filter(x=>x!==s && x.name)){
-        const on = s.needs.includes(other.name);
-        const lb = el('label','ck'+(on?'':' off'));
-        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
-        ck.onchange = () => { ck.checked ? s.needs.push(other.name) : s.needs.splice(s.needs.indexOf(other.name),1); };
-        lb.appendChild(ck); lb.append(' '+other.name); ndr.appendChild(lb);
-      }
-      if(!st.steps.filter(x=>x!==s).length) ndr.appendChild(el('span','mini','racine du DAG'));
-      nd.appendChild(ndr); sf.appendChild(nd);
-
-      const inp = el('div','frow'); inp.appendChild(el('label',null,'inputs'));
-      const ir = el('div','ckrow');
-      for(const v of inputVocab()){
-        const on = s.inputs.includes(v);
-        const lb = el('label','ck'+(on?'':' off'));
-        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
-        ck.onchange = () => { ck.checked ? s.inputs.push(v) : s.inputs.splice(s.inputs.indexOf(v),1); };
-        lb.appendChild(ck); lb.append(' '+v); ir.appendChild(lb);
-      }
-      inp.appendChild(ir); sf.appendChild(inp);
-      sfs.appendChild(sf);
+      sf.appendChild(el('div','mini', (pr.face==='ops' ? 'livrable sur work/ops (chemin ticket-doc)' : pr.face==='code' ? 'livrable sur main (chemin ticket-code)' : 'face par defaut du moteur') + ' · sieges = capabilities: producer'));
+      prodBox.appendChild(sf);
     });
-    const add = el('button','btn','+ step');
-    add.onclick = () => { st.steps.push({name:'step-'+(st.steps.length+1), role:'', brief_kind:'',
-                                          judge_target:'', needs:[], inputs:[]}); renderZone(); };
-    sfs.appendChild(add);
-    zone.appendChild(sfs);
+    const add = el('button','btn','+ producteur (enchaine apres le precedent)');
+    add.onclick = () => { st.producers.push({name:'build'+(st.producers.length?'-'+(st.producers.length+1):''), role:P.producers[0]||'', face:'', inputs:[]}); renderZone(); };
+    prodBox.appendChild(add);
+    zone.appendChild(prodBox);
+
+    zone.appendChild(stageBox('③ AUDIT — un juge lit le livrable', !!st.audit, true, (box)=>{
+      const f = el('div','frow'); f.appendChild(el('label',null,'auditeur'));
+      f.appendChild(seatSelect(st.audit.role, P.judges, v => { st.audit.role = v; }));
+      box.appendChild(f);
+    }, on => { st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
+
+    zone.appendChild(stageBox('④ JURY DE PR — verdicts paralleles', true, false, (box)=>{
+      const jr = el('div','ckrow');
+      for(const name of P.judges){
+        const on = st.jury.includes(name);
+        const lb = el('label','ck'+(on?'':' off'));
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+        ck.onchange = () => { ck.checked ? st.jury.push(name) : st.jury.splice(st.jury.indexOf(name),1); renderZone(); };
+        lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
+      }
+      box.appendChild(jr);
+      box.appendChild(el('div','mini','jury vide = promotion directe (chemin nominal c0) · le promoteur n est PAS ici'));
+    }));
+
+    const pm = el('div','fs'); pm.style.borderLeftColor='var(--gr)';
+    pm.appendChild(el('div','ftitle','⑤ PROMOTE — jamais une option'));
+    pm.appendChild(el('div','kv', (P.promoters.join(' + ')||'?') + ' scelle, quoi qu on coche — capability exception_judge, pas un choix de carte'));
+    zone.appendChild(pm);
   }
 
-  fb.onclick = () => { if(ED.state){ ED.mode='form'; renderZone(); } };
+  fb.onclick = () => { if(ED.state && ED.fits){ ED.mode='form'; renderZone(); } };
   yb.onclick = () => { if(ED.mode==='form') ED.text = emitYaml(ED.state); ED.mode='yaml'; renderZone(); };
   renderZone();
 
