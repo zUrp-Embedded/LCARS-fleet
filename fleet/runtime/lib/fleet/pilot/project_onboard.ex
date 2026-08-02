@@ -595,13 +595,19 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # A present declaration is LEFT AS-IS (the burn validates loudly; adopt does not overwrite the
   # user's engraving) — an absent one is written from the relayed declaration (or the honest C0
-  # default) and committed, BEFORE the single main push.
-  defp ensure_intensity(proj_dir, opts) do
+  # default) and committed, BEFORE the single main push (v2-1 of the 6-16/6-31 plan: pushed
+  # AFTER, it would never reach the forge and both lock_main reads would fall back to the
+  # default-card jury in silence).
+  defp ensure_intensity(
+         proj_dir,
+         opts,
+         msg \\ "chore(adopt): déclaration de criticité (intensity.json)"
+       ) do
     if File.exists?(Path.join(proj_dir, "intensity.json")) do
       :ok
     else
       with :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts) do
-        commit(proj_dir, "chore(adopt): déclaration de criticité (intensity.json)")
+        commit(proj_dir, msg)
       end
     end
   end
@@ -640,6 +646,268 @@ defmodule Fleet.Pilot.ProjectOnboard do
       "ProjectOnboard: adopt #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
         "forge #{inspect(forge)}, work_dir #{inspect(work)} (proj_dir untouched — the user's; " <>
         "a clean retry is possible)"
+    )
+  end
+
+  # External forges this verb repatriates from (BL-6-31, user perimeter). Everything else is a
+  # named refusal — extending the list is a deliberate one-line decision here.
+  @external_hosts ~w(github.com gitlab.com)
+
+  @doc """
+  IMPORTS a repo from an EXTERNAL forge (GitHub/GitLab — BL-6-31): repatriate → adoption gate →
+  create in the org → push → the existing local import leg. One-way: the external origin is
+  LEFT BEHIND (origin is re-pointed at OUR forge — an import, never a mirror).
+
+  The sequence (plan 6-16/6-31 v2.1, orchestration NEW, primitives reused):
+    1. URL gate — https + host ∈ #{inspect(@external_hosts)}; anything else refuses
+       `{:unsupported_forge, _}`.
+    2. System clone into a per-gesture SCRATCH (`--no-recurse-submodules` — a hostile submodule
+       is never repatriated silently), cleaned on EVERY exit. The forge auth extraheader is
+       PREFIX-scoped (ForgeAuth) so it never leaks to the external host; the optional external
+       credential rides `LCARS_EXTERNAL_GIT_TOKEN` (operator input at gesture time, never a
+       recipe product — public tokenless is the nominal path).
+    3. ADOPTION GATE (the parking-lot USB, BL-6-16): a non-empty `.claude/` tree is refused EN
+       BLOC (`{:foreign_claude_dir, _}` — we do not adopt someone else's hooks; org repos
+       re-enter via `import/2`, never through this verb), and every `CLAUDE.md` must pass
+       `Fleet.ReceptionFilter` (`{:hostile_material, label, path}` otherwise). Nothing reaches
+       the org on a refusal — the operator expurges at the SOURCE and retries.
+    4. Default branch → `main`, THREE cases: already main → no-op; main absent → rename;
+       default ≠ main while a remote `main` EXISTS → `{:branch_collision, _}` (half-migrated
+       repos are common; we never guess which is the real one).
+    5. Empty org repo + protocol labels + intensity committed IN the scratch BEFORE the push
+       (the push must CARRY intensity.json or every later jury read falls back in silence) →
+       push main (full history) → the local `finish_import` leg (clone from OUR forge,
+       work/ops, protection — its `lock_main` reads the now-present local intensity).
+
+  Refusals before any effect: dirs already on machine (`{:already_on_machine, _}` — that
+  project wants `open`/`import`), forge repo existing (`{:repo_already_exists, _}`).
+  Compensation: forge repo deleted DIRECT (the 6-32 lesson — an empty just-created repo probes
+  absent through delete_forge and would leak) + both local dirs; the scratch dies in `after`.
+  """
+  @spec import_external(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
+    org = Keyword.get(opts, :org, "fleet")
+    full_name = "#{org}/#{name}"
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
+    url_gate = Keyword.get(opts, :url_gate, &default_external_url_gate/1)
+
+    with :ok <- validate_name(name),
+         :ok <- url_gate.(url),
+         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- require_machine_absent(full_name, proj_dir, work_dir),
+         :ok <- require_forge_absent(full_name, opts) do
+      scratch = external_scratch_dir(name)
+
+      try do
+        with :ok <- clone_external(url, scratch, opts),
+             :ok <- adoption_gate(scratch),
+             :ok <- normalize_default_branch(scratch),
+             {:ok, forge_url} <- repo_url(full_name, opts),
+             {:ok, full_name} <- create_empty_repo(name, org, opts) do
+          source_host =
+            case URI.parse(url).host do
+              h when h in [nil, ""] -> "external"
+              h -> h
+            end
+
+          case finish_external(
+                 full_name,
+                 forge_url,
+                 scratch,
+                 proj_dir,
+                 work_dir,
+                 name,
+                 Keyword.put(opts, :source_host, source_host)
+               ) do
+            {:ok, result} ->
+              {:ok, result}
+
+            {:error, reason} = err ->
+              compensate_external(full_name, proj_dir, work_dir, reason, opts)
+              err
+          end
+        end
+      after
+        _ = File.rm_rf(scratch)
+      end
+    end
+  end
+
+  # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
+  # existing local import leg for what it does (clone from OUR forge brings intensity.json
+  # back down, so ITS lock_main reads the right jury).
+  defp finish_external(full_name, forge_url, scratch, proj_dir, work_dir, name, opts) do
+    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
+         :ok <-
+           ensure_intensity(
+             scratch,
+             opts,
+             "chore(import-externe): déclaration de criticité (intensity.json)"
+           ),
+         :ok <- set_origin(scratch, forge_url),
+         :ok <- push(scratch, "main", true),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         {:ok, result} <- finish_import(full_name, proj_dir, work_dir, name, opts) do
+      Logger.info(
+        "ProjectOnboard: #{full_name} imported from EXTERNAL " <>
+          "#{Keyword.get(opts, :source_host, "external")} — history preserved, origin " <>
+          "re-pointed at the org (the source URL is never logged: it may carry the operator token)"
+      )
+
+      {:ok, result}
+    end
+  end
+
+  defp default_external_url_gate(url) do
+    uri = URI.parse(url)
+
+    cond do
+      uri.scheme != "https" -> {:error, {:unsupported_forge, {:scheme, uri.scheme}}}
+      uri.host in @external_hosts -> :ok
+      true -> {:error, {:unsupported_forge, uri.host}}
+    end
+  end
+
+  defp require_machine_absent(full_name, proj_dir, work_dir) do
+    if File.exists?(proj_dir) or File.exists?(work_dir),
+      do: {:error, {:already_on_machine, full_name}},
+      else: :ok
+  end
+
+  # Per-gesture unique scratch (two concurrent imports of the same name never share one; the
+  # NAME collision itself is refused upstream by require_forge_absent). BEAM-side, outside any
+  # pod sandbox. (NOT the card-revision scratch_dir/1 above — different lifecycle, per-gesture.)
+  defp external_scratch_dir(name) do
+    Path.join(
+      System.tmp_dir!(),
+      "lcars-import-#{name}-#{:erlang.unique_integer([:positive])}"
+    )
+  end
+
+  defp clone_external(url, scratch, opts) do
+    timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
+
+    case Fleet.Credentials.Shell.git(
+           ["clone", "--no-recurse-submodules", with_external_token(url), scratch],
+           timeout_ms: timeout
+         ) do
+      {:ok, {_, 0}} -> :ok
+      {:ok, {out, code}} -> {:error, {:external_clone_failed, {code, String.slice(out, 0, 500)}}}
+      {:error, reason} -> {:error, {:external_clone_failed, reason}}
+    end
+  end
+
+  # Operator credential for a PRIVATE external repo — env at gesture time, never a recipe
+  # product (first-admin doctrine). Injected as URL userinfo (both GH and GitLab accept an
+  # oauth2 basic pair); the effective URL is never logged.
+  defp with_external_token(url) do
+    case System.get_env("LCARS_EXTERNAL_GIT_TOKEN") do
+      nil -> url
+      "" -> url
+      token -> url |> URI.parse() |> struct!(userinfo: "oauth2:#{token}") |> URI.to_string()
+    end
+  end
+
+  # The parking-lot USB check (BL-6-16/6-31): instruction-tier material only — scanning the
+  # whole code would drown in false positives (a README legitimately says "force-push").
+  defp adoption_gate(scratch) do
+    case foreign_claude_dirs(scratch) do
+      [] -> scan_claude_mds(scratch)
+      dirs -> {:error, {:foreign_claude_dir, dirs}}
+    end
+  end
+
+  defp foreign_claude_dirs(scratch) do
+    scratch
+    |> Path.join("**/.claude")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.reject(&(".git" in Path.split(Path.relative_to(&1, scratch))))
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.map(&Path.relative_to(&1, scratch))
+  end
+
+  defp scan_claude_mds(scratch) do
+    scratch
+    |> Path.join("**/CLAUDE.md")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.reject(&(".git" in Path.split(Path.relative_to(&1, scratch))))
+    |> Enum.reduce_while(:ok, fn path, :ok ->
+      rel = Path.relative_to(path, scratch)
+
+      case File.read(path) do
+        {:ok, content} ->
+          case Fleet.ReceptionFilter.scan(content) do
+            :clean -> {:cont, :ok}
+            {:match, label, _excerpt} -> {:halt, {:error, {:hostile_material, label, rel}}}
+          end
+
+        {:error, reason} ->
+          # Unreadable instruction material in a fresh clone: refused, never waved through.
+          {:halt, {:error, {:unreadable_material, rel, reason}}}
+      end
+    end)
+  end
+
+  # Three cases (plan F6): a half-migrated repo (default=master AND a remote main) is REFUSED —
+  # we never guess which branch is the real one; the operator settles it at the source.
+  defp normalize_default_branch(scratch) do
+    with {:ok, {head_out, 0}} <-
+           Fleet.Credentials.Shell.git(["-C", scratch, "symbolic-ref", "--short", "HEAD"],
+             env: []
+           ),
+         {:ok, {remotes_out, 0}} <-
+           Fleet.Credentials.Shell.git(
+             ["-C", scratch, "branch", "-r", "--format=%(refname:short)"],
+             env: []
+           ) do
+      head = String.trim(head_out)
+      remote_main? = "origin/main" in String.split(remotes_out, "\n", trim: true)
+
+      cond do
+        head == "main" ->
+          :ok
+
+        remote_main? ->
+          {:error, {:branch_collision, {head, "main"}}}
+
+        true ->
+          case Fleet.Credentials.Shell.git(["-C", scratch, "branch", "-m", head, "main"],
+                 env: []
+               ) do
+            {:ok, {_, 0}} ->
+              :ok
+
+            {:ok, {out, code}} ->
+              {:error, {:branch_rename_failed, {code, String.slice(out, 0, 300)}}}
+
+            {:error, reason} ->
+              {:error, {:branch_rename_failed, reason}}
+          end
+      end
+    else
+      other -> {:error, {:default_branch_unreadable, other}}
+    end
+  end
+
+  # Same direct-primitive posture as compensate_adopt (the 6-32 lesson), plus both local dirs —
+  # unlike adopt, EVERYTHING local here was created by this call.
+  defp compensate_external(full_name, proj_dir, work_dir, reason, opts) do
+    forge =
+      case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
+        :ok -> :deleted
+        {:error, e} -> {:delete_failed, e}
+      end
+
+    proj = compensate_dir(proj_dir)
+    work = compensate_dir(work_dir)
+
+    Logger.warning(
+      "ProjectOnboard: import_external #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
+        "forge #{inspect(forge)}, project_dir #{inspect(proj)}, work_dir #{inspect(work)} " <>
+        "(a clean retry is possible)"
     )
   end
 

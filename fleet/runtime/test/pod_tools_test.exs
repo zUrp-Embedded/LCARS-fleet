@@ -507,6 +507,18 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
+    def import_external(url, name, opts) do
+      send(self(), {:import_external, url, name, opts})
+
+      {:ok,
+       %{
+         repo: "fleet/#{name}",
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}"
+       }}
+    end
+
+    @impl true
     def adopt_project(name, opts) do
       send(self(), {:adopt_project, name, opts})
 
@@ -1311,6 +1323,8 @@ defmodule Fleet.MCP.PodToolsTest do
        }},
       {"close_project", %{"full_name" => "fleet/demo-proj"}},
       {"adopt_project", %{"name" => "demo-proj"}},
+      {"import_external_project",
+       %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
