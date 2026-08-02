@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
   `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -608,13 +608,37 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   """
   @spec resolve_repo_id(module(), String.t(), keyword()) :: non_neg_integer() | nil
   def resolve_repo_id(forge, repo, forge_opts) do
+    case repo_id(forge, repo, forge_opts) do
+      {:ok, id} -> id
+      {:error, _reason} -> nil
+    end
+  end
+
+  @doc """
+  Same resolution as `resolve_repo_id/3`, EXPLAINED: `{:ok, id}` | `{:error, reason}`.
+
+  Two shapes, one authority, because the callers are not asking the same question. Three of them
+  put the id through `Opts.maybe_put` — for those, `nil` is the right answer to "optional, absent",
+  and an `{:error, _}` they must unwrap would be noise. `ProjectArchitect` makes it a FAILURE
+  condition (no id ⇒ no project identity ⇒ no arch), and a failure has to say why: it used to get a
+  bare `nil` and then GUESS in its log ("forge down?") over a forge that was answering. An
+  instrument that supposes is worse than one that is silent — the supposition gets quoted.
+
+  Reasons: the forge's own (`{:error, :no_id}`, HTTP tuple…), or `:repo_id_unsupported` when the
+  seam module does not export `repo_id/2` at all (a test stub) — which is a fact about the wiring,
+  not about the forge, and must never be reported as the latter.
+  """
+  @spec repo_id(module(), String.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def repo_id(forge, repo, forge_opts) do
     if function_exported?(forge, :repo_id, 2) do
       case forge.repo_id(repo, forge_opts) do
-        {:ok, id} when is_integer(id) and id >= 0 -> id
-        _ -> nil
+        {:ok, id} when is_integer(id) and id >= 0 -> {:ok, id}
+        {:error, reason} -> {:error, reason}
+        other -> {:error, {:unexpected_repo_id, other}}
       end
     else
-      nil
+      {:error, :repo_id_unsupported}
     end
   end
 
