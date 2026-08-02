@@ -1618,6 +1618,48 @@ defmodule Fleet.Spawner.PodTest do
       end)
     end
 
+    # BL-6-03 S2 — the KNOWN-cause lift: the completion task carrying this pod's publication
+    # died, the fact reaches the pod as an event, and the flag falls NOW with the reason NAMED —
+    # the 120s deadline stays armed as the net for a lost event, no longer the main path.
+    test "deliverable.publish_lost for THIS pod → :publishing lifted for the NAMED cause, deadline canceled" do
+      pod_id = "pod-lost-#{System.unique_integer([:positive])}"
+      data = %{conditions: MapSet.new([:publishing]), pod_id: pod_id}
+
+      ev = %Fleet.Event{
+        source: :workflow,
+        type: :"deliverable.publish_lost",
+        timestamp: DateTime.utc_now(),
+        pod_id: pod_id,
+        payload: %{"reason" => ":boom"}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:keep_state, new_data, [{{:timeout, :publish_deadline}, :infinity, :fire}]} =
+                   Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+
+          refute :publishing in new_data.conditions
+        end)
+
+      # The lift is attributed to its cause — never an unexplained deadline expiry.
+      assert log =~ "named-cause lift"
+      assert log =~ ":boom"
+    end
+
+    test "deliverable.publish_lost of ANOTHER pod → ignored (no lift, no deadline touch)" do
+      data = %{conditions: MapSet.new([:publishing]), pod_id: "pod-a"}
+
+      ev = %Fleet.Event{
+        source: :workflow,
+        type: :"deliverable.publish_lost",
+        timestamp: DateTime.utc_now(),
+        pod_id: "pod-b",
+        payload: %{}
+      }
+
+      assert :keep_state_and_data = Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+    end
+
     # A payload pipe (no async push) does NOT arm :publishing — otherwise it would arm a 120s
     # deadline never lifted by deliverable.published (emitted only for git_native).
     test "submit of a payload pipe → NO :publishing condition (nothing to protect)" do

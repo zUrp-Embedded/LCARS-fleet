@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
   are called directly by `Fleet.Pilot.ProjectOnboard`.
 
-  **Last revised**: 2026-07-29
+  **Last revised**: 2026-08-02
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -339,11 +339,14 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     end
   end
 
-  # The reconcilable surface = the protection fields `lock_main` sizes, restricted to those
+  # The reconcilable surface = the protection fields the runtime projects, restricted to those
   # the CALLER actually projected (string keys, the wire's shape on readback). Comparing or
-  # patching MORE would clobber operator enrichments (status checks, push whitelists) the
-  # runtime never projected.
-  @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push)
+  # patching MORE would clobber operator enrichments (status checks) the runtime never
+  # projected. The push-door fields (`enable_push*`, `push_whitelist_usernames`) are projected
+  # ONLY by the card-revision lift (`ProjectOnboard.revise_card` — scoped lift-push-restore);
+  # the canonical `protect_main` rule does not name them, so an operator whitelist stays
+  # untouched outside that one deliberate gesture.
+  @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames)
 
   defp projected_protection_fields(rule) do
     for {k, v} <- rule, sk = to_string(k), sk in @protectable_fields, into: %{}, do: {sk, v}

@@ -25,8 +25,15 @@ defmodule Fleet.MCP.PodTools do
       - `create_project`   : the arch starts a fresh project (repo + dual-dir + scaffold).
       - `import_project`   : the arch imports an EXISTING forge repo (dual-dir, main content
         intact — ≠ create_project which starts a fresh one).
+      - `revise_project_card` : revises an existing project's validation card (BL-6-29 — the
+        engraved declaration gets a tracked revision path; future tickets only).
+      - `close_project`    : parks a project (BL-6-30 — marker issue holds the state, the
+        poller skips the repo; disk + forge intact, `open_project` reopens).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
+      - `list_issues`      : the arch reads its project's open-ticket board (BL-6-28: the
+        write channel existed without its read half — a radio that transmits but not receives).
+      - `get_issue`        : the arch reads ONE ticket in full (body + comment thread).
       - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly
@@ -230,6 +237,65 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "close_project" do
+    meta do
+      name("Close Project")
+
+      description(
+        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ delete_project: " <>
+          "nothing is destroyed, this is a pause, fully reversible). The running brick finishes; " <>
+          "the NEXT ticket never starts. Mechanics: an OPEN marker issue (`[lcars-parked]` title) " <>
+          "holds the closed state on the forge — visible in the UI, no hidden state. The " <>
+          "project's architect stops (it comes back at reopen). REOPEN: `open_project` (immediate " <>
+          "full reopen, clears the marker), or a human closing the marker issue in the forge UI " <>
+          "(the rail resumes; the architect self-respawns at the first pending escalation). " <>
+          "`full_name` = `owner/name`. Returns {\"status\":\"closed\",\"outcome\":\"closed\"|" <>
+          "\"already_closed\",\"marker_issue\":N,\"architect\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"}
+      },
+      "required" => ["full_name"]
+    })
+  end
+
+  deftool "revise_project_card" do
+    meta do
+      name("Revise Project Card")
+
+      description(
+        "REVISE the validation card of an EXISTING project: the declaration engraved at " <>
+          "create_project gets a tracked revision (a C0 PoC that grew serious no longer keeps its " <>
+          "fast-track for life). Same doctrine as create_project: PRESENT the catalogue first " <>
+          "(`list_workflow_cards`) and let the HUMAN choose — the card choice IS the criticality " <>
+          "declaration, you advise, you never decide. `justification` REQUIRED: the WHY of the " <>
+          "revision, committed with the declaration in the project's repo (git history is the " <>
+          "ledger). The branch protection re-sizes itself on the new card's jury in the same act. " <>
+          "RELAY to the human: tickets already routed keep their engraved card — the revision " <>
+          "applies to FUTURE tickets only. `full_name` = `owner/name`. Returns " <>
+          "{\"status\":\"card_revised\",\"outcome\":\"revised\"|\"unchanged\",\"card\":...," <>
+          "\"previous_card\":...}; \"unchanged\" = the identical declaration already stands " <>
+          "(honest no-op, nothing pushed)."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"},
+        "workflow_map" => %{"type" => "string"},
+        "justification" => %{"type" => "string"},
+        "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
+        "nature" => %{"type" => "string"}
+      },
+      "required" => ["full_name", "workflow_map", "justification"]
+    })
+  end
+
   deftool "delete_project" do
     meta do
       name("Delete Project")
@@ -322,6 +388,49 @@ defmodule Fleet.MCP.PodTools do
     end
 
     input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
+  end
+
+  deftool "list_issues" do
+    meta do
+      name("List Issues")
+
+      description(
+        "List the OPEN tickets of YOUR project — the situation board, not just your inbox " <>
+          "(`list_escalations` shows ONLY the issues awaiting YOUR arbitration; this shows " <>
+          "everything in flight, including tickets a human opened without you). Each entry: " <>
+          "`number`, `title`, `labels` (the `stage/*` and `genre/*` markers carry the pipeline " <>
+          "state). Closed tickets do not appear — track a specific delegation with " <>
+          "`get_issue_status`, read a full thread with `get_issue`. No arguments — it is your " <>
+          "project's board."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
+  end
+
+  deftool "get_issue" do
+    meta do
+      name("Get Issue")
+
+      description(
+        "READ a ticket of YOUR project in full: body + comment thread, oldest first — the " <>
+          "CONVERSATION, where `get_issue_status` renders a tracking VERDICT. Use it before " <>
+          "replying with `comment_issue` (never answer a thread you have not read), and to read " <>
+          "what a human or a worker wrote back to you. `number` = the issue number. Returns " <>
+          "{\"issue\":N,\"title\",\"state\",\"body\",\"labels\",\"comments\":[{\"author\"," <>
+          "\"body\",\"created_at\"}]}. If \"comments\" is ABSENT and \"comments_error\":" <>
+          "\"forge_unreachable\" is set, the THREAD read failed — retry; never treat it as an " <>
+          "empty thread."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "number" => %{"type" => "integer"}
+      },
+      "required" => ["number"]
+    })
   end
 
   deftool "comment_issue" do
@@ -477,6 +586,42 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
+  def handle_tool_call("close_project", %{"full_name" => full_name}, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.close_project(full_name, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("close_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("revise_project_card", %{"full_name" => full_name} = args, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.revise_project_card(full_name, args, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("revise_project_card", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
   def handle_tool_call("delete_project", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
@@ -513,6 +658,26 @@ defmodule Fleet.MCP.PodTools do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
+  end
+
+  # Project board + full-thread read (BL-6-28): the arch's READ half — architect gate inside
+  # Delegation, repo from the channel binding (never the wire), like every delegation tool.
+  def handle_tool_call("list_issues", _arguments, state) do
+    case Delegation.list_issues(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("get_issue", %{"number" => number}, state) when is_integer(number) do
+    case Delegation.get_issue(number, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("get_issue", _bad, state) do
+    {:error, :invalid_arguments, state}
   end
 
   def handle_tool_call("list_workflow_cards", _arguments, state) do

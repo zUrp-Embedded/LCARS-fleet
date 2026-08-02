@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   use Supervisor
@@ -213,7 +213,7 @@ defmodule Fleet.Pilot.Application do
       # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).
       {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
       {Fleet.Pilot.StepRunConsumer,
-       forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/1}
+       forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/2}
     ]
   end
 

@@ -22,7 +22,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-08-02
   """
 
   @doc """
@@ -61,6 +61,27 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   `architect` status keys); `Delegation.do_delete_project/2` reads `%{repo: _}`.
   """
   @callback delete_project(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+
+  @doc """
+  CLOSES a project (BL-6-30) — stops the fleet ON it, disk and forge intact (≠ delete: nothing
+  destroyed). The closed state is a forge object (open `[lcars-parked]` marker issue) the poller
+  respects; the running brick finishes, the next one never starts; the architect stops
+  (best-effort). Reopen via `open/2` (which also clears the marker) or the human closing the
+  marker in the UI. Result carries `repo`/`outcome` (`:closed` | `:already_closed`) +
+  `marker_issue`/`architect`.
+  """
+  @callback close_project(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+
+  @doc """
+  REVISES an EXISTING project's validation-card declaration (BL-6-29) — commits the new
+  `intensity.json` on `main` through a scoped protection lift, protection re-sized on the new
+  card's jury. `opts`: `:workflow_map` (required), `:justification` (required — the revision's
+  WHY, committed), `:intensity_level`/`:nature` (optional), `:revised_by` (the acting role).
+  Result carries `repo`/`card`/`previous_card`/`outcome` (`:revised` | `:unchanged`).
+  """
+  @callback revise_card(full_name :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
   # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom

@@ -484,6 +484,27 @@ defmodule Fleet.MCP.PodToolsTest do
          forced: Keyword.get(opts, :force, false)
        }}
     end
+
+    @impl true
+    def revise_card(full_name, opts) do
+      send(self(), {:revise_card, full_name, opts})
+
+      {:ok,
+       %{
+         repo: full_name,
+         card: Keyword.get(opts, :workflow_map),
+         previous_card: "brief-gate",
+         outcome: :revised,
+         protection: :restored
+       }}
+    end
+
+    @impl true
+    def close_project(full_name, opts) do
+      send(self(), {:close_project, full_name, opts})
+
+      {:ok, %{repo: full_name, outcome: :closed, marker_issue: 12, architect: :stopped}}
+    end
   end
 
   # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
@@ -1270,6 +1291,13 @@ defmodule Fleet.MCP.PodToolsTest do
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
       {"open_project", %{"full_name" => "fleet/demo-proj"}},
       {"delete_project", %{"full_name" => "fleet/demo-proj"}},
+      {"revise_project_card",
+       %{
+         "full_name" => "fleet/demo-proj",
+         "workflow_map" => "ops-direct",
+         "justification" => "le poc est devenu serieux"
+       }},
+      {"close_project", %{"full_name" => "fleet/demo-proj"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
@@ -1384,6 +1412,36 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "deleted"
       assert %{"project" => "removed", "work" => "removed"} = result["local"]
+    end
+
+    test "revise_project_card: threads the human declaration + the ACTING role, renders the note" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "revise_project_card",
+                 %{
+                   "full_name" => "fleet/demo-proj",
+                   "workflow_map" => "ops-direct",
+                   "justification" => "le poc est devenu serieux"
+                 },
+                 pod_state(uniq("pod-sf"))
+               )
+
+      # The seam receives the declaration verbatim + the ACTING role (revised_by = channel
+      # identity, never a wire field).
+      assert_received {:revise_card, "fleet/demo-proj", opts}
+      assert opts[:workflow_map] == "ops-direct"
+      assert opts[:justification] == "le poc est devenu serieux"
+      assert opts[:revised_by] == "starfleet"
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["status"] == "card_revised"
+      assert result["card"] == "ops-direct"
+      assert result["previous_card"] == "brief-gate"
+      assert result["outcome"] == "revised"
+      # The one semantic the human must hear at this moment: engraved routes do not re-route.
+      assert result["note"] =~ "FUTURS"
     end
 
     test "architect → the privileged tools PASS the gate (no :forbidden / :pod_unknown)" do
@@ -1660,6 +1718,207 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       refute_received {:post_comment, _, _, _, _}
+    end
+  end
+
+  # READ-channel stub (BL-6-28): the arch's board + thread reads span BOTH seam surfaces
+  # (ForgeClient.get_issue + EscalationForge.list_comments/list_open_issues) resolved on ONE
+  # module. It ADOPTS the delegation `ForgeClient` behaviour (compile-checked); `list_comments`
+  # is a PLAIN def — a second `@behaviour` would trip the conflicting-callbacks warning (both
+  # contracts declare list_open_issues/post_comment), and the escalation guard checks EXPORTS.
+  # Degradations are driven by the process dictionary (the seam runs in the caller's process).
+  defmodule ReadChannelForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    def get_issue("fleet/alpha", 5, _opts) do
+      {:ok,
+       %{
+         "number" => 5,
+         "title" => "vraie feature",
+         "state" => "open",
+         "body" => "le brief complet du ticket",
+         "labels" => [%{"name" => "type:feature"}, %{"name" => "genre/ops"}]
+       }}
+    end
+
+    def get_issue(_repo, _n, _opts), do: {:error, :not_found}
+
+    def list_comments("fleet/alpha", 5, _opts) do
+      Process.get(
+        :read_channel_thread,
+        {:ok,
+         [
+           %{
+             "body" => "question du humain",
+             "user" => %{"login" => "lordzurp"},
+             "created_at" => "2026-08-02T10:00:00Z"
+           },
+           %{"body" => "réponse du worker, sans auteur ni date dans la réponse forge"}
+         ]}
+      )
+    end
+
+    def list_comments(_repo, _n, _opts), do: {:ok, []}
+
+    @impl true
+    def list_open_issues("fleet/alpha", _opts) do
+      Process.get(
+        :read_channel_board,
+        {:ok,
+         [
+           %{
+             "number" => 4,
+             "title" => "sonde retour",
+             "labels" => [%{"name" => "lcars-awaits-arch"}]
+           },
+           %{
+             "number" => 5,
+             "title" => "vraie feature",
+             "labels" => [%{"name" => "type:feature"}, %{"name" => "stage/build"}]
+           }
+         ]}
+      )
+    end
+
+    def list_open_issues(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def create_issue(_r, _t, _b, _o), do: raise("ReadChannelForge is read-only")
+    @impl true
+    def add_label(_r, _n, _l, _o), do: raise("ReadChannelForge is read-only")
+    @impl true
+    def list_pulls(_r, _o), do: {:ok, []}
+    @impl true
+    def parse_feature_branch(_h), do: :error
+    @impl true
+    def pr_review_state(_r, _i, _o), do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+    @impl true
+    def merged_pr_of_issue(_r, _n, _o), do: :none
+    @impl true
+    def post_comment(_r, _n, _b, _o), do: raise("ReadChannelForge is read-only")
+    @impl true
+    def close_issue(_r, _n, _o), do: raise("ReadChannelForge is read-only")
+  end
+
+  describe "arch read channel (BL-6-28 — list_issues board / get_issue thread)" do
+    setup do
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, ReadChannelForge)
+
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+        {:ok, %{role: "architect", repo: "fleet/alpha"}}
+      end)
+
+      on_exit(fn ->
+        Process.delete(:read_channel_board)
+        Process.delete(:read_channel_thread)
+      end)
+
+      :ok
+    end
+
+    test "list_issues: the FULL open board (escalations AND ordinary tickets), labels as names" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-arch")))
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["count"] == 2
+
+      assert [
+               %{"number" => 4, "title" => "sonde retour", "labels" => ["lcars-awaits-arch"]} =
+                 first,
+               %{"number" => 5, "labels" => ["type:feature", "stage/build"]}
+             ] = result["issues"]
+
+      # Axiom (reorg 2026-07-19): the entry never names the repo — the arch has "the project".
+      refute Map.has_key?(first, "repo")
+    end
+
+    test "list_issues: unreadable board surfaces an error, never a silent empty board" do
+      Process.put(:read_channel_board, {:error, :forge_down})
+
+      assert {:error, {:issues_unreadable, "fleet/alpha", {:error, :forge_down}}, _} =
+               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-arch")))
+    end
+
+    test "list_issues: architect gate (non-architect role → refused, no read)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :forbidden_not_architect, _} =
+               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-eng")))
+    end
+
+    test "get_issue: body + thread oldest first; author/created_at only when the forge says them" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue",
+                 %{"number" => 5},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["issue"] == 5
+      assert result["title"] == "vraie feature"
+      assert result["state"] == "open"
+      assert result["body"] == "le brief complet du ticket"
+      assert result["labels"] == ["type:feature", "genre/ops"]
+
+      assert [
+               %{
+                 "body" => "question du humain",
+                 "author" => "lordzurp",
+                 "created_at" => "2026-08-02T10:00:00Z"
+               },
+               %{"body" => _} = bare
+             ] = result["comments"]
+
+      # One meaning per shape: unknown author/date = ABSENT key, never null.
+      refute Map.has_key?(bare, "author")
+      refute Map.has_key?(bare, "created_at")
+      refute Map.has_key?(result, "comments_error")
+    end
+
+    test "get_issue: unreadable THREAD degrades loud — body kept, comments absent, error named" do
+      Process.put(:read_channel_thread, {:error, :forge_down})
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue",
+                 %{"number" => 5},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      # The body the ISSUE read yielded is not discarded because the THREAD read failed…
+      assert result["body"] == "le brief complet du ticket"
+      # …and the outage must never render as an empty thread.
+      refute Map.has_key?(result, "comments")
+      assert result["comments_error"] == "forge_unreachable"
+    end
+
+    test "get_issue: unreadable ISSUE is a typed error, never an empty ticket" do
+      assert {:error, {:issue_unreadable, 99, {:error, :not_found}}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue",
+                 %{"number" => 99},
+                 pod_state(uniq("pod-arch"))
+               )
+    end
+
+    test "get_issue: non-integer number → :invalid_arguments (guarded at the routing table)" do
+      assert {:error, :invalid_arguments, _} =
+               PodTools.handle_tool_call("get_issue", %{"number" => "5"}, pod_state("p"))
+    end
+
+    test "get_issue: architect gate (non-architect role → refused, no read)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
+
+      assert {:error, :forbidden_not_architect, _} =
+               PodTools.handle_tool_call(
+                 "get_issue",
+                 %{"number" => 5},
+                 pod_state(uniq("pod-rev"))
+               )
     end
   end
 end

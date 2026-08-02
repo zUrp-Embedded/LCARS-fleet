@@ -44,6 +44,19 @@ defmodule Fleet.Spawner.Pod.CompletedPayloadTest do
       refute Map.has_key?(payload, "repository")
     end
 
+    test "BL-6-20: the stamped brief_kind rides the BASE payload (a payload-only judge routes by it)" do
+      payload = CompletedPayload.build(data(brief_kind: "judge"), %{"decision" => "continue"})
+
+      assert payload["brief_kind"] == "judge"
+      # Still a bare payload otherwise (no project) — the stamp is base-level by design.
+      refute Map.has_key?(payload, "workspace")
+    end
+
+    test "BL-6-20: no stamp in the spawn opts → no brief_kind key (legacy pods keep their shape)" do
+      payload = CompletedPayload.build(data(), %{})
+      refute Map.has_key?(payload, "brief_kind")
+    end
+
     test "project WITHOUT repo_path (implicit empty map) → bare payload" do
       # `effective_project` returns `%{}` (neither opts[:project] nor spec["project"]) → `_` clause → base.
       payload = CompletedPayload.build(data([], %{"project" => %{}}), %{})

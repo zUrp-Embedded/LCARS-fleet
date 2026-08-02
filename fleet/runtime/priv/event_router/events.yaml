@@ -146,6 +146,14 @@ events:
   # racing the push). Real producer.
   deliverable.published: []
 
+  # deliverable.publish_lost (BL-6-03 S2): emitted by Pilot.StepRunConsumer when the OFFLOADED
+  # completion Task carrying a pod's publication DIES mid-work (witnessed by the Offload monitor's
+  # :DOWN; carries `pod_id` from the offload label meta + the death reason in the payload).
+  # Consumed by Spawner.Pod: a `:publishing` pipe lifts its flag NOW for a NAMED cause instead of
+  # expiring the 120s :publish_deadline blind — the deadline stays armed as the NET for the case
+  # where THIS event itself is lost. Real producer.
+  deliverable.publish_lost: []
+
   # --- post_extract.git (REMOVED) ---
   # `git.published`/`git.publish_failed` REMOVED: 0 producer (the RAM engine `Pipeline.Executor`
   # was removed; the system git rail — `Workflow.Git.commit/push composed by Deliverable`,

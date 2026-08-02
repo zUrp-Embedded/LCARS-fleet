@@ -25,22 +25,29 @@ defmodule Fleet.Pilot.OffloadTest do
   } do
     test = self()
 
+    # Go-signal (same rationale as the NORMALLY test below): the task waits before dying, so the
+    # monitor is attached deterministically and the :DOWN carries :boom, never a racy :noproc.
     {:ok, :offloaded} =
       Offload.async(
         sup_name(sup),
         fn ->
-          send(test, :task_started)
-          exit(:boom)
+          send(test, {:task_pid, self()})
+
+          receive do
+            :go -> exit(:boom)
+          end
         end,
         {"StepRunConsumer", "completion lost"}
       )
 
-    assert_receive :task_started, 1_000
+    assert_receive {:task_pid, task_pid}, 1_000
+    send(task_pid, :go)
     assert_receive {:DOWN, ref, :process, pid, :boom}, 1_000
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :handled = Offload.handle_down(ref, pid, :boom)
+        # 2-tuple label → empty meta (the meta-less consumers keep their shape).
+        assert {:handled, {:died, :boom, %{}}} = Offload.handle_down(ref, pid, :boom)
       end)
 
     assert log =~ "StepRunConsumer"
@@ -49,6 +56,33 @@ defmodule Fleet.Pilot.OffloadTest do
 
     # The label entry is CONSUMED at :DOWN (no pdict leak): a replay is no longer ours.
     assert :not_mine = Offload.handle_down(ref, pid, :boom)
+  end
+
+  test "a 3-tuple label hands its META back on an abnormal death (BL-6-03 S2)", %{sup: sup} do
+    test = self()
+
+    {:ok, :offloaded} =
+      Offload.async(
+        sup_name(sup),
+        fn ->
+          send(test, {:task_pid, self()})
+
+          receive do
+            :go -> exit(:boom)
+          end
+        end,
+        {"StepRunConsumer", "completion lost", %{pod_id: "pod-x", issue: 7}}
+      )
+
+    assert_receive {:task_pid, task_pid}, 1_000
+    send(task_pid, :go)
+    assert_receive {:DOWN, ref, :process, pid, :boom}, 1_000
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      # The consumer gets the business context back — the pod whose confirmation will never come.
+      assert {:handled, {:died, :boom, %{pod_id: "pod-x", issue: 7}}} =
+               Offload.handle_down(ref, pid, :boom)
+    end)
   end
 
   test "a task that ends NORMALLY → :DOWN routed silently (nominal end, entry consumed)", %{
@@ -84,7 +118,7 @@ defmodule Fleet.Pilot.OffloadTest do
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :handled = Offload.handle_down(ref, pid, :normal)
+        assert {:handled, :nominal} = Offload.handle_down(ref, pid, :normal)
       end)
 
     refute log =~ "DIED"
@@ -99,7 +133,7 @@ defmodule Fleet.Pilot.OffloadTest do
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :handled = Offload.handle_down(ref, pid, :noproc)
+        assert {:handled, {:died, :noproc, %{}}} = Offload.handle_down(ref, pid, :noproc)
       end)
 
     assert log =~ "DIED mid-work"

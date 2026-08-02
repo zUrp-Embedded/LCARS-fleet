@@ -52,6 +52,8 @@ spec:
       - mcp__fleet__create_issue
       - mcp__fleet__get_issue_status
       - mcp__fleet__list_escalations  # return channel: reads the awaits-arch escalations (worker verdict)
+      - mcp__fleet__list_issues       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
+      - mcp__fleet__get_issue         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
       - mcp__fleet__comment_issue     # return channel: replies on an in-flight ticket (in the role's name)
     disallowedTools:
       # snake_case: Anthropic API server tools, which bypass can_use_tool

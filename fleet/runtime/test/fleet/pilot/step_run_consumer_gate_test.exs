@@ -147,6 +147,19 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
+    # BL-6-20: same shape as `mandgate` but the judge step declares NOTHING — the card omission
+    # that used to silently hard-gate a native judge's verdict. The STAMPED payload closes it.
+    def load!("mandnodeclare") do
+      %{
+        "name" => "mandnodeclare",
+        "max_rework_rounds" => 2,
+        "steps" => %{
+          "brief-review" => %{"role" => "consultant", "needs" => []},
+          "build" => %{"role" => "engineer", "needs" => ["brief-review"]}
+        }
+      }
+    end
+
     # MA-12: 1-step workflow_map `build`(engineer, PRODUCER) TERMINAL with a SOFT gate → gatekeeper
     # escalation. A gatekeeper "continue" verdict on this producer terminal used to :promote (merge
     # WITHOUT judges, regression #8.F); the fix routes via tag_advance(_, producer?) → :review
@@ -798,6 +811,49 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received :closed
     refute_received {:open_pr, _, _, _}
     refute_received {:publish, _}
+  end
+
+  # ── BL-6-20: judge-ness is STAMPED at dispatch (payload wins), step-spec = legacy fallback ──
+
+  test "BL-6-20: a STAMPED judge payload routes as a judge even when the card declares NOTHING" do
+    # The fail-open this closes: same payload on the undeclared card WITHOUT the stamp used to
+    # have its verdict hard-gated as producer output (the legacy pin below keeps that measured).
+    payload =
+      brief_done(%{"decision" => "escalate_user", "reason" => "ambiguous brief"})
+      |> Map.merge(%{"workflow_map" => "mandnodeclare", "brief_kind" => "judge"})
+
+    assert {:ok, :awaiting_arch} = StepRunConsumer.maybe_complete(payload, hc())
+    assert_received {:label, "lcars-awaits-arch"}
+  end
+
+  test "BL-6-20: WITHOUT the stamp, an undeclared card keeps the exact legacy routing (no judge)" do
+    payload =
+      brief_done(%{"decision" => "escalate_user", "reason" => "ambiguous brief"})
+      |> Map.put("workflow_map", "mandnodeclare")
+
+    # The MEASURED legacy (and the very bug the stamp closes): the judge's verdict is treated as
+    # producer output — the completion goes PR-native and dies looking for a producer branch that
+    # a pre-PR judge never pushed. Pods spawned before the stamp keep exactly this behavior; the
+    # pin is deliberately the honest wart, not a cleaned-up outcome.
+    assert {:error, {:pr_lookup, :no_producer_branch}} =
+             StepRunConsumer.maybe_complete(payload, hc())
+
+    refute_received {:label, "lcars-awaits-arch"}
+  end
+
+  test "BL-6-20: the stamp WINS over the step declaration (the effective fact travels)" do
+    # A worker-stamped payload on a judge-declared step cannot come from our dispatcher (the
+    # dispatch resolves step || profile) — but if it arrives, the pod RAN as a worker and its
+    # payload says so: same doctrine as deliverable_mode (never re-derived downstream). Worker
+    # treatment of a pre-PR payload = the same measured PR-native dead end as above.
+    payload =
+      brief_done(%{"decision" => "escalate_user", "reason" => "not a verdict"})
+      |> Map.put("brief_kind", "worker")
+
+    assert {:error, {:pr_lookup, :no_producer_branch}} =
+             StepRunConsumer.maybe_complete(payload, hc())
+
+    refute_received {:label, "lcars-awaits-arch"}
   end
 
   # ── #8-fix "a producer NEVER merges alone" ───────────────────────────────────────

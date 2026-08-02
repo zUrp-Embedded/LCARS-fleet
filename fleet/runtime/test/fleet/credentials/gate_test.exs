@@ -57,4 +57,44 @@ defmodule Fleet.Credentials.GateTest do
     write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":""}}))
     assert {:error, {:credentials_invalid, {:not_logged_in, _}}} = Gate.validate(dir)
   end
+
+  describe "status/1 (BL-6-09 — the queryable, dashboard-safe login status)" do
+    @tag :tmp_dir
+    test "logged in → :logged_in with expires_at_ms as DATA, no token material", %{tmp_dir: dir} do
+      write_creds!(
+        dir,
+        ~s({"claudeAiOauth":{"accessToken":"tok-abc","refreshToken":"ref-x","expiresAt":1754130000000}})
+      )
+
+      assert %{status: :logged_in, path: path, expires_at_ms: 1_754_130_000_000} =
+               status = Gate.status(dir)
+
+      assert path =~ ".credentials.json"
+      # Dashboard-safe: the status must never carry token material.
+      refute inspect(status) =~ "tok-abc"
+      refute inspect(status) =~ "ref-x"
+    end
+
+    @tag :tmp_dir
+    test "expiresAt null is a legitimate durable login → expires_at_ms nil, still :logged_in",
+         %{tmp_dir: dir} do
+      write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":"tok-abc","expiresAt":null}}))
+      assert %{status: :logged_in, expires_at_ms: nil} = Gate.status(dir)
+    end
+
+    @tag :tmp_dir
+    test "empty accessToken → :not_logged_in (no reason key — the category IS the fact)",
+         %{tmp_dir: dir} do
+      write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":""}}))
+      assert %{status: :not_logged_in, path: _} = Gate.status(dir)
+    end
+
+    @tag :tmp_dir
+    test "absent file / foreign shape → :unreadable with the categorized reason", %{tmp_dir: dir} do
+      assert %{status: :unreadable, reason: :enoent} = Gate.status(dir)
+
+      write_creds!(dir, ~s({"somethingElse":true}))
+      assert %{status: :unreadable, reason: :no_oauth_block} = Gate.status(dir)
+    end
+  end
 end
