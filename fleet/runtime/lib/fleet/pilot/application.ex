@@ -1,4 +1,6 @@
 defmodule Fleet.Pilot.Application do
+  require Logger
+
   @moduledoc """
   Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
 
@@ -173,6 +175,7 @@ defmodule Fleet.Pilot.Application do
     validate_card_juries!()
     validate_card_steps!()
     validate_structural_roles!()
+    validate_ops_card!()
 
     # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
     # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
@@ -282,6 +285,66 @@ defmodule Fleet.Pilot.Application do
     end
 
     :ok
+  end
+
+  @doc false
+  # The OPS knob → CARD coherence, checked at boot (interim brake, IPC consultant 2026-08-02).
+  # `Roles.ops_workflow_map/1` names the card a `genre/ops` ticket burns, and NOTHING verified
+  # that the name resolves to a card that can actually SERVE a doc ticket: a dead name, or a card
+  # whose steps all sit on the code face, fails at the FIRST doc ticket — silently, one wedged
+  # ticket at a time, far from the config that caused it.
+  #
+  # THREE cases, because "absent" means two different things and only one of them is a defect:
+  #   * knob EXPLICITLY set (opts or app env) → the card MUST load and carry an ops producer.
+  #     Someone chose this name; a dead choice is held to account, fail-loud.
+  #   * knob at its DEFAULT and the card is absent from the catalogue → a catalogue with NO doc
+  #     rail, which is a legitimate deployment (an operator's own catalogue, a narrow fixture).
+  #     Refusing the boot there would be a POLICY this check has no mandate to set: it says so
+  #     LOUD instead, naming what such a deployment cannot do.
+  #   * card PRESENT but carrying no `face: ops` producer → fail-loud whatever the knob's origin:
+  #     that is the drift itself (a card that lost its ops face, the shipped canon breaking).
+  #
+  # What it proves is deliberately MINIMAL — it does not judge the card's shape. The per-face
+  # redesign (ONE card declaring face-tagged producers, killing this knob) is the real exit; a
+  # check that anticipated it would be rewritten with it. This one only closes the silence.
+  # (`opts` carries the test roots; prod calls it argument-less.)
+  def validate_ops_card!(opts \\ []) do
+    name = Fleet.Pilot.Roles.ops_workflow_map(opts)
+
+    chosen? =
+      Keyword.has_key?(opts, :ops_workflow_map) or
+        not is_nil(Application.get_env(:fleet_pilot, :ops_workflow_map))
+
+    case Fleet.Pilot.WorkflowMapNav.safe_load(&Fleet.Workflow.Loader.load!(&1, opts), name) do
+      {:ok, card} ->
+        ops_producers =
+          for {_step, %{"face" => "ops"} = spec} <- card["steps"] || %{},
+              is_binary(Map.get(spec, "role")),
+              do: spec["role"]
+
+        if ops_producers == [] do
+          raise "fleet_pilot: the ops card #{inspect(name)} (:ops_workflow_map) carries NO " <>
+                  "producer step on `face: ops` — a doc ticket routed here would be built on the " <>
+                  "code face (or not at all). Declare the face on its producer step, or point " <>
+                  "the knob at a card that does."
+        end
+
+        :ok
+
+      {:error, {:workflow_map_load_failed, _name, why}} when chosen? ->
+        raise "fleet_pilot: the ops card #{inspect(name)} (:ops_workflow_map) does NOT load " <>
+                "(#{why}) — every `genre/ops` ticket burns this name and would wedge at its " <>
+                "first dispatch. Fix the config or the card."
+
+      {:error, {:workflow_map_load_failed, _name, why}} ->
+        Logger.warning(
+          "fleet_pilot: no ops card in this catalogue (default #{inspect(name)} absent: #{why}) " <>
+            "— this deployment serves NO `genre/ops` ticket; such a ticket would wedge at dispatch. " <>
+            "Ship an ops card or point :ops_workflow_map at one."
+        )
+
+        :ok
+    end
   end
 
   @doc false

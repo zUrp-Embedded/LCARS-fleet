@@ -181,10 +181,14 @@ fi
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
 
 # Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
-# qu'on vient de poser. Scopes du contrat operateur : ses propres repos et issues, plus read:user.
+# qu'on vient de poser. `read:organization` est LOAD-BEARING et non evident : sans lui le token
+# rend 403 sur /orgs/.../members ET /teams/... — donc la sonde d'appartenance humaine (le
+# prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Mesure
+# le 2026-08-02 : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
+# que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
 if [[ "$WITH_BOX" -eq 1 ]]; then
   HUMAN_TOKEN="$(curl -s -m 10 -u "$HUMAN:$HUMAN_PASSWORD" -H "Content-Type: application/json" \
-      -X POST -d '{"name":"bench-operateur","scopes":["write:repository","write:issue","read:user"]}' \
+      -X POST -d '{"name":"bench-operateur","scopes":["write:repository","write:issue","read:organization","read:user"]}' \
       "$(api)/users/$HUMAN/tokens" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha1",""))' 2>/dev/null || true)"
 
