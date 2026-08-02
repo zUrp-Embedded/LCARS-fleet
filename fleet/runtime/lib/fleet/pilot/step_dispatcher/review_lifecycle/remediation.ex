@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -408,7 +408,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
                ctx.repo,
                pr_number,
                issue_n,
-               ctx.forge_opts
+               ctx.forge_opts,
+               # The PR's own base (dispatch_review single site): the face worktree to align.
+               base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
              ) do
           :ok -> {:ok, {:merged, pr_number}}
           {:error, _} = err -> err

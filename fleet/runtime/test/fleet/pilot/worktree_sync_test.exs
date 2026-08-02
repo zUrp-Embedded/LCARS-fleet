@@ -41,7 +41,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
     refute File.exists?(Path.join(proj, "hello.sh"))
 
-    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj")
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "main")
 
     # AFTER: the disk reflects origin/main — same SHA, delivered file present.
     assert File.exists?(Path.join(proj, "hello.sh"))
@@ -50,7 +50,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
 
   test "local clone absent → :ok (nothing to align: the clone is a MIRROR, the truth = main merged on the forge; skip logged debug)",
        %{sync: sync} do
-    assert :ok = WorktreeSync.sync_now(sync, "fleet/jamais-clone")
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/jamais-clone", "main")
   end
 
   test "concurrent syncs on the same worktree: serialized, all :ok and clone aligned (no index.lock)",
@@ -59,7 +59,9 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
 
     results =
       1..6
-      |> Enum.map(fn _ -> Task.async(fn -> WorktreeSync.sync_now(sync, "fleet/myproj") end) end)
+      |> Enum.map(fn _ ->
+        Task.async(fn -> WorktreeSync.sync_now(sync, "fleet/myproj", "main") end)
+      end)
       |> Task.await_many(30_000)
 
     # The GenServer serializes (one git at a time) → six concurrent alignments don't trample each other.

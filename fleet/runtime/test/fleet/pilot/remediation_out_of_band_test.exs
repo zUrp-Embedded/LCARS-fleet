@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.RemediationOutOfBandTest do
       repo: "fleet/p",
       forge_opts: [token: "system"],
       wake_recovery: nil,
-      opts: []
+      opts: [pr_base_branch: "main"]
     }
   end
 

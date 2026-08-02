@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -227,14 +227,16 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
 
-    # Projects the deliverable onto the local clone `/home/projects/<name>` — a MIRROR: the truth is
-    # the merged `main` on the forge; the sync is convergent (`reset --hard origin/main` — the next
-    # merge's sync catches up any missed one) and a failure is logged warning by WorktreeSync. The SERIALIZATION
-    # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
-    # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
-    # a failed alignment = disk behind, never a loss (the deliverable is on the forge). Independent of the
-    # close (the brick is merged either way).
-    _ = worktree_sync().sync(repo)
+    # Projects the deliverable onto the FACE's local worktree — a MIRROR: the truth is the merged
+    # branch on the forge; the sync is convergent (WorktreeSync picks the worktree AND the
+    # semantics from the branch — reset for the code face, rebase for the ops face, §C) and a
+    # failure is logged warning by WorktreeSync. The SERIALIZATION lives IN the dedicated
+    # GenServer (one `git` at a time on a worktree, against the race between the two merge
+    # triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
+    # a failed alignment = disk behind, never a loss (the deliverable is on the forge).
+    # Independent of the close (the brick is merged either way). `:base_branch` is REQUIRED of
+    # every caller — the seal merges a PR, and a PR always has a base (single-default-site).
+    _ = worktree_sync().sync(repo, Keyword.fetch!(opts, :base_branch))
 
     case close_result do
       :ok ->
@@ -258,9 +260,16 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   so). `{:error, {:close_after_merge, _}}` keeps the F-C066 semantics — the caller must skip
   its unlock.
   """
-  @spec converge_out_of_band_merge(module(), String.t(), integer(), integer(), keyword()) ::
+  @spec converge_out_of_band_merge(
+          module(),
+          String.t(),
+          integer(),
+          integer(),
+          keyword(),
+          keyword()
+        ) ::
           :ok | {:error, {:close_after_merge, term()}}
-  def converge_out_of_band_merge(forge, repo, pr_number, issue_n, forge_opts) do
+  def converge_out_of_band_merge(forge, repo, pr_number, issue_n, forge_opts, opts \\ []) do
     Logger.warning(
       "GatekeeperSeal: #{repo} PR ##{pr_number} found merged OUT-OF-BAND — converging the " <>
         "terminal guards (stage/merged + close) without the seal comment (no attribution lie)"
@@ -268,7 +277,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
     close_result = close_with_retry(forge, repo, issue_n, forge_opts, pr_number)
-    _ = worktree_sync().sync(repo)
+    # Same face rule as the seal path: the out-of-band merge landed on the PR's base.
+    _ = worktree_sync().sync(repo, Keyword.fetch!(opts, :base_branch))
 
     case close_result do
       :ok -> :ok

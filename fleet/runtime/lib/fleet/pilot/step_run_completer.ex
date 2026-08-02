@@ -418,7 +418,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # `StepDispatcher.promote_pr`. The gatekeeper signature is set INTERNALLY by `seal_and_merge`
     # (sole writer `GatekeeperSeal.as_gatekeeper/1`): this `:promote` terminal (e.g. after escalation)
     # cannot merge on a raw system token without a comment (merge attributed to `lcars-system`).
-    seal_opts = Keyword.put(opts, :head_branch, Map.get(step_run, :producer_branch))
+    seal_opts =
+      opts
+      |> Keyword.put(:head_branch, Map.get(step_run, :producer_branch))
+      # The face the PR merges into, threaded from the event (chantier face-projet) — the seal
+      # aligns the FACE worktree with it, and requires it (a PR always has a base).
+      |> Keyword.put(:base_branch, Map.fetch!(step_run, :base_branch))
 
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
            forge,
@@ -652,7 +657,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
       repo: step_run.repo,
       pr_number: pr,
       issue_number: step_run.issue_number,
-      producer_branch: Map.get(step_run, :producer_branch)
+      producer_branch: Map.get(step_run, :producer_branch),
+      # The face rides through (chantier face-projet): the seal aligns the face worktree.
+      base_branch: Map.fetch!(step_run, :base_branch)
     }
 
     # Gap BEFORE unlock: `promote` merges + posts the seal + sets `stage/merged` + closes the issue

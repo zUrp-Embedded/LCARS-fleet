@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
     `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   @doc """
@@ -254,7 +254,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     # blocked). Explicit intent (catalogue, then per-spawn opts) precedes the derived default.
     (system_mounts(claude_launch_path) ++
        cap_profile_mounts(cap_profile) ++
-       opts_mounts(opts) ++ project_ops_mount(opts, cap_profile))
+       opts_mounts(opts) ++
+       project_ops_mount(opts, cap_profile) ++ code_reference_mount(opts, cap_profile))
     |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
     |> mounts_env()
   end
@@ -277,6 +278,36 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     case project_ops_path(opts, cap_profile) do
       nil -> []
       path -> [%{"mode" => "ro", "path" => path}]
+    end
+  end
+
+  defp code_reference_mount(opts, cap_profile) do
+    case code_reference_path(opts, cap_profile) do
+      nil -> []
+      path -> [%{"mode" => "ro", "path" => path}]
+    end
+  end
+
+  @doc """
+  The OPPOSITE face as RO reference (chantier face-projet, inventory #9): for an OPS-face pod
+  (workspace = a work/ops clone), the CODE worktree `<projects_root>/<project>` — its brief talks
+  about a project whose code it must be able to READ (a spec that contradicts the code it
+  specifies is the poison this producer exists to kill), and never write. The work-ops RO mount
+  stays for ALL project pods (the BRIEFS channel: the host worktree carries the brief commit,
+  pushed or not); this only ADDS the other face. Code-face pods get `nil`: their workspace IS the
+  code, work-ops was already their reference. The face is read off the project map's
+  `base_branch` — threaded at dispatch, never re-derived here (single-default-site doctrine).
+  Same testability seam as its twin `project_ops_path/3` (the real root is hardcoded layout).
+  """
+  @spec code_reference_path(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t() | nil
+  def code_reference_path(opts, cap_profile, projects_root \\ Fleet.Layout.projects_root()) do
+    with true <- Fleet.Layout.ops_branch?(effective_project(opts, cap_profile)["base_branch"]),
+         project when is_binary(project) <- rc_project(opts, cap_profile),
+         path = Path.join(projects_root, project),
+         true <- File.dir?(path) do
+      path
+    else
+      _ -> nil
     end
   end
 

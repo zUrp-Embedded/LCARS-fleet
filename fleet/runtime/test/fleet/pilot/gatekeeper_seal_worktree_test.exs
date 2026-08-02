@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
 
   defmodule SpySync do
     # Called synchronously from seal_and_merge (same process as the test) → self() = the test.
-    def sync(repo), do: send(self(), {:worktree_sync, repo})
+    def sync(repo, branch), do: send(self(), {:worktree_sync, repo, branch})
   end
 
   setup %{tmp_dir: tmp} do
@@ -33,15 +33,21 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   end
 
   test "merge OK → projection triggered on the right repo" do
-    assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [])
-    assert_received {:worktree_sync, "fleet/myproj"}
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
+
+    assert_received {:worktree_sync, "fleet/myproj", "main"}
   end
 
   test "merge KO → NO projection (the merge did not happen, nothing to align)" do
     assert {:error, {:merge, _}} =
-             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/myproj", 7, 42, "engineer", [])
+             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/myproj", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
-    refute_received {:worktree_sync, _}
+    refute_received {:worktree_sync, _, _}
   end
 
   test "soft-default #3 — gatekeeper token ABSENT → seal REFUSES (no merge as system, no projection)" do
@@ -54,9 +60,11 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, empty)
 
     assert {:error, :role_token_unavailable} =
-             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [])
+             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
 
-    refute_received {:worktree_sync, _}
+    refute_received {:worktree_sync, _, _}
   end
 
   test "F-C066 — merge OK but close FAILS (persistent) → seal {:error, {:close_after_merge, _}} + LOUD log, projection anyway" do
@@ -74,7 +82,8 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
                    7,
                    42,
                    "engineer",
-                   []
+                   [],
+                   base_branch: "main"
                  )
       end)
 
@@ -82,6 +91,6 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
 
     # The merge did happen → the worktree projection IS triggered (the failed close does not
     # invalidate the merge).
-    assert_received {:worktree_sync, "fleet/myproj"}
+    assert_received {:worktree_sync, "fleet/myproj", "main"}
   end
 end

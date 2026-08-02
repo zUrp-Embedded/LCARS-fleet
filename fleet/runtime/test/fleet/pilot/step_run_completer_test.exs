@@ -395,6 +395,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         role: "reviewer",
         review_event: :request_changes,
         review_body: "il manque un test de la branche d'erreur"
@@ -417,6 +418,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         issue_number: 42,
         producer_branch: "lcars/issue-42-engineer"
       }
@@ -433,6 +435,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
+        base_branch: "main",
         issue_number: 42,
         producer_branch: "lcars/issue-42-engineer"
       }

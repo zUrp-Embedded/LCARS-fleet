@@ -80,6 +80,65 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
+  describe "code_reference_path/3 — the OPPOSITE face as RO reference (chantier face-projet #9)" do
+    # An ops-face pod reads the code it documents; a code-face pod gets nothing new (its workspace
+    # IS the code). The face comes off the project map's base_branch — threaded, never re-derived.
+    defp ops_opts(project_extra \\ %{}) do
+      [
+        rc_name: "myproj_test",
+        project:
+          Map.merge(
+            %{"repo_path" => "http://f/x.git", "base_branch" => "work/ops"},
+            project_extra
+          )
+      ]
+    end
+
+    @tag :tmp_dir
+    test "ops-face pod + code worktree present → <projects_root>/<project>", %{tmp_dir: tmp} do
+      File.mkdir_p!(Path.join(tmp, "myproj"))
+
+      assert LaunchSpec.code_reference_path(ops_opts(), cap_with_mounts([]), tmp) ==
+               Path.join(tmp, "myproj")
+    end
+
+    @tag :tmp_dir
+    test "code-face pod → nil (its workspace IS the code; work-ops was already its reference)", %{
+      tmp_dir: tmp
+    } do
+      File.mkdir_p!(Path.join(tmp, "myproj"))
+
+      code_opts = [
+        rc_name: "myproj_test",
+        project: %{"repo_path" => "http://f/x.git", "base_branch" => "main"}
+      ]
+
+      assert LaunchSpec.code_reference_path(code_opts, cap_with_mounts([]), tmp) == nil
+    end
+
+    @tag :tmp_dir
+    test "a FEATURE branch is not the ops face → nil (judge cloning an ops PR head: code-face treatment)",
+         %{tmp_dir: tmp} do
+      File.mkdir_p!(Path.join(tmp, "myproj"))
+
+      judge_opts = [
+        rc_name: "myproj_test",
+        project: %{"repo_path" => "http://f/x.git", "base_branch" => "lcars/issue-3-eng_doc"}
+      ]
+
+      assert LaunchSpec.code_reference_path(judge_opts, cap_with_mounts([]), tmp) == nil
+    end
+
+    test "ops-face pod but code worktree ABSENT → nil (the STRICT ro-bind would crash the spawn)" do
+      assert LaunchSpec.code_reference_path(
+               ops_opts(),
+               cap_with_mounts([]),
+               "/tmp/nexiste-pas-43"
+             ) ==
+               nil
+    end
+  end
+
   describe "permission_mode/1 — bounded to the CLI enum (R1-28)" do
     defp cap_with_permission_mode(mode) do
       %Fleet.CapProfile{

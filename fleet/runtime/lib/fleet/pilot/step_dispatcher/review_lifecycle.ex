@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   no captures in the `Ctx`: taking them at the source keeps the
   core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -215,7 +215,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              issue_n,
              producer,
              ctx.forge_opts,
-             head_branch: head
+             head_branch: head,
+             # The PR's own base, read at the dispatch_review single site (chantier face-projet):
+             # the seal aligns the FACE worktree the merge landed on.
+             base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
            ) do
         :ok ->
           # Die-on-promote (return discarded — honestly: the producer is `one-shot`, ALREADY dead at
