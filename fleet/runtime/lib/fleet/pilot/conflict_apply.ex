@@ -13,10 +13,9 @@ defmodule Fleet.Pilot.ConflictApply do
   Never destructive to the shared clone: a worktree in a temp dir, removed afterwards, so
   `WorktreeSync`'s working tree is never touched.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
   alias Fleet.Conflict
-  alias Fleet.Layout
   alias Fleet.Pilot.GitOps
 
   # Automated resolution author -- the committer stays the human (GitOps identity), for traceability.
@@ -29,8 +28,10 @@ defmodule Fleet.Pilot.ConflictApply do
   `:fetch` (default true).
   """
   @spec apply(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
-  def apply(repo, feature_ref, opts \\ []) do
-    dir = Keyword.get(opts, :dir, Path.join(Layout.projects_root(), Layout.project_name(repo)))
+  def apply(_repo, feature_ref, opts \\ []) do
+    # REQUIRED (chantier face-projet): the face worktree — an ops PR resolves in the OPS worktree,
+    # and a defaulted code-face dir here would silently operate on the wrong repository.
+    dir = Keyword.fetch!(opts, :dir)
 
     if File.dir?(Path.join(dir, ".git")) do
       apply_in(dir, feature_ref, opts)
@@ -42,7 +43,9 @@ defmodule Fleet.Pilot.ConflictApply do
   @doc "Core flow against an explicit clone `dir` (isolated for testing with a local remote)."
   @spec apply_in(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
   def apply_in(dir, feature_ref, opts \\ []) do
-    base_branch = Keyword.get(opts, :base_branch, "origin/main")
+    # REQUIRED (chantier face-projet): the merge target is the PR's own base — a defaulted
+    # `origin/main` would merge the CODE face into an ops branch and report :auto_resolved.
+    base_branch = Keyword.fetch!(opts, :base_branch)
     auth = Keyword.get(opts, :auth, true)
     fetch? = Keyword.get(opts, :fetch, true)
     apply_branch = "lcars-apply-" <> sanitize(feature_ref)
