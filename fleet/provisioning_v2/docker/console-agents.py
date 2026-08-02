@@ -294,6 +294,47 @@ PAGE = r"""<!doctype html>
   .step .sfacts{color:var(--dim);font-size:11.5px;margin-top:2px}
   .arrow{color:var(--faint);padding:0 10px 6px 22px;font-size:11px}
 
+  /* ─── pipeline : les boites qui s'enchainent ─── */
+  .pipe{max-width:860px}
+  .pbox{border:1px solid var(--line);border-left:4px solid var(--vi);border-radius:0 8px 8px 0;
+        background:var(--pan);padding:10px 14px;margin:0}
+  .pbox .prole{color:var(--or);font-weight:600;font-size:14px}
+  .pbox .pname{color:var(--dim);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
+  .pbox .pfacts{margin-top:5px}
+  .pbox.judge{border-left-color:var(--cy)}
+  .pbox.term{border-left-color:var(--gr)}
+  .plink{color:var(--faint);font-size:11px;padding:2px 0 2px 26px;line-height:1.2}
+  .plink::before{content:"│";display:block;padding-left:2px}
+  .stage{border:1px dashed var(--line);border-radius:8px;padding:9px 12px;margin:0}
+  .stage>.sttl{color:var(--faint);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+  .stage .par{display:flex;gap:10px;flex-wrap:wrap}
+  .stage .par .pbox{flex:1 1 240px;margin:0}
+  .fact{display:inline-block;border:1px solid var(--line);border-radius:4px;padding:0 7px;
+        margin:2px 4px 0 0;font-size:11px;color:var(--dim)}
+  .fact b{color:var(--ink);font-weight:400}
+
+  /* ─── editeur structure ─── */
+  .fs{border:1px solid var(--line);border-radius:0 8px 8px 0;border-left:3px solid var(--am);
+      background:var(--pan);padding:10px 14px;margin:0 0 12px;max-width:860px}
+  .fs>.ftitle{color:var(--faint);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+  .ckrow{display:flex;gap:14px;flex-wrap:wrap}
+  .ck{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink);cursor:pointer}
+  .ck input{accent-color:#e8913c;width:14px;height:14px;cursor:pointer}
+  .ck.off{color:var(--faint)}
+  .frow{display:flex;gap:10px;align-items:center;margin:6px 0;flex-wrap:wrap}
+  .frow label{color:var(--dim);font-size:12px;min-width:110px}
+  input[type=text],input[type=number],select{background:#0a0f14;color:var(--ink);border:1px solid var(--line);
+        border-radius:4px;font:12.5px var(--mono);padding:3px 8px}
+  input[type=number]{width:70px}
+  select{cursor:pointer}
+  input:focus,select:focus{outline:1px solid var(--or)}
+  .stepfs{border:1px solid var(--line);border-left:3px solid var(--vi);border-radius:0 8px 8px 0;
+          background:#111820;padding:9px 12px;margin:8px 0}
+  .stepfs .shead{display:flex;gap:10px;align-items:center}
+  .stepfs .shead .del{margin-left:auto}
+  .btn.del{color:var(--rd)} .btn.del:hover{border-color:var(--rd)}
+  .mini{color:var(--faint);font-size:11px}
+
   textarea{width:100%;height:50vh;background:#0a0f14;color:var(--ink);border:1px solid var(--line);
            border-radius:6px;font:12.5px/1.5 var(--mono);padding:10px;resize:vertical}
   textarea:focus{outline:1px solid var(--or)}
@@ -348,7 +389,10 @@ function switchTo(v){
 }
 document.getElementById('tab-agents').onclick = () => switchTo('agents');
 document.getElementById('tab-cards').onclick = () => switchTo('cards');
-if(location.hash === '#cartes') switchTo('cards');
+const h = location.hash||'';
+if(h === '#cartes') switchTo('cards');
+else if(h.startsWith('#carte-')){ csel = h.slice(7); switchTo('cards'); }
+else if(h.startsWith('#edit-')){ csel = h.slice(6); editing = true; switchTo('cards'); }
 
 /* ─── AGENTS ─── */
 function rail(){
@@ -491,7 +535,7 @@ function drawCards(){
     const b = el('button','row'+(name===csel&&!editing?' on':''));
     b.appendChild(el('span','id', name));
     b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')));
-    b.onclick = () => { csel = name; editing=false; drawCards(); };
+    b.onclick = () => { csel = name; editing=false; ED=null; drawCards(); };
     r.appendChild(b);
   }
   if(Object.keys(drafts).length){
@@ -500,7 +544,7 @@ function drawCards(){
       const b = el('button','row ghost'+(name===csel&&editing?' on':''));
       b.appendChild(el('span','id', name+' ✎'));
       b.appendChild(el('span','meta','draft local'));
-      b.onclick = () => { csel = name; editing=true; drawCards(); };
+      b.onclick = () => { csel = name; editing=true; ED=null; drawCards(); };
       r.appendChild(b);
     }
   }
@@ -519,7 +563,7 @@ function cardCenter(){
   head.appendChild(el('span','k', editing ? 'EDITION — draft local, jamais servi' : 'carte canon'));
   const act = el('span','act');
   if(!editing){
-    const eb = el('button','btn','éditer'); eb.onclick = () => { editing=true; cardCenter(); };
+    const eb = el('button','btn','éditer'); eb.onclick = () => { editing=true; ED=null; cardCenter(); };
     act.appendChild(eb);
   }
   const rb = el('button','btn','recharger'); rb.onclick = () => loadCatalogue(true);
@@ -530,25 +574,74 @@ function cardCenter(){
   if(editing){ editor(body, src); c.appendChild(body); return; }
 
   if(meta.presentation) body.appendChild(el('p','present', meta.presentation));
+
+  // Le pipeline entier, boites chainees — et le JURY est un etage de plein rang, pas une note
+  // de bas de page : c'est lui qui coute des tokens et rend les verdicts.
+  const pipe = el('div','pipe');
   const steps = spec.steps||{};
   const order = topoOrder(steps);
-  for(let i=0;i<order.length;i++){
-    const sname = order[i], st = steps[sname]||{};
-    if((st.needs||[]).length) body.appendChild(el('div','arrow','▼ apres ' + st.needs.join(', ')));
-    const sd = el('div','step');
-    const l1 = el('div');
-    l1.appendChild(el('span','sname', sname+' '));
-    l1.appendChild(el('span','srole','→ '+(st.role||'?')));
-    sd.appendChild(l1);
-    const facts=[];
-    if(st.judge_target) facts.push('juge: '+st.judge_target);
-    if(st.brief_kind) facts.push('brief_kind: '+st.brief_kind);
-    if((st.inputs||[]).length) facts.push('inputs: '+st.inputs.join(', '));
-    if(facts.length) sd.appendChild(el('div','sfacts', facts.join(' · ')));
-    body.appendChild(sd);
+  for(const sname of order){
+    const st = steps[sname]||{};
+    if((st.needs||[]).length) pipe.appendChild(el('div','plink','apres ' + st.needs.join(' + ')));
+    pipe.appendChild(stepBox(sname, st));
   }
-  if(!order.length) body.appendChild(el('div','empty','carte sans steps (jury seul)'));
+  if((spec.jury||[]).length){
+    pipe.appendChild(el('div','plink', order.length ? 'la PR nait — jugement' : 'jugement'));
+    const stg = el('div','stage');
+    stg.appendChild(el('div','sttl','jury de PR · verdicts paralleles et independants'));
+    const par = el('div','par');
+    for(const j of spec.jury) par.appendChild(judgeBox(j));
+    stg.appendChild(par);
+    pipe.appendChild(stg);
+  }
+  pipe.appendChild(el('div','plink','tous verdicts rendus'));
+  const term = el('div','pbox term');
+  term.appendChild(el('div','pname','promote'));
+  term.appendChild(el('div','prole','gatekeeper scelle · rebase merge'));
+  term.appendChild(fact({'rework max': String(spec.max_rework_rounds ?? '—'),
+                         'protection': 'main verrouillee par la forge'}));
+  pipe.appendChild(term);
+  body.appendChild(pipe);
   c.appendChild(body);
+}
+
+function stepBox(sname, st){
+  const b = el('div','pbox');
+  b.appendChild(el('div','pname', sname));
+  b.appendChild(el('div','prole', st.role||'?'));
+  const f = {};
+  if(st.judge_target) f['juge'] = st.judge_target;
+  if(st.brief_kind) f['brief_kind'] = st.brief_kind;
+  if((st.inputs||[]).length) f['inputs'] = st.inputs.join(', ');
+  b.appendChild(fact(f));
+  return b;
+}
+
+function judgeBox(name){
+  const b = el('div','pbox judge');
+  b.appendChild(el('div','pname','juge'));
+  b.appendChild(el('div','prole', name));
+  const prof = CAT.profiles && CAT.profiles[name];
+  const f = {};
+  if(prof){
+    const spec=(prof.data||{}).spec||{}, inv=spec.invocation||{};
+    f['modele'] = (inv.model||'?')+' · '+(inv.effort||'?');
+    f['vie'] = inv.lifetime_scope||'?';
+    if((spec.scope||{}).git_ops_denied) f['git'] = 'denie: '+spec.scope.git_ops_denied.join(',');
+  } else {
+    f['profil'] = 'ABSENT du catalogue';
+  }
+  b.appendChild(fact(f));
+  return b;
+}
+
+function fact(map){
+  const d = el('div','pfacts');
+  for(const k of Object.keys(map)){
+    const s = el('span','fact'); s.append(k+': '); const bb=document.createElement('b'); bb.textContent=map[k]; s.appendChild(bb);
+    d.appendChild(s);
+  }
+  return d;
 }
 
 function topoOrder(steps){
@@ -565,11 +658,76 @@ function topoOrder(steps){
   return out;
 }
 
+/* ─── editeur : formulaire structure + YAML, MEME sortie, MEME parseur ───
+   Le formulaire est construit depuis les donnees parsees PAR LE BEAM (jamais un parse YAML en
+   JS) ; il EMET du YAML naif — et l'emission a le droit d'etre naive parce que l'acceptation
+   est le vrai Loader : toute betise d'emission rougit au bouton Valider. */
+let ED = null;
+
+function edStateFrom(data){
+  const meta = (data||{}).metadata||{}, spec = (data||{}).spec||{};
+  const steps = spec.steps||{};
+  return {
+    ints: (meta.applicable_intensity||[]).slice(),
+    desc: meta.description||'', pres: meta.presentation||'',
+    jury: (spec.jury||[]).slice(),
+    rework: spec.max_rework_rounds ?? 2,
+    steps: topoOrder(steps).map(n => ({name: n, role: steps[n].role||'',
+      brief_kind: steps[n].brief_kind||'', judge_target: steps[n].judge_target||'',
+      needs: (steps[n].needs||[]).slice(), inputs: (steps[n].inputs||[]).slice()}))
+  };
+}
+
+function judgeRoles(){
+  return Object.keys(CAT.profiles||{}).filter(n => ((CAT.profiles[n].data||{}).spec||{}).brief_kind==='judge').sort();
+}
+function allRoles(){ return Object.keys(CAT.profiles||{}).sort(); }
+function inputVocab(){
+  const v = new Set();
+  for(const c of Object.values(CAT.cards||{}))
+    for(const st of Object.values(((c.data||{}).spec||{}).steps||{}))
+      for(const i of (st.inputs||[])) v.add(i);
+  return [...v].sort();
+}
+
+function emitYaml(st){
+  const q = s => JSON.stringify(String(s));
+  const L = ['kind: WorkflowMap','metadata:',`  name: ${csel}`];
+  if(st.desc) L.push(`  description: ${q(st.desc)}`);
+  if(st.pres) L.push(`  presentation: ${q(st.pres)}`);
+  if(st.ints.length) L.push(`  applicable_intensity: [${st.ints.join(', ')}]`);
+  L.push('spec:');
+  L.push(`  jury: [${st.jury.join(', ')}]`);
+  L.push(`  max_rework_rounds: ${st.rework}`);
+  L.push('  steps:');
+  for(const s of st.steps){
+    L.push(`    ${s.name}:`);
+    L.push(`      role: ${s.role}`);
+    if(s.brief_kind) L.push(`      brief_kind: ${s.brief_kind}`);
+    if(s.judge_target) L.push(`      judge_target: ${s.judge_target}`);
+    L.push(`      needs: [${s.needs.join(', ')}]`);
+    if(s.inputs.length){ L.push('      inputs:'); for(const i of s.inputs) L.push(`        - ${i}`); }
+  }
+  if(!st.steps.length) L.push('    {}');
+  return L.join('\n') + '\n';
+}
+
 function editor(body, src){
-  const ta = document.createElement('textarea');
-  ta.value = src.text || '';
-  ta.spellcheck = false;
-  body.appendChild(ta);
+  const isDraft = !(CAT.cards||{})[csel] || (editing && (CAT.drafts||{})[csel] && src===(CAT.drafts||{})[csel]);
+  if(ED === null){
+    const canonData = ((CAT.cards||{})[csel]||{}).data;
+    ED = {mode: (isDraft || !canonData) ? 'yaml' : 'form',
+          state: canonData ? edStateFrom(canonData) : null,
+          text: src.text || ''};
+  }
+
+  const mbar = el('div'); mbar.style.cssText='display:flex;gap:8px;margin-bottom:10px';
+  const fb = el('button','btn'+(ED.mode==='form'?' warn':''),'formulaire');
+  const yb = el('button','btn'+(ED.mode==='yaml'?' warn':''),'yaml brut');
+  mbar.appendChild(fb); mbar.appendChild(yb);
+  body.appendChild(mbar);
+
+  const zone = el('div'); body.appendChild(zone);
 
   const bar = el('div'); bar.style.cssText='display:flex;gap:10px;margin-top:10px';
   const vb = el('button','btn','valider (vrai parseur)');
@@ -580,16 +738,117 @@ function editor(body, src){
   const res = el('div','vres'); res.style.display='none'; body.appendChild(res);
 
   const notice = el('div','notice');
-  notice.innerHTML = "Un draft n'est <b>jamais servi</b> par la fleet : le runtime publie une "
-    + "image du catalogue au boot, le disque est inerte ensuite (contrat du Loader — redeploy = "
-    + "restart). « Valider » passe par <b>le parseur reel</b> (schema v2.5 + GraphValidator) via "
-    + "le release eval : l'erreur affichee est celle que le boot cracherait.";
+  notice.innerHTML = "Un draft n'est <b>jamais servi</b> (image publiee au boot — redeploy = restart). "
+    + "« Valider » passe par le <b>parseur reel</b> (schema v2.5 + GraphValidator, release eval). "
+    + "⚠ Le formulaire regenere le YAML : les <b>commentaires du canon ne survivent pas</b> — pour "
+    + "retoucher une carte commentee sans perdre ses cicatrices, passer par « yaml brut ».";
   body.appendChild(notice);
+
+  let ta = null;
+  const currentText = () => ED.mode==='yaml' ? ta.value : emitYaml(ED.state);
+
+  function renderZone(){
+    zone.innerHTML='';
+    fb.className = 'btn'+(ED.mode==='form'?' warn':''); yb.className = 'btn'+(ED.mode==='yaml'?' warn':'');
+    if(ED.mode==='yaml'){
+      ta = document.createElement('textarea'); ta.value = ED.text; ta.spellcheck=false;
+      ta.oninput = () => { ED.text = ta.value; };
+      zone.appendChild(ta);
+      return;
+    }
+    const st = ED.state;
+
+    const g = el('div','fs'); g.appendChild(el('div','ftitle','gouvernance'));
+    const ints = el('div','ckrow');
+    for(const i of ['C0','C1','C2','C3','C4']){
+      const on = st.ints.includes(i);
+      const lb = el('label','ck'+(on?'':' off'));
+      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+      ck.onchange = () => { ck.checked ? st.ints.push(i) : st.ints.splice(st.ints.indexOf(i),1);
+                            st.ints.sort(); renderZone(); };
+      lb.appendChild(ck); lb.append(' '+i); ints.appendChild(lb);
+    }
+    g.appendChild(ints);
+    const rw = el('div','frow'); const rl = el('label',null,'rework max');
+    const ri = document.createElement('input'); ri.type='number'; ri.min=0; ri.max=9; ri.value=st.rework;
+    ri.onchange = () => { st.rework = parseInt(ri.value||'0',10); };
+    rw.appendChild(rl); rw.appendChild(ri); g.appendChild(rw);
+    zone.appendChild(g);
+
+    const j = el('div','fs'); j.appendChild(el('div','ftitle','jury de PR — verdicts paralleles'));
+    const jr = el('div','ckrow');
+    for(const name of judgeRoles()){
+      const on = st.jury.includes(name);
+      const lb = el('label','ck'+(on?'':' off'));
+      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+      ck.onchange = () => { ck.checked ? st.jury.push(name) : st.jury.splice(st.jury.indexOf(name),1); renderZone(); };
+      lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
+    }
+    j.appendChild(jr);
+    j.appendChild(el('div','mini','choix = les cap-profiles brief_kind: judge du catalogue'));
+    zone.appendChild(j);
+
+    const sfs = el('div','fs'); sfs.appendChild(el('div','ftitle','steps — la chaine'));
+    st.steps.forEach((s, idx) => {
+      const sf = el('div','stepfs');
+      const sh = el('div','shead');
+      const ni = document.createElement('input'); ni.type='text'; ni.value=s.name; ni.size=16;
+      ni.onchange = () => { s.name = ni.value.trim(); renderZone(); };
+      const rs = document.createElement('select');
+      for(const r of ['', ...allRoles()]){ const o=document.createElement('option'); o.value=r; o.textContent=r||'— role —';
+        if(r===s.role) o.selected=true; rs.appendChild(o); }
+      rs.onchange = () => { s.role = rs.value; };
+      const del = el('button','btn del','retirer'); del.onclick = () => { st.steps.splice(idx,1); renderZone(); };
+      sh.appendChild(ni); sh.appendChild(el('span','mini','→')); sh.appendChild(rs);
+      const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
+      sf.appendChild(sh);
+
+      const f2 = el('div','frow'); f2.appendChild(el('label',null,'judge_target'));
+      const jt = document.createElement('select');
+      for(const v of ['','brief','pr']){ const o=document.createElement('option'); o.value=v; o.textContent=v||'aucun (producteur)';
+        if(v===s.judge_target) o.selected=true; jt.appendChild(o); }
+      jt.onchange = () => { s.judge_target = jt.value; s.brief_kind = jt.value ? 'judge' : ''; };
+      f2.appendChild(jt); sf.appendChild(f2);
+
+      const nd = el('div','frow'); nd.appendChild(el('label',null,'apres (needs)'));
+      const ndr = el('div','ckrow');
+      for(const other of st.steps.filter(x=>x!==s && x.name)){
+        const on = s.needs.includes(other.name);
+        const lb = el('label','ck'+(on?'':' off'));
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+        ck.onchange = () => { ck.checked ? s.needs.push(other.name) : s.needs.splice(s.needs.indexOf(other.name),1); };
+        lb.appendChild(ck); lb.append(' '+other.name); ndr.appendChild(lb);
+      }
+      if(!st.steps.filter(x=>x!==s).length) ndr.appendChild(el('span','mini','racine du DAG'));
+      nd.appendChild(ndr); sf.appendChild(nd);
+
+      const inp = el('div','frow'); inp.appendChild(el('label',null,'inputs'));
+      const ir = el('div','ckrow');
+      for(const v of inputVocab()){
+        const on = s.inputs.includes(v);
+        const lb = el('label','ck'+(on?'':' off'));
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+        ck.onchange = () => { ck.checked ? s.inputs.push(v) : s.inputs.splice(s.inputs.indexOf(v),1); };
+        lb.appendChild(ck); lb.append(' '+v); ir.appendChild(lb);
+      }
+      inp.appendChild(ir); sf.appendChild(inp);
+      sfs.appendChild(sf);
+    });
+    const add = el('button','btn','+ step');
+    add.onclick = () => { st.steps.push({name:'step-'+(st.steps.length+1), role:'', brief_kind:'',
+                                          judge_target:'', needs:[], inputs:[]}); renderZone(); };
+    sfs.appendChild(add);
+    zone.appendChild(sfs);
+  }
+
+  fb.onclick = () => { if(ED.state){ ED.mode='form'; renderZone(); } };
+  yb.onclick = () => { if(ED.mode==='form') ED.text = emitYaml(ED.state); ED.mode='yaml'; renderZone(); };
+  renderZone();
 
   vb.onclick = async () => {
     res.style.display='block'; res.className='vres'; res.textContent='validation par le BEAM… (quelques secondes)';
     const r = await (await fetch('/api/cards/validate', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name: csel, text: ta.value})})).json();
+      body: JSON.stringify({name: csel, text: currentText()})})).json();
     if(r.ok && (r.warnings||[]).length){ res.className='vres warn'; res.textContent='CARTE VALIDE (parseur) — mais :\n' + r.warnings.join('\n'); }
     else if(r.ok){ res.className='vres ok'; res.textContent='CARTE VALIDE — schema + graphe passes par le vrai Loader.'; }
     else { res.className='vres ko'; res.textContent=r.error||'erreur inconnue'; }
@@ -597,11 +856,11 @@ function editor(body, src){
   sb.onclick = async () => {
     res.style.display='block'; res.className='vres'; res.textContent='validation puis sauvegarde…';
     const r = await (await fetch('/api/cards/draft', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name: csel, text: ta.value})})).json();
+      body: JSON.stringify({name: csel, text: currentText()})})).json();
     if(r.ok){ res.className='vres ok'; res.textContent='DRAFT SAUVE : '+r.path+'\n(non servi — deploiement = geste operateur + restart)'; }
     else { res.className='vres ko'; res.textContent=r.error||'refus'; }
   };
-  cb.onclick = () => { editing=false; loadCatalogue(); };
+  cb.onclick = () => { editing=false; ED=null; loadCatalogue(); };
 }
 
 function cardCtx(){
