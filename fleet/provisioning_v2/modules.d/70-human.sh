@@ -107,6 +107,14 @@ apply() {
       else
         cat "$TEMPLATE" > "$tmp"
       fi
+      # L'exposition des listeners est une propriété du DÉPLOIEMENT, pas de l'humain : le runtime
+      # lie en loopback par défaut, ce qui dans un conteneur rend le deck injoignable depuis un
+      # navigateur (la loopback est celle du conteneur). Elle voyage donc par l'environnement du
+      # substrat — et doit atterrir ICI, parce que `fleet_v2` lit ce fichier et non l'environnement
+      # du conteneur : un `su - <humain>` repart d'un environnement vierge.
+      if [[ -n "${LCARS_BIND_HOST:-}" ]]; then
+        { echo ""; echo "LCARS_BIND_HOST=$LCARS_BIND_HOST"; } >> "$tmp"
+      fi
       # D4 (ADR install/compile/release) : ce que le système fait est signé du SYSTÈME. Si le
       # token lcars-system est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
       # du cycle), on câble sa lecture ICI ; sinon le token minté ne serait jamais lu (le

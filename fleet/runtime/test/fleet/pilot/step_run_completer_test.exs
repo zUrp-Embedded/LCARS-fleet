@@ -809,7 +809,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       step_run = producer_step_run(:review, %{workflow_map: "ops-zero"})
 
       zero_loader = fn "ops-zero" ->
-        %{"jury" => [], "steps" => %{"build" => %{"role" => "eng_doc", "needs" => []}}}
+        %{"jury" => [], "steps" => %{"build" => %{"role" => "scribe", "needs" => []}}}
       end
 
       # NO reviewer_roles seam here — it would win over both cards and prove nothing. The

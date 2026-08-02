@@ -1,3 +1,31 @@
+# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
+# ║  VARIANTE DEGRADEE — NE PAS APPLIQUER EN DEHORS D'UN BANC JETABLE                         ║
+# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
+#
+# CE FICHIER N'EST PAS UNE RECETTE ACTIVE. Son extension n'est pas `.tf`, donc `tofu` l'ignore —
+# c'est deliberé : il ne doit jamais s'appliquer par inadvertance. Il existe pour qu'on N'OUBLIE
+# PAS ce qui a ete casse, et comment le defaire.
+#
+# CE QUI EST DEGRADE, ET POURQUOI (arbitrage user, 2026-08-02) :
+#   Le compte humain nait `must_change_password = true` et sans mot de passe connu. C'est le bon
+#   defaut (l'humain pose son propre secret au premier login) mais il rend l'UI de la forge
+#   INACCESSIBLE tant que personne n'a fait ce geste — donc impossible de tester une auth web
+#   contre la forge. Le banc pose donc un mot de passe CONNU et retire le drapeau.
+#
+#   Etat applique sur le banc (a la main, par API admin — PAS par ce fichier) :
+#     lcars / toto32toto32 · must_change_password = false
+#   Le mot de passe demande etait `toto32` : Gitea REFUSE (« password must be at least 8
+#   characters »). Double, pour rester memorable sans se battre avec la regle.
+#
+# CE QUE CA COUTE : n'importe qui joignant la forge de test connait le mot de passe de l'humain.
+# Sur un banc en loopback, assume. Sur autre chose, c'est une porte ouverte.
+#
+# POUR DEFAIRE :
+#   PATCH /api/v1/admin/users/lcars {"login_name":"lcars","source_id":0,
+#                                    "password":"<aleatoire>","must_change_password":true}
+#
+# LA RECETTE REELLE reste `forge.tf`, inchangee, a cote. Toute correction va LA-BAS.
+#
 # ═══════════════════════════════════════════════════════════════════════════
 # LCARS Fleet — empreinte forge (structure déclarative)
 #
@@ -41,11 +69,7 @@ locals {
   # sur lui, BL-6-11 fermé). scoper = juge natif (team judges) ; le nom consultant est LIBRE,
   # le runtime l'a retiré ({:error, :not_found}) AVANT cette dépose — un compte sans cap-profile
   # est inerte, l'ordre inverse ne l'est pas.
-  # scribe (2026-08-02, chantier face-projet) : le producteur DOCUMENTAIRE — meme mecanique de
-  # livraison que l'engineer (git-native, forge-blind), sur la face work/ops. Team writers, comme
-  # tout producteur. Lecon scoper (BL du 2026-08-02) : un role ajoute au catalogue SANS son compte
-  # forge boucle en role_token_unavailable — le compte nait ICI, avec le role.
-  roles = ["architect", "engineer", "scribe", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+  roles = ["architect", "engineer", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {
@@ -100,12 +124,14 @@ resource "gitea_user" "starfleet" {
 # site-admin Gitea passe outre toutes les permissions de team, donc un daily-admin rendrait
 # `humans` décoratif : il pourrait relabelliser `stage/*` et déclarer terminé un travail qui ne
 # l'est pas.
+# DEGRADE : `must_change_password = false` + mot de passe connu (cf. l'en-tete de ce fichier).
+# La recette reelle garde `true` — l'humain pose son propre secret au premier login.
 resource "gitea_user" "human" {
   username             = var.human_username
   login_name           = var.human_username
   email                = var.human_email
   password             = var.seed_password
-  must_change_password = true  # daily : l'humain pose son propre secret au 1er login
+  must_change_password = false # DEGRADE (banc) — la recette reelle : true
   admin                = false # NON site-admin : l'humain opère VIA la fleet, pas par gestes forge manuels
   # Hardening : l'humain daily ne crée ni org, ni git-hook serveur, ni import local
   # (le break-glass, c'est le compte admin de l'installeur, pas ce compte-ci).
@@ -194,7 +220,7 @@ resource "gitea_team" "humans" {
 
 # ── Memberships ────────────────────────────────────────────────────────────
 locals {
-  writers   = ["architect", "engineer", "scribe", "gatekeeper"]
+  writers   = ["architect", "engineer", "gatekeeper"]
   judges    = ["qualifier", "reviewer", "scoper"]
   externals = ["vulcan"]
 }
@@ -225,16 +251,4 @@ resource "gitea_team_membership" "externals" {
 resource "gitea_team_membership" "human" {
   team_id  = gitea_team.humans.id
   username = gitea_user.human.username
-}
-
-# lcars-system ∈ humans : le token système doit LIRE les membres de `humans` — c'est la
-# vérification d'admission de l'onboard (`{:human_team_unverifiable, …}` refuse l'onboard quand
-# cette lecture échoue). BL-6-27 : deux agents ont posé ce membership à la main, séparément, sur
-# deux bancs — un contournement réinventé deux fois est un trou de recette. Aucun privilège
-# nouveau : la team est `read` et `system` (write, can_create_repos) la domine déjà — seule la
-# visibilité de la liste des membres est acquise. Le volet delete_project (repo-admin exigé par
-# Gitea) reste OUVERT dans BL-6-27 : il se règle par une identité, pas en élargissant `system`.
-resource "gitea_team_membership" "system_reads_humans" {
-  team_id  = gitea_team.humans.id
-  username = gitea_user.system.username
 }

@@ -293,7 +293,7 @@ defmodule Fleet.Workflow.DeliverableGate do
         # are FORBIDDEN in a deliverable chain — a commit touching `.claude/**` or a NON-root
         # `CLAUDE.md` would plant (or delete) directive material in the target repo at harvest.
         # Same per-commit listing as the secret scan below: zero extra git call. The ROOT
-        # CLAUDE.md stays legitimate (an eng_doc may document the project).
+        # CLAUDE.md stays legitimate (a scribe may document the project).
         case Enum.find(files, &forbidden_instruction_path?/1) do
           nil ->
             case Enum.find(files, &Regex.match?(@secret_file_re, &1)) do

@@ -18,5 +18,5 @@ kind: ReservedSeat
 metadata:
   name: vulcan
   # 0..7 taken (starfleet 0, architect 1, gatekeeper 2, engineer 3, qualifier 4, reviewer 5,
-  # scoper 6, eng_doc 7). Uniqueness is enforced by the contracts check (role_index scan).
+  # scoper 6, scribe 7). Uniqueness is enforced by the contracts check (role_index scan).
   role_index: 8

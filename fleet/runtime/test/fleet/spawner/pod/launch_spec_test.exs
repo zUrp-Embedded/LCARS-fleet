@@ -123,7 +123,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
       judge_opts = [
         rc_name: "myproj_test",
-        project: %{"repo_path" => "http://f/x.git", "base_branch" => "lcars/issue-3-eng_doc"}
+        project: %{"repo_path" => "http://f/x.git", "base_branch" => "lcars/issue-3-scribe"}
       ]
 
       assert LaunchSpec.code_reference_path(judge_opts, cap_with_mounts([]), tmp) == nil

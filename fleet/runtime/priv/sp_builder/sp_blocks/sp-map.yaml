@@ -44,14 +44,14 @@ engineer:
 # --- Producer documentaire (git-native sur la face ops : commits locaux, le systeme pousse) ---
 # Meme socle que l'engineer (producteur pipe, wake-longlived) : seuls le bloc methode et le bloc
 # role changent — la mecanique de livraison est IDENTIQUE, c'est la these du chantier face-projet.
-eng_doc:
+scribe:
   - core/pod-sanctuary
   - core/runtime-contract
   - core/wake-longlived
   - core/evidence
   - core/producer-output
-  - method/eng_doc-redact
-  - role/eng_doc
+  - method/scribe-redact
+  - role/scribe
 
 # --- Brief judge (pre-PR, read-only: no diff, the input is the brief) ---
 scoper:
@@ -61,6 +61,16 @@ scoper:
   - core/judge-verdict
   - method/brief-review
   - role/scoper
+
+# --- Reserved seat: external auditor (duplicate of scoper by user arbitrage 2026-08-02 —
+# a valid, provable profile that no card calls; see the header of its cap-profile) ---
+vulcan:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-verdict
+  - method/brief-review
+  - role/vulcan
 
 # --- Exception judge / final promotion (arbitrates the upstream verdicts; no diff) ---
 # One-shot per-project judge (reorg 2026-07-19) — NO core/wake-longlived: its single eval mandate

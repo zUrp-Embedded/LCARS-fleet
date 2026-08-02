@@ -158,6 +158,8 @@ COPY fleet/provisioning_v2/docker/console.sh         /opt/lcars/console.sh
 COPY fleet/provisioning_v2/docker/console-humans.sh  /opt/lcars/console-humans.sh
 COPY fleet/provisioning_v2/docker/console-status.sh  /opt/lcars/console-status.sh
 COPY fleet/provisioning_v2/docker/console-landing.sh /opt/lcars/console-landing.sh
+COPY fleet/provisioning_v2/docker/console-deck.py    /opt/lcars/console-deck.py
+COPY fleet/provisioning_v2/docker/console-pod.sh     /opt/lcars/console-pod.sh
 COPY fleet/provisioning_v2/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
@@ -191,6 +193,7 @@ RUN printf '%s\n' \
 
 RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console-humans.sh \
                /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
+               /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/fleet/provisioning_v2/provision \
                /opt/lcars/fleet/provisioning_v2/modules.d/*.sh \
                /opt/lcars/fleet/runtime/etc/provision-role-tokens.sh
