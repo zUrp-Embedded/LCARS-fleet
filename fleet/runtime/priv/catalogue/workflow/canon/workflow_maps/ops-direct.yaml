@@ -1,8 +1,9 @@
 # Pipeline V2 — ops-direct (chantier face-projet, 2026-08-02)
 #
 # Date: 2026-08-02
-# Statut: canon, INERTE tant que le moteur ne lit pas `face` (Phase 2 du chantier) — la
-#         presentation le crie, cf. TECHNIQUE ci-dessous.
+# Statut: actif — rail cable et PROUVE le 2026-08-02 sur fleet neuve docker (banc faceproof) :
+#         ticket genre/ops -> burn ops-direct -> eng_doc -> PR base=work/ops -> merge scelle
+#         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
 # Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
 # Consommé par: Fleet.Workflow.Loader (schema v2.5, clé `face` du step).
 #
@@ -23,7 +24,7 @@ kind: WorkflowMap
 metadata:
   name: ops-direct
   description: "Ticket documentaire — l'eng_doc rédige sur work/ops, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
-  presentation: "Carte TECHNIQUE (rail en construction — chantier face-projet Phase 2 non câblée : le moteur ignore encore `face`, la sélectionner aujourd'hui enverrait le producteur sur la mauvaise face). À terme : le chemin DIRECT des livrables documentaires, sur toute carte, à toute criticité."
+  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : l'eng_doc rédige sur work/ops (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre ops), jamais par projet — toute carte de criticité garde son pipeline code."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
