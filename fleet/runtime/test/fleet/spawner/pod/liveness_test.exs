@@ -30,6 +30,21 @@ defmodule Fleet.Spawner.Pod.LivenessTest do
     assert Liveness.liveness_moved?({nil, nil}, {nil, nil})
   end
 
+  test "3-tuple probe (pane hash): a pane CHANGE alone is movement — the in-generation signal" do
+    # jsonl frozen between message boundaries + holder cpu idle + TUI repainting = alive.
+    assert Liveness.liveness_moved?({10, 5, 111}, {10, 5, 222})
+    # Static screen + frozen signals = genuine silence.
+    refute Liveness.liveness_moved?({10, 5, 111}, {10, 5, 111})
+    # A nil hash on either side proves nothing (capture failure never counts as movement).
+    refute Liveness.liveness_moved?({10, 5, nil}, {10, 5, 333})
+    refute Liveness.liveness_moved?({10, 5, 111}, {10, 5, nil})
+    # The other signals still carry alone.
+    assert Liveness.liveness_moved?({10, 5, 111}, {11, 5, 111})
+    # Fully unobservable 3-tuple = unknown, never proven silence.
+    assert Liveness.liveness_moved?({10, 5, 111}, {nil, nil, nil})
+    assert Liveness.unobservable?({nil, nil, nil})
+  end
+
   test "unobservable?/1 flags the fully-nil sample (the tick handler logs the degrade)" do
     assert Liveness.unobservable?({nil, nil})
     refute Liveness.unobservable?({10, nil})

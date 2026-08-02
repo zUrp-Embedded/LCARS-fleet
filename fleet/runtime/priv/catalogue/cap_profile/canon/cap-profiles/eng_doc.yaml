@@ -81,6 +81,12 @@ spec:
   # Same delivery contract as the engineer: commits in its own workspace, the system
   # verifies (I-CBC gate: identity/secrets/base) then pushes on the branch it chose.
   # The FACE that workspace clones is the card's business (`face: ops`), never this file's.
+  # Producer watchdog (BL debug scribe 2026-08-02): 300 s default killed a producer mid-way
+  # through ONE long generation (the jsonl only grows at message boundaries; the pane-hash
+  # probe now carries in-generation liveness, this raises the true-idle budget too — real
+  # producer sessions run hours).
+  timeouts:
+    response_sec: 1800
   deliverable_mode: git_native
   # brief = executable instruction (the issue body), the role ACTS. REQUIRED (schema).
   brief_kind: worker

@@ -435,6 +435,37 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     end)
   end
 
+  test "residual workspace of a DEAD predecessor is MORGUED, never erased (one generation kept)",
+       %{tmp_dir: tmp} do
+    src = make_source_repo(Path.join(tmp, "morgue-src"))
+    pod_dir = Path.join(tmp, "pod-morgue")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
+
+    {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
+    # The dead predecessor's uncommitted work — 10 minutes of a producer's life.
+    File.write!(Path.join(ws, "review-in-progress.md"), "l'oeuvre non commitee")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, ^ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
+      end)
+
+    assert File.read!(Path.join(ws <> ".morgue", "review-in-progress.md")) =~ "l'oeuvre"
+    assert log =~ "moved to"
+    refute File.exists?(Path.join(ws, "review-in-progress.md"))
+
+    # ONE generation: a third spawn replaces the morgue with the SECOND corpse.
+    File.write!(Path.join(ws, "second-death.md"), "generation 2")
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, ^ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
+    end)
+
+    assert File.exists?(Path.join(ws <> ".morgue", "second-death.md"))
+    refute File.exists?(Path.join(ws <> ".morgue", "review-in-progress.md"))
+  end
+
   test "read_original_claude_md on a repo without a tracked CLAUDE.md → :absent", %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "plain-src"))
     pod_dir = Path.join(tmp, "pod-noclaude")

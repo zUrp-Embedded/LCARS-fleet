@@ -202,10 +202,21 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
          # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
          _ =
-           with(
-             {:ok, ro} <- Fleet.Pilot.ForgeClient.as_role(forge_opts, role),
-             do: forge.start_stopwatch(repo, lock_target, ro)
-           ),
+           (case Fleet.Pilot.ForgeClient.as_role(forge_opts, role) do
+              {:ok, ro} ->
+                forge.start_stopwatch(repo, lock_target, ro)
+
+              {:error, :role_token_unavailable} ->
+                # STILL best-effort (a pure Gitea metric never blocks a dispatch) but no longer
+                # MUTE: a missing role token here is a provisioning defect (the four-list class),
+                # and its only forge-visible symptom is "the worker never shows up on the ticket"
+                # — measured twice (eng_doc bench, scribe bench) at one diagnosis session each.
+                Logger.warning(
+                  "StepDispatcher: no forge token for role #{inspect(role)} — stopwatch NOT " <>
+                    "started on #{repo}##{lock_target} (the ticket will not show the worker " <>
+                    "arriving; check the role account/token provisioning)"
+                )
+            end),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, brief_ref, brief_sha) do
       # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`

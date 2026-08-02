@@ -68,8 +68,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # and is not an empty directory") → PERMANENT wedge of the issue (a pod that times out otherwise
           # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
           # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
-          # just after, a fresh clone is always correct).
-          _ = File.rm_rf(ws)
+          # just after, a fresh clone is always correct). The slate is cleaned through the MORGUE,
+          # never a mute shredder (debug scribe 2026-08-02): a deadline-killed producer left 10+ min
+          # of uncommitted work in ws, and this rm_rf erased it — deliverable loss is the house's
+          # top severity. A residual ws MOVES to `<ws>.morgue` (previous morgue replaced: ONE
+          # generation kept — the operator salvage window, not an archive), logged ERROR.
+          morgue_residual_workspace(ws)
 
           ref = project["reference_repo_path"]
 
@@ -202,6 +206,37 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # rather than a reset onto an undefined base (which would keep the previous issue's state).
           {:error, {:reset_failed, :no_base_sha}}
       end
+    end
+
+    # The residual-workspace morgue (cf. the clone-site comment): move, never erase. Kept ONE
+    # generation deep — `<ws>.morgue` is a salvage window for the operator, not an archive; the
+    # NEXT death replaces it. Move failure degrades to the old rm_rf (the clone MUST proceed —
+    # a wedged issue trades a lost deliverable for a dead rail) and says so.
+    defp morgue_residual_workspace(ws) do
+      _ =
+        if File.exists?(ws) do
+          morgue = ws <> ".morgue"
+          _ = File.rm_rf(morgue)
+
+          _ =
+            case File.rename(ws, morgue) do
+              :ok ->
+                Logger.error(
+                  "Phase.Clone: residual workspace of a DEAD predecessor moved to #{morgue} — " <>
+                    "salvage any uncommitted work there; replaced at the next respawn"
+                )
+
+              {:error, reason} ->
+                Logger.error(
+                  "Phase.Clone: residual workspace #{ws} could NOT be morgued (#{inspect(reason)}) " <>
+                    "— falling back to rm_rf (clean slate over wedge; uncommitted work lost)"
+                )
+
+                _ = File.rm_rf(ws)
+            end
+        end
+
+      :ok
     end
 
     @doc """

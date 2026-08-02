@@ -49,10 +49,14 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     state.pod_dir
     |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
-      case File.rm(f) do
+      # RENAME, not rm (debug scribe 2026-08-02): the stale jsonl is the DEAD predecessor's
+      # transcript — the only forensic trail of what it was doing when killed. `.dead` frees the
+      # UUID exactly like removal (the glob matches *.jsonl only) and keeps ONE generation of
+      # evidence; the next death replaces it.
+      case File.rename(f, f <> ".dead") do
         :ok ->
           Logger.info(
-            "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} removed (UUID GC → fresh session)"
+            "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} -> .dead (UUID freed, transcript kept one generation)"
           )
 
         {:error, :enoent} ->
@@ -61,7 +65,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
         {:error, reason} ->
           Logger.warning(
-            "pod #{state.pod_id} gc: could NOT remove stale jsonl #{Path.basename(f)} " <>
+            "pod #{state.pod_id} gc: could NOT rename stale jsonl #{Path.basename(f)} " <>
               "(#{inspect(reason)}) — the --session-id launch will surface it as 'Session ID already in use'"
           )
       end
@@ -127,7 +131,13 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
           case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
             :ok ->
-              :ok
+              # Anti-leak, UNTRACKED case (measured live on the scribe bench: `?? CLAUDE.md` in
+              # git status): on a repo that does not track a root CLAUDE.md, OUR composed copy is
+              # stageable — a pod's `git add -A` would ship pod-identity material in its
+              # deliverable, and the gate's path wall deliberately allows the ROOT CLAUDE.md.
+              # `.git/info/exclude` hides it from add/status, is clone-local, and never ships.
+              # (The TRACKED case is covered by the sanitizer's skip-worktree.)
+              exclude_composed_claude_md(workspace)
 
             {:error, reason} ->
               Logger.warning(
@@ -186,6 +196,35 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           {:error, {:recall_seed_missing, jsonl}}
         end
     end
+  end
+
+  # cf. the call-site comment (anti-leak, untracked case). Idempotent; best-effort LOUD.
+  defp exclude_composed_claude_md(workspace) do
+    exclude = Path.join(workspace, ".git/info/exclude")
+    line = "/CLAUDE.md"
+
+    with {:ok, content} <-
+           (case File.read(exclude) do
+              {:ok, c} -> {:ok, c}
+              {:error, :enoent} -> {:ok, ""}
+              err -> err
+            end),
+         false <- String.contains?(content, line),
+         :ok <- File.mkdir_p(Path.dirname(exclude)),
+         :ok <- File.write(exclude, line <> "\n", [:append]) do
+      :ok
+    else
+      true ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "pod: composed CLAUDE.md NOT excluded in #{workspace} (#{inspect(reason)}) — " <>
+            "a pod commit-all could ship it (the gate allows root CLAUDE.md by design)"
+        )
+    end
+
+    :ok
   end
 
   # The repo-section revival (BL-6-16 — cf. the call-site comment for WHY here and not at

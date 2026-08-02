@@ -43,7 +43,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` and
   `default_response_timeout_sec/1` are internal (called ONLY by the functions above).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   # ============================================================
@@ -85,7 +85,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
     case keyword_opt(state, :liveness_probe_fun) ||
            Application.get_env(:fleet_spawner, :liveness_probe_fun) do
       fun when is_function(fun, 1) -> fun.(state)
-      _ -> {jsonl_size(state), proc_cpu_jiffies(state)}
+      _ -> {jsonl_size(state), proc_cpu_jiffies(state), pane_hash(state)}
     end
   end
 
@@ -104,15 +104,48 @@ defmodule Fleet.Spawner.Pod.Liveness do
   @spec liveness_moved?(term(), term()) :: boolean()
   def liveness_moved?(nil, _now), do: true
   def liveness_moved?(_prev, {nil, nil}), do: true
+  def liveness_moved?(_prev, {nil, nil, nil}), do: true
+
+  # 3-tuple (current default probe): the PANE hash is the primary in-generation signal — the
+  # claude TUI repaints (spinner + elapsed counter) during a long SINGLE generation, exactly
+  # when the jsonl sits between message boundaries and reads as silence (measured kill: a
+  # producer writing one large doc for >5 min died mid-work). A pane CHANGE is movement; a nil
+  # hash (capture failed) contributes nothing (anti-kill bias, same as the other signals).
+  def liveness_moved?({pj, pc, ph}, {nj, nc, nh}),
+    do: grew?(pj, nj) or grew?(pc, nc) or pane_changed?(ph, nh)
+
   def liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
 
   @doc "Is this sample fully UNOBSERVABLE (both signals nil)? The tick handler logs the degrade."
   @spec unobservable?(term()) :: boolean()
   def unobservable?({nil, nil}), do: true
+  def unobservable?({nil, nil, nil}), do: true
   def unobservable?(_), do: false
 
   defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
   defp grew?(_, _), do: false
+
+  # Pane movement = hash INEQUALITY (a screen is not monotonic), counted only when BOTH
+  # captures succeeded — a nil on either side proves nothing about activity.
+  defp pane_changed?(prev, now) when is_integer(prev) and is_integer(now), do: prev != now
+  defp pane_changed?(_, _), do: false
+
+  # Hash of the visible REPL screen (`tmux capture-pane -p`, via the PodTmux authority — "" on
+  # any failure -> nil). An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive);
+  # a generating pod repaints every second (elapsed counter) -> the signal the jsonl cannot
+  # carry mid-message.
+  defp pane_hash(state) do
+    case Map.get(state, :pod_id) do
+      pod_id when is_binary(pod_id) ->
+        case Fleet.Spawner.PodTmux.capture_pane(pod_id) do
+          "" -> nil
+          content -> :erlang.phash2(content)
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   # Cumulative size of the pod's `<session_id>.jsonl` (append-only → grows on each message/tool-result;
   # shared glob `SessionFiles.jsonl_paths/2`). `nil` if no jsonl (session not yet written).

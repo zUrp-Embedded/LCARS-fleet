@@ -67,4 +67,37 @@ defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
     ws_md = File.read!(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
     assert ws_md == md
   end
+
+  test "the UNTRACKED composed CLAUDE.md never reaches a pod commit-all (info/exclude)",
+       %{tmp_dir: tmp} do
+    # Repo WITHOUT a tracked root CLAUDE.md — the measured bench case (`?? CLAUDE.md`): our
+    # composed copy is untracked and would ride a `git add -A` into the deliverable.
+    src = Path.join(tmp, "bare-src")
+    File.mkdir_p!(src)
+    {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", src], stderr_to_stdout: true)
+    {_, 0} = git(["config", "user.email", "t@lcars.local"], src)
+    {_, 0} = git(["config", "user.name", "test"], src)
+    File.write!(Path.join(src, "code.txt"), "x")
+    {_, 0} = git(["add", "-A"], src)
+    {_, 0} = git(["commit", "-q", "-m", "base"], src)
+
+    pod_dir = Path.join(tmp, "pod-excl")
+    File.mkdir_p!(pod_dir)
+    File.write!(Path.join(pod_dir, "CLAUDE.md"), "COMPOSED pod identity")
+
+    {:ok, cap} = Fleet.CapProfile.load("engineer")
+    cap = Fleet.CapProfile.with_project(cap, %{"repo_path" => src, "base_branch" => "main"})
+    state = %{pod_id: "t-excl", pod_dir: pod_dir, opts: [], cap_profile: cap}
+
+    assert :ok = Scaffold.maybe_bootstrap_project_workspace(state)
+
+    ws = Path.join(pod_dir, "workspace")
+    assert File.exists?(Path.join(ws, "CLAUDE.md"))
+
+    {_, 0} = git(["add", "-A"], ws)
+    {staged, 0} = git(["diff", "--cached", "--name-only"], ws)
+
+    refute staged =~ "CLAUDE.md",
+           "the composed CLAUDE.md leaked into the pod's stage: #{staged}"
+  end
 end
