@@ -701,7 +701,8 @@ function stageModel(data){
   const steps=spec.steps||{}; const P=pools();
   const st={ints:(meta.applicable_intensity||[]).slice(), desc:meta.description||'',
             pres:meta.presentation||'', rework: spec.max_rework_rounds ?? 2,
-            jury:(spec.jury||[]).slice(), pre:null, producers:[], audit:null, extra:[]};
+            jury:(spec.jury||[]).slice(), juryOn:(spec.jury||[]).length>0,
+            pre:null, producers:[], audit:null, extra:[]};
   for(const n of topoOrder(steps)){
     const sd=steps[n]||{};
     const item={name:n, role:sd.role||'', face:sd.face||'', inputs:(sd.inputs||[]).slice()};
@@ -780,12 +781,20 @@ function editor(body, src){
   let ta = null;
   const currentText = () => ED.mode==='yaml' ? ta.value : emitYaml(ED.state);
 
-  function seatSelect(current, pool, onpick){
-    const rs = document.createElement('select');
-    for(const r of ['', ...pool]){ const o=document.createElement('option'); o.value=r;
-      o.textContent=r||'— siege —'; if(r===current) o.selected=true; rs.appendChild(o); }
-    rs.onchange = () => onpick(rs.value);
-    return rs;
+  /* Tous les sieges du pool VISIBLES (radios) — un dropdown cache l offre, et « qui peut
+     s asseoir la » est exactement l information que la page doit montrer. */
+  let seatSeq = 0;
+  function seatRadios(current, pool, onpick, allowNone){
+    const g = el('span','ckrow'); const name = 'seat'+(seatSeq++);
+    const mk = (val, label) => {
+      const lb = el('label','ck'+(val===current?'':' off'));
+      const rb = document.createElement('input'); rb.type='radio'; rb.name=name; rb.checked = val===current;
+      rb.onchange = () => onpick(val);
+      lb.appendChild(rb); lb.append(' '+label); g.appendChild(lb);
+    };
+    if(allowNone) mk('', allowNone);
+    for(const r of pool) mk(r, r);
+    return g;
   }
 
   function stageBox(title, on, toggleable, buildBody, onToggle){
@@ -809,6 +818,7 @@ function editor(body, src){
     zone.innerHTML='';
     fb.className = 'btn'+(ED.mode==='form'?' warn':''); yb.className = 'btn'+(ED.mode==='yaml'?' warn':'');
     if(ED.mode==='yaml'){
+      sb.disabled = false; sb.style.opacity='1';
       ta = document.createElement('textarea'); ta.value = ED.text; ta.spellcheck=false;
       ta.oninput = () => { ED.text = ta.value; };
       zone.appendChild(ta);
@@ -835,7 +845,7 @@ function editor(body, src){
 
     zone.appendChild(stageBox('① PRE-FLIGHT — le brief est juge avant tout', !!st.pre, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'juge du brief'));
-      f.appendChild(seatSelect(st.pre.role, P.judges, v => { st.pre.role = v; }));
+      f.appendChild(seatRadios(st.pre.role, P.judges, v => { st.pre.role = v; renderZone(); }));
       box.appendChild(f);
       box.appendChild(el('div','mini','sieges = brief_kind: judge · inputs auto: ticket.body · needs cable par l ordre'));
     }, on => { st.pre = on ? {name:'brief-review', role:P.judges[0]||'', face:'', inputs:[]} : null; renderZone(); }));
@@ -850,11 +860,11 @@ function editor(body, src){
       const ni = document.createElement('input'); ni.type='text'; ni.value=pr.name; ni.size=14;
       ni.onchange = () => { pr.name = ni.value.trim(); };
       sh.appendChild(ni); sh.appendChild(el('span','mini','→'));
-      sh.appendChild(seatSelect(pr.role, P.producers, v => { pr.role = v; }));
+      sh.appendChild(seatRadios(pr.role, P.producers, v => { pr.role = v; renderZone(); }));
       const faces = enumOf('face');
       if(faces.length){
-        sh.appendChild(el('span','mini','face'));
-        sh.appendChild(seatSelect(pr.face, faces, v => { pr.face = v; }));
+        sh.appendChild(el('span','mini','· face'));
+        sh.appendChild(seatRadios(pr.face, faces, v => { pr.face = v; renderZone(); }, '(moteur)'));
       }
       const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
       const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
@@ -869,11 +879,11 @@ function editor(body, src){
 
     zone.appendChild(stageBox('③ AUDIT — un juge lit le livrable', !!st.audit, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'auditeur'));
-      f.appendChild(seatSelect(st.audit.role, P.judges, v => { st.audit.role = v; }));
+      f.appendChild(seatRadios(st.audit.role, P.judges, v => { st.audit.role = v; renderZone(); }));
       box.appendChild(f);
     }, on => { st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
 
-    zone.appendChild(stageBox('④ JURY DE PR — verdicts paralleles', true, false, (box)=>{
+    zone.appendChild(stageBox('④ JURY DE PR — verdicts paralleles', st.juryOn, true, (box)=>{
       const jr = el('div','ckrow');
       for(const name of P.judges){
         const on = st.jury.includes(name);
@@ -883,8 +893,19 @@ function editor(body, src){
         lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
       }
       box.appendChild(jr);
-      box.appendChild(el('div','mini','jury vide = promotion directe (chemin nominal c0) · le promoteur n est PAS ici'));
-    }));
+      box.appendChild(el('div','mini','le promoteur n est PAS ici — il scelle toujours (etage ⑤)'));
+    }, on => { st.juryOn = on; if(!on) st.jury = []; renderZone(); }));
+
+    const workOk = st.producers.length > 0 || !!st.audit;
+    if(!workOk){
+      const warnb = el('div','vres warn');
+      warnb.style.display='block';
+      warnb.textContent = "AUCUN ETAGE DE TRAVAIL : ajoute un producteur (②) ou active l audit (③). "
+        + "Une carte sans travail passerait le schema d aujourd hui — le clic la refuse, et le "
+        + "durcissement (steps minProperties) est demande au proprietaire du schema.";
+      zone.appendChild(warnb);
+    }
+    sb.disabled = !workOk; sb.style.opacity = workOk ? '1' : '.4';
 
     const pm = el('div','fs'); pm.style.borderLeftColor='var(--gr)';
     pm.appendChild(el('div','ftitle','⑤ PROMOTE — jamais une option'));
