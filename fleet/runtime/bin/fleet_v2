@@ -16,7 +16,7 @@
 #   - the on-switches (starfleet permanent front-desk + forge-driven step-mode machine).
 #
 # Human config: ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (projects are discovered
-#         by topic `lcars-fleet-<human>`, no fixed watched repo).
+#         by ORG MEMBERSHIP, no fixed watched repo).
 # Gestures: fleet_v2 {start|stop|restart|status|version|forge}.
 
 set -euo pipefail
@@ -106,9 +106,12 @@ setup_env() {
     die "profil forge inconnu : « $LCARS_FORGE » — $forge_file absent (« fleet_v2 forge <nom> » vers un profil existant, ou ajoute le fichier)"
   fi
 
-  # F-037 multi-project: the poller DISCOVERS its repos by topic (lcars-fleet-<human>), so no
-  # LCARS_PILOT_POLL_REPO is required any more. The fail-loud guard is on FORGE_BASE_URL (discovery +
-  # per-step-run push), matching the Elixir guard `Fleet.Pilot.Application.step_children!`.
+  # F-037 multi-project: the poller DISCOVERS its repos by listing the ORG, so no
+  # LCARS_PILOT_POLL_REPO is required any more. The fail-loud guard is on FORGE_BASE_URL (discovery
+  # + per-step-run push), matching the Elixir guard `Fleet.Pilot.Application.step_children!`.
+  # WS3 retired the mutable topic marker this comment used to name: org membership IS the admission
+  # frontier, and per-human scoping moved to the issue-level `assigned_by` filter. A launcher that
+  # names a mechanism the code dropped is read as current — it printed that claim at every start.
   : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour le scan des projets + le push}"
 
   compute_ports
@@ -223,7 +226,8 @@ cmd_start() {
   # Mode follows the deployment (derived from where this launcher sits — nothing hardcoded):
   #   - INSTALL (/local/LCARS_v2): the self-contained RELEASE (`rel/.../bin/fleet_umbrella start`) runs
   #     WITHOUT the repo (bundled priv, embedded ERTS).
-  #   - SOURCE (dev): `mix run --no-halt` from the repo (fast iteration) + the source's LIVE cap-profiles.
+  #   - SOURCE (dev): `mix run --no-halt` from the repo (fast iteration). The catalogue is the live
+  #     source tree either way — `_build/<env>/lib/lcars_fleet/priv` is a symlink to `priv/`.
   # Erlang distribution is PER-HUMAN (cf. setup_env): node `fleet_<user>`, never the shared fixed
   # `fleet_umbrella`. ON only when LCARS_FLEET_V2_ERL_NODE is set (RPC debug); OFF otherwise (no epmd).
   local erl_node="$ERL_NODE" erl_cookie="$ERL_COOKIE" dist_on="$DIST_ON"
@@ -244,14 +248,18 @@ cmd_start() {
     launch_cmd="exec '$rel_bin' start"
   else
     mode="dev (mix run, MIX_ENV=$mix_env)"
-    export LCARS_CAPPROFILES_ROOT="${LCARS_CAPPROFILES_ROOT:-$RUNTIME_DIR/priv/cap_profile/canon/cap-profiles}"
+    # NO cap-profile root pinned here. Mix links `_build/<env>/lib/lcars_fleet/priv` to the source
+    # `priv/`, so the default root ALREADY reads the live tree — the override bought nothing, and
+    # it made this launcher a second authority on the catalogue's layout. It broke the moment the
+    # catalogue moved (2026-08-01) and killed the BEAM at boot: one layout, one authority, and it
+    # is `Fleet.Catalogue`, never a path rebuilt in shell.
     [[ -n "$dist_on" ]] && export ELIXIR_ERL_OPTIONS="-name $erl_node -setcookie $erl_cookie ${ELIXIR_ERL_OPTIONS:-}"
     launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
   fi
 
   echo "fleet_v2: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
   echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · webhook $WEBHOOK_PORT" >&2
-  echo "fleet_v2: scan multi-projet par topic lcars-fleet-<humain> (F-037, plus de repo fixe)" >&2
+  echo "fleet_v2: scan multi-projet — tout depot de l'org (F-037, plus de repo fixe)" >&2
 
   # DEDICATED tmux socket (fresh server) → it captures the env exported above. The BEAM runs detached
   # there and survives this terminal. `start` (release) / `mix run --no-halt` (dev): the foreground is
