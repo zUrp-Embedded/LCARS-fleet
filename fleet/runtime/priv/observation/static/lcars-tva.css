@@ -74,7 +74,10 @@ html, body {
   grid-template-columns: 110px 1fr;
   grid-template-rows: 64px 1fr 36px;
   gap: 0;
-  height: 100vh;
+  /* 100% et non 100vh : embarque dans un cadre (le deck de la boite montre cette page dans un
+     onglet), `vh` mesure la fenetre du navigateur et non le cadre — le contenu deborde ou se
+     replie. `100%` mesure ce qui contient reellement. */
+  height: 100%;
 }
 
 .lcars-header {
@@ -99,8 +102,13 @@ html, body {
   overflow-y: auto;
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto auto;
+  /* AUTO-FIT, PAS DEUX COLONNES FIXES : `1fr 1fr` divise en deux QUELLE QUE SOIT la largeur —
+     dans un contenant etroit (cadre, fenetre reduite, ecran secondaire) les sept panneaux
+     tombent a quelques pixels de large et le deck devient illisible sans rien signaler. Avec
+     un plancher de 340px, la grille passe a une colonne au lieu de tout ecraser. Meme regle
+     que `.obs-grid`, qui la portait deja pour les cartes de pods. */
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-auto-rows: minmax(0, auto);
   gap: 12px;
 }
 /* commits + health : split vertical (côte à côte) en mode-fleet, row 2 explicite
@@ -363,6 +371,9 @@ html { scroll-behavior: smooth; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Un item de grille a `min-width:auto` par defaut : son contenu (lignes d'evenements en
+     `white-space:nowrap`) impose alors sa largeur et fait deborder la colonne. */
+  min-width: 0;
 }
 .panel-head {
   display: flex;

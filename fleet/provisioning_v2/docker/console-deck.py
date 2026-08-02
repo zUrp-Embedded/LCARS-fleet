@@ -141,7 +141,7 @@ PAGE = r"""<!doctype html>
 <style>
   :root { --or:#FF9900; --am:#FFCC66; --bg:#000; --pan:#141414; --dim:#7a7a7a; --line:#262626 }
   * { box-sizing:border-box }
-  html,body { height:100%% }
+  html,body { height:100vh; overflow:hidden }
   body { margin:0; background:var(--bg); color:var(--am);
          font:15px/1.5 ui-monospace,"DejaVu Sans Mono",Menlo,monospace; display:flex }
   nav { width:236px; flex:0 0 236px; background:var(--pan); border-right:3px solid var(--or);
@@ -153,12 +153,20 @@ PAGE = r"""<!doctype html>
   .tab:hover { background:#1f1f1f; color:var(--or) }
   .tab.here { border-left-color:var(--or); color:var(--or); background:#1a1a1a }
   .tab .meta { color:var(--dim); font-size:11px; display:block }
-  main { flex:1; display:flex; flex-direction:column; min-width:0 }
-  header { padding:10px 18px; border-bottom:1px solid var(--line); color:var(--dim); font-size:12px;
-           display:flex; gap:14px; align-items:baseline }
+  main { flex:1; min-width:0; display:flex; flex-direction:column }
+  header { flex:0 0 auto; padding:10px 18px; border-bottom:1px solid var(--line); color:var(--dim);
+           font-size:12px; display:flex; gap:14px; align-items:baseline }
   header b { color:var(--or); font-weight:400; letter-spacing:.1em }
-  #frame { flex:1; border:0; width:100%%; background:#000 }
-  #panel { flex:1; overflow-y:auto; padding:22px 26px; display:none }
+  header a { color:var(--dim); margin-left:auto; text-decoration:none; border-bottom:1px dotted var(--dim) }
+  header a:hover { color:var(--or); border-bottom-color:var(--or) }
+  /* LA SCENE : position:relative + panneaux en inset:0 absolu. Un iframe dimensionne par flex
+     herite d'une hauteur ambigue (les navigateurs lui donnent 150px par defaut si la chaine de
+     hauteurs casse) et la page embarquee, qui se dimensionne en 100vh/grille, se replie sur
+     quelques pixels. En absolu dans une scene qui a une taille, la question ne se pose plus. */
+  #stage { flex:1; min-height:0; position:relative }
+  .pane { position:absolute; inset:0; width:100%%; height:100%%; border:0; background:#000 }
+  .pane[hidden] { display:none }
+  #panel { position:absolute; inset:0; overflow-y:auto; padding:22px 26px }
   table { border-collapse:collapse; width:100%%; max-width:820px; margin-bottom:22px }
   th,td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line) }
   th { color:var(--or); font-weight:400; width:200px; white-space:nowrap }
@@ -170,9 +178,8 @@ PAGE = r"""<!doctype html>
   <div id="rail"></div>
 </nav>
 <main>
-  <header><b id="crumb">STATUT</b><span id="hint"></span></header>
-  <iframe id="frame" title="contenu"></iframe>
-  <div id="panel"></div>
+  <header><b id="crumb">STATUT</b><span id="hint"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a></header>
+  <div id="stage"><div id="panel"></div></div>
 </main>
 <script>
 const HOST = location.hostname;
@@ -185,14 +192,42 @@ function show(tab) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('here', b.dataset.key === tab.key));
   document.getElementById('crumb').textContent = tab.crumb;
   document.getElementById('hint').textContent = tab.hint || '';
-  const frame = document.getElementById('frame'), panel = document.getElementById('panel');
+
+  const stage = document.getElementById('stage'), panel = document.getElementById('panel');
+  const pop = document.getElementById('pop');
+
+  // UN CADRE PAR ONGLET, CREE UNE FOIS ET JAMAIS RECHARGE. Reutiliser un seul cadre en
+  // reecrivant son `src` DECHARGE la page en place : ttyd pose un `beforeunload` (il protege un
+  // terminal connecte), donc changer d'onglet faisait surgir un « voulez-vous quitter ? ». Et le
+  // terminal se reconnectait a chaque retour, perdant son ecran. Montrer/cacher ne decharge rien :
+  // la question ne se pose plus, et les sessions gardent leur etat.
+  stage.querySelectorAll('.pane').forEach(f => { f.hidden = true; });
   if (tab.url) {
-    panel.style.display = 'none'; frame.style.display = '';
-    if (frame.dataset.url !== tab.url) { frame.dataset.url = tab.url; frame.src = tab.url; }
+    panel.style.display = 'none';
+    let pane = stage.querySelector(`.pane[data-key="${CSS.escape(tab.key)}"]`);
+    if (!pane) {
+      pane = document.createElement('iframe');
+      pane.className = 'pane';
+      pane.dataset.key = tab.key;
+      pane.title = tab.crumb;
+      pane.src = tab.url;
+      stage.appendChild(pane);
+    }
+    pane.hidden = false;
+    pop.hidden = false; pop.href = tab.url;
   } else {
-    frame.style.display = 'none'; panel.style.display = '';
+    panel.style.display = '';
     panel.innerHTML = ''; panel.appendChild(tab.render());
+    pop.hidden = true;
   }
+}
+
+// Un onglet dont l'agent est mort n'a plus de cible : son cadre se ferme avec lui, sinon la page
+// garderait des terminaux fantomes en memoire pour des pods qui n'existent plus.
+function dropPanes(keys) {
+  document.querySelectorAll('.pane').forEach(f => {
+    if (!keys.has(f.dataset.key)) f.remove();
+  });
 }
 
 function statusPanel(s) {
@@ -257,6 +292,7 @@ function build(s) {
     }
   }
 
+  dropPanes(new Set(tabs.map(t => t.key)));
   const keep = tabs.find(t => t.key === current) || tabs[0];
   show(keep);
 }
