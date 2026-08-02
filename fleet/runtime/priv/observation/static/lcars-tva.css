@@ -100,15 +100,6 @@ html, body {
   border-bottom: 3px solid var(--amber);
 }
 
-.lcars-rail {
-  background: var(--bg-strip);
-  border-right: 3px solid var(--amber);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 0 6px 6px;
-}
-
 .lcars-main {
   overflow-y: auto;
   min-width: 0;
