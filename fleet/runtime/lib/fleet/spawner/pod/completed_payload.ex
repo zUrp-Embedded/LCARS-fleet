@@ -46,13 +46,20 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   """
   @spec build(map(), map()) :: map()
   def build(data, result) do
-    base = %{
-      "pod_id" => data.pod_id,
-      "issue_id" => data.issue_id,
-      "result" => result
-    }
-
     opts = data.opts || []
+
+    # The EFFECTIVE judge-ness the pod was dispatched with (BL-6-20 — resolved ONCE by
+    # BriefBuilder at dispatch, step || profile, threaded via spawn_opts). On the BASE payload,
+    # not the project branch: a payload-only judge (no cloned project) still routes its verdict
+    # by it. Absent for pods spawned outside the step rail (permanent pods, legacy) — the
+    # consumer's step-spec fallback covers those.
+    base =
+      %{
+        "pod_id" => data.pod_id,
+        "issue_id" => data.issue_id,
+        "result" => result
+      }
+      |> maybe_put_brief_kind(opts)
 
     # Step-dispatch pod (assignee-driven). If it carries a PROJECT (cloned repo), the payload embeds the
     # end-of-step-run context: the StepRunConsumer consumer is stateless (the event carries the state).
@@ -124,6 +131,13 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   # Multi-project: embeds the project's REPO in `pod.completed` → the StepRunConsumer knows which
   # repo to act on + where to push. `"repository" => %{"full_name"}` = forge identifier; `"remote"` = the
   # push URL. Project without `"repo"` → payload unchanged → single-repo fallback of the StepRunConsumer.
+  defp maybe_put_brief_kind(payload, opts) do
+    case Keyword.get(opts, :brief_kind) do
+      kind when is_binary(kind) and kind != "" -> Map.put(payload, "brief_kind", kind)
+      _ -> payload
+    end
+  end
+
   defp maybe_put_repo(payload, %{"repo" => repo} = proj) when is_binary(repo) and repo != "" do
     payload
     |> Map.put("repository", %{"full_name" => repo})

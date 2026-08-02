@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
       blindly) — no silent misroute.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -236,6 +236,16 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   #                               gatekeeper + `{:escalate, corr, eval_ctx}` (async resumption
   #                               on `work_item.completed`). Failed enqueue → fail-loud (the issue
   #                               stays locked, no blind advance).
+  # The stamped kind wins; the step-spec is the LEGACY fallback only (cf. the rationale at the
+  # call site). An out-of-vocab stamped value falls back too — never a guessed judge.
+  defp judge_kind?(payload, spec) do
+    case payload["brief_kind"] do
+      "judge" -> true
+      "worker" -> false
+      _absent_or_out_of_vocab -> Map.get(spec, "brief_kind") == "judge"
+    end
+  end
+
   defp gate_decide(workflow_map, step, payload, n, seams) do
     spec =
       case Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step) do
@@ -249,16 +259,16 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     # otherwise the gate sees the envelope instead of the outputs (wrongly hard-gates).
     result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
 
-    # Judge-ness is read from the STEP ONLY here — deliberately, and NOT the same resolution as
-    # `Pilot.BriefBuilder`, which falls back to the role's profile. The asymmetry is real and is
-    # documented rather than silently closed: adding the profile fallback here re-routes EVERY
-    # judge-held step whose card declares nothing (measured: 4 canon-chain tests flip from
-    # `:captured` to `:awaiting_arch`), because a judge's step gate stops being evaluated and its
-    # payload starts deciding its own route. That may well be the right model — it is not a change
-    # to make as a side effect of a role rename. Consequence to know: a card that dispatches a
-    # native judge MUST still carry `brief_kind: judge` on the step, or its verdict is hard-gated
-    # as if it were a producer's output.
-    if Map.get(spec, "brief_kind") == "judge" do
+    # Judge-ness (BL-6-20 — single-resolution-site doctrine): resolved ONCE at dispatch by
+    # `Pilot.BriefBuilder` (step || profile), stamped into the spawn opts and ECHOED by the
+    # payload (`CompletedPayload`) — the PAYLOAD wins here, exactly like `deliverable_mode`
+    # (the effective fact travels, it is not recomputed). This closes the old fail-open
+    # asymmetry: a card that dispatched a native judge WITHOUT declaring `brief_kind: judge`
+    # on the step had the judge's verdict silently hard-gated as a producer's output — a
+    # SECURITY property (schema-required on the profile) downgraded by a card omission.
+    # The step-spec read remains ONLY as the legacy fallback (payloads emitted by pods spawned
+    # before the stamp, bare test payloads): those keep the exact pre-BL-6-20 routing.
+    if judge_kind?(payload, spec) do
       # The finishing step IS a judge (brief_kind:judge, e.g. brief-review/scoper). Its
       # result CARRIES the gate-decision-v1 verdict: the judge has ALREADY decided → NO Gates.evaluate (which
       # would judge the judge's outputs as a hard-gate). The verdict is applied by `apply_verdict` (THE

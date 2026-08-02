@@ -27,7 +27,7 @@ spec:
     # --- Step 1 (racine) : revue du brief par le scoper (juge natif) ---
     brief-review:
       role: scoper
-      brief_kind: judge             # redondant avec le profil, load-bearing pour GateEngine (cf. brief-gate)
+      brief_kind: judge             # redondant avec le profil, sans danger depuis BL-6-20 (cf. brief-gate)
       judge_target: brief           # juge le BRIEF (ticket.body) → pré-PR, avance issue-level
       needs: []                     # racine DAG
       inputs:

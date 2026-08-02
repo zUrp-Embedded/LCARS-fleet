@@ -171,10 +171,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
     # `physicalize` degrades to {nil, nil} (LOUD) without ever breaking the dispatch.
     # Human-named (`issue-<n>-<role>`), routed by EFFECTIVE kind (worker → briefs/, judge →
-    # gate-briefs/ — resolved by BriefBuilder, popped here: dispatch data, not a spawn opt), and
-    # PUBLISHED best-effort (F-15: an unpushed triplet is unauditable from the forge and
-    # non-durable — a push failure warns and never blocks the dispatch).
-    {brief_kind, spawn_opts} = Keyword.pop(spawn_opts, :brief_kind, "worker")
+    # gate-briefs/ — resolved by BriefBuilder), and PUBLISHED best-effort (F-15: an unpushed
+    # triplet is unauditable from the forge and non-durable — a push failure warns and never
+    # blocks the dispatch). The kind STAYS in spawn_opts (BL-6-20 — it used to be popped as
+    # "dispatch data"): judge-ness is resolved ONCE here at dispatch (step || profile, by
+    # BriefBuilder) and the pod's payload ECHOES it (`CompletedPayload`), so the completion never
+    # re-derives it from a card that may not declare it — the fail-open default this closes.
+    brief_kind = Keyword.get(spawn_opts, :brief_kind, "worker")
 
     {brief_ref, brief_sha} =
       Fleet.Workflow.BriefArtifact.physicalize(brief, repo,
