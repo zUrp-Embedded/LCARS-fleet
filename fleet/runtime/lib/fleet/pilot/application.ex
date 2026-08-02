@@ -20,8 +20,11 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer SEPARATE from the pod FAILURE
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
+    * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:fleet_pilot, :poller, :poll]`. First child
+      of the rail because it measures the rail: the poller emitted those three sites since it was
+      written and nothing ever attached, so every duration was computed and dropped (BL-6-40 Ph. 0).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   use Supervisor
@@ -123,6 +126,10 @@ defmodule Fleet.Pilot.Application do
   # `step_rail_processes ⇔ step_children!` fails if a new child is added there but not here.
   def step_rail_processes do
     [
+      # The instrument is part of the rail's readiness, not an accessory: a rail running with its
+      # telemetry dead is a rail nobody can measure, which is the exact state BL-6-40 named. Better
+      # `:degraded` and visible than `:operational` and blind.
+      poller_telemetry: Fleet.Pilot.PollerTelemetry,
       poller: Fleet.Pilot.Poller,
       step_run_consumer: Fleet.Pilot.StepRunConsumer,
       step_run_task_supervisor: Fleet.Pilot.StepRunConsumer.task_supervisor(),
@@ -186,6 +193,12 @@ defmodule Fleet.Pilot.Application do
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
     [
+      # The poller's telemetry, ATTACHED (BL-6-40 Phase 0). Started BEFORE the Poller so no tick is
+      # emitted into the void, and it is the FIRST child of the rail because it measures the rail:
+      # the three emission sites have existed since the poller was written and nothing ever called
+      # `:telemetry.attach`, so every duration was computed and dropped. Nothing else in BL-6-40 is
+      # provable until this exists.
+      Fleet.Pilot.PollerTelemetry,
       # Task supervisor for the offload of step_run completion (the ≤30s git push of the
       # StepRunConsumer does not block the singleton). Started BEFORE the StepRunConsumer (which refers to it).
       # max_children: bounds the burst (cascade of pod.completed -> N concurrent forge pushes =
