@@ -17,6 +17,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
       dual-dir, then the architect pod — stopped last, only if a dir is proven to be `full_name`),
       fail-closed unless `args["force"] == true` (the delete is irreversible).
     * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
+    * `list_issues/1` — READ channel (BL-6-28): the project's open-ticket board.
+    * `get_issue/2` — READ channel (BL-6-28): ONE ticket in full (body + comment thread).
 
   ## Two server-side gates (reorg 2026-07-19, cf. DESIGN-carte-des-roles §9)
 
@@ -24,10 +26,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   the socket acceptor — NOT a wire field), then matched. The tools split along the arch's two heads:
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
-      `open_project` / `delete_project` / `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
+      `open_project` / `delete_project` / `revise_project_card` / `list_workflow_cards`: the
+      PORTFOLIO head. Admits `starfleet` (fleet-master, owner of onboarding)
       OR `architect` (transitionally, until it goes per-project). Refusal → `:forbidden_not_onboarder`.
     * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
-      `comment_issue`: the per-project head. Admits ONLY `architect`. Refusal → `:forbidden_not_architect`.
+      `list_issues` / `get_issue` / `comment_issue`: the per-project head. Admits ONLY `architect`.
+      Refusal → `:forbidden_not_architect`.
 
   A worker pod (engineer, reviewer), a nil/unknown role or a pod absent from the registry → REFUSAL on
   both. Fail-closed end to end: no case falls back onto an authorized access. (The tool-visibility filter
@@ -402,6 +406,113 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Lists the OPEN issues of the architect's project — the situation board (BL-6-28: the arch had a
+  full forge WRITE channel and no way to enumerate its own tickets — a human opening an issue was
+  invisible to it). Read-only, architect gate; the repo comes from the CHANNEL BINDING, never a
+  wire argument. Same loud-or-nothing stance as `list_escalations`: an unreadable repo is an
+  ERROR, never a silent empty board (empty and broken must stay distinguishable).
+  """
+  @spec list_issues(map()) :: {:ok, map()} | {:error, term()}
+  def list_issues(state) do
+    with {:ok, %{repo: repo}} <- require_architect(state),
+         {:ok, forge} <- conforming_escalation_forge() do
+      case forge.list_open_issues(repo, []) do
+        {:ok, issues} when is_list(issues) ->
+          entries = Enum.map(issues, &issue_entry/1)
+          {:ok, %{"count" => length(entries), "issues" => entries}}
+
+        other ->
+          Logger.warning(
+            "Delegation: list_issues — board unreadable: repo #{repo} (#{inspect(other)}) — " <>
+              "surfaced as error, not an empty board"
+          )
+
+          {:error, {:issues_unreadable, repo, other}}
+      end
+    end
+  end
+
+  # Axiom (reorg 2026-07-19): no "repo" in the entry — the arch has "the project". Labels are
+  # NAMES only (the `stage/*` / `genre/*` markers carry the pipeline state the arch reads).
+  defp issue_entry(issue) do
+    %{
+      "number" => Map.get(issue, "number"),
+      "title" => Map.get(issue, "title"),
+      "labels" => issue_label_names(issue)
+    }
+  end
+
+  defp issue_label_names(issue) do
+    (Map.get(issue, "labels") || [])
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(& &1["name"])
+    |> Enum.filter(&is_binary/1)
+  end
+
+  @doc """
+  Reads ONE issue of the architect's project in FULL — body + comment thread, oldest first
+  (BL-6-28: the arch could WRITE into conversations it could not READ; `issue_status` renders a
+  tracking VERDICT, this renders the CONVERSATION). Read-only, architect gate, repo from the
+  binding. The ISSUE read failing is a typed ERROR (a mute forge is not an empty ticket); the
+  THREAD read failing degrades LOUD — body still returned, `comments` key ABSENT and
+  `comments_error` set (an unreadable thread must never render as an empty one).
+  """
+  @spec get_issue(integer(), map()) :: {:ok, map()} | {:error, term()}
+  def get_issue(number, state) when is_integer(number) do
+    with {:ok, %{repo: repo}} <- require_architect(state),
+         {:ok, forge} <- conforming_forge(),
+         {:ok, esc_forge} <- conforming_escalation_forge() do
+      case forge.get_issue(repo, number, []) do
+        {:ok, issue} ->
+          base =
+            %{
+              "issue" => number,
+              "state" => Map.get(issue, "state", "unknown"),
+              "body" => Map.get(issue, "body") || "",
+              "labels" => issue_label_names(issue)
+            }
+            |> put_present("title", Map.get(issue, "title"))
+
+          {:ok, put_thread(base, esc_forge, repo, number)}
+
+        err ->
+          Logger.warning(
+            "Delegation: get_issue #{repo}##{number} unreadable (#{inspect(err)}) — typed error"
+          )
+
+          {:error, {:issue_unreadable, number, err}}
+      end
+    end
+  end
+
+  # One meaning per shape (same doctrine as put_pr/2): a READ thread is a list (possibly empty),
+  # an UNREADABLE thread is NO `comments` key + `comments_error` — the arch must never read an
+  # outage as "nobody answered".
+  defp put_thread(base, forge, repo, number) do
+    case forge.list_comments(repo, number, []) do
+      {:ok, comments} when is_list(comments) ->
+        Map.put(base, "comments", Enum.map(comments, &comment_entry/1))
+
+      other ->
+        Logger.warning(
+          "Delegation: get_issue — thread of #{repo}##{number} unreadable (#{inspect(other)}) — " <>
+            "comments omitted, comments_error set"
+        )
+
+        Map.put(base, "comments_error", "forge_unreachable")
+    end
+  end
+
+  # `author`/`created_at` via put_present: absent when the forge map lacks them, never null.
+  defp comment_entry(c) when is_map(c) do
+    %{"body" => Map.get(c, "body")}
+    |> put_present("author", get_in(c, ["user", "login"]))
+    |> put_present("created_at", Map.get(c, "created_at"))
+  end
+
+  defp comment_entry(_), do: %{"body" => nil}
+
+  @doc """
   Posts a comment on issue `number` of `repo` IN THE ARCHITECT'S OWN NAME (the role account's token,
   like `create_issue`) — the arch's reply on a ticket in flight (typically an escalation). Architect
   gate; `:role_token_unavailable` REFUSES rather than posting under the system account (traceability +
@@ -670,6 +781,61 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # Preserve the TYPED reason (do NOT flatten): the caller must distinguish
         # `{:force_required, _}` (pass `force: true` to confirm the destruction) from
         # `{:forge_check_failed, _}` (forge down, retry) — a destructive op's most useful signal.
+        {:error, _reason} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
+  REVISES an EXISTING project's validation card (BL-6-29: the card was engraved at onboarding
+  with no revision path) — onboarder gate (the card is a PORTFOLIO declaration, same head as
+  create/import; the human chooses from the catalogue, the agent advises). The mechanics live
+  pilot-side (`revise_card` seam callback): committed `intensity.json` on `main` via a scoped
+  protection lift, protection re-sized on the new card's jury. Typed errors pass through
+  UNFLATTENED (`{:unknown_card, _}`, `:justification_required`, `{:card_push_failed, _}` — the
+  caller must distinguish a typo from a forge outage).
+  """
+  @spec revise_project_card(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def revise_project_card(full_name, args, state)
+      when is_binary(full_name) and is_map(args) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, role} -> do_revise_card(full_name, args, role)
+    end
+  end
+
+  defp do_revise_card(full_name, args, role) do
+    with {:ok, onboard} <- conforming_onboard() do
+      opts = [
+        workflow_map: Map.get(args, "workflow_map"),
+        justification: Map.get(args, "justification"),
+        intensity_level: Map.get(args, "intensity_level"),
+        nature: Map.get(args, "nature"),
+        revised_by: role
+      ]
+
+      case onboard.revise_card(full_name, opts) do
+        {:ok, %{repo: repo, card: card, outcome: outcome} = result} ->
+          {:ok,
+           %{
+             "status" => "card_revised",
+             "repo" => repo,
+             "card" => card,
+             "outcome" => to_string(outcome),
+             # FR: operator-facing payload — the ONE semantic the human must hear at this moment.
+             "note" =>
+               "les routes déjà gravées ne re-routent pas : la révision vaut pour les tickets FUTURS"
+           }
+           |> put_present("previous_card", Map.get(result, :previous_card))
+           |> put_present(
+             "protection",
+             case Map.get(result, :protection) do
+               nil -> nil
+               p -> to_string(p)
+             end
+           )}
+
         {:error, _reason} = err ->
           err
       end
