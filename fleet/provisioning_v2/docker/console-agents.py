@@ -286,7 +286,7 @@ PAGE = r"""<!doctype html>
 <style>
   :root{
     --bg:#0d1117; --pan:#131a22; --pan2:#0f151c; --line:#1e2833;
-    --ink:#c9d6e2; --dim:#6b7d8f; --faint:#44525f;
+    --ink:#d7e2ec; --dim:#93a7ba; --faint:#71869c;
     --or:#e8913c; --cy:#4fb3c4; --gr:#6cc08b; --rd:#d2646a; --am:#d9b44a; --vi:#9a8ac4;
     --mono:ui-monospace,"JetBrains Mono","SF Mono","DejaVu Sans Mono",Menlo,monospace;
   }
