@@ -85,7 +85,12 @@ networks:
 EOF
 
 # ─── 3. Pose : down -v d'office (zombie d'une forge morte), puis up avec le token ───────────────
-$DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
+# Le down porte des valeurs factices : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et
+# l'interpolation refuse MEME un down. Sans elles, ce nettoyage echoue en silence sous le
+# `|| true`, l'identite zombie survit dans le volume, et act_runner IGNORE le nouveau token
+# (il ne s'enregistre pas si `.runner` existe) — un runner appaire a une forge morte.
+LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN=" " \
+  $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
 LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_NAME="bench-runner" \
   $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
 $DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-runner-1:/data/bench-config.yaml"
