@@ -231,6 +231,38 @@ teardown() { rm -rf "$TMP_BASE"; }
   [[ "$status" -eq 0 ]]; [[ "$output" == *"/usr/bin/env FOO=bar"* ]]
 }
 
+# ==================== Fleet skills rail (BL-6-22) =================
+
+@test "skills: a name:path line binds RO into ~/.claude/skills/<name> — path spaces preserved, no host-side mkdir" {
+  # Newline format, first `:` separates. The path CARRIES a space — the case a word-split loop
+  # would shatter. NC3 invariant: bwrap CREATES the bind target inside the namespace (same as the
+  # plugin loop) — the launcher must NOT pre-create it host-side.
+  mkdir -p "$POD_DIR/sk root/card-revision"
+  export LCARS_SKILLS_PATHS="card-revision:$POD_DIR/sk root/card-revision"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/sk root/card-revision"* ]]
+  [[ "$output" == *".claude/skills/card-revision"* ]]
+}
+
+@test "skills: a path-traversal skill name is rejected before any bind" {
+  export LCARS_SKILLS_PATHS="../evil:/tmp"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]; [[ "$output" == *"path-traversal"* ]]
+}
+
+@test "skills: a missing skill dir fails LOUD (projection/launch skew, never a silent skip)" {
+  export LCARS_SKILLS_PATHS="ghost:$POD_DIR/absent-skill"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]; [[ "$output" == *"no dir"* ]]
+}
+
+@test "skills: absent var → zero skill bind (skill-less pods unchanged)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *".claude/skills/"* ]]
+}
+
 # ==================== Plugin security (S5) =================
 
 @test "security: a path-traversal plugin name (../) is rejected before any bind (S5 allowlist)" {

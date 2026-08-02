@@ -64,7 +64,7 @@ defmodule Fleet.Catalogue do
 
   Foundation (`deps: []`, next to `Fleet.Layout` and `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -88,6 +88,7 @@ defmodule Fleet.Catalogue do
   @rel_brief_templates "workflow/brief_templates"
   @rel_coord_policies "coord/config/coord-policies.yaml"
   @rel_project_template "project_template"
+  @rel_skills "skills/canon"
 
   @doc """
   Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:fleet_catalogue, :root`) or `priv/catalogue`.
@@ -146,6 +147,15 @@ defmodule Fleet.Catalogue do
   @doc "Scaffolding copied into a freshly onboarded project (`<root>/#{@rel_project_template}/<face>`)."
   @spec project_template_root() :: Path.t()
   def project_template_root, do: Path.join(root(), @rel_project_template)
+
+  @doc """
+  Pod-mountable skills (`<root>/#{@rel_skills}/<name>/SKILL.md`) — filtered per cap-profile
+  (`knowledge.skills` whitelist, `SPBuilder.filter_skills/2`) and bind-mounted RO into the pod's
+  `~/.claude/skills/` (BL-6-22). The fine override is `:fleet_spawner, :skills_root`
+  (`LCARS_SKILLS_ROOT`), resolved at SPAWN time — cf. the `:catalogue` sentinel in `Spawner.Pod`.
+  """
+  @spec skills_root() :: Path.t()
+  def skills_root, do: Path.join(root(), @rel_skills)
 
   @doc "Path of the manifest (`<root>/#{@manifest_basename}`)."
   @spec manifest_path() :: Path.t()

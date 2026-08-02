@@ -242,6 +242,41 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
+  `LCARS_SKILLS_PATHS` = the FILTERED plain-skill dirs to bind RO into the pod's
+  `~/.claude/skills/` (BL-6-22 — the delivery half `filter_skills` never had). NEWLINE-delimited
+  `name:abs_path` entries — the `LCARS_POD_MOUNTS` pattern, NOT the plugins one above: plugins
+  carry bare NAMES, these carry PATHS, and a space-separated format would shatter on a skills
+  root containing a space. The first `:` separates (a skill name is a `Fleet.Slug`, no `:` in
+  the alphabet), so a path containing `:` stays whole. The name is `Path.basename(path)` —
+  legitimate BY CONSTRUCTION (`filter_skills` builds each path as `Path.join(skills_root, name)`;
+  do NOT "improve" filter_skills to return tuples — that is the `SPBuilder.Composer` behaviour
+  contract, with stubs and tests on it). Empty → `%{}` (no var, no bind loop).
+  """
+  @spec skills_paths_env([Path.t()]) :: map()
+  def skills_paths_env([]), do: %{}
+
+  def skills_paths_env(paths) when is_list(paths) do
+    # DR-021, same refusal as `mounts_env`: a `\n`/`\r` INSIDE a path would INJECT an extra bind
+    # line into the sandbox projection → REFUSE the projection (raise, caught by LaunchEnv.build's
+    # try/rescue → clean pod-projection failure), never drop-and-launch.
+    case Enum.find(paths, &String.match?(&1, ~r/[\n\r]/)) do
+      nil ->
+        :ok
+
+      injecting ->
+        raise ArgumentError,
+              "LaunchSpec: SECURITY REFUSAL — newline in a skill path (LCARS_SKILLS_PATHS " <>
+                "injection): #{inspect(injecting)}. Pod projection refused — an injecting " <>
+                "bind is NOT dropped-and-launched."
+    end
+
+    %{
+      "LCARS_SKILLS_PATHS" =>
+        Enum.map_join(paths, "\n", fn path -> "#{Path.basename(path)}:#{path}" end)
+    }
+  end
+
+  @doc """
   Serializes `LCARS_POD_MOUNTS` (read by bwrap_launch, one `mode:path` line per mount): the SYSTEM
   mount (launchers dir) ++ the cap-profile's CATALOGUE mounts (`metadata.mounts`).
   `claude_launch_path` is resolved on the Pod side (install config) and passed here.

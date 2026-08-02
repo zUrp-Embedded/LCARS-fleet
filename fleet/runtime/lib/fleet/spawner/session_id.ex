@@ -12,13 +12,30 @@ defmodule Fleet.Spawner.SessionId do
     - `<X>`            kill/lifecycle CLASS (hex nibble): `0` = starfleet (never killed) · `1` =
                       persistent-resumable (arch, gatekeeper, eng — kill-safe, they resume their slot) ·
                       `2` = spawn-dead (one-shot judges — accumulate, reaped). `badcafe` = universal
-                      kill-marker → `pkill -f 2badcafe` reaps the judge cadavers, `pkill -f 1badcafe`
-                      the persistents, `0badcafe` (starfleet) always spared ; `pkill -f badcafe` = all.
+                      kill-marker → `pkill -f 'claude.*2badcafe'` reaps the judge cadavers,
+                      `pkill -f 'claude.*1badcafe'` the persistents, `0badcafe` (starfleet) always
+                      spared ; `pkill -f 'claude.*badcafe'` = all. ⚠ ALWAYS anchor on `claude.*`:
+                      a bare `pkill -f 2badcafe` matches ANY cmdline carrying the pattern — a
+                      concurrent `grep -r 2badcafe` (yours, an analysis agent's, a deck probe's)
+                      carries it in its argv and gets reaped with the judges. Classic `pkill -f`
+                      footgun; the anchor closes it for free.
     - `<UID>`         the runtime human's OS **UID**, in **DECIMAL** 4 digits (exact copy, like `<REPO4>`
                       — grep-direct, zero conversion). Distinguishes two humans sharing ONE OAuth
-                      account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999.
+                      account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999
+                      — a DEPLOYMENT assumption, not a property: desktop UIDs fit; container
+                      userns/subuid ranges live at 100000+. Today bwrap pods run under the human's
+                      UID so the bound holds; the provisioning_v2/docker work is exactly where it
+                      can stop holding. The refusal is LOUD (function-clause — the right failure),
+                      and that collision is a NAMED dossier (BACKLOG, provisioning list), not a
+                      surprise to rediscover.
     - `4dad-babe`     fixed hexspeak filler (`4` of `4dad` = UUID version nibble ; `b` of `babe` =
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
+                      ⚠ VENDOR EXPOSURE, named: the whole scheme rests on the vendor accepting any
+                      well-formed v4 UUID as `--session-id`. Server-side validation someday (vendor-
+                      issued ids, entropy checks) breaks the deterministic identity wholesale — loudly
+                      (resume fails), and the non-deterministic fallback already exists (`UUID.uuid4()`
+                      is the default outside pods). Same exposure class as the ToS surface: theirs to
+                      redefine, ours to detect.
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
                       `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/5` REFUSES a
@@ -26,6 +43,19 @@ defmodule Fleet.Spawner.SessionId do
                       it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
                       stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
                       hand two projects one deterministic identity). Widening `<REPO4>` = a format redesign.
+                      ⚠ THE WRAP IS ARBITRATED (user, 2026-08-02): when the stop fires, do NOT "cut and
+                      restart from 0000" — that is the same modulo done by policy instead of by `rem`
+                      (two projects, one identity; a pod resumes the OTHER project's conversation and the
+                      recall can restore its seed — silent cross-project context bleed, the one failure
+                      family this repo forbids everywhere). Worse than uniform: survivor bias concentrates
+                      recycled low ids onto the OLDEST, most load-bearing repos (fleet/lcars is id 2), and
+                      `0000` is the reserved fleet-level sentinel a restart would impersonate. The decision
+                      is DEFERRED to the first break ("on attend de casser pour décider") — the material
+                      for that day, ready: (a) a GENERATION WORD in the filler, `dec0de` → `decade` →
+                      `defaced` (still hexspeak, still legal hex, the aesthetics are a project invariant —
+                      a bare counter nibble was refused on those grounds); (b) belt-and-suspenders, a
+                      repo-match guard at the mint/slot (a seed already exists for this UUID and names
+                      another repo → loud refusal). Neither is built until the stop fires.
     - `dec0de`        filler.
     - `<P><R>`        pool (high nibble, `0` = sequential) + role index (low nibble) — **HEX** (R=0-F).
                       `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a
@@ -38,7 +68,7 @@ defmodule Fleet.Spawner.SessionId do
   valid inputs — no role refusal (those decisions live at the spawn level, not here), no `{:error, _}`.
   An out-of-bounds input = caller bug → function-clause/raise.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
   import Bitwise
 

@@ -121,6 +121,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
       forge_issues: IssueForge,
       spawner: StubSpawner,
       sleeper: fn _ms -> :ok end,
+      ensure_labels: fn _repo, _o -> :ok end,
       ensure_architect: fn repo, _o ->
         send(self(), {:arch_ensured, repo})
         {:ok, "arch-stub"}

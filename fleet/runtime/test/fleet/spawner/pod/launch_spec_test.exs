@@ -139,6 +139,29 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
+  describe "skills_paths_env/1 — the skills delivery rail (BL-6-22)" do
+    test "newline-delimited name:path entries — the LCARS_POD_MOUNTS pattern, space-safe" do
+      # A root WITH a space is the exact case a space-separated format would shatter on.
+      paths = ["/opt/my catalogue/skills/canon/card-revision", "/opt/skills/deep-dive"]
+
+      assert %{"LCARS_SKILLS_PATHS" => env} = LaunchSpec.skills_paths_env(paths)
+
+      assert env ==
+               "card-revision:/opt/my catalogue/skills/canon/card-revision\n" <>
+                 "deep-dive:/opt/skills/deep-dive"
+    end
+
+    test "empty list → no var at all (no bind loop launcher-side)" do
+      assert LaunchSpec.skills_paths_env([]) == %{}
+    end
+
+    test "a newline in a path REFUSES the projection (DR-021 — never drop-and-launch)" do
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL.*LCARS_SKILLS_PATHS/s, fn ->
+        LaunchSpec.skills_paths_env(["/tmp/skills/ok", "/tmp/evil\n--rw-bind /etc"])
+      end
+    end
+  end
+
   describe "permission_mode/1 — bounded to the CLI enum (R1-28)" do
     defp cap_with_permission_mode(mode) do
       %Fleet.CapProfile{

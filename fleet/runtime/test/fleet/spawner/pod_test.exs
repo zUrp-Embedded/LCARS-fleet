@@ -929,6 +929,50 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_PERMISSION_MODE"] == "default"
     end
 
+    test "BL-6-22: a whitelisted skill RIDES the launch env; a ghost whitelist REFUSES the spawn",
+         %{tmp_dir: tmp} do
+      skills_root = Path.join(tmp, "skills")
+      File.mkdir_p!(Path.join(skills_root, "card-revision"))
+
+      File.write!(
+        Path.join([skills_root, "card-revision", "SKILL.md"]),
+        "---\nname: card-revision\n---\n"
+      )
+
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :skills_root, skills_root)
+
+      profile = valid_profile()
+
+      whitelisting = %{
+        profile
+        | spec: Map.put(profile.spec, "knowledge", %{"skills" => ["card-revision"]})
+      }
+
+      pod_id = "pod-skills-#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} =
+        spawn_via_supervisor(%{build_args(pod_id, "issue-1") | cap_profile: whitelisting})
+
+      # The delivery half the filter never had (the paths used to be validated then thrown away).
+      assert_receive {:launch_called, _args, env}, 2_000
+
+      assert env["LCARS_SKILLS_PATHS"] ==
+               "card-revision:#{Path.join(skills_root, "card-revision")}"
+
+      # The ghost half: the fail-loud guard finally has an effect to guard. The pod dies at
+      # projection and the EXIT carries the NAMED ghost — trapped here so the refusal is the
+      # assertion instead of killing the linked test.
+      Process.flag(:trap_exit, true)
+      ghost = %{profile | spec: Map.put(profile.spec, "knowledge", %{"skills" => ["ghost"]})}
+      ghost_id = "pod-ghost-#{System.unique_integer([:positive])}"
+      {:ok, pid2} = spawn_via_supervisor(%{build_args(ghost_id, "issue-2") | cap_profile: ghost})
+
+      assert_receive {:EXIT, ^pid2, {:shutdown, {:project_failed, {:skills_missing, ["ghost"]}}}},
+                     2_000
+
+      refute_received {:launch_called, _, _}
+    end
+
     test "cap-profile spec.invocation.permission_mode overrides the default" do
       pod_id = "pod-perm-ovr-#{System.unique_integer([:positive])}"
       cp = valid_profile()
@@ -1536,6 +1580,37 @@ defmodule Fleet.Spawner.PodTest do
       # Brutal kill (Process.exit, not kill_pod — cf. the header): the pod terminates with :killed.
       Process.exit(pid, :kill)
       assert_receive {:EXIT, ^pid, :killed}, 2_000
+    end
+
+    test "BL-6-06: launch-proven emits pod.spawned ONCE (the ArchFeed's milestone)" do
+      StubBackend.set_reply(interactive_reply(session_id: "s-spawned"))
+      pod_id = "pod-spawned-#{System.unique_integer([:positive])}"
+
+      Bus.subscribe()
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{
+          cap_profile: pipe_profile(),
+          issue_id: "issue-9",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
+
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # Emitted at the FIRST entry into :monitoring — launch proven, the real producer.
+      assert_receive %Fleet.Event{
+                       type: :"pod.spawned",
+                       payload: %{"pod_id" => ^pod_id, "issue_id" => "issue-9", "issue" => 9}
+                     },
+                     2_000
+
+      # A pipe returning to :monitoring after a submit does NOT re-emit (first entry only).
+      submit_result_event(pod_id, %{"cycle" => 1})
+      assert_receive %Fleet.Event{type: :"pod.completed"}, 2_000
+      refute_receive %Fleet.Event{type: :"pod.spawned"}, 200
+
+      Process.exit(pid, :kill)
     end
 
     # SLOT-FREEZE guard — :publishing is armed ONLY for an async git deliverable (maybe_enter_publishing).

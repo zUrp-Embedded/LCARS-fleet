@@ -87,6 +87,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
       forge_repo: RecordingFileForge,
       forge_users: Humans,
       sleeper: fn _ms -> :ok end,
+      ensure_labels: fn _repo, _o -> :ok end,
       ensure_architect: fn _repo, _o -> {:ok, "arch-stub"} end
     ]
   end

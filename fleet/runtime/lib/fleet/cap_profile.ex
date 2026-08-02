@@ -45,7 +45,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -653,11 +653,13 @@ defmodule Fleet.CapProfile do
   (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field):
 
     * `0` = **starfleet** (`role_index == 0`) — the fleet-level global orchestrator, NEVER killed
-      (`pkill -f 1badcafe` / `2badcafe` spare it).
+      (`pkill -f 'claude.*1badcafe'` / `'claude.*2badcafe'` spare it).
     * `2` = **spawn-dead** (`lifetime_scope == "one-shot"` — the fan-out judges) — ephemeral, accumulate,
-      reaped by `pkill -f 2badcafe`.
+      reaped by `pkill -f 'claude.*2badcafe'`.
     * `1` = **persistent-resumable** (everything else: arch, gatekeeper, engineer) — kill-SAFE, they
-      resume their slot + context (Phase 0 slots). `pkill -f 1badcafe` restarts them without loss.
+      resume their slot + context (Phase 0 slots). `pkill -f 'claude.*1badcafe'` restarts them without
+      loss. (Anchor on `claude.*` ALWAYS — a bare pattern reaps any concurrent `grep` carrying it in
+      its argv; cf. `SessionId` moduledoc.)
 
   Replaces the old `protected` bit as the `<X>` source: "protected" collapses into "class 0 = starfleet"
   (the arch moves from protected(0) to persistent(1) — kill-safe because resumable).

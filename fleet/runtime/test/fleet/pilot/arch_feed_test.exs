@@ -63,6 +63,26 @@ defmodule Fleet.Pilot.ArchFeedTest do
     refute_received {:notified, _, _}
   end
 
+  test "BL-6-06: pod.spawned feeds the arch — role + issue, one line, no wake", %{tmp_dir: tmp} do
+    pid = start_feed(tmp)
+
+    send(
+      pid,
+      event(:"pod.spawned", %{
+        "repo" => "fleet/demo",
+        "pod_id" => "fleet-demo-engineer",
+        "issue_id" => "issue-7",
+        "issue" => 7,
+        "role" => "engineer"
+      })
+    )
+
+    :sys.get_state(pid)
+
+    assert feed(tmp) =~ "engineer parti (#7)"
+    refute_received {:notified, _, _}
+  end
+
   test "the :delivered unlock is the SINGLE push — line appended AND informational wake to THAT arch",
        %{tmp_dir: tmp} do
     pid = start_feed(tmp)
