@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-02
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -501,12 +501,15 @@ defmodule Fleet.Spawner.Pod do
   # and overwrites tracked content, `clean -fdx` removes everything untracked including ignored files.
   #
   # Gated on the pod reading `:ready`, which means `:publishing` is absent (`StepDispatcher.Spawn`:
-  # `:publishing in conds -> :busy`). That flag is the ONLY gate. It falls on TWO paths, and the
-  # safety argument only covers one:
+  # `:publishing in conds -> :busy`). That flag is the ONLY gate. It falls on THREE paths, and the
+  # safety argument only covers the first:
   #   - `deliverable.published` confirmed on the forge → the push already READ the workspace, so the
   #     reset cannot race it. This is the path the guarantee is written for.
-  #   - the `:publish_deadline` fail-safe → the flag is cleared WITHOUT that confirmation, precisely
-  #     because it never came. The premise above does not hold here; see the deadline handler.
+  #   - `deliverable.publish_lost` (BL-6-03 S2) → the completion Task DIED mid-work; the flag is
+  #     cleared for that NAMED cause, without the confirmation (the push may or may not have read
+  #     the workspace — same unproven premise as the deadline, honestly stated at the source).
+  #   - the `:publish_deadline` fail-safe → the flag is cleared WITHOUT that confirmation and
+  #     WITHOUT a named cause — the net when the publish_lost event itself is lost.
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
     # cap_profile carrying the EFFECTIVE project (the call's, not the static one) for reset_in_place.
     eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
@@ -853,6 +856,34 @@ defmodule Fleet.Spawner.Pod do
   end
 
   def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
+    do: :keep_state_and_data
+
+  # BL-6-03 S2 — the completion Task carrying THIS pod's publication DIED (witnessed by the
+  # consumer's :DOWN, event-carried): lift :publishing NOW for a NAMED cause instead of letting
+  # the 120s deadline expire blind. Same reset-safety semantics as the deadline lift (the task
+  # died mid-work — the push may or may not have read the workspace); what changes is the honesty
+  # and the latency. The deadline is canceled here BECAUSE this event replaces it; it stays the
+  # NET for the case where this event itself is lost. Matched by pod_id; other pods' → ignored.
+  def handle_event(
+        :info,
+        %Fleet.Event{type: :"deliverable.publish_lost", pod_id: pid} = ev,
+        _state,
+        %{pod_id: pid} = data
+      ) do
+    if Publishing.publishing?(data) do
+      reason = (ev.payload || %{})["reason"] || "unknown"
+
+      Logger.warning(
+        "pod #{data.pod_id} :publishing -> :ready — completion task DIED (#{reason}); " <>
+          "named-cause lift, :publish_deadline spared"
+      )
+    end
+
+    {:keep_state, Publishing.leave_publishing(data),
+     [Publishing.cancel_publish_deadline_action()]}
+  end
+
+  def handle_event(:info, %Fleet.Event{type: :"deliverable.publish_lost"}, _state, _data),
     do: :keep_state_and_data
 
   # Port lifecycle: if the result was extracted (work_item.completed event received → :output_extracted),

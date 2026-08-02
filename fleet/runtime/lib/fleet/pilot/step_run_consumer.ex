@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task).
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   use GenServer
@@ -230,12 +230,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Shared skeleton `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor
   # and its loss consequence ("completion lost").
   @doc false
-  def offload_async(fun),
+  def offload_async(fun, meta \\ %{}),
     do:
       Fleet.Pilot.Offload.async_or_inline(
         @step_run_task_supervisor,
         fun,
-        {"StepRunConsumer", "completion lost"}
+        {"StepRunConsumer", "completion lost", meta}
       )
 
   @impl GenServer
@@ -380,13 +380,42 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # BEFORE the catch-all: the death of an OFFLOADED completion task (Offload monitors it; the
   # :DOWN lands here, in the consumer that launched it). Without this clause the catch-all
   # swallowed the only witness of a completion dying mid-work — the pod's publish deadline then
-  # expired 120s later for an unexplained reason.
+  # expired 120s later for an unexplained reason. BL-6-03 S2: when the label meta names a pod,
+  # the fact now REACHES it (`deliverable.publish_lost`) so its `:publishing` flag lifts for a
+  # KNOWN cause — the 120s deadline becomes the net for a lost event, no longer the main path.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    _ = Fleet.Pilot.Offload.handle_down(ref, pid, reason)
+    case Fleet.Pilot.Offload.handle_down(ref, pid, reason) do
+      {:handled, {:died, death_reason, %{pod_id: pod_id} = meta}}
+      when is_binary(pod_id) and pod_id != "" ->
+        emit_publish_lost(pod_id, death_reason, meta)
+
+      _nominal_metaless_or_not_mine ->
+        :ok
+    end
+
     {:noreply, state}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
+
+  # The completion carrying THIS pod's publication died mid-work: tell the pod (fast path of the
+  # known-reason lift). Fire-and-forget by design — the durable truth is unchanged (the forge has
+  # or has not the push), and a missed emission falls back on the very deadline this event spares.
+  defp emit_publish_lost(pod_id, death_reason, meta) do
+    _ =
+      Fleet.EventRouter.Bus.safe_emit(
+        :workflow,
+        :"deliverable.publish_lost",
+        [
+          pod_id: pod_id,
+          correlation_id: meta |> Map.get(:issue) |> to_string(),
+          payload: %{"reason" => death_reason |> inspect() |> String.slice(0, 200)}
+        ],
+        context: "StepRunConsumer: deliverable.publish_lost (completion task died, non-fatal)"
+      )
+
+    :ok
+  end
 
   defp handle_pod_completed(p, state) do
     case maybe_complete(p, state) do
@@ -716,7 +745,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # the outcome is logged INSIDE the task, the runner returns `{:ok, :offloaded}`. Ordering preserved (lock
   # lcars-in-flight + idempotent writes). A `.complete` that crashes in async is
   # isolated by the supervised task (does not kill the StepRunConsumer).
-  defp run_completion(state, label, fun) do
+  defp run_completion(state, label, fun) when is_function(fun, 0),
+    do: run_completion(state, label, %{}, fun)
+
+  # `meta` (BL-6-03 S2) rides the offload LABEL: on an abnormal Task death the :DOWN clause gets
+  # it back from `Offload.handle_down` and can name the pod whose completion just vanished —
+  # without it the only witness of the loss carried strings. Empty for the meta-less paths
+  # (gate-abandon, escalation seam): they publish nothing, no pod waits on them.
+  defp run_completion(state, label, meta, fun) do
     exec = fn ->
       outcome = fun.()
 
@@ -731,7 +767,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
       outcome
     end
 
-    (state.step_run_runner || (&run_sync/1)).(exec)
+    case state.step_run_runner do
+      nil -> run_sync(exec)
+      # Prod shape (`&offload_async/2`): the meta reaches the offload label.
+      runner when is_function(runner, 2) -> runner.(exec, meta)
+      # Legacy seam shape (tests inject arity-1 runners): still valid, meta simply not carried.
+      runner when is_function(runner, 1) -> runner.(exec)
+    end
   end
 
   defp run_sync(fun), do: fun.()
@@ -761,7 +803,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # E4: ALL the construction (including the judge-branch resolution → inline list_open_pulls HTTP,
     # timeout 10s) lives INSIDE the offloaded closure — a degraded forge + a burst of pod.completed does not
     # blocks the singleton's mailbox (handle_info becomes O(1) again in prod, the offload carries the I/O).
-    run_completion(state, "##{n}", fn ->
+    run_completion(state, "##{n}", %{pod_id: payload["pod_id"], issue: n}, fn ->
       # DR-013: `build/5` returns `{:error, _}` if the producer/judge classification is UNKNOWN
       # (cap-profile unloadable) → we do NOT complete under an unknown property; `run_completion` logs
       # the FAIL. (In practice the upstream `producer?` guard in `run_step_run` already escalated this

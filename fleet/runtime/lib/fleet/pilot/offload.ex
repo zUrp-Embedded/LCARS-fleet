@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.Offload do
   The real outcome of the offloaded work is logged IN the task by the caller (the return
   `{:ok, :offloaded}` only says "the task was launched").
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -28,13 +28,20 @@ defmodule Fleet.Pilot.Offload do
   reached) → fail-loud: logs `"<consumer>: offload Task failed (<reason>) — <consequence>"` +
   `{:error, {:offload_failed, reason}}` — the work was NOT launched, and it shows.
 
-  `error_label` = `{consumer, consequence}`: the consumer name (log prefix) and the
-  business consequence of the loss (log suffix), the only two points of divergence of the
-  original copies.
+  `error_label` = `{consumer, consequence}` or `{consumer, consequence, meta}`: the consumer
+  name (log prefix), the business consequence of the loss (log suffix), and optionally `meta` —
+  a map of business context (e.g. `%{pod_id: _}`) returned by `handle_down/3` on an abnormal
+  death so the consumer can ACT on the loss (BL-6-03 S2), not only log it.
   """
-  @spec async(atom(), (-> any()), {String.t(), String.t()}) ::
+  @spec async(
+          atom(),
+          (-> any()),
+          {String.t(), String.t()} | {String.t(), String.t(), map()}
+        ) ::
           {:ok, :offloaded} | {:error, {:offload_failed, term()}}
-  def async(supervisor_name, fun, {consumer, consequence} = label) do
+  def async(supervisor_name, fun, label) do
+    {consumer, consequence} = consumer_consequence(label)
+
     case start_monitored(supervisor_name, fun, label) do
       {:ok, :offloaded} = ok ->
         ok
@@ -45,6 +52,14 @@ defmodule Fleet.Pilot.Offload do
         {:error, {:offload_failed, reason}}
     end
   end
+
+  # One label vocabulary, two shapes: the 2-tuple stays valid (meta-less consumers), the 3-tuple
+  # adds the business context `handle_down/3` hands back on an abnormal death.
+  defp consumer_consequence({consumer, consequence}), do: {consumer, consequence}
+  defp consumer_consequence({consumer, consequence, _meta}), do: {consumer, consequence}
+
+  defp label_meta({_consumer, _consequence}), do: %{}
+  defp label_meta({_consumer, _consequence, meta}) when is_map(meta), do: meta
 
   # Spawns + MONITORS the task (shared by async/3 and async_or_inline/3, no logging here — each
   # entry point states ITS truth: dropped vs falling back). The task's DEATH is observed: before
@@ -76,9 +91,15 @@ defmodule Fleet.Pilot.Offload do
   crash is isolated (rescued, LOUD, typed) — the consumer never dies for a fallback. ONE policy for
   both consumers (StepRunConsumer + IncidentConsumer) — never a re-implemented local copy.
   """
-  @spec async_or_inline(atom(), (-> any()), {String.t(), String.t()}) ::
+  @spec async_or_inline(
+          atom(),
+          (-> any()),
+          {String.t(), String.t()} | {String.t(), String.t(), map()}
+        ) ::
           {:ok, :offloaded} | {:ok, :inline} | {:error, :inline_crashed}
-  def async_or_inline(supervisor_name, fun, {consumer, consequence} = label) do
+  def async_or_inline(supervisor_name, fun, label) do
+    {consumer, consequence} = consumer_consequence(label)
+
     case start_monitored(supervisor_name, fun, label) do
       {:ok, :offloaded} = ok ->
         ok
@@ -113,27 +134,35 @@ defmodule Fleet.Pilot.Offload do
   end
 
   @doc """
-  Routes a `:DOWN` received by a consumer: `:handled` if the ref belongs to one of ITS offloaded
-  tasks (entry consumed — no leak), `:not_mine` otherwise (the consumer's catch-all takes over).
-  A `:normal`/`:shutdown` exit is the nominal end (silent); anything else is the LOUD trace this
-  mechanism exists for — the task died mid-work and its consequence is named.
+  Routes a `:DOWN` received by a consumer: `:not_mine` if the ref is not one of ITS offloaded
+  tasks (the consumer's catch-all takes over); otherwise the entry is consumed (no leak) and the
+  outcome is TYPED so the consumer can act on it (BL-6-03 S2), not only read a log:
+
+    * `{:handled, :nominal}` — `:normal`/`:shutdown` exit, the nominal end (silent).
+    * `{:handled, {:died, reason, meta}}` — the task died mid-work: the LOUD trace this
+      mechanism exists for, plus the label's `meta` (business context — e.g. the `pod_id` whose
+      `:publishing` flag now waits on a confirmation that will never come). Logging stays HERE
+      (one voice); ACTING on the loss is the consumer's.
   """
-  @spec handle_down(reference(), pid(), term()) :: :handled | :not_mine
+  @spec handle_down(reference(), pid(), term()) ::
+          :not_mine | {:handled, :nominal} | {:handled, {:died, term(), map()}}
   def handle_down(ref, _pid, reason) do
     case Process.delete({__MODULE__, ref}) do
       nil ->
         :not_mine
 
-      {consumer, consequence} ->
+      label ->
+        {consumer, consequence} = consumer_consequence(label)
+
         case reason do
           :normal ->
-            :ok
+            {:handled, :nominal}
 
           :shutdown ->
-            :ok
+            {:handled, :nominal}
 
           {:shutdown, _} ->
-            :ok
+            {:handled, :nominal}
 
           # The task exited BEFORE the monitor attached. On the offload path (git/forge I/O)
           # this window is µs vs ms+ work → near-instant exit almost always means the task
@@ -144,13 +173,15 @@ defmodule Fleet.Pilot.Offload do
               "#{consumer}: offloaded task DIED mid-work (:noproc — exited before monitor) — #{consequence}"
             )
 
+            {:handled, {:died, :noproc, label_meta(label)}}
+
           other ->
             Logger.error(
               "#{consumer}: offloaded task DIED mid-work (#{inspect(other)}) — #{consequence}"
             )
-        end
 
-        :handled
+            {:handled, {:died, other, label_meta(label)}}
+        end
     end
   end
 end

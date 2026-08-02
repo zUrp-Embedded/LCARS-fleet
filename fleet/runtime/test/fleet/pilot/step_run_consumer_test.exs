@@ -199,6 +199,98 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert {:ok, :captured} = exec.()
       assert_received {:step_run, _step_run, _opts}
     end
+
+    test "an arity-2 runner receives the completion META (pod_id + issue) — BL-6-03 S2" do
+      test_pid = self()
+
+      recording = fn exec, meta ->
+        send(test_pid, {:offloaded, exec, meta})
+        {:ok, :offloaded}
+      end
+
+      assert {:ok, :offloaded} =
+               StepRunConsumer.maybe_complete(
+                 step_payload(),
+                 state(%{step_run_runner: recording})
+               )
+
+      # The meta is what the death witness hands back: without it, a completion dying mid-work
+      # names no pod, and the :publishing flag waits for its blind deadline.
+      assert_received {:offloaded, _exec, %{pod_id: "pod-abc", issue: 42}}
+    end
+
+    test "the death of an offloaded completion with a pod meta emits deliverable.publish_lost (BL-6-03 S2)" do
+      # Real Task.Supervisor under the consumer's global name (absent in the hermetic test env —
+      # the guard tolerates a run where something else already started it).
+      unless Process.whereis(Fleet.Pilot.StepRunTaskSupervisor) do
+        start_supervised!({Task.Supervisor, name: Fleet.Pilot.StepRunTaskSupervisor})
+      end
+
+      Fleet.EventRouter.Bus.subscribe()
+      test = self()
+
+      # Go-signal: the task waits before dying → the monitor is attached deterministically.
+      {:ok, :offloaded} =
+        StepRunConsumer.offload_async(
+          fn ->
+            send(test, {:task_pid, self()})
+
+            receive do
+              :go -> exit(:boom)
+            end
+          end,
+          %{pod_id: "pod-s2", issue: 9}
+        )
+
+      assert_receive {:task_pid, task_pid}, 1_000
+      send(task_pid, :go)
+
+      # The monitor was created in THIS process (offload_async ran here) → the :DOWN lands here;
+      # feeding it to handle_info models exactly what the consumer GenServer does in prod.
+      assert_receive {:DOWN, _, :process, _, :boom} = down, 1_000
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:noreply, %{}} = StepRunConsumer.handle_info(down, %{})
+      end)
+
+      assert_receive %Fleet.Event{
+                       type: :"deliverable.publish_lost",
+                       pod_id: "pod-s2",
+                       correlation_id: "9",
+                       payload: %{"reason" => reason}
+                     },
+                     1_000
+
+      assert reason =~ "boom"
+    end
+
+    test "a meta-less offloaded death emits NOTHING (no pod waits on those paths)" do
+      unless Process.whereis(Fleet.Pilot.StepRunTaskSupervisor) do
+        start_supervised!({Task.Supervisor, name: Fleet.Pilot.StepRunTaskSupervisor})
+      end
+
+      Fleet.EventRouter.Bus.subscribe()
+      test = self()
+
+      {:ok, :offloaded} =
+        StepRunConsumer.offload_async(fn ->
+          send(test, {:task_pid, self()})
+
+          receive do
+            :go -> exit(:boom)
+          end
+        end)
+
+      assert_receive {:task_pid, task_pid}, 1_000
+      send(task_pid, :go)
+      assert_receive {:DOWN, _, :process, _, :boom} = down, 1_000
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:noreply, %{}} = StepRunConsumer.handle_info(down, %{})
+      end)
+
+      refute_receive %Fleet.Event{type: :"deliverable.publish_lost"}, 100
+    end
   end
 
   describe "maybe_complete/2 — filters (skip)" do
