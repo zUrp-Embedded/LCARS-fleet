@@ -159,6 +159,17 @@ PAGE = r"""<!doctype html>
   header b { color:var(--or); font-weight:400; letter-spacing:.1em }
   header a { color:var(--dim); margin-left:auto; text-decoration:none; border-bottom:1px dotted var(--dim) }
   header a:hover { color:var(--or); border-bottom-color:var(--or) }
+  header #size { color:var(--dim); font-variant-numeric:tabular-nums }
+  /* FENETRE ETROITE : mon rail (236px) + celui de la page embarquee (110px) mangent 346px avant
+     le moindre contenu. Sous 900px, le rail se reduit a une colonne d'icones-texte pour rendre
+     la place a ce qu'on est venu regarder. */
+  @media (max-width: 900px) {
+    nav { width:104px; flex:0 0 104px }
+    nav h1 { margin-left:10px; font-size:12px; letter-spacing:.12em }
+    .grp { margin-left:10px; font-size:10px }
+    .tab { padding:6px 10px; font-size:12px }
+    .tab .meta { display:none }
+  }
   /* LA SCENE : position:relative + panneaux en inset:0 absolu. Un iframe dimensionne par flex
      herite d'une hauteur ambigue (les navigateurs lui donnent 150px par defaut si la chaine de
      hauteurs casse) et la page embarquee, qui se dimensionne en 100vh/grille, se replie sur
@@ -178,7 +189,7 @@ PAGE = r"""<!doctype html>
   <div id="rail"></div>
 </nav>
 <main>
-  <header><b id="crumb">STATUT</b><span id="hint"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a></header>
+  <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a></header>
   <div id="stage"><div id="panel"></div></div>
 </main>
 <script>
@@ -304,6 +315,16 @@ async function tick() {
     if (sig !== window.__sig) { window.__sig = sig; build(s); }
   } catch (e) { /* la page survit a une sonde ratee : elle garde son dernier etat vrai */ }
 }
+// La taille du cadre est AFFICHEE, pas supposee : quand une page embarquee se replie, la premiere
+// question est « combien de place lui donne-t-on ? ». Sans cette lecture, on debogue le CSS de la
+// page invitee alors que c'est l'hote qui l'etrangle — ou l'inverse.
+function showSize() {
+  const st = document.getElementById('stage');
+  if (st) document.getElementById('size').textContent = Math.round(st.clientWidth) + '×' + Math.round(st.clientHeight) + ' px';
+}
+addEventListener('resize', showSize);
+setInterval(showSize, 1000);
+showSize();
 tick(); setInterval(tick, 10000);
 </script>
 """
