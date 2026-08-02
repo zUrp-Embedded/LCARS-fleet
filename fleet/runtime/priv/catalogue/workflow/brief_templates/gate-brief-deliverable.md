@@ -27,6 +27,15 @@ send back / escalate?
 ## Expected decision — strict JSON (`gate-decision-v1.json`)
 `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 
+The envelope is schema-VALIDATED and fail-closed: a mistyped field halts the step run, it is not
+coerced. `decision` and `reason` are required; the two optional fields have an enforced shape.
+
+- `details` — a FLAT object of scalars, rendered as one `- **key** : value` line each.
+  Example: `{"test_added": "none", "gate_rule": "R-coverage"}`
+- `chain` — an array of PLAIN STRINGS, one reasoning step per entry, rendered as bullets under
+  "Raisonnement". An array of objects is REFUSED (`#/chain/0: expected String`).
+  Example: `["the diff touches the launcher", "no bats case covers it", "→ redirect"]`
+
 `decision` ∈ {{decisions}}
 - `continue`: the deliverable satisfies the gate → advance to the next step
 - `redirect`: send back to the architect (e.g. brief too big → ask for a split)
