@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -279,7 +279,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
     repo = Map.fetch!(step_run, :repo)
     n = Map.fetch!(step_run, :issue_number)
     role = Map.fetch!(step_run, :role)
-    base = Map.get(step_run, :base_branch, "main")
+    # Asserted at the PR contact point (chantier face-projet): opening a PR IS choosing the face
+    # the deliverable merges into. StepRunBuild threads it off the event (pr_base || face-at-
+    # dispatch, nil for payload-only judges) — a producer reaching PR-open without one has skipped
+    # the face decision, and a re-default here would silently PR an ops deliverable against main.
+    base =
+      Map.fetch!(step_run, :base_branch) ||
+        raise(ArgumentError,
+          message:
+            "StepRunCompleter.complete_pr: step_run ##{n} (role #{inspect(role)}) carries no " <>
+              "base_branch — the face is decided at dispatch and threaded, never re-defaulted " <>
+              "here (single-default-site doctrine, chantier face-projet)."
+        )
+
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
     title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role}")
 
@@ -546,7 +558,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
-    base = Map.get(step_run, :base_branch, "main")
+    # Key presence asserted (build always sets it); nil TOLERATED until the PR contact —
+    # a payload-only judge (issue-comment verdict) has no face and never touches a PR.
+    # `resolve_pr` raises on the head-without-base combination (chantier face-projet).
+    base = Map.fetch!(step_run, :base_branch)
     head = Map.get(step_run, :producer_branch)
 
     case resolve_pr(forge, repo, head, base, forge_opts) do
@@ -577,6 +592,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp resolve_pr(_forge, _repo, head, _base, _opts) when not is_binary(head),
     do: {:error, {:pr_lookup, :no_producer_branch}}
+
+  # A producer branch WITHOUT a face: the lookup would match a PR on a guessed base — raise, never
+  # guess (single-default-site doctrine, chantier face-projet). Nil base is only legitimate when
+  # head is nil too (payload-only judge, clause above).
+  defp resolve_pr(_forge, repo, head, nil, _opts) when is_binary(head) do
+    raise ArgumentError,
+          "StepRunCompleter.resolve_pr: PR lookup for #{inspect(repo)} head #{inspect(head)} " <>
+            "carries no base_branch — the face is decided at dispatch and threaded, never " <>
+            "re-defaulted here (chantier face-projet)."
+  end
 
   defp resolve_pr(forge, repo, head, base, forge_opts) do
     case forge.get_pr_for_branch(repo, head, base, forge_opts) do

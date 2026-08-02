@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-08-02
   """
 
   defmodule Clone do
@@ -70,7 +70,20 @@ defmodule Fleet.ProjectBootstrap.Phase do
           _ = File.rm_rf(ws)
 
           ref = project["reference_repo_path"]
-          base = project["base_branch"] || "main"
+
+          # ASSERTED, never defaulted (chantier face-projet): the resolver ALWAYS engraves
+          # `base_branch` in the project map — the face decision made once at dispatch. The old
+          # `|| "main"` was dead code on the live path and a substituting default on any other:
+          # a project map without a base_branch has skipped the face decision, and cloning the
+          # code face over it would bury exactly the bug this chantier exists to kill.
+          base =
+            project["base_branch"] ||
+              raise(ArgumentError,
+                message:
+                  "Phase.Clone: project map for #{inspect(project["repo"])} carries no " <>
+                    "\"base_branch\" — the face is decided at dispatch and threaded, never " <>
+                    "re-defaulted here (single-default-site doctrine, chantier face-projet)."
+              )
 
           # Clean world: branch = `feature/<slug>` WITHOUT the pod_id (the agent must not re-read its
           # pod_id in its own branch — containment). The slug comes from the dispatcher (sanitized issue

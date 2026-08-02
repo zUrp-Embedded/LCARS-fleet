@@ -172,6 +172,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         repo: "lordzurp/lcars-test",
         issue_number: 42,
         role: "engineer",
+        # chantier face-projet : la face est assertee par le completer, la fixture la dit comme la prod
+        base_branch: "main",
         deliverable_opts: %{mode: :git_native, workspace: "/tmp/ws", base_sha: "cafe"}
       },
       extra
@@ -453,6 +455,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           repo: "fleet/proj",
           issue_number: 42,
           role: "engineer",
+          base_branch: "main",
           pr_role: :producer,
           intent: intent,
           next_assignee: nil,
@@ -474,6 +477,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           repo: "fleet/proj",
           issue_number: 42,
           role: "reviewer",
+          base_branch: "main",
           pr_role: :judge,
           intent: intent,
           next_assignee: nil,

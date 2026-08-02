@@ -335,6 +335,13 @@ defmodule Fleet.Pilot.StepDispatcher do
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}} | {:skipped, atom()} | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
+    # The PR's OWN base (chantier face-projet): the face the deliverable merges into, read off the
+    # PR at this single site and threaded via opts → project map → pod.completed → step_run. Every
+    # pod dispatched OFF an existing PR (judges, rework, conflict-rework) clones the FEATURE branch,
+    # so its clone-base cannot answer "which face does this PR land on" — the PR itself is the only
+    # honest source, and it is in hand exactly here.
+    opts = Keyword.put(opts, :pr_base_branch, get_in(pr, ["base", "ref"]))
+
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
     # `ctx.<typo>` does not compile. PURE data — no captures threaded: both flows take

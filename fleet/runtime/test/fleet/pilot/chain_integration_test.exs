@@ -334,6 +334,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
+      "base_branch" => "main",
       "role" => role,
       "workflow_map" => spawn_opts[:workflow_map],
       "step" => spawn_opts[:step]
@@ -345,6 +346,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp dispatch_opts do
     [
       repo: "o/r",
+      base_branch: "main",
       # #5.2 D1 — multi-user scoping: this fleet's human = the fixtures' assignee ("human").
       human: "human",
       forge_client: SimForge,
