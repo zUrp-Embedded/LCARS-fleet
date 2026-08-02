@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.ArchFeed do
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
   `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   use GenServer
@@ -48,6 +48,7 @@ defmodule Fleet.Pilot.ArchFeed do
     :"step.unlocked",
     :"deliverable.published",
     :"work_item.completed",
+    :"pod.spawned",
     :"pod.completed",
     :"pod.failed",
     :"spawn.failed",
@@ -119,6 +120,9 @@ defmodule Fleet.Pilot.ArchFeed do
 
   defp render_line(:"work_item.completed", p),
     do: "work-item terminé#{ctx(p)}"
+
+  defp render_line(:"pod.spawned", p),
+    do: "#{p["role"] || "?"} parti#{ctx(p)}"
 
   defp render_line(:"pod.completed", p),
     do: "pod #{p["pod_id"] || p[:pod_id] || "?"} a fini son run#{ctx(p)}"

@@ -1538,6 +1538,37 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:EXIT, ^pid, :killed}, 2_000
     end
 
+    test "BL-6-06: launch-proven emits pod.spawned ONCE (the ArchFeed's milestone)" do
+      StubBackend.set_reply(interactive_reply(session_id: "s-spawned"))
+      pod_id = "pod-spawned-#{System.unique_integer([:positive])}"
+
+      Bus.subscribe()
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{
+          cap_profile: pipe_profile(),
+          issue_id: "issue-9",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
+
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # Emitted at the FIRST entry into :monitoring — launch proven, the real producer.
+      assert_receive %Fleet.Event{
+                       type: :"pod.spawned",
+                       payload: %{"pod_id" => ^pod_id, "issue_id" => "issue-9", "issue" => 9}
+                     },
+                     2_000
+
+      # A pipe returning to :monitoring after a submit does NOT re-emit (first entry only).
+      submit_result_event(pod_id, %{"cycle" => 1})
+      assert_receive %Fleet.Event{type: :"pod.completed"}, 2_000
+      refute_receive %Fleet.Event{type: :"pod.spawned"}, 200
+
+      Process.exit(pid, :kill)
+    end
+
     # SLOT-FREEZE guard — :publishing is armed ONLY for an async git deliverable (maybe_enter_publishing).
     test "submit of a git_native pipe → :publishing condition armed (push to protect)" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pub-git"))

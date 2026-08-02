@@ -26,6 +26,13 @@ events:
   # consumer) = registry lie (the registry must reflect reality). Removed; to re-add WITH a
   # producer if pod progression becomes observable.
   pod.completed: []
+  # pod.spawned (BL-6-06, scoped cut): emitted by Spawner.Pod at launch-PROVEN (first entry
+  # into :monitoring) — real producer. Real consumer: Pilot.ArchFeed (per-project feed line
+  # "<role> parti (#N)"). The other lifecycle keys the 6-06 dossier once named (pod.phase,
+  # pod.alive) stay OUT deliberately: no consumer exists — the deck reads the live snapshot
+  # by design, and a key without a consumer is the registry lie the hollow cleanup removed.
+  pod.spawned: []
+
   pod.failed:
     source: spawner
     action: incident

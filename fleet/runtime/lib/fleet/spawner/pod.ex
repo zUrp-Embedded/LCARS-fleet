@@ -210,7 +210,23 @@ defmodule Fleet.Spawner.Pod do
   @impl :gen_statem
   def handle_event(:enter, old_state, :monitoring, data) do
     first_entry? = old_state != :extracting
-    if first_entry?, do: :ok = Bus.subscribe()
+
+    if first_entry? do
+      :ok = Bus.subscribe()
+
+      # BL-6-06, scoped cut: the ONE lifecycle milestone with a REAL consumer — `pod.spawned`
+      # feeds the per-project ArchFeed ("engineer parti sur #7"). Emitted at launch-PROVEN
+      # (first entry into :monitoring), the real producer the registry demands. `pod.phase` /
+      # `pod.alive` stay OUT: no consumer exists — re-adding them would recreate the hollow
+      # the registry cleanup removed (the deck reads the live snapshot by design).
+      Events.lossy_broadcast("pod.spawned", %{
+        "pod_id" => data.pod_id,
+        "issue_id" => data.issue_id,
+        "issue" => issue_number_of(data.issue_id),
+        "role" => Fleet.CapProfile.name(data.cap_profile),
+        "repo" => LaunchSpec.effective_project(data.opts, data.cap_profile)["repo"]
+      })
+    end
 
     actions = arm_result_deadline_actions(data)
 
@@ -228,6 +244,17 @@ defmodule Fleet.Spawner.Pod do
 
   # All other states: entry does nothing (the work lives in `:proceed`).
   def handle_event(:enter, _old_state, _state, _data), do: :keep_state_and_data
+
+  # Local "issue-N" → N parse (feed context only): Spawner cannot reach Pilot's IssueId
+  # (upward edge), and the feed needs a best-effort integer — nil when the shape differs.
+  defp issue_number_of("issue-" <> rest) do
+    case Integer.parse(rest) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp issue_number_of(_), do: nil
 
   # ============================================================
   # Boot chain — internal :proceed event (priority over the mailbox)
