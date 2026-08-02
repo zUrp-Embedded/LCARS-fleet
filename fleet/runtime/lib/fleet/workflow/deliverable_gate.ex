@@ -18,7 +18,7 @@ defmodule Fleet.Workflow.DeliverableGate do
   The system-chosen target branch and the forge network isolation are outside this module
   (resp. `Fleet.Workflow.Deliverable.publish` and the bwrap containment).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   @git_timeout_ms 15_000
@@ -78,11 +78,16 @@ defmodule Fleet.Workflow.DeliverableGate do
         :ok
 
       {:ok, false} ->
-        # DIAGNOSTIC message. `merge-base --is-ancestor` outputs NOTHING on the nominal failure case
-        # (valid base but not an ancestor of HEAD, e.g. a rebase rewrote over it) → a bare
-        # `{:base_not_ancestor, ""}` is untraceable. We embed the `base_sha` (short): a single log
-        # says "such base ⊄ HEAD" → the cause (clone-base instead of the rebase target) is obvious.
-        {:error, {:base_not_ancestor, "#{String.slice(to_string(base_sha), 0, 12)} ⊄ HEAD"}}
+        # DIAGNOSTIC message. `merge-base --is-ancestor` outputs NOTHING on the nominal failure
+        # case, and the old message named the BASE but not what HEAD actually was — the faceproof
+        # rework loop failed five identical rounds with "<base> ⊄ HEAD" and the one fact that
+        # would have discriminated an amend (same parent, new sha) from a reset-to-elsewhere died
+        # unlogged each time; the bench was destroyed before anyone could ask the workspace. HEAD
+        # and its parent cost one local rev-parse ON THE FAILURE PATH ONLY and turn the next such
+        # loop into a one-log diagnosis.
+        {:error,
+         {:base_not_ancestor,
+          "#{String.slice(to_string(base_sha), 0, 12)} ⊄ HEAD=#{head_diag(workspace)}"}}
 
       {:error, {:git_timeout, _} = e} ->
         {:error, e}
@@ -93,6 +98,35 @@ defmodule Fleet.Workflow.DeliverableGate do
       # Any other unexpected shape: fail-closed as `:git_error` (never a false `base_not_ancestor`).
       {:error, other} ->
         {:error, {:git_error, "merge-base: #{inspect(other)}"}}
+    end
+  end
+
+  # HEAD and its first parent, short, for the base_not_ancestor diagnostic — failure path only.
+  # Best-effort by design: this is a MESSAGE decorator, and a broken rev-parse must not turn a
+  # precise `base_not_ancestor` into a vague `git_error` (the check above already ran).
+  defp head_diag(workspace) do
+    case rev_parse_short(workspace, "HEAD") do
+      {:ok, head} ->
+        case rev_parse_short(workspace, "HEAD~1") do
+          {:ok, parent} -> "#{head} (parent #{parent})"
+          _ -> "#{head} (root)"
+        end
+
+      _ ->
+        "unreadable"
+    end
+  end
+
+  # Split calls ON PURPOSE: `rev-parse A B` prints the fatal BEFORE the resolved line when B is
+  # unresolvable (root HEAD), poisoning the whole output.
+  defp rev_parse_short(workspace, ref) do
+    case Fleet.Credentials.Shell.git(
+           ["rev-parse", "--short=12", ref],
+           cd: workspace,
+           timeout_ms: 5_000
+         ) do
+      {:ok, {out, 0}} -> {:ok, String.trim(out)}
+      _ -> :error
     end
   end
 
