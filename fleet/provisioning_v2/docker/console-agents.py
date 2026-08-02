@@ -188,11 +188,81 @@ def get(url):
     except Exception:
         return None
 
+# ─── L'etat des MACHINES, mesure d'ou la page vit (l'interieur de la boite) ────────────────────
+# La boite se lit dans /proc ; la fleet par son API ; la forge par un ping version sur l'URL que
+# le RUNTIME utilise (fleet_v2.env — la verite de l'humain, pas une reconstruction) ; le runner
+# n'est PAS joignable d'ici (conteneur voisin, pas de socket docker dans la boite — et c'est
+# voulu) : sa preuve de vie est INDIRECTE, le dernier verdict CI du repo temoin.
+_MACH = {"t": 0, "forge": None, "ci": None}
+
+def _env_forge_url():
+    try:
+        for line in open(os.path.expanduser("~/.lcars/fleet_v2.env"), encoding="utf-8"):
+            m = re.match(r"^(?:export\s+)?FORGE_BASE_URL=[\"']?([^\"'\s]+)", line.strip())
+            if m:
+                return m.group(1)
+    except OSError:
+        pass
+    return os.environ.get("FORGE_BASE_URL") or None
+
+def machines():
+    import time
+    out = {}
+    try:
+        out["load"] = round(os.getloadavg()[0], 2)
+        out["cpus"] = os.cpu_count()
+    except OSError:
+        pass
+    try:
+        mi = {}
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":", 1)
+            mi[k] = int(v.strip().split()[0])
+        out["mem_used_gb"] = round((mi["MemTotal"] - mi["MemAvailable"]) / 1048576, 1)
+        out["mem_total_gb"] = round(mi["MemTotal"] / 1048576, 1)
+    except Exception:
+        pass
+    try:
+        st = os.statvfs("/home")
+        out["disk_pct"] = round(100 * (1 - st.f_bavail / st.f_blocks))
+    except OSError:
+        pass
+    now = time.monotonic()
+    if now - _MACH["t"] > 15:
+        _MACH["t"] = now
+        url = _env_forge_url()
+        if url:
+            t0 = time.monotonic()
+            v = get(url.rstrip("/") + "/api/v1/version")
+            _MACH["forge"] = {"url": url, "version": (v or {}).get("version"),
+                              "ms": round((time.monotonic() - t0) * 1000)} if v else {"url": url, "down": True}
+            tok = None
+            try:
+                tok = open(os.path.expanduser("~/.gitea_token")).read().strip()
+            except OSError:
+                pass
+            try:
+                import urllib.request as ur
+                req = ur.Request(url.rstrip("/") + "/api/v1/repos/fleet/project-template/actions/tasks")
+                if tok:
+                    req.add_header("Authorization", "token " + tok)
+                with ur.urlopen(req, timeout=2) as r:
+                    runs = (json.load(r).get("workflow_runs") or [])
+                _MACH["ci"] = {"status": runs[0].get("status"), "at": (runs[0].get("updated_at") or "")[11:16]} if runs else None
+            except Exception:
+                _MACH["ci"] = None
+        else:
+            _MACH["forge"] = None
+            _MACH["ci"] = None
+    if _MACH["forge"]: out["forge"] = _MACH["forge"]
+    if _MACH["ci"]: out["ci"] = _MACH["ci"]
+    return out
+
 def state():
     pods = get(f"http://127.0.0.1:{DECK_PORT}/api/pods")
     proj = get(f"http://127.0.0.1:{DECK_PORT}/api/projection")
     out = {"fleet": pods is not None, "pods": [], "stream": [], "counts": {}, "status": None,
-           "pod_console_port": POD_CONSOLE_PORT}
+           "pod_console_port": POD_CONSOLE_PORT, "machines": machines()}
     if proj:
         out["stream"] = proj.get("stream") or []
         out["counts"] = proj.get("counts") or {}
@@ -409,6 +479,22 @@ function rail(){
     b.onclick = () => { sel = p.pod_id; draw(); };
     r.appendChild(b);
   }
+  const M = S.machines||{};
+  r.appendChild(el('div','grp','machines'));
+  const mrow = (k,v,cls) => { const d=el('div','row'); d.style.cursor='default';
+    d.appendChild(el('span','id',k)); const m=el('span','meta',v); if(cls) m.style.color=cls; d.appendChild(m); r.appendChild(d); };
+  mrow('boîte', (M.load!=null?`load ${M.load}/${M.cpus}`:'—')
+    + (M.mem_used_gb!=null?` · ram ${M.mem_used_gb}/${M.mem_total_gb}G`:'')
+    + (M.disk_pct!=null?` · disk ${M.disk_pct}%`:''),
+    (M.disk_pct>85||M.load>(M.cpus||8)) ? 'var(--am)' : null);
+  mrow('fleet', S.fleet ? `BEAM up · ${S.pods.length} pod${S.pods.length>1?'s':''}` : 'éteinte',
+    S.fleet ? 'var(--gr)' : 'var(--rd)');
+  if(M.forge) mrow('forge', M.forge.down ? (M.forge.url+' INJOIGNABLE') : `${M.forge.version} · ${M.forge.ms}ms`,
+    M.forge.down ? 'var(--rd)' : 'var(--gr)');
+  else mrow('forge','aucune configurée',null);
+  if(M.ci) mrow('ci (runner)', `${M.ci.status} · ${M.ci.at}`,
+    M.ci.status==='success' ? 'var(--gr)' : (M.ci.status==='failure' ? 'var(--rd)' : 'var(--am)'));
+
   if(CAT && CAT.profiles){
     const live = new Set(S.pods.map(p=>p.role));
     const dormant = Object.keys(CAT.profiles).sort().filter(n=>!live.has(n));
