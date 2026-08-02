@@ -139,8 +139,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
       :no_jury ->
         # The CARD arbitrates (doc point 4): zero-judge card → this IS the nominal path, seal
-        # directly; judged card → orphan PR, lay the card's jury (adoption).
-        case Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts) do
+        # directly; judged card → orphan PR, lay the card's jury (adoption). The arbitrating card
+        # is THE ISSUE'S ENGRAVED one when a route exists (`wfmap/*` — an ops-direct issue's
+        # zero-judge choice is deliberate); the project's declared card only for a true orphan
+        # (no route). Reading the project card unconditionally re-adopted brief-gate's judges
+        # onto an ops PR every tick (faceproof bench).
+        case issue_card_jury(head, ctx) do
           [] -> promote_or_route(pr_number, head, ctx)
           card_jury -> adopt_orphan_pr(pr_number, card_jury, ctx)
         end
@@ -166,6 +170,26 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
       other ->
         other
+    end
+  end
+
+  # The issue's engraved card jury, when the head parses and a route is engraved; the project's
+  # declared card otherwise. Same fallback shape as the completer's `step_run_jury` twin.
+  defp issue_card_jury(head, %Ctx{} = ctx) do
+    with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
+         {:ok, {map_name, _step}} <-
+           Fleet.Pilot.StepDispatcher.Spawn.route_for(
+             ctx.forge,
+             ctx.repo,
+             issue_n,
+             ctx.forge_opts
+           ),
+         {:ok, %{"jury" => jury} = map} when is_list(jury) <-
+           Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
+      # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
+      Fleet.Pilot.Roles.jury(map, ctx.opts)
+    else
+      _ -> Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts)
     end
   end
 

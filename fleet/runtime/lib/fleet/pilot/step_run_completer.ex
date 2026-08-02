@@ -743,7 +743,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # case: the lock was on the PR (set by `dispatch_review` :rework, held by the re-dispatched
     # producer). The ISSUE lock, though, is NOT lifted here (doctrine above, cf. `:advance`): the
     # brick stays in-flight until the final `:promote`, first delivery or not.
-    with :ok <- request_reviews_step(forge, repo, pr, Roles.project_jury(repo, opts), forge_opts),
+    with :ok <- request_reviews_step(forge, repo, pr, step_run_jury(step_run, opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
          # Producer → judges hand-off: closes ITS build stopwatch (on the ISSUE), decoupled from the lock (the
          # ISSUE lock persists until the merge; the PR unlock below covers only the rework re-delivery
@@ -795,6 +795,35 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # would engulf the whole review (time when it does nothing) → CYCLE time disguised as WORK time.
     stop_build_stopwatch(forge, repo, step_run.issue_number, forge_opts, step_run.role)
     :ok
+  end
+
+  # The jury of THE ISSUE'S engraved card when the step_run carries one (a terminal producer on a
+  # routed map lands in `route(:review)` too — MA-12), the project's declared card otherwise
+  # (single-brick, no map). Reading the project card unconditionally convened brief-gate's judges
+  # onto an ops-direct PR — the exact prose jury the ops card refuses by design (measured on the
+  # faceproof bench: qualifier+reviewer laid on a zero-judge card, REQUEST_CHANGES x2, rework
+  # loop). An unloadable engraved card falls back to the project card LOUD — same never-stall
+  # doctrine as `load_project_card`.
+  defp step_run_jury(step_run, opts) do
+    loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
+
+    with name when is_binary(name) and name != "" <- Map.get(step_run, :workflow_map),
+         {:ok, %{"jury" => jury} = map} when is_list(jury) <-
+           Fleet.Pilot.WorkflowMapNav.safe_load(loader, name) do
+      # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
+      Roles.jury(map, opts)
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "StepRunCompleter: engraved card unloadable (#{inspect(reason)}) — jury falls back " <>
+            "to the project card"
+        )
+
+        Roles.project_jury(step_run.repo, opts)
+
+      _no_map ->
+        Roles.project_jury(step_run.repo, opts)
+    end
   end
 
   # Requests the review of ALL the card's judges at once (into requested_reviewers).

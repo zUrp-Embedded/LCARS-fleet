@@ -667,6 +667,30 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
+    test "producer :review on a ROUTED map → the ENGRAVED card's jury, never the project's (faceproof bench)" do
+      # chantier face-projet: the step_run carries the engraved map (ops-direct, jury []) — the
+      # review request must convene THAT card's jury, not the project card's. Reading the project
+      # card laid brief-gate's qualifier+reviewer onto a zero-judge ops PR: REQUEST_CHANGES x2 on
+      # prose, rework loop. Measured on the faceproof bench before this test existed.
+      step_run = producer_step_run(:review, %{workflow_map: "ops-zero"})
+
+      zero_loader = fn "ops-zero" ->
+        %{"jury" => [], "steps" => %{"build" => %{"role" => "eng_doc", "needs" => []}}}
+      end
+
+      # NO reviewer_roles seam here — it would win over both cards and prove nothing. The
+      # discriminant is real: without the fix, the fallback `project_jury` loads the delegation
+      # default card (brief-gate, jury qualifier+reviewer) and a request_review fires.
+      assert {:ok, :review_requested} =
+               StepRunCompleter.complete_pr(
+                 step_run,
+                 orch_opts(workflow_map_loader: zero_loader)
+               )
+
+      # Zero-judge engraved card → NOBODY convened. The promote is dispatch_review's (:no_jury).
+      refute_received {:request_review, _, _}
+    end
+
     test "②.1d producer :review (no-workflow_map) → opens PR, request_review(qualifier+reviewer), assigns the human, unlocks PR ONLY (issue persists), NO merge" do
       step_run = producer_step_run(:review)
 
