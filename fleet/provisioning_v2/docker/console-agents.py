@@ -659,7 +659,8 @@ function drawCards(){
     const meta = (cards[name].data||{}).metadata||{};
     const b = el('button','row'+(name===csel&&!editing?' on':''));
     b.appendChild(el('span','id', name));
-    b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')));
+    b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')
+      + (meta.status && meta.status!=='canon' ? ' · '+meta.status : '')));
     b.onclick = () => { csel = name; editing=false; ED=null; drawCards(); };
     r.appendChild(b);
   }
@@ -834,13 +835,20 @@ function stageModel(data){
             pres:meta.presentation||'', rework: spec.max_rework_rounds ?? 2,
             jury:(spec.jury||[]).slice(), juryOn:(spec.jury||[]).length>0,
             pre:null, producers:[], audit:null, extra:[]};
+  /* Deux façons de sortir de la grammaire, TOUTES DEUX declarees : un step inclassable, ou un
+     step classable qui porte des champs que le formulaire ne modelise pas (gate:, outputs:, …) —
+     l'ouvrir quand meme AMPUTERAIT ces champs au save, en silence. Attrape vivant sur
+     poc-helloworld (outputs) le soir meme du YOLO. */
+  const KNOWN = ['role','brief_kind','judge_target','face','needs','inputs'];
   for(const n of topoOrder(steps)){
     const sd=steps[n]||{};
+    const unk = Object.keys(sd).filter(k => !KNOWN.includes(k));
+    if(unk.length){ st.extra.push(n+' porte '+unk.join('+')); continue; }
     const item={name:n, role:sd.role||'', face:sd.face||'', inputs:(sd.inputs||[]).slice()};
     if(sd.judge_target==='brief' && !st.pre) st.pre=item;
     else if(sd.judge_target==='deliverable' && !st.audit) st.audit=item;
     else if(P.producers.includes(sd.role)) st.producers.push(item);
-    else st.extra.push(n);
+    else st.extra.push(n+' inclassable');
   }
   return st;
 }
@@ -887,7 +895,9 @@ function editor(body, src){
   const fb = el('button','btn'+(ED.mode==='form'?' warn':''),'formulaire');
   const yb = el('button','btn'+(ED.mode==='yaml'?' warn':''),'yaml brut');
   mbar.appendChild(fb); mbar.appendChild(yb);
-  if(!ED.fits) mbar.appendChild(el('span','mini','carte HORS GRAMMAIRE (step inclassable) — yaml brut seul'));
+  if(!ED.fits) mbar.appendChild(el('span','mini','HORS GRAMMAIRE — '
+    + (((ED.state||{}).extra||[]).join(' · ')||'steps inconnus')
+    + ' → yaml brut seul (le formulaire amputerait ces champs)'));
   body.appendChild(mbar);
 
   const zone = el('div'); body.appendChild(zone);
