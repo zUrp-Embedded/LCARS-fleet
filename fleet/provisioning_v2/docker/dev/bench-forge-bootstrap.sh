@@ -11,7 +11,15 @@
 # l'humain ne pouvait plus se loguer, parce que le mot de passe de banc n'etait ecrit nulle part.
 # Une recette qu'on retient de tete est une recette qu'on perd au prochain nuke. Celle-ci est ici.
 #
-# Ce que le script fait, dans l'ordre (chaque etape est idempotente) :
+# ⚠ IDEMPOTENT A UNE CONDITION, ET ELLE N'ETAIT PAS ECRITE (mesure du 2026-08-03, en composant ce
+# script deux fois de suite depuis bench-up.sh) : sans `--tofu-dir`, l'etape 4 se copie la recette
+# dans un mktemp NEUF a chaque passe, donc avec un tfstate VIDE — tofu croit devoir creer une org,
+# des teams et dix comptes qui existent deja, et l'apply meurt en 409. Chaque etape prise seule est
+# idempotente ; l'ENCHAINEMENT ne l'est que si l'etat de tofu survit d'une passe a l'autre. Donner
+# un `--tofu-dir` stable est donc obligatoire des qu'on joue ce script plus d'une fois sur la meme
+# forge. Le defaut mktemp reste correct pour l'usage d'origine : UNE passe sur une forge NEUVE.
+#
+# Ce que le script fait, dans l'ordre :
 #   1. attend que la forge reponde ;
 #   2. cree le compte admin de bootstrap s'il manque (mot de passe genere, jamais fixe) ;
 #   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
