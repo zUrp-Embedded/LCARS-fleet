@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
   the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-08-02
   """
 
   # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.
@@ -23,7 +23,22 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
           {:ok, map() | nil} | {:error, term()}
   def default_project_resolver(repo, opts) do
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    base_branch = Keyword.get(opts, :base_branch, "main")
+
+    # REQUIRED, never defaulted (chantier face-projet, inventory §D): the face decision is made
+    # ONCE at the dispatch entry (issue flow: the card step's `face`; review flow: the PR head).
+    # This used to be `Keyword.get(opts, :base_branch, "main")` — a substituting default that
+    # looked like a seam: when the value did not arrive, the resolver silently pinned the CODE
+    # face instead of stopping, and five downstream twins did the same in two spellings. A caller
+    # without a base_branch has skipped the face decision; that is its bug to surface, not ours
+    # to paper over.
+    base_branch =
+      Keyword.get(opts, :base_branch) ||
+        raise(
+          ArgumentError,
+          "default_project_resolver: :base_branch missing for #{inspect(repo)} — the FACE " <>
+            "decision is made once at the dispatch entry and threaded, never re-defaulted here " <>
+            "(single-default-site doctrine, chantier face-projet)."
+        )
 
     # DECONFLATION clone-base / gate-base. `base_sha` would otherwise conflate two
     # concerns: (1) the STARTING POINT of the clone (`pin_base_sha` resets HEAD onto it) and (2) the

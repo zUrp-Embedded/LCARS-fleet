@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   delegated to `Fleet.Pilot.StepDispatcher.ReviewLifecycle`. The modules
   `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` are **seams** (defaults = real modules).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -203,7 +203,16 @@ defmodule Fleet.Pilot.StepDispatcher do
                  pod_id
                ),
              :ok <- Spawn.gate_scope_decision(decision),
-             {:ok, project} <- Opts.tag_err(resolver.(repo, opts), :project_resolution),
+             # THE single default site of the project FACE (inventory §D): the card's step says
+             # which face its producer works on; absent = the code face — decided HERE, once, and
+             # threaded as `:base_branch`. Every downstream consumer ASSERTS the value instead of
+             # re-defaulting (the resolver raises without it): six sites used to substitute `main`
+             # in two spellings when the value did not reach them, each coherent alone, wrong at
+             # the junction. `face_branch/1` raises on a value outside the schema enum — a card
+             # that bypassed validation must not dispatch onto a guessed branch.
+             face = Map.get(step_spec || %{}, "face", "code"),
+             face_opts = Keyword.put(opts, :base_branch, Fleet.Layout.face_branch(face)),
+             {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
              :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
