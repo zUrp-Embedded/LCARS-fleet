@@ -40,6 +40,8 @@ defmodule Fleet.Workflow.DeliverableGate do
           | {:bad_identity, [String.t()]}
           | {:missing_coauthor_trailer, String.t(), [String.t()]}
           | {:secret_detected, String.t(), String.t()}
+          # BL-6-16: an instruction-tier path (.claude/**, non-root CLAUDE.md) in the chain.
+          | {:forbidden_path_in_diff, String.t()}
           | {:git_error, term()}
           # Git timeout, distinct from the "not ancestor" diagnostic and from a hard git error.
           | {:git_timeout, term()}
@@ -287,14 +289,30 @@ defmodule Fleet.Workflow.DeliverableGate do
       {out, 0} ->
         files = String.split(out, "\n", trim: true)
 
-        case Enum.find(files, &Regex.match?(@secret_file_re, &1)) do
-          nil -> :ok
-          f -> {:error, {:secret_detected, "blacklisted_file", f}}
+        # BL-6-16 second line (independent of the workspace sanitizer): instruction-tier paths
+        # are FORBIDDEN in a deliverable chain — a commit touching `.claude/**` or a NON-root
+        # `CLAUDE.md` would plant (or delete) directive material in the target repo at harvest.
+        # Same per-commit listing as the secret scan below: zero extra git call. The ROOT
+        # CLAUDE.md stays legitimate (an eng_doc may document the project).
+        case Enum.find(files, &forbidden_instruction_path?/1) do
+          nil ->
+            case Enum.find(files, &Regex.match?(@secret_file_re, &1)) do
+              nil -> :ok
+              f -> {:error, {:secret_detected, "blacklisted_file", f}}
+            end
+
+          f ->
+            {:error, {:forbidden_path_in_diff, f}}
         end
 
       {out, rc} ->
         {:error, classify_git_error(out, rc)}
     end
+  end
+
+  defp forbidden_instruction_path?(path) do
+    segments = Path.split(path)
+    ".claude" in segments or (Path.basename(path) == "CLAUDE.md" and length(segments) > 1)
   end
 
   defp scan_secret_content(workspace, base_sha) do

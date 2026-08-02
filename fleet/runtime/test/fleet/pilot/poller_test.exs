@@ -479,6 +479,19 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
+  # The listener name is GLOBAL and this file is async: the name frees on the PREVIOUS test
+  # process's DEATH, which is asynchronous — a register at the next test's first line can race
+  # it (seed-dependent flake, measured in the gate). Bounded wait: the only possible owner is
+  # the dying predecessor of THIS serial module, never a live peer.
+  defp register_reap_listener!(tries \\ 50) do
+    Process.register(self(), :reap_test_listener)
+  rescue
+    ArgumentError ->
+      if tries == 0, do: raise("reap_test_listener never freed")
+      Process.sleep(10)
+      register_reap_listener!(tries - 1)
+  end
+
   # Reap (B'): a live per-brick JUDGE pod + kill capture. `kill_pod` runs in the POLLER process →
   # the capture goes through the registered test listener (`:reap_test_listener`), same reason the
   # forge stub threads `_test_pid`.
@@ -743,7 +756,7 @@ defmodule Fleet.Pilot.PollerTest do
       # Live case 2026-07-19 (#5 zombie loop): consultant idle-at-prompt 16 min after its redirect
       # verdict. Here: #8 is parked awaits-arch (in-flight lifted by await_arch), the judge pod is
       # alive with a TERMINAL task → no reason to live → reaped after the 2-tick grace.
-      Process.register(self(), :reap_test_listener)
+      register_reap_listener!()
 
       issues = [
         %{
@@ -783,7 +796,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "reap (B'): a pod whose brick STILL holds the in-flight lock is NEVER reaped" do
-      Process.register(self(), :reap_test_listener)
+      register_reap_listener!()
 
       issues = [
         %{
@@ -821,7 +834,7 @@ defmodule Fleet.Pilot.PollerTest do
     test "reap (B'): an ACTIVE-task pod is NEVER reaped even with its brick unlocked (mid-eval belt)" do
       # Gate-eval belt: a one-shot gatekeeper mid-eval works an issue whose lock may be lifted —
       # the active task (not the label) proves it is working. Same authority as the lock duty.
-      Process.register(self(), :reap_test_listener)
+      register_reap_listener!()
 
       issues = [
         %{
@@ -859,7 +872,7 @@ defmodule Fleet.Pilot.PollerTest do
     test "reap (B'): a RESIDENT project pod (no brick ref in its id) is structurally exempt" do
       # The resident eng (`<repo>-engineer`) has no `-issue-N-` ref: its lifecycle is the
       # slot-freeze, never the brick reap — even fully idle on a quiet repo.
-      Process.register(self(), :reap_test_listener)
+      register_reap_listener!()
 
       name = :"P_reap_resident_#{System.unique_integer([:positive])}"
 
