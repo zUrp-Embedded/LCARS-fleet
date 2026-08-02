@@ -17,7 +17,8 @@
 #   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
 #   4. joue `tofu apply` sur la recette de prod INCHANGEE (org, teams, 8 roles, systeme, humain) ;
 #   5. pose le seed dans la boite pour que le mint A4 des role-tokens converge au prochain boot ;
-#   6. pose le mot de passe de BANC de l'humain (cf. le bloc ci-dessous) ;
+#   6. pose le mot de passe de BANC de l'humain, son TOKEN operateur, et cable le token
+#      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
 #   7. pose les avatars de charte (le scribe en a un depuis le 2026-08-02) ;
 #   8. SEME la forge : `fleet/lcars` (la source que la boite clone) + `fleet/project-template`
 #      (le modele que create_project genere). Une forge vierge sans ces deux repos donne une
@@ -34,6 +35,20 @@
 # production : rien dans `provisioning/` ni dans le runtime ne lit cette valeur.
 # La vraie sortie est l'onboarding humain (BL-6-25) ; d'ici la, la convention est ECRITE plutot que
 # retenue.
+#
+# ─── LE TOKEN OPERATEUR ET LE CABLAGE ENV — MEME NATURE, MEME RAISON ────────────────────────────
+# Corollaire du mot de passe : en PRODUCTION la forge preexiste et Gitea regle l'identite de
+# l'humain a son propre onboarding ; le token operateur est un geste d'identite que la recette
+# n'automatise pas (70-human le SONDE et l'INSTRUIT, il ne le pose jamais). Sur un banc, cette
+# identite nait et meurt avec la forge, plusieurs fois par jour — le geste est donc ici.
+#
+# Le cablage env vient du meme ordre de cold boot, et la boite le NOMME deja (70-human, cas D4) :
+# le premier boot seed `fleet_v2.env` AVANT que la forge soit bootstrappee, donc sans
+# `FORGE_TOKEN_FILE` ; ensuite le fichier appartient a l'humain et n'est PLUS jamais reecrit. Sans
+# ces deux lignes le runtime retombe sur `~/.gitea_token` (le token de l'HUMAIN), et la creation de
+# projet echoue — soit en enoent, soit, pire, en 403 : la team `humans` a `can_create_repos =
+# false`, seul le compte SYSTEME cree des repos d'org (forge.tf). Un banc qui pose le token humain
+# sans cabler le systeme troque une panne claire contre une panne qui ressemble a un droit manquant.
 #
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
@@ -164,6 +179,33 @@ fi
     --username "$HUMAN" --password "$HUMAN_PASSWORD" --must-change-password=false >/dev/null 2>&1 \
   || die "mot de passe de banc non pose pour $HUMAN" 6
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
+
+# Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
+# qu'on vient de poser. Scopes du contrat operateur : ses propres repos et issues, plus read:user.
+if [[ "$WITH_BOX" -eq 1 ]]; then
+  HUMAN_TOKEN="$(curl -s -m 10 -u "$HUMAN:$HUMAN_PASSWORD" -H "Content-Type: application/json" \
+      -X POST -d '{"name":"bench-operateur","scopes":["write:repository","write:issue","read:user"]}' \
+      "$(api)/users/$HUMAN/tokens" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha1",""))' 2>/dev/null || true)"
+
+  if [[ -n "$HUMAN_TOKEN" ]]; then
+    printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+        'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
+      && say "token operateur pose dans $BOX:~$HUMAN/.gitea_token" \
+      || say "token operateur NON pose dans la boite"
+  else
+    say "la forge n'a pas rendu de token operateur (un token du meme nom existe deja ?)"
+  fi
+
+  # Les DEUX lignes que 70-human instruit (cas D4) : le runtime doit ecrire sur la forge avec le
+  # compte SYSTEME, jamais avec celui de l'humain. Ajoutees seulement si absentes — apres le seed,
+  # ce fichier appartient a l'humain.
+  "$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c \
+      'grep -q "^FORGE_TOKEN_FILE=" ~/.lcars/fleet_v2.env \
+       || printf "FORGE_TOKEN_FILE=/home/private/system.gitea_token\nFORGE_BOT_LOGIN=lcars-system\n" >> ~/.lcars/fleet_v2.env' \
+    && say "fleet_v2.env : token systeme cable (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN)" \
+    || say "fleet_v2.env NON cable — la creation de projet echouera (cf. l'en-tete)"
+fi
 
 # ─── 7. avatars de charte ────────────────────────────────────────────────────────────────────────
 # Le mapping compte→fichier vit dans le script de la recette (DONNEE, pas cas special) — un role
