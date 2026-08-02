@@ -563,7 +563,14 @@ function agentCenter(){
   const s6 = sec('modop_set');
   s6.appendChild(el('div','mini','default')); chipRow(s6, mo.default||[]);
   s6.appendChild(el('div','mini','optional')); chipRow(s6, mo.optional||[]);
-  s6.appendChild(el('div','mini','incompatible')); chipRow(s6, mo.incompatible||[], 'var(--rd)');
+  s6.appendChild(el('div','mini','incompatible — PAIRES : les deux ne peuvent etre actifs ensemble'));
+  (function(){ const d=el('div');
+    for(const pair of (mo.incompatible||[])){
+      const label = Array.isArray(pair) ? pair.join(' ⟂ ') : String(pair);
+      const c=el('span','chip',label); c.style.color='var(--rd)'; d.appendChild(c);
+    }
+    if(!(mo.incompatible||[]).length) d.appendChild(el('span','mini','aucune'));
+    s6.appendChild(d); })();
 
   const s7 = sec('project');
   if(spec.project){ for(const k of Object.keys(spec.project)) kvRow(s7, k, spec.project[k]==null?'null':spec.project[k]); }
