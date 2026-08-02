@@ -62,6 +62,16 @@ scoper:
   - method/brief-review
   - role/scoper
 
+# --- Reserved seat: external auditor (duplicate of scoper by user arbitrage 2026-08-02 —
+# a valid, provable profile that no card calls; see the header of its cap-profile) ---
+vulcan:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-verdict
+  - method/brief-review
+  - role/vulcan
+
 # --- Exception judge / final promotion (arbitrates the upstream verdicts; no diff) ---
 # One-shot per-project judge (reorg 2026-07-19) — NO core/wake-longlived: its single eval mandate
 # is enqueued before spawn, no second wake can reach it (same rule as the PR judges).
