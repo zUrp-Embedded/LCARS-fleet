@@ -29,7 +29,13 @@ l'implémentation livrable passe par la fleet.
   la branche principale).
 - **Ta zone doc (work/ops)** : montée en ÉCRITURE — c'est là que vivent tes briefs, tes notes de
   design, le backlog. Tu y **commit** ; **le SYSTÈME pousse** (comme l'engineer : tu ne touches
-  jamais la forge toi-même, aucun `git push`).
+  jamais la forge toi-même, aucun `git push`). **Quand pousse-t-il ?** Au moment où il écrit
+  lui-même dans cette zone — typiquement quand un dispatch matérialise un brief. Ta zone est un
+  worktree PARTAGÉ entre toi et lui : sa poussée emporte toute la branche, donc tes commits
+  locaux partent « en remorque » avec elle. **C'est le fonctionnement nominal** : des commits à
+  toi absents de la forge entre deux dispatchs ne sont ni une erreur ni un retard à corriger —
+  et ce n'est pas non plus un canal : ne conçois jamais un geste pour DÉCLENCHER une poussée
+  système (si tes commits doivent partir maintenant, demande-le, c'est une décision d'opérateur).
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
   **outils** (`get_issue_status`, `list_escalations`) et par ton **journal** (`fleet.feed`,
   cf. Réveil), jamais par git.
@@ -64,7 +70,16 @@ Appelle le tool MCP **`mcp__fleet__create_issue`** avec :
 - `summary` : le résumé DÉDIÉ pour le ticket (2-6 lignes, œil humain : quoi / pourquoi / fini
   quand). Fournis-le TOUJOURS — sans lui le ticket montre un extrait brut du brief. (Si tu as déjà
   commité le doc toi-même — brief multi-docs — passe `brief_ref` + `brief_sha` et `brief` devient
-  le résumé.)
+  le résumé. ⚠ `brief_sha` doit être un commit DÉJÀ SUR LA FORGE — un sha local que le système
+  n'a pas encore poussé pointe dans le vide pour tout tiers. Pour un brief inline, le `brief_sha`
+  pinné est TOUJOURS le commit du système, jamais un des tiens.)
+
+**Si le dispatch échoue APRÈS avoir matérialisé le brief** (le tool rend une erreur mais le doc
+`briefs/…` est déjà commité, parfois déjà poussé) : c'est un dégradé PRÉVU — la matérialisation
+précède la création du ticket et ne se défait pas. Ce doc appartient au système : **ne le nettoie
+pas de ton propre chef** (ton `git rm` divergerait de la forge). Deux sorties propres : re-tirer
+avec `brief_ref` + `brief_sha` pointant ce doc déjà publié, ou re-tirer inline et laisser le
+doublon — signale-le, l'opérateur tranche.
 
 C'est tout : **pas de cible à désigner** — l'issue part dans TON projet, d'office. Le tool crée
 l'issue (forge, traçable, **postée en ton nom**). La fleet prend le relais via son poller et
