@@ -694,6 +694,24 @@ function enumOf(key){
   return out||[];
 }
 
+/* L'OBSERVATION du canon : quels juges ont deja occupe quel siege. Les profils ne portent
+   AUCUN discriminant brief-juge vs PR-juge aujourd'hui (mesure : qualifier/scoper/reviewer
+   identiques hors nom) — en attendant un champ propre (judge_targets, demande au proprietaire
+   du schema cap-profile), le canon fait office de mesure : un juge jamais vu sur un siege y est
+   VISIBLE mais grise, avec la raison. Pool observe vide → siege ouvert a tous (pas de fantome). */
+function observedSeats(){
+  const o = {brief:new Set(), deliverable:new Set(), jury:new Set()};
+  for(const c of Object.values(CAT.cards||{})){
+    const spec=(c.data||{}).spec||{};
+    for(const j of (spec.jury||[])) o.jury.add(j);
+    for(const sd of Object.values(spec.steps||{})){
+      if(sd.judge_target==='brief') o.brief.add(sd.role);
+      if(sd.judge_target==='deliverable') o.deliverable.add(sd.role);
+    }
+  }
+  return o;
+}
+
 /* Le MODELE A ETAGES est une MESURE des steps (judge_target du schema + pools), pas une grammaire
    posee ici : un step qui ne se classe pas rend la carte « hors grammaire » → yaml brut. */
 function stageModel(data){
@@ -786,14 +804,20 @@ function editor(body, src){
   let seatSeq = 0;
   function seatRadios(current, pool, onpick, allowNone){
     const g = el('span','ckrow'); const name = 'seat'+(seatSeq++);
-    const mk = (val, label) => {
+    const mk = (val, label, dis, why) => {
       const lb = el('label','ck'+(val===current?'':' off'));
+      if(dis){ lb.style.opacity='.42'; lb.title = why||''; lb.style.cursor='not-allowed'; }
       const rb = document.createElement('input'); rb.type='radio'; rb.name=name; rb.checked = val===current;
+      rb.disabled = !!dis && val!==current;
       rb.onchange = () => onpick(val);
-      lb.appendChild(rb); lb.append(' '+label); g.appendChild(lb);
+      lb.appendChild(rb); lb.append(' '+label+(dis?' ⌀':''));
+      g.appendChild(lb);
     };
-    if(allowNone) mk('', allowNone);
-    for(const r of pool) mk(r, r);
+    if(allowNone) mk('', allowNone, false);
+    for(const r of pool){
+      if(typeof r === 'string') mk(r, r, false);
+      else mk(r.name, r.name, r.off, r.why);
+    }
     return g;
   }
 
@@ -845,9 +869,12 @@ function editor(body, src){
 
     zone.appendChild(stageBox('① PRE-FLIGHT — le brief est juge avant tout', !!st.pre, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'juge du brief'));
-      f.appendChild(seatRadios(st.pre.role, P.judges, v => { st.pre.role = v; renderZone(); }));
+      const obsB = observedSeats().brief;
+      const poolB = P.judges.map(n => ({name:n, off: obsB.size>0 && !obsB.has(n),
+        why:'jamais observe sur ce siege dans le canon — profil sans discriminant, calibrage SP inconnu'}));
+      f.appendChild(seatRadios(st.pre.role, poolB, v => { st.pre.role = v; renderZone(); }));
       box.appendChild(f);
-      box.appendChild(el('div','mini','sieges = brief_kind: judge · inputs auto: ticket.body · needs cable par l ordre'));
+      box.appendChild(el('div','mini','⌀ = jamais vu sur ce siege dans le canon (les profils juges sont indiscrimines — champ judge_targets demande)'));
     }, on => { st.pre = on ? {name:'brief-review', role:P.judges[0]||'', face:'', inputs:[]} : null; renderZone(); }));
 
     const prodBox = el('div','fs');
@@ -866,8 +893,10 @@ function editor(body, src){
         sh.appendChild(el('span','mini','· face'));
         sh.appendChild(seatRadios(pr.face, faces, v => { pr.face = v; renderZone(); }, '(moteur)'));
       }
-      const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
-      const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
+      if(!(st.producers.length===1 && !st.audit)){
+        const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
+        const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
+      }
       sf.appendChild(sh);
       sf.appendChild(el('div','mini', (pr.face==='ops' ? 'livrable sur work/ops (chemin ticket-doc)' : pr.face==='code' ? 'livrable sur main (chemin ticket-code)' : 'face par defaut du moteur') + ' · sieges = capabilities: producer'));
       prodBox.appendChild(sf);
@@ -879,34 +908,32 @@ function editor(body, src){
 
     zone.appendChild(stageBox('③ AUDIT — un juge lit le livrable', !!st.audit, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'auditeur'));
-      f.appendChild(seatRadios(st.audit.role, P.judges, v => { st.audit.role = v; renderZone(); }));
+      const obsD = observedSeats().deliverable;
+      const poolD = P.judges.map(n => ({name:n, off: obsD.size>0 && !obsD.has(n),
+        why:'jamais observe sur ce siege dans le canon'}));
+      f.appendChild(seatRadios(st.audit.role, poolD, v => { st.audit.role = v; renderZone(); }));
       box.appendChild(f);
-    }, on => { st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
+      if(st.producers.length===0) box.appendChild(el('div','mini','seul etage de travail de la carte — desactivation impossible'));
+    }, on => { if(!on && !st.producers.length) { renderZone(); return; }
+       st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
 
     zone.appendChild(stageBox('④ JURY DE PR — verdicts paralleles', st.juryOn, true, (box)=>{
       const jr = el('div','ckrow');
+      const obsJ = observedSeats().jury;
       for(const name of P.judges){
         const on = st.jury.includes(name);
+        const off = obsJ.size>0 && !obsJ.has(name) && !on;
         const lb = el('label','ck'+(on?'':' off'));
-        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+        if(off){ lb.style.opacity='.42'; lb.title='jamais observe dans un jury du canon (vulcan : siege reserve — codex pas branche)'; }
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on; ck.disabled=off;
         ck.onchange = () => { ck.checked ? st.jury.push(name) : st.jury.splice(st.jury.indexOf(name),1); renderZone(); };
-        lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
+        lb.appendChild(ck); lb.append(' '+name+(off?' ⌀':'')); jr.appendChild(lb);
       }
       box.appendChild(jr);
-      box.appendChild(el('div','mini','le promoteur n est PAS ici — il scelle toujours (etage ⑤)'));
+      box.appendChild(el('div','mini','le promoteur n est PAS ici — il scelle toujours (etage ⑤) · ⌀ = jamais vu dans un jury canon'));
     }, on => { st.juryOn = on; if(!on) st.jury = []; renderZone(); }));
 
-    const workOk = st.producers.length > 0 || !!st.audit;
-    if(!workOk){
-      const warnb = el('div','vres warn');
-      warnb.style.display='block';
-      warnb.textContent = "AUCUN ETAGE DE TRAVAIL : ajoute un producteur (②) ou active l audit (③). "
-        + "Une carte sans travail passerait le schema d aujourd hui — le clic la refuse, et le "
-        + "durcissement (steps minProperties) est demande au proprietaire du schema.";
-      zone.appendChild(warnb);
-    }
-    sb.disabled = !workOk; sb.style.opacity = workOk ? '1' : '.4';
-
+    sb.disabled = false; sb.style.opacity = '1';
     const pm = el('div','fs'); pm.style.borderLeftColor='var(--gr)';
     pm.appendChild(el('div','ftitle','⑤ PROMOTE — jamais une option'));
     pm.appendChild(el('div','kv', (P.promoters.join(' + ')||'?') + ' scelle, quoi qu on coche — capability exception_judge, pas un choix de carte'));
