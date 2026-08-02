@@ -275,8 +275,11 @@ teardown() {
   [[ "$output" == *"--setting-sources project,local"* ]]
 }
 
-@test "flags: --settings points at .lcars/settings.json (additive flagSettings)" {
-  # The pod settings are provisioned UNCONDITIONALLY (cf. the settings section) → --settings is always emitted.
+@test "flags: --settings points at .lcars/settings.json when the PROJECTION wrote it" {
+  # BL-6-07: the launcher composes nothing — the file comes from the projection tier
+  # (Assets.pod_settings_json/1). Present → passed through as flagSettings.
+  mkdir -p "$POD_DIR/.lcars"
+  echo '{"autoMemoryEnabled":false}' > "$POD_DIR/.lcars/settings.json"
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
 }
@@ -289,54 +292,46 @@ teardown() {
 }
 
 # =============================================================
-# Pod settings (.lcars/settings.json): UNCONDITIONAL provisioning + --settings pass-through
-# (flagSettings). #kill-yolo: PERM_MODE default → no --dangerously-skip-permissions and no
-# skipDangerousModePermissionPrompt on the default path. The file carries autoMemoryEnabled:false
-# (F-POD-AUTOMEM: pod auto-memory off). The skip-dialog is reserved for PERM_MODE=bypassPermissions —
-# the real enum value, since PERM_MODE is NEVER empty (it defaults to "default") and the old `-z` guard
-# was therefore dead code. --settings is the flagSettings source, independent of --setting-sources.
+# Pod settings (.lcars/settings.json): CONSUMED, never composed (BL-6-07). The file is written
+# COMPLETE by the projection tier (Assets.pod_settings_json/1 — autoMemory off for every mode,
+# skip-dialog reserved to bypassPermissions; the POLICY tests live Elixir-side with the owner).
+# The launcher's whole contract: file present → --settings pass-through; file absent → no flag
+# and NO write. The old in-launcher jq merge was a second composer with a second policy over
+# one file — and the two disagreed on the skip-dialog.
 # =============================================================
 
-@test "settings: provisions .lcars/settings.json (autoMemory off) + passes it through --settings" {
+@test "settings: the launcher COMPOSES NOTHING — absent file, no flag, no write" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
-  [[ -f "$POD_DIR/.lcars/settings.json" ]]
-  grep -q "autoMemoryEnabled" "$POD_DIR/.lcars/settings.json"
+  [[ ! -f "$POD_DIR/.lcars/settings.json" ]]
+  [[ "$output" != *"--settings "* ]]
+}
+
+@test "settings: a projected file passes through BYTE-IDENTICAL (no merge, no fleet key added)" {
+  mkdir -p "$POD_DIR/.lcars"
+  echo '{"hooks":{"PreToolUse":[]}}' > "$POD_DIR/.lcars/settings.json"
+  before="$(cat "$POD_DIR/.lcars/settings.json")"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$(cat "$POD_DIR/.lcars/settings.json")" == "$before" ]]
   [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
 }
 
-@test "settings: non-destructive merge (pre-existing pod settings kept + fleet key added)" {
-  echo '{"hooks":{"PreToolUse":[]}}' > "$POD_DIR/.lcars/settings.json"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR"
-  [[ "$status" -eq 0 ]]
-  grep -q "autoMemoryEnabled" "$POD_DIR/.lcars/settings.json"   # the fleet key is added
-  grep -q "PreToolUse" "$POD_DIR/.lcars/settings.json"          # the existing content is NOT clobbered
-}
-
-@test "settings: a restricted role (LCARS_PERMISSION_MODE) does NOT provision the skip-dialog" {
-  export LCARS_PERMISSION_MODE=plan
-  run "$SCRIPT" engineer pod-1 "$POD_DIR"
-  [[ "$status" -eq 0 ]]
-  # The file exists (autoMemoryEnabled is UNCONDITIONAL) but WITHOUT
-  # skipDangerousModePermissionPrompt: the skip-dialog is reserved for PERM_MODE=bypassPermissions,
-  # never for a restricted or default mode.
-  ! grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
-}
-
-@test "settings: PERM_MODE=bypassPermissions (env override) provisions the skip-dialog (pre-accepted, no hang)" {
-  # Regression: the historical `-z "$PERM_MODE"` guard was DEAD (PERM_MODE is never empty, it defaults
-  # to "default"), so a bypassPermissions pod hung at boot on the "Yes I accept" dialog. The guard is
-  # now keyed on the real enum value (launch_spec.ex @permission_modes).
+@test "settings: PERM_MODE=bypassPermissions still writes NOTHING (the policy owner is Elixir)" {
+  # The --permission-mode flag passes; the skip-dialog provisioning is the projection tier's
+  # (Assets.pod_settings_json/1, tested with the owner) — the launcher stays a pure executor.
   export LCARS_PERMISSION_MODE=bypassPermissions
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"--permission-mode bypassPermissions"* ]]
-  grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
+  [[ ! -f "$POD_DIR/.lcars/settings.json" ]]
 }
 
-@test "settings: cap-profile permission_mode=bypassPermissions provisions the skip-dialog (in-sandbox channel)" {
-  # Same invariant as above but through the PROD channel: the cap-profile JSON's
-  # `.spec.invocation.permission_mode`. bwrap --clearenv strips the env, so the JSON IS the mode's channel.
+@test "settings: cap-profile bypassPermissions flows to --permission-mode, still ZERO settings write (BL-6-07)" {
+  # The PROD channel for the mode stays the cap-profile JSON (bwrap --clearenv strips the env,
+  # so the JSON IS the mode's channel) — but the skip-dialog PROVISIONING moved to the policy
+  # owner (Assets.pod_settings_json/1, projection tier, tested Elixir-side). The launcher reads
+  # the mode for the FLAG only and composes nothing.
   cat > "$POD_DIR/.cap-profile.json" <<'EOF'
 {
   "api_version": "lcars/v2.5",
@@ -351,7 +346,7 @@ EOF
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"--permission-mode bypassPermissions"* ]]
-  grep -q '"skipDangerousModePermissionPrompt":true' "$POD_DIR/.lcars/settings.json"
+  [[ ! -f "$POD_DIR/.lcars/settings.json" ]]
 }
 
 @test "version: claude --version in an unexpected format → fallback 2.1.150, NOT a pipefail death" {

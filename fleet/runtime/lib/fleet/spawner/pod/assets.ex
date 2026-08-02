@@ -20,35 +20,48 @@ defmodule Fleet.Spawner.Pod.Assets do
   - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Spawner.Pod.Fs
 
   @doc """
-  Minimal `settings.json` for the pod's claude REPL (written to `.lcars/` by the `:projecting` state).
+  The pod REPL's `settings.json` — COMPLETE, single-owner (written to `.lcars/` by the
+  `:projecting` state; BL-6-07: the launcher no longer composes or merges anything, it only
+  passes the file through `--settings`). Before this, TWO tiers wrote the same file with TWO
+  policies: this module put `skipDangerousModePermissionPrompt: true` unconditionally
+  (pre-kill-yolo), while `claude_launch.sh` jq-merged its own keys and reserved the skip-dialog
+  to bypass — and the unconditional side WON the merge, shipping every restricted pod a
+  pre-accepted danger dialog. One owner now, and the kill-yolo policy is the one that holds:
 
-  `skipDangerousModePermissionPrompt: true` — pre-accepts the interactive warning claude shows
-  on first boot under `--dangerously-skip-permissions`; without this key, the pod's tmux session
-  freezes on "By proceeding, you accept..." (option 1/2 + Enter).
-  `hasCompletedOnboarding: true` also skips onboarding (the legacy `.claude.json` — the
-  host user's global config — is not meant to be touched here).
-
+  `skipDangerousModePermissionPrompt: true` ONLY under `permission_mode == "bypassPermissions"`
+  (`LaunchSpec.permission_mode/1`, the same authority that exports `LCARS_PERMISSION_MODE`) —
+  it pre-accepts the interactive "By proceeding, you accept..." dialog that hangs a headless
+  pod; a default/restricted pod gets NO pre-acceptance.
+  `hasCompletedOnboarding: true` skips onboarding (the legacy `.claude.json` — the host user's
+  global config — is not meant to be touched here).
+  `autoMemoryEnabled: false` (F-POD-AUTOMEM, moved from the launcher): the pod's claude
+  auto-memory is siloed, useless to the fleet, and doctrine pollution (BUG-3) — off for every
+  permission mode.
   `extensions.marketplace.autoInstall: false` — left on, every spawn clones Anthropic's plugin
   marketplace from GitHub (~40 plugin trees) to install zero plugin: the fleet installs none. A
   pod runs inside a projected world and must not fetch code from the internet at boot.
   """
-  @spec pod_settings_json() :: String.t()
-  def pod_settings_json do
-    Jason.encode!(
-      %{
-        "hasCompletedOnboarding" => true,
-        "hasAcknowledgedCostThreshold" => true,
-        "skipDangerousModePermissionPrompt" => true,
-        "extensions" => %{"marketplace" => %{"autoInstall" => false}}
-      },
-      pretty: true
-    )
+  @spec pod_settings_json(Fleet.CapProfile.t()) :: String.t()
+  def pod_settings_json(%Fleet.CapProfile{} = cap_profile) do
+    base = %{
+      "hasCompletedOnboarding" => true,
+      "hasAcknowledgedCostThreshold" => true,
+      "autoMemoryEnabled" => false,
+      "extensions" => %{"marketplace" => %{"autoInstall" => false}}
+    }
+
+    settings =
+      if Fleet.Spawner.Pod.LaunchSpec.permission_mode(cap_profile) == "bypassPermissions",
+        do: Map.put(base, "skipDangerousModePermissionPrompt", true),
+        else: base
+
+    Jason.encode!(settings, pretty: true)
   end
 
   @doc """

@@ -333,7 +333,10 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Fs.safe_write(Path.join(data.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <-
-           Fs.safe_write(Path.join(lcars_dir, "settings.json"), Assets.pod_settings_json()),
+           Fs.safe_write(
+             Path.join(lcars_dir, "settings.json"),
+             Assets.pod_settings_json(data.cap_profile)
+           ),
          :ok <- Fs.safe_mkdir_p(issues_dir),
          :ok <-
            Fs.safe_write(

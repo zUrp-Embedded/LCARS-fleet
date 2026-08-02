@@ -244,42 +244,18 @@ RC_FLAGS=()
 dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
 
 # =============================================================
-# Pod-specific settings (permissions/bypass). $POD_DIR/.lcars/settings.json, passed as flagSettings via
-# --settings (ADDITIVE, independent of --setting-sources). The human's hooks no longer leak, and they are
-# stopped at the BIND (bwrap binds only .credentials.json, .claude/ is pod-owned → zero human settings.json
-# in any user/project/local tier — P1/C9). Optional: no file, no --settings flag.
+# Pod settings: CONSUMED, never composed (BL-6-07). $POD_DIR/.lcars/settings.json is written
+# COMPLETE by the projection tier (Fleet.Spawner.Pod.Assets.pod_settings_json/1 — the tier that
+# holds the cap-profile and the permission policy): autoMemoryEnabled:false (F-POD-AUTOMEM) for
+# every mode, skipDangerousModePermissionPrompt:true ONLY under bypassPermissions (the flag that
+# pre-accepts the danger dialog a headless pod would hang on; --settings IS the flagSettings
+# source, independent of --setting-sources). This launcher used to jq-merge its OWN keys here —
+# a second composer with a second policy over one file, and the two disagreed on the
+# skip-dialog: the decision belongs to Elixir, the launcher executes. No file → no --settings
+# flag, and the launcher writes NOTHING (a settings-less run is the projection tier's business).
 # =============================================================
 
 POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
-
-# Bypass dialog: under PERM_MODE=bypassPermissions, pre-accept the interactive DIALOG ("1. No / 2. Yes I
-# accept") that hangs a headless pod. Mechanism (observed on v2.1.88, verified e2e): interactiveHelpers.tsx
-# shows the dialog iff `!hasSkipDangerousModePermissionPrompt()`, which reads
-# `skipDangerousModePermissionPrompt` from userSettings|localSettings|flagSettings|policySettings.
-# `--settings <file>` IS the **flagSettings** source ⇒ in that list, and INDEPENDENT of --setting-sources.
-# So the flag is provisioned in the pod settings (merged if the file exists) and claude_launch stays the
-# end-to-end owner of bypass mode: the flag AND the lifting of the dialog. Outside bypass (default, or a
-# role restricted by its cap-profile) we do not touch it. The old `bypassPermissionsModeAccepted` of the
-# global config is DEPRECATED/migrated — do not write it any more.
-# F-POD-AUTOMEM: the pod settings file is written UNCONDITIONALLY. It used to be bypass-only, but every pod
-# runs --permission-mode default since kill-yolo, so it was never written. `autoMemoryEnabled:false` turns
-# off the pod's claude auto-memory (siloed memory, useless to the fleet, doctrine pollution BUG-3) — for
-# EVERY PERM_MODE.
-# The guard is keyed on the enum's REAL VALUE (`bypassPermissions`, launch_spec.ex @permission_modes):
-# PERM_MODE is NEVER empty (the "default" above guarantees it), so the old `-z "$PERM_MODE"` guard was DEAD
-# and a bypassPermissions pod HUNG at boot on the un-pre-accepted dialog. Latent today (no canon cap-profile
-# runs in bypass) — a defensive gesture.
-mkdir -p "$POD_DIR/.lcars"
-POD_SETTINGS_JSON='{"autoMemoryEnabled":false}'
-[[ "$PERM_MODE" == "bypassPermissions" ]] && POD_SETTINGS_JSON="$("$JQ_BIN" -nc --argjson b "$POD_SETTINGS_JSON" '$b + {skipDangerousModePermissionPrompt:true}')"
-if [[ -f "$POD_SETTINGS_FILE" ]]; then
-  _merged="$("$JQ_BIN" --argjson add "$POD_SETTINGS_JSON" '. + $add' "$POD_SETTINGS_FILE")" \
-    && printf '%s\n' "$_merged" > "$POD_SETTINGS_FILE" \
-    || { dbg "EXIT: pod settings merge failed"; echo "ERR: pod settings merge failed" >&2; exit 1; }
-else
-  printf '%s\n' "$POD_SETTINGS_JSON" > "$POD_SETTINGS_FILE"
-fi
-dbg "step pod settings written (autoMemoryEnabled=false → $POD_SETTINGS_FILE)"
 
 # --setting-sources is UNCONDITIONAL: it excludes the 'user' tier (the human's ~/.claude/settings.json).
 # NOTE (P1/C9): this flag is NOT enough to close the hook leak — that one came through the `project`/`local`
