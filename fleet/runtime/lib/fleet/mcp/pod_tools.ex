@@ -31,6 +31,7 @@ defmodule Fleet.MCP.PodTools do
         poller skips the repo; disk + forge intact, `open_project` reopens).
       - `adopt_project`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
         of import; local content never overwritten).
+      - `import_external_project` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
       - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `list_issues`      : the arch reads its project's open-ticket board (BL-6-28: the
@@ -271,6 +272,41 @@ defmodule Fleet.MCP.PodTools do
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["name"]
+    })
+  end
+
+  deftool "import_external_project" do
+    meta do
+      name("Import External Project")
+
+      description(
+        "IMPORT a repo from an EXTERNAL forge (GitHub or GitLab ONLY — https URL) into the " <>
+          "fleet: full history repatriated, repo created in the org, dual-dir + work/ops + " <>
+          "forge gate like import_project. ONE-WAY: the external origin is left behind (this " <>
+          "is an import, never a mirror). THE ADOPTION GATE runs first (a foreign repo is the " <>
+          "found-USB-key of the parking lot): a repo shipping a `.claude/` tree is REFUSED en " <>
+          "bloc (we never adopt someone else's hooks), and every CLAUDE.md must pass the " <>
+          "mechanical reception filter — on refusal NOTHING reaches the org; the human expurges " <>
+          "at the source and retries. Default branch is normalized to `main` (a half-migrated " <>
+          "repo with BOTH master and main is refused — the human settles which is real). " <>
+          "Private repos: the operator sets LCARS_EXTERNAL_GIT_TOKEN in the daemon env (never " <>
+          "ask for the token in chat). `url` = https repo URL; `name` = the kebab-case project " <>
+          "name in our org. The card/criticality declaration relays like create_project. " <>
+          "Returns {\"status\":\"imported_external\",\"repo\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "url" => %{"type" => "string"},
+        "name" => %{"type" => "string"},
+        "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
+        "intensity_justification" => %{"type" => "string"},
+        "nature" => %{"type" => "string"},
+        "workflow_map" => %{"type" => "string"}
+      },
+      "required" => ["url", "name"]
     })
   end
 
@@ -631,6 +667,18 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("adopt_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("import_external_project", %{"url" => url, "name" => name} = args, state)
+      when is_binary(url) and is_binary(name) and url != "" and name != "" do
+    case Delegation.import_external_project(url, name, args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("import_external_project", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

@@ -21,6 +21,10 @@
 #      le GARDENT : must_change_password=false dans forge.tf), le module le DÉRIVE :
 #      {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge donc les
 #      tokens dans le MÊME cycle — plus aucun geste.
+#   3. converge la VISIBILITÉ des adhésions d'org des comptes machine (BL-6-29 : une adhésion
+#      créée par API est PRIVÉE par défaut — on se cachait sans l'avoir décidé). Le provider
+#      n'expose pas cette visibilité → recette, pas tofu. L'humain est sondé + instruit,
+#      jamais convergé (son password lui appartient).
 #
 # Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_SEED_FILE (défaut
 # <tokens-dir>/forge-seed.pass, 0600 root, posé par le geste bootstrap) · PROV_PASSWORDS_FILE
@@ -87,6 +91,66 @@ ensure_passwords_entries() {
   p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
 }
 
+# La visibilité des adhésions (BL-6-29 : « savoir QUI existe est un prérequis de sûreté ») —
+# sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui :
+# 403, même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal
+# A4 (write:repository,write:issue) répond 403 même sur soi. La seule voie recette est donc la
+# basic-auth PAR COMPTE du passwords-file — la même mécanique que le mint A4, les bots gardent
+# le seed. Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
+members_hidden() { # $1=liste de comptes → sous-liste dont l'adhésion n'est PAS publique
+  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok="" acct code hidden=""
+  local -a auth=()
+  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
+  [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
+  for acct in $1; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
+            "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/public_members/$acct" 2>/dev/null || true)"
+    [[ "$code" == "204" ]] || hidden="$hidden $acct"
+  done
+  printf '%s' "${hidden# }"
+}
+
+check_members_visible() {
+  local hidden
+  hidden="$(members_hidden "$ACCOUNTS")"
+  if [[ -z "$hidden" ]]; then
+    p_ok "adhésions org visibles (comptes machine)"
+  else
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — l'apply les publicise (basic-auth par compte)"
+  fi
+  # L'humain : sonde seule, geste instruit — jamais convergé ici (cf. en-tête, point 3).
+  if account_exists "$PROV_HUMAN" && [[ -n "$(members_hidden "$PROV_HUMAN")" ]]; then
+    p_drift "adhésion org de $PROV_HUMAN privée — geste utilisateur : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)"
+  fi
+}
+
+converge_members_visible() {
+  local hidden acct pwd code
+  hidden="$(members_hidden "$ACCOUNTS")"
+  [[ -z "$hidden" ]] && { p_ok "adhésions org déjà visibles (comptes machine)"; return 0; }
+  # Basic-auth par compte : le passwords-file est la MÊME source que le mint A4 (convergée
+  # par entrée depuis le seed) — pas de source de secret nouvelle pour ce geste.
+  if ! ensure_passwords_entries; then
+    p_drift "adhésions privées ($hidden) non convergées — passwords-file incomplet (cf. ci-dessus)"
+    return 0
+  fi
+  for acct in $hidden; do
+    pwd="$(jq -r --arg a "$acct" '.[$a] // empty' "$PROV_PASSWORDS_FILE" 2>/dev/null)"
+    if [[ -z "$pwd" ]]; then
+      p_drift "adhésion de $acct non convergée : pas d'entrée passwords-file"
+      continue
+    fi
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -u "$acct:$pwd" -X PUT \
+            "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/public_members/$acct" 2>/dev/null || true)"
+    if [[ "$code" == "204" ]]; then
+      PROV_CHANGED=$((PROV_CHANGED + 1))
+      p_chg "adhésion org publicisée : $acct"
+    else
+      p_drift "publicize $acct → HTTP $code (publicize est self-only ; password du seed encore valide ?)"
+    fi
+  done
+}
+
 check() {
   if [[ -z "$PROV_FORGE_URL" ]]; then
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
@@ -117,6 +181,7 @@ check() {
   fi
 
   check_human_onboardable
+  check_members_visible
   verdict_check
 }
 
@@ -164,6 +229,10 @@ apply() {
     p_drift "structure absente (comptes : $miss) — bootstrap requis : « ./docker.sh forge-bootstrap » (admin + tofu apply + seed)"
     verdict_apply
   fi
+
+  # AVANT l'early-return des tokens : la visibilité converge à CHAQUE apply, pas seulement
+  # quand des tokens manquent (les deux jambes sont indépendantes — BL-6-29).
+  converge_members_visible
 
   if a4_check; then
     p_ok "role-tokens déjà valides ($PROV_TOKENS_DIR)"

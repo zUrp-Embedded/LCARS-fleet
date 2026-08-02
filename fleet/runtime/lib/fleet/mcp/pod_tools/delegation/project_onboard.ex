@@ -75,6 +75,18 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               | {:error, term()}
 
   @doc """
+  IMPORTS a repo from an EXTERNAL forge (GitHub/GitLab — BL-6-31): repatriates the full
+  history into a system scratch, runs the ADOPTION GATE (foreign `.claude/` refused en bloc,
+  every `CLAUDE.md` through the reception filter), normalizes the default branch to `main`
+  (half-migrated master+main → named refusal), creates the org repo and hands over to the
+  standard import leg. One-way — the external origin is left behind. Same 3 return keys as
+  `onboard/2` (+ `architect`).
+  """
+  @callback import_external(url :: String.t(), name :: String.t(), opts :: keyword()) ::
+              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              | {:error, term()}
+
+  @doc """
   CLOSES a project (BL-6-30) — stops the fleet ON it, disk and forge intact (≠ delete: nothing
   destroyed). The closed state is a forge object (open `[lcars-parked]` marker issue) the poller
   respects; the running brick finishes, the next one never starts; the architect stops

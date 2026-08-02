@@ -17,7 +17,7 @@ defmodule Fleet.SPBuilder.RepoSections do
   legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching with zero repo context
   used to be indistinguishable from a pod that was given no repo file at all.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -30,7 +30,11 @@ defmodule Fleet.SPBuilder.RepoSections do
   @repo_section_names ~w(Stack Build Test Conventions Commands Gotchas)
 
   @doc """
-  Reads the repo `CLAUDE.md` and extracts the named sections from it.
+  Reads the repo `CLAUDE.md`, extracts the named sections, and passes EACH through
+  `Fleet.ReceptionFilter` (BL-6-16): the repo file is authored OUTSIDE the trust boundary and
+  this is the door where its content becomes pod DIRECTIVES. A matching section is DROPPED
+  whole and logged ERROR (red-alert class — the pod launches with LESS context, never with
+  poison; a spawn is never wedged over prose).
 
     * `path = nil` → `{:ok, ""}` (no repo CLAUDE.md supplied: no section, not
       an error — the template renders the zone empty).
@@ -42,8 +46,34 @@ defmodule Fleet.SPBuilder.RepoSections do
 
   def read(path) when is_binary(path) do
     case File.read(path) do
-      {:ok, content} -> {:ok, warn_if_no_section(extract(content), path)}
-      {:error, reason} -> {:error, {:repo_claude_md_unreadable, path, reason}}
+      {:ok, content} ->
+        kept =
+          content
+          |> named_sections()
+          |> Enum.filter(&admit_section?(&1, path))
+          |> Enum.join("\n\n")
+
+        {:ok, warn_if_no_section(kept, path)}
+
+      {:error, reason} ->
+        {:error, {:repo_claude_md_unreadable, path, reason}}
+    end
+  end
+
+  # The reception filter at the admission door (never a cleanup: the WHOLE section goes).
+  defp admit_section?(section, path) do
+    case Fleet.ReceptionFilter.scan(section) do
+      :clean ->
+        true
+
+      {:match, label, excerpt} ->
+        Logger.error(
+          "RepoSections: section DROPPED from #{path} — reception filter matched " <>
+            "#{inspect(label)} (#{inspect(excerpt)}); the section never reaches the pod's " <>
+            "directives (BL-6-16)"
+        )
+
+        false
     end
   end
 
@@ -70,10 +100,16 @@ defmodule Fleet.SPBuilder.RepoSections do
   @doc """
   Extracts from the markdown content the sections in the closed list (pure parser):
   splits at the `## ` headers, keeps the sections whose title matches, joins them
-  by a blank line. Content with no named section → `""`.
+  by a blank line. Content with no named section → `""`. UNFILTERED — the reception
+  filter lives in `read/1` (the I/O door); this stays the pure structural half.
   """
   @spec extract(String.t()) :: String.t()
   def extract(content) when is_binary(content) do
+    content |> named_sections() |> Enum.join("\n\n")
+  end
+
+  # The named sections as a LIST (one string each) — the shape `read/1` filters per-section.
+  defp named_sections(content) do
     lines = String.split(content, "\n")
     {sections_acc, current} = Enum.reduce(lines, {[], []}, &fold_section/2)
 
@@ -81,7 +117,7 @@ defmodule Fleet.SPBuilder.RepoSections do
     |> Enum.reverse()
     |> Enum.map(&Enum.reverse/1)
     |> Enum.filter(&named_section?/1)
-    |> Enum.map_join("\n\n", &Enum.join(&1, "\n"))
+    |> Enum.map(&Enum.join(&1, "\n"))
   end
 
   # Line-by-line fold: a `## ` header opens a new section (the accumulator

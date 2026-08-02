@@ -43,7 +43,7 @@ defmodule Fleet.Pilot do
 
   ## Operator entries (delegated here — the facade is the contract)
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
@@ -72,6 +72,9 @@ defmodule Fleet.Pilot do
       # quiesces — the poller-side reader, added to the two existing ones (ControlRouter, PermanentWarden).
       Fleet.Shutdown.Quiesce,
       Fleet.Publish.InFlight,
+      # BL-6-31: the adoption gate of import_external scans instruction material through the
+      # reception filter — foundation, shared with SPBuilder's RepoSections door.
+      Fleet.ReceptionFilter,
       # — external wire surface (lib fencing: every reference is declared) —
       Req,
       Req.Response

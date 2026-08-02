@@ -174,7 +174,7 @@ defmodule LcarsFleet.MixProject do
       {:ex_json_schema, "~> 0.11"},
       {:yaml_elixir, "~> 2.12"},
       # — MCP (pod frontier) —
-      {:ex_mcp, "~> 0.9.1"},
+      {:ex_mcp, "~> 0.12.0"},
       # PINNED, and load-bearing: 1.11.11+ ships `jose_json_otp.erl`, which declares the `dynamic()`
       # type. OTP 25 (what the Ubuntu LTS serves, cf. the apt-only toolchain posture) does not know
       # that type, so the dep does not COMPILE — `type dynamic() undefined`, measured 2026-07-30 by

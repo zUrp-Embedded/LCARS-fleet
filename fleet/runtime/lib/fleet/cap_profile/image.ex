@@ -20,7 +20,7 @@ defmodule Fleet.CapProfile.Image do
 
   The truly-dynamic calibration assets stay OUT of the image by design (cf. the SP split).
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -47,7 +47,24 @@ defmodule Fleet.CapProfile.Image do
       end
 
     Enum.each(index, fn {role, raw} ->
-      case Schema.validate(raw, :cap_profile) do
+      # Branch on kind (BL-6-28): a ReservedSeat is validated against ITS schema — every entry
+      # is proven at boot, none rots unvalidated behind its exclusion from the spawnable world.
+      # Three exits, the third a raise: an unknown kind is a broken deploy artifact, refused
+      # loud here rather than mis-validated against whichever schema a default would pick.
+      schema_kind =
+        case Map.get(raw, "kind") do
+          "CapabilityProfile" ->
+            :cap_profile
+
+          "ReservedSeat" ->
+            :reserved_seat
+
+          other ->
+            raise "CapProfile.Image: entry #{role} declares unknown kind #{inspect(other)} — " <>
+                    "proven-good image at boot, or do not boot"
+        end
+
+      case Schema.validate(raw, schema_kind) do
         :ok ->
           :ok
 
@@ -70,9 +87,19 @@ defmodule Fleet.CapProfile.Image do
     version = version_of(index, overlays)
     :persistent_term.put(@key, %{index: index, overlays: overlays, version: version})
 
+    # Reserved seats named ONCE, loud, at the publish (BL-6-28): the state "declared but not
+    # spawnable" is voiced here instead of surfacing as a confusing :not_found downstream.
+    seats = for {name, raw} <- index, not Catalog.spawnable?(raw), do: name
+
+    seats_note =
+      case seats do
+        [] -> ""
+        _ -> ", #{length(seats)} reserved seat(s): #{Enum.join(Enum.sort(seats), ", ")}"
+      end
+
     Logger.info(
-      "CapProfile.Image: published (#{map_size(index)} profiles, #{map_size(overlays)} " <>
-        "overlays, version=#{version})"
+      "CapProfile.Image: published (#{map_size(index) - length(seats)} profiles, " <>
+        "#{map_size(overlays)} overlays#{seats_note}, version=#{version})"
     )
 
     :ok

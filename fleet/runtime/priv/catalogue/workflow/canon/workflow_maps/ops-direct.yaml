@@ -23,8 +23,8 @@
 kind: WorkflowMap
 metadata:
   name: ops-direct
-  description: "Ticket documentaire — l'scribe rédige sur work/ops, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
-  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : l'scribe rédige sur work/ops (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre ops), jamais par projet — toute carte de criticité garde son pipeline code."
+  description: "Ticket documentaire — le scribe rédige sur work/ops, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
+  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : le scribe rédige sur work/ops (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre ops), jamais par projet — toute carte de criticité garde son pipeline code."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:

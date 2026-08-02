@@ -11,6 +11,8 @@ defmodule Fleet.CapProfile.Schema do
     * `modop-profile.json` — strict schema of the modop fragment (reserved keys
       forbidden: `kind`, `metadata.containment`, `metadata.name` — so a modop
       cannot override the base profile's containment/name/kind).
+    * `reserved-seat-v1.json` — strict schema of a `kind: ReservedSeat` catalogue entry
+      (BL-6-28): a kept, non-spawnable seat — a seat carrying a `spec` is rejected.
 
   Single dependency direction (no cycle): this module is UPSTREAM of the core — it
   calls neither the single-authority accessors (`name/1`, `containment/1`…) nor
@@ -23,7 +25,7 @@ defmodule Fleet.CapProfile.Schema do
   `:persistent_term` (keyed by the RESOLVED path → test overrides get their own entry),
   lazy, errors not cached.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -39,7 +41,8 @@ defmodule Fleet.CapProfile.Schema do
 
   ## Exit codes
     * `:ok` — conformant to the schema.
-    * `{:error, :invalid_schema}` — `kind: :cap_profile` nonconformant.
+    * `{:error, :invalid_schema}` — `kind: :cap_profile` or `:reserved_seat` nonconformant
+      (one atom for both: the callers' contract branches on `:ok`/`{:error, reason}` only).
     * `{:error, :invalid_modop}` — `kind: :modop` nonconformant.
     * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt.
 
@@ -47,9 +50,9 @@ defmodule Fleet.CapProfile.Schema do
   are the return contract of `load/1` and `compose/2` (see their moduledocs) —
   frozen, do not rename.
   """
-  @spec validate(map(), :cap_profile | :modop) ::
+  @spec validate(map(), :cap_profile | :modop | :reserved_seat) ::
           :ok | {:error, :invalid_schema | :invalid_modop | :schema_unavailable}
-  def validate(map, kind) when is_map(map) and kind in [:cap_profile, :modop] do
+  def validate(map, kind) when is_map(map) and kind in [:cap_profile, :modop, :reserved_seat] do
     case load_schema(kind) do
       {:ok, schema} ->
         case ExJsonSchema.Validator.validate(schema, map) do
@@ -59,6 +62,7 @@ defmodule Fleet.CapProfile.Schema do
           {:error, _errors} ->
             case kind do
               :cap_profile -> {:error, :invalid_schema}
+              :reserved_seat -> {:error, :invalid_schema}
               :modop -> {:error, :invalid_modop}
             end
         end
@@ -89,6 +93,7 @@ defmodule Fleet.CapProfile.Schema do
 
   defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
+  defp load_schema(:reserved_seat), do: load_schema_file("reserved-seat-v1.json")
 
   # IMMUTABLE priv schema: read+decode+resolve once, cached in `:persistent_term`
   # keyed by the RESOLVED path (the `schema_dir/0` test overrides get their entry). Lazy-init,

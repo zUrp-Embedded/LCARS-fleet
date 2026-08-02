@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
   (recall restore). No dependency toward `Fleet.Spawner.Pod`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   require Logger
@@ -49,10 +49,14 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     state.pod_dir
     |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
-      case File.rm(f) do
+      # RENAME, not rm (debug scribe 2026-08-02): the stale jsonl is the DEAD predecessor's
+      # transcript — the only forensic trail of what it was doing when killed. `.dead` frees the
+      # UUID exactly like removal (the glob matches *.jsonl only) and keeps ONE generation of
+      # evidence; the next death replaces it.
+      case File.rename(f, f <> ".dead") do
         :ok ->
           Logger.info(
-            "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} removed (UUID GC → fresh session)"
+            "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} -> .dead (UUID freed, transcript kept one generation)"
           )
 
         {:error, :enoent} ->
@@ -61,7 +65,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
         {:error, reason} ->
           Logger.warning(
-            "pod #{state.pod_id} gc: could NOT remove stale jsonl #{Path.basename(f)} " <>
+            "pod #{state.pod_id} gc: could NOT rename stale jsonl #{Path.basename(f)} " <>
               "(#{inspect(reason)}) — the --session-id launch will surface it as 'Session ID already in use'"
           )
       end
@@ -108,6 +112,18 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                  state.pod_dir,
                  eff_cap
                ) do
+          # Repo-section rail, revived HERE and not at :projecting (BL-6-16): the composer runs
+          # at :projecting, the clone at :launching — the original rail expected
+          # `CLAUDE.md.repo-source` to exist BEFORE composition, an order the state machine
+          # contradicts, which is why its writer never existed and zero repo sections ever
+          # reached a pod. Post-clone is the first moment the original is READABLE (from GIT,
+          # never the working tree — from the 2nd spawn on the tree carries OUR composed file):
+          # write repo-source, re-compose the CLAUDE.md with it (RepoSections filters each
+          # section through Fleet.ReceptionFilter — hostile sections are dropped loud there),
+          # overwrite the pod_dir copy. Best-effort LOUD: a failure degrades to the
+          # identity-only CLAUDE.md of :projecting, never a HALT.
+          maybe_enrich_claude_md(state, workspace)
+
           # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
           # the agent pops into an already-documented project. The :projecting state writes it at the
           # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
@@ -115,7 +131,13 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
           case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
             :ok ->
-              :ok
+              # Anti-leak, UNTRACKED case (measured live on the scribe bench: `?? CLAUDE.md` in
+              # git status): on a repo that does not track a root CLAUDE.md, OUR composed copy is
+              # stageable — a pod's `git add -A` would ship pod-identity material in its
+              # deliverable, and the gate's path wall deliberately allows the ROOT CLAUDE.md.
+              # `.git/info/exclude` hides it from add/status, is clone-local, and never ships.
+              # (The TRACKED case is covered by the sanitizer's skip-worktree.)
+              exclude_composed_claude_md(workspace)
 
             {:error, reason} ->
               Logger.warning(
@@ -172,6 +194,64 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           end
         else
           {:error, {:recall_seed_missing, jsonl}}
+        end
+    end
+  end
+
+  # cf. the call-site comment (anti-leak, untracked case). Idempotent; best-effort LOUD.
+  defp exclude_composed_claude_md(workspace) do
+    exclude = Path.join(workspace, ".git/info/exclude")
+    line = "/CLAUDE.md"
+
+    with {:ok, content} <-
+           (case File.read(exclude) do
+              {:ok, c} -> {:ok, c}
+              {:error, :enoent} -> {:ok, ""}
+              err -> err
+            end),
+         false <- String.contains?(content, line),
+         :ok <- File.mkdir_p(Path.dirname(exclude)),
+         :ok <- File.write(exclude, line <> "\n", [:append]) do
+      :ok
+    else
+      true ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "pod: composed CLAUDE.md NOT excluded in #{workspace} (#{inspect(reason)}) — " <>
+            "a pod commit-all could ship it (the gate allows root CLAUDE.md by design)"
+        )
+    end
+
+    :ok
+  end
+
+  # The repo-section revival (BL-6-16 — cf. the call-site comment for WHY here and not at
+  # :projecting). Original absent (nominal: the template ships no CLAUDE.md) → silent no-op,
+  # the :projecting composition stands. Any failure past that point degrades LOUD to the
+  # identity-only CLAUDE.md — a pod without repo conventions beats no pod, and beats a pod
+  # whose repo doc bypassed the reception filter.
+  defp maybe_enrich_claude_md(state, workspace) do
+    case Fleet.ProjectBootstrap.Phase.Clone.read_original_claude_md(workspace) do
+      :absent ->
+        :ok
+
+      {:ok, original} ->
+        repo_source = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
+
+        with :ok <- File.write(repo_source, original),
+             {:ok, md} <- Fleet.SPBuilder.compose_claude_md(state.cap_profile, repo_source),
+             :ok <- File.write(Path.join(state.pod_dir, "CLAUDE.md"), md) do
+          :ok
+        else
+          {:error, reason} ->
+            Logger.warning(
+              "pod #{state.pod_id} repo-section enrichment FAILED (#{inspect(reason)}) — " <>
+                "the pod launches on the identity-only CLAUDE.md (no repo conventions)"
+            )
+
+            :ok
         end
     end
   end

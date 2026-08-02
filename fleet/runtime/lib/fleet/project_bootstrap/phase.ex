@@ -34,6 +34,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
     activated (pod-side counterpart = the `$GIT_MIRROR` bind in `bin/bwrap_launch.sh`, also
     dormant). User decision: KEEP, do not purge.
     """
+    require Logger
+
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
     def clone_or_skip(pod_dir, %Fleet.CapProfile{} = cap_profile, opts) do
@@ -66,8 +68,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # and is not an empty directory") → PERMANENT wedge of the issue (a pod that times out otherwise
           # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
           # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
-          # just after, a fresh clone is always correct).
-          _ = File.rm_rf(ws)
+          # just after, a fresh clone is always correct). The slate is cleaned through the MORGUE,
+          # never a mute shredder (debug scribe 2026-08-02): a deadline-killed producer left 10+ min
+          # of uncommitted work in ws, and this rm_rf erased it — deliverable loss is the house's
+          # top severity. A residual ws MOVES to `<ws>.morgue` (previous morgue replaced: ONE
+          # generation kept — the operator salvage window, not an archive), logged ERROR.
+          morgue_residual_workspace(ws)
 
           ref = project["reference_repo_path"]
 
@@ -124,11 +130,15 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []) do
+                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []),
+               :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
             {:invalid_base_branch, b} ->
               {:error, {:clone_failed, {:invalid_base_branch, b}}}
+
+            {:error, {:sanitize_failed, _}} = err ->
+              err
 
             {:invalid_feature_branch, f} ->
               {:error, {:clone_failed, {:invalid_feature_branch, f}}}
@@ -170,12 +180,20 @@ defmodule Fleet.ProjectBootstrap.Phase do
         sha when is_binary(sha) and sha != "" ->
           # pin_base_sha REUSED (reset --hard sha + targeted fetch as fallback if the base has advanced).
           # clean + checkout bounded via Shell.git (no bare `System.cmd git`; bare env, local).
+          # `sanitize_workspace` LAST and NON-optional (BL-6-16): `reset --hard` rebuilds the
+          # index from the tree-object — the CE_SKIP_WORKTREE bits are ERASED and every tracked
+          # victim (.claude/, nested CLAUDE.md) is RESTORED; `clean -fdx` only clears the
+          # UNtracked. Without this call a pipe pod gets the hostile material back on its 2nd
+          # ticket. FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on
+          # hostile material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
                {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-B", feature], env: []) do
+                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-B", feature], env: []),
+               :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
+            {:error, {:sanitize_failed, _}} = err -> err
             {:ok, {out, code}} -> {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
             {:error, {:timeout, ms}} -> {:error, {:reset_failed, {:git_timeout, ms}}}
             {:error, {:exit, reason}} -> {:error, {:reset_failed, {:git_exit, reason}}}
@@ -187,6 +205,159 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # base_sha absent = caller bug (the dispatcher MUST pin it at re-brief) → fail-loud
           # rather than a reset onto an undefined base (which would keep the previous issue's state).
           {:error, {:reset_failed, :no_base_sha}}
+      end
+    end
+
+    # The residual-workspace morgue (cf. the clone-site comment): move, never erase. Kept ONE
+    # generation deep — `<ws>.morgue` is a salvage window for the operator, not an archive; the
+    # NEXT death replaces it. Move failure degrades to the old rm_rf (the clone MUST proceed —
+    # a wedged issue trades a lost deliverable for a dead rail) and says so.
+    defp morgue_residual_workspace(ws) do
+      _ =
+        if File.exists?(ws) do
+          morgue = ws <> ".morgue"
+          _ = File.rm_rf(morgue)
+
+          _ =
+            case File.rename(ws, morgue) do
+              :ok ->
+                Logger.error(
+                  "Phase.Clone: residual workspace of a DEAD predecessor moved to #{morgue} — " <>
+                    "salvage any uncommitted work there; replaced at the next respawn"
+                )
+
+              {:error, reason} ->
+                Logger.error(
+                  "Phase.Clone: residual workspace #{ws} could NOT be morgued (#{inspect(reason)}) " <>
+                    "— falling back to rm_rf (clean slate over wedge; uncommitted work lost)"
+                )
+
+                _ = File.rm_rf(ws)
+            end
+        end
+
+      :ok
+    end
+
+    @doc """
+    BL-6-16 wall, layer 1 — neutralizes the vendor CLI's PROJECT-TIER instruction surface in
+    a workspace: `.claude/` directories and NON-root `CLAUDE.md` files come from the TARGET
+    repo (the parking-lot USB) and would be read as DIRECTIVES by the CLI (cwd = workspace;
+    the root `CLAUDE.md` is covered separately — the composed one overwrites it, Scaffold).
+
+    Tracked victims (and a tracked root `CLAUDE.md`, which the overwrite would dirty) are
+    flagged `git update-index --skip-worktree` BEFORE removal, so the pod's `git add .` never
+    stages our deletions nor our composed file into its deliverable — the gate's
+    forbidden-path check is the independent second line. Called by BOTH workspace producers
+    (`clone_or_skip` at spawn, `reset_in_place` at every slot-freeze re-brief — `reset --hard`
+    erases the skip-worktree bits and restores tracked victims). Neutralized paths are logged
+    ONCE, warning: the operator of a legitimate repo must see that its `.claude/` does not
+    follow. The empty-workspace path (no repo) has nothing to sanitize and never calls this.
+    """
+    @spec sanitize_workspace(Path.t()) :: :ok | {:error, {:sanitize_failed, term()}}
+    def sanitize_workspace(ws) do
+      victims = claude_dirs(ws) ++ nested_claude_mds(ws)
+
+      with :ok <- skip_worktree_tracked(ws, victims ++ [Path.join(ws, "CLAUDE.md")]),
+           :ok <- remove_all(victims) do
+        if victims != [] do
+          rels = Enum.map(victims, &Path.relative_to(&1, ws))
+
+          Logger.warning(
+            "Phase.Clone: workspace instruction-tier material neutralized (BL-6-16): " <>
+              "#{inspect(rels)} — the target repo's .claude/ and nested CLAUDE.md never " <>
+              "reach the agent's directive tier"
+          )
+        end
+
+        :ok
+      end
+    end
+
+    # Every `.claude` DIRECTORY in the tree (root included), `.git` excluded. `match_dot:
+    # true` — a wildcard does not see dotfiles by default, which is the whole point here.
+    defp claude_dirs(ws) do
+      ws
+      |> Path.join("**/.claude")
+      |> Path.wildcard(match_dot: true)
+      |> Enum.reject(&under_git_dir?(&1, ws))
+      |> Enum.filter(&File.dir?/1)
+    end
+
+    # Every CLAUDE.md EXCEPT the workspace root's (overwritten by the composed one).
+    defp nested_claude_mds(ws) do
+      ws
+      |> Path.join("**/CLAUDE.md")
+      |> Path.wildcard(match_dot: true)
+      |> Enum.reject(&(&1 == Path.join(ws, "CLAUDE.md") or under_git_dir?(&1, ws)))
+    end
+
+    defp under_git_dir?(path, ws), do: ".git" in Path.split(Path.relative_to(path, ws))
+
+    # ONE `ls-files` for the tracked set, ONE `update-index --skip-worktree` for all victims
+    # (bounded twice total, never per-path). A directory victim contributes every tracked file
+    # under its prefix (skip-worktree is a per-FILE index bit).
+    defp skip_worktree_tracked(ws, paths) do
+      case Fleet.Credentials.Shell.git(["-C", ws, "ls-files", "-z"], env: []) do
+        {:ok, {out, 0}} ->
+          tracked = out |> String.split(<<0>>, trim: true) |> MapSet.new()
+
+          rels = Enum.map(paths, &Path.relative_to(&1, ws))
+
+          targets =
+            Enum.filter(tracked, fn t ->
+              Enum.any?(rels, fn r -> t == r or String.starts_with?(t, r <> "/") end)
+            end)
+
+          flag_skip_worktree(ws, targets)
+
+        {:ok, {out, code}} ->
+          {:error, {:sanitize_failed, {:ls_files, code, String.slice(out, 0, 300)}}}
+
+        {:error, reason} ->
+          {:error, {:sanitize_failed, {:ls_files, reason}}}
+      end
+    end
+
+    defp flag_skip_worktree(_ws, []), do: :ok
+
+    defp flag_skip_worktree(ws, targets) do
+      case Fleet.Credentials.Shell.git(
+             ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
+             env: []
+           ) do
+        {:ok, {_, 0}} ->
+          :ok
+
+        {:ok, {out, code}} ->
+          {:error, {:sanitize_failed, {:skip_worktree, code, String.slice(out, 0, 300)}}}
+
+        {:error, reason} ->
+          {:error, {:sanitize_failed, {:skip_worktree, reason}}}
+      end
+    end
+
+    defp remove_all(paths) do
+      Enum.reduce_while(paths, :ok, fn path, :ok ->
+        case File.rm_rf(path) do
+          {:ok, _} -> {:cont, :ok}
+          {:error, reason, at} -> {:halt, {:error, {:sanitize_failed, {:rm, at, reason}}}}
+        end
+      end)
+    end
+
+    @doc """
+    The target repo's ORIGINAL root `CLAUDE.md`, read from GIT (`git show HEAD:CLAUDE.md`) —
+    never from the working tree, which carries OUR composed file from the first spawn on.
+    `:absent` covers both "not tracked at HEAD" (the nominal case — the project template ships
+    none) and any git failure: no original, no repo-section rail, the composed doc renders its
+    repo zone empty exactly as before (BL-6-16 — the rail's revival point, cf. Scaffold).
+    """
+    @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
+    def read_original_claude_md(ws) do
+      case Fleet.Credentials.Shell.git(["-C", ws, "show", "HEAD:CLAUDE.md"], env: []) do
+        {:ok, {content, 0}} -> {:ok, content}
+        _ -> :absent
       end
     end
 

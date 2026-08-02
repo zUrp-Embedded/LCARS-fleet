@@ -54,18 +54,17 @@ set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="/home/private"
-# vulcan is ABSENT from the provisioning, rightly: vulcan is the Codex (OpenAI) agent, EXTERNAL to the
-# fleet BY CONSTRUCTION — the N1 vendor frontier has only a Claude launcher (bin/claude_launch.sh), no
-# OpenAI bridge. It therefore NEVER runs as a fleet pod: no cap-profile, no role token. (An earlier
-# comment called it a "phantom role renamed starfleet"; that was a propagated confusion between the
-# EXTERNAL vulcan agent and the `starfleet` gatekeeper role. Verified: no vulcan.yaml, no OpenAI
-# launcher.) starfleet IS a real fleet role, but host-native → zero token consumption, also absent.
+# vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-28) — account + token minted,
+# both inert until the box opens. A seat = a full identity, no branch here. (The older note
+# claiming vulcan "absent rightly, external Codex agent" described the pre-seat world and is
+# gone with it.) starfleet: real fleet role, `forge_identity: false` in its canon — every forge
+# write goes through the system account, hence no token here either.
 #
-# The `roles.provisioning_in_catalogue` contract check guards this list in ONE direction only: it fails
-# on a role listed here that has no canon cap-profile (a phantom). It CANNOT catch the reverse — drop a
-# canon role from ROLES below and the check stays green, because it is a subset test. Closing that
-# direction needs a `needs_role_token` flag in the canon, which is not built.
-ROLES="architect engineer scribe gatekeeper qualifier reviewer scoper"
+# This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
+# catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
+# role rename or a dropped role goes RED at the gate with the delta named (the old
+# one-direction subset check missed exactly that, twice).
+ROLES="architect engineer scribe gatekeeper qualifier reviewer scoper vulcan"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"

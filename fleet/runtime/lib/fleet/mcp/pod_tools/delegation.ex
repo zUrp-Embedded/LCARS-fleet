@@ -833,6 +833,53 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  IMPORTS a repo from an EXTERNAL forge (BL-6-31) — onboarder gate. The mechanics live
+  pilot-side (`import_external` seam callback: URL gate, scratch repatriation, adoption gate,
+  branch normalization, org creation, standard import leg). The criticality declaration is
+  RELAYED like `create_project`'s. Typed errors pass through unflattened
+  (`{:unsupported_forge, _}`, `{:foreign_claude_dir, _}`, `{:hostile_material, _, _}`,
+  `{:branch_collision, _}`, `{:already_on_machine, _}`, `{:repo_already_exists, _}` — each
+  names a DIFFERENT operator action).
+  """
+  @spec import_external_project(String.t(), String.t(), map(), map()) ::
+          {:ok, map()} | {:error, term()}
+  def import_external_project(url, name, args, state)
+      when is_binary(url) and is_binary(name) and is_map(args) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, role} -> do_import_external(url, name, args, role)
+    end
+  end
+
+  defp do_import_external(url, name, args, role) do
+    with {:ok, onboard} <- conforming_onboard() do
+      opts = [
+        intensity_level: Map.get(args, "intensity_level"),
+        intensity_justification: Map.get(args, "intensity_justification"),
+        intensity_nature: Map.get(args, "nature"),
+        workflow_map: Map.get(args, "workflow_map"),
+        onboarded_by: role
+      ]
+
+      case onboard.import_external(url, name, opts) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+          {:ok,
+           %{
+             "status" => "imported_external",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }
+           |> put_architect(result)}
+
+        {:error, _reason} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
   CLOSES a project (BL-6-30) — onboarder gate (portfolio head, like open/delete). The mechanics
   live pilot-side (`close_project` seam callback): parked marker issue posted (the forge object
   the poller respects), then the architect stops best-effort. Typed errors pass through

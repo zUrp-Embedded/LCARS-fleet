@@ -17,6 +17,12 @@ metadata:
   # `pkill -f 1badcafe`/`2badcafe` never touch it). The old `protected`/`fleet_level` bits are GONE
   # (reorg 2026-07-19): both collapsed into "role_index 0" once every other role went per-project.
   role_index: 0
+  # NO forge identity (the EXPLICIT declaration of the one asymmetry, BL-6-28): starfleet holds
+  # no forge account and no role token — every forge write it causes goes through the SYSTEM
+  # (its MCP tools delegate; zero as_role("starfleet") site, measured). The four-list equality
+  # check (catalogue == forge.tf == ROLES == PROV_ROLES) excludes it on THIS field — the
+  # asymmetry lives here, in the data, never as an exception coded into the control.
+  forge_identity: false
   # Large focal length (cf. DESIGN-carte-des-roles §2/§5): starfleet sees the WHOLE project space.
   # RW on both — NOT to edit files routinely (the skills create_project/import_project do the structured
   # work, system-side), but as a LEVER to act as the human's hand when needed. Default runtime activity
@@ -57,6 +63,7 @@ spec:
       - mcp__fleet__revise_project_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
       - mcp__fleet__close_project        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
       - mcp__fleet__adopt_project        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
+      - mcp__fleet__import_external_project  # BL-6-31: repatriate from GitHub/GitLab (adoption gate: foreign .claude refused, CLAUDE.md filtered)
     disallowedTools:
       - web_search
       - web_fetch

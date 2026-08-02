@@ -93,6 +93,12 @@ spec:
   # system verifies (I-CBC gate: identity/secrets/base) then pushes on the branch IT
   # chose (forge-blind). Judges stay on `payload` (default): their deliverable is a
   # structured verdict, not a git patch.
+  # Producer watchdog (BL debug scribe 2026-08-02): 300 s default killed a producer mid-way
+  # through ONE long generation (the jsonl only grows at message boundaries; the pane-hash
+  # probe now carries in-generation liveness, this raises the true-idle budget too — real
+  # producer sessions run hours).
+  timeouts:
+    response_sec: 1800
   deliverable_mode: git_native
   # Entry dual of deliverable_mode: brief = executable instruction (the issue body), the
   # role ACTS. REQUIRED (schema) — judge-ness is never inferred.

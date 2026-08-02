@@ -11,7 +11,10 @@ defmodule Fleet.SPBuilder do
       Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache,
-      Fleet.CapProfile
+      Fleet.CapProfile,
+      # BL-6-16: the reception filter guards the repo-CLAUDE.md door (RepoSections) —
+      # foundation, shared with the Pilot-side adoption gate.
+      Fleet.ReceptionFilter
     ],
     exports: []
 
@@ -62,7 +65,7 @@ defmodule Fleet.SPBuilder do
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-02
   """
 
   @behaviour Fleet.SPBuilder.Composer
