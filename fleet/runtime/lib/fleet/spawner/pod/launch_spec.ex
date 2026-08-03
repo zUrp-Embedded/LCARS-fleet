@@ -209,6 +209,26 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   def permission_mode(_), do: "default"
 
+  @doc """
+  EFFECTIVE Desktop visibility of a pod — the ONE authority, obeyed by all three consumers.
+
+  Visibility used to be derived twice, independently: `Fleet.CapProfile.remote_control?/1` on the
+  Elixir side (the Desktop-slot capture and the slot resume) and a `jq` read of the same field in
+  `claude_launch.sh` (the `--remote-control` flag and `remoteControlAtStartup`). Two derivations of
+  one fact agree only as long as nothing tries to change it — and the moment something does, the
+  half that is not reached produces a pod VISIBLE in Desktop whose slot is never captured nor
+  resumed: visible now, a new slot every boot, which is the "12 archs" bug wearing a new hat.
+
+  So this is the single site, and the launcher stops deriving: `LaunchEnv.build/4` exports the
+  answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it.
+
+  Today it is exactly the declaration — this commit moves the authority, it does not move the
+  value. What it makes possible is that a widening (the fleet's debug mode) lands in ONE place and
+  reaches all three consumers, instead of in the launcher alone.
+  """
+  @spec remote_control?(Fleet.CapProfile.t() | term()) :: boolean()
+  def remote_control?(cap_profile), do: Fleet.CapProfile.remote_control?(cap_profile)
+
   defp bound_permission_mode(mode) when mode in @permission_modes, do: mode
 
   defp bound_permission_mode(other) do

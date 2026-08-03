@@ -195,6 +195,63 @@ teardown() {
   [[ "$output" == *"--remote-control"* ]]
 }
 
+# Rewrites the fixture profile with an explicit spec.invocation.remote_control. The setup fixture
+# declares none on purpose (that is the "says nothing" case), so a test that needs a DECLARED value
+# has to write one — the role name argument is the RC label, it selects no profile.
+declare_remote_control() {
+  cat > "$POD_DIR/.cap-profile.json" <<EOF
+{
+  "api_version": "lcars/v2.5",
+  "kind": "CapabilityProfile",
+  "metadata": {"name": "engineer"},
+  "spec": {
+    "invocation": {"remote_control": $1},
+    "scope": {
+      "allowedTools": ["Read", "Glob", "Grep"],
+      "disallowedTools": ["web_search", "tool_search_internal"]
+    }
+  }
+}
+EOF
+}
+
+# --- Desktop visibility: the runtime decides, this script obeys ---
+# Visibility used to be derived TWICE — here from the profile, and in Elixir for the slot capture
+# and the slot resume. Two derivations of one fact agree until something tries to change it: the
+# half not reached then yields a pod visible in Desktop whose slot is never captured nor resumed.
+
+@test "RC: LCARS_POD_REMOTE_CONTROL=false hides the pod even though its profile says nothing" {
+  # `engineer` declares no `remote_control`, so the standalone derivation says visible. The env
+  # says otherwise and WINS — that is what "the runtime decides" has to mean to be worth anything.
+  LCARS_POD_REMOTE_CONTROL=false run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *"--remote-control"* ]]
+  run cat "$POD_DIR/.claude.json"
+  [[ "$output" == *'"remoteControlAtStartup": false'* ]]
+}
+
+@test "RC: LCARS_POD_REMOTE_CONTROL=true shows a pod its profile declares invisible" {
+  # The symmetric direction, and the one a widening will use. The profile declares
+  # `remote_control: false`; the env opens it, and BOTH levers must follow — a flag without
+  # remoteControlAtStartup (or the reverse) is the half-applied state this pins against.
+  declare_remote_control false
+  LCARS_POD_REMOTE_CONTROL=true run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--remote-control"* ]]
+  run cat "$POD_DIR/.claude.json"
+  [[ "$output" == *'"remoteControlAtStartup": true'* ]]
+}
+
+@test "RC: no env → the profile read stands (standalone fallback, invoked by hand)" {
+  # This script is the N1 vendor frontier and runs without a runtime around it. The fallback is the
+  # NARROWER answer by construction (the declaration is the floor), so an absent env is a missing
+  # widening, never a wrongly-opened door.
+  declare_remote_control false
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *"--remote-control"* ]]
+}
+
 @test "env: ENABLE_TOOL_SEARCH not exported (the vendor default is kept)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"STUB_ENV: ENABLE_TOOL_SEARCH=unset"* ]]

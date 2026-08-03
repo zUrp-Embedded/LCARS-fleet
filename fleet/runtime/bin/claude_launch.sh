@@ -179,11 +179,26 @@ POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
 # There are TWO RC levers to keep consistent, or the judge shows up anyway: (1) the --remote-control flag
 # (RC_FLAGS, further down) AND (2) remoteControlAtStartup in .claude.json. If remoteControlAtStartup stays
 # hardcoded true, claude ENABLES RC at boot EVEN without the flag → the judge leaks into Desktop. Both are
-# therefore driven by the same flag, from a single shared jq read.
+# therefore driven by the same value, read once here.
+#
+# THE RUNTIME DECIDES, THIS SCRIPT OBEYS. `LCARS_POD_REMOTE_CONTROL` carries the answer of
+# `LaunchSpec.remote_control?/1`, the single authority. Re-deriving it here from the profile — as
+# this script did — made TWO derivations of one fact, which agree exactly until something tries to
+# change it: the half not reached then yields a pod VISIBLE in Desktop whose slot is never captured
+# nor resumed (visible now, a fresh slot every boot — the "12 archs" bug wearing a new hat).
+#
+# The jq read survives as the STANDALONE fallback: this script is the N1 vendor frontier and is
+# invoked by hand (bats, a debug run) with no runtime around it. It can only ever be the narrower
+# answer — the declaration is the floor, and any widening lives upstream — so an absent env is a
+# missing widening, never a wrongly-opened door.
 # jq TRAP: `.x // true` treats `false` AND null as "empty", so `false // true` = true. The old `// true`
 # therefore SWALLOWED the judges' remote_control:false — forced RC was THE bug. Defaulting on null ONLY
 # preserves an explicit false: null -> true (engineer/arch, absent), false -> false (judges), true -> true.
-REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control | if . == null then true else . end' "$CAP_PROFILE_JSON" 2>/dev/null)
+if [[ -n "${LCARS_POD_REMOTE_CONTROL:-}" ]]; then
+  REMOTE_CONTROL="$LCARS_POD_REMOTE_CONTROL"
+else
+  REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control | if . == null then true else . end' "$CAP_PROFILE_JSON" 2>/dev/null)
+fi
 RC_STARTUP=$([[ "$REMOTE_CONTROL" != "false" ]] && echo true || echo false)
 
 # SOLE writer of .claude.json (N1 vendor frontier; pod.ex at N0 no longer writes it — this `cat >` would

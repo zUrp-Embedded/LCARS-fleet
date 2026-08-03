@@ -279,7 +279,7 @@ defmodule Fleet.Spawner.Pod do
     # → the slot re-attaches next boot (SeedStore.capture_slot_bridge). A no-RC pod never registers
     # → never armed. Once per boot suffices (the slot is stable for the process lifetime).
     actions =
-      if first_entry? and Fleet.CapProfile.remote_control?(data.cap_profile),
+      if first_entry? and LaunchSpec.remote_control?(data.cap_profile),
         do: [schedule_capture_action(0, capture_slot_first_delay_ms()) | actions],
         else: actions
 
@@ -1334,7 +1334,7 @@ defmodule Fleet.Spawner.Pod do
       base.resume or Keyword.has_key?(base.opts, :recall_seed_jsonl) ->
         base
 
-      not Fleet.CapProfile.remote_control?(base.cap_profile) ->
+      not LaunchSpec.remote_control?(base.cap_profile) ->
         base
 
       live_jsonl_exists?(base) ->

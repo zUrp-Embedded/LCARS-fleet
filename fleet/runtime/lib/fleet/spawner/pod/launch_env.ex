@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -91,10 +91,17 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # RC Desktop name: `<project>_<role>` supplied by the dispatch (`opts[:rc_name]`); default = role
           # alone (permanent / project-less pods). claude_launch passes it as
           # `--remote-control "<name>"` EXACT (zero auto suffix → no "random names piling up").
-          # Per-user RC sessions (the human sees ONLY their own). Desktop visibility gated on the
-          # claude_launch.sh side (reads `invocation.remote_control` of the cap-profile). NB: the VALUE is the
-          # EXACT name, not a prefix — the legacy env name (`_NAME_PREFIX`) is kept (less churn).
+          # Per-user RC sessions (the human sees ONLY their own). NB: the VALUE is the EXACT name,
+          # not a prefix — the legacy env name (`_NAME_PREFIX`) is kept (less churn).
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
+          # Desktop VISIBILITY, decided here and obeyed there. claude_launch.sh used to re-derive it
+          # from the cap-profile with its own jq read: two derivations of one fact, which agree only
+          # until something tries to change it. `LaunchSpec.remote_control?/1` is now the single
+          # authority and this env carries its answer.
+          |> Map.put(
+            "LCARS_POD_REMOTE_CONTROL",
+            to_string(LaunchSpec.remote_control?(state.cap_profile))
+          )
           # Tmux sock base: bwrap_launch creates the socket under <base>/<pod_id>/, PodTmux (host) hits it.
           # SAME value on both sides ⇒ the computed sock coincides. The value = PodTmux.sock_base (default
           # home-relative `~/.lcars/run/tmux-sock` for a fleet launched by a human; never /run/lcars).
