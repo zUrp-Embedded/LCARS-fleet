@@ -1478,6 +1478,76 @@ defmodule Fleet.Pilot.PollerTest do
   describe "step mode — repo-serialized lease" do
     # `extra_opts` overrides the opts (Keyword.merge last): injects a seam (`wake_recovery`) or
     # replaces a default (`workflow_map_loader`) without duplicating the harness.
+    # A forge whose DISCOVERY is slow — the seam that makes the tick take longer than its own
+    # interval. Everything else delegates to StepStubForge (generated, so this stays correct if the
+    # stub gains a function; a hand-written mirror would rot the day someone adds one).
+    defmodule SlowForge do
+      @slow_ms 60
+
+      def list_org_repos(org, opts) do
+        send(Keyword.get(opts, :_test_pid, self()), :poll_started)
+        Process.sleep(@slow_ms)
+        StepStubForge.list_org_repos(org, opts)
+      end
+
+      for {fun, arity} <- StepStubForge.__info__(:functions), fun != :list_org_repos do
+        args = Macro.generate_arguments(arity, __MODULE__)
+
+        def unquote(fun)(unquote_splicing(args)),
+          do: StepStubForge.unquote(fun)(unquote_splicing(args))
+      end
+    end
+
+    test "a webhook hint NEVER arms a second tick chain (R3 parallel-chain, BL-6-44)" do
+      # THE most expensive finding of its list by its proof: two generations of agents wrote the
+      # same falsehood about this file, and one assertion would have killed it.
+      #
+      # ⚠ The falsehood was "the ticks stack up", and the FIRST version of this test tried to pin
+      # its negation by asserting a small mailbox — which was itself hollow. Measured: with the
+      # fault deliberately introduced (`schedule/1` moved BEFORE `safe_poll`), it stayed GREEN.
+      # `Process.send_after` arms exactly ONE timer per handler pass, so the chain is single-in-
+      # flight whatever the order; the order only shifts the effective period by the poll duration.
+      # Nothing stacks, and no assertion on the tick order can show otherwise.
+      #
+      # What IS load-bearing, and what the code names two lines below the tick handler, is that a
+      # SECOND chain must never be armed: injecting `:poll` from the webhook path "would create a
+      # permanent PARALLEL CHAIN", which is why the hint uses a DEDICATED `:gitea_kick`. That is
+      # the real property, and it is falsifiable — a `:poll` there re-enters the recurring handler
+      # and the poller ticks forever from a hint.
+      parent = self()
+
+      {_name, pid} =
+        start_entry_poller({:ok, []}, %{},
+          start_tick?: false,
+          interval_ms: 30,
+          forge_client: SlowForge,
+          forge_opts: [_test_issues: {:ok, []}, _test_routes: %{}, _test_pid: parent]
+        )
+
+      # `start_tick?: false` → NO chain running. The hint is the only thing that can poll.
+      send(pid, %Fleet.Event{
+        type: :"gitea.issues",
+        source: :event_router,
+        timestamp: DateTime.utc_now(),
+        payload: %{}
+      })
+
+      # The debounced kick polls ONCE (1 s coalescence window + the slow poll).
+      assert_receive :poll_started, 3_000
+
+      # And then nothing: the kick consumed no clock and started none. A `:poll` in place of
+      # `:gitea_kick` lands in the recurring handler and arms the chain, so a single webhook would
+      # make the poller tick forever.
+      #
+      # The window is 2.5 s and that number is not padding: `Backoff.jitter/1` clamps every delay to
+      # a 1 s FLOOR ("no accidental busy-poll on a small interval"), so `interval_ms: 30` really
+      # means ~1 s. A shorter window cannot see the fault — measured, the first version of this
+      # assertion used 500 ms and stayed GREEN with `:gitea_kick` deliberately replaced by `:poll`.
+      refute_receive :poll_started, 2_500
+
+      GenServer.stop(pid)
+    end
+
     defp start_entry_poller(issues_response, routes, extra_opts \\ []) do
       name = :"P_lease_#{System.unique_integer([:positive])}"
 
