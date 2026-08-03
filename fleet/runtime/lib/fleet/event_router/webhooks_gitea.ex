@@ -22,7 +22,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
       (default `/etc/fleet/webhook-secret`)
     * `:fleet_event_router, :webhook_port` — HTTP port (default 8081)
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   use Plug.Router
@@ -217,21 +217,35 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     conn |> get_req_header("x-gitea-event") |> List.first()
   end
 
-  # Extract the issue from issues AND pull requests (not only issue.id).
-  defp extract_issue(%{"issue" => %{"id" => id}} = body), do: issue_ref(body, id)
-  defp extract_issue(%{"pull_request" => %{"id" => id}} = body), do: issue_ref(body, id)
+  # Extract the issue from issues AND pull requests, keyed on the REPO-SCOPED `number`.
+  #
+  # It used to key on the internal `id`, and the comment below said so while naming the divergence
+  # as latent: "if a webhook->pod correlation is ever wired, key it on `number`". A divergence that
+  # waits for its first consumer is a trap set for whoever wires it -- they inherit a ref that looks
+  # like an issue reference (`fleet/lcars#4711`) and is not one. Closed BEFORE that consumer exists,
+  # which is the only moment it costs nothing (BL-6-43.3).
+  #
+  # The display consumers gain from it too: the deck now shows the number a human can click, where
+  # the internal id matched nothing they could look up.
+  #
+  # No `id` fallback ON PURPOSE. A fallback would restore exactly the ambiguity being removed --
+  # sometimes a number, sometimes an id, with no way to tell which -- and silently. A Gitea webhook
+  # always carries `number`; a body without it is degenerate and takes the `nil` clause already
+  # there, the same fail-closed treatment as a body with no issue at all.
+  defp extract_issue(%{"issue" => %{"number" => number}} = body), do: issue_ref(body, number)
+
+  defp extract_issue(%{"pull_request" => %{"number" => number}} = body),
+    do: issue_ref(body, number)
+
   defp extract_issue(_), do: nil
 
   # `<repository.full_name>#<id>` — the repo comes from the webhook PAYLOAD, not hardcoded (multi-repo
   # correct). A real Gitea webhook ALWAYS carries `repository.full_name`; a body without it is
   # DEGENERATE/malformed. We fall back to an explicit sentinel `"unknown"`, NOT a fabricated real repo name
   # (`"fleet/lcars"` would IMPERSONATE an actual repo in the display event) — honest: we don't know the repo.
-  # NB: still the issue's INTERNAL `id`, NOT the repo-scoped `number` (the user-facing ref). LATENT
-  # divergence: today's `gitea.*` consumers — display (observation read-model / API WS) and the
-  # Poller's coalesced poll-hint (`gitea_event?`, never a source of truth) — none key on this ref;
-  # the Poller ingests issues via the forge API keyed on `number` independently. If a webhook→pod
-  # correlation is ever wired, key it on `number` (the Poller's key), not `id`.
-  defp issue_ref(body, id) do
+  # The ref is the repo-scoped `number` — the SAME key the Poller ingests on, so a webhook→pod
+  # correlation can be wired later without a translation step that nobody would remember to add.
+  defp issue_ref(body, number) do
     # Pattern-match the body STRUCTURE, not `get_in` then a guard: `Plug.Parsers` guarantees `body`
     # is a map, NOT that `repository` is one. On `{"repository": "x"}` (a forged/malformed body),
     # `get_in("x", ["full_name"])` raises `FunctionClauseError` in `Access` — and the `|| "unknown"`
@@ -244,6 +258,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         _ -> "unknown"
       end
 
-    "#{repo}##{id}"
+    "#{repo}##{number}"
   end
 end

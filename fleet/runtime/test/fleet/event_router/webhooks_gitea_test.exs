@@ -36,7 +36,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # A real Gitea webhook ALWAYS carries `repository.full_name` → the issue_ref reflects it (multi-repo).
       body = %{
         "action" => "opened",
-        "issue" => %{"id" => 42},
+        "issue" => %{"number" => 42},
         "repository" => %{"full_name" => "fleet/demo"}
       }
 
@@ -66,7 +66,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         fn _source, _type, _opts -> {:error, :pubsub_down} end
       )
 
-      body = %{"action" => "opened", "issue" => %{"id" => 42}}
+      body = %{"action" => "opened", "issue" => %{"number" => 42}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 422
@@ -121,7 +121,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     test "M21: issue extracted from a pull request (not only issue)", %{secret: secret} do
       body = %{
         "action" => "opened",
-        "pull_request" => %{"id" => 99},
+        "pull_request" => %{"number" => 99},
         "repository" => %{"full_name" => "fleet/demo"}
       }
 
@@ -141,7 +141,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
          %{secret: secret} do
       # A real Gitea webhook always carries full_name; a payload without it is malformed. We do NOT
       # fabricate `fleet/lcars` (impersonates a real repo in the event display) → honest `unknown` sentinel.
-      body = %{"action" => "opened", "issue" => %{"id" => 7}}
+      body = %{"action" => "opened", "issue" => %{"number" => 7}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
@@ -163,7 +163,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # in Access) INSIDE extract_issue, BEFORE the `try` → Cowboy 500, outside the module's
       # 422-on-drift discipline (the `|| "unknown"` only catches an ABSENT repository). Exact twin
       # of the non-string `action` case. Pattern-matching the structure yields `unknown`, not a raise.
-      body = %{"action" => "opened", "issue" => %{"id" => 7}, "repository" => "x"}
+      body = %{"action" => "opened", "issue" => %{"number" => 7}, "repository" => "x"}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
@@ -181,7 +181,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     } do
       body = %{
         "action" => "opened",
-        "issue" => %{"id" => 7},
+        "issue" => %{"number" => 7},
         "repository" => %{"full_name" => "acme/widgets"}
       }
 
@@ -195,7 +195,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     } do
       # never-declared action → `String.to_existing_atom("gitea.<action>")` raises ArgumentError →
       # a 200 "ok" here would make the forge believe the event delivered (silent drop, F-009).
-      body = %{"action" => "zzz_drift_action_inexistante_42", "issue" => %{"id" => 7}}
+      body = %{"action" => "zzz_drift_action_inexistante_42", "issue" => %{"number" => 7}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 422
@@ -210,7 +210,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # Falsifies the "401 on a large legitimate payload" finding: a body under the 1 MB cap must
       # pass. If the raw_body were truncated ({:more}/partial branch), the HMAC would not match → 401.
       big = String.duplicate("x", 900_000)
-      body = %{"action" => "opened", "issue" => %{"id" => 1}, "blob" => big}
+      body = %{"action" => "opened", "issue" => %{"number" => 1}, "blob" => big}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200,
