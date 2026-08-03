@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
       immediate, repeats under the registry cooldown suppressed.
     * `:runner` — offload seam (see above). Default `nil` → sync.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-03
   """
 
   use GenServer
@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # this consumer) and `offload_async/1`. Specific to this consumer (not the StepRunConsumer's): clean separation.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
-  defstruct record_fun: nil, escalate_fun: nil, runner: nil, routing_fun: nil
+  defstruct record_fun: nil, escalate_fun: nil, runner: nil, routing_fun: nil, brake_fun: nil
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -113,6 +113,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
       escalate_fun:
         Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5),
       runner: Keyword.get(opts, :runner),
+      brake_fun: Keyword.get(opts, :brake_fun, &__MODULE__.default_brake/3),
       # The event → op/escalation-kind CLASSIFICATION is TABLE data (`events.yaml` routing —
       # audit B-05); the seam keeps the unit tests hermetic (no global persistent_term mutation).
       routing_fun: Keyword.get(opts, :routing_fun, &Fleet.EventRouter.Bus.event_routing/0)
@@ -173,7 +174,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
             if(inc.escalate_kind, do: [escalate_kind: inc.escalate_kind], else: []) ++
             for key <- inc.forward, do: {key, payload[Atom.to_string(key)]}
 
-        record(state, inc.op, subject, payload["reason"], reg_opts)
+        record(state, inc.op, subject, payload["reason"], reg_opts, payload)
 
       _ ->
         Logger.warning(
@@ -188,7 +189,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   defp cat5_tag(type),
     do: type |> Atom.to_string() |> String.replace_prefix("starfleet.audit_cat5_", "")
 
-  defp record(state, op, pod_id, reason, reg_opts) do
+  defp record(state, op, pod_id, reason, reg_opts, payload) do
     exec = fn ->
       case state.record_fun.(op, pod_id, reason, reg_opts) do
         :recorded ->
@@ -200,6 +201,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
           Logger.warning(
             "IncidentConsumer: #{op}.failed #{pod_id} RECURRENT → escalated (#{inspect(reason)})"
           )
+
+          maybe_brake(state, op, reason, payload)
 
         {:escalation_failed, e} ->
           Logger.error(
@@ -228,6 +231,11 @@ defmodule Fleet.Pilot.IncidentConsumer do
               "existing issue #{inspect(issue)} carries the alarm"
           )
 
+          # Le frein s'applique AUSSI sous cooldown : la suppression concerne l'ISSUE SYSADMIN
+          # (ne pas en ouvrir une par tick), pas la boucle de re-dispatch. Ne freiner que sur
+          # `{:escalated, _}` laisserait le ticket repartir a l'infini des la deuxieme recurrence.
+          maybe_brake(state, op, reason, payload)
+
         other ->
           Logger.warning(
             "IncidentConsumer: #{op}.failed #{pod_id} → unexpected outcome #{inspect(other)}"
@@ -236,6 +244,66 @@ defmodule Fleet.Pilot.IncidentConsumer do
     end
 
     (state.runner || (&run_sync/1)).(exec)
+  end
+
+  # ─── LE FREIN (BL-6-37.6) ────────────────────────────────────────────────────────────────────
+  # Le rail d'incident SAVAIT deja « recurrence » — l'issue systeme dit « Deja vu — ROOT-CAUSE
+  # requis » — et le poller re-dispatchait quand meme, a l'infini. Mesure du 2026-08-02 sur le banc
+  # tetris : un producteur tue en pleine redaction, respawn en boucle, invisible sur son ticket.
+  # Detecter sans debrancher, c'est fabriquer un compteur de degats, pas un frein.
+  #
+  # La consequence manquante : poser `lcars-awaits-arch` sur le TICKET DE TRAVAIL. Le vocabulaire
+  # existe et fait exactement ce qu'il faut — le poller SORT du dispatch une issue qui le porte, et
+  # un humain/l'arch tranche. On ne kille pas, on ne reessaie pas mieux : on rend la main.
+  #
+  # ⚠ RESTREINT au timeout, deliberement. L'entree mesure `result_timeout` — une boucle ou le pod
+  # travaille et se fait couper. Freiner sur TOUTE categorie recurrente sortirait du dispatch des
+  # tickets sur des causes que personne n'a mesurees ici (un `exited_before_result` peut etre une
+  # erreur de brief qu'un rework corrige). Elargir se fera sur une mesure, pas sur une intuition.
+  defp maybe_brake(state, "pod", reason, payload) when is_map(payload) do
+    with true <- timeout_reason?(reason),
+         repo when is_binary(repo) <- payload["repo"],
+         {:ok, number} <- Fleet.Pilot.IssueId.parse(payload["issue_id"] || "") do
+      state.brake_fun.(repo, number, reason)
+    else
+      _ -> :ok
+    end
+  end
+
+  defp maybe_brake(_state, _op, _reason, _payload), do: :ok
+
+  # La categorie normalisee cote producteur (`Fleet.Event.reason_fields/1`) — on compare sur la
+  # forme STABLE, jamais sur le tuple d'origine qui ne traverse pas le bus.
+  defp timeout_reason?(reason), do: to_string(reason) =~ "result_timeout"
+
+  @doc false
+  # Best-effort ASSUME : un frein qu'on ne peut pas poser ne doit pas casser le rail d'incident, qui
+  # est lui-meme le rail de derniere instance. L'echec est dit LOUD — sans ca, on aurait un frein
+  # silencieusement absent, ce qui est pire que pas de frein du tout (on croirait etre protege).
+  def default_brake(repo, number, reason) do
+    forge = Application.get_env(:fleet_pilot, :forge_client, Fleet.Pilot.ForgeClient)
+
+    case forge.add_label(repo, number, Fleet.Labels.awaits_arch(), []) do
+      {:ok, _} ->
+        Logger.warning(
+          "IncidentConsumer: FREIN — #{repo}##{number} sort du dispatch (#{inspect(reason)} " <>
+            "recurrent) : `#{Fleet.Labels.awaits_arch()}` pose, l'arch tranche"
+        )
+
+        :ok
+
+      {:error, e} ->
+        Logger.error(
+          "IncidentConsumer: FREIN NON POSE sur #{repo}##{number} (#{inspect(e)}) — le ticket " <>
+            "reste dans la boucle de re-dispatch"
+        )
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.error("IncidentConsumer: FREIN a leve sur #{repo}##{number} : #{inspect(e)}")
+      :ok
   end
 
   defp run_sync(fun), do: fun.()

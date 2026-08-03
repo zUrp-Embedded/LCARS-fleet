@@ -937,6 +937,10 @@ defmodule Fleet.Spawner.Pod do
       Events.lossy_broadcast("pod.failed", %{
         "pod_id" => data.pod_id,
         "issue_id" => data.issue_id,
+        # Le DEPOT, sans lequel `issue_id` (`issue-<n>`) ne designe rien d'ecrivable : un
+        # consommateur qui veut poser un label sur le ticket a besoin de `owner/name` + n, et le
+        # deduire du `pod_id` a tirets serait une devinette (un nom de depot peut en contenir).
+        "repo" => Keyword.get(data.opts, :repo),
         "reason" => "exited_before_result",
         "exit_code" => exit_code
       })
@@ -1369,6 +1373,9 @@ defmodule Fleet.Spawner.Pod do
     Events.lossy_broadcast("pod.failed", %{
       "pod_id" => data.pod_id,
       "issue_id" => data.issue_id,
+      # Twin du site ci-dessus : meme raison, meme cle. Les deux emissions de `pod.failed` doivent
+      # porter la MEME forme, sinon un consommateur marche sur l'une et pas sur l'autre.
+      "repo" => Keyword.get(data.opts, :repo),
       "reason" => category,
       "reason_detail" => reason_detail
     })

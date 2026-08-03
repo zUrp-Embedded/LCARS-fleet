@@ -48,6 +48,96 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   defp failed_event(type, payload),
     do: Fleet.Event.new(:spawner, type, payload: payload)
 
+  describe "LE FREIN (BL-6-37.6) — detecter la recurrence sans debrancher fabriquait un compteur" do
+    defp brake_spy do
+      me = self()
+      fn repo, number, reason -> send(me, {:brake, repo, number, reason}) end
+    end
+
+    defp brake_event(payload),
+      do: failed_event(:"pod.failed", Map.merge(%{"pod_id" => "pod_1"}, payload))
+
+    defp start_with(outcome, extra \\ []) do
+      start(fn _op, _s, _r, _o -> outcome end, [brake_fun: brake_spy()] ++ extra)
+    end
+
+    test "recurrence ESCALADEE sur un result_timeout → le ticket sort du dispatch" do
+      pid = start_with({:escalated, 77})
+
+      send(
+        pid,
+        brake_event(%{
+          "repo" => "fleet/demo",
+          "issue_id" => "issue-42",
+          "reason" => "result_timeout"
+        })
+      )
+
+      assert_receive {:brake, "fleet/demo", 42, "result_timeout"}, 500
+    end
+
+    test "recurrence SOUS COOLDOWN → le frein s'applique AUSSI (c'est la que vit la boucle)" do
+      # LE cas qui discrimine. La suppression concerne l'ISSUE SYSADMIN — ne pas en ouvrir une par
+      # tick — pas la boucle de re-dispatch. Ne freiner que sur `{:escalated, _}` laisserait le
+      # ticket repartir a l'infini des la deuxieme recurrence, c'est-a-dire l'incident mesure.
+      pid = start_with({:escalation_suppressed, 77})
+
+      send(
+        pid,
+        brake_event(%{
+          "repo" => "fleet/demo",
+          "issue_id" => "issue-42",
+          "reason" => "result_timeout"
+        })
+      )
+
+      assert_receive {:brake, "fleet/demo", 42, _}, 500
+    end
+
+    test "PREMIERE occurrence → AUCUN frein (une panne isolee peut etre du hasard)" do
+      pid = start_with(:recorded)
+
+      send(
+        pid,
+        brake_event(%{
+          "repo" => "fleet/demo",
+          "issue_id" => "issue-42",
+          "reason" => "result_timeout"
+        })
+      )
+
+      refute_receive {:brake, _, _, _}, 200
+    end
+
+    test "recurrence sur une AUTRE categorie → aucun frein (restriction deliberee)" do
+      # Un `exited_before_result` peut etre une erreur de brief qu'un rework corrige. Elargir le
+      # frein se fera sur une mesure, pas sur une intuition.
+      pid = start_with({:escalated, 77})
+
+      send(
+        pid,
+        brake_event(%{
+          "repo" => "fleet/demo",
+          "issue_id" => "issue-42",
+          "reason" => "exited_before_result"
+        })
+      )
+
+      refute_receive {:brake, _, _, _}, 200
+    end
+
+    test "payload SANS depot → aucun frein, et aucun crash du rail d'incident" do
+      # `issue_id` vaut `issue-<n>` : un numero sans depot ne designe rien d'ecrivable. Le rail
+      # d'incident est le rail de derniere instance — il degrade, il ne tombe pas.
+      pid = start_with({:escalated, 77})
+
+      send(pid, brake_event(%{"issue_id" => "issue-42", "reason" => "result_timeout"}))
+
+      refute_receive {:brake, _, _, _}, 200
+      assert Process.alive?(pid)
+    end
+  end
+
   test "pod.failed → record_or_escalate(\"pod\", pod_id, reason, reason_detail threaded)" do
     pid = start(echo_fun())
 
