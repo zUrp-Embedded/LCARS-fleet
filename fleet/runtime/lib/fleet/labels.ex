@@ -109,4 +109,85 @@ defmodule Fleet.Labels do
   @doc "PR LIFECYCLE step: the brick is merged (terminal). Mechanism, not a map step."
   @spec stage_merged() :: String.t()
   def stage_merged, do: @stage_merged
+
+  # ============================================================
+  # FIFTH FAMILY — SCOPED WAIT (BL-6-48, step 1 of its plan)
+  # ============================================================
+  # `wait/<reason>` — what a ticket is WAITING FOR, when it is alive with no active pod.
+  #
+  # SCOPED on purpose, and it buys the hard half for free: `ForgeClient.ensure_repo_label` creates a
+  # name containing `/` as `exclusive: true`, so setting `wait/capacity` REMOVES `wait/role` with no
+  # code guarding it. Two simultaneous waits are unrepresentable natively, exactly like `stage/`.
+  #
+  # ⚠ What exclusivity does NOT buy: LEAVING the wait. It acts when another label of the scope is
+  # SET; a ticket that stops waiting sets nothing. That removal is the caller's job, and it is the
+  # point where this family could manufacture the very "stale state" the entry exists to kill.
+  @wait_prefix "wait/"
+
+  @doc "Scoped prefix of the wait reason (`wait/`). Scoped → exclusive (native mutex)."
+  @spec wait_prefix() :: String.t()
+  def wait_prefix, do: @wait_prefix
+
+  @doc """
+  Maps a dispatch skip reason to its `wait/*` label, or `nil` when the reason must stay SILENT.
+
+  This function IS the deliverable of BL-6-48 — not the wiring. Five labels for seventeen measured
+  reasons, and the twelve `nil` each carry a reason of their own: without them a reader finds twelve
+  apparent oversights and adds twelve labels. **A `nil` by decision and a `nil` by omission read the
+  same in code** — only the exhaustiveness test tells them apart, so it is not optional.
+
+  Raises on an UNKNOWN reason, deliberately. A silent fallthrough is how the eighteenth reason would
+  be born mute — which is literally what happened while measuring for this table: six tuple-shaped
+  reasons were invisible to a grep that could only match atoms, one of them added an hour earlier by
+  the same hand. An instrument that cannot see a shape accuses the material of not having it.
+  """
+  @spec wait_for(term()) :: String.t() | nil
+  # ─── The five that earn a label: a real wait, invisible today ──────────────────────────────────
+  # A queued ticket is indistinguishable from a forgotten one — that ambiguity already cost a false
+  # diagnosis (cf. the entry).
+  def wait_for(:at_capacity), do: @wait_prefix <> "capacity"
+  def wait_for(:role_busy), do: @wait_prefix <> "role"
+  def wait_for(:draining), do: @wait_prefix <> "draining"
+  def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"
+  def wait_for(:ci_pending), do: @wait_prefix <> "ci"
+
+  # ─── Already carried by an existing label: a second one would be a second truth ────────────────
+  # The one you read is never the one somebody corrected.
+  def wait_for(:in_flight), do: nil
+  def wait_for(:awaits_arch), do: nil
+
+  # ─── Not a wait: a config failure, and it has its own rail (BL-6-47.2 wired the incident) ──────
+  def wait_for(:no_role), do: nil
+
+  # ─── Not OUR ticket: a foreign PR has nothing to receive from us ───────────────────────────────
+  def wait_for(:not_fleet_branch), do: nil
+
+  # ─── Transitions and terminals: nothing is waiting ─────────────────────────────────────────────
+  # `onboarded` just entered and leaves on the next tick; `merged`/`cancelled` never come back.
+  def wait_for(:onboarded), do: nil
+  def wait_for(:merged), do: nil
+  def wait_for({:cancelled, _pr}), do: nil
+
+  # ─── Escalations already RESOLVED: `lcars-awaits-arch` is posted by those very paths ───────────
+  def wait_for({:rework_exhausted_escalated, _pr}), do: nil
+  def wait_for({:merge_blocked_escalated, _pr}), do: nil
+  def wait_for({:publish_brake_escalated, _pr}), do: nil
+
+  # ─── Provenance wall: its forge trace exists since `d31ed188a` (BL-6-47.4) ─────────────────────
+  def wait_for({:head_read_failed, _why}), do: nil
+
+  # ─── `draft` — TWO shapes for one concept, and the unification is NOT this function's call ─────
+  # A human putting a PR in draft makes a DECISION; the fleet undergoes it. Saying "the fleet waits"
+  # is mechanically true and socially false — it inverts who is waiting on whom. Pending the user
+  # arbitration, both shapes stay SILENT rather than guess.
+  def wait_for(:draft), do: nil
+  def wait_for({:draft, _pr}), do: nil
+
+  # ─── The wall (BL-6-48): an unknown reason FAILS instead of being born mute ────────────────────
+  def wait_for(reason) do
+    raise ArgumentError,
+          "Fleet.Labels.wait_for/1: reason #{inspect(reason)} is absent from the BL-6-48 table. " <>
+            "Add it with a label OR with an explicit nil AND its argument — a silent fallthrough " <>
+            "is how a reason is born mute."
+  end
 end
