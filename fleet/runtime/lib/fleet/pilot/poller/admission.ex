@@ -58,6 +58,41 @@ defmodule Fleet.Pilot.Poller.Admission do
     {account(result, acc), started?(result)}
   end
 
+  # How many workflow_runs one PROJECT may have in flight at once. Per project and not fleet-wide:
+  # the thing being protected is a repo's merge surface, and two projects do not race each other's
+  # base. Ceiling 15 = the pool slots a role actually has (`PoolSlot`, seats 1..15, seat 0 reserved)
+  # — asking for a 16th producer is asking for a slot that does not exist.
+  @default_max_fan 5
+  @max_max_fan 15
+
+  @doc """
+  Ceiling on the workflow_runs one project may hold in flight — `:fleet_pilot, :max_fan`,
+  default #{@default_max_fan}, clamped to `1..#{@max_max_fan}`.
+
+  **Serial is this ceiling at 1**, not another mechanism. The boolean it replaces
+  (`:repo_serialized_lease`) and this counter were the same parameter at two resolutions, which is
+  why the boolean could only ever say "one" or "as many as there are" — and "as many as there are"
+  was genuinely unbounded, a repo with forty queued tickets starting forty runs.
+
+  Clamped rather than refused HERE because this is read on every dispatch decision (a tick, then a
+  ticket): a value that fails must fail at a DOOR, once — `runtime.exs` for the env, the flag parser
+  for `--max-fan` — not on a rail that would then log the same complaint every thirty seconds. The
+  clamp is the belt behind those doors, never the place a mistake is reported.
+  """
+  @spec max_fan() :: pos_integer()
+  def max_fan do
+    :fleet_pilot
+    |> Application.get_env(:max_fan, @default_max_fan)
+    |> case do
+      n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
+      _ -> @default_max_fan
+    end
+  end
+
+  @doc "The hard ceiling `max_fan` is clamped to — single source for the doors that validate it."
+  @spec max_fan_ceiling() :: pos_integer()
+  def max_fan_ceiling, do: @max_max_fan
+
   @doc """
   Accounts for an item the rail refuses WITHOUT dispatching it — the lease branches, and tomorrow
   the `max_fan` ceiling.

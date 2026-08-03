@@ -1571,7 +1571,16 @@ defmodule Fleet.Pilot.PollerTest do
   # ============================================================
   # Repo-serialized lease (increment 3): at most 1 active pipeline per repo.
   # ============================================================
-  describe "step mode — repo-serialized lease" do
+  describe "step mode — max_fan (serial IS this ceiling at 1)" do
+    # These tests describe SERIALIZATION, so they must now DECLARE it: the `:repo_serialized_lease`
+    # boolean they used to inherit is gone, and `max_fan` defaults to 5. Reading them at the default
+    # would be reading a serialization story on a fan-out fleet — five reddened here saying exactly
+    # that, which is the item working, not the item breaking.
+    setup do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      :ok
+    end
+
     # `extra_opts` overrides the opts (Keyword.merge last): injects a seam (`wake_recovery`) or
     # replaces a default (`workflow_map_loader`) without duplicating the harness.
     # A forge whose DISCOVERY is slow — the seam that makes the tick take longer than its own

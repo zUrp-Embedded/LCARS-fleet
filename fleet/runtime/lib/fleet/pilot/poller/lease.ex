@@ -127,25 +127,20 @@ defmodule Fleet.Pilot.Poller.Lease do
         {issue, pr?, engaged, prefetch}
       end)
 
-    # SERIALIZATION, DISCONNECTABLE (2026-08-03) — `:fleet_pilot, :repo_serialized_lease`, default
-    # TRUE (the historical behaviour: at most ONE workflow_run in flight per repo).
+    # THE CEILING (2026-08-03) — `max_fan`: how many workflow_runs this project may hold in flight
+    # at once. It REPLACES the `:repo_serialized_lease` boolean, because the boolean and the counter
+    # were the same parameter at two resolutions: **serial IS this ceiling at 1**. The boolean could
+    # only say "one" or "as many as there are", and "as many as there are" was genuinely unbounded —
+    # a repo with forty queued tickets started forty runs.
     #
-    # Why it can now be turned off: the lease was the only thing that made a second producer
-    # impossible, so it also made the per-ticket producers (`slot_scope: instance`) and their pool
-    # slots theoretical. Off, a repo starts as many workflow_runs as it has QUEUED issues, and the
-    # real ceilings become the ones that count something: `max_pods_per_role` (15, typed refusal →
-    # the ticket stacks) and the global `max_pods`.
-    #
-    # Why it stays ON by default, and why this is a knob rather than a removal: N producers on one
-    # repo means N branches racing the same base, so merge conflicts stop being an accident and
-    # become the normal case — the remediation rail exists but has never been exercised at that
-    # rate. Turning it off is an operator decision, taken with eyes open, reversible in one
-    # config line.
-    serialized? = Application.get_env(:fleet_pilot, :repo_serialized_lease, true)
+    # Two behaviour changes to state rather than discover: `serialized? = false` used to mean
+    # UNLIMITED and now means 5 by default; and a repo can now hold several runs without the operator
+    # flipping anything, which is the point of the item and the reason the ceiling is low.
+    max_fan = Admission.max_fan()
 
-    # IN-FLIGHT crosses BOTH dispatch rails. The lease used to count only what it could see on its
-    # own rail — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is
-    # dispatched through the pulls) and therefore held nothing. Consequence, measured and not
+    # IN-FLIGHT crosses BOTH dispatch rails. It used to count only what it could see on its own rail
+    # — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is dispatched
+    # through the pulls) and therefore counted for nothing. Consequence, measured and not
     # theoretical: a repo serialized to one workflow_run started a SECOND one as soon as the first
     # reached its jury. The hole was already open in serial; the fan-out only makes it visible.
     #
@@ -153,52 +148,46 @@ defmodule Fleet.Pilot.Poller.Lease do
     # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
     # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
     # never a union to deduplicate.
-    #
-    # A count and not a boolean because 5.3 turns the knob into `max_fan`: serial is that ceiling at
-    # 1, not a different mechanism. The `> 0` here is the boolean projection of a number the next
-    # item stops projecting.
     in_flight =
       Enum.count(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end) +
         MapSet.size(pr_issue_ids)
 
-    lease_held0 = serialized? and in_flight > 0
-
-    {tally, _lease} =
-      Enum.reduce(classified, {zero_tally(), lease_held0}, fn
-        {issue, pr?, engaged, prefetch}, {acc, lease} ->
+    # The accumulator is the COUNT, seeded with what is already flying. An ENGAGED step and a jury
+    # ticket do not increment it — they are already inside `in_flight`; only a fresh START does.
+    {tally, _fan} =
+      Enum.reduce(classified, {zero_tally(), in_flight}, fn
+        {issue, pr?, engaged, prefetch}, {acc, fan} ->
           payload = wrap_issue_as_payload(issue, seams.repo)
           item_opts = Keyword.merge(dispatch_opts, prefetch)
           wait = Admission.current_wait(payload)
 
           cond do
             # Issue with an open fleet PR → JUDGE phase (dispatched via the pulls). SKIP on the
-            # issue side (otherwise producer re-spawn). The PR holds the lease.
+            # issue side (otherwise producer re-spawn). It already counts in `in_flight`.
             pr? ->
-              {acc2, _} =
-                Admission.refuse(:pr_open, item_opts, issue["number"], wait, acc)
+              {acc2, _} = Admission.refuse(:pr_open, item_opts, issue["number"], wait, acc)
+              {acc2, fan}
 
-              {acc2, lease}
-
-            # ENGAGED pipeline → dispatches its current step; it HOLDS the lease → lease unchanged.
+            # ENGAGED pipeline → dispatches its current step. Already counted: continuing a run is
+            # not entering one, and a ceiling that charged for both would strangle a project at its
+            # second step rather than at its second ticket.
             engaged ->
-              {acc2, lease2} = dispatch_engaged(payload, item_opts, acc, lease, seams.dispatcher)
-              {acc2, serialized? and lease2}
+              {acc2, _started?} =
+                dispatch_engaged(payload, item_opts, acc, seams.dispatcher)
 
-            # QUEUED, lease held by another workflow_run → waits. It now SAYS so: this branch was
-            # the one the wait convergence never reached, so a ticket held back was silent tick
-            # after tick, indistinguishable from a forgotten one. `:at_capacity` and not a reason of
-            # its own — 5.3 makes serial the same ceiling at 1, so this refusal and the `max_fan`
-            # refusal are one refusal wearing two names.
-            lease ->
-              {acc2, _} =
-                Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
+              {acc2, fan}
 
-              {acc2, lease}
+            # The project is FULL → the ticket waits, and it SAYS so. This branch was the one the
+            # wait convergence never reached, so a ticket held back was silent tick after tick,
+            # indistinguishable from a forgotten one.
+            fan >= max_fan ->
+              {acc2, _} = Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
+              {acc2, fan}
 
-            # QUEUED, lease free → STARTS (takes the lease if effectively dispatched).
+            # QUEUED with room → STARTS, and takes a seat only if it actually started.
             true ->
-              {acc2, lease2} = start_workflow_run(payload, item_opts, acc, seams.dispatcher)
-              {acc2, serialized? and lease2}
+              {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
+              {acc2, if(started?, do: fan + 1, else: fan)}
           end
       end)
 
@@ -231,20 +220,10 @@ defmodule Fleet.Pilot.Poller.Lease do
     )
   end
 
-  # Dispatch of an ENGAGED workflow_run (it ALREADY holds the lease): the lease stays unchanged whatever happens
-  # (the tally is updated, `started?` is ignored — the engagement comes from the classification, not from this step_run).
-  defp dispatch_engaged(payload, opts, acc, lease, dispatcher) do
-    {acc2, _started?} = step_do_dispatch(payload, opts, acc, dispatcher)
-    {acc2, lease}
-  end
-
-  # Start of a QUEUED workflow_run (free lease): dispatch; if a pod was actually put in flight
-  # (spawned OR wake_unreached = lock+pod placed), the lease becomes HELD → the other queued issues of the same
-  # tick wait (serialization 1 workflow_run/repo). A missed wake holds the lease (the workflow_run is started),
-  # NOT a dispatch failure (nothing started).
-  defp start_workflow_run(payload, opts, acc, dispatcher) do
-    {acc2, started?} = step_do_dispatch(payload, opts, acc, dispatcher)
-    {acc2, started?}
+  # Dispatch of an ENGAGED workflow_run: the seat is already taken (the engagement comes from the
+  # classification, not from this step_run), so `started?` says nothing the counter needs.
+  defp dispatch_engaged(payload, opts, acc, dispatcher) do
+    step_do_dispatch(payload, opts, acc, dispatcher)
   end
 
   # Classifies an issue (lease) AND pre-resolves what `dispatch_issue` would otherwise re-read. Returns
