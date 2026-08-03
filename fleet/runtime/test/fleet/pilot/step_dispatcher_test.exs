@@ -1363,6 +1363,103 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:skipped, :ci_pending} = StepDispatcher.dispatch_review(pr, opts)
     end
 
+    # Les deux seams de conflit (`:conflict_diagnoser` / `:conflict_applier`) existaient sans qu'un
+    # seul test ne les injecte — une indirection dont le benefice, l'hermetisme, n'etait jamais
+    # consomme (BL-6-42.2). Et la mesure a montre pire que « une seam inutilisee » : `tier0_decision`
+    # (le routage PUR) etait deja teste, mais le CABLAGE — flag → diagnoser → decision → acte —
+    # n'avait aucun test. Le trou tombait exactement entre une fonction prouvee et le monde, soit
+    # la portion que ces seams existent pour rendre testable.
+    defmodule AllSemanticProbe do
+      def probe(_repo, _ref, _opts), do: {:ok, %{totals: %{none_trivial?: true}}}
+    end
+
+    defmodule AllWritableProbe do
+      def probe(_repo, _ref, _opts), do: {:ok, %{totals: %{all_writable?: true}}}
+    end
+
+    defmodule BlindProbe do
+      def probe(_repo, _ref, _opts), do: {:error, :cannot_diagnose}
+    end
+
+    defmodule ResolvingApplier do
+      def apply(_repo, _ref, _opts), do: {:ok, :auto_resolved}
+    end
+
+    defp conflict_pr,
+      do:
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6,
+          # `pr_base_branch` n'est PAS une option du dispatch : `step_dispatcher` l'ECRASE depuis
+          # l'objet PR (`get_in(pr, ["base","ref"])`), et c'est la bonne source — la face d'un PR
+          # est une propriete du PR, pas du harnais. La poser en opts ne servait a rien.
+          "base" => %{"ref" => "main"}
+        })
+
+    defp conflict_opts(extra) do
+      dispatch_opts(
+        Keyword.merge(
+          [
+            forge_opts: [
+              _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+              _test_merge_result: {:error, {:http, 405, "conflit"}},
+              _test_pull: %{
+                "number" => 6,
+                "state" => "open",
+                "draft" => false,
+                "mergeable" => false
+              }
+            ]
+          ],
+          extra
+        )
+      )
+    end
+
+    test "tier-0 : un conflit TOUT-SEMANTIQUE escalade sans bruler un round de producteur" do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllSemanticProbe)
+
+      # Le gain de tier-0 RACCOURCIT un chemin, il n'en casse aucun : un conflit dont rien n'est
+      # trivial ne deviendra pas resoluble en y envoyant un producteur trois fois.
+      assert {:skipped, {:merge_blocked_escalated, 6}} =
+               StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+
+      # Et c'est LA le gain, pas le tuple : aucun round de producteur n'a ete brule.
+      refute_received {:spawned, _issue, _opts}
+    end
+
+    test "tier-0 : un conflit TOUT-ECRIVABLE est resolu par le runtime, sans pod" do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+
+      # C'est ICI que la seam `:conflict_applier` gagne sa vie : sans injection, ce chemin exige un
+      # vrai worktree git et ne serait jamais exerce.
+      assert {:ok, {:auto_resolved, 6}} =
+               StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+    end
+
+    # ❌ PAS de test pour la sonde MUETTE (`{:error, _}` → `:fall_through`), et la raison est
+    # mesuree : dans ce harnais le chemin legacy converge sur le MEME observable que l'escalade
+    # tier-0 — meme tuple de retour, et aucun spawn dans les deux cas. Un test ecrit ici
+    # n'assertait rien. Le rendre discriminant demande de faire dispatcher un producteur au chemin
+    # legacy, donc d'instrumenter le budget de rework du harnais : un geste de harnais, pas une
+    # assertion. Non fait, plutot qu'un test vert qui ne separe rien.
+
+    test "flag OFF : le diagnoser n'est meme pas consulte (le defaut reste le chemin legacy)" do
+      # `conflict_diagnosis?` est false par defaut ; ce test epingle que le defaut ne traverse pas
+      # tier-0 — sinon les trois tests ci-dessus prouveraient un chemin que la prod n'emprunte pas.
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, false)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+
+      refute match?(
+               {:ok, {:auto_resolved, 6}},
+               StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+             )
+    end
+
     test "PR flipped back to DRAFT (judge-dispatch guard) → skip, no review nor merge" do
       pr =
         pr(%{
