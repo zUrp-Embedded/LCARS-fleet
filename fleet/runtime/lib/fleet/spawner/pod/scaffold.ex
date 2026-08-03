@@ -86,6 +86,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   cloning it into `<pod_dir>/work` existed and never ran — its trigger field had no writer anywhere
   in the corpus — so a reader met the dead one first and took it for the live one.
 
+  Being a BIND and not a clone has one consequence worth knowing before assuming otherwise: the pod
+  reads the LIVE worktree, the one the dispatcher commits other tickets' briefs into. Harmless (RO,
+  and git is coherent per file) but not a snapshot — two reads by one pod can see two states.
+
   The pod's commit identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
   the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*` = the HUMAN, role in the
   trailer) and the guarantee lives on the world side (DeliverableGate gate at push).
