@@ -328,18 +328,26 @@ defmodule Fleet.Spawner.Pod do
   # scaffold file written BESIDE it.
   #
   # What that file actually holds, measured 2026-08-03 — it is not one thing:
-  #   * step rail (producers): the dispatcher puts NO `:brief` in the spawn opts (the order travels
-  #     through the queue alone), so the file holds the "(No brief provided)" placeholder;
-  #   * PR rail (judges, rework): `RoleDispatch` MUST pass `brief:` in the spawn opts — judges are
-  #     `one-shot` and `brief_guard` refuses a one-shot spawn without one — so the file holds the
-  #     order, and it is written HERE, in `:projecting`, i.e. at SPAWN ONLY. A re-brief keeps the
-  #     pod alive (enqueue + wake, no re-spawn), so on the rework rounds this file describes the
-  #     PREVIOUS round.
+  #   * PRODUCERS: the step dispatcher puts NO `:brief` in the spawn opts (the order travels through
+  #     the queue alone), so the file holds the "(No brief provided)" placeholder. That covers the
+  #     rework rounds too: `RoleDispatch` re-briefs the producer on ITS OWN pod identity
+  #     (`pod_id_for_scope`, the same one `dispatch_issue` uses), and that pod was spawned from the
+  #     step rail — so the placeholder is what it had and what it keeps.
+  #   * JUDGES: `RoleDispatch` MUST pass `brief:` in the spawn opts — a judge is `one-shot` and
+  #     `brief_guard` refuses a one-shot spawn without one — so the file holds the gate brief. Its
+  #     pod is keyed on the PR (`PodId.for_pr`) and dies with its verdict, so each review writes it
+  #     FRESH, and a re-dispatch while the previous one is alive is refused upstream by the
+  #     `lcars-in-flight` lock (`dispatch_review`).
   #
-  # No SP block or draft reads it (measured across `priv/sp_builder` and the committed drafts), but
-  # an agent exploring its own workspace does not need a wire to read a file named after its issue.
-  # Whether it should be refreshed or dropped is open (chantier monde-du-pod, `## À trancher`): the
-  # answer depends on a DEPLOYED catalogue this repo does not carry.
+  # So it is a SECOND COPY of the gate brief on a judge's disk, not a stale one: no reachable path
+  # leaves an order here describing a round that has passed. (An earlier revision of this comment
+  # claimed it did — deduced from "written at spawn only" without measuring which pod identity a
+  # rework lands on.)
+  #
+  # No SP block or draft reads it either (measured across `priv/sp_builder` and the committed
+  # drafts), but an agent exploring its own workspace does not need a wire to read a file named
+  # after its issue. Whether the copy should exist at all is open (chantier monde-du-pod,
+  # `## À trancher`): the answer depends on a DEPLOYED catalogue this repo does not carry.
   def handle_event(:internal, :proceed, :projecting, data) do
     # Skills root — THREE-way resolution (BL-6-22), and the `:catalogue` sentinel is deliberate
     # (get_env/3 returns the default ONLY when the key is ABSENT, never when it is present-nil):
