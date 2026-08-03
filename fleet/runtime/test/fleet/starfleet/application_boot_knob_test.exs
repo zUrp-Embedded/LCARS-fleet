@@ -16,8 +16,11 @@ defmodule Fleet.Starfleet.ApplicationBootKnobTest do
     TestEnv.put_env_restoring(:fleet_starfleet, :start_mcp_monitor, false)
     refute App.boot_enabled?(:start_mcp_monitor, true)
 
-    TestEnv.put_env_restoring(:fleet_starfleet, :start_mcp_watcher, true)
-    assert App.boot_enabled?(:start_mcp_watcher, false)
+    # Une clef ARBITRAIRE, pas un second knob reel : ce test porte sur `boot_enabled?`, pas sur
+    # l'inventaire des enfants. L'epingler a un knob nomme l'a fait survivre au retrait de
+    # MCPWatcher et casser un test qui ne parlait pas de lui.
+    TestEnv.put_env_restoring(:fleet_starfleet, :start_some_child, true)
+    assert App.boot_enabled?(:start_some_child, false)
   end
 
   test "absent key → boolean default (no interpretation)" do

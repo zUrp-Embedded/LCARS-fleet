@@ -22,7 +22,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
   Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
   → tests instantiate without the global subscribe.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   use GenServer
@@ -49,7 +49,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # V2 extensions (MCPWatcher + MCPMonitor).
+  # V2 extensions (MCPMonitor).
   def handle_info(
         %Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert", payload: p},
         state

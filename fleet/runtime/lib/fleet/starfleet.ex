@@ -58,16 +58,14 @@ defmodule Fleet.Starfleet do
       `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
     * `Fleet.Starfleet.MCPMonitor` — passive health check of the pod-facing
       MCP substrate (`Fleet.MCP.PodSocketSupervisor`)
-    * `Fleet.Starfleet.MCPWatcher` — passive cron: upstream version drift
-      of the Elixir MCP SDK on Hex.pm
     * `Fleet.Starfleet.PeriodicCheck` — shared plumbing for the periodic
-      checks (`MCPMonitor`, `MCPWatcher`)
+      checks (`MCPMonitor`)
 
   ## Vendor boundary
 
   N0 (vendor-agnostic, no direct SDK call).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   @doc """

@@ -67,10 +67,10 @@ config :fleet_credentials,
 # tests async ; les tests dédiés démarrent manuellement avec opts isolés.
 config :fleet_starfleet, start_audit_consumer: false
 config :fleet_starfleet, start_boot_orchestrator: false
-# BL-021 chantier 8 — Extensions V2 off par défaut en test (hermétisme :
-# MCPWatcher fetch HTTP Hex.pm parasiterait CI, MCPMonitor Process.whereis +
-# timer Bus broadcast pollue async tests). Tests dédiés instancient avec opts.
-config :fleet_starfleet, start_mcp_watcher: false
+# BL-021 chantier 8 — Extension V2 off par défaut en test (hermétisme : MCPMonitor fait
+# Process.whereis + un timer qui broadcast sur le Bus, ce qui pollue les tests async). Les tests
+# dédiés instancient avec opts. (`start_mcp_watcher` retiré avec MCPWatcher le 2026-08-03 — la
+# veille amont est passée en CI ; une clef de config sans lecteur est une promesse morte.)
 config :fleet_starfleet, start_mcp_monitor: false
 
 # Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :

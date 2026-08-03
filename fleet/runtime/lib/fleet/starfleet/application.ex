@@ -16,8 +16,6 @@ defmodule Fleet.Starfleet.Application do
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
          `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
        * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
-       * `MCPWatcher` (default `false`) — HTTP egress to Hex.pm (SDK upstream alert),
-         opt-in only where outbound is allowed
        * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
 
   `BootOrchestrator` is NOT a child here: as a mid-boot Task it could
@@ -30,7 +28,7 @@ defmodule Fleet.Starfleet.Application do
 
   One boolean `:start_*` knob per child (all under `:fleet_starfleet`):
   `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
-  `:start_mcp_watcher` (default `false`), `:start_mcp_monitor` (default `true`) —
+  `:start_mcp_monitor` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
   (`Fleet.Application`), not by this tree. Tests set a knob to `false` to start that
   child manually via `start_supervised/1`.
@@ -40,7 +38,7 @@ defmodule Fleet.Starfleet.Application do
   `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` — each child is independent;
   the widened restart window (vs OTP's 3/5) is a deliberate choice for blips.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   use Supervisor
@@ -54,8 +52,12 @@ defmodule Fleet.Starfleet.Application do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
     # V2 extensions.
-    # MCPWatcher: default OFF (HTTP I/O to Hex.pm — opt-in in prod where outbound
-    # is allowed). MCPMonitor: default ON (purely local Process.whereis,
+    # MCPWatcher RETIRE le 2026-08-03 (BL-6-44) : la veille de version amont est passee en CI
+    # (`.gitea/workflows/deps-upstream.yml`). Il etait OFF par defaut et n'a JAMAIS ete active
+    # nulle part — donc la veille n'existait pas, et le code qui la promettait invitait a
+    # l'allumer. Surveiller une registry de paquets n'est pas le travail d'un plan de controle :
+    # aucun consommateur en ligne, une sortie reseau de plus au daemon, et rien qu'un cron ne
+    # fasse mieux. MCPMonitor reste ON : purement local (Process.whereis), zero I/O reseau.
     # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++
@@ -72,10 +74,6 @@ defmodule Fleet.Starfleet.Application do
         end ++
         if(boot_enabled?(:start_audit_consumer, true),
           do: [Fleet.Starfleet.AuditConsumer],
-          else: []
-        ) ++
-        if(boot_enabled?(:start_mcp_watcher, false),
-          do: [Fleet.Starfleet.MCPWatcher],
           else: []
         ) ++
         if(boot_enabled?(:start_mcp_monitor, true),

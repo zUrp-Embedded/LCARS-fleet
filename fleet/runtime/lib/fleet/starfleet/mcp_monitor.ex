@@ -6,7 +6,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
   ## Mechanics
 
   GenServer + recursive `Process.send_after/3` — the plumbing (named start_link, tick + re-arming,
-  test hook `:check_now`) is SHARED with `MCPWatcher` via `Fleet.Starfleet.PeriodicCheck`; this
+  test hook `:check_now`) lives in `Fleet.Starfleet.PeriodicCheck` (shared plumbing kept generic
+  after MCPWatcher moved to CI — the shape outlived its second user); this
   module keeps its state, its `do_check/1` and the shape of its reply (`{:ok, status}`). On each
   tick (default 60s), checks the target's liveness:
 
@@ -41,7 +42,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
       `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
       atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   use GenServer

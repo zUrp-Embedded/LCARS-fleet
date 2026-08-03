@@ -1,6 +1,8 @@
 defmodule Fleet.Starfleet.PeriodicCheck do
   @moduledoc """
-  SHARED plumbing for starfleet's periodic-check GenServers (`MCPMonitor`, `MCPWatcher`).
+  Plumbing for starfleet's periodic-check GenServers. `MCPMonitor` is its only user since
+  MCPWatcher moved to CI (2026-08-03); kept generic rather than inlined — the next periodic
+  check should not have to re-derive the tick/re-arm/test-hook shape.
 
   Both twins carry the SAME skeleton: named GenServer + recursive `Process.send_after/3`
   (a single deadline armed at any instant: the tick runs the check then re-arms the next) +
@@ -18,7 +20,7 @@ defmodule Fleet.Starfleet.PeriodicCheck do
   (e.g. `Fleet.Spawner.PodWarden`) have their own nuances (handle_continue, tick skip) — folding
   them in here would force speculative parameters. Two real clients, zero hypothetical clients.
 
-  ## Contract (called by `MCPMonitor` / `MCPWatcher`)
+  ## Contract (called by `MCPMonitor`)
 
   - `start_link(module, opts)` — starts the named GenServer `module` (`opts[:name]`, default the
     module itself — tests inject a unique name to co-exist).
@@ -29,7 +31,7 @@ defmodule Fleet.Starfleet.PeriodicCheck do
   - `check_now(state, do_check, reply)` — body of `handle_call(:check_now, ...)`: same check as
     the timer, reply built by `reply.(new_state)` → `{:reply, _, new_state}`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   @spec start_link(module(), keyword()) :: GenServer.on_start()
