@@ -13,9 +13,19 @@ defmodule Fleet.MCP.SeamContractTest do
   use ExUnit.Case, async: true
 
   # {behaviour contract, canonical default impl (the module `resolved/0` falls back to)}
+  #
+  # EVERY duck-typed seam belongs here, and the list was HALF of them until 2026-08-03 (BL-6-44):
+  # the two `mcp → pilot` contracts were locked while `spawner → mcp` and the onboarding contract
+  # were not, for no reason anyone had written — the same mirror, the same manual propagation, the
+  # same silent break at runtime. A lock that covers some instances of a hazard and not others
+  # reads, to whoever adds the next one, as if the uncovered ones were deliberate.
   @seams [
     {Fleet.MCP.PodTools.Delegation.ForgeClient, Fleet.Pilot.ForgeClient},
-    {Fleet.MCP.PodTools.Delegation.EscalationForge, Fleet.Pilot.ForgeClient}
+    {Fleet.MCP.PodTools.Delegation.EscalationForge, Fleet.Pilot.ForgeClient},
+    # spawner → mcp: a pod spawn cannot provision its socket if this one drifts.
+    {Fleet.Spawner.McpSocketProvisioner, Fleet.MCP.PodSocketSupervisor},
+    # mcp → pilot: the arch's `create_project` lands here.
+    {Fleet.MCP.PodTools.Delegation.ProjectOnboard, Fleet.Pilot.ProjectOnboard}
   ]
 
   for {contract, impl} <- @seams do
