@@ -98,7 +98,16 @@ defmodule Fleet.DurableLog do
         compress_on_rotate: true
       },
       level: Keyword.get(opts, :level, :warning),
-      formatter: Logger.Formatter.new(format: "$time $metadata[$level] $message\n")
+      # `colors: [enabled: false]` — NOT cosmetic. Measured 2026-08-03 on a live bench: the file
+      # came out carrying `\e[33m`/`\e[0m` around every line, because the formatter inherits the
+      # console's colour setting. A trace exists to be READ AFTER THE FACT, by a human grepping or
+      # an agent parsing; escape codes break both (`grep "^\[warning\]"` matches nothing, and every
+      # line has invisible bytes at its ends). Colour belongs to a terminal, not to a file.
+      formatter:
+        Logger.Formatter.new(
+          format: "$time $metadata[$level] $message\n",
+          colors: [enabled: false]
+        )
     }
 
     case :logger.add_handler(@handler_id, :logger_std_h, config) do

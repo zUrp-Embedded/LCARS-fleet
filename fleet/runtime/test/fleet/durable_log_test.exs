@@ -42,6 +42,11 @@ defmodule Fleet.DurableLogTest do
     trace = read_log(path)
     assert trace =~ "publish_deadline fired for pod-42"
     assert trace =~ "pr-open-fail issue-7"
+
+    # NO ANSI. Measured on a live bench before this assertion existed: the file carried
+    # `\e[33m`/`\e[0m` around every line, inherited from the console's colour setting. A trace
+    # exists to be read after the fact — escape codes break a grep and a parser alike.
+    refute trace =~ "\e["
   end
 
   test "info does NOT land — a line per routine pass buries the one that matters", %{path: path} do
