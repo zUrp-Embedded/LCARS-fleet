@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
   the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.
@@ -56,7 +56,8 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
         repo_url = "#{String.trim_trailing(base_url, "/")}/#{repo}.git"
 
         with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
-             {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
+             {:ok, gate_sha} <-
+               resolve_gate_base_sha(repo_url, gate_base_branch, sha, base_branch) do
           # `"repo"` (full_name "owner/name") embedded in the project → it travels all the way to the pod
           # then comes back out in `pod.completed` (`CompletedPayload.build`) → the StepRunConsumer knows on WHICH
           # repo to act (multi-project), without re-deriving it. `repo_path` = the push URL (per-step-run remote).
@@ -77,10 +78,27 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   # from where the pod cloned. A dispatch resolve passes `:gate_base_branch` ("main") → we pin the tip of
   # THAT branch (the rebase target): the guard then requires HEAD to descend from `main`, not from the old
   # feature tip (rewritten by the rebase → it would no longer be an ancestor, hence a `base_not_ancestor`).
-  defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha), do: {:ok, clone_base_sha}
+  defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha, _base_branch),
+    do: {:ok, clone_base_sha}
 
-  defp resolve_gate_base_sha(repo_url, branch, _clone_base_sha) when is_binary(branch),
-    do: ls_remote_sha(repo_url, branch)
+  # LES DEUX REFS COINCIDENT SUR LE CHEMIN FORWARD, et le moduledoc le dit — build/rework prennent
+  # `gate_base_branch == base_branch`. On payait quand meme une SECONDE `ls-remote` (reseau, bornee
+  # a 15 s, DANS le GenServer du poller) pour une valeur deja en main. Sur D dispatches, c'etait
+  # 2 x 15 s x D de plafond la ou 1 x 15 s x D suffit (BL-6-40, amplificateur 3).
+  #
+  # Et ce n'est pas qu'une economie : deux `ls-remote` sur LE MEME ref a deux instants peuvent
+  # rendre deux shas differents si quelqu'un pousse entre les deux. Le pod clonerait alors une base
+  # et serait juge contre une AUTRE, sans qu'aucune des deux ne soit fausse. Reutiliser la lecture
+  # deja faite est donc plus CONSISTANT, pas seulement plus rapide.
+  defp resolve_gate_base_sha(_repo_url, branch, clone_base_sha, base_branch)
+       when is_binary(branch) and branch == base_branch,
+       do: {:ok, clone_base_sha}
+
+  # Divergentes (resolution par rebase) : la seconde lecture est la SEULE facon de connaitre la
+  # tete de l'autre ref. Elle reste.
+  defp resolve_gate_base_sha(repo_url, branch, _clone_base_sha, _base_branch)
+       when is_binary(branch),
+       do: ls_remote_sha(repo_url, branch)
 
   defp forge_base_url(forge_opts) do
     Keyword.get(forge_opts, :base_url) ||

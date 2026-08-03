@@ -1813,5 +1813,27 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert proj["base_sha"] == ctx.feature_tip
       assert proj["gate_base_sha"] == proj["base_sha"]
     end
+
+    test "gate_base_branch EGAL a base_branch : une seule lecture, pas deux (BL-6-40 ampli 3)",
+         ctx do
+      # Le chemin forward passe `gate_base_branch == base_branch` — le moduledoc dit qu'elles
+      # coincident. On payait quand meme une SECONDE `ls-remote` (reseau, bornee a 15 s, DANS le
+      # GenServer du poller) pour une valeur deja en main.
+      #
+      # Ce que ce test tient n'est PAS le compte d'appels (invisible d'ici) mais sa CONSEQUENCE
+      # observable : les deux shas sont issus de la MEME lecture, donc rigoureusement egaux. Deux
+      # `ls-remote` sur le meme ref a deux instants peuvent diverger si quelqu'un pousse entre les
+      # deux — le pod clonerait une base et serait juge contre une autre, sans qu'aucune des deux
+      # ne soit fausse. La reutilisation est donc plus CONSISTANTE, pas seulement plus rapide.
+      assert {:ok, proj} =
+               StepDispatcher.default_project_resolver("owner/proj",
+                 base_branch: "main",
+                 gate_base_branch: "main",
+                 forge_opts: [base_url: ctx.base_url]
+               )
+
+      assert proj["base_sha"] == ctx.main_c1
+      assert proj["gate_base_sha"] == proj["base_sha"]
+    end
   end
 end
