@@ -79,17 +79,24 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   @doc """
   The SHORT pointer work-order (FR, agent-facing payload): sent as the work_item `brief`
-  when the order WAS materialized — the pod READS the committed doc in its RO-mounted
-  work/ops instead of receiving the full text (single source; a non-nil sha proves
-  work/ops exists, so the mount will be projected for a project pod).
+  when the order WAS materialized — the pod READS the committed doc AT ITS PIN instead of
+  receiving the full text (single source; a non-nil sha proves work/ops exists, so the mount
+  will be projected for a project pod).
+
+  It used to send the worker to the PATH and then ask it to cite the sha: an attestation of a pin
+  it had never consulted. The two are not interchangeable — `LCARS_PROJECT_OPS` is a live `--ro-bind`
+  of the worktree the project architect holds in RW at the same path, so the file under that name
+  can differ from the pinned object by the time the pod reads it. One address, and it is the one
+  the pod is asked to attest.
   """
   @spec pointer_brief(String.t(), String.t()) :: String.t()
   def pointer_brief(ref, sha) when is_binary(ref) and is_binary(sha) do
     short = String.slice(sha, 0, 7)
 
-    "Ton ordre de mission COMPLET est le doc commité `#{ref}` @ `#{short}` — LIS-le EN PREMIER " <>
-      "dans `${LCARS_PROJECT_OPS}/#{ref}` (le work/ops de ton projet, monté en lecture seule chez toi), " <>
-      "puis exécute-le. CITE `#{short}` dans ton résultat/verdict."
+    "Ton ordre de mission COMPLET est le doc commité `#{ref}` @ `#{short}`. LIS-le EN PREMIER " <>
+      "à sa version PINNÉE :\n`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`\n" <>
+      "L'arbre de travail peut avoir bougé depuis le pin ; le pin, non. Puis exécute-le, " <>
+      "et CITE `#{short}` — c'est ce que tu as lu."
   end
 
   @doc """

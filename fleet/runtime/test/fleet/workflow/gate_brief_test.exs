@@ -92,7 +92,15 @@ defmodule Fleet.Workflow.GateBriefTest do
 
     assert brief =~ "briefs/issue-5-engineer.md"
     assert brief =~ "0627de8abc"
-    assert brief =~ "$LCARS_PROJECT_OPS"
+
+    # ONE address, and it is the PIN. The judge used to be given the working-tree path first, with
+    # `git show` offered only "if the file changed since the pin" — a condition that requires its
+    # own answer: knowing whether it changed means already holding the pinned version. And the path
+    # is not a fallback: `LCARS_PROJECT_OPS` is a live `--ro-bind` of the worktree the project
+    # architect holds in RW at the same path, so it moves under the judge mid-session.
+    assert brief =~ "git -C $LCARS_PROJECT_OPS show 0627de8abc:briefs/issue-5-engineer.md"
+    refute brief =~ "$LCARS_PROJECT_OPS/briefs/issue-5-engineer.md"
+
     # No embedded blockquote of a brief body: the pointer instruction replaces the copy.
     refute brief =~ "> "
   end

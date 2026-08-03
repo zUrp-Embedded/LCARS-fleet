@@ -11,9 +11,10 @@ defmodule Fleet.Workflow.GateBrief do
 
   ONE EXCEPTION, stated because "the prose lives in the templates" read as absolute and is not: the
   source-pointer body (`subject_body(:brief, …)` below) is written HERE, in French, like its twin
-  `BriefArtifact.pointer_brief/2`. What those two carry is not tone — it is PROTOCOL: the RO mount
-  path the judge must read (`$LCARS_PROJECT_OPS/<ref>`), the commit the version is pinned to, and the
-  `git show <sha>:<ref>` that recovers the exact text if the file moved since. Their imperative half
+  `BriefArtifact.pointer_brief/2`. What those two carry is not tone — it is PROTOCOL: ONE address,
+  `git show <sha>:<ref>`, which is the pinned object itself. Not the working-tree path with the pin
+  as a fallback: that mount is a live bind of a worktree the architect holds in RW, so the path and
+  the pin are not two ways of reading the same thing. Their imperative half
   ("read it in full before judging") IS calibration, and moving that half to a template — the fragment
   mechanism already exists, cf. `gate-brief-request-section` — is what it would take to tune the
   wording without a deploy. Until then: framing in templates, pointers in code, and the reader is told
@@ -22,7 +23,7 @@ defmodule Fleet.Workflow.GateBrief do
   Pure function over its inputs + the template files (fail-loud on a missing/miswired
   template — a judge never receives a half-rendered order).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Workflow.BriefTemplate
@@ -64,16 +65,29 @@ defmodule Fleet.Workflow.GateBrief do
   defp template_name(:brief), do: "gate-brief-brief"
   defp template_name(_deliverable), do: "gate-brief-deliverable"
 
-  # :brief with a SOURCE pointer → the judged brief is NOT re-quoted (dedup, one source of
-  # truth): the judge reads the authored doc through its RO-mounted project work/ops. FR: prose
-  # rendered to the agent (same stance as the git-native `livrable` pointer text).
+  # :brief with a SOURCE pointer → the judged brief is NOT re-quoted (dedup, one source of truth):
+  # the judge reads the authored doc AT ITS PIN. FR: prose rendered to the agent (same stance as the
+  # git-native `livrable` pointer text).
+  #
+  # ONE address, and it is the sha. The path used to be given first, with the pin offered as a
+  # fallback "if the file changed since" — a condition that requires its own answer to evaluate:
+  # knowing whether the file moved means already holding the pinned version. An agent following it
+  # literally either reaches for `git show` anyway, or reads the working tree and never evaluates
+  # the condition at all — judging, in silence, a version nobody pinned.
+  #
+  # And the working-tree path is not an acceptable fallback: `LCARS_PROJECT_OPS` is a `--ro-bind`
+  # of the very worktree the project architect holds in RW at the SAME path
+  # (`LaunchSpec.project_ops_path/3` and `ProjectArchitect`'s work dir are both
+  # `<work_root>/<project>`). The RO protects the pod, not the tree: it moves under the judge
+  # mid-session. The sha addresses an immutable object.
   defp subject_body(:brief, %{"brief_ref" => ref, "brief_sha" => sha})
        when is_binary(ref) and is_binary(sha) do
     "Le brief à juger n'est PAS recopié ici (une seule source de vérité) : c'est le doc " <>
-      "**`#{ref}`** de ton work/ops projet (monté RO — chemin `$LCARS_PROJECT_OPS/#{ref}`), " <>
-      "version pinnée au commit `#{sha}`. LIS-LE EN ENTIER avant de juger. Si le fichier a " <>
-      "changé depuis le pin, la version exacte à juger est " <>
-      "`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`."
+      "**`#{ref}`** de ton work/ops projet, à sa version PINNÉE au commit `#{sha}`. " <>
+      "LIS-LE EN ENTIER avant de juger, par son pin : " <>
+      "`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`. C'est LA version à juger — le fichier " <>
+      "de même nom dans l'arbre de travail n'est pas elle : ce mount est un bind vivant que " <>
+      "l'architecte a en écriture."
   end
 
   # :brief inline (degraded dispatch, no authored doc) → READABLE defused blockquote (E2 — a
