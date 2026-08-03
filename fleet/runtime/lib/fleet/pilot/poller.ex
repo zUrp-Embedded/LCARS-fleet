@@ -905,7 +905,13 @@ defmodule Fleet.Pilot.Poller do
   defp step_process_pulls(pulls, opts) do
     wait_labels = Keyword.get(opts, :wait_labels, %{})
 
-    Enum.reduce(pulls, Lease.zero_tally(), fn pr, acc ->
+    # Same admission order as the issues rail, by the ticket the PR carries. Not decorative since
+    # the per-role pre-flight can refuse a judge mid-tick: whoever is walked first gets the seat,
+    # so the walk order is a decision. Ascending id, or the forge's "most recently touched" would
+    # decide it — and it would decide it differently on the two rails.
+    pulls
+    |> Enum.sort_by(&pr_issue_number/1)
+    |> Enum.reduce(Lease.zero_tally(), fn pr, acc ->
       # The issue number comes from the feature-branch name (`lcars/issue-N-<role>`): zero calls. A
       # foreign PR does not parse → `nil` → the wait convergence does nothing, which is the correct
       # behaviour and not a side effect: it is not our ticket.

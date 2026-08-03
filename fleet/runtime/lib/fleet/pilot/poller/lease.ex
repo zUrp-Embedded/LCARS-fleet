@@ -121,11 +121,13 @@ defmodule Fleet.Pilot.Poller.Lease do
     # `prefetch` (merged into the opts) → the lease classification and the dispatch read the SAME
     # data without a second get_route / workflow_map load.
     classified =
-      Enum.map(issues, fn issue ->
+      issues
+      |> Enum.map(fn issue ->
         pr? = MapSet.member?(pr_issue_ids, Map.get(issue, "number"))
         {engaged, prefetch} = classify_issue(issue, pr?, seams)
         {issue, pr?, engaged, prefetch}
       end)
+      |> Enum.sort_by(fn {issue, _pr?, _engaged, _pf} -> Map.get(issue, "number") end)
 
     # THE CEILING (2026-08-03) — `max_fan`: how many workflow_runs this project may hold in flight
     # at once. It REPLACES the `:repo_serialized_lease` boolean, because the boolean and the counter
@@ -152,6 +154,18 @@ defmodule Fleet.Pilot.Poller.Lease do
       Enum.count(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end) +
         MapSet.size(pr_issue_ids)
 
+    # ADMISSION ORDER — ascending ticket number, decided HERE and not inherited.
+    #
+    # The listing carries no `sort`: whatever order the forge returns is the order the seats were
+    # handed out in, which under Gitea means "most recently touched first". So the ticket that got
+    # the last seat was the one someone had just commented on — a rule nobody wrote, that changes
+    # when a human types, and that reverses if the forge changes its default.
+    #
+    # Ascending id is the one order a queue can be READ in: it is the arrival order, it is stable
+    # across ticks (so a refused ticket keeps its place instead of drifting), and it needs no field
+    # the forge might not have. It is a property of the ADMISSION, not of the transport — which is
+    # why it lives here and not as a query parameter that only the HTTP path would obey.
+    #
     # The accumulator is the COUNT, seeded with what is already flying. An ENGAGED step and a jury
     # ticket do not increment it — they are already inside `in_flight`; only a fresh START does.
     {tally, _fan} =

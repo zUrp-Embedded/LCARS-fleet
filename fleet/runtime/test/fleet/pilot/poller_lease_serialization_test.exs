@@ -31,9 +31,14 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   end
 
   defmodule CountingDispatcher do
-    # Stands in for StepDispatcher: counts what the lease let through.
+    # Stands in for StepDispatcher: says WHICH ticket the lease let through.
+    #
+    # It used to read `payload["number"]`, which is always nil: the lease wraps the issue
+    # (`%{"issue" => issue, "repository" => …}`), the shape the real dispatcher reads. Every test
+    # here asserted counts only, so the broken identity read cost nothing and said nothing — until
+    # an order test needed it and got `{:dispatched, nil}` three times.
     def dispatch_issue(payload, _opts) do
-      send(self(), {:dispatched, payload["number"] || payload[:number]})
+      send(self(), {:dispatched, get_in(payload, ["issue", "number"])})
       {:ok, {:spawned, "pod", "engineer"}}
     end
   end
@@ -104,6 +109,41 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
 
     assert tally.dispatched == 1
     assert tally.skipped == 2
+  end
+
+  describe "admission order — ascending ticket, decided here" do
+    test "three tickets 12/7/30 and ONE seat → the 7 starts" do
+      # The listing carries no `sort`, so the order was the forge's default ("most recently
+      # touched" under Gitea): the last seat went to whichever ticket someone had just commented
+      # on. A rule nobody wrote, that changes when a human types.
+      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+
+      out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
+
+      tally = Lease.process_issues(out_of_order, MapSet.new(), opts(), seams())
+
+      assert tally.dispatched == 1
+      assert_received {:dispatched, 7}
+      refute_received {:dispatched, 12}
+      refute_received {:dispatched, 30}
+    end
+
+    test "the refused ticket keeps its place at the next tick" do
+      # Ascending id is stable across ticks, which is what makes a queue a queue: a ticket refused
+      # today is not overtaken tomorrow by one that merely got touched. Two seats, so 7 and 12 go
+      # and 30 waits — twice, identically.
+      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+
+      out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
+
+      for _tick <- 1..2 do
+        Lease.process_issues(out_of_order, MapSet.new(), opts(), seams())
+
+        assert_received {:dispatched, 7}
+        assert_received {:dispatched, 12}
+        refute_received {:dispatched, 30}
+      end
+    end
   end
 
   describe "max_fan/0 — the reader clamps, it does not report" do
