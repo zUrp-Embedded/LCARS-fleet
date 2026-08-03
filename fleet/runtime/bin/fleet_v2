@@ -145,6 +145,14 @@ setup_env() {
   # explicitly so the wait, the attach and the `lcars` CLI all compute the SAME path.
   export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
+  # Debug visibility (`fleet_v2 start --debug`), exported so it reaches the vendor launcher through
+  # the pod's env. Scope = THIS fleet life: a flag whose lifetime is a process's has no lifecycle of
+  # its own — nothing to toggle, nothing to persist, nothing to reconcile mid-run. Absent = off, and
+  # nothing in `etc/fleet_v2.env.template` offers it: this is a start-time gesture, not a setting.
+  # The variable is only carried here; what it changes lives at the launcher, and it can only ever
+  # ADD visibility (cf. the RC levers in claude_launch.sh).
+  [[ -n "${LCARS_DEBUG_VISIBILITY:-}" ]] && export LCARS_DEBUG_VISIBILITY
+
   # Base of the per-pod MCP sockets (one AF_UNIX channel <base>/<pod_id>/sock per pod). SAME logic as
   # the tmux sock above: the central default (/run/lcars/mcp) is not writable without privilege when a
   # HUMAN launches the fleet, so we put the path under their home. runtime.exs reads this env as the
@@ -196,7 +204,44 @@ fleet_up_notice() {
   echo "fleet_v2: logs BEAM : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION » · un pod : « lcars attach <pod_id> »" >&2
 }
 
+# ─── OPTION PARSING ─────────────────────────────────────────────────────────────────────────────
+# Until now this script dispatched sub-commands and NOTHING read `$@` past that: `cmd_start` took
+# its arguments and ignored them, so every flag was silently swallowed. A door that accepts anything
+# and does nothing with it is worse than one that refuses: the operator types a flag, sees a fleet
+# come up, and believes it is on.
+#
+# So: one parser, and an UNKNOWN flag is a refusal, not a shrug. Flags set shell variables read by
+# `setup_env` (which is what exports the launch env to the BEAM) — the boot is the whole scope of a
+# flag here, deliberately. A start argument has no idempotence to prove and no state to reconcile:
+# its lifetime is the fleet's, which is exactly the property that makes it cheap.
+#
+# `--` ends the option list (a positional that begins with `-` stays possible for a future
+# sub-command); anything after it is left in "$@" for the caller.
+parse_start_opts() {
+  while (( $# )); do
+    case "$1" in
+      --debug)
+        # Observability mode for the WHOLE fleet life. Read by the vendor launcher at exec time, so
+        # it applies to the pods spawned while it is on and cannot retro-fit the ones already up —
+        # a property the flag states rather than hides (cf. `--help`).
+        LCARS_DEBUG_VISIBILITY=1
+        shift
+        ;;
+      --) shift; break ;;
+      -*)
+        die "option inconnue : $1 (voir « fleet_v2 help »)"
+        ;;
+      *) break ;;
+    esac
+  done
+
+  START_ARGS=("$@")
+}
+
 cmd_start() {
+  parse_start_opts "$@"
+  set -- "${START_ARGS[@]}"
+
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     # Fleet ALREADY up: re-source the runtime env (to match the live fleet) and just report.
@@ -416,5 +461,19 @@ case "${1:-help}" in
   status)  shift; cmd_status "$@" ;;
   version) shift; cmd_version "$@" ;;
   forge)   shift; cmd_forge "$@" ;;
-  *) echo "usage: fleet_v2 {start|stop|restart|status|version|forge [nom]}" >&2; exit 1 ;;
+  # `help` reaches here on purpose (it is the `${1:-help}` default) and exits 1: a bare invocation
+  # is not a success. The usage names the flags, because a flag the door accepts and the usage hides
+  # is a flag nobody uses.
+  *)
+    cat >&2 <<'USAGE'
+usage: fleet_v2 {start|stop|restart|status|version|forge [nom]}
+
+  start [--debug]   demarre la fleet (daemon tmux)
+                    --debug : les pods spawnes PENDANT cette vie de fleet sont visibles dans
+                              Claude Desktop, y compris ceux qui sont invisibles par defaut.
+                              Porte sur la vie de la fleet : ni bascule a chaud, ni reglage
+                              persistant, et sans effet sur les pods deja lances.
+USAGE
+    exit 1
+    ;;
 esac

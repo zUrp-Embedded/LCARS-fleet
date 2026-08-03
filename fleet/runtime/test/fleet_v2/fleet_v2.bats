@@ -73,6 +73,46 @@ NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { e
   [ "$status" -ne 0 ]
 }
 
+# --- option parsing ---
+# Until 2026-08-03 this script dispatched sub-commands and NOTHING read `$@` past that: `cmd_start`
+# took its arguments and ignored them, so every flag was silently swallowed. A door that accepts
+# anything and does nothing with it is worse than one that refuses — the operator types a flag,
+# sees a fleet come up, and believes it is on.
+
+@test "an unknown start flag is REFUSED, not swallowed" {
+  run bash -c "source '$SCRIPT'; parse_start_opts --nawak"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"option inconnue"* ]]
+  [[ "$output" == *"--nawak"* ]]
+}
+
+@test "--debug arms the visibility variable; without it the variable stays unset" {
+  # The flag's whole mechanism is one exported variable read at the vendor launcher. Asserting the
+  # variable (and not just a zero exit) is what pins that it DOES something.
+  run bash -c "source '$SCRIPT'; parse_start_opts --debug; echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dbg=[1]"* ]]
+
+  run bash -c "source '$SCRIPT'; parse_start_opts; echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dbg=[]"* ]]
+}
+
+@test "the flag does not eat the positionals behind it" {
+  # `--` ends the option list, and what follows must reach the caller untouched: a parser that
+  # quietly consumes the rest would break the day `start` takes an argument.
+  run bash -c "source '$SCRIPT'; parse_start_opts --debug -- keep-me; echo \"rest=[\${START_ARGS[*]}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rest=[keep-me]"* ]]
+}
+
+@test "the usage names the flag — a flag the usage hides is a flag nobody uses" {
+  run bash "$SCRIPT" badcmd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--debug"* ]]
+  [[ "$output" == *"deja lances"* ]]
+}
+
 @test "LCARS_START_WITHOUT_CLAUDE=1 passes the door with no credentials (documented escape)" {
   run bash -c "export LCARS_START_WITHOUT_CLAUDE=1; source '$SCRIPT'; $NEUTRALISED_START"
   [[ "$output" != *"credentials claude absentes"* ]]
