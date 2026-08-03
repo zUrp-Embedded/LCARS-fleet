@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   `Fleet.Pilot.Poller` has emitted `[:fleet_pilot, :poller, :poll]` from three sites since it was
   written — duration, dispatched/skipped/errors, per-repo status. Nothing anywhere in `lib/` ever
   called `:telemetry.attach`, so every one of those measurements was computed and dropped: nobody,
-  human or agent, could state how long a tick actually took. The amplifiers that make ticks slow
+  human or agent, could state how long a poll actually took. The amplifiers that make polls slow
   (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
   network `ls-remote` inside the GenServer) were therefore only ever REASONED about. This module
   is what turns them into something measurable, and it is deliberately the first phase: the rest
@@ -16,9 +16,18 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   ## What it does, and what it deliberately does NOT do
 
-  Keeps the last #{100} ticks in a ring and answers `stats/0` — count, last, p50/p95/max, and the
-  error tally by scope. Logs ONLY when a tick crosses `:poller_slow_tick_ms` (default 10 s) or
-  reports an error status.
+  Keeps the last #{100} samples in a ring and answers `stats/0` — count, last, p50/p95/max, and
+  the error tally by scope. Logs ONLY when a sample crosses `:poller_slow_tick_ms` (default 10 s)
+  or reports an error status.
+
+  ⚠ **A sample is ONE REPO, not one cycle.** `[:fleet_pilot, :poller, :poll]` is emitted once per
+  repo — every emission carries `repo:` — so this distribution describes what a single repo costs
+  to poll, never what a full pass costs. Measured on 2026-08-03: 12 repos at a 30 s interval made
+  the counter advance by 12 per cycle. **The cost of a CYCLE is not measured here**, and no name in
+  this module may suggest otherwise: the readiness key was first called `tick`, which asserted a
+  scope the mechanism does not have, and a measurement was read wrong before that name was fixed.
+  Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
+  not) — that is a different instrument, not an arithmetic on this one.
 
   It does not log nominal ticks, and that restraint is a contract, not a taste: the poller is a
   ~30 s cron, its own moduledoc records that logging every nominal pass drowns the trace under
@@ -38,19 +47,19 @@ defmodule Fleet.Pilot.PollerTelemetry do
       they pin the defining module's code version; a captured `&__MODULE__.fun/4` does not.
 
   `cast` is lossy under saturation, and that is the correct trade here: dropping a metric is
-  strictly better than delaying the tick it measures. A mailbox that actually grows is itself the
+  strictly better than delaying the poll it measures. A mailbox that actually grows is itself the
   signal — and c'est ce que la jauge ci-dessous mesure.
 
   ## La jauge de mailbox (cousin de BL-6-40, livre ici)
 
   « Aucune jauge de `message_queue_len` sur les mailboxes StepRunConsumer/Poller — un consumer en
-  retard est invisible jusqu'au symptome. » Elle est echantillonnee a CHAQUE tick, dans ce module
-  plutot qu'ailleurs, parce que le tick est deja la cadence a laquelle on veut la reponse : aucun
+  retard est invisible jusqu'au symptome. » Elle est echantillonnee a CHAQUE poll, dans ce module
+  plutot qu'ailleurs, parce que le poll est deja la cadence a laquelle on veut la reponse : aucun
   timer de plus, aucun process de plus, et l'instrument mesure les deux singletons du rail.
 
-  Elle warn au FRANCHISSEMENT du seuil, pas a chaque tick au-dessus : une mailbox qui reste haute
+  Elle warn au FRANCHISSEMENT du seuil, pas a chaque poll au-dessus : une mailbox qui reste haute
   est UN fait, et le repeter toutes les 30 s noierait la trace que ce module existe pour garder
-  lisible — la meme discipline que le silence du tick nominal. Le retour sous le seuil est dit
+  lisible — la meme discipline que le silence du poll nominal. Le retour sous le seuil est dit
   aussi : sans lui, un operateur ne sait pas si c'est resorbe ou si le rail est mort.
 
   ## Config
@@ -63,7 +72,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   # Les deux singletons du rail dont la mailbox est un signal : le Poller (si ses ticks
   # s'accumulent, la fleet est en retard sur elle-meme) et le StepRunConsumer (un consumer en
   # retard est INVISIBLE jusqu'au symptome — BL-6-40, cousin nomme). Ils sont echantillonnes ICI
-  # parce qu'un tick de poller est deja la cadence a laquelle on veut la reponse : pas de timer de
+  # parce qu'un poll de depot est deja la cadence a laquelle on veut la reponse : pas de timer de
   # plus, pas de process de plus.
   @watched [Fleet.Pilot.Poller, Fleet.Pilot.StepRunConsumer]
   # Au-dela, la mailbox n'absorbe plus : elle accumule. Seuil volontairement BAS — ces deux
@@ -74,7 +83,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @event [:fleet_pilot, :poller, :poll]
   @handler_id "fleet-pilot-poller-telemetry"
 
-  defstruct ticks: [], count: 0, slow_tick_ms: @default_slow_tick_ms, mailboxes: %{}
+  defstruct samples: [], count: 0, slow_tick_ms: @default_slow_tick_ms, mailboxes: %{}
 
   # ============================================================
   # Public surface
@@ -83,16 +92,20 @@ defmodule Fleet.Pilot.PollerTelemetry do
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc """
-  Rolling summary of the last #{@window} ticks, or `:no_data` before the first one.
+  Rolling summary of the last #{@window} PER-REPO polls, or `:no_data` before the first one.
 
   `p50`/`p95`/`max` are over the window, not since boot: the question this answers is "is the
   poller healthy NOW", and an all-time average hides a rail that started degrading an hour ago
-  behind the thousands of fast ticks that preceded it.
+  behind the thousands of fast samples that preceded it.
 
       %{count: 412, window: 100, last_ms: 82, p50_ms: 76, p95_ms: 310, max_ms: 5_204,
         errors: %{repo_list: 2}, slow_tick_ms: 10_000}
 
   `count` is the total observed since boot; every other figure describes the window.
+
+  ⚠ Every figure here is scoped to ONE REPO (cf. the moduledoc). With R repos in the org the
+  counter advances by R per cycle, so `count` is not a number of cycles and `p50_ms` is not the
+  duration of one.
   """
   @spec stats() :: map() | :no_data
   def stats, do: GenServer.call(__MODULE__, :stats)
@@ -104,7 +117,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   def handle_event(@event, measurements, metadata, _config) do
     GenServer.cast(
       __MODULE__,
-      {:tick, Map.get(measurements, :duration_ms, 0), Map.get(metadata, :status, :ok),
+      {:sample, Map.get(measurements, :duration_ms, 0), Map.get(metadata, :status, :ok),
        Map.get(metadata, :scope), Map.get(metadata, :repo)}
     )
   rescue
@@ -147,7 +160,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   end
 
   @impl GenServer
-  def handle_cast({:tick, duration_ms, status, scope, repo}, state) do
+  def handle_cast({:sample, duration_ms, status, scope, repo}, state) do
     _ = maybe_warn(state, duration_ms, status, scope, repo)
     mailboxes = sample_mailboxes()
     _ = warn_saturated(mailboxes, state.mailboxes)
@@ -157,22 +170,22 @@ defmodule Fleet.Pilot.PollerTelemetry do
        state
        | count: state.count + 1,
          mailboxes: mailboxes,
-         ticks: Enum.take([{duration_ms, status, scope} | state.ticks], @window)
+         samples: Enum.take([{duration_ms, status, scope} | state.samples], @window)
      }}
   end
 
   @impl GenServer
-  def handle_call(:stats, _from, %{ticks: []} = state), do: {:reply, :no_data, state}
+  def handle_call(:stats, _from, %{samples: []} = state), do: {:reply, :no_data, state}
 
   def handle_call(:stats, _from, state) do
-    durations = state.ticks |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    durations = state.samples |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
     errors =
-      state.ticks
+      state.samples
       |> Enum.filter(fn {_d, status, _scope} -> status == :error end)
       |> Enum.frequencies_by(fn {_d, _status, scope} -> scope || :discovery end)
 
-    {last_ms, _, _} = hd(state.ticks)
+    {last_ms, _, _} = hd(state.samples)
 
     {:reply,
      %{

@@ -111,18 +111,26 @@ defmodule Fleet.Pilot.Application do
       # StepRunConsumer) while IncidentRegistry / the two Task.Supervisors / IncidentConsumer /
       # WorktreeSync / ArchFeed were dead read hollow-green: the rail NAMED in readiness was not the rail
       # MEASURED. `step_rail_processes/0` IS that rail (locked to `step_children!` by a drift test).
-      # La SANTE du tick, à côté de la liste des vivants (BL-6-40). Un rail dont tous les process
-      # sont up mais dont les ticks prennent 40 s est « operational » et ne va pas bien — la
+      # La SANTE des polls, à côté de la liste des vivants (BL-6-40). Un rail dont tous les process
+      # sont up mais dont les polls prennent 40 s est « operational » et ne va pas bien — la
       # readiness disait le premier et taisait le second.
+      #
+      # ⚠ La cle s'appelle `repo_poll` et PAS `tick`, parce que la telemetrie mesure UN DEPOT et non
+      # un cycle. `[:fleet_pilot, :poller, :poll]` est emis une fois PAR DEPOT (chaque emission
+      # porte `repo:`), donc une distribution sur cette clef decrit le cout d'un depot, jamais celui
+      # d'un passage complet. Mesure du 2026-08-03 : 12 depots, intervalle 30 s, et le compteur
+      # avancait de 12 par cycle. La clef s'est d'abord appelee `tick` — un nom qui affirmait un
+      # perimetre que le mecanisme n'a pas, et sur lequel une mesure a ete lue de travers avant
+      # d'etre reprise. Le cout d'un CYCLE n'est pas mesure ici, et aucun nom ne doit le suggerer.
       #
       # ⚠ Et c'est ici que la telemetrie devient LISIBLE. `PollerTelemetry.stats/0` existait depuis
       # cette nuit sans aucun appelant de production : `RELEASE_DISTRIBUTION=none` par defaut (choix
       # delibere de `bin/fleet_v2` : pas d'epmd, pas de collision multi-humain), donc AUCUN `rpc`
       # n'atteint le noeud. Un instrument qu'on ne peut pas interroger mesure pour personne — c'est
       # le hollow que 6-06 documente, refait par l'instrument cense le combattre.
-      detail = Map.put(detail, :tick, tick_health())
+      detail = Map.put(detail, :repo_poll, repo_poll_health())
 
-      if Enum.all?(detail, fn {key, up?} -> key == :tick or up? end),
+      if Enum.all?(detail, fn {key, up?} -> key == :repo_poll or up? end),
         do: {:operational, detail},
         else: {:degraded, detail}
     else
@@ -130,10 +138,10 @@ defmodule Fleet.Pilot.Application do
     end
   end
 
-  # Resume de sante du tick, ou `:no_data` avant le premier. TOTAL par obligation : la readiness
-  # est ce qu'un operateur consulte quand ca va mal, donc elle ne doit jamais tomber a cause de son
-  # propre instrument. Un telemetre mort rend `:unavailable` et le rail reste lisible.
-  defp tick_health do
+  # Resume de sante des polls PAR DEPOT, ou `:no_data` avant le premier. TOTAL par obligation : la
+  # readiness est ce qu'un operateur consulte quand ca va mal, donc elle ne doit jamais tomber a
+  # cause de son propre instrument. Un telemetre mort rend `:unavailable` et le rail reste lisible.
+  defp repo_poll_health do
     Fleet.Pilot.PollerTelemetry.stats()
   catch
     :exit, _ -> :unavailable
