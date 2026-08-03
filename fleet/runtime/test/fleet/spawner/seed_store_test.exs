@@ -90,6 +90,24 @@ defmodule Fleet.Spawner.SeedStoreTest do
     assert SeedStore.slugify("/home/x/resume-test__9c62d00f") == "-home-x-resume-test--9c62d00f"
   end
 
+  test "slugify: RE-CONFRONTE au binaire vendor 2.1.220 (temoins mesures, pas rejoues)" do
+    # Le contrat etait gele contre la v2.1.183 et jamais re-confronte depuis. Le binaire d'une
+    # boite est en 2.1.220 — trois versions plus loin — et une derive ici ne casse RIEN
+    # visiblement : le resume pointe vers un repertoire vide, donc un pod repart sans sa memoire
+    # au lieu d'echouer. C'est la moitie muette du contrat vendor (BL-6-44).
+    #
+    # Ces deux attentes ne sont pas deduites de notre code : elles sont les noms de repertoire que
+    # `claude --print` a REELLEMENT ecrits sous `~/.claude/projects/` le 2026-08-03, depuis les
+    # deux `cwd` ci-dessous, sur un binaire 2.1.220. Un test qui rejouerait notre propre fonction
+    # re-affirmerait notre lecture de l'algo ; ceux-la confrontent.
+    #
+    # Le second cas est le DISCRIMINANT : `__` et deux espaces donnent `----` — l'absence de
+    # collapsing est exactement ce qui distingue l'algo gele d'une slugification naive, et c'est
+    # le seul endroit ou une divergence se verrait.
+    assert SeedStore.slugify("/tmp/witness/pod_a.b-c") == "-tmp-witness-pod-a-b-c"
+    assert SeedStore.slugify("/tmp/w2/pod__x  y") == "-tmp-w2-pod--x--y"
+  end
+
   test "read_map: workflow_map + jsonl present → {:ok, uuid}, otherwise :none", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
