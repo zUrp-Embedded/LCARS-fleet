@@ -620,6 +620,68 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
+  describe "validate/1 — G24-17 (a human in front ⟹ a door to reach it)" do
+    defp facing(struct, who), do: put_in(struct, [Access.key!(:spec), "interlocutor"], who)
+
+    test "interlocutor `both` + remote_control false → REFUSED" do
+      # Not a restriction, a contradiction: the profile provisions the human protocol addendum
+      # into a terminal nobody can open. The pod holds a conversation contract with no counterpart
+      # and the fleet reports it healthy.
+      profile =
+        valid_struct()
+        |> declares_its_keying()
+        |> facing("both")
+        |> put_invocation("remote_control", false)
+
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_17 in codes
+    end
+
+    test "interlocutor `human` + remote_control false → REFUSED (same contradiction)" do
+      profile =
+        valid_struct()
+        |> declares_its_keying()
+        |> facing("human")
+        |> put_invocation("remote_control", false)
+
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_17 in codes
+    end
+
+    test "reached by SILENCE too: `both` + instance-keyed + undeclared derives invisible" do
+      # The check reads the EFFECTIVE answer, not the declared field. An instance-keyed role that
+      # declares nothing derives to invisible since 4.4 — the same contradiction, arrived at by
+      # omission instead of statement. g24_16 does not cover this one (it only forces a
+      # declaration from PROJECT-keyed roles).
+      profile =
+        valid_struct()
+        |> put_invocation("slot_scope", "instance")
+        |> facing("both")
+
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_17 in codes
+    end
+
+    test "interlocutor `fleet` + remote_control false → OK (nobody is waiting at that door)" do
+      profile =
+        valid_struct()
+        |> declares_its_keying()
+        |> facing("fleet")
+        |> put_invocation("remote_control", false)
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    test "`both` + remote_control true → OK (the canon architect/starfleet shape)" do
+      profile =
+        valid_struct()
+        |> declares_its_keying()
+        |> facing("both")
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+  end
+
   describe "from_map/1 (validated in-memory constructor — BND-001)" do
     test "schema-conformant map → {:ok, %CapProfile{}} (same validation as load)" do
       # A nominal fixture (builder) IS schema-conformant; re-pass it as a map and from_map rebuilds it.

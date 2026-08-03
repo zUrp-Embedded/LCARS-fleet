@@ -13,9 +13,11 @@ defmodule Fleet.CapProfile.Invariants do
   `:g24_*` enforces lives on its check function below; `validate/1` points here
   rather than restating it.
 
-  The error-atom vocabulary (`:g24_1`, `:g24_3`, … `:g24_14`) is **FROZEN**:
-  the tests AND `mix lcars.contracts.check` match these exact codes — do NOT
-  rename them (they are a wire contract, not a comment).
+  The error-atom vocabulary is **FROZEN**: the tests AND `mix lcars.contracts.check`
+  match these exact codes — do NOT rename them (they are a wire contract, not a
+  comment). The registry in `violations/1` is the list; naming an upper bound here
+  would be a second copy that goes stale the next time one is added, which is
+  exactly what happened to the `… :g24_14` this sentence used to end on.
 
   ## Excluded from `validate/1` (documented at their sites below)
 
@@ -90,7 +92,8 @@ defmodule Fleet.CapProfile.Invariants do
       {:g24_12, &check_host_native_containment/1},
       {:g24_14, &check_monk_registry_pairing/1},
       {:g24_15, &check_slot_scope_declared/1},
-      {:g24_16, &check_remote_control_declared/1}
+      {:g24_16, &check_remote_control_declared/1},
+      {:g24_17, &check_human_facing_visible/1}
     ]
     |> Enum.reject(fn {_code, fun} -> fun.(profile) == :ok end)
     |> Enum.map(fn {code, _fun} -> code end)
@@ -281,5 +284,27 @@ defmodule Fleet.CapProfile.Invariants do
          is_boolean(get_in(spec, ["invocation", "remote_control"])),
        do: :ok,
        else: :error
+  end
+
+  # g24_17 — a role with a HUMAN in front of it must be REACHABLE by that human.
+  #
+  # `interlocutor` says who the REPL converses with; `remote_control` says whether there is a door
+  # to that REPL. `both`/`human` with no door is not a restriction, it is a CONTRADICTION: the
+  # profile provisions the human protocol addendum (`SeeU`, handoff, the whole interactive
+  # contract) into a terminal nobody can open. The pod would sit there holding a conversation
+  # contract with no counterpart, and the fleet would report it healthy.
+  #
+  # Checked on the EFFECTIVE answer, not on the declared field: since the visibility derivation, an
+  # instance-keyed `both` role that declares nothing derives to invisible, which is the same
+  # contradiction reached by silence rather than by statement. `g24_16` covers the project-keyed
+  # side by forcing a declaration; this one covers what the declaration then says.
+  #
+  # The debug widening is deliberately NOT consulted: it is a fleet-lifetime mode, and an invariant
+  # that a runtime flag can satisfy is not an invariant. A profile must be coherent as written.
+  defp check_human_facing_visible(%CapProfile{} = profile) do
+    if CapProfile.interlocutor(profile) in ~w(both human) and
+         not CapProfile.remote_control?(profile),
+       do: :error,
+       else: :ok
   end
 end
