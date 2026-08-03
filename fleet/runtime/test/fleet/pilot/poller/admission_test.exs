@@ -73,6 +73,34 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       assert_received {:add_label, 42, "wait/capacity"}
     end
 
+    test "the ticket LOSES wait/capacity when a seat frees" do
+      # The other half of the refusal, and the one that makes it safe to write at all: a label
+      # nobody removes is a stale state that outlives its cause. The dispatch succeeds, the
+      # convergence sees a `{:ok, _}` (no opinion to carry) against a ticket that holds one, and
+      # removes it. Without this, a project that had ever been full would look permanently full.
+      assert {%{dispatched: 1}, true} =
+               Admission.admit(
+                 fn -> {:ok, {:spawned, "pod", "engineer"}} end,
+                 opts(),
+                 42,
+                 "wait/capacity",
+                 Lease.zero_tally()
+               )
+
+      assert_received {:remove_label, 42, "wait/capacity"}
+    end
+
+    test "both saturation refusals write the SAME label — one ceiling or the other" do
+      # `:at_capacity` (project ceiling, `max_fan`) and `:role_at_capacity` (the role's pool seats)
+      # are two ceilings and ONE fact for the reader: not started yet. Two labels would make a
+      # human learn a taxonomy to read a queue.
+      Admission.refuse(:at_capacity, opts(), 1, nil, Lease.zero_tally())
+      Admission.refuse(:role_at_capacity, opts(), 2, nil, Lease.zero_tally())
+
+      assert_received {:add_label, 1, "wait/capacity"}
+      assert_received {:add_label, 2, "wait/capacity"}
+    end
+
     test "no ticket number → the dispatch is accounted, nothing is written" do
       # A foreign PR whose branch does not parse. Not our ticket: no label, and the tally still moves.
       assert {%{skipped: 1}, false} =

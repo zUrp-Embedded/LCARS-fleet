@@ -406,9 +406,22 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
             "(#{lock_state}#{if(alive_before?, do: "", else: ", pod killed")} — re-dispatch on next tick)"
         )
 
-        err
+        compensated_verdict(err)
     end
   end
+
+  # Saturation reached AT THE WALL is the same truth as saturation caught at the pre-flight —
+  # "full, waiting" — and the compensation above has just undone everything, so nothing started.
+  # Returning it as an error made the two paths disagree about one fact: the pre-flight answered
+  # `{:skipped, :at_capacity}` (a wait, labelled `wait/capacity`), while its twin one layer down
+  # answered `{:error, _}`, which the funnel counts in `errors` and on which it deliberately writes
+  # NOTHING (an error says nothing about what a ticket waits for). So the residual TOCTOU — the
+  # last seat taken between the check and the spawn — produced a ticket that was silently not
+  # dispatched, tallied as a failure.
+  #
+  # Only THIS reason converts. Every other post-lock failure stays an error: they are failures.
+  defp compensated_verdict({:error, :role_at_capacity}), do: {:skipped, :role_at_capacity}
+  defp compensated_verdict(err), do: err
 
   defp maybe_spawn(_spawner, true = _alive?, _profile, _issue_id, _spawn_opts),
     do: {:ok, :rebriefed}

@@ -243,6 +243,64 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
            )
   end
 
+  test "saturation reached AT THE WALL is a WAIT, not an error (the residual TOCTOU)" do
+    # The pre-flight said room, the last seat went between the check and the spawn. The
+    # compensation undoes everything (lock removed, pod killed) — so NOTHING started, which is the
+    # definition of a skip. Returned as an error, this ticket was tallied as a failure AND left
+    # unlabelled (an error says nothing about what a ticket waits for), so it was silently not
+    # dispatched. The two saturation paths now say the same thing.
+    defmodule WallRefusesSpawner do
+      def has_capacity?, do: true
+      # The pre-flight is optimistic — this is the TOCTOU, so it must answer yes.
+      def has_free_slot?(_role, _repo, _scope), do: true
+      def pod_info(_pod_id), do: {:error, :not_found}
+      def spawn_pod(_p, _i, _o), do: {:error, :role_at_capacity}
+      def wake_pod(_pod_id), do: :ok
+      def kill_pod(_pod_id), do: :ok
+    end
+
+    assert {:skipped, :role_at_capacity} =
+             Spawn.spawn_step(
+               seams(WallRefusesSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               "brief",
+               [repo_id: 7],
+               42,
+               42,
+               "ctx"
+             )
+
+    # The lock WAS taken (we got past the pre-flight) and the compensation removed it.
+    assert_received {:add_label, "lcars-in-flight"}
+    assert_received {:remove_label, "lcars-in-flight"}
+  end
+
+  test "a real post-lock failure stays an ERROR — only saturation converts" do
+    defmodule BrokenSpawner do
+      def has_capacity?, do: true
+      def has_free_slot?(_role, _repo, _scope), do: true
+      def pod_info(_pod_id), do: {:error, :not_found}
+      def spawn_pod(_p, _i, _o), do: {:error, :launch_failed}
+      def wake_pod(_pod_id), do: :ok
+      def kill_pod(_pod_id), do: :ok
+    end
+
+    assert {:error, :launch_failed} =
+             Spawn.spawn_step(
+               seams(BrokenSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               "brief",
+               [repo_id: 7],
+               42,
+               42,
+               "ctx"
+             )
+  end
+
   test "saturated + FRESH spawn → {:skipped, :at_capacity}, NO forge write (no lock)" do
     assert {:skipped, :at_capacity} =
              Spawn.spawn_step(
