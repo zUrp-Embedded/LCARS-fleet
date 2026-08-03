@@ -340,6 +340,11 @@ defmodule Fleet.Pilot.PollerTest do
     def start_stopwatch(_repo, _n, _opts), do: :ok
     def stop_stopwatch(_repo, _n, _opts), do: :ok
 
+    # DELEGATION a la vraie fonction, et c'est deliberé : `route_from_labels/1` est PURE (zero I/O)
+    # — la stubber reviendrait a re-implementer la regle de derivation dans le harnais, donc a
+    # tester une copie au lieu du contrat. Les stubs existent pour couper les I/O, pas les regles.
+    def route_from_labels(labels), do: Fleet.Pilot.ForgeClient.route_from_labels(labels)
+
     # #8: the route lives in the route-comment (state-machine). Stub configurable via
     # `_test_routes` (map n → {workflow_map, step}). Default :none (unrouted issue → A1 producer).
     def get_route(_repo, n, opts) do
@@ -1445,9 +1450,26 @@ defmodule Fleet.Pilot.PollerTest do
           protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
+          # La route est PORTEE par les labels de l'issue (BL-6-40 Phase 2) — ce site construit ses
+          # opts en direct, donc il projette lui-meme au lieu de passer par le harnais.
           forge_opts: [
-            _test_issues: {:ok, issues},
-            _test_routes: %{10 => {"qa-build", "build"}}
+            _test_issues:
+              {:ok,
+               Enum.map(issues, fn
+                 %{"number" => 10} = i ->
+                   Map.put(
+                     i,
+                     "labels",
+                     (i["labels"] || []) ++
+                       [
+                         %{"name" => "wfmap/qa-build"},
+                         %{"name" => "stage/build"}
+                       ]
+                   )
+
+                 i ->
+                   i
+               end)}
           ],
           loader: StepStubLoader,
           workflow_map_loader: StepStubWorkflowMapLoader,
@@ -1548,6 +1570,46 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    # La route d'une issue est PORTEE PAR SES LABELS, pas servie par un stub (BL-6-40 Phase 2).
+    # `list_open_issues` les rend avec l'issue ; `get_route` refaisait un GET par issue et par tick
+    # pour une donnee deja en RAM.
+    #
+    # La migration tient ICI et les 15 sites d'appel ne bougent pas : ils continuent d'exprimer
+    # leur intention en `%{numero => {carte, step}}`, forme lisible, et le harnais la PROJETTE en
+    # labels `wfmap/*` + `stage/*` sur les issues correspondantes. Garder la forme d'appel etait la
+    # bonne decision : elle dit ce que le test veut, pas comment la forge l'encode.
+    #
+    # ⚠ `_test_routes` est RETIRE en meme temps, et c'est ce qui donne le ROUGE (`[RR2]` du plan) :
+    # laisse en place, le stub `get_route` continuerait a servir la route et les tests resteraient
+    # verts VIA LE STUB — des labels mal formes ne se verraient qu'au branchement, loin de leur
+    # cause.
+    defp project_routes_onto_issues({:ok, issues}, routes) when map_size(routes) > 0 do
+      {:ok,
+       Enum.map(issues, fn issue ->
+         case Map.get(routes, issue["number"]) do
+           {map, step} ->
+             existing = issue["labels"] || []
+
+             Map.put(
+               issue,
+               "labels",
+               existing ++
+                 [
+                   %{"name" => Fleet.Labels.wfmap_prefix() <> map},
+                   %{"name" => Fleet.Labels.stage_prefix() <> step}
+                 ]
+             )
+
+           # Une route non projetable (le sentinel `:error` de l'ancien stub) ne devient PAS un
+           # label : l'issue reste routeless, ce qui est le seul etat que des labels peuvent dire.
+           _ ->
+             issue
+         end
+       end)}
+    end
+
+    defp project_routes_onto_issues(issues_response, _routes), do: issues_response
+
     defp start_entry_poller(issues_response, routes, extra_opts \\ []) do
       name = :"P_lease_#{System.unique_integer([:positive])}"
 
@@ -1559,7 +1621,7 @@ defmodule Fleet.Pilot.PollerTest do
         protection_reconciler: fn _repo, _opts -> :ok end,
         step_dispatch?: true,
         forge_client: StepStubForge,
-        forge_opts: [_test_issues: issues_response, _test_routes: routes],
+        forge_opts: [_test_issues: project_routes_onto_issues(issues_response, routes)],
         loader: StepStubLoader,
         workflow_map_loader: StepStubWorkflowMapLoader,
         spawner: StepStubSpawner
@@ -1753,41 +1815,25 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "routed-advanced issue with get_route in ERROR holds the lease (transient forge does not release the lease — fail-closed symmetry)" do
-      # Killed canary: classify_issue's catch-all `_ -> {false, []}` classified an engaged issue
-      # whose get_route TRANSIENTLY errors as QUEUED → it left the lease set → a 2nd issue of the
-      # same repo started a 2nd workflow_run (serialization loss) — EXACTLY the danger the nil
-      # workflow_map sibling (just above) closes fail-closed. A transient get_route can NOT rule
-      # out that this workflow_run is advanced → fail-closed: ENGAGED (lease HELD).
-      #
-      # #18: get_route → {:error, :timeout} → fail-closed ENGAGED → holds the lease; its step is
-      # dispatched but fail-loud (unreadable route on the StepDispatcher side → errors:1). #19:
-      # routeless → QUEUED → lease held → skipped:1. No 2nd workflow_run.
-      #
-      # Proven regression: go back to the buggy `_ -> {false, []}` → #18 leaves the lease set →
-      # #19 sees the lease FREE → STARTS → the tally becomes `dispatched:1, skipped:0` (instead of
-      # `dispatched:0, skipped:1`).
-      issues = [
-        %{
-          "number" => 18,
-          "body" => "avance",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
-        %{
-          "number" => 19,
-          "body" => "file",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
-      ]
-
-      {name, pid} = start_entry_poller({:ok, issues}, %{18 => :error})
-
-      assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
-
-      GenServer.stop(pid)
-    end
+    # ❌ TEST SUPPRIME le 2026-08-03 (BL-6-40 Phase 2, `[R2]`) — et il faut savoir pourquoi, sinon
+    # quelqu'un le reecrira.
+    #
+    # Il epinglait le fail-CLOSED de `classify_issue` quand `get_route` rendait une ERREUR
+    # TRANSITOIRE : on garde le bail plutot que de risquer de perdre celui d'un workflow_run
+    # avance. C'etait un vrai canari, avec sa regression prouvee.
+    #
+    # La route se DERIVE desormais des labels que `list_open_issues` rend deja
+    # (`route_from_labels/1`, pure) : il n'y a plus d'appel reseau dans ce chemin, donc plus de
+    # panne transitoire a couvrir. La branche `{:error, _}` n'existe plus — pas « n'arrive plus » :
+    # `route_from_labels/1` ne rend que `{:ok, …}` ou `:none`.
+    #
+    # Le garder aurait produit un ECHEC (mesure : `dispatched:1` au lieu de `0`, l'issue #18 aux
+    # labels vides devenant QUEUED donc dispatchable), pas un faux vert. La propriete qu'il tenait
+    # n'est pas perdue : elle est devenue sans objet avec l'I/O qui la causait.
+    #
+    # Ce qui RESTE couvert, et qu'il ne faut pas confondre : le fail-closed sur workflow_map nil
+    # d'un cote (le test juste au-dessus), et le meme fail-closed pour les appelants de
+    # `get_route/3` — qui, eux, lisent encore le reseau.
   end
 
   # ============================================================

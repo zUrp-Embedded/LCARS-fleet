@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   This module also owns the **tally** vocabulary (`zero_tally/0`, `merge_tally/2`)
   — the observability currency of the tick, produced here and aggregated by the poller.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -221,9 +221,15 @@ defmodule Fleet.Pilot.Poller.Lease do
     if @in_flight in labels do
       {true, []}
     else
-      n = Map.get(issue, "number")
-
-      case seams.forge.get_route(seams.repo, n, seams.forge_opts) do
+      # Route DERIVEE des labels deja en main (BL-6-40 Phase 2) : `list_open_issues` les rend avec
+      # l'issue, et `get_route` refaisait un GET par issue et par tick pour la meme donnee. Le
+      # numero n'est meme plus lu ici — il ne servait qu'a ADRESSER la requete.
+      #
+      # La branche `{:error, _}` de `get_route` disparait pour CET appelant, et c'est une
+      # consequence a nommer : elle n'existait que parce qu'il y avait un appel reseau. Sans appel,
+      # pas de panne transitoire a couvrir ; le fail-closed qu'elle portait reste entier pour les
+      # appelants de `get_route/3`, qui, eux, lisent encore.
+      case seams.forge.route_from_labels(Map.get(issue, "labels") || []) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
           # The lease reads on the ROUTE (append-only, robust), NEVER on the success of the load of the
