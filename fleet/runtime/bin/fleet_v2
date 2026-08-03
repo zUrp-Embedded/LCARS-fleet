@@ -57,6 +57,12 @@ SESSION="${LCARS_FLEET_V2_SESSION:-fleet_v2}"
 DAEMON_SOCK="${LCARS_FLEET_V2_SOCK:-$HOME/.lcars/run/fleet_v2.sock}"
 MIX_ENV_DEFAULT="${LCARS_FLEET_V2_MIX_ENV:-prod}"
 
+# Upper bound of `--max-fan`, DUPLICATED from `Fleet.Pilot.Poller.Admission.max_fan_ceiling/0`
+# (a shell door cannot call into the BEAM). The duplication is deliberate and CHECKED: a test
+# reads this literal and compares it to the Elixir authority, so the door and the rail cannot
+# drift into two ceilings.
+MAX_FAN_CEILING=15
+
 die() { echo "fleet_v2: $*" >&2; exit 1; }
 dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
 
@@ -157,6 +163,7 @@ setup_env() {
   # Applied AFTER `load_env` so the flag beats the file, and by OR so it can only ever ADD.
   apply_start_flags
   [[ -n "${LCARS_DEBUG_VISIBILITY:-}" ]] && export LCARS_DEBUG_VISIBILITY
+  [[ -n "${LCARS_MAX_FAN:-}" ]] && export LCARS_MAX_FAN
 
   # Base of the per-pod MCP sockets (one AF_UNIX channel <base>/<pod_id>/sock per pod). SAME logic as
   # the tmux sock above: the central default (/run/lcars/mcp) is not writable without privilege when a
@@ -237,6 +244,24 @@ parse_start_opts() {
         DEBUG_VISIBILITY_FLAG=1
         shift
         ;;
+      --max-fan)
+        # How many workflow_runs ONE project may hold in flight. The flag PRIMES the fleet; the
+        # runtime re-reads the value at every dispatch decision, so an operator can move it in
+        # flight (a config write on the live node) and a restart comes back to what was typed here.
+        #
+        # Validated AT THE DOOR, refused rather than clamped. Clamping would accept `--max-fan 99`,
+        # start green, and run at 15: a flag that says one thing and does another, which is the
+        # defect this parser exists to end. The ceiling is 15 because that is how many pool seats a
+        # role HAS — the authority is `Admission.max_fan_ceiling/0`, and a test pins this literal
+        # against it (no silent drift between the door and the rail).
+        shift
+        [[ $# -ge 1 ]] || die "--max-fan attend une valeur (1..${MAX_FAN_CEILING})"
+        [[ "$1" =~ ^[0-9]+$ ]] || die "--max-fan : « $1 » n'est pas un entier (1..${MAX_FAN_CEILING})"
+        (( $1 >= 1 && $1 <= MAX_FAN_CEILING )) ||
+          die "--max-fan $1 hors bornes (1..${MAX_FAN_CEILING} : au-dela, un role demanderait un siege de pool qui n'existe pas)"
+        MAX_FAN_FLAG="$1"
+        shift
+        ;;
       --) shift; break ;;
       -*)
         die "option inconnue : $1 (voir « fleet_v2 help »)"
@@ -257,6 +282,7 @@ parse_start_opts() {
 # no flag is typed, and the flag wins when one is.
 apply_start_flags() {
   [[ -n "${DEBUG_VISIBILITY_FLAG:-}" ]] && LCARS_DEBUG_VISIBILITY=1
+  [[ -n "${MAX_FAN_FLAG:-}" ]] && LCARS_MAX_FAN="$MAX_FAN_FLAG"
   return 0
 }
 
@@ -490,7 +516,12 @@ case "${1:-help}" in
     cat >&2 <<'USAGE'
 usage: fleet_v2 {start|stop|restart|status|version|forge [nom]}
 
-  start [--debug]   demarre la fleet (daemon tmux)
+  start [--debug] [--max-fan N]
+                    demarre la fleet (daemon tmux)
+                    --max-fan N : nombre de workflow_runs qu'UN projet tient en vol
+                              (1..15, defaut 5). 1 = serialise, un ticket de bout en bout.
+                              Relu a chaque decision de dispatch : ajustable en vol sur le
+                              node ; un redemarrage revient a la valeur tapee ici.
                     --debug : les pods spawnes PENDANT cette vie de fleet sont visibles dans
                               Claude Desktop, y compris ceux qui sont invisibles par defaut.
                               Porte sur la vie de la fleet : ni bascule a chaud, ni reglage

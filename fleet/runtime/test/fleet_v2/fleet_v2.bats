@@ -99,6 +99,51 @@ NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { e
   [[ "$output" == *"dbg=[]"* ]]
 }
 
+@test "--max-fan takes a value, and the door REFUSES what it cannot honour" {
+  # A flag that clamps accepts `--max-fan 99`, starts green and runs at 15: it says one thing and
+  # does another, which is the defect this parser exists to end. Refusing names the mistake at the
+  # only moment the operator is still looking.
+  run bash -c "source '$SCRIPT'; parse_start_opts --max-fan 3; echo \"fan=[\${MAX_FAN_FLAG:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fan=[3]"* ]]
+
+  run bash -c "source '$SCRIPT'; parse_start_opts --max-fan"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"attend une valeur"* ]]
+
+  run bash -c "source '$SCRIPT'; parse_start_opts --max-fan beaucoup"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"entier"* ]]
+
+  run bash -c "source '$SCRIPT'; parse_start_opts --max-fan 99"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hors bornes"* ]]
+
+  run bash -c "source '$SCRIPT'; parse_start_opts --max-fan 0"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hors bornes"* ]]
+}
+
+@test "--max-fan reaches the BEAM as LCARS_MAX_FAN, applied after the env file" {
+  # Same rule as --debug: the parser sets a marker, `apply_start_flags` posts the variable AFTER
+  # `load_env` sources the human file — so a file naming LCARS_MAX_FAN cannot silence the flag.
+  local env_file="$BATS_TEST_TMPDIR/fleet_v2.env"
+  echo 'LCARS_MAX_FAN=9' > "$env_file"
+
+  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+    "source '$SCRIPT'; parse_start_opts --max-fan 2; load_env; apply_start_flags; \
+     echo \"fan=[\${LCARS_MAX_FAN:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fan=[2]"* ]]
+
+  # No flag → the file stands: the flag adds, it does not clobber.
+  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+    "source '$SCRIPT'; parse_start_opts; load_env; apply_start_flags; \
+     echo \"fan=[\${LCARS_MAX_FAN:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fan=[9]"* ]]
+}
+
 @test "--debug BEATS an env file that says otherwise (the flag is applied after the sourcing)" {
   # `setup_env` sources the human env file with `set -a`. A variable assigned by the parser BEFORE
   # that sourcing is overwritten by the file: the operator types --debug, the fleet comes up green,

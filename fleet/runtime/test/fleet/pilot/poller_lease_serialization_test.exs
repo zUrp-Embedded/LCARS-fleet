@@ -154,6 +154,24 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       assert Admission.max_fan() == 5
     end
 
+    test "the SHELL door and the rail hold the SAME ceiling" do
+      # `bin/fleet_v2 --max-fan` validates at the door and cannot call into the BEAM, so the bound
+      # is duplicated there. Duplication is fine when it is CHECKED: without this, the door would
+      # accept 20 the day the rail moves to 20, or keep refusing 16 the day it drops to 10 — and
+      # the operator would meet a flag that argues with the fleet.
+      literal =
+        "bin/fleet_v2"
+        |> File.read!()
+        |> then(&Regex.run(~r/^MAX_FAN_CEILING=(\d+)$/m, &1))
+
+      assert literal, "MAX_FAN_CEILING= not found in bin/fleet_v2 — the instrument is broken"
+      [_, n] = literal
+
+      assert String.to_integer(n) == Admission.max_fan_ceiling(),
+             "the shell door bounds --max-fan at #{n} while the rail clamps at " <>
+               "#{Admission.max_fan_ceiling()} — one of the two is lying to the operator"
+    end
+
     test "below 1 or above the ceiling → clamped, never zero and never a slot that does not exist" do
       # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
       # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read

@@ -447,6 +447,27 @@ if config_env() != :test and not tool_mode? do
     config :fleet_pilot, step_dispatch?: true
   end
 
+  # ============================================================
+  # fleet_pilot — `max_fan`: workflow_runs ONE project holds in flight (`fleet_v2 --max-fan N`).
+  # Posted only when the operator typed it: an unconditional put would clobber a value set in
+  # `config.exs` with the reader's own default, and the two would then disagree about which one is
+  # the default (F6).
+  # ============================================================
+  # The DOOR validates (the flag parser refuses a non-integer and anything outside 1..15 rather
+  # than clamping) and this parse is the belt behind it, for the env set by hand. STRICT: a
+  # `max_fan` that silently falls back would run a fleet at a fan the operator never asked for,
+  # and the symptom -- tickets waiting -- looks like a busy fleet, not like a misconfiguration.
+  if raw = System.get_env("LCARS_MAX_FAN") do
+    config :fleet_pilot,
+      max_fan:
+        Fleet.EnvParse.bounded(
+          "LCARS_MAX_FAN",
+          raw,
+          1,
+          Fleet.Pilot.Poller.Admission.max_fan_ceiling()
+        )
+  end
+
   # Anti-tie spacing of the forge writes (Fleet.Pilot.WriteSpacing — seal, onboard,
   # branch birth → content push). Reader default: 2000 ms. Gitea's own notification-queue
   # INSERTION lag (~1-2 s measured) can visually re-glue what the runtime spaced — raise

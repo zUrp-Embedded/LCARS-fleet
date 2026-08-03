@@ -14,7 +14,7 @@ defmodule Fleet.EnvParse do
   not an opaque `String.to_integer` stacktrace). A boolean feature-flag typo → the documented default +
   a LOUD warning (a flag typo should be visible, but must not kill the boot).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -30,6 +30,18 @@ defmodule Fleet.EnvParse do
   @doc "Non-negative count (≥ 0). Non-integer / negative → raise."
   @spec count(String.t(), String.t()) :: non_neg_integer()
   def count(name, value), do: bounded_int(name, value, 0, nil, "a non-negative count")
+
+  @doc """
+  Integer inside an explicit `min..max`. Outside, or not an integer → raise = boot refused.
+
+  For knobs whose bounds belong to a DOMAIN authority rather than to this module (a ceiling that
+  some module owns and that this one must not restate). REFUSES rather than clamps: a clamped value
+  boots green and runs at something the operator never typed, and the symptom of a wrong fan —
+  tickets waiting — reads like a busy fleet, not like a misconfiguration.
+  """
+  @spec bounded(String.t(), String.t(), integer(), integer()) :: integer()
+  def bounded(name, value, min, max) when is_integer(min) and is_integer(max),
+    do: bounded_int(name, value, min, max, "an integer in #{min}..#{max}")
 
   defp bounded_int(name, value, min, max, expectation) when is_binary(value) do
     with {n, ""} <- Integer.parse(value),
