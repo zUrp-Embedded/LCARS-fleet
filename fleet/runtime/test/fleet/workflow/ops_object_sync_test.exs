@@ -274,6 +274,51 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     assert commit_count(tmp) == "#{n}"
   end
 
+  test "the scope is NODE-GLOBAL: two DIFFERENT work_dirs go through the SAME server (BL-6-43.4)",
+       %{tmp_dir: tmp, server: srv} do
+    # The gap this closes, in the module's own words: "Sharding per `work_dir` (`:via` a Registry)
+    # is the exit if the head-of-line blocking ever bites; NO test pins the node-wide scope, so a
+    # green suite would not by itself prove such a change safe." The CI-11 test above proves
+    # serialization within ONE work_dir — and a per-work_dir sharding would keep it green while
+    # silently dropping the cross-project guarantee.
+    #
+    # What is pinned here is the ROUTING KEY: `work_dir` travels as PAYLOAD, the server is the only
+    # address. Two unrelated repos are committed through one explicitly-named instance, and both
+    # must land. A refactor that derived the process from `work_dir` could not satisfy this call
+    # shape — it would have to resolve elsewhere, and this test is where it says so.
+    #
+    # What is NOT pinned, deliberately: mutual exclusion ACROSS work_dirs by timing. Proving "these
+    # two never overlapped" needs a clock, and a clock in a test buys flakiness rather than truth.
+    # The structural property is the one a refactor breaks first.
+    a = Path.join(tmp, "project-a")
+    b = Path.join(tmp, "project-b")
+    File.mkdir_p!(a)
+    File.mkdir_p!(b)
+    git_init(a)
+    git_init(b)
+
+    results =
+      [{a, "briefs/from-a.md"}, {b, "briefs/from-b.md"}]
+      |> Task.async_stream(
+        fn {dir, ref} ->
+          OpsObjectSync.commit_object(srv, dir, ref, "content for #{ref}\n", label: "test")
+        end,
+        max_concurrency: 2,
+        timeout: 60_000
+      )
+      |> Enum.map(fn {:ok, r} -> r end)
+
+    assert Enum.all?(results, &match?({:ok, _sha}, &1)),
+           "both projects must land through the single node-global server: #{inspect(results)}"
+
+    # Each repo carries exactly its OWN commit — the shared server never cross-wrote.
+    assert commit_count(a) == "1"
+    assert commit_count(b) == "1"
+    assert File.exists?(Path.join(a, "briefs/from-a.md"))
+    assert File.exists?(Path.join(b, "briefs/from-b.md"))
+    refute File.exists?(Path.join(a, "briefs/from-b.md"))
+  end
+
   test "the PROD-config bypass is LOUD: serializer absent while config starts it → warning per call" do
     # The optional-layer posture is documented; what could not stand is the SILENT bypass in
     # a booted daemon (restart window / crash loop): the gate's absence must be visible.
