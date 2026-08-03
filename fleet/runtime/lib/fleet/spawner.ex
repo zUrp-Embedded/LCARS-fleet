@@ -560,6 +560,22 @@ defmodule Fleet.Spawner do
   def has_capacity?, do: count_pods() < max_pods()
 
   @doc """
+  Is there a free pool SEAT for this `(role, repo)`? — the per-role twin of `has_capacity?/0`,
+  exposed on the facade because the pre-flight lives in another domain (`Pilot.StepDispatcher`)
+  and `PoolSlot` is not part of this boundary's export surface.
+
+  Delegates to `Fleet.Spawner.PoolSlot.has_free_slot?/3` and takes its three arguments unchanged:
+  a pre-flight that interrogates a DIFFERENT bucket than the wall is worse than no pre-flight,
+  because it defers on a ceiling that is not the one that will refuse. Same reason the caller
+  passes the cap-profile's `slot_scope` rather than deriving a second opinion about it.
+
+  An OPTIMIZATION, never the enforcement: the answer can be stale by the time the spawn runs, and
+  the real refusal stays in `PoolSlot.allocate/3`, inside the serialized start.
+  """
+  @spec has_free_slot?(String.t(), integer() | nil, String.t()) :: boolean()
+  defdelegate has_free_slot?(role, repo, slot_scope), to: Fleet.Spawner.PoolSlot
+
+  @doc """
   Wakes a long-lived pod (lifetime_scope != one-shot) for a new cycle.
 
   **Load-bearing rail = wake-by-flag** (`turn.flag` + in-pod Monitor tool), touched HERE. Triggers the

@@ -123,26 +123,48 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # `not alive_before?` is load-bearing: a re-brief of a LIVE pipe pod starts no child — gating
     # it at saturation would starve the pipe. The residual TOCTOU stays covered by
     # `max_children` + the compensation below (now the rare exception, not the steady state).
-    if not alive_before? and not has_capacity?(spawner) do
-      Logger.info(
-        "StepDispatcher: at capacity (max_pods) → defer role=#{role} pod=#{pod_id} #{log_ctx} " <>
-          "(no lock taken; re-dispatch when a slot frees)"
-      )
+    cond do
+      not alive_before? and not has_capacity?(spawner) ->
+        Logger.info(
+          "StepDispatcher: at capacity (max_pods) → defer role=#{role} pod=#{pod_id} #{log_ctx} " <>
+            "(no lock taken; re-dispatch when a slot frees)"
+        )
 
-      {:skipped, :at_capacity}
-    else
-      locked_spawn_step(
-        seams,
-        pod_id,
-        role,
-        profile,
-        brief,
-        spawn_opts,
-        lock_target,
-        {issue_id, issue_number},
-        alive_before?,
-        log_ctx
-      )
+        {:skipped, :at_capacity}
+
+      # PER-ROLE pre-flight, same stage and same reason as the global one above: the wall that
+      # will actually refuse is `PoolSlot.allocate/3` INSIDE the spawn, i.e. after the forge lock.
+      # Discovering a full bucket there means a lock/unlock cycle per issue per tick at saturation,
+      # and "full" tallied as an ERROR — a poller backoff as if the forge were down.
+      #
+      # It asks the SAME bucket as that wall: same `(role, repo_id, slot_scope)`, the repo_id read
+      # off the spawn_opts the spawn itself will carry and the slot_scope off the cap-profile. A
+      # pre-flight on a different bucket is worse than none — it defers on a ceiling that is not
+      # the one that refuses.
+      #
+      # `not alive_before?` is load-bearing here too: re-briefing a LIVE pipe pod starts no child,
+      # so gating it at saturation would starve the very pipe holding the seat.
+      not alive_before? and not has_free_slot?(spawner, role, profile, spawn_opts) ->
+        Logger.info(
+          "StepDispatcher: role bucket FULL (max_pods_per_role) → defer role=#{role} " <>
+            "pod=#{pod_id} #{log_ctx} (no lock taken; re-dispatch when a seat frees)"
+        )
+
+        {:skipped, :role_at_capacity}
+
+      true ->
+        locked_spawn_step(
+          seams,
+          pod_id,
+          role,
+          profile,
+          brief,
+          spawn_opts,
+          lock_target,
+          {issue_id, issue_number},
+          alive_before?,
+          log_ctx
+        )
     end
   end
 
@@ -466,6 +488,28 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # admission OPTIMIZATION, the real cap stays enforced by the supervisor's `max_children` +
   # the caller's compensation. A broken capacity check must never STARVE the dispatch (a wrong
   # "full" would freeze the whole fleet); a wrong "room" at worst pays one lock/unlock cycle.
+  # Per-role pre-flight, same default-ALLOW and same fail-OPEN as the global twin below, and for
+  # the same reason: a broken capacity check must never STARVE the dispatch. `PoolSlot.allocate/3`
+  # is still the wall. The `slot_scope` comes from the cap-profile via its single accessor — a
+  # second derivation of "is this role project-keyed" is how a pre-flight ends up asking a bucket
+  # nobody enforces.
+  defp has_free_slot?(spawner, role, profile, spawn_opts) do
+    not function_exported?(spawner, :has_free_slot?, 3) or
+      spawner.has_free_slot?(
+        role,
+        Keyword.get(spawn_opts, :repo_id),
+        Fleet.CapProfile.slot_scope(profile)
+      )
+  rescue
+    e ->
+      Logger.warning(
+        "StepDispatcher: has_free_slot? RAISED (#{inspect(e)}) → assume a seat " <>
+          "(fail-open; PoolSlot.allocate/3 still enforces)"
+      )
+
+      true
+  end
+
   defp has_capacity?(spawner) do
     not function_exported?(spawner, :has_capacity?, 0) or spawner.has_capacity?()
   rescue

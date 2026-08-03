@@ -146,6 +146,10 @@ defmodule Fleet.Labels do
   # A queued ticket is indistinguishable from a forgotten one — that ambiguity already cost a false
   # diagnosis (cf. the entry).
   def wait_for(:at_capacity), do: @wait_prefix <> "capacity"
+  # Same label as the global cap, deliberately: the ticket waits for a seat, and WHICH ceiling
+  # holds it is an operator's diagnosis, not a distinct state of the ticket. Two labels here would
+  # make a human learn a taxonomy to read "not started yet".
+  def wait_for(:role_at_capacity), do: @wait_prefix <> "capacity"
   def wait_for(:role_busy), do: @wait_prefix <> "role"
   def wait_for(:draining), do: @wait_prefix <> "draining"
   def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"

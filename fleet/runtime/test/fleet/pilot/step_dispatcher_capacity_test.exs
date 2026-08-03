@@ -55,6 +55,33 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
+  # Global room, but the ROLE's bucket is full — the ceiling `PoolSlot.allocate/3` will enforce.
+  # The two pre-flights are independent: passing the global one proves nothing about the seat.
+  defmodule FullRoleSpawner do
+    def has_capacity?, do: true
+    def has_free_slot?(_role, _repo, _slot_scope), do: false
+    def pod_info(_pod_id), do: {:error, :not_found}
+    def spawn_pod(_p, _i, _o), do: raise("spawn_pod must NEVER be reached on a full role bucket")
+    def wake_pod(_pod_id), do: :ok
+    def kill_pod(_pod_id), do: :ok
+  end
+
+  # Same, but it RECORDS the bucket it was asked about: a pre-flight that interrogates a different
+  # bucket than the wall is worse than none, so the arguments are what this pins.
+  defmodule BucketRecordingSpawner do
+    def has_capacity?, do: true
+
+    def has_free_slot?(role, repo, slot_scope) do
+      send(self(), {:bucket, role, repo, slot_scope})
+      false
+    end
+
+    def pod_info(_pod_id), do: {:error, :not_found}
+    def spawn_pod(_p, _i, _o), do: raise("unreachable")
+    def wake_pod(_pod_id), do: :ok
+    def kill_pod(_pod_id), do: :ok
+  end
+
   # Room available and no live pod: the spawn WOULD proceed — so a refusal in these tests can only
   # come from the order materialization, never from capacity.
   defmodule FreshSpawner do
@@ -147,6 +174,73 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
 
       refute_received {:add_label, _}
     end
+  end
+
+  test "role bucket FULL + fresh spawn → {:skipped, :role_at_capacity}, NO forge write (no lock)" do
+    # The wall is `PoolSlot.allocate/3`, INSIDE the spawn — i.e. past the forge lock. Without this
+    # pre-flight, saturation of one role means a lock/unlock cycle per issue per tick and "full"
+    # tallied as an error. `has_free_slot?/3` had existed since the seat work and had NO caller:
+    # the pre-flight was written and never wired.
+    assert {:skipped, :role_at_capacity} =
+             Spawn.spawn_step(
+               seams(FullRoleSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               "brief",
+               [repo_id: 7],
+               42,
+               42,
+               "ctx"
+             )
+
+    refute_received {:add_label, _}
+    refute_received {:remove_label, _}
+  end
+
+  test "the pre-flight asks the SAME bucket the wall will refuse on" do
+    Spawn.spawn_step(
+      seams(BucketRecordingSpawner),
+      "pod-x",
+      "engineer",
+      profile(),
+      "brief",
+      [repo_id: 7],
+      42,
+      42,
+      "ctx"
+    )
+
+    # `(role, repo_id, slot_scope)` — the three arguments `PoolSlot.allocate/3` takes. The scope
+    # comes from the cap-profile's own accessor (pipe ⟹ project), never from a second opinion.
+    assert_received {:bucket, "engineer", 7, "project"}
+  end
+
+  test "a LIVE pod is not gated by the role bucket — re-briefing it starts no child" do
+    # Load-bearing: gating a live pipe pod at saturation would starve the very pipe holding the
+    # seat. The spawner says the bucket is full and the dispatch goes through anyway.
+    defmodule LivePodFullRoleSpawner do
+      def has_capacity?, do: true
+      def has_free_slot?(_role, _repo, _scope), do: false
+      def pod_info(_pod_id), do: {:ok, %{phase: :monitoring}}
+      def wake_pod(_pod_id), do: :ok
+      def kill_pod(_pod_id), do: :ok
+    end
+
+    refute match?(
+             {:skipped, :role_at_capacity},
+             Spawn.spawn_step(
+               seams(LivePodFullRoleSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               "brief",
+               [repo_id: 7],
+               42,
+               42,
+               "ctx"
+             )
+           )
   end
 
   test "saturated + FRESH spawn → {:skipped, :at_capacity}, NO forge write (no lock)" do
