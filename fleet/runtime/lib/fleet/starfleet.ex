@@ -26,6 +26,16 @@ defmodule Fleet.Starfleet do
     exports: [Shutdown, CoordBackend]
 
   @moduledoc """
+  ⚠ **This domain is named after a role whose meaning moved, and the name has not caught up yet.**
+  `starfleet` was the SYSADMIN role — a sudo agent that kept the box running. What lives here is the
+  system-side half of that job: audit, Cat 5 escalation, drift, MCP health, boot orchestration,
+  quiesce + drain. Then the role became the fleet-level front desk, and this domain kept a name that
+  no longer describes it — it does not reference that role once. Target name: `sysadmin`
+  (BL-6-53, deliberately deferred: two of its four surfaces are DATA, not identifiers — the wire
+  value `%Fleet.Event{source: :starfleet}` and the interpolated topics `starfleet.audit_cat5_<x>`).
+
+  Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
+
   System-side module consuming the outputs of arbitration pods
   (gatekeeper + other decision-making roles) on the system side.
 
@@ -65,7 +75,7 @@ defmodule Fleet.Starfleet do
 
   N0 (vendor-agnostic, no direct SDK call).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @doc """

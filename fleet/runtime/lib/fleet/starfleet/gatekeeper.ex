@@ -1,5 +1,10 @@
 defmodule Fleet.Starfleet.Gatekeeper do
   @moduledoc """
+  ⚠ **Named after a role, and not about it.** This is the DECISION VALIDATOR: it checks the JSON any
+  arbitration pod returns, which today includes the gatekeeper and is not limited to it (see the
+  first sentence below — it already said so). The role name here is inherited, like its parent
+  domain's (BL-6-53).
+
   Pure functions validating a pod gatekeeper's (or other arbitration
   pod's) decision JSON.
 
@@ -23,7 +28,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
       ...>     ~s|{"decision":"halt","reason":"poc","details":{},"chain":["test"]}|
       ...>   )
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-04
   """
 
   alias Fleet.Decision
