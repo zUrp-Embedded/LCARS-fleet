@@ -81,15 +81,15 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha, _base_branch),
     do: {:ok, clone_base_sha}
 
-  # LES DEUX REFS COINCIDENT SUR LE CHEMIN FORWARD, et le moduledoc le dit — build/rework prennent
-  # `gate_base_branch == base_branch`. On payait quand meme une SECONDE `ls-remote` (reseau, bornee
-  # a 15 s, DANS le GenServer du poller) pour une valeur deja en main. Sur D dispatches, c'etait
-  # 2 x 15 s x D de plafond la ou 1 x 15 s x D suffit (BL-6-40, amplificateur 3).
+  # THE TWO REFS COINCIDE ON THE FORWARD PATH, and the moduledoc says so — build/rework take
+  # `gate_base_branch == base_branch`. We still paid a SECOND `ls-remote` (network, bounded at 15 s,
+  # INSIDE the poller's GenServer) for a value already in hand. Over D dispatches that was a ceiling
+  # of 2 x 15 s x D where 1 x 15 s x D suffices (BL-6-40, amplifier 3).
   #
-  # Et ce n'est pas qu'une economie : deux `ls-remote` sur LE MEME ref a deux instants peuvent
-  # rendre deux shas differents si quelqu'un pousse entre les deux. Le pod clonerait alors une base
-  # et serait juge contre une AUTRE, sans qu'aucune des deux ne soit fausse. Reutiliser la lecture
-  # deja faite est donc plus CONSISTANT, pas seulement plus rapide.
+  # And it is not merely an economy: two `ls-remote` on THE SAME ref at two instants can return two
+  # different shas if somebody pushes in between. The pod would then clone one base and be judged
+  # against ANOTHER, without either being wrong. Reusing the read already done is therefore more
+  # CONSISTENT, not just faster.
   defp resolve_gate_base_sha(_repo_url, branch, clone_base_sha, base_branch)
        when is_binary(branch) and branch == base_branch,
        do: {:ok, clone_base_sha}

@@ -1129,18 +1129,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Le mot « sanctuaire »/« sanctuary » porte un prior NL dominant — sacre, intouchable — et son
-  # seul anticorps est de la PROSE (« Aucun code n'est sacre », CLAUDE.md ; « THIS FILE is NOT the
-  # sanctuary », bwrap_launch.sh). Or la prose est la premiere chose qu'une compression de contexte
-  # retire : il reste le mot, il ne reste plus la correction. Le symptome est mesure — un agent
-  # refuse d'editer le launcher parce qu'il l'a lu comme sacre.
+  # The word "sanctuaire"/"sanctuary" carries a dominant NL prior — sacred, untouchable — and its
+  # only antibody is PROSE ("Aucun code n'est sacre", CLAUDE.md; "THIS FILE is NOT the sanctuary",
+  # bwrap_launch.sh). Yet prose is the first thing a context compression drops: the word remains,
+  # the correction does not. The symptom is measured — an agent refusing to edit the launcher
+  # because it read it as sacred.
   #
-  # Ce verrou ne RENOMME rien (ce serait un arbitrage de vocabulaire, pas un fix) : il empeche le
-  # mot de SE REPANDRE. Trois fichiers l'emploient aujourd'hui, chacun a cote de son anticorps ;
-  # un quatrieme le ferait sans, et c'est exactement comme un prior s'installe. Un lint ne repare
-  # pas un prior, il borne sa surface (BL-6-44).
-  # Le fichier du check est dans la liste par NECESSITE : il doit nommer le mot pour l'interdire.
-  # C'est la seule exemption qui ne demande pas d'anticorps — un verrou ne se piege pas lui-meme.
+  # This lock RENAMES nothing (that would be a vocabulary arbitration, not a fix): it stops the word
+  # from SPREADING. Three files use it today, each next to its antibody; a fourth would do so
+  # without one, and that is exactly how a prior settles in. A lint does not repair a prior, it
+  # bounds its surface (BL-6-44).
+  # The check's own file is on the list by NECESSITY: it must name the word in order to forbid it.
+  # That is the one exemption needing no antibody — a lock does not trap itself.
   @sanctuary_allowed ~w(
     bin/bwrap_launch.sh
     lib/fleet/cap_profile/invariants.ex

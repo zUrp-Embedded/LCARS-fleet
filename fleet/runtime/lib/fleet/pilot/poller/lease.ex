@@ -192,29 +192,30 @@ defmodule Fleet.Pilot.Poller.Lease do
     end
   end
 
-  # BL-6-48, pas 3 (moitie ISSUES) — le point de passage ECRIT enfin ce qu'il tenait deja.
+  # BL-6-48, step 3 (ISSUES half) — the passage point finally WRITES what it was already holding.
   #
-  # Les 63 sites qui produisent un `{:skipped, reason}` sont consommes ICI et dans `step_process_pulls`,
-  # et les deux jetaient la raison (`{:skipped, _reason} -> skipped + 1`). Le « point de passage
-  # unique » que BL-6-48 reclamait n'etait pas absent : il oubliait ce qu'il tenait. Un ticket en
-  # file etait donc indiscernable d'un ticket oublie — ambiguite qui a deja coute un faux diagnostic.
+  # The 63 sites producing a `{:skipped, reason}` are consumed HERE and in `step_process_pulls`, and
+  # both threw the reason away (`{:skipped, _reason} -> skipped + 1`). The "single passage point"
+  # BL-6-48 asked for was never missing: it was forgetting what it held. A queued ticket was
+  # therefore indistinguishable from a forgotten one — an ambiguity that already cost one false
+  # diagnosis.
   #
-  # TROIS etats, et le troisieme est celui qu'on oublie :
-  #   {:skipped, r}  -> poser `wait/<r>` (ou rien : douze raisons sont silencieuses par decision)
-  #   {:ok, _}       -> RETIRER le `wait/*` : l'attente a cesse
-  #   {:error, _}    -> NE RIEN TOUCHER. Une erreur ne dit rien de l'attente, et son rail est
-  #                     l'incident. Ecrire ici transformerait une panne en « attente » — un
-  #                     mensonge de plus, pas une trace de moins.
+  # THREE states, and the third is the one that gets forgotten:
+  #   {:skipped, r}  -> set `wait/<r>` (or nothing: twelve reasons are silent BY DECISION)
+  #   {:ok, _}       -> REMOVE the `wait/*`: the wait has ended
+  #   {:error, _}    -> touch NOTHING. An error says nothing about what a ticket waits for, and its
+  #                     rail is the incident. Writing here would turn a failure into a "wait" — one
+  #                     more lie, not one less gap.
   #
-  # ECRITURE SUR CHANGEMENT SEULEMENT. Les labels de l'issue sont dans le payload que le tick a deja
-  # liste (zero appel forge), donc on COMPARE avant d'ecrire. Sans cette comparaison, un
-  # `criterion_unavailable` intermittent ferait battre le label toutes les 30 s dans le fil de
-  # l'issue — on aurait echange une attente invisible contre du bruit permanent.
+  # WRITE ON CHANGE ONLY. The issue's labels are in the payload the tick already listed (zero forge
+  # call), so we COMPARE before writing. Without that comparison an intermittent
+  # `criterion_unavailable` would make the label flap every 30 s in the issue thread — trading an
+  # invisible wait for permanent noise.
   #
-  # L'exclusivite native fait le reste : `wait/` contient un `/`, donc `ensure_repo_label` cree ces
-  # labels `exclusive: true` et poser l'un retire l'autre. Le seul cas que l'exclusivite ne couvre
-  # PAS est la sortie d'attente — c'est la branche `{:ok, _}` ci-dessus, et l'oublier aurait
-  # fabrique l'etat perime que cet item existe pour tuer.
+  # Native exclusivity does the rest: `wait/` contains a `/`, so `ensure_repo_label` creates these
+  # labels `exclusive: true` and setting one removes the other. The single case exclusivity does NOT
+  # cover is LEAVING the wait — that is the `{:ok, _}` branch above, and omitting it would have
+  # manufactured the stale state this item exists to kill.
   defp converge_wait_label(payload, opts, result),
     do: converge_wait(opts, payload["number"], current_wait_label(payload), result)
 
@@ -251,7 +252,7 @@ defmodule Fleet.Pilot.Poller.Lease do
           :noop | {:add, String.t()} | {:remove, String.t()}
   def wait_transition(_current, :keep), do: :noop
   # `(same, same)` couvre AUSSI `(nil, nil)` : rien porte, rien voulu, rien a faire. Une clause
-  # `(nil, nil)` explicite serait morte — et un code mort ment sans que le compilateur le dise.
+  # explicit `(nil, nil)` clause would be dead — and dead code lies without the compiler saying so.
   def wait_transition(same, same), do: :noop
   def wait_transition(current, nil), do: {:remove, current}
   def wait_transition(_current, desired), do: {:add, desired}
@@ -270,10 +271,9 @@ defmodule Fleet.Pilot.Poller.Lease do
   defp desired_wait_label({:skipped, reason}) do
     Fleet.Labels.wait_for(reason)
   rescue
-    # `wait_for/1` leve sur une raison absente de la table — c'est le MUR, et il est tenu par un
-    # test qui mesure `lib/`. En production on degrade plutot que d'avorter un tick entier pour une
-    # question d'etiquette : la trace manque, le dispatch continue. Le rouge appartient au gate,
-    # pas au rail.
+    # `wait_for/1` raises on a reason absent from the table — that is the WALL, and a test that
+    # measures `lib/` holds it. In production we degrade rather than abort a whole tick over a
+    # label: the trace is missing, the dispatch goes on. The red belongs to the gate, not the rail.
     ArgumentError ->
       Logger.warning(
         "Poller: skip reason #{inspect(reason)} absent from the BL-6-48 wait table — " <>
@@ -296,8 +296,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
     :ok
   rescue
-    # Best-effort assume : une etiquette qu'on ne peut pas poser ne doit jamais empecher un
-    # dispatch. La trace manque, le travail passe.
+    # Best-effort by obligation: a label that cannot be posted must never block a dispatch. The
+    # trace is missing, the work goes through.
     e ->
       Logger.warning(
         "Poller: wait label #{inspect(op)} on ##{number} failed (#{inspect(e)}) — dispatch unaffected"
@@ -338,14 +338,14 @@ defmodule Fleet.Pilot.Poller.Lease do
     if @in_flight in labels do
       {true, []}
     else
-      # Route DERIVEE des labels deja en main (BL-6-40 Phase 2) : `list_open_issues` les rend avec
-      # l'issue, et `get_route` refaisait un GET par issue et par tick pour la meme donnee. Le
-      # numero n'est meme plus lu ici — il ne servait qu'a ADRESSER la requete.
+      # Route DERIVED from the labels already in hand (BL-6-40 Phase 2): `list_open_issues` returns
+      # them with the issue, and `get_route` was redoing a GET per issue per tick for the same data.
+      # The number is not even read here anymore — it only ever served to ADDRESS the request.
       #
-      # La branche `{:error, _}` de `get_route` disparait pour CET appelant, et c'est une
-      # consequence a nommer : elle n'existait que parce qu'il y avait un appel reseau. Sans appel,
-      # pas de panne transitoire a couvrir ; le fail-closed qu'elle portait reste entier pour les
-      # appelants de `get_route/3`, qui, eux, lisent encore.
+      # `get_route`'s `{:error, _}` branch disappears for THIS caller, and that consequence is worth
+      # naming: it existed only because there was a network call. With no call, there is no
+      # transient failure to cover; the fail-closed it carried stays whole for the callers of
+      # `get_route/3`, which do still read.
       case seams.forge.route_from_labels(Map.get(issue, "labels") || []) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->

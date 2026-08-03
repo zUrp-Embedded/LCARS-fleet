@@ -253,9 +253,9 @@ defmodule Fleet.Starfleet.Shutdown do
   # The debounce therefore keeps its original job (not a SINGLE racy 0-read) and no longer carries
   # a window it was never sized for. Raising the count would still buy nothing.
   #
-  # ⚠ Garde en specimen: ce commentaire a survecu a la livraison qui l'invalidait, et il annoncait
-  # un trou connu dans le fichier meme qui le fermait. Un lecteur — humain ou agent — en repart
-  # avec une dette qui n'existe pas, et la premiere chose qu'il fera est de la "reparer".
+  # ⚠ Kept as a SPECIMEN: this comment outlived the delivery that invalidated it, and it announced
+  # a known hole in the very file that closed it. A reader — human or agent — walks away with a debt
+  # that does not exist, and the first thing they will do is "repair" it.
   @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real

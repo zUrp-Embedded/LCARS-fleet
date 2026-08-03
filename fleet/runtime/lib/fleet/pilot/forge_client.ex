@@ -631,34 +631,33 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Recupere la forme COMPLETE de chaque PR (head/head.sha/requested_reviewers) pour les numeros
-  # filtres. Fail-fast conserve : une erreur sur une seule PR fait echouer l'ensemble — on ne
-  # dispatche jamais sur une vue partielle, meme regle que la pagination.
+  # Fetches the COMPLETE shape of each PR (head/head.sha/requested_reviewers) for the filtered
+  # numbers. Fail-fast preserved: an error on a single PR fails the whole set — we never dispatch on
+  # a partial view, the same rule as pagination.
   #
   # ─── POURQUOI N REQUETES, ET POURQUOI ELLES SONT MAINTENANT PARALLELES (BL-6-40) ──────────────
-  # Le N+1 est STRUCTUREL cote forge : `/pulls` de Gitea 1.26 ne porte pas `assigned_by`, donc le
-  # scoping passe par `/issues?type=pulls` — qui rend des objets ISSUE, sans `head.sha` ni
-  # `requested_reviewers`. Il faut donc un `get_pull` par numero, et aucun contournement ne le
-  # supprime tant que la forge ne rend pas le champ.
+  # The N+1 is STRUCTURAL on the forge side: Gitea 1.26's `/pulls` does not carry `assigned_by`, so
+  # scoping goes through `/issues?type=pulls` — which returns ISSUE objects, with no `head.sha` and
+  # no `requested_reviewers`. Hence one `get_pull` per number, and no workaround removes it until
+  # the forge returns the field.
   #
-  # Ce qui EST supprimable, c'est la SEQUENTIALITE. Ces requetes sont independantes et sans effet
-  # de bord ; les enchainer faisait payer au tick la SOMME des latences la ou le maximum suffit.
-  # `max_concurrency: 8` et pas illimite : elles partagent le pool Finch du ForgeClient, et ouvrir
-  # N connexions vers une forge pour lire N PR echangerait une lenteur contre une saturation.
+  # What IS removable is the SEQUENTIALITY. These requests are independent and side-effect free;
+  # chaining them made the tick pay the SUM of the latencies where the maximum suffices.
+  # `max_concurrency: 8` and not unbounded: they share the ForgeClient's Finch pool, and opening N
+  # connections to a forge to read N PRs would trade slowness for saturation.
   #
-  # ⚠ Le contournement par `updated_at` (cacher la forme complete et ne re-lire que les PR
-  # modifiees) reste NON FAIT, et deliberement : la cle d'invalidation serait `updated_at`, donc
-  # une seule mutation Gitea qui ne le bumpe pas servirait une PR PERIMEE a une decision de merge.
-  # Ca demande de VERIFIER quelles mutations le bumpent (review soumise, push sur la tete,
-  # changement de reviewers), pas de le supposer.
+  # ⚠ The `updated_at` workaround (cache the complete shape and re-read only the modified PRs) is
+  # deliberately NOT DONE: the invalidation key would be `updated_at`, so a single Gitea mutation
+  # that does not bump it would serve a STALE PR to a merge decision. It demands VERIFYING which
+  # mutations bump it (review submitted, push on the head, reviewer change), not assuming it.
   defp fetch_pulls(numbers, repo, opts) do
     numbers
     |> Task.async_stream(&get_pull(repo, &1, opts),
       max_concurrency: 8,
       ordered: true,
-      # Le timeout d'une PR est deja borne par le transport (`receive_timeout`) ; celui-ci est le
-      # filet du cas ou la Task elle-meme se bloque. `:kill_task` plutot qu'un exit propage : une
-      # PR qui ne repond pas devient une erreur de CETTE PR, pas un crash du poller.
+      # A PR's timeout is already bounded by the transport (`receive_timeout`); this one is the net
+      # for the case where the Task itself hangs. `:kill_task` rather than a propagated exit: a PR
+      # that does not answer becomes an error of THAT PR, not a crash of the poller.
       timeout: 30_000,
       on_timeout: :kill_task
     )

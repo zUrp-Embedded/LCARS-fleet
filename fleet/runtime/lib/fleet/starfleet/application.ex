@@ -52,12 +52,12 @@ defmodule Fleet.Starfleet.Application do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
     # V2 extensions.
-    # MCPWatcher RETIRE le 2026-08-03 (BL-6-44) : la veille de version amont est passee en CI
-    # (`.gitea/workflows/deps-upstream.yml`). Il etait OFF par defaut et n'a JAMAIS ete active
-    # nulle part — donc la veille n'existait pas, et le code qui la promettait invitait a
-    # l'allumer. Surveiller une registry de paquets n'est pas le travail d'un plan de controle :
-    # aucun consommateur en ligne, une sortie reseau de plus au daemon, et rien qu'un cron ne
-    # fasse mieux. MCPMonitor reste ON : purement local (Process.whereis), zero I/O reseau.
+    # MCPWatcher REMOVED on 2026-08-03 (BL-6-44): upstream version watch moved to CI
+    # (`.gitea/workflows/deps-upstream.yml`). It was OFF by default and had NEVER been enabled
+    # anywhere — so the watch did not exist, and the code promising it invited someone to switch it
+    # on. Polling a package registry is not a control plane's job: no online consumer, one more
+    # network egress from the daemon, and nothing a cron does not do better. MCPMonitor stays ON:
+    # purely local (Process.whereis),
     # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++

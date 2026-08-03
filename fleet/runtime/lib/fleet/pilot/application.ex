@@ -111,28 +111,28 @@ defmodule Fleet.Pilot.Application do
       # StepRunConsumer) while IncidentRegistry / the two Task.Supervisors / IncidentConsumer /
       # WorktreeSync / ArchFeed were dead read hollow-green: the rail NAMED in readiness was not the rail
       # MEASURED. `step_rail_processes/0` IS that rail (locked to `step_children!` by a drift test).
-      # La SANTE des polls, à côté de la liste des vivants (BL-6-40). Un rail dont tous les process
-      # sont up mais dont les polls prennent 40 s est « operational » et ne va pas bien — la
-      # readiness disait le premier et taisait le second.
+      # The HEALTH of the polls, beside the list of the living (BL-6-40). A rail whose processes are
+      # all up but whose polls take 40 s is "operational" and is not fine — readiness stated the
+      # first and kept quiet about the second.
       #
-      # ⚠ La cle s'appelle `repo_poll` et PAS `tick`, parce que la telemetrie mesure UN DEPOT et non
-      # un cycle. `[:fleet_pilot, :poller, :poll]` est emis une fois PAR DEPOT (chaque emission
-      # porte `repo:`), donc une distribution sur cette clef decrit le cout d'un depot, jamais celui
-      # d'un passage complet. Mesure du 2026-08-03 : 12 depots, intervalle 30 s, et le compteur
-      # avancait de 12 par cycle. La clef s'est d'abord appelee `tick` — un nom qui affirmait un
-      # perimetre que le mecanisme n'a pas, et sur lequel une mesure a ete lue de travers avant
-      # d'etre reprise. Le cout d'un CYCLE n'est pas mesure ici, et aucun nom ne doit le suggerer.
+      # ⚠ The key is called `repo_poll` and NOT `tick`, because the telemetry measures ONE REPO, not
+      # a cycle. `[:fleet_pilot, :poller, :poll]` is emitted once PER REPO (every emission carries
+      # `repo:`), so a distribution over this key describes what one repo costs, never what a full
+      # pass costs. Measured 2026-08-03: 12 repos, 30 s interval, and the counter advanced by 12 per
+      # cycle. The key was first called `tick` — a name asserting a scope the mechanism does not
+      # have, and on which a measurement was read wrong before the name was fixed. The cost of a
+      # CYCLE is not measured here, and no name may suggest otherwise.
       #
-      # ⚠ Et c'est ici que la telemetrie devient LISIBLE. `PollerTelemetry.stats/0` existait depuis
-      # cette nuit sans aucun appelant de production : `RELEASE_DISTRIBUTION=none` par defaut (choix
-      # delibere de `bin/fleet_v2` : pas d'epmd, pas de collision multi-humain), donc AUCUN `rpc`
-      # n'atteint le noeud. Un instrument qu'on ne peut pas interroger mesure pour personne — c'est
-      # le hollow que 6-06 documente, refait par l'instrument cense le combattre.
-      # Deux echelles, deux clefs, jamais une moyenne des deux : `repo_poll` dit ce que coute UN
-      # depot, `poll_cycle` ce que coute UN PASSAGE (decouverte + photo des pods + fold seriel des
-      # R depots + les deux passes fleet-globales). C'est `poll_cycle` qu'il faut lire pour savoir
-      # si une donnee figee au debut d'un passage peut devenir fausse avant sa fin ; `repo_poll` ne
-      # peut pas y repondre, il ignore combien de depots existent.
+      # ⚠ And this is where the telemetry becomes READABLE. `PollerTelemetry.stats/0` existed with
+      # no production caller: `RELEASE_DISTRIBUTION=none` is the default (a deliberate choice of
+      # `bin/fleet_v2`: no epmd, no multi-human collision), so NO `rpc` reaches the node. An
+      # instrument nobody can query measures for nobody — the very hollow 6-06 documents, rebuilt by
+      # the instrument meant to fight it.
+      # Two scales, two keys, never an average of the two: `repo_poll` says what ONE REPO costs,
+      # `poll_cycle` what ONE PASS costs (discovery + pod snapshot + serial fold of the R repos +
+      # the two fleet-global passes). `poll_cycle` is the one to read when asking whether a value
+      # frozen at the start of a pass can go stale before it ends; `repo_poll` cannot answer that,
+      # it does not know how many repos exist.
       detail =
         detail
         |> Map.put(:repo_poll, repo_poll_health())
@@ -146,16 +146,16 @@ defmodule Fleet.Pilot.Application do
     end
   end
 
-  # Resume de sante des polls PAR DEPOT, ou `:no_data` avant le premier. TOTAL par obligation : la
-  # readiness est ce qu'un operateur consulte quand ca va mal, donc elle ne doit jamais tomber a
-  # cause de son propre instrument. Un telemetre mort rend `:unavailable` et le rail reste lisible.
+  # Health summary of the PER-REPO polls, or `:no_data` before the first one. TOTAL by obligation:
+  # readiness is what an operator consults when things go wrong, so it must never fall because of
+  # its own instrument. A dead telemeter yields `:unavailable` and the rail stays readable.
   defp repo_poll_health do
     Fleet.Pilot.PollerTelemetry.stats()
   catch
     :exit, _ -> :unavailable
   end
 
-  # Resume de sante du PASSAGE complet. Meme totalite que ci-dessus, et pour la meme raison.
+  # Health summary of the whole PASS. Same totality as above, and for the same reason.
   defp poll_cycle_health do
     Fleet.Pilot.PollerTelemetry.cycle_stats()
   catch

@@ -90,9 +90,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             {:error, {:provenance_incoherent, reason}}
 
           wall ->
-            # `wall` vaut `:ok` (le mur a tourne et le triplet est coherent) ou `{:skipped, why}`.
-            # Il DESCEND jusqu'apres le merge : la note ne se poste qu'une fois le merge REEL,
-            # cf. `note_wall_not_run/5`.
+            # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
+            # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
+            # `note_wall_not_run/5`.
             do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall)
         end
     end
@@ -393,27 +393,27 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
-  # ASYMÉTRIE FERMÉE (BL-6-47.4). Les deux branches voisines loguaient ; une seule écrivait SUR LA
-  # FORGE. L'incohérence commente la PR, le saut ne laissait rien — donc une PR mergée avait
-  # exactement la même apparence, qu'un mur déterministe l'ait vérifiée ou qu'il n'ait jamais tourné.
-  # « Mergée » suggérait une provenance contrôlée. Le log ne rattrape pas ça : la PR est l'artefact
-  # que relit un humain six mois plus tard, et il ne remonte pas les journaux du BEAM pour savoir si
-  # une vérification a eu lieu.
+  # ASYMMETRY CLOSED (BL-6-47.4). Both neighbouring branches logged; only one wrote ON THE FORGE.
+  # Incoherence comments the PR, a skip left nothing — so a merged PR looked exactly the same
+  # whether a deterministic wall had checked it or had never run at all. "Merged" suggested a
+  # verified provenance. The log does not close that gap: the PR is the artefact a human re-reads
+  # six months later, and nobody walks back through BEAM journals to learn whether a verification
+  # took place.
   #
-  # Une TRACE, pas un blocage : ce chemin est délibérément non-bloquant (« a forge hiccup never
-  # blocks an approved merge », « incoherence alone blocks »), et le fix ne renverse pas cette
-  # décision — il la rend LISIBLE là où elle produit ses effets.
+  # A TRACE, not a block: this path is deliberately non-blocking ("a forge hiccup never blocks an
+  # approved merge", "incoherence alone blocks"), and the fix does not reverse that decision — it
+  # makes it LEGIBLE where its effects land.
   #
-  # Déduplication par une signature DISTINCTE de celle du refus : les confondre ferait qu'une note
-  # « non vérifiée » déduplique un vrai refus, ou l'inverse. Best-effort assumé — une note qu'on ne
-  # peut pas poster ne doit pas empêcher un merge que le jury a approuvé.
+  # Dedup on a signature DISTINCT from the refusal's: sharing one would let a "not verified" note
+  # deduplicate a real refusal, or the reverse. Best-effort by obligation — a note that cannot be
+  # posted must not block a merge the jury approved.
   #
-  # ⚠ POSTÉE APRÈS LE MERGE RÉEL, jamais pendant le mur. La première version de ce fix commentait
-  # depuis `verify_provenance_wall`, donc AVANT `do_merge` — et un test existant l'a refusée à
-  # raison : sur un merge qui échoue, la note se serait posée sur une PR non mergée, suggérant
-  # exactement le contraire de ce qu'elle existe pour dire. C'est la doctrine du fichier, écrite
-  # trente lignes plus haut : « MERGE FIRST, only comment IF the merge REALLY succeeded ». Une note
-  # sur la provenance d'un merge qui n'a pas eu lieu est de la même famille qu'un « mergé » menteur.
+  # ⚠ POSTED AFTER THE REAL MERGE, never during the wall. The first version of this fix commented
+  # from `verify_provenance_wall`, i.e. BEFORE `do_merge` — and an existing test refused it,
+  # correctly: on a failing merge the note would have landed on an UNMERGED PR, stating the exact
+  # opposite of what it exists to state. That is this file's own doctrine, written thirty lines
+  # above: "MERGE FIRST, only comment IF the merge REALLY succeeded". A note about the provenance of
+  # a merge that never happened belongs to the same family as a lying "merged".
   defp note_wall_not_run(_forge, _repo, _pr_number, :ok, _forge_opts), do: :ok
 
   defp note_wall_not_run(forge, repo, pr_number, {:skipped, why}, forge_opts) do

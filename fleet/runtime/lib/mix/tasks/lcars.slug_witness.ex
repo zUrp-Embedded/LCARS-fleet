@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
   CASSE VISIBLEMENT : le resume pointe vers un repertoire vide, donc un pod repart sans sa memoire
   au lieu d'echouer. C'est la moitie qui fait le plus mal, exactement parce qu'elle est muette.
 
-  ## Pourquoi un TEMOIN et pas un test
+  ## Why a WITNESS and not a test
 
   Un test unitaire de `slugify/1` verifie que la fonction fait ce qu'on a ECRIT — il re-affirme
   notre lecture de l'algo vendor, il ne la CONFRONTE a rien. Le seul juge est ce que le binaire a
@@ -74,16 +74,15 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
     if disputed != [], do: exit({:shutdown, 1})
   end
 
-  # Le seul verdict qu'un nom de repertoire seul permet : il ne doit contenir QUE le charset que
-  # `slugify/1` peut produire. On ne peut pas inverser un slug pour retrouver le `cwd` (la
-  # projection est destructive — `/a_b` et `/a-b` donnent le meme resultat), donc on verifie
-  # l'IMAGE de la fonction plutot que son application. Un nom hors charset prouve un algo different
-  # sans qu'aucune inversion soit necessaire.
+  # The only verdict a directory name alone permits: it must contain ONLY the charset `slugify/1`
+  # can produce. A slug cannot be inverted back to the `cwd` (the projection is destructive — `/a_b`
+  # and `/a-b` yield the same result), so we check the function's IMAGE rather than its application.
+  # A name outside the charset proves a different algorithm with no inversion needed.
   defp consistent?(slug), do: slug == Fleet.Spawner.SeedStore.slugify(slug)
 
-  # Un temoin ne DISCRIMINE que s'il porte une trace des cas ou l'algo gele se distingue : pas de
-  # collapsing des `-`, et tout caractere hors charset devient un `-`. Un `-home-tetris` est
-  # compatible avec a peu pres n'importe quelle slugification.
+  # A witness only DISCRIMINATES if it carries a trace of the cases where the frozen algorithm
+  # differs: no `-` collapsing, and every out-of-charset character becomes a `-`. A `-home-tetris`
+  # is compatible with just about any slugification.
   defp discriminating?(slug), do: String.contains?(slug, "--")
 
   defp parse_root(args) do

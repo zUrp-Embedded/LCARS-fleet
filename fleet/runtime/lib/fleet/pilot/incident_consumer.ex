@@ -231,9 +231,9 @@ defmodule Fleet.Pilot.IncidentConsumer do
               "existing issue #{inspect(issue)} carries the alarm"
           )
 
-          # Le frein s'applique AUSSI sous cooldown : la suppression concerne l'ISSUE SYSADMIN
-          # (ne pas en ouvrir une par tick), pas la boucle de re-dispatch. Ne freiner que sur
-          # `{:escalated, _}` laisserait le ticket repartir a l'infini des la deuxieme recurrence.
+          # The brake applies UNDER COOLDOWN too: the suppression concerns the SYSADMIN ISSUE (not
+          # opening one per tick), NOT the re-dispatch loop. Braking only on `{:escalated, _}` would
+          # let the ticket restart forever from the second recurrence on.
           maybe_brake(state, op, reason, payload)
 
         other ->
@@ -247,19 +247,19 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   # ─── LE FREIN (BL-6-37.6) ────────────────────────────────────────────────────────────────────
-  # Le rail d'incident SAVAIT deja « recurrence » — l'issue systeme dit « Deja vu — ROOT-CAUSE
-  # requis » — et le poller re-dispatchait quand meme, a l'infini. Mesure du 2026-08-02 sur le banc
-  # tetris : un producteur tue en pleine redaction, respawn en boucle, invisible sur son ticket.
-  # Detecter sans debrancher, c'est fabriquer un compteur de degats, pas un frein.
+  # The incident rail already KNEW "recurrence" — its sysadmin issue says "Deja vu — ROOT-CAUSE
+  # required" — and the poller re-dispatched anyway, forever. Measured 2026-08-02 on the tetris
+  # bench: a producer killed mid-writing, respawned in a loop, invisible on its own ticket.
+  # Detecting without unplugging builds a damage counter, not a brake.
   #
-  # La consequence manquante : poser `lcars-awaits-arch` sur le TICKET DE TRAVAIL. Le vocabulaire
-  # existe et fait exactement ce qu'il faut — le poller SORT du dispatch une issue qui le porte, et
-  # un humain/l'arch tranche. On ne kille pas, on ne reessaie pas mieux : on rend la main.
+  # The missing consequence: put `lcars-awaits-arch` on the WORK TICKET. The vocabulary exists and
+  # does exactly the right thing — the poller takes an issue carrying it OUT of dispatch, and a
+  # human/the arch decides. We do not kill, we do not retry harder: we hand back.
   #
-  # ⚠ RESTREINT au timeout, deliberement. L'entree mesure `result_timeout` — une boucle ou le pod
-  # travaille et se fait couper. Freiner sur TOUTE categorie recurrente sortirait du dispatch des
-  # tickets sur des causes que personne n'a mesurees ici (un `exited_before_result` peut etre une
-  # erreur de brief qu'un rework corrige). Elargir se fera sur une mesure, pas sur une intuition.
+  # ⚠ RESTRICTED to the timeout, deliberately. The entry measures `result_timeout` — a loop where
+  # the pod is working and gets cut. Braking on ANY recurrent category would pull tickets out of
+  # dispatch for causes nobody measured here (an `exited_before_result` can be a brief error that a
+  # rework fixes). Widening happens on a measurement, not on an intuition.
   defp maybe_brake(state, "pod", reason, payload) when is_map(payload) do
     with true <- timeout_reason?(reason),
          repo when is_binary(repo) <- payload["repo"],
@@ -272,14 +272,14 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   defp maybe_brake(_state, _op, _reason, _payload), do: :ok
 
-  # La categorie normalisee cote producteur (`Fleet.Event.reason_fields/1`) — on compare sur la
-  # forme STABLE, jamais sur le tuple d'origine qui ne traverse pas le bus.
+  # The category normalised producer-side (`Fleet.Event.reason_fields/1`) — we compare on the
+  # STABLE shape, never on the original tuple, which does not cross the bus.
   defp timeout_reason?(reason), do: to_string(reason) =~ "result_timeout"
 
   @doc false
-  # Best-effort ASSUME : un frein qu'on ne peut pas poser ne doit pas casser le rail d'incident, qui
-  # est lui-meme le rail de derniere instance. L'echec est dit LOUD — sans ca, on aurait un frein
-  # silencieusement absent, ce qui est pire que pas de frein du tout (on croirait etre protege).
+  # Best-effort BY OBLIGATION: a brake that cannot be placed must not break the incident rail,
+  # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
+  # silently absent brake, which is worse than no brake at all (you would believe you are covered).
   def default_brake(repo, number, reason) do
     forge = Application.get_env(:fleet_pilot, :forge_client, Fleet.Pilot.ForgeClient)
 

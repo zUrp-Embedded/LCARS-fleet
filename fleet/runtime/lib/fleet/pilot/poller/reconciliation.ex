@@ -121,18 +121,17 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
           MapSet.t()
   def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams, pods) do
     # UN SEUL `list_pods` par passe (BL-6-40 Phase 1). Il y en avait 2 + N : deux duties
-    # l'appelaient, et `lock_diagnosis` une fois PAR verrou candidat. Chaque appel est un
-    # `GenServer.call` a 5 s de timeout vers le Spawner — un seul pod wedge coutait donc
-    # 5 s x (2 + N) x nb_repos par tick, et rien ne le disait (c'est ce que la Phase 0 rend
-    # desormais mesurable).
+    # called it, and `lock_diagnosis` once PER candidate lock. Each call is a `GenServer.call` at a
+    # 5 s timeout to the Spawner — so a single wedged pod cost 5 s x (2 + N) x repo_count per tick,
+    # and nothing said so (which is exactly what Phase 0 now makes measurable).
     #
-    # Le snapshot est de la DONNEE, pas une seam : il descend en parametre explicite plutot que
-    # d'entrer dans `%Seams{}`, dont le contrat est « les 5 coutures que reconcile/5 lit » et non
-    # « ce qu'elle a lu ». L'ajouter la aurait rendu la structure porteuse d'un cache.
+    # The snapshot is DATA, not a seam: it travels as an explicit parameter rather than entering
+    # `%Seams{}`, whose contract is "the 5 seams reconcile/5 READS" and not "what it has read".
+    # Adding it there would have made the struct carry a cache.
     #
-    # Le fail-safe se DEPLACE ici sans changer de sens : une enumeration impossible rend `:error`
-    # et la passe entiere ne reclame rien — exactement ce que `live_owned_refs` faisait seule,
-    # sauf que les trois consommateurs sont maintenant couverts par la meme lecture.
+    # The fail-safe MOVES here without changing meaning: an impossible enumeration yields `:error`
+    # and the whole pass reclaims nothing — exactly what `live_owned_refs` did on its own, except
+    # the three consumers are now covered by the same read.
     case pods do
       {:error, _reason} ->
         prior_suspects

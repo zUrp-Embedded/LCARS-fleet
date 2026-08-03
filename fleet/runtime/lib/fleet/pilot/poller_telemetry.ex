@@ -53,19 +53,19 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   `cast` is lossy under saturation, and that is the correct trade here: dropping a metric is
   strictly better than delaying the poll it measures. A mailbox that actually grows is itself the
-  signal — and c'est ce que la jauge ci-dessous mesure.
+  signal — and that is what the gauge below measures.
 
-  ## La jauge de mailbox (cousin de BL-6-40, livre ici)
+  ## The mailbox gauge (BL-6-40's cousin, delivered here)
 
-  « Aucune jauge de `message_queue_len` sur les mailboxes StepRunConsumer/Poller — un consumer en
-  retard est invisible jusqu'au symptome. » Elle est echantillonnee a CHAQUE poll, dans ce module
-  plutot qu'ailleurs, parce que le poll est deja la cadence a laquelle on veut la reponse : aucun
-  timer de plus, aucun process de plus, et l'instrument mesure les deux singletons du rail.
+  "No `message_queue_len` gauge on the StepRunConsumer/Poller mailboxes — a consumer falling behind
+  is invisible until the symptom." It is sampled at EVERY poll, in this module rather than
+  elsewhere, because the poll is already the cadence at which we want the answer: no extra timer,
+  no extra process, and the instrument measures both singletons of the rail.
 
-  Elle warn au FRANCHISSEMENT du seuil, pas a chaque poll au-dessus : une mailbox qui reste haute
-  est UN fait, et le repeter toutes les 30 s noierait la trace que ce module existe pour garder
-  lisible — la meme discipline que le silence du poll nominal. Le retour sous le seuil est dit
-  aussi : sans lui, un operateur ne sait pas si c'est resorbe ou si le rail est mort.
+  It warns on CROSSING the threshold, not on every poll above it: a mailbox that stays high is ONE
+  fact, and repeating it every 30 s would drown the trace this module exists to keep readable — the
+  same discipline as the silent nominal poll. The return below the threshold is announced too:
+  without it, an operator cannot tell resolved from dead.
 
   ## Config
     * `:fleet_pilot, :poller_slow_tick_ms` — warn threshold (default `10_000`).
@@ -74,21 +74,21 @@ defmodule Fleet.Pilot.PollerTelemetry do
   """
 
   @window 100
-  # Les deux singletons du rail dont la mailbox est un signal : le Poller (si ses ticks
-  # s'accumulent, la fleet est en retard sur elle-meme) et le StepRunConsumer (un consumer en
-  # retard est INVISIBLE jusqu'au symptome — BL-6-40, cousin nomme). Ils sont echantillonnes ICI
-  # parce qu'un poll de depot est deja la cadence a laquelle on veut la reponse : pas de timer de
-  # plus, pas de process de plus.
+  # The two singletons of the rail whose mailbox is a signal: the Poller (if its ticks pile up, the
+  # fleet is behind itself) and the StepRunConsumer (a consumer falling behind is INVISIBLE until
+  # the symptom — BL-6-40, named cousin). They are sampled HERE
+  # because a repo poll is already the cadence at which we want the answer: no extra timer, no extra
+  # process.
   @watched [Fleet.Pilot.Poller, Fleet.Pilot.StepRunConsumer]
-  # Au-dela, la mailbox n'absorbe plus : elle accumule. Seuil volontairement BAS — ces deux
-  # process traitent un message en dizaines de millisecondes, donc dix en attente veut deja dire
-  # que quelque chose bloque, pas que la charge est forte.
+  # Beyond this, the mailbox no longer absorbs: it accumulates. Deliberately LOW — these two
+  # processes handle a message in tens of milliseconds, so ten waiting already means something is
+  # stuck, not that the load is high.
   @mailbox_warn 10
   @default_slow_tick_ms 10_000
   @event [:fleet_pilot, :poller, :poll]
-  # Le cycle est un evenement DISTINCT, pas un champ de plus sur `:poll` : les deux ont des echelles
-  # differentes (un depot / un passage) et des cardinalites differentes (R pour 1). Les melanger
-  # dans un anneau commun rendrait un p50 qui ne decrit rien — ni un depot, ni un passage.
+  # The cycle is a DISTINCT event, not one more field on `:poll`: the two have different scales (one
+  # repo / one pass) and different cardinalities (R against 1). Mixed into a single ring, the p50
+  # would describe neither a repo nor a pass.
   @cycle_event [:fleet_pilot, :poller, :cycle]
   @handler_id "fleet-pilot-poller-telemetry"
 
@@ -223,11 +223,11 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   @impl GenServer
   def handle_cast({:cycle, duration_ms, repos, status, mode}, state) do
-    # Pas de warn ici : le seuil `slow_tick_ms` est calibre sur un DEPOT. Un cycle de R depots
-    # depasse legitimement R fois ce seuil, donc reutiliser le meme nombre produirait une alerte a
-    # chaque passage des que l'org grossit — un bruit qui apprend a ignorer l'instrument. Le seuil
-    # du cycle est une decision separee, et tant qu'elle n'est pas prise on MESURE sans alerter
-    # plutot que d'alerter sur un nombre invente.
+    # No warn here: the `slow_tick_ms` threshold is calibrated on ONE REPO. A cycle over R repos
+    # legitimately exceeds it R times over, so reusing that number would fire on every pass as soon
+    # as the org grows — noise that teaches an operator to ignore the instrument. The cycle's
+    # threshold is a separate decision, and until it is taken we MEASURE without alerting rather
+    # than alert on a number nobody chose.
     {:noreply,
      %{
        state
@@ -301,23 +301,23 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   defp maybe_warn(_state, _ms, _status, _scope, _repo), do: :ok
 
-  # `Process.info(pid, :message_queue_len)` sur un pid VIVANT uniquement — un nom non enregistre
-  # (rail off, redemarrage en cours) sort de la mesure au lieu d'y entrer comme un zero, qui
-  # ressemblerait a « sain ».
+  # `Process.info(pid, :message_queue_len)` on a LIVE pid only — an unregistered name (rail off,
+  # restart in progress) drops OUT of the measurement instead of entering it as a zero, which would
+  # look like "healthy".
   defp sample_mailboxes do
     for name <- @watched, pid = Process.whereis(name), into: %{} do
       case Process.info(pid, :message_queue_len) do
         {:message_queue_len, n} -> {name, n}
-        # Mort entre le `whereis` et le `info` : on ne fabrique pas une valeur.
+        # Died between the `whereis` and the `info`: we do not manufacture a value.
         nil -> {name, :gone}
       end
     end
   end
 
-  # Warn au FRANCHISSEMENT, pas a chaque tick au-dessus du seuil : une mailbox qui reste haute est
-  # un seul fait, et le repeter toutes les 30 s noierait la trace que ce module existe pour garder
-  # lisible. Le retour sous le seuil est dit aussi — sans lui, un operateur ne sait pas si c'est
-  # resorbe ou si le rail est mort.
+  # Warn on CROSSING, not on every tick above the threshold: a mailbox that stays high is ONE fact,
+  # and repeating it every 30 s would drown the trace this module exists to keep readable. The
+  # return below the threshold is announced too — without it, an operator cannot tell resolved from
+  # dead.
   defp warn_saturated(now, before) do
     for {name, n} <- now, is_integer(n) do
       was = Map.get(before, name)

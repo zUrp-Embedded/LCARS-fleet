@@ -382,15 +382,15 @@ defmodule Fleet.Pilot.Poller do
         #
         # The fold accumulates exactly the two cross-repo monoids step_do_poll yields (tally merge,
         # suspects union) + the awaits-arch union — nothing else survives the per-repo pass.
-        # UN SEUL `list_pods` POUR TOUT LE TICK (BL-6-40, contexte de tick). Il vivait dans
-        # `reconcile/5`, donc il tournait une fois par REPO : sur R repos, R `GenServer.call` a 5 s
-        # de timeout vers le Spawner pour une photo qui ne change pas utilement d'un repo a l'autre.
-        # La photo est de la DONNEE, elle descend en parametre — jamais dans `%Seams{}`, dont le
-        # contrat est « les coutures que reconcile LIT », ni dans `state`, ou elle deviendrait un
-        # cache a invalider.
+        # ONE `list_pods` FOR THE WHOLE TICK (BL-6-40, tick context). It used to live in
+        # `reconcile/5`, so it ran once per REPO: over R repos, R `GenServer.call`s at a 5 s timeout
+        # to the Spawner for a snapshot that does not usefully change from one repo to the next.
+        # The snapshot is DATA, so it travels as an explicit parameter — never inside `%Seams{}`,
+        # whose contract is "the seams reconcile READS", nor in `state`, where it would become a
+        # cache to invalidate.
         #
-        # `:tick` SEULEMENT : le kick ne reconcilie pas (dispatch-only), donc prendre la photo pour
-        # lui AJOUTERAIT un appel au lieu d'en retirer — exactement l'inverse du but.
+        # `:tick` ONLY: the kick does not reconcile (dispatch-only), so taking the snapshot for it
+        # would ADD a call instead of removing one — the exact opposite of the point.
         pods =
           if mode == :tick,
             do: Reconciliation.snapshot_pods(state.spawner || Fleet.Spawner),
@@ -420,15 +420,15 @@ defmodule Fleet.Pilot.Poller do
         # kept a main protection out of line with the CURRENT jury until now.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
-        # Le CYCLE, mesure A SON ECHELLE — strictement distinct de `[:poller, :poll]`, qui est emis
-        # PAR DEPOT (chaque emission porte `repo:`). Une distribution sur `:poll` ne peut pas
-        # repondre « combien de temps un passage complet dure » : elle decrit un depot, et le nombre
-        # de depots n'y apparait nulle part. Or c'est la duree du PASSAGE qui decide si une donnee
-        # figee au debut (un `base_sha`, une photo de pods) peut devenir fausse avant la fin.
+        # The CYCLE, measured AT ITS OWN SCALE — strictly distinct from `[:poller, :poll]`, which
+        # is emitted PER REPO (every emission carries `repo:`). A distribution over `:poll` cannot
+        # answer "how long does a full pass take": it describes one repo, and the number of repos
+        # appears nowhere in it. Yet it is the duration of the PASS that decides whether a value
+        # frozen at its start (a `base_sha`, a pod snapshot) can go stale before it ends.
         #
-        # `started` est capture AVANT `list_org_repos`, donc la mesure couvre tout ce qu'un passage
-        # fait : la decouverte, la photo des pods, le fold SERIEL des R depots, et les deux passes
-        # fleet-globales (arch net, recheck de protection). Pas seulement sa partie visible.
+        # `started` is captured BEFORE `list_org_repos`, so the measurement covers everything a
+        # pass does: discovery, the pod snapshot, the SERIAL fold of the R repos, and the two
+        # fleet-global passes (arch net, protection recheck). Not just its visible part.
         :telemetry.execute(
           [:fleet_pilot, :poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: length(repos)},
@@ -438,10 +438,10 @@ defmodule Fleet.Pilot.Poller do
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
-        # Un passage qui echoue a la decouverte EST un passage, et il a une duree. L'omettre
-        # rendrait le p95 du cycle plus beau que la realite exactement sur le cas qu'un operateur
-        # surveille — la meme cecite que `started` capture apres l'appel lent evitait deja.
-        # `repos: 0` n'est pas un remplissage : aucun depot n'a ete replie.
+        # A pass that fails at discovery IS a pass, and it has a duration. Dropping it would make
+        # the cycle's p95 prettier than reality on exactly the case an operator watches — the same
+        # blindness that capturing `started` after the slow call already avoided. `repos: 0` is not
+        # filler: no repo was folded.
         :telemetry.execute(
           [:fleet_pilot, :poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: 0},
@@ -488,20 +488,18 @@ defmodule Fleet.Pilot.Poller do
     }
   end
 
-  # L'enumeration des pods qui echoue est DEUX choses a la fois : un fail-safe correct (on ne reclame
-  # rien plutot que de deverrouiller a l'aveugle) et une panne potentiellement DURABLE. Tant qu'elle
-  # dure, aucun lock orphelin n'est repris — donc un `lcars-in-flight` survit indefiniment a son pod,
-  # et la brique reste prise sans que personne ne l'apprenne. Muette, elle etait indistinguable d'un
-  # tick ou il n'y avait simplement rien a reclamer : c'est ce qui la rendait invisible, pas son
-  # absence de gravite.
+  # A failing pod enumeration is TWO things at once: a correct fail-safe (we reclaim nothing rather
+  # than unlock blindly) AND a potentially DURABLE outage. While it lasts, no orphaned lock is ever
+  # taken back — so an `lcars-in-flight` outlives its pod indefinitely, and the brick stays held
+  # without anyone learning it. Silent, it was indistinguishable from a tick that simply had nothing
+  # to reclaim: that is what made it invisible, not any lack of severity.
   #
-  # On parle au FRANCHISSEMENT, jamais a chaque tick — repeter le meme fait toutes les 30 s noierait
-  # la trace, meme discipline que la jauge de mailbox et que le silence du tick nominal. La
-  # RECUPERATION se dit aussi : sans elle, un operateur qui a vu l'alerte ne sait pas si c'est
-  # resorbe ou si le rail est mort.
+  # We speak on the TRANSITION, never per tick — repeating the same fact every 30 s would drown the
+  # trace, the same discipline as the mailbox gauge and the silent nominal tick. RECOVERY is
+  # announced too: without it, an operator who saw the alert cannot tell resolved from dead.
   #
-  # `:none` (kick) ne touche a rien : le kick ne PREND PAS de photo, donc il n'a rien a dire sur son
-  # etat. Le confondre avec un succes ferait disparaitre une panne en cours au premier webhook.
+  # `:none` (kick) changes nothing: a kick takes NO snapshot, so it has nothing to say about its
+  # health. Treating it as a success would erase an ongoing outage at the first webhook.
   defp note_pods_snapshot(%__MODULE__{} = state, :none), do: state
 
   defp note_pods_snapshot(%__MODULE__{} = state, {:error, reason}) do
@@ -519,7 +517,7 @@ defmodule Fleet.Pilot.Poller do
             reason_detail: inspect(reason)
           )
         catch
-          # never-stall : le rail d'incident observe la panne, il n'en est jamais une condition.
+          # never-stall: the incident rail OBSERVES the outage, it is never a condition of it.
           kind, why ->
             Logger.warning(
               "Poller: incident rail unavailable for pod enumeration " <>
@@ -693,11 +691,11 @@ defmodule Fleet.Pilot.Poller do
     # kicks ONCE on the union — that single call reaches every project's architect.
     awaits_arch_ids = awaits_arch_ids(issues)
 
-    # BL-6-48 pas 3, moitie PR. Meme geste que la ligne au-dessus, et pour la meme raison : le
-    # chemin PR tient des PULLS, pas des issues — or le `wait/*` vit sur l'ISSUE (c'est le ticket
-    # qu'un humain lit, il survit a ses PR successives). Sans ce threading, ecrire depuis les pulls
-    # couterait un `get_issue` par PR sautee. Les issues sont deja listees AVEC leurs labels : la
-    # map est gratuite, exactement comme `awaits_arch_ids`.
+    # BL-6-48 step 3, PR half. Same gesture as the line above, and for the same reason: the PR path
+    # holds PULLS, not issues — yet the `wait/*` lives on the ISSUE (it is the ticket a human reads,
+    # and it outlives its successive PRs). Without this threading, writing from the pulls would cost
+    # a `get_issue` per skipped PR. The issues are already listed WITH their labels: the map is
+    # free, exactly like `awaits_arch_ids`.
     pulls_opts =
       opts
       |> Keyword.put(:awaits_arch_ids, awaits_arch_ids)
@@ -844,9 +842,9 @@ defmodule Fleet.Pilot.Poller do
     Enum.reduce(pulls, Lease.zero_tally(), fn pr, acc ->
       result = StepDispatcher.dispatch_review(pr, opts)
 
-      # Le numero de l'issue vient du nom de la feature-branch (`lcars/issue-N-<role>`) : zero appel.
-      # Une PR etrangere ne parse pas → `nil` → `converge_wait` ne fait rien, ce qui est le bon
-      # comportement et pas un effet de bord : ce n'est pas notre ticket.
+      # The issue number comes from the feature-branch name (`lcars/issue-N-<role>`): zero calls. A
+      # foreign PR does not parse → `nil` → `converge_wait` does nothing, which is the correct
+      # behaviour and not a side effect: it is not our ticket.
       issue_n = pr_issue_number(pr)
       _ = Lease.converge_wait(opts, issue_n, Map.get(wait_labels, issue_n), result)
 
@@ -859,8 +857,8 @@ defmodule Fleet.Pilot.Poller do
     end)
   end
 
-  # `issue → wait/*` pour les issues qui en portent un. Derivee des issues DEJA listees par le tick
-  # (zero appel forge), threadee aux pulls — jumelle exacte d'`awaits_arch_ids/1`.
+  # `issue → wait/*` for the issues carrying one. Derived from the issues ALREADY listed by the
+  # tick (zero forge call), threaded to the pulls — exact twin of `awaits_arch_ids/1`.
   defp wait_labels(issues) do
     prefix = Fleet.Labels.wait_prefix()
 
