@@ -251,8 +251,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     # REAPER — a TICKET-keyed producer dies HERE, never earlier.
     # A `slot_scope: instance` producer is context-long, and NOTHING harvests it on its own (the
-    # PodWarden only sweeps the SUBSTRATE of already-dead pods). Without this call the pods pile up
-    # to `max_pods` and the fleet wedges on a SILENT `:at_capacity`.
+    # PodWarden only sweeps the SUBSTRATE of already-dead pods). Without this call the role's pool
+    # seats fill with pods nobody is waiting on, and every later ticket of that role is deferred on
+    # `wait/capacity` — a fleet that looks busy while it is only un-harvested.
     # The hook is the SEAL, never `pod.completed`: a completion ends a ROUND, and the whole point of
     # ticket-live is that the producer keeps its context ACROSS its rework rounds — killing it at
     # completion would restore the exact defect this lot removes. The merge ends the ticket, so it

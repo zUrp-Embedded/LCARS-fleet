@@ -97,7 +97,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           String.t()
         ) ::
           {:ok, {:spawned, String.t(), String.t()}}
-          | {:skipped, :at_capacity}
+          | {:skipped, :role_at_capacity}
           | {:error, term()}
   def spawn_step(
         %Seams{} = seams,
@@ -115,35 +115,24 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     issue_id = Fleet.Pilot.IssueId.compose(issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
-    # Capacity pre-flight BEFORE the forge lock — admission condition at the same
-    # stage as the scope gate (`gate_scope_decision`, "gate BEFORE any lock"). Locking first would
-    # discover `:max_children` at spawn and compensate (unlock) EVERY tick at saturation: ~4 forge
-    # writes/issue/30s polluting the timeline, and "full" tallied as an ERROR (poller backoff as
-    # if the forge were down). Deferral is a SKIP (truth: "full, waiting"), not an error.
-    # `not alive_before?` is load-bearing: a re-brief of a LIVE pipe pod starts no child — gating
-    # it at saturation would starve the pipe. The residual TOCTOU stays covered by
-    # `max_children` + the compensation below (now the rare exception, not the steady state).
+    # Capacity pre-flight BEFORE the forge lock — admission condition at the same stage as the
+    # scope gate (`gate_scope_decision`, "gate BEFORE any lock"). ONE ceiling reaches here: the
+    # per-role pool seats. The fleet-wide `max_pods` is a FUSE and not a policy — nothing consults
+    # it to decide, and blowing it is an anomaly that comes back loud as `{:error, :max_children}`.
+    #
+    # The wall that refuses is `PoolSlot.allocate/3`, INSIDE the spawn, i.e. past the forge lock.
+    # Discovering a full bucket there means a lock/unlock cycle per issue per tick at saturation
+    # (~4 forge writes/issue/30s polluting the timeline) and "full" tallied as an ERROR — a poller
+    # backoff as if the forge were down. Deferral is a SKIP (truth: "full, waiting").
+    #
+    # It asks the SAME bucket as that wall: `(role, repo_id, slot_scope)`, the repo_id read off the
+    # spawn_opts the spawn itself will carry and the slot_scope off the cap-profile. A pre-flight on
+    # a different bucket is worse than none — it defers on a ceiling that is not the one that
+    # refuses.
+    #
+    # `not alive_before?` is load-bearing: re-briefing a LIVE pipe pod starts no child, so gating it
+    # at saturation would starve the very pipe holding the seat.
     cond do
-      not alive_before? and not has_capacity?(spawner) ->
-        Logger.info(
-          "StepDispatcher: at capacity (max_pods) → defer role=#{role} pod=#{pod_id} #{log_ctx} " <>
-            "(no lock taken; re-dispatch when a slot frees)"
-        )
-
-        {:skipped, :at_capacity}
-
-      # PER-ROLE pre-flight, same stage and same reason as the global one above: the wall that
-      # will actually refuse is `PoolSlot.allocate/3` INSIDE the spawn, i.e. after the forge lock.
-      # Discovering a full bucket there means a lock/unlock cycle per issue per tick at saturation,
-      # and "full" tallied as an ERROR — a poller backoff as if the forge were down.
-      #
-      # It asks the SAME bucket as that wall: same `(role, repo_id, slot_scope)`, the repo_id read
-      # off the spawn_opts the spawn itself will carry and the slot_scope off the cap-profile. A
-      # pre-flight on a different bucket is worse than none — it defers on a ceiling that is not
-      # the one that refuses.
-      #
-      # `not alive_before?` is load-bearing here too: re-briefing a LIVE pipe pod starts no child,
-      # so gating it at saturation would starve the very pipe holding the seat.
       not alive_before? and not has_free_slot?(spawner, role, profile, spawn_opts) ->
         Logger.info(
           "StepDispatcher: role bucket FULL (max_pods_per_role) → defer role=#{role} " <>
@@ -496,16 +485,12 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     _ -> :ok
   end
 
-  # Capacity pre-flight. Default-ALLOW when the seam does not expose `has_capacity?/0`
-  # (test stubs — mirror of safe_wake/pod_alive?) and fail-OPEN on raise: this gate is an
-  # admission OPTIMIZATION, the real cap stays enforced by the supervisor's `max_children` +
-  # the caller's compensation. A broken capacity check must never STARVE the dispatch (a wrong
-  # "full" would freeze the whole fleet); a wrong "room" at worst pays one lock/unlock cycle.
-  # Per-role pre-flight, same default-ALLOW and same fail-OPEN as the global twin below, and for
-  # the same reason: a broken capacity check must never STARVE the dispatch. `PoolSlot.allocate/3`
-  # is still the wall. The `slot_scope` comes from the cap-profile via its single accessor — a
-  # second derivation of "is this role project-keyed" is how a pre-flight ends up asking a bucket
-  # nobody enforces.
+  # Capacity pre-flight. Default-ALLOW when the seam does not expose the predicate (test stubs — mirror of
+  # safe_wake/pod_alive?) and fail-OPEN on raise: this gate is an admission OPTIMIZATION, and
+  # `PoolSlot.allocate/3` is still the wall. A broken capacity check must never STARVE the dispatch
+  # (a wrong "full" would freeze the fleet); a wrong "room" at worst pays one lock/unlock cycle.
+  # The `slot_scope` comes from the cap-profile via its single accessor — a second derivation of
+  # "is this role project-keyed" is how a pre-flight ends up asking a bucket nobody enforces.
   defp has_free_slot?(spawner, role, profile, spawn_opts) do
     not function_exported?(spawner, :has_free_slot?, 3) or
       spawner.has_free_slot?(
@@ -518,17 +503,6 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       Logger.warning(
         "StepDispatcher: has_free_slot? RAISED (#{inspect(e)}) → assume a seat " <>
           "(fail-open; PoolSlot.allocate/3 still enforces)"
-      )
-
-      true
-  end
-
-  defp has_capacity?(spawner) do
-    not function_exported?(spawner, :has_capacity?, 0) or spawner.has_capacity?()
-  rescue
-    e ->
-      Logger.warning(
-        "StepDispatcher: has_capacity? RAISED (#{inspect(e)}) → assume room (fail-open; max_children still enforces)"
       )
 
       true

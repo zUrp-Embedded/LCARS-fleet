@@ -25,8 +25,10 @@ defmodule Fleet.ConfigKnobsTest do
   alias Fleet.Pilot.IncidentRegistry
 
   describe "the knobs that bound a safety are actually READ" do
-    test ":fleet_spawner, :max_pods — the global live-pod cap" do
-      # 24 is the documented default; 7 is a value nothing else could produce.
+    test ":fleet_spawner, :max_pods — the fleet-wide FUSE (not a policy)" do
+      # 128 is the documented default; 7 is a value nothing else could produce. The knob still has
+      # to answer: an operator on a small machine lowers the fuse deliberately, and it is the one
+      # ceiling nothing else can substitute for.
       Fleet.TestEnv.put_env_restoring(:fleet_spawner, :max_pods, 7)
       assert Fleet.Spawner.max_pods() == 7
     end

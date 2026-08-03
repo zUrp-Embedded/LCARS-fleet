@@ -117,7 +117,7 @@ defmodule Fleet.Spawner.PoolSlot do
 
   @doc """
   Is there a free slot RIGHT NOW? The pre-flight twin of `allocate/3`, for the dispatcher's
-  admission gate — same pair as `Fleet.Spawner.has_capacity?/0` against `max_children`.
+  admission gate for the ceiling that actually shapes the queue: the per-role seats.
 
   Takes the SAME three arguments as `allocate/3` on purpose: a pre-flight that interrogates a
   different bucket than the wall is worse than no pre-flight, because it defers on a ceiling that
@@ -154,29 +154,5 @@ defmodule Fleet.Spawner.PoolSlot do
       %{role: ^role, repo: ^repo, pool: pool}, acc when is_integer(pool) -> MapSet.put(acc, pool)
       _other, acc -> acc
     end)
-  end
-
-  @doc """
-  Boot-time coherence of the two ceilings — the BRAKE.
-
-  A per-role cap the global cap cannot hold produces skips nobody can explain: the role never
-  reaches its own limit, it just gets refused by a ceiling that names something else. Rather than
-  discover it on a wedged fleet, the incoherence is stated at boot, once, LOUD. Not a refusal:
-  a small `max_pods` is a legitimate operator choice (a laptop) — but it must be a CHOSEN one.
-  """
-  @spec check_ceilings!() :: :ok
-  def check_ceilings! do
-    global = Fleet.Spawner.max_pods()
-    per_role = max_per_role()
-
-    if per_role > global do
-      Logger.warning(
-        "PoolSlot: max_pods_per_role=#{per_role} EXCEEDS max_pods=#{global} — a role will be " <>
-          "refused by the GLOBAL ceiling before reaching its own, and the skip will name the " <>
-          "wrong limit. Raise max_pods, or lower max_pods_per_role."
-      )
-    end
-
-    :ok
   end
 end

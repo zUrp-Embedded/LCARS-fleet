@@ -153,16 +153,4 @@ defmodule Fleet.Spawner.PoolSlotTest do
       end
     end
   end
-
-  test "the brake states an incoherent pair of ceilings instead of letting it wedge a fleet" do
-    TestEnv.put_env_restoring(:fleet_spawner, :max_pods, 2)
-    TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 10)
-
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        assert :ok = PoolSlot.check_ceilings!()
-      end)
-
-    assert log =~ "EXCEEDS max_pods"
-  end
 end

@@ -5,8 +5,9 @@ defmodule Fleet.Pilot.PodReaper do
   Exists because a `slot_scope: instance` producer is context-long: nothing kills it on its own
   (`Pod`'s post-completion branch — "Release only on external kill_pod or deadline timeout" — and
   `PodWarden` only sweeps the substrate of ALREADY-dead pods). Every terminal end of a ticket must
-  therefore name its reaping, or pods pile up to `max_pods` and the fleet wedges on a silent
-  `:at_capacity`.
+  therefore name its reaping, or the role's pool seats fill with pods nobody is waiting on and
+  every later ticket of that role is deferred on `wait/capacity` — a fleet that looks busy while
+  it is only un-harvested.
 
   Two callers, two ends of a ticket:
 

@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date**: 2026-07-11
-**Last revised**: 2026-07-21
+**Last revised**: 2026-08-03
 **Status**: active — spawner domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: `mix.exs`
 
@@ -20,7 +20,7 @@ Core lifecycle:
 - `Fleet.Spawner` — public-API facade (`spawn_pod`/`kill_pod`/`pod_info`/`list_pods`/`count_pods`/`wake_pod`/`recall`/`reprovision_pipe_workspace` + the `valid_pod_id?`/`brief_required?`/`restart_strategy_for` authorities); the domain entry point
 - `Fleet.Spawner.Pod` — the lifecycle `gen_statem` (7 states = the 7 phases; `:publishing` is a FLAG, not a state; boot-chain, `:monitoring` watchdogs, guaranteed `terminate/3` teardown)
 - `Fleet.Spawner.Application` — `:rest_for_one` root supervisor (Registry → Supervisor → gated consumers); boots NO permanent pod
-- `Fleet.Spawner.Supervisor` — DynamicSupervisor, `:max_pods` global cap on living pods
+- `Fleet.Spawner.Supervisor` — DynamicSupervisor ; `:max_pods` y est le FUSIBLE anti-emballement (pas une politique : le fan est borne par `max_fan` et les sieges de pool)
 - `Fleet.Spawner.PodTmux` — host→pod control-plane over the per-pod tmux socket (kick / `/clear` / has-session; orphan `kill_holder` fallback)
 - `Fleet.Spawner.BootEpoch` — identity of the CURRENT BEAM boot (per-fleet-life nonce): the discriminator that separates a POD-level recovery from a FLEET-level restart.
 - `Fleet.Spawner.PodWarden` — periodic reaper of the substrate (orphan tmux socks + graveyard pod_dir GC, 2-tick grace)

@@ -15,7 +15,7 @@ defmodule Fleet.Spawner.Supervisor do
   the supervisor): the boot-orchestrator (initial boot of the permanents) and the `PermanentWarden`
   (recovery respawn of a DEAD permanent, on `pod.failed` + reconciliation).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   use DynamicSupervisor
@@ -27,12 +27,15 @@ defmodule Fleet.Spawner.Supervisor do
 
   @impl DynamicSupervisor
   def init(_args) do
-    # max_children: GLOBAL CAP of live pods — a spawn flood (admin/spawn no-auth
-    # loopback, or a rail gone haywire) cannot launch N claude sessions (each = a real
-    # OS process + tokens). Beyond it -> {:error, :max_children} returned by spawn_pod (fail-loud at
-    # the caller). Cap read from the SINGLE authority `Fleet.Spawner.max_pods/0` (default 24: wide
-    # margin above the real — ~6 permanents + step workers; the bound targets the ANOMALY, not the
-    # nominal) — shared with the dispatcher's `has_capacity?` pre-flight, no default drift.
+    # max_children: THE FUSE. A spawn flood (the no-auth loopback of /api/admin/spawn, or a rail
+    # gone haywire) cannot launch N claude sessions (each = a real OS process + tokens). Beyond it
+    # -> {:error, :max_children} from spawn_pod, fail-loud at the caller.
+    #
+    # It is not a policy and nothing consults it to DECIDE: what shapes the queue is `max_fan` (runs
+    # per project) and the pool seats (pods per role per repo), which refuse in a way a ticket can
+    # carry. This one targets the ANOMALY, sits above the computable nominal peak, and blowing it is
+    # meant to be an error rather than a wait. Its number and the arithmetic behind it live at the
+    # single authority `Fleet.Spawner.max_pods/0`.
     max = Fleet.Spawner.max_pods()
 
     DynamicSupervisor.init(

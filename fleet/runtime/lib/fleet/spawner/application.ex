@@ -32,12 +32,6 @@ defmodule Fleet.Spawner.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # BRAKE — coherence of the TWO ceilings, stated once at boot. A per-role cap the global cap
-    # cannot hold produces skips nobody can explain: the role never reaches its own limit, it just
-    # gets refused by a ceiling that names something else. Rather than discover that on a wedged
-    # fleet, it is announced here.
-    _ = Fleet.Spawner.PoolSlot.check_ceilings!()
-
     # Fleet-life epoch stamped BEFORE any pod starts (single init, no race) — the discriminator
     # between a pod crash (same epoch → fresh-reroll) and a fleet restart (stale epoch → unified
     # seed decision). Cf. Fleet.Spawner.BootEpoch.

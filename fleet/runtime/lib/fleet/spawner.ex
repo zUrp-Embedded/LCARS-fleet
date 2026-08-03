@@ -537,27 +537,30 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Global live-pod cap — SINGLE authority for the `:fleet_spawner, :max_pods` default (24).
-  Read by the DynamicSupervisor (`max_children`, the enforcing side) AND `has_capacity?/0`
-  (the pre-flight side): one default, no drift between the two readers.
+  The FUSE: how many pods may live at once, fleet-wide — `:fleet_spawner, :max_pods`, default 128,
+  enforced by the DynamicSupervisor as `max_children`.
+
+  It is NOT a policy and nothing consults it to decide anything. What shapes the queue is
+  `max_fan` (workflow_runs per project) and the pool seats (pods per role per repo); those refuse
+  in a way a ticket can carry — a `wait/capacity` label and a skip. This one only stops a RUNAWAY:
+  a spawn flood through the no-auth loopback, or a rail gone haywire. Hitting it is an anomaly,
+  it comes back as `{:error, :max_children}`, and it is meant to be loud.
+
+  Why it moved from 24. That number was chosen as "a wide margin above the real" when the lease
+  serialized a repo to ONE workflow_run — the real was ~6 permanents plus a handful of step
+  workers. With `max_fan` the nominal peak is computable and 24 sits UNDER it: a project at the
+  default fan of 5, whose heaviest canon jury is 2 (`standard-qa`), peaks around 15 pods, so a
+  two-project fleet crosses 24 while doing exactly what it was configured to do. A fuse that blows
+  at nominal load is not a fuse, it is an unexplained failure — and it would surface as
+  `{:error, :max_children}`, an error, on a fleet that is merely busy.
+
+  128 clears 8 projects at the default fan (8 x 15 = 120) plus the permanents, and a single
+  project at the maximum fan of 15 with room to spare. It is a chosen headroom, not a derivation:
+  the project count is unbounded by design (org discovery), so no fleet-wide number can be derived
+  from the per-project ones. An operator on a small machine lowers it deliberately.
   """
   @spec max_pods() :: pos_integer()
-  def max_pods, do: Application.get_env(:fleet_spawner, :max_pods, 24)
-
-  @doc """
-  Is there room to START a new pod? Same count/cap pair the DynamicSupervisor enforces
-  (`count_children` vs `max_pods/0`) — the pre-flight twin of its `max_children` refusal,
-  for callers that must gate BEFORE side effects. Raison d'être: the dispatcher LOCKS the
-  issue on the forge before spawning; discovering saturation only at `spawn_pod`
-  (`{:error, :max_children}`) forced a lock→unlock compensation on EVERY tick at saturation
-  (~4 forge writes/issue/30s polluting the issue timeline, and the tally counted "full" as
-  an ERROR → poller backoff as if the forge were down). Pre-flight = defer without a write.
-  The residual TOCTOU (last slot stolen between check and spawn) still lands on
-  `max_children` + the caller's compensation — this gate makes that the rare exception,
-  not the steady-state mechanism.
-  """
-  @spec has_capacity?() :: boolean()
-  def has_capacity?, do: count_pods() < max_pods()
+  def max_pods, do: Application.get_env(:fleet_spawner, :max_pods, 128)
 
   @doc """
   Is there a free pool SEAT for this `(role, repo)`? — the per-role twin of `has_capacity?/0`,

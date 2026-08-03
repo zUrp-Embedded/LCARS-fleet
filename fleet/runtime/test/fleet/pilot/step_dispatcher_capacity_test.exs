@@ -46,19 +46,9 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
          }}
   end
 
-  # Saturated + fresh pod: has_capacity? false, pod_info :error (pod not alive).
-  defmodule FullFreshSpawner do
-    def has_capacity?, do: false
-    def pod_info(_pod_id), do: {:error, :not_found}
-    def spawn_pod(_p, _i, _o), do: raise("spawn_pod must NEVER be reached at saturation")
-    def wake_pod(_pod_id), do: :ok
-    def kill_pod(_pod_id), do: :ok
-  end
-
   # Global room, but the ROLE's bucket is full — the ceiling `PoolSlot.allocate/3` will enforce.
   # The two pre-flights are independent: passing the global one proves nothing about the seat.
   defmodule FullRoleSpawner do
-    def has_capacity?, do: true
     def has_free_slot?(_role, _repo, _slot_scope), do: false
     def pod_info(_pod_id), do: {:error, :not_found}
     def spawn_pod(_p, _i, _o), do: raise("spawn_pod must NEVER be reached on a full role bucket")
@@ -69,8 +59,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   # Same, but it RECORDS the bucket it was asked about: a pre-flight that interrogates a different
   # bucket than the wall is worse than none, so the arguments are what this pins.
   defmodule BucketRecordingSpawner do
-    def has_capacity?, do: true
-
     def has_free_slot?(role, repo, slot_scope) do
       send(self(), {:bucket, role, repo, slot_scope})
       false
@@ -85,7 +73,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   # Room available and no live pod: the spawn WOULD proceed — so a refusal in these tests can only
   # come from the order materialization, never from capacity.
   defmodule FreshSpawner do
-    def has_capacity?, do: true
     def pod_info(_pod_id), do: {:error, :not_found}
 
     def spawn_pod(_p, _i, _o),
@@ -106,7 +93,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
 
   # TOCTOU: the free slot at check time is stolen before the spawn → :max_children at real spawn.
   defmodule ToctouSpawner do
-    def has_capacity?, do: true
     def pod_info(_pod_id), do: {:error, :not_found}
     def spawn_pod(_p, _i, _o), do: {:error, :max_children}
     def wake_pod(_pod_id), do: :ok
@@ -220,7 +206,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # Load-bearing: gating a live pipe pod at saturation would starve the very pipe holding the
     # seat. The spawner says the bucket is full and the dispatch goes through anyway.
     defmodule LivePodFullRoleSpawner do
-      def has_capacity?, do: true
       def has_free_slot?(_role, _repo, _scope), do: false
       def pod_info(_pod_id), do: {:ok, %{phase: :monitoring}}
       def wake_pod(_pod_id), do: :ok
@@ -250,7 +235,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # unlabelled (an error says nothing about what a ticket waits for), so it was silently not
     # dispatched. The two saturation paths now say the same thing.
     defmodule WallRefusesSpawner do
-      def has_capacity?, do: true
       # The pre-flight is optimistic — this is the TOCTOU, so it must answer yes.
       def has_free_slot?(_role, _repo, _scope), do: true
       def pod_info(_pod_id), do: {:error, :not_found}
@@ -279,7 +263,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
 
   test "a real post-lock failure stays an ERROR — only saturation converts" do
     defmodule BrokenSpawner do
-      def has_capacity?, do: true
       def has_free_slot?(_role, _repo, _scope), do: true
       def pod_info(_pod_id), do: {:error, :not_found}
       def spawn_pod(_p, _i, _o), do: {:error, :launch_failed}
@@ -299,24 +282,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                42,
                "ctx"
              )
-  end
-
-  test "saturated + FRESH spawn → {:skipped, :at_capacity}, NO forge write (no lock)" do
-    assert {:skipped, :at_capacity} =
-             Spawn.spawn_step(
-               seams(FullFreshSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               "brief",
-               [],
-               42,
-               42,
-               "ctx"
-             )
-
-    refute_received {:add_label, _}
-    refute_received {:remove_label, _}
   end
 
   test "saturated + ALIVE pod → the re-brief PROCEEDS (a live pipe creates no child: not starved)" do
@@ -355,35 +320,5 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # the lock was taken THEN compensated (remove_label) — the TOCTOU net holds
     assert_received {:add_label, "lcars-in-flight"}
     assert_received {:remove_label, "lcars-in-flight"}
-  end
-
-  test "end-to-end propagation: dispatch_issue returns {:skipped, :at_capacity} (tally skip, not error)" do
-    payload = %{
-      "issue" => %{
-        "number" => 42,
-        "body" => "fais le hello",
-        "labels" => [],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
-    }
-
-    opts = [
-      repo: "lordzurp/lcars-test",
-      forge_client: CaptureForge,
-      forge_opts: [_test_route: {:ok, {"g", "build"}}],
-      loader: StubLoader,
-      spawner: FullFreshSpawner,
-      task_queue: StubTaskQueue,
-      project_resolver: fn _repo, _opts -> {:ok, nil} end,
-      workflow_map_loader: fn _name ->
-        %{
-          "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
-          "max_rework_rounds" => 2
-        }
-      end
-    ]
-
-    assert {:skipped, :at_capacity} = StepDispatcher.dispatch_issue(payload, opts)
-    refute_received {:add_label, _}
   end
 end
