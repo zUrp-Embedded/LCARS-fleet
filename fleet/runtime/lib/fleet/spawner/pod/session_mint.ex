@@ -62,9 +62,10 @@ defmodule Fleet.Spawner.Pod.SessionMint do
           Fleet.CapProfile.kill_class(cap_profile),
           uid,
           repo,
-          # POOL (2026-08-03) : l'index de slot alloue au spawn par `Fleet.Spawner.PoolSlot`.
-          # Defaut 0 pour tout appelant qui n'alloue pas (recall, admin, tests) — le comportement
-          # historique, ou le nibble valait toujours 0.
+          # POOL — the slot index allocated at the child's start by `Fleet.Spawner.PoolSlot`.
+          # Default 0 for any caller that does not allocate (tests building args by hand): 0 is the
+          # RESERVED seat, so an unallocated pod carries the value that says "outside the managed
+          # fan-out" rather than colliding with an allocated one.
           Keyword.get(opts, :pool, 0)
         )
 

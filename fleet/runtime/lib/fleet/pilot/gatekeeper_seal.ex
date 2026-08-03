@@ -249,17 +249,17 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # every caller — the seal merges a PR, and a PR always has a base (single-default-site).
     _ = worktree_sync().sync(repo, Keyword.fetch!(opts, :base_branch))
 
-    # FOSSOYEUR (2026-08-03) — le producteur cle par TICKET meurt ICI, jamais avant.
-    # Un producteur `slot_scope: instance` est context-long : RIEN ne le moissonne (le PodWarden
-    # ne balaie que le SUBSTRAT des pods deja morts), donc sans cet appel les pods s'empilent
-    # jusqu'a `max_pods` et la fleet se coince sur un `:at_capacity` SILENCIEUX. L'accroche est le
-    # SCELLEMENT, jamais `pod.completed` : une completion ne finit qu'un ROUND, et tout l'interet
-    # du ticket-live est que le producteur garde son contexte a travers ses rounds de rework —
-    # le tuer a la completion restaurerait exactement le defaut que ce lot retire. Le merge est la
-    # fin du ticket, donc la fin du producteur. Best-effort par construction : un merge fait
-    # autorite et ne se defait pas pour une moisson ratee ; `:not_found` est le cas NOMINAL (deja
-    # mort, ou producteur clé par projet qui doit survivre a son ticket) — d'ou l'absence de
-    # chemin d'erreur, et l'idempotence au rejeu.
+    # REAPER — a TICKET-keyed producer dies HERE, never earlier.
+    # A `slot_scope: instance` producer is context-long, and NOTHING harvests it on its own (the
+    # PodWarden only sweeps the SUBSTRATE of already-dead pods). Without this call the pods pile up
+    # to `max_pods` and the fleet wedges on a SILENT `:at_capacity`.
+    # The hook is the SEAL, never `pod.completed`: a completion ends a ROUND, and the whole point of
+    # ticket-live is that the producer keeps its context ACROSS its rework rounds — killing it at
+    # completion would restore the exact defect this lot removes. The merge ends the ticket, so it
+    # ends the producer.
+    # Best-effort by construction: a merge is authoritative and does not undo itself for a failed
+    # harvest, and `:not_found` is the NOMINAL case (already dead, or a project-keyed producer that
+    # must outlive this ticket) — hence no error path, and idempotence on replay.
     _ = reap_ticket_producer(repo, issue_n, producer)
 
     case close_result do
@@ -275,10 +275,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
-  # Tue le pod producteur lie a CE ticket, et lui seul. L'identite se lit dans le catalogue comme
-  # le dispatcher la construit (`slot_scope` + `PodId`), jamais une chaine devinee : un role cle
-  # par PROJET resout vers un id partage, que cette fonction ne doit PAS tuer — c'est donc le
-  # scope qui decide, et `instance` est le seul moissonne.
+  # Kills the producer pod bound to THIS ticket, and it alone. The identity is read from the
+  # catalogue the way the dispatcher BUILDS it (`slot_scope` + `PodId`), never a guessed string: a
+  # PROJECT-keyed role resolves to a shared id this function must NOT kill. So the scope decides,
+  # and `instance` is the only one harvested.
   defp reap_ticket_producer(repo, issue_n, producer) do
     with true <- producer != "",
          {:ok, profile} <- Fleet.CapProfile.load(producer),

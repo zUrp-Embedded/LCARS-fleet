@@ -67,12 +67,12 @@ spec:
     # (qualifier, reviewer, scoper) are one-shot. Reversible: set `one-shot` back
     # here — the gate's one-shot path is UNCHANGED.
     lifetime_scope: pipe
-    # TICKET-LIVE (2026-08-03) : un pod par TICKET, qui survit a ses rounds de rework sans
-    # survivre a son ticket. `pipe` seul derivait `slot_scope: project` — UN pod pour tout le
-    # depot, re-brief par reset de workspace + `/clear` : le processus survivait, le CONTEXTE
-    # mourait. Or c'est le contexte qui compte quand un livrable revient corrige. Declarer
-    # `instance` cle le pod sur (repo, issue, role) : le re-dispatch du MEME ticket retombe sur
-    # le MEME pod et le re-briefe sans rien effacer.
+    # TICKET-LIVE — one pod per TICKET, surviving its rework rounds without outliving its ticket.
+    # `pipe` alone derived `slot_scope: project`: ONE pod for the whole repo, re-briefed by a
+    # workspace reset plus `/clear` — the process survived and the CONTEXT died. Yet the context is
+    # what matters when a deliverable comes back for correction. Declaring `instance` keys the pod
+    # on (repo, issue, role): a re-dispatch of the SAME ticket lands on the SAME pod and re-briefs
+    # it without erasing anything.
     slot_scope: instance
     model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
