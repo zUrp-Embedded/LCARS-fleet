@@ -101,6 +101,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
+        check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
@@ -1125,6 +1126,52 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           "role_index #{idx} claimed by: #{Enum.join(Enum.sort(names), ", ")}"
         end),
       note: "role_index (hexspeak UUID slot) unique across the canon catalogue, seats included"
+    }
+  end
+
+  # Le mot « sanctuaire »/« sanctuary » porte un prior NL dominant — sacre, intouchable — et son
+  # seul anticorps est de la PROSE (« Aucun code n'est sacre », CLAUDE.md ; « THIS FILE is NOT the
+  # sanctuary », bwrap_launch.sh). Or la prose est la premiere chose qu'une compression de contexte
+  # retire : il reste le mot, il ne reste plus la correction. Le symptome est mesure — un agent
+  # refuse d'editer le launcher parce qu'il l'a lu comme sacre.
+  #
+  # Ce verrou ne RENOMME rien (ce serait un arbitrage de vocabulaire, pas un fix) : il empeche le
+  # mot de SE REPANDRE. Trois fichiers l'emploient aujourd'hui, chacun a cote de son anticorps ;
+  # un quatrieme le ferait sans, et c'est exactement comme un prior s'installe. Un lint ne repare
+  # pas un prior, il borne sa surface (BL-6-44).
+  # Le fichier du check est dans la liste par NECESSITE : il doit nommer le mot pour l'interdire.
+  # C'est la seule exemption qui ne demande pas d'anticorps — un verrou ne se piege pas lui-meme.
+  @sanctuary_allowed ~w(
+    bin/bwrap_launch.sh
+    lib/fleet/cap_profile/invariants.ex
+    lib/fleet/spawner/pod/launch_spec.ex
+    lib/mix/tasks/lcars.contracts.check.ex
+  )
+
+  defp check_sanctuary_contained(root) do
+    offenders =
+      ["lib", "bin", "etc"]
+      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs,sh}"])) end)
+      |> Enum.filter(fn f ->
+        rel = Path.relative_to(f, root)
+
+        rel not in @sanctuary_allowed and
+          match?({:ok, c} when is_binary(c), File.read(f)) and
+          File.read!(f) =~ ~r/sanctuaire|sanctuary/i
+      end)
+      |> Enum.map(&Path.relative_to(&1, root))
+
+    %{
+      id: "vocab.sanctuary_contained",
+      remediation:
+        "le mot « sanctuaire »/« sanctuary » porte un prior NL dominant (sacre, intouchable) que " <>
+          "seule de la prose corrige — et la prose est ce qu'une compression de contexte retire " <>
+          "d'abord. Employer un terme descriptif (le monde projete, le perimetre du pod), ou " <>
+          "ajouter le fichier a @sanctuary_allowed EN Y METTANT l'anticorps",
+      status: if(offenders == [], do: :pass, else: :fail),
+      evidence: offenders,
+      note:
+        "le mot reste borne aux #{length(@sanctuary_allowed)} fichiers qui portent son anticorps (BL-6-44)"
     }
   end
 

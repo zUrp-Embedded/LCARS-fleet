@@ -30,7 +30,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   The MCP server spec is read from config (`:fleet_spawner, :mcp_server_spec`); the resolved backend
   is passed by the Pod (single source `Fleet.Spawner.LaunchBackend.resolved/0`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -204,7 +204,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # Builds the `fleet` MCP server entry of the `.mcp-fleet.json`, provisioning
   # the stdio bridge INTO the pod_dir.
   #
-  # bwrap projects the pod's SANCTUARY — it mounts only
+  # bwrap projects a CLOSED WORLD for the pod — it mounts only
   # `/usr`, `/etc`, `/sys`, `$POD_DIR`, `$GIT_MIRROR`, the vendor and the sock-dir.
   # `/var/lib/lcars` is NOT mounted there. Launching the bridge via its HOST path
   # (`/var/lib/lcars/bin/...py`) with a log under `/var/lib/lcars/` would fail:
