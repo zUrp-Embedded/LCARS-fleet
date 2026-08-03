@@ -598,6 +598,28 @@ defmodule Fleet.CapProfile do
   def remote_control?(_), do: true
 
   @doc """
+  Does this role hold a FORGE IDENTITY — its own account and role token? (`metadata.forge_identity`,
+  absent = `true`.)
+
+  `false` is the explicit declaration of an asymmetry: an orchestrator whose forge writes all go
+  through the system account (`starfleet`). Until now the field had NO runtime reader — only
+  `mix lcars.contracts.check` consulted it, to exclude such a role from the four-list provisioning
+  equality. So the runtime could not tell "this role declares no identity" from "this role's token
+  is MISSING", and the two got the same treatment: an attempt, a failure, and a warning telling the
+  operator to check a provisioning that is working as declared.
+
+  That mattered beyond tidiness. It made `forge_identity: false` unusable for any role reached by
+  the dispatch: choosing it meant accepting a permanent "provisioning defect" warning on every
+  spawn — so the choice between "give this role an account" and "declare it has none" was not a
+  choice at all.
+  """
+  @spec forge_identity?(t()) :: boolean()
+  def forge_identity?(%__MODULE__{metadata: meta}) when is_map(meta),
+    do: Map.get(meta, "forge_identity", true) != false
+
+  def forge_identity?(_), do: true
+
+  @doc """
   Is the profile in sandboxed bwrap containment (the default)? `false` = host-native (`"none"`, the
   pod runs on the host *as* the human). The single predicate for host-native guards (e.g. API admission).
   """

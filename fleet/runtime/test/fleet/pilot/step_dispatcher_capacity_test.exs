@@ -274,6 +274,61 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     refute attrs.brief =~ order
   end
 
+  test "a role DECLARING no forge identity is not a provisioning hole — no as_role, no warning" do
+    # `forge_identity: false` had no runtime reader: only `mix lcars.contracts.check` consulted it.
+    # So the dispatch could not tell "declares none" from "token MISSING" and warned identically —
+    # telling the operator to check a provisioning that works as declared. That made the flag
+    # unusable for any role the dispatch reaches, which is why choosing it was never a real choice.
+    no_identity =
+      put_in(profile().metadata, Map.put(profile().metadata, "forge_identity", false))
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, {:spawned, _, _}} =
+                 Spawn.spawn_step(
+                   seams(RecordingSpawner),
+                   "pod-x",
+                   "engineer",
+                   no_identity,
+                   "brief",
+                   [repo_id: 7],
+                   42,
+                   42,
+                   "ctx"
+                 )
+      end)
+
+    refute log =~ "no forge token"
+    refute log =~ "role account/token provisioning"
+  end
+
+  test "a role that DOES hold an identity still warns when its token is missing" do
+    # The other half, and the reason the warning exists: an absent token for a role that claims one
+    # IS a provisioning defect, and its only forge-visible symptom is "the worker never shows up on
+    # the ticket" — measured twice, one diagnosis session each.
+    #
+    # `scribe` and not `engineer`: the test fixture holds a token for engineer, so it would take the
+    # succeeding path and the assertion would measure nothing. (Checked rather than assumed — the
+    # first version of this test asserted on engineer and passed nothing.)
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, {:spawned, _, _}} =
+                 Spawn.spawn_step(
+                   seams(RecordingSpawner),
+                   "pod-x",
+                   "scribe",
+                   profile(),
+                   "brief",
+                   [repo_id: 7],
+                   42,
+                   42,
+                   "ctx"
+                 )
+      end)
+
+    assert log =~ "no forge token"
+  end
+
   test "role bucket FULL + fresh spawn → {:skipped, :role_at_capacity}, NO forge write (no lock)" do
     # The wall is `PoolSlot.allocate/3`, INSIDE the spawn — i.e. past the forge lock. Without this
     # pre-flight, saturation of one role means a lock/unlock cycle per issue per tick and "full"

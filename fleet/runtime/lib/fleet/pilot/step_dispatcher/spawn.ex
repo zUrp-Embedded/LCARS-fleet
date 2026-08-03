@@ -317,10 +317,18 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          # under `lcars-system`, never the real worker. Gitea requires the SAME identity for start AND stop
          # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
          # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
+         # A role that DECLARES no forge identity is not a provisioning hole: its writes go through
+         # the system by design, so there is no `as_role` to attempt and nothing to warn about. The
+         # declaration had no runtime reader until now, which made `forge_identity: false` unusable
+         # for any role the dispatch reaches — picking it bought a permanent "check your
+         # provisioning" warning on every spawn.
          _ =
-           (case Fleet.Pilot.ForgeClient.as_role(forge_opts, role) do
+           (case forge_identity_or_none(profile, forge_opts, role) do
               {:ok, ro} ->
                 forge.start_stopwatch(repo, lock_target, ro)
+
+              :no_identity ->
+                :ok
 
               {:error, :role_token_unavailable} ->
                 # STILL best-effort (a pure Gitea metric never blocks a dispatch) but no longer
@@ -394,7 +402,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # same role) — Gitea accepts the stop ONLY from the user who started it. Pure Gitea metric
         # (best-effort, NOT load-bearing) → its failure is not surfaced.
         _ =
-          with {:ok, ro} <- Fleet.Pilot.ForgeClient.as_role(forge_opts, role) do
+          with {:ok, ro} <- forge_identity_or_none(profile, forge_opts, role) do
             forge.stop_stopwatch(repo, lock_target, ro)
           end
 
@@ -491,6 +499,17 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     if function_exported?(spawner, :kill_pod, 1), do: spawner.kill_pod(pod_id), else: :ok
   rescue
     _ -> :ok
+  end
+
+  # `as_role`, unless the role DECLARES it has no forge identity — in which case there is nothing to
+  # resolve and no anomaly to report. Same shape as the predicate it wraps; `:no_identity` is a
+  # third answer, not an error, so a caller cannot fold it into the failure branch by accident.
+  defp forge_identity_or_none(profile, forge_opts, role) do
+    if Fleet.CapProfile.forge_identity?(profile) do
+      Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
+    else
+      :no_identity
+    end
   end
 
   # Capacity pre-flight. Default-ALLOW when the seam does not expose the predicate (test stubs — mirror of
