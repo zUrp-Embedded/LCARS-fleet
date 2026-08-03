@@ -1,5 +1,8 @@
 defmodule Fleet.ProjectBootstrap.CloneTest do
-  # Doc-mount (invoked world): clones the code branch (workspace) + the doc branch (work/ops) into the pod.
+  # Workspace clone (invoked world): the pod's CODE face. The project's doc is NOT cloned here — it
+  # reaches the pod as an RO bind of the runtime's own work/ops worktree (`LCARS_PROJECT_OPS`).
+  # A second mechanism cloning it into `<pod_dir>/work` existed and NEVER ran (its trigger field had
+  # no writer in the whole corpus); removed 2026-08-03.
   # REAL git fixture (no mock) — source repo with `main` + orphan branch `work/ops`.
   # async: git fixtures isolated by tmp_dir (git -C) — no application env mutated.
   use ExUnit.Case, async: true
@@ -46,30 +49,23 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
              Clone.clone_or_skip("relative-pod-x", profile, [])
 
-    assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
-             Clone.clone_work_doc("relative-pod-x", profile)
-
     refute File.exists?("relative-pod-x"),
            "a relative pod_dir must create/erase NOTHING (guard before any I/O)"
   end
 
-  test "clone code (workspace) + doc (work) side by side", %{tmp_dir: tmp} do
+  test "clone code (workspace)", %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src"))
     pod_dir = Path.join(tmp, "pod-test-1")
     File.mkdir_p!(pod_dir)
-    profile = cap(%{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"})
+    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
 
-    # code branch → <pod_dir>/workspace
+    # code branch → <pod_dir>/workspace. The project's DOC does not come through here: it reaches
+    # the pod as an RO bind of the runtime's own work/ops worktree (`LCARS_PROJECT_OPS`).
     assert {:ok, ws, feature} = Clone.clone_or_skip(pod_dir, profile, [])
     assert ws == Path.join(pod_dir, "workspace")
     assert File.exists?(Path.join(ws, "src.txt"))
     assert feature =~ "feature/"
-
-    # doc branch → <pod_dir>/work
-    assert {:ok, doc} = Clone.clone_work_doc(pod_dir, profile)
-    assert doc == Path.join(pod_dir, "work")
-    assert File.exists?(Path.join(doc, "BACKLOG.md"))
-    refute File.exists?(Path.join(doc, "src.txt"))
+    refute File.exists?(Path.join(pod_dir, "work"))
   end
 
   test "the workspace clone brings ONE branch — a neighbour's is not one checkout away", %{
@@ -174,43 +170,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(ws, "b.txt"))
   end
 
-  test "work_branch nil → skip (project without a doc branch)", %{tmp_dir: tmp} do
-    src = make_source_repo(Path.join(tmp, "src2"))
-    pod_dir = Path.join(tmp, "pod-test-2")
-    File.mkdir_p!(pod_dir)
-    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
-
-    assert {:ok, nil} = Clone.clone_work_doc(pod_dir, profile)
-    refute File.exists?(Path.join(pod_dir, "work"))
-  end
-
-  test "work_branch declared but absent → fail-loud (I-CBC)", %{tmp_dir: tmp} do
-    src = make_source_repo(Path.join(tmp, "src3"))
-    pod_dir = Path.join(tmp, "pod-test-3")
-    File.mkdir_p!(pod_dir)
-    profile = cap(%{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/nope"})
-
-    assert {:error, {:work_doc_clone_failed, {"work/nope", _code, _out}}} =
-             Clone.clone_work_doc(pod_dir, profile)
-  end
-
   # MA-22/F-BOOT-FM-03 — `rm_rf` parity: a residual `work/` (dead predecessor pod) must not
   # wedge the re-dispatch on "destination already exists".
-  test "clone_work_doc idempotent: residual work/ → cleaned + re-cloned", %{tmp_dir: tmp} do
-    src = make_source_repo(Path.join(tmp, "src-doc-idem"))
-    pod_dir = Path.join(tmp, "pod-doc-idem")
-    File.mkdir_p!(pod_dir)
-    profile = cap(%{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"})
-
-    assert {:ok, doc} = Clone.clone_work_doc(pod_dir, profile)
-    File.write!(Path.join(doc, "stale.txt"), "residue from a dead doc pod")
-
-    # re-dispatch on the SAME pod_dir: without rm_rf → clone refuses (non-empty dest); with → clean re-clone.
-    assert {:ok, ^doc} = Clone.clone_work_doc(pod_dir, profile)
-    assert File.exists?(Path.join(doc, "BACKLOG.md"))
-    refute File.exists?(Path.join(doc, "stale.txt"))
-  end
-
   # ============================================================
   # MOVE-1/MA-22 — the clone is BOUNDED by construction: a HANGING git is killed within the deadline,
   # the pod does NOT stay zombie (the caller gets a typed error instead of freezing forever).
@@ -355,26 +316,6 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     {status, 0} = git(["status", "--porcelain"], ws)
     assert String.trim(status) == ""
     assert File.exists?(sentinel)
-  end
-
-  test "work_branch failing the ref grammar → typed refusal BEFORE git (no option injection)", %{
-    tmp_dir: tmp
-  } do
-    # The cap-profile types work_branch as a bare string: a ref starting with `-` would read as a
-    # git OPTION on the clone argv. The gate refuses it typed — git is never invoked (the repo_path
-    # below does not even exist, so reaching git would fail differently).
-    pod_dir = Path.join(tmp, "pod-evil-branch")
-    File.mkdir_p!(pod_dir)
-
-    profile =
-      cap(%{
-        "repo_path" => Path.join(tmp, "no-such-repo"),
-        "base_branch" => "main",
-        "work_branch" => "--upload-pack=/tmp/evil"
-      })
-
-    assert {:error, {:work_doc_clone_failed, {:invalid_work_branch, _}}} =
-             Clone.clone_work_doc(pod_dir, profile)
   end
 
   # ── BL-6-16 — workspace sanitisation (the parking-lot USB never reaches the directive tier) ──

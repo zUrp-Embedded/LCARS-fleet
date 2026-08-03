@@ -2049,11 +2049,7 @@ defmodule Fleet.Spawner.PodTest do
         base
         | spec:
             base.spec
-            |> Map.put("project", %{
-              "repo_path" => src,
-              "base_branch" => "main",
-              "work_branch" => "work/ops"
-            })
+            |> Map.put("project", %{"repo_path" => src, "base_branch" => "main"})
       }
 
       StubBackend.set_reply(interactive_reply())
@@ -2082,7 +2078,9 @@ defmodule Fleet.Spawner.PodTest do
 
       # doc-mount: code branch + doc branch cloned side by side in the pod
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
-      assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
+
+      # No `<pod_dir>/work`: the project doc is an RO bind of the runtime's worktree, never a clone.
+      refute File.exists?(Path.join([pod_dir, "work"]))
 
       # P2: composed CLAUDE.md present AT THE CWD ROOT (workspace), not only at the pod_dir
       assert File.exists?(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
@@ -2110,7 +2108,7 @@ defmodule Fleet.Spawner.PodTest do
         issue_id: "t-1",
         pod_id: pod_id,
         opts: [
-          project: %{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"},
+          project: %{"repo_path" => src, "base_branch" => "main"},
           repo_id: @test_repo_id
         ]
       }
@@ -2120,12 +2118,14 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, env}, 3_000
       pod_dir = env["HOME"]
 
-      # the brief's project is cloned (code + doc) + cwd set, without any project in the catalog
+      # the brief's project is cloned (CODE face) + cwd set, without any project in the catalog
       # #monde-propre Stage B: INTRA-POD cwd relocated (the real pod_dir hidden behind /home/.pod).
       # Legacy project-without-rc_name → the relocated workspace. (An rc_name worker would see /home/<project>.)
       assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
-      assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
+
+      # No `<pod_dir>/work`: the project doc is an RO bind of the runtime's worktree, never a clone.
+      refute File.exists?(Path.join([pod_dir, "work"]))
     end
   end
 

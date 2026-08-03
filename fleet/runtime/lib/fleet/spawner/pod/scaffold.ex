@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
   (recall restore). No dependency toward `Fleet.Spawner.Pod`.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -76,11 +76,15 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   Wiring of `Fleet.ProjectBootstrap.Phase.Clone` for pods carrying a project (`repo_path`): the
   EFFECTIVE project comes from the BRIEF (`LaunchSpec.effective_project/2`: `opts[:project]`
   injected by the issue→repo dispatch) or from the static cap_profile (permanent pods). Present:
-  clones the repo into `<pod_dir>/workspace/` + checkout of the feature branch + doc branch
-  (`work/ops` — nil if the project has no doc branch, fail-loud if declared but absent); the REPL's
-  cwd points at this workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) → the agent codes INSIDE its
+  clones the repo into `<pod_dir>/workspace/` + checkout of the feature branch; the REPL's cwd
+  points at this workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) → the agent codes INSIDE its
   branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
   workspace (with cwd=workspace it must be INSIDE the cwd). Absent (`repo_path` nil) → no-op.
+
+  The project's doc is NOT cloned here: it reaches the pod as an RO BIND of the runtime's own
+  work/ops worktree (`LaunchSpec.project_ops_path/3` → `LCARS_PROJECT_OPS`). A second mechanism
+  cloning it into `<pod_dir>/work` existed and never ran — its trigger field had no writer anywhere
+  in the corpus — so a reader met the dead one first and took it for the live one.
 
   The pod's commit identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
   the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*` = the HUMAN, role in the
@@ -104,13 +108,6 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                  state.pod_dir,
                  eff_cap,
                  []
-               ),
-             # Doc-mount: the `work/ops` branch (plans/backlog/conventions) alongside
-             # the code. nil if the project has no doc branch; fail-loud if declared but absent.
-             {:ok, doc} <-
-               Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
-                 state.pod_dir,
-                 eff_cap
                ) do
           # Repo-section rail, revived HERE and not at :projecting (BL-6-16): the composer runs
           # at :projecting, the clone at :launching — the original rail expected
@@ -147,8 +144,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           end
 
           Logger.info(
-            "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
-              if(doc, do: " doc=#{doc}", else: " (no doc branch)")
+            "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})"
           )
 
           :ok

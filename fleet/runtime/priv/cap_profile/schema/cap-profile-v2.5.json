@@ -286,12 +286,6 @@
                 "string",
                 "null"
               ]
-            },
-            "work_branch": {
-              "type": [
-                "string",
-                "null"
-              ]
             }
           }
         },
