@@ -201,7 +201,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                Spawn.project_scope_decision(
                  Fleet.CapProfile.lifetime_scope(profile),
                  spawner,
-                 pod_id
+                 pod_id,
+                 scope
                ),
              :ok <- Spawn.gate_scope_decision(decision),
              # THE single default site of the project FACE (inventory §D): the card's step says

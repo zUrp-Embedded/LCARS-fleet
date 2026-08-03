@@ -142,7 +142,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
            Spawn.project_scope_decision(
              Fleet.CapProfile.lifetime_scope(profile),
              ctx.spawner,
-             pod_id
+             pod_id,
+             Fleet.CapProfile.slot_scope(profile)
            ),
          :ok <- Spawn.gate_scope_decision(decision),
          {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),

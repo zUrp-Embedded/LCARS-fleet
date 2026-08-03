@@ -639,12 +639,27 @@ defmodule Fleet.CapProfile do
   `for_issue`/`for_pr` off this. `lifetime_scope` is schema-REQUIRED (`invocation.required`) + enum-gated
   (`g24_4`) → always present+valid for a loaded profile; the `"one-shot"` default is the safe fail (a role
   without a lifetime = ephemeral = fans out, never a shared serialized slot claimed by mistake).
+
+  **DECLARABLE since 2026-08-03** — `invocation.slot_scope` (optional, enum-gated by the schema)
+  OVERRIDES the derivation. Reason, measured: the derivation is a total function, so ONE
+  combination could not be written — context-long AND one pod per ticket. That combination is
+  what a producer needs: it must survive its rework rounds (keep the context of what it just
+  built) WITHOUT outliving its ticket. Under the pure derivation a producer was project-keyed,
+  so the next ticket re-briefed the SAME pod through a workspace reset + `/clear`: the process
+  survived and the context died — neither fan-out nor memory. Absent field = historical
+  derivation, so every profile that does not declare keeps its behaviour to the letter.
   """
   @spec slot_scope(t()) :: String.t()
-  def slot_scope(%__MODULE__{} = profile) do
-    case lifetime_scope(profile) do
-      "one-shot" -> "instance"
-      _context_long -> "project"
+  def slot_scope(%__MODULE__{spec: spec} = profile) do
+    case get_in(spec, ["invocation", "slot_scope"]) do
+      scope when scope in ["instance", "project"] ->
+        scope
+
+      _ ->
+        case lifetime_scope(profile) do
+          "one-shot" -> "instance"
+          _context_long -> "project"
+        end
     end
   end
 

@@ -455,11 +455,30 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
   """
-  @spec project_scope_decision(String.t(), module(), String.t()) ::
+  @spec project_scope_decision(String.t(), module(), String.t(), String.t()) ::
           :proceed | :role_busy | :ready_needs_reprovision
-  def project_scope_decision("one-shot", _spawner, _pod_id), do: :proceed
+  def project_scope_decision(lifetime_scope, spawner, pod_id, slot_scope \\ "project")
 
-  def project_scope_decision(_context_long, spawner, pod_id) do
+  def project_scope_decision("one-shot", _spawner, _pod_id, _slot), do: :proceed
+
+  # TICKET-LIVE (2026-08-03) — a context-long producer keyed on the ISSUE.
+  # `:ready` does NOT mean the same thing under the two keyings, and reading it as one thing was
+  # the defect: under `project` the pod is shared, so `:ready` = "free for ANOTHER subject" and the
+  # workspace reset + `/clear` are the price of the switch. Under `instance` the pod belongs to ONE
+  # ticket, so `:ready` = "MY ticket is coming back" (rework after REQUEST_CHANGES) — and clearing
+  # there destroys exactly what makes the rework cheap: what the producer built and why. Measured
+  # in production 2026-08-03: deliverable 1 came back to the engineer WITH a `/clear`; it re-read
+  # everything cold while the reviews faulted decisions it no longer remembered making.
+  # So: re-brief in place, no reset, no `/clear`. The context is an asset of the ticket and lives
+  # until the merge.
+  def project_scope_decision(_context_long, spawner, pod_id, "instance") do
+    case pipe_rebrief_state(spawner, pod_id) do
+      :busy -> :role_busy
+      _dead_or_ready -> :proceed
+    end
+  end
+
+  def project_scope_decision(_context_long, spawner, pod_id, _project) do
     case pipe_rebrief_state(spawner, pod_id) do
       :dead -> :proceed
       :busy -> :role_busy
