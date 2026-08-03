@@ -31,7 +31,7 @@
 # Identity/session env (set by the spawner, INHERITED through the Port — no --setenv, no namespace to
 # repopulate; the pod runs in the daemon's real env, and the daemon runs as `User=<human>`):
 #   LCARS_POD_SESSION_ID          pre-allocated UUID — required (:? strict, consumed by claude_launch)
-#   LCARS_POD_SESSION_NAME_PREFIX required RC name prefix (<human>_<role>)
+#   LCARS_POD_SESSION_NAME_PREFIX required readable pod label, passed through verbatim
 #   HOME                          the human's REAL home (set by pod.ex for containment:none) → claude reads
 #                                 the native ~/.claude (auth :bind happens natively, OAuth refresh, no 8h
 #                                 cliff — the arch is a forever pod).
@@ -81,7 +81,7 @@ COMMAND=("$@")
 
 # Identity/session (read from the env, set by the spawner; :? strict — claude_launch requires them too).
 : "${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
-: "${LCARS_POD_SESSION_NAME_PREFIX:?RC name prefix required (<human>_<role>)}"
+: "${LCARS_POD_SESSION_NAME_PREFIX:?pod label required (Fleet.Layout.pod_label)}"
 
 # cwd = the branch root (the invoked world). Defaults to $POD_DIR; the spawner/bootstrap lays down the clone.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"

@@ -28,7 +28,7 @@
 # Identity/session env (set by the spawner before Port.open; propagated through --setenv):
 #   LCARS_POD_SESSION_ID          pre-allocated UUID — required (strict :?, consumed by claude_launch)
 #   LCARS_POD_RESUME              0|1 (first creation / recovery) — defaults to 0
-#   LCARS_POD_SESSION_NAME_PREFIX <human>_<role>, readable RC name — required (strict :?)
+#   LCARS_POD_SESSION_NAME_PREFIX readable pod label, passed through verbatim — required (strict :?)
 #   CLAUDE_DIR                    the human account's claudeDir — required (bound RW, cf. LCARS_AUTH_MODE)
 #   LCARS_AUTH_MODE               bind ONLY:
 #                                   - bind: RW bind of CLAUDE_DIR/.credentials.json ALONE →
@@ -106,7 +106,7 @@ COMMAND=("$@")
 # Identity/session (read from the env, set by the spawner; strict :? — claude_launch requires them too).
 SESSION_ID="${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
 POD_RESUME="${LCARS_POD_RESUME:-0}"
-SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?RC name prefix required (<human>_<role>)}"
+SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?pod label required (Fleet.Layout.pod_label)}"
 
 # Clean-world stage B: the intra-pod $HOME is relocated. SANDBOX_HOME is what the agent sees as its home
 # (and the root of EVERY pod bind: .claude, creds, vendor, plugins). Gated: LCARS_POD_HOME absent →

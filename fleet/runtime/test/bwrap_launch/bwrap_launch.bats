@@ -83,7 +83,7 @@ teardown() { rm -rf "$TMP_BASE"; }
 @test "session: non-zero exit + message when LCARS_POD_SESSION_NAME_PREFIX is absent" {
   unset LCARS_POD_SESSION_NAME_PREFIX
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$status" -ne 0 ]]; [[ "$output" == *"RC name prefix required"* ]]
+  [[ "$status" -ne 0 ]]; [[ "$output" == *"pod label required"* ]]
 }
 
 # ======================= Setup checks ========================

@@ -29,7 +29,8 @@
 # Identity env (supplied by the spawner; not subject to masking, so env is fine here, unlike the SP):
 #   LCARS_POD_SESSION_ID          PRE-ALLOCATED session UUID (uuidgen, state.json at spawn) — required
 #   LCARS_POD_RESUME              0 = first creation (--session-id); 1 = recovery (--resume)
-#   LCARS_POD_SESSION_NAME_PREFIX Desktop-readable RC name prefix (<human>_<role>) — required
+#   LCARS_POD_SESSION_NAME_PREFIX Desktop-readable pod label (<project>#<ticket>_<role>, or
+#                                 <project>_<role> when not ticket-bound) — required, verbatim
 #
 # Exit codes:
 #   0   : success (propagated through exec)
@@ -79,7 +80,7 @@ SP_FILE="$POD_DIR/.lcars/system-prompt.md"
 
 SESSION_ID="${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
 POD_RESUME="${LCARS_POD_RESUME:-0}"                          # 0 = first creation; 1 = recovery
-SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?RC name prefix required (<human>_<role>)}"
+SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?pod label required (Fleet.Layout.pod_label)}"
 
 # Permission (#kill-yolo): the world is shaped (bwrap RO/RW + cap-profile allow/deny), so
 # --dangerously-skip-permissions is NOT used any more — it NEUTRALISED our own lists (a leftover from the
@@ -238,7 +239,8 @@ dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
 RC_FLAGS=()
 # #chantier pod-seed: the EXACT RC name goes through `--remote-control "<name>"` (the optional positional
 # name), NOT `--remote-control-session-name-prefix`, which appends an auto suffix — random names piling up.
-# SESSION_NAME_PREFIX now carries the full `<project>_<role>` name (set by the spawner, pod.ex).
+# SESSION_NAME_PREFIX carries the WHOLE label, built by one function on the Elixir side
+# (Fleet.Layout.pod_label/3) and passed through verbatim: nothing here composes or parses it.
 [[ "$REMOTE_CONTROL" != "false" ]] &&
   RC_FLAGS=(--remote-control "$SESSION_NAME_PREFIX")
 dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
