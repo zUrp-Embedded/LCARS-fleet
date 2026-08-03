@@ -928,10 +928,38 @@ defmodule Fleet.Pilot.ForgeClient do
   def get_route(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, labels} <- get_issue_labels(config, repo, issue_number) do
-      case {current_wfmap(labels), current_stage(labels)} do
-        {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
-        _ -> :none
-      end
+      route_from_labels(labels)
+    end
+  end
+
+  @doc """
+  La route DERIVEE de labels deja en main — pure, zero I/O (BL-6-40 Phase 2).
+
+  `get_route/3` fait un `GET /issues/{n}/labels` par issue et par tick. Or l'appelant chaud
+  (`Poller.Lease.classify_issue`) tient DEJA les labels complets : `list_open_issues` les rend avec
+  l'issue. Une requete par issue, par repo, par tick, pour une donnee qui est en RAM.
+
+  Deux formes acceptees parce que les deux existent chez les appelants : la forme FIL (maps Gitea
+  `%{"name" => …}`, ce que rend `get_issue_labels`) et la liste de NOMS (ce que `classify_issue`
+  a deja projete). Accepter les deux evite d'imposer une re-projection a un appelant qui a
+  justement fait l'economie.
+
+  `get_route/3` reste, et n'est pas un doublon : un appelant qui n'a pas l'objet issue — une sonde,
+  un outil, un chemin qui part d'un numero — ne peut pas deriver ce qu'il n'a pas lu. Il delegue
+  ici apres avoir lu, donc la REGLE de derivation n'existe qu'une fois.
+  """
+  @spec route_from_labels([map() | String.t()]) :: {:ok, {String.t(), String.t()}} | :none
+  def route_from_labels(labels) when is_list(labels) do
+    normalized =
+      Enum.map(labels, fn
+        %{"name" => n} -> %{"name" => n}
+        n when is_binary(n) -> %{"name" => n}
+        _ -> %{"name" => nil}
+      end)
+
+    case {current_wfmap(normalized), current_stage(normalized)} do
+      {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
+      _ -> :none
     end
   end
 

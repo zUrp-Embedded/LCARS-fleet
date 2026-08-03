@@ -146,6 +146,41 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "route_from_labels/1 — la regle de derivation, sans I/O (BL-6-40 Phase 2)" do
+    test "wfmap + stage presents → la route" do
+      assert {:ok, {"brief-gate", "build"}} =
+               ForgeClient.route_from_labels([
+                 %{"name" => "lcars-in-flight"},
+                 %{"name" => "wfmap/brief-gate"},
+                 %{"name" => "stage/build"}
+               ])
+    end
+
+    test "accepte aussi une liste de NOMS — l'appelant chaud a deja projete" do
+      # `Poller.Lease.classify_issue` tient `Enum.map(labels, & &1["name"])`. Lui imposer une
+      # re-projection pour appeler cette fonction lui ferait payer l'economie qu'il vient de faire.
+      assert {:ok, {"ops-direct", "redaction"}} =
+               ForgeClient.route_from_labels(["wfmap/ops-direct", "stage/redaction"])
+    end
+
+    test "un seul des deux → :none, jamais une route a moitie" do
+      # Une route est un COUPLE. Rendre `{map, nil}` laisserait un appelant croire qu'il a de quoi
+      # charger une carte, et il echouerait une couche plus loin, sur une valeur qu'on lui a donnee.
+      assert :none = ForgeClient.route_from_labels([%{"name" => "wfmap/brief-gate"}])
+      assert :none = ForgeClient.route_from_labels([%{"name" => "stage/build"}])
+      assert :none = ForgeClient.route_from_labels([])
+    end
+
+    test "ignore les labels hors-scope au lieu de s'y perdre" do
+      assert :none =
+               ForgeClient.route_from_labels([
+                 %{"name" => "type:doc"},
+                 %{"name" => "genre/ops"},
+                 %{"name" => "lcars-awaits-arch"}
+               ])
+    end
+  end
+
   describe "repo_id/2 — the repo's forge id (source of truth for <REPO4>, BL-055)" do
     test "GET /repos/<repo> → {:ok, id} integer" do
       h = %{
