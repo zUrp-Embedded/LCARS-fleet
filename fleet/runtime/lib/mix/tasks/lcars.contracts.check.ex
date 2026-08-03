@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   use Mix.Task
@@ -100,6 +100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
+        check_sourcers_set_strict(root),
         check_mcp_wire_inputschema(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
@@ -1125,6 +1126,67 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         end),
       note: "role_index (hexspeak UUID slot) unique across the canon catalogue, seats included"
     }
+  end
+
+  # `provision-lib.sh` is SOURCED, so it inherits its caller's shell flags — it sets none of its
+  # own, which is correct for a library (a sourced file imposing `set -e` on its caller changes the
+  # caller's error semantics behind its back). The consequence is that its safety belongs to every
+  # SOURCER: without `set -u`, an undefined variable expands to the empty string and the recipe
+  # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
+  # `[object Object]`).
+  #
+  # Measured 2026-08-03: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
+  # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
+  # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
+  defp check_sourcers_set_strict(root) do
+    # `root` IS fleet/runtime (project_root/0) — the sibling trees hang off `..`, exactly as the
+    # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
+    # run, which is the worst of the three outcomes: a green that checked nothing.
+    dir = Path.expand("../provisioning_v2", root)
+
+    case tree_scope(dir) do
+      :out_of_scope ->
+        %{
+          id: "shell.sourcers_set_strict",
+          remediation: "—",
+          status: :pass,
+          evidence: [],
+          note:
+            "NOT CHECKED here (provisioning_v2 absent from this artifact — runtime-only context)"
+        }
+
+      :required ->
+        offenders =
+          [
+            Path.join(dir, "modules.d"),
+            Path.join(root, "etc")
+          ]
+          |> Enum.flat_map(fn d -> Path.wildcard(Path.join(d, "*.sh")) end)
+          |> Enum.filter(fn f ->
+            # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
+            # whole contracts run, turning a shell-hygiene check into a gate outage.
+            case File.read(f) do
+              {:ok, content} ->
+                String.contains?(content, "provision-lib.sh") and
+                  not Regex.match?(~r/^set -[a-z]*u[a-z]*\b/m, content)
+
+              {:error, _} ->
+                false
+            end
+          end)
+
+        %{
+          id: "shell.sourcers_set_strict",
+          remediation:
+            "a script sourcing provision-lib.sh must `set -u` (`set -euo pipefail`): the library " <>
+              "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
+              "expands to \"\" and the recipe provisions the wrong thing in silence",
+          status: if(offenders == [], do: :pass, else: :fail),
+          evidence: Enum.map(offenders, &Path.relative_to(&1, Path.expand("..", root))),
+          note:
+            "every sourcer of provision-lib.sh sets -u (BL-6-36: bash's silent-coercion class)"
+        }
+    end
   end
 
   # One provisioning list, read fail-closed: nil when the file or its anchor pattern is absent

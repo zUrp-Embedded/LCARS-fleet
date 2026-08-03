@@ -35,7 +35,16 @@ services:
       args:
         GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
         BUILD_DATE: "${LCARS_BUILD_DATE:-unknown}"
-    image: lcars-fleet:2
+    # LE TAG EST UNE VARIABLE, ET CE N'EST PAS DU CONFORT. Ecrit en dur, un `compose build` ECRASE
+    # ce tag pour tout le monde — y compris un banc qui TOURNE et qui le reference : le conteneur
+    # vivant n'est pas touche (il tient son image par son id), mais l'image d'origine cesse d'etre
+    # adressable et son prochain redemarrage le fait glisser en silence sur le code du dernier
+    # build. Mesure du 2026-08-03, sur ce fichier : un build lance avec `LCARS_IMAGE=lcars-fleet:nuit`
+    # a quand meme ecrase `:2`, parce que la variable n'etait lue nulle part ici. Le compose
+    # d'installation, lui, la lisait deja — la dissymetrie etait le piege.
+    #
+    # Pour construire A COTE d'un banc qui travaille : `LCARS_IMAGE=lcars-fleet:<nom> docker compose build`.
+    image: "${LCARS_IMAGE:-lcars-fleet:2}"
     # Le hostname se LIT dans le prompt (`\h`) et dans le titre des sessions : sans lui, docker
     # colle le hash du conteneur (`aa23b9d888c9`), illisible et different a chaque recreation.
     # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
