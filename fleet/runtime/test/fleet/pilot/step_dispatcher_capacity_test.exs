@@ -46,6 +46,22 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
          }}
   end
 
+  # Room, no live pod, and it RECORDS what the spawn was handed: the nominal materialized branch
+  # asserts on the ORDER, not on a refusal.
+  defmodule RecordingSpawner do
+    def has_capacity?, do: true
+    def has_free_slot?(_role, _repo, _scope), do: true
+    def pod_info(_pod_id), do: {:error, :not_found}
+
+    def spawn_pod(_p, _i, opts) do
+      send(self(), {:spawn_opts, opts})
+      {:ok, self()}
+    end
+
+    def wake_pod(_pod_id), do: :ok
+    def kill_pod(_pod_id), do: :ok
+  end
+
   # Global room, but the ROLE's bucket is full — the ceiling `PoolSlot.allocate/3` will enforce.
   # The two pre-flights are independent: passing the global one proves nothing about the seat.
   defmodule FullRoleSpawner do
@@ -160,6 +176,102 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
 
       refute_received {:add_label, _}
     end
+  end
+
+  @tag :tmp_dir
+  test "NOMINAL: the order is materialized, and what travels is the POINTER — not a second copy",
+       %{tmp_dir: tmp} do
+    # THE nominal branch, and it had NO coverage: measured before writing, zero test in the
+    # dispatcher suite materializes a brief — all of them run with the work_dir absent, i.e. on the
+    # DEGRADED rail. That is how the order's delivery could carry a self-referential instruction
+    # ("read the pin if the file changed", which requires the pin to evaluate) for a whole chantier
+    # without a test noticing.
+    #
+    # It needed a SEAM: `materialize/3` had `:work_root`, but the dispatcher never threaded it, so
+    # the real hardcoded global root was the only reachable one. Same seam, same reason, as
+    # `StepRunCompleter`'s.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+
+    work_dir = Path.join(tmp, "lcars-test")
+    File.mkdir_p!(work_dir)
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+    order = "Implémente le sélecteur de pièce suivante, avec ses tests."
+
+    assert {:ok, {:spawned, _pod, "engineer"}} =
+             Spawn.spawn_step(
+               seams(RecordingSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               order,
+               [repo_id: 7, work_root: tmp],
+               42,
+               42,
+               "ctx"
+             )
+
+    assert_received {:spawn_opts, spawn_opts}
+    sha = Keyword.fetch!(spawn_opts, :brief_sha)
+    ref = Keyword.fetch!(spawn_opts, :brief_ref)
+
+    # The ORDER travels through the QUEUE, and only there — measured while writing this: the
+    # dispatcher's spawn_opts carry `brief_ref`/`brief_sha` but no `:brief`. The pod pulls it with
+    # the MCP `get_work_item`.
+    assert_received {:enqueued, "pod-x", attrs}
+    payload = attrs.brief
+
+    # The pointer, addressed by its PIN — the one thing the pod is later asked to cite.
+    assert payload =~ "git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}"
+
+    # And NOT a second copy of the order. The committed doc is the single source; a payload that
+    # also carried the text would make "the version to judge" ambiguous the moment the two differ.
+    refute payload =~ order
+
+    # The doc really exists at that pin, and it holds the order.
+    {content, 0} = System.cmd("git", ["show", "#{sha}:#{ref}"], cd: work_dir)
+    assert content =~ order
+  end
+
+  @tag :tmp_dir
+  test "NOMINAL: no copy of the order text reaches the pod's spawn opts", %{tmp_dir: tmp} do
+    # The wall the IPC report asked for was "default_brief/1 never contains opts[:brief]". It cannot
+    # be written that way — interpolating `opts[:brief]` is that function's whole job. Measured, the
+    # property is one layer up and stronger: on the step rail the dispatcher puts NO `:brief` in the
+    # spawn opts at all, so `Pod.Brief.default_brief/1` has nothing to interpolate and the pod's
+    # `issues/<id>.md` cannot hold a copy. The order reaches the pod through the queue, as a pointer.
+    #
+    # This is what makes the committed doc the single source in fact and not only in intent: there
+    # is no second place for the text to be.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+
+    work_dir = Path.join(tmp, "lcars-test")
+    File.mkdir_p!(work_dir)
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+    order = "Corrige le placement latéral des pièces."
+
+    assert {:ok, _} =
+             Spawn.spawn_step(
+               seams(RecordingSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               order,
+               [repo_id: 7, work_root: tmp],
+               42,
+               42,
+               "ctx"
+             )
+
+    assert_received {:spawn_opts, spawn_opts}
+
+    refute Keyword.has_key?(spawn_opts, :brief),
+           "the dispatcher put the order in the spawn opts — the pod would write it to " <>
+             "issues/<id>.md, a second copy of a text whose single source is the committed doc"
+
+    assert_received {:enqueued, "pod-x", attrs}
+    refute attrs.brief =~ order
   end
 
   test "role bucket FULL + fresh spawn → {:skipped, :role_at_capacity}, NO forge write (no lock)" do

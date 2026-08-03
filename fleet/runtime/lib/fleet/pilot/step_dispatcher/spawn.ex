@@ -193,7 +193,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # re-derives it from a card that may not declare it — the fail-open default this closes.
     brief_kind = Keyword.get(spawn_opts, :brief_kind, "worker")
 
-    case materialize_order(brief, repo, issue_number, role, brief_kind) do
+    # `:work_root` — SEAM of the work/ops root, the exact twin of `StepRunCompleter`'s and for the
+    # same reason: the real root is a hardcoded global path, so without injecting it NO dispatcher
+    # test can walk the materialized branch. Measured before adding it: zero test in
+    # `step_dispatcher_test.exs` materializes a brief — all of them run with the work_dir absent,
+    # i.e. on the DEGRADED rail. The nominal path of the order delivery had no coverage at all,
+    # which is how it could carry a self-referential instruction for a whole chantier.
+    work_root = Keyword.get(spawn_opts, :work_root)
+
+    case materialize_order(brief, repo, issue_number, role, brief_kind, work_root) do
       {:error, _} = refusal ->
         refusal
 
@@ -228,12 +236,12 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # the second it happens. A brief is not instrumentation, it is the ORDER: losing a gauge's
   # provenance costs a metric, losing the order's costs the ability to answer "what was this pod
   # asked to do?" about a deliverable that went to production.
-  defp materialize_order(brief, repo, issue_number, role, brief_kind) do
-    case Fleet.Workflow.BriefArtifact.materialize(brief, repo,
-           name_hint: "issue-#{issue_number}-#{role}",
-           kind: brief_kind,
-           push: :work_ops
-         ) do
+  defp materialize_order(brief, repo, issue_number, role, brief_kind, work_root) do
+    materialize_opts =
+      [name_hint: "issue-#{issue_number}-#{role}", kind: brief_kind, push: :work_ops]
+      |> then(fn o -> if work_root, do: Keyword.put(o, :work_root, work_root), else: o end)
+
+    case Fleet.Workflow.BriefArtifact.materialize(brief, repo, materialize_opts) do
       {:ok, {ref, sha}} ->
         {:ok, Fleet.Workflow.BriefArtifact.pointer_brief(ref, sha),
          [brief_sha: sha, brief_ref: ref]}
