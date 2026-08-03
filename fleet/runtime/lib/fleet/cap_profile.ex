@@ -53,6 +53,8 @@ defmodule Fleet.CapProfile do
   # JSON-schema validation cluster (structural conformance), UPSTREAM of the core.
   # `load`/`compose` delegate to it (and via `Catalog.read_modops` too); no cycle
   # (Schema calls nothing here).
+  require Logger
+
   alias Fleet.CapProfile.Schema
 
   # Catalogue FS cluster (resolution by metadata.name, YAML scan, Slug confinement).
@@ -257,8 +259,22 @@ defmodule Fleet.CapProfile do
 
   defp role_declares?(role, cap) do
     case load(role) do
-      {:ok, profile} -> has_capability?(profile, cap)
-      {:error, _} -> false
+      {:ok, profile} ->
+        has_capability?(profile, cap)
+
+      {:error, reason} ->
+        # A profile that does not LOAD cannot declare anything, so `false` is the only honest
+        # answer — but silence made it indistinguishable from "loads fine, does not carry this
+        # capability". The caller is usually a structural resolver, which then raises "no role
+        # declares X — fix the catalogue": true, and pointing at the wrong thing. Measured cost:
+        # three probes to discover that the profile had simply stopped parsing.
+        Logger.warning(
+          "CapProfile: role #{inspect(role)} does NOT load (#{inspect(reason)}) while resolving " <>
+            "capability #{inspect(cap)} — it counts as not declaring it; a structural resolver " <>
+            "will fail loud naming the capability, the real cause is this profile"
+        )
+
+        false
     end
   end
 

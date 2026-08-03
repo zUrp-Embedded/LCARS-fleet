@@ -21,15 +21,25 @@ defmodule Fleet.Pilot.RolesStructuralTest do
     File.mkdir_p!(tmp)
     Application.put_env(:fleet_cap_profile, :root_dir, tmp)
 
+    # L'image publiee court-circuiterait le disque : on la retire pour ce bloc. Elle est REPUBLIEE
+    # a la sortie — sans ca, la depublication survit au fichier et tout le reste du run resout ses
+    # roles par le disque au lieu de l'image. Le `root_dir`, lui, etait deja restaure : c'est
+    # l'asymetrie entre les deux etats globaux du meme setup qui l'a rendue invisible.
+    published_before = Fleet.CapProfile.Image.published()
+
     on_exit(fn ->
       File.rm_rf(tmp)
 
       if prev,
         do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
         else: Application.delete_env(:fleet_cap_profile, :root_dir)
+
+      case published_before do
+        %{} = image -> Fleet.CapProfile.Image.republish(image)
+        _ -> :ok
+      end
     end)
 
-    # L'image publiee court-circuiterait le disque : on la retire pour ce bloc.
     Fleet.CapProfile.Image.unpublish()
     {:ok, dir: tmp}
   end
@@ -67,9 +77,12 @@ defmodule Fleet.Pilot.RolesStructuralTest do
     # refuserait la readiness a une fleet specialisee, pour une politique que personne n'a demandee.
     write_role!(dir, "eng-hw", ["producer"])
     write_role!(dir, "eng-sw", ["producer"])
-    write_role!(dir, "sealer", ["exception_judge"])
+    # Two capabilities on one role, which is the canon shape: the sealer signs the merge AND takes
+    # the tier-2 conflict today. They are two KEYS, so a catalogue may split them across two roles
+    # without the seal noticing.
+    write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
 
-    assert %{producers: ["eng-hw", "eng-sw"], gatekeeper: "sealer"} =
+    assert %{producers: ["eng-hw", "eng-sw"], gatekeeper: "sealer", conflict_resolver: "sealer"} =
              Roles.resolve_structural_roles!()
   end
 

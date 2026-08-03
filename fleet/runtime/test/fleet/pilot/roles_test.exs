@@ -171,6 +171,35 @@ defmodule Fleet.Pilot.RolesTest do
     assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == Roles.gatekeeper_role()
   end
 
+  describe "conflict_resolver_role/1 — its OWN capability, so the seal keeps its signatory" do
+    test "resolved by `conflict_resolver`, and today that is the gatekeeper" do
+      # The two responsibilities share a role: that is a CATALOGUE fact, not a law. What matters
+      # is that they are asked through two different keys.
+      assert Roles.conflict_resolver_role() == "gatekeeper"
+      assert Roles.conflict_resolver_role() == Roles.gatekeeper_role()
+    end
+
+    # Substitution through the OPT, never `Application.put_env`. The env is a NODE-WIDE table: in an
+    # async file, posting `:gatekeeper_role` there is read by every concurrent test that seals a PR,
+    # which then resolves a role whose forge token does not exist — `:role_token_unavailable`, on a
+    # test that touched none of this. Measured, at the cost of a diagnosis: 0/4/5/7 failures
+    # depending on the run, in two other files. The opt is process-local and proves the same thing,
+    # which is why it is the accessor's FIRST precedence level.
+    test "MOVING the tier-2 resolver does NOT move the seal's signatory" do
+      # THE property of the item. Under one shared key, substituting the role that resolves an
+      # exhausted conflict would also have substituted the role that SIGNS the merge — silently,
+      # because nothing would have said the two decisions were the same decision.
+      assert Roles.conflict_resolver_role(conflict_resolver_role: "engineer") == "engineer"
+      assert Roles.gatekeeper_role() == "gatekeeper"
+      assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == "gatekeeper"
+    end
+
+    test "and the reverse: moving the signatory does not move the resolver" do
+      assert Roles.gatekeeper_role(gatekeeper_role: "scoper") == "scoper"
+      assert Roles.conflict_resolver_role() == "gatekeeper"
+    end
+  end
+
   test "the arch pod id is PER-PROJECT — the single authority is ProjectArchitect.pod_id_for/1" do
     # Reorg 2026-07-19: Roles.architect_pod_id (the "permanent-architect" singleton accessor) is GONE.
     refute function_exported?(Roles, :architect_pod_id, 1)

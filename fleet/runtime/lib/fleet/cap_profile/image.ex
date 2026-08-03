@@ -20,7 +20,7 @@ defmodule Fleet.CapProfile.Image do
 
   The truly-dynamic calibration assets stay OUT of the image by design (cf. the SP split).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -113,6 +113,20 @@ defmodule Fleet.CapProfile.Image do
   @spec unpublish() :: :ok
   def unpublish do
     _ = :persistent_term.erase(@key)
+    :ok
+  end
+
+  @doc """
+  Restores a previously-`published/0` image — TESTS ONLY, the symmetric of `unpublish/0`.
+
+  Exists because unpublishing has no natural undo and a test that omits one leaks the DISK regime
+  into every test after it: same read, different path, and a whole run's timing changes under it.
+  `publish!/0` is not that undo — it rebuilds from the catalogue currently configured, which a test
+  that repointed `root_dir` no longer has.
+  """
+  @spec republish(map()) :: :ok
+  def republish(%{} = image) do
+    :persistent_term.put(@key, image)
     :ok
   end
 

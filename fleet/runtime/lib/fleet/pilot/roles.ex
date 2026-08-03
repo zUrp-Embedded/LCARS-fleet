@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.Roles do
   runs it at boot, so a catalogue that cannot name its producer refuses readiness instead of dying at
   the first dispatch.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -33,6 +33,12 @@ defmodule Fleet.Pilot.Roles do
   # gate resolves a responsibility, never a magic name.
   @producer_capability :producer
   @gatekeeper_capability :exception_judge
+  # SEPARATE from `:exception_judge` on purpose, and the separation is the point. The tier-2
+  # conflict resolver and the merge signer happen to be the same role today; resolving both through
+  # ONE key would make "who resolves an exhausted conflict" and "who signs the merge" the same
+  # decision forever — so moving the first would silently move the second, and the seal's signatory
+  # is not something a remediation policy gets to change as a side effect.
+  @conflict_resolver_capability :conflict_resolver
   @delegate_capability :project_delegate
 
   @doc """
@@ -114,9 +120,17 @@ defmodule Fleet.Pilot.Roles do
 
   Returns the gatekeeper (resolved) and the producers (the set) for the caller.
   """
-  @spec resolve_structural_roles!(keyword()) :: %{producers: [String.t()], gatekeeper: String.t()}
+  @spec resolve_structural_roles!(keyword()) :: %{
+          producers: [String.t()],
+          gatekeeper: String.t(),
+          conflict_resolver: String.t()
+        }
   def resolve_structural_roles!(opts \\ []) do
-    %{producers: producers!(), gatekeeper: gatekeeper_role(opts)}
+    %{
+      producers: producers!(),
+      gatekeeper: gatekeeper_role(opts),
+      conflict_resolver: conflict_resolver_role(opts)
+    }
   end
 
   # AT LEAST one — the cards choose among them.
@@ -273,6 +287,26 @@ defmodule Fleet.Pilot.Roles do
     Keyword.get(opts, :gatekeeper_role) ||
       Application.get_env(:fleet_pilot, :gatekeeper_role) ||
       resolve_structural!(@gatekeeper_capability, "gatekeeper")
+  end
+
+  @doc """
+  TIER-2 CONFLICT RESOLVER — the role handed an unresolved merge conflict once the producer has
+  spent its rework budget. Override by the opt `:conflict_resolver_role` (project/test), then config
+  `:fleet_pilot, :conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
+  `conflict_resolver` capability. Raises on zero and on several, like every structural role.
+
+  Its own capability, NOT `exception_judge`. The two responsibilities sit on the same role today,
+  and that is a catalogue fact rather than a law: resolving a conflict means WRITING code on the
+  PR, signing the merge means attesting it. Sharing one key would make moving the first move the
+  second in silence — and the signatory of the seal is not something a remediation policy changes
+  as a side effect. With two keys, substituting the resolver is a cap-profile edit that no file in
+  `lib/` sees and that leaves the seal's signature exactly where it was.
+  """
+  @spec conflict_resolver_role(keyword()) :: String.t()
+  def conflict_resolver_role(opts \\ []) do
+    Keyword.get(opts, :conflict_resolver_role) ||
+      Application.get_env(:fleet_pilot, :conflict_resolver_role) ||
+      resolve_structural!(@conflict_resolver_capability, "conflict resolver")
   end
 
   # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was

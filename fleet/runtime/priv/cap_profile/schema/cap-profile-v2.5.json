@@ -259,11 +259,12 @@
               "onboarder",
               "project_delegate",
               "exception_judge",
+              "conflict_resolver",
               "producer"
             ]
           },
           "uniqueItems": true,
-          "description": "Business RESPONSIBILITIES the role carries (catalogue chantier L3, B-03 2026-07-20). The gates resolve a CAPABILITY via CapProfile.has_capability?, NEVER a magic role name. `onboarder` = create/import/open projects (starfleet + architect); `project_delegate` = delegate issues within its project (architect); `exception_judge` = the soft-gate escalation judge (gatekeeper); `producer` = the default deliverable producer (engineer). Renaming/substituting a role = a cap-profile edit, not Elixir. Absent = no special responsibility."
+          "description": "Business RESPONSIBILITIES the role carries (catalogue chantier L3, B-03 2026-07-20). The gates resolve a CAPABILITY via CapProfile.has_capability?, NEVER a magic role name. `onboarder` = create/import/open projects (starfleet + architect); `project_delegate` = delegate issues within its project (architect); `exception_judge` = the soft-gate escalation judge, and the SIGNATORY of the seal (gatekeeper); `conflict_resolver` = the tier-2 resolver handed a merge conflict the producer could not resolve — SEPARATE from exception_judge on purpose, so substituting the resolver never moves the seal's signature; `producer` = the default deliverable producer (engineer). Renaming/substituting a role = a cap-profile edit, not Elixir. Absent = no special responsibility."
         },
         "project": {
           "type": [

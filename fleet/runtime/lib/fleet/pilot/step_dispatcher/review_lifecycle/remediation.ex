@@ -341,11 +341,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
     case ctx.forge.post_comment(ctx.repo, pr_number, body, comment_opts) do
       {:ok, _} ->
+        # `conflict_resolver_role/0`, NOT `gatekeeper_role/0`: this dispatch decides who RESOLVES an
+        # exhausted conflict, and the seal decides who SIGNS the merge. One key for both would make
+        # substituting the resolver move the signatory too, silently.
         RoleDispatch.dispatch(
           :conflict_rework_gatekeeper,
           pr_number,
           head,
-          Fleet.Pilot.Roles.gatekeeper_role(),
+          Fleet.Pilot.Roles.conflict_resolver_role(),
           ctx
         )
 

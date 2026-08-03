@@ -12,7 +12,10 @@ metadata:
   role_index: 2
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
-  capabilities: [exception_judge]
+  # Two capabilities, two responsibilities that happen to share a role TODAY. `exception_judge`
+  # signs the merge; `conflict_resolver` is handed a conflict the producer could not resolve.
+  # Splitting them is what lets the second move to another role without moving the signature.
+  capabilities: [exception_judge, conflict_resolver]
   scope:
     allowedTools:
       - Read
