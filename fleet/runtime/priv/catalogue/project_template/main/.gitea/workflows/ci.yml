@@ -15,6 +15,18 @@ name: CI
 # sont pas LCARS : nommer ici `elixir` ferait hériter chaque projet créé d'une dépendance à une
 # toolchain qui ne le regarde pas. L'opérateur qui pose son runner doit servir `shell` ; c'est le
 # contrat minimal du côté CI, et il est petit exprès.
+#
+# ⚠ CE QUE `shell` TE DONNE, ET CE QU'IL NE TE DONNE PAS. Le label est une CLÉ : l'opérateur la
+# mappe sur une image dans la config de son runner, et le déploiement de référence la mappe sur
+# `alpine:3.20`. Donc, dans ce job : pas de `git`, pas de `node`, pas de `bash` — un `sh` POSIX et
+# rien d'autre. Un step qui appelle `git` sort en **127 command not found**, ce qui a été mesuré
+# sur un projet ayant réécrit ce fichier pour récupérer ses sources (2026-08-03).
+#
+# TU RÉÉCRIS CE FICHIER ? Alors ce paragraphe est celui à ne pas perdre. Deux sorties, au choix :
+#   1. installer ce dont tu as besoin dans le job — `apk add --no-cache git` en premier step ;
+#   2. demander une AUTRE image — `container: <image>` sur le job, et le runner la tirera.
+# La seconde est la bonne dès que tu as plus d'un outil à poser : une liste d'`apk add` en tête de
+# workflow est une image, écrite au mauvais endroit et re-téléchargée à chaque run.
 
 on:
   push:
