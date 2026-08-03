@@ -414,9 +414,34 @@ defmodule Fleet.Pilot.Poller do
         # kept a main protection out of line with the CURRENT jury until now.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
+        # Le CYCLE, mesure A SON ECHELLE — strictement distinct de `[:poller, :poll]`, qui est emis
+        # PAR DEPOT (chaque emission porte `repo:`). Une distribution sur `:poll` ne peut pas
+        # repondre « combien de temps un passage complet dure » : elle decrit un depot, et le nombre
+        # de depots n'y apparait nulle part. Or c'est la duree du PASSAGE qui decide si une donnee
+        # figee au debut (un `base_sha`, une photo de pods) peut devenir fausse avant la fin.
+        #
+        # `started` est capture AVANT `list_org_repos`, donc la mesure couvre tout ce qu'un passage
+        # fait : la decouverte, la photo des pods, le fold SERIEL des R depots, et les deux passes
+        # fleet-globales (arch net, recheck de protection). Pas seulement sa partie visible.
+        :telemetry.execute(
+          [:fleet_pilot, :poller, :cycle],
+          %{duration_ms: elapsed_ms(started), repos: length(repos)},
+          %{status: :ok, mode: mode, org: state.org}
+        )
+
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
+        # Un passage qui echoue a la decouverte EST un passage, et il a une duree. L'omettre
+        # rendrait le p95 du cycle plus beau que la realite exactement sur le cas qu'un operateur
+        # surveille — la meme cecite que `started` capture apres l'appel lent evitait deja.
+        # `repos: 0` n'est pas un remplissage : aucun depot n'a ete replie.
+        :telemetry.execute(
+          [:fleet_pilot, :poller, :cycle],
+          %{duration_ms: elapsed_ms(started), repos: 0},
+          %{status: :error, mode: mode, org: state.org}
+        )
+
         handle_poll_error(state, {:discover_repos, reason}, started)
     end
   end

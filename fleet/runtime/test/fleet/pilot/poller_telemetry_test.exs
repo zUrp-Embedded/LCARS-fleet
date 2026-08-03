@@ -118,4 +118,58 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
       refute log2 =~ "prend du retard"
     end
   end
+
+  describe "l'echelle du CYCLE, distincte de celle du depot" do
+    # Ce bloc existe parce que la confusion a REELLEMENT eu lieu : `[:poller, :poll]` est emis par
+    # DEPOT, la clef de readiness qui l'exposait s'appelait `tick`, et une mesure a ete lue comme
+    # une duree de passage. Ces tests tombent si les deux echelles se remelangent.
+    @cycle [:fleet_pilot, :poller, :cycle]
+
+    defp emit_cycle(duration_ms, repos, meta \\ %{status: :ok, mode: :tick}) do
+      :telemetry.execute(@cycle, %{duration_ms: duration_ms, repos: repos}, meta)
+      PollerTelemetry.cycle_stats()
+    end
+
+    test "avant le premier passage, la reponse honnete est :no_data" do
+      assert :no_data = PollerTelemetry.cycle_stats()
+    end
+
+    test "DES POLLS DE DEPOT NE FONT PAS UN CYCLE — c'est tout l'objet de la separation" do
+      # Le specimen exact du defaut : douze depots replies dans UN passage. Si les deux echelles
+      # partageaient un anneau, `cycle_stats` rendrait douze entrees de 80 ms et un operateur
+      # lirait « un passage coute 80 ms » alors qu'il en coute 960.
+      for _ <- 1..12, do: emit(80)
+
+      assert %{count: 12} = PollerTelemetry.stats()
+      assert :no_data = PollerTelemetry.cycle_stats()
+
+      assert %{count: 1, last_ms: 960, last_repos: 12} = emit_cycle(960, 12)
+      # Et le passage n'a pas pollue l'anneau des depots.
+      assert %{count: 12} = PollerTelemetry.stats()
+    end
+
+    test "le nombre de depots voyage AVEC la duree — sinon le chiffre n'est pas lisible" do
+      # Une duree de passage sans la taille de l'org qui l'a produite ne dit rien : 900 ms sur
+      # 2 depots est une alerte, sur 300 depots c'est nominal.
+      assert %{last_ms: 150, last_repos: 2} = emit_cycle(150, 2)
+      assert %{last_ms: 900, last_repos: 60} = emit_cycle(900, 60)
+    end
+
+    test "un passage qui echoue a la decouverte est COMPTE, avec zero depot replie" do
+      # L'omettre embellirait le p95 exactement sur le cas qu'un operateur surveille.
+      stats = emit_cycle(4_000, 0, %{status: :error, mode: :tick})
+
+      assert %{count: 1, errors: 1, last_repos: 0, max_ms: 4_000} = stats
+    end
+
+    test "un passage LONG ne warn PAS — le seuil est calibre sur un depot, pas sur R" do
+      # Decision deliberee, pas un oubli : reutiliser `slow_tick_ms` (500 ms ici) ferait crier a
+      # chaque passage des que l'org depasse quelques depots. On mesure sans alerter plutot que
+      # d'alerter sur un seuil invente.
+      log = ExUnit.CaptureLog.capture_log(fn -> emit_cycle(30_000, 40) end)
+
+      assert log == ""
+      assert %{count: 1, max_ms: 30_000} = PollerTelemetry.cycle_stats()
+    end
+  end
 end

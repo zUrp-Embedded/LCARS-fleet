@@ -128,9 +128,17 @@ defmodule Fleet.Pilot.Application do
       # delibere de `bin/fleet_v2` : pas d'epmd, pas de collision multi-humain), donc AUCUN `rpc`
       # n'atteint le noeud. Un instrument qu'on ne peut pas interroger mesure pour personne — c'est
       # le hollow que 6-06 documente, refait par l'instrument cense le combattre.
-      detail = Map.put(detail, :repo_poll, repo_poll_health())
+      # Deux echelles, deux clefs, jamais une moyenne des deux : `repo_poll` dit ce que coute UN
+      # depot, `poll_cycle` ce que coute UN PASSAGE (decouverte + photo des pods + fold seriel des
+      # R depots + les deux passes fleet-globales). C'est `poll_cycle` qu'il faut lire pour savoir
+      # si une donnee figee au debut d'un passage peut devenir fausse avant sa fin ; `repo_poll` ne
+      # peut pas y repondre, il ignore combien de depots existent.
+      detail =
+        detail
+        |> Map.put(:repo_poll, repo_poll_health())
+        |> Map.put(:poll_cycle, poll_cycle_health())
 
-      if Enum.all?(detail, fn {key, up?} -> key == :repo_poll or up? end),
+      if Enum.all?(detail, fn {key, up?} -> key in [:repo_poll, :poll_cycle] or up? end),
         do: {:operational, detail},
         else: {:degraded, detail}
     else
@@ -143,6 +151,13 @@ defmodule Fleet.Pilot.Application do
   # cause de son propre instrument. Un telemetre mort rend `:unavailable` et le rail reste lisible.
   defp repo_poll_health do
     Fleet.Pilot.PollerTelemetry.stats()
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  # Resume de sante du PASSAGE complet. Meme totalite que ci-dessus, et pour la meme raison.
+  defp poll_cycle_health do
+    Fleet.Pilot.PollerTelemetry.cycle_stats()
   catch
     :exit, _ -> :unavailable
   end

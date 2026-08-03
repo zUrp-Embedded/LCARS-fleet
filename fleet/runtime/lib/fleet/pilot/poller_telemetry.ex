@@ -29,6 +29,11 @@ defmodule Fleet.Pilot.PollerTelemetry do
   Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
   not) — that is a different instrument, not an arithmetic on this one.
 
+  That different instrument is `[:fleet_pilot, :poller, :cycle]`, kept in a SECOND ring and read by
+  `cycle_stats/0`: one sample per whole pass, carrying the repo count that produced it. Two rings
+  rather than one field, because the two scales have different cardinalities (R against 1) — mixed
+  in a single ring, the p50 would describe neither a repo nor a pass.
+
   It does not log nominal ticks, and that restraint is a contract, not a taste: the poller is a
   ~30 s cron, its own moduledoc records that logging every nominal pass drowns the trace under
   hundreds of routine lines. An observability layer that re-introduces the noise the observed
@@ -81,9 +86,18 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @mailbox_warn 10
   @default_slow_tick_ms 10_000
   @event [:fleet_pilot, :poller, :poll]
+  # Le cycle est un evenement DISTINCT, pas un champ de plus sur `:poll` : les deux ont des echelles
+  # differentes (un depot / un passage) et des cardinalites differentes (R pour 1). Les melanger
+  # dans un anneau commun rendrait un p50 qui ne decrit rien — ni un depot, ni un passage.
+  @cycle_event [:fleet_pilot, :poller, :cycle]
   @handler_id "fleet-pilot-poller-telemetry"
 
-  defstruct samples: [], count: 0, slow_tick_ms: @default_slow_tick_ms, mailboxes: %{}
+  defstruct samples: [],
+            count: 0,
+            cycles: [],
+            cycle_count: 0,
+            slow_tick_ms: @default_slow_tick_ms,
+            mailboxes: %{}
 
   # ============================================================
   # Public surface
@@ -110,10 +124,38 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @spec stats() :: map() | :no_data
   def stats, do: GenServer.call(__MODULE__, :stats)
 
+  @doc """
+  Rolling summary of the last #{@window} POLL CYCLES, or `:no_data` before the first one.
+
+  A cycle is one whole pass: discover the org's repos, snapshot the pods, fold the R repos
+  SERIALLY, then the two fleet-global passes. `last_repos` carries R for the most recent one, so a
+  duration is readable against the size of the org that produced it — the single figure that made
+  `stats/0` unreadable as a cycle cost.
+
+      %{count: 96, window: 96, last_ms: 164, last_repos: 12, p50_ms: 158, p95_ms: 402,
+        max_ms: 1_204, errors: 0}
+
+  This is the figure to use when asking whether a value frozen at the start of a pass (a
+  `base_sha`, the pod snapshot) can go stale before the pass ends. `stats/0` cannot answer that:
+  it describes one repo and does not know how many there are.
+  """
+  @spec cycle_stats() :: map() | :no_data
+  def cycle_stats, do: GenServer.call(__MODULE__, :cycle_stats)
+
   @doc false
   # The telemetry callback. Public because `:telemetry` dispatches to it by name from the poller's
   # process — NOT an API anyone should call (BL-6-42: a public function that exists only for a
   # framework is documented as such, here, rather than left looking like a surface).
+  def handle_event(@cycle_event, measurements, metadata, _config) do
+    GenServer.cast(
+      __MODULE__,
+      {:cycle, Map.get(measurements, :duration_ms, 0), Map.get(measurements, :repos, 0),
+       Map.get(metadata, :status, :ok), Map.get(metadata, :mode)}
+    )
+  rescue
+    _ -> :ok
+  end
+
   def handle_event(@event, measurements, metadata, _config) do
     GenServer.cast(
       __MODULE__,
@@ -140,7 +182,12 @@ defmodule Fleet.Pilot.PollerTelemetry do
     # Attach here rather than at application boot: the handler's target is THIS process, so the
     # attachment must not outlive it. `:already_exists` is not an error — a supervisor restart
     # re-attaches over the previous incarnation's registration.
-    case :telemetry.attach(@handler_id, @event, &__MODULE__.handle_event/4, nil) do
+    case :telemetry.attach_many(
+           @handler_id,
+           [@event, @cycle_event],
+           &__MODULE__.handle_event/4,
+           nil
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> :ok
     end
@@ -175,6 +222,40 @@ defmodule Fleet.Pilot.PollerTelemetry do
   end
 
   @impl GenServer
+  def handle_cast({:cycle, duration_ms, repos, status, mode}, state) do
+    # Pas de warn ici : le seuil `slow_tick_ms` est calibre sur un DEPOT. Un cycle de R depots
+    # depasse legitimement R fois ce seuil, donc reutiliser le meme nombre produirait une alerte a
+    # chaque passage des que l'org grossit — un bruit qui apprend a ignorer l'instrument. Le seuil
+    # du cycle est une decision separee, et tant qu'elle n'est pas prise on MESURE sans alerter
+    # plutot que d'alerter sur un nombre invente.
+    {:noreply,
+     %{
+       state
+       | cycle_count: state.cycle_count + 1,
+         cycles: Enum.take([{duration_ms, repos, status, mode} | state.cycles], @window)
+     }}
+  end
+
+  @impl GenServer
+  def handle_call(:cycle_stats, _from, %{cycles: []} = state), do: {:reply, :no_data, state}
+
+  def handle_call(:cycle_stats, _from, state) do
+    durations = state.cycles |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    {last_ms, last_repos, _, _} = hd(state.cycles)
+
+    {:reply,
+     %{
+       count: state.cycle_count,
+       window: length(durations),
+       last_ms: last_ms,
+       last_repos: last_repos,
+       p50_ms: percentile(durations, 50),
+       p95_ms: percentile(durations, 95),
+       max_ms: List.last(durations),
+       errors: Enum.count(state.cycles, fn {_d, _r, status, _m} -> status == :error end)
+     }, state}
+  end
+
   def handle_call(:stats, _from, %{samples: []} = state), do: {:reply, :no_data, state}
 
   def handle_call(:stats, _from, state) do
