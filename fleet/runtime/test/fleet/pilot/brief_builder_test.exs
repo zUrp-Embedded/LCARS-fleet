@@ -251,13 +251,16 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       refute brief =~ "Passe d'exception"
     end
 
-    test "the GATEKEEPER is told it has no brief, and must compose rather than pick a side" do
-      brief = conflict_brief(:gatekeeper)
+    test "the OUTSIDER is told it has no brief, and must compose rather than pick a side" do
+      # `:exception`, not `:gatekeeper`: the axis this voice turns on is OWNER vs OUTSIDER, and it
+      # survived the role moving from the gatekeeper to `chief`. Naming the option after whoever
+      # holds the capability is what made this voice look like a gatekeeper detail.
+      brief = conflict_brief(:exception)
 
       assert brief =~ "Passe d'exception"
       assert brief =~ "tu n'as pas de brief à reprendre"
       assert brief =~ "tu ne choisis pas un camp"
-      # The exception judge must know that refusing IS the expected outcome when composing needs a
+      # The outsider must know that refusing IS the expected outcome when composing needs a
       # decision the code does not carry — a guessed resolution costs more than a motivated refusal.
       assert brief =~ "blocked"
 

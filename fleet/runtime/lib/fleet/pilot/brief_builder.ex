@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -48,13 +48,16 @@ defmodule Fleet.Pilot.BriefBuilder do
   # answer is `blocked`, never a guessed resolution.
   # Two voices for ONE mechanic. The steps are identical (merge, resolve, commit, the system pushes,
   # the jury re-judges); what differs is WHO is being addressed. The producer resumes work it wrote
-  # and that the judges approved. The gatekeeper arrives as an exception judge on someone else's
-  # branch after the producer's budget ran out — telling it "ton brief est INCHANGÉ" names a brief
-  # it never had, and invites it to guess at an intention it does not hold.
+  # and that the judges approved. The exception pass arrives on someone else's branch after that
+  # budget ran out — telling it "ton brief est INCHANGÉ" names a brief it never had, and invites it
+  # to guess at an intention it does not hold.
+  #
+  # The axis is OWNER vs OUTSIDER, never a role name: it held when the outsider was the gatekeeper
+  # and it holds now that it is `chief`.
   defp conflict_section(opts) do
     case Keyword.get(opts, :conflict, false) do
       false -> ""
-      :gatekeeper -> gatekeeper_conflict_section()
+      :exception -> exception_conflict_section()
       _producer -> producer_conflict_section()
     end
   end
@@ -79,7 +82,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     """
   end
 
-  defp gatekeeper_conflict_section do
+  defp exception_conflict_section do
     """
     ## Passe d'exception : conflit de merge non résolu par le producteur
 

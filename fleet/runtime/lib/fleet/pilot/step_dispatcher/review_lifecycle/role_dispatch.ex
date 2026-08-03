@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -47,13 +47,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
   @typedoc """
-  Nature of the PR dispatch. `:conflict_rework` and `:conflict_rework_gatekeeper` share the SAME
+  Nature of the PR dispatch. `:conflict_rework` and `:conflict_rework_exception` share the SAME
   mechanics (clone the feature branch, resolve, system pushes, jury re-judges) and differ ONLY in
-  the brief's voice — the producer resumes ITS OWN approved work, the gatekeeper arrives as an
-  exception judge on someone else's. A single kind for both made the gatekeeper read a brief that
-  says "ton brief est INCHANGÉ" about a brief it never had.
+  the brief's voice — the producer resumes ITS OWN approved work, the exception pass arrives on
+  someone else's. A single kind for both made that pass read a brief saying "ton brief est
+  INCHANGÉ" about a brief it never had.
+
+  `_exception` and not `_gatekeeper`: the distinction this kind carries is OWNER vs OUTSIDER, and
+  it survived the role moving to `chief`. Naming it after whoever happens to hold the
+  `conflict_resolver` capability is what made it look removable — the plan for this item said
+  "retirer `:conflict_rework_gatekeeper`", which would have re-merged two voices that differ for a
+  reason that has nothing to do with the role.
   """
-  @type kind :: :judge | :rework | :conflict_rework | :conflict_rework_gatekeeper
+  @type kind :: :judge | :rework | :conflict_rework | :conflict_rework_exception
 
   @doc """
   Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
@@ -171,7 +177,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # changing the pod identity loses no context.
          pod_id =
            (case kind do
-              k when k in [:rework, :conflict_rework, :conflict_rework_gatekeeper] ->
+              k when k in [:rework, :conflict_rework, :conflict_rework_exception] ->
                 Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
               _ ->
@@ -333,10 +339,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: :producer),
           "worker"}
 
-  # Conflict-rework GATEKEEPER (tier 2 — Remediation.dispatch_gatekeeper_rework): same dispatch,
-  # exception-judge voice. It is not resuming its own work and has no brief of its own to preserve.
+  # Conflict-rework EXCEPTION pass (tier 2 — Remediation.dispatch_exception_rework): same dispatch,
+  # outsider voice. It is not resuming its own work and has no brief of its own to preserve.
   defp review_brief(
-         :conflict_rework_gatekeeper,
+         :conflict_rework_exception,
          _profile,
          role,
          forge,
@@ -349,6 +355,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
        do:
          {:ok,
           BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
-            conflict: :gatekeeper
+            conflict: :exception
           ), "worker"}
 end

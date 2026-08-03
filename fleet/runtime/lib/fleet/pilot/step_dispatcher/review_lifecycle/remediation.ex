@@ -152,8 +152,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     * `:conflict` → the 4-tier pipeline of `conflict_rework/4`, gated by `:conflict_diagnosis?`:
                     tier 0 (deterministic diagnosis + auto-resolution of an all-trivial conflict,
                     runtime, no pod), tier 1 (BOUNDED producer conflict-rework: local resolution on
-                    the same PR — needs no forge credentials), tier 2 (ONE gatekeeper pass, the
-                    exception judge), tier 3 (honest arch escalation). Flag off → tier 1 → tier 3,
+                    the same PR — needs no forge credentials), tier 2 (ONE outsider pass, the
+                    `conflict_resolver` role), tier 3 (honest arch escalation). Flag off → tier 1 → tier 3,
                     byte-for-byte the legacy path.
     * `:unknown`  → not classifiable → HONEST arch escalation (we don't guess).
   """
@@ -201,8 +201,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # the new head, so a wrong resolution is caught downstream), anything else — and any probe/apply
   # failure — falls through to the legacy producer conflict-rework. The gain only ever SHORTENS a
   # path, never breaks one. Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are
-  # injectable seams (`:conflict_diagnoser` / `:conflict_applier`). NB tier-2 (gatekeeper inference)
-  # is a distinct, still-future increment — tier-0 is the deterministic pre-filter in front of it.
+  # injectable seams (`:conflict_diagnoser` / `:conflict_applier`). NB tier-2 (the outsider's
+  # inference pass) is a distinct increment — tier-0 is the deterministic pre-filter in front of it.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     if diagnosis_enabled?() do
       case tier0_conflict_route(pr_number, head, reason, ctx) do
@@ -289,44 +289,50 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     do: Application.get_env(:fleet_pilot, :conflict_applier, Fleet.Pilot.ConflictApply)
 
   # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
-  # the one-shot GATEKEEPER a single inference pass before immobilizing a human (tier-3). Flag off,
-  # or the gatekeeper pass already spent → the legacy arch escalation, byte-for-byte unchanged.
+  # the OUTSIDER a single inference pass before immobilizing a human (tier-3). Flag off, or that pass
+  # already spent → the legacy arch escalation, byte-for-byte unchanged.
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     if diagnosis_enabled?() do
-      gatekeeper_stage(pr_number, head, reason, ctx, producer_rounds)
+      exception_stage(pr_number, head, reason, ctx, producer_rounds)
     else
       escalate_exhausted(pr_number, head, reason, ctx, producer_rounds)
     end
   end
 
-  defp gatekeeper_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
-    marker = "[conflict-gatekeeper:pr-#{pr_number}"
+  defp exception_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    marker = "[conflict-chief:pr-#{pr_number}"
     count = ctx.forge.count_comments_marked(ctx.repo, pr_number, marker, ctx.forge_opts)
 
-    case gatekeeper_stage_decision(count) do
+    case exception_stage_decision(count) do
       :dispatch ->
-        dispatch_gatekeeper_rework(pr_number, head, ctx)
+        dispatch_exception_rework(pr_number, head, ctx)
 
       :escalate ->
-        escalate_exhausted(pr_number, head, {:gatekeeper_spent, reason}, ctx, producer_rounds)
+        escalate_exhausted(pr_number, head, {:exception_pass_spent, reason}, ctx, producer_rounds)
     end
   end
 
   @doc false
-  # PURE tier-2 gate: one gatekeeper pass, then the arch. Unreadable count → escalate (never a loop).
-  @spec gatekeeper_stage_decision({:ok, integer()} | {:error, term()}) :: :dispatch | :escalate
-  def gatekeeper_stage_decision({:ok, spent}) when is_integer(spent) and spent < 1, do: :dispatch
-  def gatekeeper_stage_decision(_), do: :escalate
+  # PURE tier-2 gate: one exception pass, then the arch. Unreadable count → escalate (never a loop).
+  @spec exception_stage_decision({:ok, integer()} | {:error, term()}) :: :dispatch | :escalate
+  def exception_stage_decision({:ok, spent}) when is_integer(spent) and spent < 1, do: :dispatch
+  def exception_stage_decision(_), do: :escalate
 
-  # One inference pass by the gatekeeper (a distinct, more-capable one-shot judge) on the SAME proven
+  # One inference pass by the OUTSIDER (`conflict_resolver` capability — `chief`) on the SAME proven
   # conflict-rework dispatch as the producer: it clones the feature branch (`base_branch: head`),
   # resolves in its workspace, the SYSTEM pushes, the jury re-judges the new head. The round-1 marker
   # bounds it to a single pass and makes the re-dispatch idempotent (dedup, like the producer's).
-  # The brief carries the EXCEPTION-JUDGE voice (`:conflict_rework_gatekeeper`), not the producer's:
-  # the gatekeeper has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited
-  # it to guess at an intention it does not hold. Same mechanics, addressed to who is actually there.
-  defp dispatch_gatekeeper_rework(pr_number, head, %Ctx{} = ctx) do
-    signature = "[conflict-gatekeeper:pr-#{pr_number}:round-1]"
+  # The brief carries the OUTSIDER voice (`:conflict_rework_exception`), not the producer's: this pass
+  # has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited it to guess at
+  # an intention it does not hold. Same mechanics, addressed to who is actually there.
+  #
+  # MARKER RENAMED `[conflict-gatekeeper:pr-N` → `[conflict-chief:pr-N`. It is FORGE-VISIBLE and
+  # load-bearing (`count_comments_marked` reads it to bound the pass to one), so a rename is a
+  # migration: a PR already carrying the old marker would count 0 and get a SECOND pass. Safe here
+  # because this tier has never fired in production (user, 2026-08-04) — stated as the reason, not
+  # measured by me. Had it fired, the correct move was to count both prefixes for one cycle.
+  defp dispatch_exception_rework(pr_number, head, %Ctx{} = ctx) do
+    signature = "[conflict-chief:pr-#{pr_number}:round-1]"
 
     body =
       "⚠ Conflit de merge non résolu par le producteur (budget de rework épuisé). Passe " <>
@@ -345,7 +351,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         # exhausted conflict, and the seal decides who SIGNS the merge. One key for both would make
         # substituting the resolver move the signatory too, silently.
         RoleDispatch.dispatch(
-          :conflict_rework_gatekeeper,
+          :conflict_rework_exception,
           pr_number,
           head,
           Fleet.Pilot.Roles.conflict_resolver_role(),
@@ -358,7 +364,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           pr_number,
           head,
           :conflict,
-          {:conflict_gatekeeper_marker_unpostable, marker_reason}
+          {:conflict_exception_marker_unpostable, marker_reason}
         )
     end
   end
@@ -378,9 +384,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
   # dedup makes the count replay-safe). Beyond budget, or any unreadable read → tier 3, the
-  # honest arch escalation (never a blind loop). Tier 2 (a gatekeeper one-shot before the arch) is
-  # CÂBLÉ since the conflict-engine increment: budget-exhausted goes through `gatekeeper_stage_decision`
-  # and one gatekeeper pass, then the arch — gated by `:conflict_diagnosis?` like tier 0.
+  # honest arch escalation (never a blind loop). Tier 2 (ONE outsider pass before the arch) is
+  # CÂBLÉ since the conflict-engine increment: budget-exhausted goes through `exception_stage_decision`
+  # and one pass, then the arch — gated by `:conflict_diagnosis?` like tier 0.
   defp legacy_conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     marker_prefix = "[conflict-rework:pr-#{pr_number}"
 
