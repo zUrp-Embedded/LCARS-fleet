@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.Pod.Brief do
   - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -45,6 +45,13 @@ defmodule Fleet.Spawner.Pod.Brief do
   @doc """
   Body of the `issues/<id>.md`: neutral conversational framing "pod LCARS (role X)" + the request
   (`opts[:brief]`, or a placeholder if absent).
+
+  Which of the two it is depends on the RAIL, and neither is an accident: the step dispatcher sends
+  the order through the queue alone (no `:brief` in the spawn opts → placeholder here), while the PR
+  rail must pass it, because judges are `one-shot` and `Spawner.brief_required?/1` refuses a
+  one-shot spawn without a brief. So this function is a placeholder generator on one rail and the
+  writer of the order on the other. Interpolating `opts[:brief]` is its job — a wall forbidding that
+  cannot be written; the property that holds is upstream, at what each rail puts in the opts.
 
   NATURAL tone (not a formalized multi-section "## Task / ## Deliverable"): claude REPL in
   interactive mode may interpret an overly structured format as a prompt-injection attempt and

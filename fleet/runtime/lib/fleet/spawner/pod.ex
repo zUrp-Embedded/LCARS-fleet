@@ -323,9 +323,23 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # PROJECT — all the I/O in the `with` chain (non-bang) → error propagated → clean
-  # transition_failed (state.json phase=failed written). Issue-driven model: the brief is written to
-  # `issues/<issue_id>.md` (read as project content, not as a prompt-injection) AND pushed to
-  # TaskQueue (the pod PULLS via the MCP tool get_work_item, triggered by the `engage` keyword).
+  # transition_failed (state.json phase=failed written). Issue-driven model: the pod PULLS its order
+  # from the TaskQueue (MCP `get_work_item`, triggered by `engage`); `issues/<issue_id>.md` is a
+  # scaffold file written BESIDE it.
+  #
+  # What that file actually holds, measured 2026-08-03 — it is not one thing:
+  #   * step rail (producers): the dispatcher puts NO `:brief` in the spawn opts (the order travels
+  #     through the queue alone), so the file holds the "(No brief provided)" placeholder;
+  #   * PR rail (judges, rework): `RoleDispatch` MUST pass `brief:` in the spawn opts — judges are
+  #     `one-shot` and `brief_guard` refuses a one-shot spawn without one — so the file holds the
+  #     order, and it is written HERE, in `:projecting`, i.e. at SPAWN ONLY. A re-brief keeps the
+  #     pod alive (enqueue + wake, no re-spawn), so on the rework rounds this file describes the
+  #     PREVIOUS round.
+  #
+  # No SP block or draft reads it (measured across `priv/sp_builder` and the committed drafts), but
+  # an agent exploring its own workspace does not need a wire to read a file named after its issue.
+  # Whether it should be refreshed or dropped is open (chantier monde-du-pod, `## À trancher`): the
+  # answer depends on a DEPLOYED catalogue this repo does not carry.
   def handle_event(:internal, :proceed, :projecting, data) do
     # Skills root — THREE-way resolution (BL-6-22), and the `:catalogue` sentinel is deliberate
     # (get_env/3 returns the default ONLY when the key is ABSENT, never when it is present-nil):
