@@ -20,14 +20,22 @@ defmodule Fleet.Workflow.BriefArtifact do
   commit (git history IS the version ledger). Without a `:name_hint` the name falls back to
   the content's sha256 (hintless legacy/test path).
 
-  **Provenance is BEST-EFFORT, NOT load-bearing for delivery** (DR-010) — cf. `physicalize/3`:
-  it DEGRADES, it NEVER breaks the dispatch. The work_item carries the `{ref, sha}` pointer
-  WHEN the materialization succeeds; OTHERWISE (no work/ops, non-onboarded project, git
-  failure → `{nil, nil}`) it carries the **brief string** as the assumed degraded fallback,
-  and the dispatch continues. The pod CITES the sha **when present** (cf.
-  `runtime-contract.md` + the MCP envelope) — the authenticity anchor is the forge commit,
-  verifiable by any third party; an absent `brief_sha` = provenance NOT PROVEN, never a
-  blocker (a VISIBLE property of the degraded mode, not a silently bypassed guarantee).
+  **This module MATERIALIZES; what a failure costs is the CALLER's contract, and the two callers
+  differ on purpose** (revised 2026-08-03 — DR-010's "best-effort, never breaks the dispatch" held
+  for both and was wrong for one of them):
+
+    * TICKET CREATION (`physicalize_attrs/3`, the arch writing an issue) — degrades on every
+      cause. Refusing to create a ticket because work/ops is not ready would block the very
+      gesture that gets a project going.
+    * ORDER DELIVERY (`materialize/3`, the step dispatcher) — breaks on the three PERMANENT
+      causes. The nominal path replaces the brief TEXT with a pointer as soon as a sha exists, so
+      the pointer IS the delivery; degrading there produced work nobody could prove was asked for,
+      indefinitely, with nothing failing.
+
+  The pod CITES the sha **when present** (cf. `runtime-contract.md` + the MCP envelope) — the
+  authenticity anchor is the forge commit, verifiable by any third party. On the one transient
+  cause that still degrades, the ORDER ITSELF says so, so an absent `brief_sha` is a fact the
+  result reports rather than a silence.
 
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
@@ -108,11 +116,12 @@ defmodule Fleet.Workflow.BriefArtifact do
   def physicalize_attrs(attrs, _repo, _opts), do: attrs
 
   @doc """
-  Core of the materialization, TUPLE form: `{brief_ref, brief_sha}` (or `{nil, nil}` degraded). The
-  dispatch leaf calls it ONCE (before the spawn) and sets the pointer both in the spawn_opts
-  (→ pod.completed → triplet) AND in the enqueue (→ the pod). `physicalize_attrs/3` derives from it.
-  DEGRADES (LOUD + `{nil, nil}`) on no brief / repo / work_dir / git failure — the dispatch is NEVER
-  broken. `opts[:work_root]` injectable (tests).
+  TUPLE form of `materialize/3`: `{brief_ref, brief_sha}`, or `{nil, nil}` for ANY failure cause.
+
+  Kept for the callers that genuinely have one policy for every cause (`physicalize_attrs/3`).
+  A caller that must tell a permanent failure from a transient one uses `materialize/3` — this
+  form cannot express the difference, and that flattening is what let a misconfigured project
+  produce unauditable work indefinitely. `opts[:work_root]` injectable (tests).
   """
   @spec physicalize(String.t() | nil, String.t() | nil, keyword()) ::
           {String.t() | nil, String.t() | nil}
