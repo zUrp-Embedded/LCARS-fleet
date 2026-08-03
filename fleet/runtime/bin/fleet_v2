@@ -275,9 +275,9 @@ cmd_start() {
 
 # F7: GRACEFUL stop first — Shutdown.begin (refuse new work + drain in-flight) then :init.stop (ordered
 # OTP shutdown: the pods' terminate runs, trap_exit F3 → teardown + checkpoint seed). The tmux
-# kill-server is only the FALLBACK (BEAM without distribution, RPC down, or a graceful that drags past
-# 30s). A direct kill-server means NO shutdown path ever executes the Shutdown rail — which is what it
-# was built for.
+# kill-server is only the FALLBACK (BEAM without distribution, RPC down, or a graceful that outlasts
+# the wait below). A direct kill-server means NO shutdown path ever executes the Shutdown rail — which
+# is what it was built for.
 cmd_stop() {
   load_env
   if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
@@ -301,11 +301,16 @@ cmd_stop() {
   if [[ -n "$beam_pid" ]]; then
     kill -TERM "$beam_pid" 2>/dev/null || true
 
-    # Wait for the BEAM to finish cleanly (the tmux session dies with it). Bounded by
-    # FLEET_V2_STOP_WAIT seconds (default 30; tests shrink it). Under `set -e`, `((i++))`
-    # returns 0 (falsy) on the first round and kills the script silently — hence the
-    # explicit form below.
-    local i=0 max_wait="${FLEET_V2_STOP_WAIT:-30}"
+    # Wait for the BEAM to finish cleanly (the tmux session dies with it). This is the OUTER
+    # bound of the WHOLE clean stop: the drain's own deadline AND the ordered teardown that
+    # follows it (pods' terminate → checkpoint seed) must both fit inside. Set tighter than the
+    # drain deadline, it makes that deadline decorative — the fallback kill-server below then
+    # cuts the checkpoint, the one thing a clean stop exists to save. The asymmetry decides the
+    # value: too generous costs an operator's wait on a BEAM that is already stuck, too tight
+    # costs pod state. Still a literal posed HERE rather than derived from the BEAM's own
+    # deadline — that single source is BL-6-52. Under `set -e`, `((i++))` returns 0 (falsy) on
+    # the first round and kills the script silently, hence the explicit form below.
+    local i=0 max_wait="${FLEET_V2_STOP_WAIT:-90}"
     while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < max_wait )); do
       sleep 1
       i=$((i + 1))
