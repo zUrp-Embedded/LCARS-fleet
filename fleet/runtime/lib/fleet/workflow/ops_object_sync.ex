@@ -27,8 +27,13 @@ defmodule Fleet.Workflow.OpsObjectSync do
   result: on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`,
   no lock) and returns the sha if the transaction landed — a false-negative timeout can no longer make
   a landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
-  head-of-line blocking ever bites; NO test pins the node-wide scope, so a green suite would not by
-  itself prove such a change safe.
+  head-of-line blocking ever bites. The node-wide scope IS pinned since 2026-08-03 (BL-6-43.4,
+  `ops_object_sync_test.exs`): two different `work_dir`s committed through one explicitly-named
+  instance, both landing, neither cross-writing. What that test holds is the ROUTING KEY — the
+  server is the only address, `work_dir` is payload — which is the first thing a sharding refactor
+  changes. It deliberately does NOT pin mutual exclusion across `work_dir`s by timing: proving
+  "these two never overlapped" takes a clock, and a clock in a test buys flakiness rather than
+  truth.
 
   ## SYNCHRONOUS (unlike WorktreeSync)
 
@@ -54,7 +59,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
   starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
 
-  **Last revised**: 2026-07-22
+  **Last revised**: 2026-08-03
   """
 
   use GenServer
