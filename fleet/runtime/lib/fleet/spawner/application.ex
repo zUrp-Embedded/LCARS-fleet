@@ -32,6 +32,12 @@ defmodule Fleet.Spawner.Application do
 
   @impl Supervisor
   def init(_init_arg) do
+    # FREIN (2026-08-03) : coherence des DEUX plafonds, dite une fois au boot. Un cap par role que
+    # le plafond global ne peut pas contenir produit des skips que personne ne sait expliquer — le
+    # role n'atteint jamais sa propre limite, il se fait refuser par un plafond qui nomme autre
+    # chose. On ne le decouvre pas sur une fleet coincee : on l'annonce ici.
+    _ = Fleet.Spawner.PoolSlot.check_ceilings!()
+
     # Fleet-life epoch stamped BEFORE any pod starts (single init, no race) — the discriminator
     # between a pod crash (same epoch → fresh-reroll) and a fleet restart (stale epoch → unified
     # seed decision). Cf. Fleet.Spawner.BootEpoch.

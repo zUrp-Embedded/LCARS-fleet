@@ -155,7 +155,13 @@ defmodule Fleet.Spawner.Pod do
   """
   @spec start_link(map()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(args) do
-    :gen_statem.start_link(name(args.pod_id), __MODULE__, args, [])
+    # The slot identity travels in the REGISTRY VALUE (cf. `name/2`): `PoolSlot` reads live
+    # allocations from it without calling any pod. Absent (recall, admin spawn, tests that do not
+    # go through the allocator) → plain registration, and that pod simply holds no slot.
+    case Map.get(args, :slot) do
+      %{} = slot -> :gen_statem.start_link(name(args.pod_id, slot), __MODULE__, args, [])
+      _ -> :gen_statem.start_link(name(args.pod_id), __MODULE__, args, [])
+    end
   end
 
   @doc """
@@ -167,6 +173,19 @@ defmodule Fleet.Spawner.Pod do
   @spec name(String.t()) :: {:via, Registry, {Fleet.Spawner.Registry, String.t()}}
   def name(pod_id) when is_binary(pod_id) do
     {:via, Registry, {Fleet.Spawner.Registry, pod_id}}
+  end
+
+  @doc """
+  Registry-via name CARRYING the pod's slot identity `%{role, repo, pool}`.
+
+  The value is what makes `Fleet.Spawner.PoolSlot` able to read live allocations WITHOUT calling
+  a single pod — a hung pod must never block another's spawn. It is set at registration, so the
+  pool has to be decided at the SPAWN site (before the process exists), which is also where the
+  capacity ceiling belongs.
+  """
+  @spec name(String.t(), map()) :: {:via, Registry, {Fleet.Spawner.Registry, String.t(), map()}}
+  def name(pod_id, %{} = slot) when is_binary(pod_id) do
+    {:via, Registry, {Fleet.Spawner.Registry, pod_id, slot}}
   end
 
   # ============================================================

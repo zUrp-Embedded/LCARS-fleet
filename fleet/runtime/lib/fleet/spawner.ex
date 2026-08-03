@@ -182,22 +182,37 @@ defmodule Fleet.Spawner do
         # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
         _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
-        args = %{
-          cap_profile: cap_profile,
-          issue_id: issue_id,
-          pod_id: pod_id,
-          opts: opts
-        }
+        # POOL SLOT — decide ICI, avant que le processus existe : la valeur doit etre connue a
+        # l'enregistrement (cf. `Pod.name/2`). C'est aussi la bonne place pour le plafond : un role
+        # a capacite est un REPORT, pas un echec — l'appelant en fait un skip, le ticket empile et
+        # retente. Sans ca, le 16e pod d'un role aurait fait exploser le garde `pool in 0..0xF` de
+        # `SessionId.encode/5` : un plafond de format heurte comme un bug.
+        role = Fleet.CapProfile.name(cap_profile)
+        repo = Keyword.get(opts, :repo)
 
-        spec = pod_child_spec(args)
+        case Fleet.Spawner.PoolSlot.allocate(role, repo) do
+          {:error, :role_at_capacity} = err ->
+            err
 
-        # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
-        # (never produced by our gen_statem, but callers should not have to carry that contract).
-        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-          {:ok, pid} -> {:ok, pid}
-          {:ok, pid, _info} -> {:ok, pid}
-          :ignore -> {:error, :pod_init_ignored}
-          {:error, _} = err -> err
+          {:ok, pool} ->
+            args = %{
+              cap_profile: cap_profile,
+              issue_id: issue_id,
+              pod_id: pod_id,
+              slot: %{role: role, repo: repo, pool: pool},
+              opts: Keyword.put(opts, :pool, pool)
+            }
+
+            spec = pod_child_spec(args)
+
+            # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
+            # (never produced by our gen_statem, but callers should not have to carry that contract).
+            case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+              {:ok, pid} -> {:ok, pid}
+              {:ok, pid, _info} -> {:ok, pid}
+              :ignore -> {:error, :pod_init_ignored}
+              {:error, _} = err -> err
+            end
         end
       else
         {:error, :invalid_pod_id}

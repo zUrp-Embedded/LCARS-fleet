@@ -52,7 +52,8 @@ defmodule Fleet.Spawner.Pod.SessionMint do
           Fleet.CapProfile.role_index(cap_profile),
           Fleet.CapProfile.kill_class(cap_profile),
           uid,
-          0x0000
+          0x0000,
+          Keyword.get(opts, :pool, 0)
         )
 
       is_integer(repo) and repo in 0..9999 ->
@@ -60,7 +61,11 @@ defmodule Fleet.Spawner.Pod.SessionMint do
           Fleet.CapProfile.role_index(cap_profile),
           Fleet.CapProfile.kill_class(cap_profile),
           uid,
-          repo
+          repo,
+          # POOL (2026-08-03) : l'index de slot alloue au spawn par `Fleet.Spawner.PoolSlot`.
+          # Defaut 0 pour tout appelant qui n'alloue pas (recall, admin, tests) — le comportement
+          # historique, ou le nibble valait toujours 0.
+          Keyword.get(opts, :pool, 0)
         )
 
       is_integer(repo) ->
