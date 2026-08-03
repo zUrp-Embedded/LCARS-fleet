@@ -125,7 +125,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           comment_opts,
           forge_opts,
           gk_opts,
-          opts
+          opts,
+          producer
         )
 
       {:error, _} = err ->
@@ -154,7 +155,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             comment_opts,
             forge_opts,
             gk_opts,
-            opts
+            opts,
+            producer
           )
         else
           err
@@ -174,7 +176,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
          comment_opts,
          forge_opts,
          gk_opts,
-         opts
+         opts,
+         producer
        ) do
     # Feed chronology: the merge call itself births `merge_pull_request` + `commit_repo main`
     # in ONE Gitea transaction (tied second, unsplittable client-side — accepted: both lines
@@ -238,6 +241,19 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # every caller — the seal merges a PR, and a PR always has a base (single-default-site).
     _ = worktree_sync().sync(repo, Keyword.fetch!(opts, :base_branch))
 
+    # FOSSOYEUR (2026-08-03) — le producteur cle par TICKET meurt ICI, jamais avant.
+    # Un producteur `slot_scope: instance` est context-long : RIEN ne le moissonne (le PodWarden
+    # ne balaie que le SUBSTRAT des pods deja morts), donc sans cet appel les pods s'empilent
+    # jusqu'a `max_pods` et la fleet se coince sur un `:at_capacity` SILENCIEUX. L'accroche est le
+    # SCELLEMENT, jamais `pod.completed` : une completion ne finit qu'un ROUND, et tout l'interet
+    # du ticket-live est que le producteur garde son contexte a travers ses rounds de rework —
+    # le tuer a la completion restaurerait exactement le defaut que ce lot retire. Le merge est la
+    # fin du ticket, donc la fin du producteur. Best-effort par construction : un merge fait
+    # autorite et ne se defait pas pour une moisson ratee ; `:not_found` est le cas NOMINAL (deja
+    # mort, ou producteur clé par projet qui doit survivre a son ticket) — d'ou l'absence de
+    # chemin d'erreur, et l'idempotence au rejeu.
+    _ = reap_ticket_producer(repo, issue_n, producer)
+
     case close_result do
       :ok ->
         :ok
@@ -248,6 +264,31 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # keeps `lcars-in-flight` = immediate guard) and `decide/1` skips `stage/merged` (durable guard)
         # → the merged brick is NEVER re-dispatched (no double-delivery).
         {:error, {:close_after_merge, reason}}
+    end
+  end
+
+  # Tue le pod producteur lie a CE ticket, et lui seul. L'identite se lit dans le catalogue comme
+  # le dispatcher la construit (`slot_scope` + `PodId`), jamais une chaine devinee : un role cle
+  # par PROJET resout vers un id partage, que cette fonction ne doit PAS tuer — c'est donc le
+  # scope qui decide, et `instance` est le seul moissonne.
+  defp reap_ticket_producer(repo, issue_n, producer) do
+    with true <- producer != "",
+         {:ok, profile} <- Fleet.CapProfile.load(producer),
+         "instance" <- Fleet.CapProfile.slot_scope(profile) do
+      pod_id = Fleet.Pilot.PodId.for_issue(repo, issue_n, producer)
+
+      case spawner().kill_pod(pod_id) do
+        :ok ->
+          Logger.info(
+            "GatekeeperSeal: #{repo}##{issue_n} sealed — ticket-scoped producer pod " <>
+              "#{pod_id} reaped (its context lived until the merge, as designed)"
+          )
+
+        {:error, :not_found} ->
+          :ok
+      end
+    else
+      _ -> :ok
     end
   end
 
@@ -302,6 +343,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
     do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Pilot.WorktreeSync)
+
+  # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
+  defp spawner,
+    do: Application.get_env(:fleet_pilot, :spawner, Fleet.Spawner)
 
   # ── Provenance wall (Phase 2) ────────────────────────────────────────────
   # Deterministic triplet check on the brick being sealed. SKIP paths (all LOUD, never
