@@ -39,7 +39,19 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   `cast` is lossy under saturation, and that is the correct trade here: dropping a metric is
   strictly better than delaying the tick it measures. A mailbox that actually grows is itself the
-  signal, and it belongs to the gauge listed as a cousin item of BL-6-40, not to this module.
+  signal — and c'est ce que la jauge ci-dessous mesure.
+
+  ## La jauge de mailbox (cousin de BL-6-40, livre ici)
+
+  « Aucune jauge de `message_queue_len` sur les mailboxes StepRunConsumer/Poller — un consumer en
+  retard est invisible jusqu'au symptome. » Elle est echantillonnee a CHAQUE tick, dans ce module
+  plutot qu'ailleurs, parce que le tick est deja la cadence a laquelle on veut la reponse : aucun
+  timer de plus, aucun process de plus, et l'instrument mesure les deux singletons du rail.
+
+  Elle warn au FRANCHISSEMENT du seuil, pas a chaque tick au-dessus : une mailbox qui reste haute
+  est UN fait, et le repeter toutes les 30 s noierait la trace que ce module existe pour garder
+  lisible — la meme discipline que le silence du tick nominal. Le retour sous le seuil est dit
+  aussi : sans lui, un operateur ne sait pas si c'est resorbe ou si le rail est mort.
 
   ## Config
     * `:fleet_pilot, :poller_slow_tick_ms` — warn threshold (default `10_000`).
@@ -48,11 +60,21 @@ defmodule Fleet.Pilot.PollerTelemetry do
   """
 
   @window 100
+  # Les deux singletons du rail dont la mailbox est un signal : le Poller (si ses ticks
+  # s'accumulent, la fleet est en retard sur elle-meme) et le StepRunConsumer (un consumer en
+  # retard est INVISIBLE jusqu'au symptome — BL-6-40, cousin nomme). Ils sont echantillonnes ICI
+  # parce qu'un tick de poller est deja la cadence a laquelle on veut la reponse : pas de timer de
+  # plus, pas de process de plus.
+  @watched [Fleet.Pilot.Poller, Fleet.Pilot.StepRunConsumer]
+  # Au-dela, la mailbox n'absorbe plus : elle accumule. Seuil volontairement BAS — ces deux
+  # process traitent un message en dizaines de millisecondes, donc dix en attente veut deja dire
+  # que quelque chose bloque, pas que la charge est forte.
+  @mailbox_warn 10
   @default_slow_tick_ms 10_000
   @event [:fleet_pilot, :poller, :poll]
   @handler_id "fleet-pilot-poller-telemetry"
 
-  defstruct ticks: [], count: 0, slow_tick_ms: @default_slow_tick_ms
+  defstruct ticks: [], count: 0, slow_tick_ms: @default_slow_tick_ms, mailboxes: %{}
 
   # ============================================================
   # Public surface
@@ -127,11 +149,14 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @impl GenServer
   def handle_cast({:tick, duration_ms, status, scope, repo}, state) do
     _ = maybe_warn(state, duration_ms, status, scope, repo)
+    mailboxes = sample_mailboxes()
+    _ = warn_saturated(mailboxes, state.mailboxes)
 
     {:noreply,
      %{
        state
        | count: state.count + 1,
+         mailboxes: mailboxes,
          ticks: Enum.take([{duration_ms, status, scope} | state.ticks], @window)
      }}
   end
@@ -158,7 +183,8 @@ defmodule Fleet.Pilot.PollerTelemetry do
        p95_ms: percentile(durations, 95),
        max_ms: List.last(durations),
        errors: errors,
-       slow_tick_ms: state.slow_tick_ms
+       slow_tick_ms: state.slow_tick_ms,
+       mailboxes: state.mailboxes
      }, state}
   end
 
@@ -180,6 +206,43 @@ defmodule Fleet.Pilot.PollerTelemetry do
   end
 
   defp maybe_warn(_state, _ms, _status, _scope, _repo), do: :ok
+
+  # `Process.info(pid, :message_queue_len)` sur un pid VIVANT uniquement — un nom non enregistre
+  # (rail off, redemarrage en cours) sort de la mesure au lieu d'y entrer comme un zero, qui
+  # ressemblerait a « sain ».
+  defp sample_mailboxes do
+    for name <- @watched, pid = Process.whereis(name), into: %{} do
+      case Process.info(pid, :message_queue_len) do
+        {:message_queue_len, n} -> {name, n}
+        # Mort entre le `whereis` et le `info` : on ne fabrique pas une valeur.
+        nil -> {name, :gone}
+      end
+    end
+  end
+
+  # Warn au FRANCHISSEMENT, pas a chaque tick au-dessus du seuil : une mailbox qui reste haute est
+  # un seul fait, et le repeter toutes les 30 s noierait la trace que ce module existe pour garder
+  # lisible. Le retour sous le seuil est dit aussi — sans lui, un operateur ne sait pas si c'est
+  # resorbe ou si le rail est mort.
+  defp warn_saturated(now, before) do
+    for {name, n} <- now, is_integer(n) do
+      was = Map.get(before, name)
+
+      cond do
+        n >= @mailbox_warn and (not is_integer(was) or was < @mailbox_warn) ->
+          Logger.warning(
+            "PollerTelemetry: mailbox de #{inspect(name)} a #{n} messages (seuil #{@mailbox_warn}) " <>
+              "— ce process prend du retard, les faits qu'il traite arrivent plus vite qu'il ne les consomme"
+          )
+
+        n < @mailbox_warn and is_integer(was) and was >= @mailbox_warn ->
+          Logger.info("PollerTelemetry: mailbox de #{inspect(name)} resorbee (#{n})")
+
+        true ->
+          :ok
+      end
+    end
+  end
 
   # Nearest-rank on a SORTED list. No interpolation: these are millisecond counts over a window of
   # at most #{@window} samples, where an interpolated value would suggest a precision the sample

@@ -85,4 +85,37 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
     # And it keeps working afterwards.
     assert %{count: 2, last_ms: 42} = emit(42)
   end
+
+  describe "jauge de mailbox (cousin BL-6-40)" do
+    test "stats/0 porte la longueur de mailbox des deux singletons du rail" do
+      # Le module s'echantillonne LUI-MEME quand il est le seul des trois a tourner ? Non : il
+      # observe le Poller et le StepRunConsumer, absents ici — donc la carte est VIDE, et c'est le
+      # comportement voulu. Un nom non enregistre sort de la mesure au lieu d'y entrer comme un
+      # zero, qui ressemblerait a « sain ».
+      emit(10)
+      assert %{mailboxes: m} = PollerTelemetry.stats()
+      assert m == %{}
+    end
+
+    test "un process observe SATURE declenche un warning au franchissement, une seule fois" do
+      # Un process qui ne RECOIT JAMAIS : sa mailbox ne peut que croitre. Premiere version de ce
+      # test : un `Agent`, qui DRAINE ses messages inconnus en les loggant — la mailbox se vidait,
+      # le test passait en isolation et tombait au gate. Un test dont le verdict depend de qui a
+      # draine en premier n'est pas un test, c'est un tirage.
+      pid = spawn(fn -> Process.sleep(:infinity) end)
+      true = Process.register(pid, Fleet.Pilot.Poller)
+      on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+
+      for _ <- 1..12, do: send(pid, :bourrage)
+
+      log = ExUnit.CaptureLog.capture_log(fn -> emit(10) end)
+      assert log =~ "mailbox de Fleet.Pilot.Poller"
+      assert log =~ "prend du retard"
+
+      # Deuxieme tick au-dessus du seuil : SILENCE. Repeter le meme fait toutes les 30 s noierait
+      # la trace — meme discipline que le silence du tick nominal.
+      log2 = ExUnit.CaptureLog.capture_log(fn -> emit(10) end)
+      refute log2 =~ "prend du retard"
+    end
+  end
 end
