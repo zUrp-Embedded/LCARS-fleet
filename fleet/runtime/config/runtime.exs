@@ -80,6 +80,29 @@ if config_env() != :test and not tool_mode? do
   config :logger, level: log_level
 
   # ============================================================
+  # The warning+ trace ON DISK (BL-6-41)
+  # ============================================================
+  # `config :logger, level:` above used to be the ONLY logger configuration of this project: every
+  # load-bearing warning lived in the daemon's tmux ring buffer and died with it, which makes an
+  # incident un-auditable after the fact. `Fleet.DurableLog` owns the two decisions (warning+, and
+  # the human's `.lcars/log/` beside their env file rather than the release directory a deploy
+  # replaces); here we only resolve the PATH, since it is the operator's to move.
+  #
+  # `LCARS_LOG_FILE=` (explicitly empty) DISABLES it. That is not a courtesy knob: on a read-only
+  # or ephemeral home the handler would fail to install at every boot, and an operator must be able
+  # to say "I know, I collect elsewhere" without reading a warning about it forever.
+  durable_log_path =
+    case System.get_env("LCARS_LOG_FILE") do
+      nil -> Path.expand("~/.lcars/log/fleet.log")
+      "" -> nil
+      explicit -> Fleet.EnvParse.path("LCARS_LOG_FILE", explicit)
+    end
+
+  if durable_log_path do
+    config :lcars_fleet, durable_log: [path: durable_log_path, level: :warning]
+  end
+
+  # ============================================================
   # fleet_catalogue — THE catalogue root (coarse knob)
   # ============================================================
   # One variable brings ONE catalogue: every business tree derives its sub-path from here

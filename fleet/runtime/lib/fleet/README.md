@@ -1,7 +1,7 @@
 # Fleet — root map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-08-02
+**Last revised**: 2026-08-03
 **Status**: active — generated topology map + root pointers
 **Referenced by**: `CLAUDE.md`, `README.md`
 
@@ -43,6 +43,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.Catalogue` | 0 |
 | foundation | `Fleet.Conflict` | 0 |
 | foundation | `Fleet.Decision` | 0 |
+| foundation | `Fleet.DurableLog` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |
 | foundation | `Fleet.GitRef` | 0 |

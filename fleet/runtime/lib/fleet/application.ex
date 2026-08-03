@@ -23,7 +23,12 @@ defmodule Fleet.Application do
       Fleet.SPBuilder,
       # The catalogue is verified before either image freezes from it (cf. start/2) — a boot
       # concern for the same reason, on the foundation that resolves it.
-      Fleet.Catalogue
+      Fleet.Catalogue,
+      # The durable warning+ trace, installed BEFORE the two guards above can fail-loud (BL-6-41).
+      # Same nature as the three edges above and the same justification: a node-global installation
+      # that must happen once, at the single-threaded spot, before anything can warn. Naming the
+      # edge here is what makes it reviewable — the ONLY caller is the root, by construction.
+      Fleet.DurableLog
     ],
     exports: []
 
@@ -69,7 +74,7 @@ defmodule Fleet.Application do
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-03
   """
 
   use Application
@@ -79,6 +84,13 @@ defmodule Fleet.Application do
     # Single-threaded materialization of the drain's activity counter (two concurrent
     # lazy inits would orphan a ref and undercount its wrap).
     :ok = Fleet.Shutdown.Quiesce.init_busy!()
+
+    # FIRST, before anything that can warn: every line emitted from here on survives the process
+    # (BL-6-41). Installed ahead of the catalogue check and the images on purpose — those are the
+    # two steps that fail-loud on a broken deploy, and their diagnosis is exactly what nobody could
+    # read after the fact. Never fatal: a trace that refuses to let the fleet boot has become the
+    # incident it was meant to record.
+    :ok = Fleet.DurableLog.attach()
 
     # The CATALOGUE is checked before anything reads it: the root exists, it carries a manifest, and
     # that manifest targets a contract generation this runtime consumes. Ordering is the whole point

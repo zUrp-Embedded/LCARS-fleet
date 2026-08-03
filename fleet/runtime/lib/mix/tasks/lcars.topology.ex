@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Lcars.Topology do
       mix lcars.topology            # regenerate the section in lib/fleet/README.md
       mix lcars.topology --check    # exit 1 if the committed map diverges (gate step)
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   use Mix.Task
@@ -74,6 +74,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Layout" => "foundation",
     "Fleet.Catalogue" => "foundation",
     "Fleet.ReceptionFilter" => "foundation",
+    "Fleet.DurableLog" => "foundation",
     "Fleet.Event" => "foundation",
     "Fleet.SchemaCache" => "foundation",
     "Fleet.Labels" => "foundation",
