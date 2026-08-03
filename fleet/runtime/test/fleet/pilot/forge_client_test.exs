@@ -146,6 +146,36 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "list_open_pulls/2 — N+1 parallelise, semantique inchangee (BL-6-40)" do
+    test "l'ORDRE est celui du listing, pas celui des reponses" do
+      # `ordered: true` n'est pas un detail : le dispatch lit ces PR dans l'ordre, et une forge qui
+      # repond plus vite sur #9 que sur #7 ne doit pas reordonner ce que le poller traite.
+      h = %{
+        {"GET", "/api/v1/repos/fleet/tmpl/issues"} =>
+          {200, [%{"number" => 7}, %{"number" => 8}, %{"number" => 9}]},
+        {"GET", "/api/v1/repos/fleet/tmpl/pulls/7"} => {200, %{"number" => 7}},
+        {"GET", "/api/v1/repos/fleet/tmpl/pulls/8"} => {200, %{"number" => 8}},
+        {"GET", "/api/v1/repos/fleet/tmpl/pulls/9"} => {200, %{"number" => 9}}
+      }
+
+      assert {:ok, prs} = ForgeClient.list_open_pulls("fleet/tmpl", opts(h))
+      assert Enum.map(prs, & &1["number"]) == [7, 8, 9]
+    end
+
+    test "FAIL-FAST conserve : une seule PR en erreur fait echouer l'ensemble" do
+      # On ne dispatche JAMAIS sur une vue partielle — meme regle que la pagination. Un `{:ok, [2
+      # PR sur 3]}` ferait prendre au poller une decision de merge sur un monde incomplet, et il
+      # n'aurait aucun moyen de savoir qu'il en manque une.
+      h = %{
+        {"GET", "/api/v1/repos/fleet/tmpl/issues"} => {200, [%{"number" => 7}, %{"number" => 8}]},
+        {"GET", "/api/v1/repos/fleet/tmpl/pulls/7"} => {200, %{"number" => 7}},
+        {"GET", "/api/v1/repos/fleet/tmpl/pulls/8"} => {500, %{"error" => "boom"}}
+      }
+
+      assert {:error, _} = ForgeClient.list_open_pulls("fleet/tmpl", opts(h))
+    end
+  end
+
   describe "route_from_labels/1 — la regle de derivation, sans I/O (BL-6-40 Phase 2)" do
     test "wfmap + stage presents → la route" do
       assert {:ok, {"brief-gate", "build"}} =
