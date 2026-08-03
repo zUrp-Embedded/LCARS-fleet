@@ -211,9 +211,11 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
       end
     end
 
-    # 1. the DECISION requires no project (it is taken before the resolver)
+    # 1. the DECISION requires no project (it is taken before the resolver). `"project"` spelled
+    # out: the reprovision verdict only exists under project keying, and the argument used to be
+    # defaulted — the test read as if the keying did not matter to the answer.
     assert :ready_needs_reprovision =
-             Spawn.project_scope_decision("pipe", ReadyPipeSpawner, "pod-pipe")
+             Spawn.project_scope_decision("pipe", ReadyPipeSpawner, "pod-pipe", "project")
 
     # 2. the ACTION consumes the resolved project (base_sha) — post-resolver
     assert :ok =
@@ -238,7 +240,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert :role_busy =
-                 Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x")
+                 Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x", "project")
       end)
 
     # VISIBLE fail-closed (safe_pod_info's warning), never :proceed (destructive reset). The old

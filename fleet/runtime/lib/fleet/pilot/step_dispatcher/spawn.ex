@@ -454,11 +454,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   action gap spans the resolver call (~15s worst case); the single sequential dispatcher per
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
+
+  `slot_scope` is REQUIRED, with no default. It carries the whole difference between re-briefing a
+  pod in place and wiping its context, so a caller that omits it is a caller that has not decided —
+  and a default would answer for them, silently, on the side that reintroduces the `/clear`. The
+  compiler asking the question is the cheapest possible wall; the alternative is a new call site
+  inheriting the old semantics with nothing to see in review.
   """
   @spec project_scope_decision(String.t(), module(), String.t(), String.t()) ::
           :proceed | :role_busy | :ready_needs_reprovision
-  def project_scope_decision(lifetime_scope, spawner, pod_id, slot_scope \\ "project")
-
   def project_scope_decision("one-shot", _spawner, _pod_id, _slot), do: :proceed
 
   # TICKET-LIVE (2026-08-03) — a context-long producer keyed on the ISSUE.
