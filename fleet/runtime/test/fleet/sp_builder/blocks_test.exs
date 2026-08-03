@@ -55,10 +55,22 @@ defmodule Fleet.SPBuilder.BlocksTest do
   test "catalog completeness: each pod role has its own SP (the no-fallback flip would brick its spawn otherwise)" do
     # Roles spawned via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap pods). `architect` and
     # `starfleet` keep a HISTORICAL/manual draft (user-facing socle — one per-project, one fleet-level —
-    # outside the composed blocks, so NOT in sp-map.yaml). Every other role is block-composed. A NEW pod
-    # role → add it here AND give it a draft, else its spawn dies hard (no-fallback, cf. no-sp-no-pod-no-fleet).
-    # `vulcan` is ABSENT by construction: a ReservedSeat is not spawnable, so it owes no draft (BL-6-45).
-    pod_roles = ~w(architect starfleet engineer scribe gatekeeper qualifier reviewer scoper)
+    # outside the composed blocks, so NOT in sp-map.yaml). Every other role is block-composed.
+    #
+    # DERIVED from the catalogue, not listed. This used to be a hand-written `~w(...)` of the eight
+    # names, with a comment telling the reader to add the next role to it — a FIFTH list to keep in
+    # sync, checked by nothing, next to the four the contracts check locks precisely because
+    # hand-kept lists drift. A role added everywhere else would leave this test green while never
+    # testing it: the one test whose job is to catch a missing draft would be the one that missed it.
+    #
+    # `list/0` filters ReservedSeats out (`vulcan` is not spawnable, so it owes no draft, BL-6-45),
+    # which is the exact set that owes one.
+    {:ok, pod_roles} = Fleet.CapProfile.list()
+
+    # Anti-vacuity, same reason as above: an empty list would loop over nothing and pass.
+    assert length(pod_roles) >= 8,
+           "the catalogue returns #{length(pod_roles)} spawnable roles — the instrument is broken, " <>
+             "not the tree (measured: 8 on 2026-08-03)"
 
     for role <- pod_roles do
       path = Path.join(drafts_dir(), "agent-#{role}-base.md")
