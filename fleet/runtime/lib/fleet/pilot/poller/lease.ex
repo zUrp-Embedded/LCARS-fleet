@@ -170,7 +170,10 @@ defmodule Fleet.Pilot.Poller.Lease do
   # `{tally, started?}`; `started?` (= a pod was actually put in flight this tick) drives the lease taking,
   # INDEPENDENTLY of whether the dispatch finished without error.
   defp step_do_dispatch(payload, opts, acc) do
-    case StepDispatcher.dispatch_issue(payload, opts) do
+    result = StepDispatcher.dispatch_issue(payload, opts)
+    _ = converge_wait_label(payload, opts, result)
+
+    case result do
       {:ok, {:spawned, _pod_id, _role}} ->
         {%{acc | dispatched: acc.dispatched + 1}, true}
 
@@ -187,6 +190,106 @@ defmodule Fleet.Pilot.Poller.Lease do
       {:error, _reason} ->
         {%{acc | errors: acc.errors + 1}, false}
     end
+  end
+
+  # BL-6-48, pas 3 (moitie ISSUES) — le point de passage ECRIT enfin ce qu'il tenait deja.
+  #
+  # Les 63 sites qui produisent un `{:skipped, reason}` sont consommes ICI et dans `step_process_pulls`,
+  # et les deux jetaient la raison (`{:skipped, _reason} -> skipped + 1`). Le « point de passage
+  # unique » que BL-6-48 reclamait n'etait pas absent : il oubliait ce qu'il tenait. Un ticket en
+  # file etait donc indiscernable d'un ticket oublie — ambiguite qui a deja coute un faux diagnostic.
+  #
+  # TROIS etats, et le troisieme est celui qu'on oublie :
+  #   {:skipped, r}  -> poser `wait/<r>` (ou rien : douze raisons sont silencieuses par decision)
+  #   {:ok, _}       -> RETIRER le `wait/*` : l'attente a cesse
+  #   {:error, _}    -> NE RIEN TOUCHER. Une erreur ne dit rien de l'attente, et son rail est
+  #                     l'incident. Ecrire ici transformerait une panne en « attente » — un
+  #                     mensonge de plus, pas une trace de moins.
+  #
+  # ECRITURE SUR CHANGEMENT SEULEMENT. Les labels de l'issue sont dans le payload que le tick a deja
+  # liste (zero appel forge), donc on COMPARE avant d'ecrire. Sans cette comparaison, un
+  # `criterion_unavailable` intermittent ferait battre le label toutes les 30 s dans le fil de
+  # l'issue — on aurait echange une attente invisible contre du bruit permanent.
+  #
+  # L'exclusivite native fait le reste : `wait/` contient un `/`, donc `ensure_repo_label` cree ces
+  # labels `exclusive: true` et poser l'un retire l'autre. Le seul cas que l'exclusivite ne couvre
+  # PAS est la sortie d'attente — c'est la branche `{:ok, _}` ci-dessus, et l'oublier aurait
+  # fabrique l'etat perime que cet item existe pour tuer.
+  defp converge_wait_label(payload, opts, result) do
+    case wait_transition(current_wait_label(payload), desired_wait_label(result)) do
+      :noop -> :ok
+      op -> write_wait(opts, payload["number"], op)
+    end
+  end
+
+  @doc """
+  The PURE rule of the wait label: `current` (on the ticket) + `desired` (from the dispatch) →
+  `:noop | {:add, label} | {:remove, label}`.
+
+  Extracted with no I/O for the same reason `ForgeClient.route_from_labels/1` was: a decision buried
+  under a forge call is a decision nobody can exercise. Every branch below is reachable from a test
+  without a network.
+
+  `:keep` is NOT a third label, it is the ABSENCE of an opinion — a dispatch error says nothing
+  about what a ticket is waiting for, and writing on it would turn a failure into a "wait".
+  """
+  @spec wait_transition(String.t() | nil, String.t() | nil | :keep) ::
+          :noop | {:add, String.t()} | {:remove, String.t()}
+  def wait_transition(_current, :keep), do: :noop
+  # `(same, same)` couvre AUSSI `(nil, nil)` : rien porte, rien voulu, rien a faire. Une clause
+  # `(nil, nil)` explicite serait morte — et un code mort ment sans que le compilateur le dise.
+  def wait_transition(same, same), do: :noop
+  def wait_transition(current, nil), do: {:remove, current}
+  def wait_transition(_current, desired), do: {:add, desired}
+
+  defp current_wait_label(payload) do
+    prefix = Fleet.Labels.wait_prefix()
+
+    (payload["labels"] || [])
+    |> Enum.map(& &1["name"])
+    |> Enum.find(&(is_binary(&1) and String.starts_with?(&1, prefix)))
+  end
+
+  defp desired_wait_label({:ok, _}), do: nil
+  defp desired_wait_label({:error, _}), do: :keep
+
+  defp desired_wait_label({:skipped, reason}) do
+    Fleet.Labels.wait_for(reason)
+  rescue
+    # `wait_for/1` leve sur une raison absente de la table — c'est le MUR, et il est tenu par un
+    # test qui mesure `lib/`. En production on degrade plutot que d'avorter un tick entier pour une
+    # question d'etiquette : la trace manque, le dispatch continue. Le rouge appartient au gate,
+    # pas au rail.
+    ArgumentError ->
+      Logger.warning(
+        "Poller: skip reason #{inspect(reason)} absent from the BL-6-48 wait table — " <>
+          "no label written (the tick stands; the exhaustiveness test is what must go red)"
+      )
+
+      :keep
+  end
+
+  defp write_wait(opts, number, op) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    repo = Keyword.get(opts, :repo)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    _ =
+      case op do
+        {:add, label} -> forge.add_label(repo, number, label, forge_opts)
+        {:remove, label} -> forge.remove_label(repo, number, label, forge_opts)
+      end
+
+    :ok
+  rescue
+    # Best-effort assume : une etiquette qu'on ne peut pas poser ne doit jamais empecher un
+    # dispatch. La trace manque, le travail passe.
+    e ->
+      Logger.warning(
+        "Poller: wait label #{inspect(op)} on ##{number} failed (#{inspect(e)}) — dispatch unaffected"
+      )
+
+      :ok
   end
 
   # Dispatch of an ENGAGED workflow_run (it ALREADY holds the lease): the lease stays unchanged whatever happens
