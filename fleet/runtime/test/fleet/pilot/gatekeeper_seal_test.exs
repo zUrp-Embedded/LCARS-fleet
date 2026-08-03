@@ -368,4 +368,35 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
     assert_received {:merge, 4}
   end
+
+  test "provenance wall SAUTÉ : le merge passe, ET la PR le DIT (BL-6-47.4)", %{tmp_dir: tmp} do
+    # L'asymétrie fermée ici : les deux branches voisines loguaient, une seule écrivait SUR LA
+    # FORGE. Une PR mergée avait donc exactement la même apparence, que le mur l'ait vérifiée ou
+    # qu'il n'ait jamais tourné — « mergée » suggérait une provenance contrôlée. Le log ne rattrape
+    # pas ça : la PR est l'artefact qu'un humain relit six mois plus tard, pas les journaux du BEAM.
+    %{head: head} = wall_harness(tmp)
+    # PAS de `wall_statement/4` → `{:skip, {:no_statement, ref}}`.
+
+    assert :ok =
+             GatekeeperSeal.seal_and_merge(
+               WallForge,
+               "fleet/demo",
+               4,
+               9,
+               "engineer",
+               wall_opts(tmp, head),
+               Keyword.put(wall_opts(tmp, head), :base_branch, "main")
+             )
+
+    # Le merge n'est PAS bloqué — le chemin reste délibérément non-bloquant, le fix rend la
+    # décision lisible, il ne la renverse pas.
+    assert_received {:merge, 4}
+
+    # Et la trace existe, sous une signature DISTINCTE de celle du refus : confondre les deux
+    # ferait qu'une note « non vérifiée » dédupliquerait un vrai refus, ou l'inverse.
+    assert_received {:comment, 4, body, "[provenance-wall-skipped:pr-4]"}
+    assert body =~ "Provenance NON vérifiée"
+    assert body =~ "no_statement"
+    refute body =~ "Provenance incohérente"
+  end
 end

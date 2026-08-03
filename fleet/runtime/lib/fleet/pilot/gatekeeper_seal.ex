@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -85,16 +85,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # statement passes LOUD (emission is best-effort, DR-010 — absence is recorded,
         # incoherence blocks). The wall is deterministic (git+JSON, no LLM) — the one
         # check a confabulating jury consensus cannot cross.
-        with {:error, {:provenance_incoherent, reason}} <-
-               verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
-          {:error, {:provenance_incoherent, reason}}
-        else
-          :ok -> do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts)
+        case verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
+          {:error, {:provenance_incoherent, reason}} ->
+            {:error, {:provenance_incoherent, reason}}
+
+          wall ->
+            # `wall` vaut `:ok` (le mur a tourne et le triplet est coherent) ou `{:skipped, why}`.
+            # Il DESCEND jusqu'apres le merge : la note ne se poste qu'une fois le merge REEL,
+            # cf. `note_wall_not_run/5`.
+            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall)
         end
     end
   end
 
-  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts) do
+  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `get_issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Pilot.ForgeProtocol.merge_marker(pr_number)
@@ -116,6 +120,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
+        note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
+
         converge_postconditions(
           forge,
           repo,
@@ -144,6 +150,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
               "merged — converging the seal postconditions from the forge state (the POST's " <>
               "verdict was a lie of the wire, not of the merge)"
           )
+
+          note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
 
           converge_postconditions(
             forge,
@@ -373,7 +381,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             "sealing without the deterministic check (absence recorded, incoherence alone blocks)"
         )
 
-        :ok
+        {:skipped, why}
 
       {:error, why} ->
         Logger.warning(
@@ -381,8 +389,48 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             "sealing without the deterministic check (a forge hiccup never blocks an approved merge)"
         )
 
-        :ok
+        {:skipped, {:head_read_failed, why}}
     end
+  end
+
+  # ASYMÉTRIE FERMÉE (BL-6-47.4). Les deux branches voisines loguaient ; une seule écrivait SUR LA
+  # FORGE. L'incohérence commente la PR, le saut ne laissait rien — donc une PR mergée avait
+  # exactement la même apparence, qu'un mur déterministe l'ait vérifiée ou qu'il n'ait jamais tourné.
+  # « Mergée » suggérait une provenance contrôlée. Le log ne rattrape pas ça : la PR est l'artefact
+  # que relit un humain six mois plus tard, et il ne remonte pas les journaux du BEAM pour savoir si
+  # une vérification a eu lieu.
+  #
+  # Une TRACE, pas un blocage : ce chemin est délibérément non-bloquant (« a forge hiccup never
+  # blocks an approved merge », « incoherence alone blocks »), et le fix ne renverse pas cette
+  # décision — il la rend LISIBLE là où elle produit ses effets.
+  #
+  # Déduplication par une signature DISTINCTE de celle du refus : les confondre ferait qu'une note
+  # « non vérifiée » déduplique un vrai refus, ou l'inverse. Best-effort assumé — une note qu'on ne
+  # peut pas poster ne doit pas empêcher un merge que le jury a approuvé.
+  #
+  # ⚠ POSTÉE APRÈS LE MERGE RÉEL, jamais pendant le mur. La première version de ce fix commentait
+  # depuis `verify_provenance_wall`, donc AVANT `do_merge` — et un test existant l'a refusée à
+  # raison : sur un merge qui échoue, la note se serait posée sur une PR non mergée, suggérant
+  # exactement le contraire de ce qu'elle existe pour dire. C'est la doctrine du fichier, écrite
+  # trente lignes plus haut : « MERGE FIRST, only comment IF the merge REALLY succeeded ». Une note
+  # sur la provenance d'un merge qui n'a pas eu lieu est de la même famille qu'un « mergé » menteur.
+  defp note_wall_not_run(_forge, _repo, _pr_number, :ok, _forge_opts), do: :ok
+
+  defp note_wall_not_run(forge, repo, pr_number, {:skipped, why}, forge_opts) do
+    _ =
+      comment(
+        forge,
+        repo,
+        pr_number,
+        "ℹ️ **Provenance NON vérifiée** — le mur déterministe n'a pas tourné sur cette PR " <>
+          "(`#{inspect(why)}`).\n\n" <>
+          "Le merge reste légitime : c'est le jury qui l'autorise, et seule une provenance " <>
+          "INCOHÉRENTE bloque. Cette note existe pour qu'une PR mergée sans contrôle ne se lise " <>
+          "pas comme une PR contrôlée.",
+        Keyword.put(forge_opts, :dedup_signature, "[provenance-wall-skipped:pr-#{pr_number}]")
+      )
+
+    :ok
   end
 
   defp comment(forge, repo, issue_n, body, opts) do
