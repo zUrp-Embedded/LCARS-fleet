@@ -236,8 +236,26 @@ defmodule Fleet.Starfleet.Shutdown do
   # so the item leaves `list_active` before this consumer has even decided, let alone offloaded.
   # Raising the count would buy the same instrument, slower, at the price of every clean shutdown.
   #
-  # What would actually close it: a LEASE taken BEFORE the work-item flips to `:completed`, so the
-  # drain counts the lease instead of an aggregate that misses the window by construction. Open.
+  # THE LEASE EXISTS, AND THIS COMMENT DECLARED IT MISSING (corrige 2026-08-03, BL-6-43.1). The
+  # paragraph above described the right fix — "a LEASE taken BEFORE the work-item flips" — and
+  # closed on "Open." while `in_flight_count/0`, 130 lines up, already adds
+  # `Quiesce.busy_count()`, and `StepRunConsumer` already wraps its whole `pod.completed` handoff
+  # in `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
+  # counted: the drain cannot conclude while it runs.
+  #
+  # WHAT REMAINS UNCOVERED, precisely, because "closed" said flatly would be the next lie: the Bus
+  # message in flight between `submit_result`'s broadcast and the consumer's `handle_info` entry.
+  # There, the item is `:completed` and the lease is not yet taken. That gap is a local PubSub
+  # delivery — microseconds — against 1.5s of CONTINUOUS zero required by the debounce, five
+  # orders of magnitude. And it cannot widen under load: a backed-up consumer mailbox means the
+  # previous message is being handled, so the lease is already held and the count is not zero.
+  #
+  # The debounce therefore keeps its original job (not a SINGLE racy 0-read) and no longer carries
+  # a window it was never sized for. Raising the count would still buy nothing.
+  #
+  # ⚠ Garde en specimen: ce commentaire a survecu a la livraison qui l'invalidait, et il annoncait
+  # un trou connu dans le fichier meme qui le fermait. Un lecteur — humain ou agent — en repart
+  # avec une dette qui n'existe pas, et la premiere chose qu'il fera est de la "reparer".
   @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real
