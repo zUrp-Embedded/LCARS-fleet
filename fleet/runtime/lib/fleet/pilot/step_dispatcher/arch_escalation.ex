@@ -16,6 +16,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   (`dispatch_rework`/`route_merge_failure`). This module ONLY WRITES — a single forge write point
   shared by the two escalations (`escalate_to_arch`, private), no fork of signature/label.
 
+  ## Family
+
+  One of FOUR escalation exits. The family register — the four exits, the overlap under watch and
+  its COUNT — lives once, in `Fleet.Pilot`'s moduledoc. Read it before adding a fifth: the standing
+  decision is to merge the two overlapping ones when a fifth appears, and that threshold only works
+  if the count is kept in one place.
+
   ## Boundary: explicit seams struct (not the whole `ctx`)
 
   The cluster reads ONLY 3 seams of the dispatch (`forge`, `repo`, `forge_opts`). We do NOT pass the
@@ -44,7 +51,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
   rails — not a physical merge.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in

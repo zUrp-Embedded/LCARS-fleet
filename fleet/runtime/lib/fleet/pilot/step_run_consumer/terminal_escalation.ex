@@ -23,6 +23,13 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   the rail churn: the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step
   → re-fail → infinite loop without ever notifying a human.
 
+  ## Family
+
+  One of FOUR escalation exits. The family register — the four exits, the overlap under watch and
+  its COUNT — lives once, in `Fleet.Pilot`'s moduledoc. Read it before adding a fifth: the standing
+  decision is to merge the two overlapping ones when a fifth appears, and that threshold only works
+  if the count is kept in one place.
+
   ## Armored boundary
 
   The module NEVER receives the consumer's state: `Seams` (narrow struct) carries the
@@ -37,7 +44,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   transient / self-healing errors (`:no_gatekeeper` → the one-shot gatekeeper is
   (re)spawned on the next tick; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   require Logger

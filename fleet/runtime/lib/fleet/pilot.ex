@@ -43,7 +43,34 @@ defmodule Fleet.Pilot do
 
   ## Operator entries (delegated here — the facade is the contract)
 
-  **Last revised**: 2026-08-02
+  ## The escalation FAMILY — the register, because the posture has a threshold
+
+  Four modules escalate, with four DISTINCT exits, and that is why none of them was merged:
+
+  | Module | Exit | Object |
+  |---|---|---|
+  | `StepRunConsumer.TerminalEscalation` | human wall: freeze + unlock `lcars-in-flight` | issue |
+  | `StepDispatcher.ArchEscalation` | deduplicated comment + `lcars-awaits-arch` | issue (PR-originated) |
+  | `StepRunConsumer.GatekeeperEscalation` | summons the gatekeeper | PR |
+  | `IncidentRegistry.Escalation` | sysadmin issue | separate repo |
+
+  **The overlap under watch, and its COUNT: 2 of the 4 aim at the same target with neighbouring
+  gestures** — `ArchEscalation` and `TerminalEscalation` both end at "the arch decides", both write
+  an arch-addressed comment plus `lcars-awaits-arch` on the ISSUE. They differ by ORIGIN (a PR that
+  cannot advance vs a step_run that cannot conclude) and by one effect (only the terminal one
+  unlocks `lcars-in-flight`).
+
+  The standing decision is to WATCH, not to merge — the two origins are genuinely different and a
+  premature merge would fuse two lifecycles. The threshold: **merge when a 5th escalation appears.**
+
+  **This register exists because that threshold had no counter.** The posture was written in an
+  audit as "to merge at the 5th appearance" while nothing anywhere counted, which makes the rule
+  unfalsifiable: the next reader adding an escalation cannot know whether they are the 4th or the
+  6th, so the threshold can never trigger. A rule with a number and no place to read the number is
+  a rule that will not fire (BL-6-42.4, count taken 2026-08-03: **4 modules, 2 overlapping**).
+  Whoever adds a 5th updates this table FIRST — that update is what makes the threshold real.
+
+  **Last revised**: 2026-08-03
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
