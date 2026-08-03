@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -66,7 +66,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch(kind, pr_number, head, role, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),
-         {:ok, profile} <- load_role_or_skip(ctx.loader, role) do
+         {:ok, profile} <- load_role_or_skip(ctx, role) do
       do_dispatch_review(pr_number, issue_n, head, role, profile, kind, ctx)
     end
   end
@@ -85,15 +85,58 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  defp load_role_or_skip(_loader, ""), do: {:skipped, :no_role}
+  # An EMPTY role is a step with no judge — a legitimate, frequent configuration. It stays silent:
+  # saying it every tick would train an operator to skip the very line the clause below emits.
+  defp load_role_or_skip(%Ctx{}, ""), do: {:skipped, :no_role}
 
-  defp load_role_or_skip(loader, role) do
+  defp load_role_or_skip(%Ctx{} = ctx, role) do
     # `resolve` (not bare `load`): composes the role's modops so the structural overlay is applied
     # on the review/rework pod like every other launch site (catalogue chantier L1a — no divergence).
-    case Fleet.CapProfile.resolve(loader, role) do
-      {:ok, _} = ok -> ok
-      {:error, _} -> {:skipped, :no_role}
+    case Fleet.CapProfile.resolve(ctx.loader, role) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} ->
+        note_unresolvable_role(ctx, role, reason)
+        {:skipped, :no_role}
     end
+  end
+
+  # A jury role that does not RESOLVE is a durable config defect, never a transient: the same card is
+  # re-read on every tick, so the same skip repeats forever while the PR keeps displaying "judge at
+  # work". Returning a bare `{:skipped, :no_role}` made a TYPO in a card indistinguishable from a
+  # step that legitimately has no judge — and because the second case is ordinary, nobody goes
+  # looking. One missing letter freezes a brick, in silence, indefinitely.
+  #
+  # It goes on the INCIDENT rail rather than through a bare Logger, and that choice is load-bearing:
+  # a warning every 30 s per PR drowns the very trace it exists to raise, whereas the registry notes
+  # the first occurrence and ESCALATES the recurrence into a sysadmin issue under its own cooldown.
+  # A durable config error is precisely the shape that rail was built for.
+  #
+  # The subject is the ROLE, not the PR: one typo seen on ten PRs is ONE incident. Keying on the PR
+  # would open ten issues for one missing line in one card — the self-amplification the registry's
+  # own moduledoc warns about.
+  defp note_unresolvable_role(%Ctx{} = ctx, role, reason) do
+    incident =
+      Keyword.get(ctx.opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+    _ =
+      try do
+        incident.("review_role", role, :cap_profile_unresolvable,
+          reason_detail: "#{ctx.repo}: #{inspect(reason)}"
+        )
+      catch
+        # An incident that cannot be recorded must never break the dispatch (never-stall). The skip
+        # itself stays correct — only its trace is lost, and that loss is said out loud rather than
+        # swallowed a second time.
+        kind, why ->
+          Logger.warning(
+            "StepDispatcher: incident rail unavailable for unresolvable role #{inspect(role)} " <>
+              "(#{inspect(kind)} #{inspect(why)}) — the skip stands, its trace does not"
+          )
+      end
+
+    :ok
   end
 
   defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, %Ctx{} = ctx) do
