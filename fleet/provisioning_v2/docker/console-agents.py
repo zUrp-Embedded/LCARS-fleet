@@ -56,7 +56,6 @@ if not PORT:
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 CARD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-DRAFTS_DIR = os.path.expanduser("~/card-drafts")
 
 # ─── La porte eval — le seul chemin vers le parseur et les chemins du catalogue ─────────────────
 
@@ -86,7 +85,8 @@ DUMP_EXPR = (
     'rd = fn dir -> dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".yaml")) '
     '|> Map.new(fn f -> p = Path.join(dir, f); '
     '{Path.rootname(f), %{"data" => YamlElixir.read_from_file!(p), "text" => File.read!(p)}} end) end; '
-    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr}, "schema" => sch, '
+    'av = Path.join(to_string(:code.priv_dir(:lcars_fleet)), "observation/static/assets"); '
+    'IO.puts(Jason.encode!(%{"roots" => %{"maps" => mr, "profiles" => pr, "assets" => av}, "schema" => sch, '
     '"cards" => rd.(mr), "profiles" => rd.(pr)}))'
 )
 
@@ -119,17 +119,7 @@ def catalogue():
         payload = json.loads(out.strip().splitlines()[-1])
         _CATALOGUE["payload"] = payload
         _CATALOGUE["stamp"] = _tree_stamp([payload["roots"]["maps"], payload["roots"]["profiles"]])
-    # Les drafts sont TOUJOURS relus (pas caches) : c'est la partie vivante de la page.
-    drafts = {}
-    if os.path.isdir(DRAFTS_DIR):
-        for f in sorted(os.listdir(DRAFTS_DIR)):
-            if f.endswith(".yaml"):
-                p = os.path.join(DRAFTS_DIR, f)
-                drafts[f[:-5]] = {"text": open(p, encoding="utf-8").read(),
-                                  "mtime": int(os.stat(p).st_mtime)}
-    out = dict(payload)
-    out["drafts"] = drafts
-    return out
+    return payload
 
 def validate_card(name, text):
     # Le draft est pose dans un repertoire jetable et charge par le VRAI Loader (schema + graphe).
@@ -160,11 +150,21 @@ def _role_warnings(text):
     return [f"role « {r} » sans cap-profile — validate_card_steps! refusera ce boot au deploy"
             for r in sorted(roles) if r and r not in profs]
 
-def save_draft(name, text):
-    os.makedirs(DRAFTS_DIR, exist_ok=True)
-    path = os.path.join(DRAFTS_DIR, f"{name}.yaml")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+def save_card(name, text):
+    # YOLO assume (arbitrage user) : le clic ne produit que du valide, le vrai parseur a dit oui —
+    # on ecrit DIRECTEMENT dans le workflow_maps root de la boite (chemin donne par le BEAM, jamais
+    # reconstruit). Le contrat du Loader reste entier : la fleet sert son image de boot, cette
+    # ecriture ne prend effet qu'au prochain start. Boite d'exploration, catalogue jetable.
+    roots = (_CATALOGUE["payload"] or {}).get("roots") or {}
+    maps_dir = roots.get("maps")
+    if not maps_dir:
+        return {"ok": False, "error": "racine du catalogue inconnue (dump pas encore fait ?)"}
+    path = os.path.join(maps_dir, f"{name}.yaml")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        return {"ok": False, "error": f"ecriture refusee : {e}"}
     return {"ok": True, "path": path}
 
 # ─── L'etat vivant (onglet AGENTS) ──────────────────────────────────────────────────────────────
@@ -188,11 +188,81 @@ def get(url):
     except Exception:
         return None
 
+# ─── L'etat des MACHINES, mesure d'ou la page vit (l'interieur de la boite) ────────────────────
+# La boite se lit dans /proc ; la fleet par son API ; la forge par un ping version sur l'URL que
+# le RUNTIME utilise (fleet_v2.env — la verite de l'humain, pas une reconstruction) ; le runner
+# n'est PAS joignable d'ici (conteneur voisin, pas de socket docker dans la boite — et c'est
+# voulu) : sa preuve de vie est INDIRECTE, le dernier verdict CI du repo temoin.
+_MACH = {"t": 0, "forge": None, "ci": None}
+
+def _env_forge_url():
+    try:
+        for line in open(os.path.expanduser("~/.lcars/fleet_v2.env"), encoding="utf-8"):
+            m = re.match(r"^(?:export\s+)?FORGE_BASE_URL=[\"']?([^\"'\s]+)", line.strip())
+            if m:
+                return m.group(1)
+    except OSError:
+        pass
+    return os.environ.get("FORGE_BASE_URL") or None
+
+def machines():
+    import time
+    out = {}
+    try:
+        out["load"] = round(os.getloadavg()[0], 2)
+        out["cpus"] = os.cpu_count()
+    except OSError:
+        pass
+    try:
+        mi = {}
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":", 1)
+            mi[k] = int(v.strip().split()[0])
+        out["mem_used_gb"] = round((mi["MemTotal"] - mi["MemAvailable"]) / 1048576, 1)
+        out["mem_total_gb"] = round(mi["MemTotal"] / 1048576, 1)
+    except Exception:
+        pass
+    try:
+        st = os.statvfs("/home")
+        out["disk_pct"] = round(100 * (1 - st.f_bavail / st.f_blocks))
+    except OSError:
+        pass
+    now = time.monotonic()
+    if now - _MACH["t"] > 15:
+        _MACH["t"] = now
+        url = _env_forge_url()
+        if url:
+            t0 = time.monotonic()
+            v = get(url.rstrip("/") + "/api/v1/version")
+            _MACH["forge"] = {"url": url, "version": (v or {}).get("version"),
+                              "ms": round((time.monotonic() - t0) * 1000)} if v else {"url": url, "down": True}
+            tok = None
+            try:
+                tok = open(os.path.expanduser("~/.gitea_token")).read().strip()
+            except OSError:
+                pass
+            try:
+                import urllib.request as ur
+                req = ur.Request(url.rstrip("/") + "/api/v1/repos/fleet/project-template/actions/tasks")
+                if tok:
+                    req.add_header("Authorization", "token " + tok)
+                with ur.urlopen(req, timeout=2) as r:
+                    runs = (json.load(r).get("workflow_runs") or [])
+                _MACH["ci"] = {"status": runs[0].get("status"), "at": (runs[0].get("updated_at") or "")[11:16]} if runs else None
+            except Exception:
+                _MACH["ci"] = None
+        else:
+            _MACH["forge"] = None
+            _MACH["ci"] = None
+    if _MACH["forge"]: out["forge"] = _MACH["forge"]
+    if _MACH["ci"]: out["ci"] = _MACH["ci"]
+    return out
+
 def state():
     pods = get(f"http://127.0.0.1:{DECK_PORT}/api/pods")
     proj = get(f"http://127.0.0.1:{DECK_PORT}/api/projection")
     out = {"fleet": pods is not None, "pods": [], "stream": [], "counts": {}, "status": None,
-           "pod_console_port": POD_CONSOLE_PORT}
+           "pod_console_port": POD_CONSOLE_PORT, "machines": machines()}
     if proj:
         out["stream"] = proj.get("stream") or []
         out["counts"] = proj.get("counts") or {}
@@ -216,7 +286,7 @@ PAGE = r"""<!doctype html>
 <style>
   :root{
     --bg:#0d1117; --pan:#131a22; --pan2:#0f151c; --line:#1e2833;
-    --ink:#c9d6e2; --dim:#6b7d8f; --faint:#44525f;
+    --ink:#d7e2ec; --dim:#93a7ba; --faint:#71869c;
     --or:#e8913c; --cy:#4fb3c4; --gr:#6cc08b; --rd:#d2646a; --am:#d9b44a; --vi:#9a8ac4;
     --mono:ui-monospace,"JetBrains Mono","SF Mono","DejaVu Sans Mono",Menlo,monospace;
   }
@@ -285,6 +355,8 @@ PAGE = r"""<!doctype html>
   .chip{display:inline-block;border:1px solid var(--line);border-radius:9px;padding:1px 9px;
         margin:2px 4px 2px 0;font-size:11px;color:var(--cy)}
   .chip.int{color:var(--am)}
+  .av{width:20px;height:20px;border-radius:5px;vertical-align:-5px;margin-right:7px}
+  .av.big{width:34px;height:34px;border-radius:8px;vertical-align:-11px;margin-right:10px}
   .empty{color:var(--faint);padding:22px 14px;font-size:12.5px;line-height:1.7}
   .empty b{color:var(--dim);font-weight:400}
 
@@ -354,8 +426,8 @@ PAGE = r"""<!doctype html>
     <button class="tab on" id="tab-agents">AGENTS</button>
     <button class="tab" id="tab-cards">CARTES</button>
   </nav>
-  <span class="sub" id="sub">&mdash;</span>
-  <span class="right"><span id="counts"></span><span class="live" id="live">&bull; LIVE</span><span id="clock"></span></span>
+  <span class="sub" id="sub">config &mdash; le vivant se rebranche plus tard</span>
+  <span class="right"><span class="sub">catalogue seul</span></span>
 </header>
 
 <main id="v-agents">
@@ -377,6 +449,8 @@ let CAT = null, csel = null, editing = false;  // cartes
 let view = 'agents';
 
 const el = (t,c,x) => { const e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; };
+const avatar = (name, big) => { const i=document.createElement('img'); i.className='av'+(big?' big':'');
+  i.src='/avatar/'+name+'.svg'; i.alt=''; i.onerror=()=>{ i.style.display='none'; }; return i; };
 const phCls = p => 'ph-' + (['monitoring','launching','projecting','injecting','allocating','cleaning','releasing','publishing'].includes(p) ? p : 'unknown');
 const evCls = t => /fail|crash|dead|error/.test(t) ? 'bad' : (/wake|retry|drift|stale/.test(t) ? 'warn' : '');
 
@@ -387,7 +461,7 @@ function switchTo(v){
   document.getElementById('v-cards').classList.toggle('hidden', v!=='cards');
   document.getElementById('tab-agents').classList.toggle('on', v==='agents');
   document.getElementById('tab-cards').classList.toggle('on', v==='cards');
-  if(v==='cards' && !CAT) loadCatalogue();
+  if(!CAT) loadCatalogue(); else (v==='agents' ? drawAgents() : drawCards());
 }
 document.getElementById('tab-agents').onclick = () => switchTo('agents');
 document.getElementById('tab-cards').onclick = () => switchTo('cards');
@@ -396,125 +470,159 @@ if(h === '#cartes') switchTo('cards');
 else if(h.startsWith('#carte-')){ csel = h.slice(7); switchTo('cards'); }
 else if(h.startsWith('#edit-')){ csel = h.slice(6); editing = true; switchTo('cards'); }
 
-/* ─── AGENTS ─── */
-function rail(){
+/* ─── AGENTS — CONFIG SEULE (arbitrage user : ce deck est la configuration ;
+   pods vivants, flux, machines se rebrancheront ailleurs plus tard) ─── */
+let psel = null;
+
+function groupsOf(){
+  const P = CAT.profiles||{}; const names=Object.keys(P).sort();
+  const spec = n => ((P[n]||{}).data||{}).spec||{};
+  const caps = n => spec(n).capabilities||[];
+  const g = {'promoteur':[], 'juges':[], 'producteurs':[], 'orchestrateurs':[], 'autres':[]};
+  for(const n of names){
+    if(caps(n).includes('exception_judge')) g['promoteur'].push(n);
+    else if(spec(n).brief_kind==='judge') g['juges'].push(n);
+    else if(caps(n).includes('producer')) g['producteurs'].push(n);
+    else if(caps(n).includes('onboarder')||caps(n).includes('project_delegate')) g['orchestrateurs'].push(n);
+    else g['autres'].push(n);
+  }
+  return g;
+}
+
+function drawAgents(){
+  if(!CAT) return;
   const r = document.getElementById('rail'); r.innerHTML='';
-  r.appendChild(el('div','grp', S.fleet ? `pods · ${S.pods.length}` : 'fleet eteinte'));
-  if(!S.pods.length) r.appendChild(el('div','empty', S.fleet ? 'aucun pod vivant' : 'demarre la fleet : fleet_v2 start'));
-  for(const p of S.pods){
-    const b = el('button','row' + (p.pod_id===sel ? ' on' : ''));
-    const id = el('span','id'); id.appendChild(el('span','dot '+phCls(p.phase))); id.append(p.role);
-    b.appendChild(id);
-    b.appendChild(el('span','meta', p.phase + ' · ' + p.pod_id));
-    b.onclick = () => { sel = p.pod_id; draw(); };
-    r.appendChild(b);
-  }
-  if(CAT && CAT.profiles){
-    const live = new Set(S.pods.map(p=>p.role));
-    const dormant = Object.keys(CAT.profiles).sort().filter(n=>!live.has(n));
-    if(dormant.length){
-      r.appendChild(el('div','grp','roles declares · dormants'));
-      for(const name of dormant){
-        const b = el('button','row ghost' + (sel==='profile:'+name ? ' on' : ''));
-        b.appendChild(el('span','id', name));
-        const spec = (CAT.profiles[name].data||{}).spec||{};
-        b.appendChild(el('span','meta', (spec.brief_kind||'?') + ' · dormant'));
-        b.onclick = () => { sel = 'profile:'+name; draw(); };
-        r.appendChild(b);
-      }
+  const g = groupsOf();
+  if(!psel) psel = (g['juges'][0]||Object.keys(CAT.profiles||{})[0]||null);
+  for(const grp of Object.keys(g)){
+    if(!g[grp].length) continue;
+    r.appendChild(el('div','grp',grp+' · '+g[grp].length));
+    for(const n of g[grp]){
+      const b = el('button','row'+(n===psel?' on':''));
+      const idl = el('span','id'); idl.appendChild(avatar(n)); idl.append(n); b.appendChild(idl);
+      const inv=(((CAT.profiles[n]||{}).data||{}).spec||{}).invocation||{};
+      b.appendChild(el('span','meta',(inv.model||'?')+' · '+(inv.effort||'?')+' · '+(inv.lifetime_scope||'?')));
+      b.onclick=()=>{ psel=n; drawAgents(); };
+      r.appendChild(b);
     }
   }
+  agentCenter(); agentRight();
 }
 
-function center(){
+/* L'ENTONNOIR NE MENT PLUS : trois fois dans la soiree, String() a aplati une structure en
+   mensonge lisible (jury, paires, mounts). Regle : une valeur structuree qui n'a pas recu de
+   rendu dedie s'affiche en JSON EXACT, ambre, moche EXPRES — elle crie « donne-moi un rendu »
+   au lieu de se faire passer pour du texte. */
+function kvRow(box,k,v){
+  const r=el('div','kv'); r.appendChild(el('span','k',k));
+  if(v!==null && typeof v==='object'){
+    const code=document.createElement('code');
+    code.style.cssText='font:11px/1.4 var(--mono);color:var(--am);white-space:pre-wrap';
+    code.textContent=JSON.stringify(v,null,1);
+    r.appendChild(code);
+  } else r.appendChild(el('span',null,String(v)));
+  box.appendChild(r);
+}
+function chipRow(box, arr, color){
+  const d=el('div');
+  for(const a of (arr||[])){
+    const label = (a!==null && typeof a==='object') ? JSON.stringify(a) : String(a);
+    const c=el('span','chip',label);
+    if(a!==null && typeof a==='object') c.style.color='var(--am)';
+    else if(color) c.style.color=color;
+    d.appendChild(c);
+  }
+  if(!(arr||[]).length) d.appendChild(el('span','mini','aucun'));
+  box.appendChild(d);
+}
+
+function agentCenter(){
   const c = document.getElementById('center'); c.innerHTML='';
-  const p = S.pods.find(x=>x.pod_id===sel);
+  const prof = (CAT.profiles||{})[psel];
   const head = el('div','pane-head');
-  head.appendChild(el('b', p ? p.role.toUpperCase() : ((sel||'').startsWith('profile:') ? sel.slice(8).toUpperCase() : 'FLUX')));
-  head.appendChild(el('span','k', p ? p.pod_id : ((sel||'').startsWith('profile:') ? 'role declare, aucun pod' : 'tous les evenements')));
-  if(p && S.pod_console_port){
-    const act = el('span','act');
-    const a = document.createElement('a'); a.className='btn'; a.textContent='ouvrir la console ↗';
-    a.href = `http://${HOST}:${S.pod_console_port}?arg=${encodeURIComponent(p.pod_id)}`;
-    a.target='_blank'; a.rel='noopener'; act.appendChild(a); head.appendChild(act);
-  }
+  if(psel) head.appendChild(avatar(psel, true));
+  head.appendChild(el('b',(psel||'—').toUpperCase()));
+  head.appendChild(el('span','k','cap-profile — la declaration complete, rien du vivant'));
   c.appendChild(head);
-  const evs = S.stream.filter(e => !p || e.pod_id === p.pod_id);
-  if(!evs.length){
-    const e = el('div','empty');
-    e.innerHTML = p
-      ? "aucun evenement pour ce pod.<br><b>Entre deux tool calls, rien n'emet</b> — un pod en longue reflexion est invisible d'ici ; sa console est le seul temoin."
-      : ((sel||'').startsWith('profile:') ? "role declare au catalogue — aucun pod ne l'incarne en ce moment." : 'flux vide');
-    c.appendChild(e); return;
-  }
-  for(const e of evs){
-    const row = el('div','ev ' + evCls(e.type||''));
-    row.appendChild(el('span','t', (e.ts||'').slice(11,19)));
-    row.appendChild(el('span','ty', e.type||''));
-    row.appendChild(el('span','src', e.source||''));
-    row.appendChild(el('span','pod', e.pod_id||''));
-    c.appendChild(row);
-  }
-}
+  if(!prof){ c.appendChild(el('div','empty','selectionne un role')); return; }
+  const d = prof.data||{}, meta=d.metadata||{}, spec=d.spec||{};
+  const body = el('div','cbody');
+  const sec = (title) => { const f=el('div','fs'); f.appendChild(el('div','ftitle',title)); body.appendChild(f); return f; };
 
-function ctx(){
-  const d = document.getElementById('ctx'); d.innerHTML='';
-  if((sel||'').startsWith('profile:')){ profileCtx(d, sel.slice(8)); return; }
-  const p = S.pods.find(x=>x.pod_id===sel);
-  if(!p){ d.appendChild(el('div','empty','selectionne un agent')); return; }
-  const idc = el('div','card'); idc.appendChild(el('h4',null,'identite'));
-  for(const [k,v] of [['role',p.role],['phase',p.phase],['mandat',p.issue||'—']]){
-    const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); idc.appendChild(r);
-  }
-  d.appendChild(idc);
-  const sc = el('div','card'); sc.appendChild(el('h4',null,'slot de session'));
-  if(p.session){
-    for(const [k,v] of [['classe',p.session.classe],['humain','uid '+p.session.uid],
-                        ['projet',p.session.repo],['slot',p.session.slot]]){
-      const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); sc.appendChild(r);
+  const s1 = sec('identite');
+  kvRow(s1,'name', meta.name||'?'); kvRow(s1,'containment', meta.containment||'?');
+  if(meta.role_index!=null) kvRow(s1,'role_index', meta.role_index+' — slot du role dans l UUID hexspeak');
+  if((meta.mounts||[]).length){
+    s1.appendChild(el('div','mini','mounts — la focale du pod (ce que bwrap projette en plus du sanctuaire)'));
+    for(const m of meta.mounts){
+      const label = (typeof m==='object' && m) ? ((m.path||'?') + ' · ' + (m.mode||'ro')) : String(m);
+      const c = el('span','chip', label);
+      if((m||{}).mode==='rw') c.style.color='var(--am)';
+      s1.appendChild(c);
     }
   }
-  const raw=el('div','kv'); raw.appendChild(el('span','k','brut'));
-  raw.appendChild(el('span',null,p.session_raw||'—')); sc.appendChild(raw);
-  d.appendChild(sc);
-  const cc = el('div','card'); cc.appendChild(el('h4',null,'conditions'));
-  if(p.conditions.length) p.conditions.forEach(x=>cc.appendChild(el('span','cond',x)));
-  else cc.appendChild(el('span','kv','aucune'));
-  d.appendChild(cc);
-  if(CAT) profileCtx(d, p.role, true);
+
+  const s2 = sec('mandat');
+  kvRow(s2,'brief_kind', spec.brief_kind||'—'); kvRow(s2,'interlocutor', spec.interlocutor||'—');
+  s2.appendChild(el('div','mini','capabilities — les faits que les autres surfaces derivent'));
+  chipRow(s2, spec.capabilities||[], 'var(--am)');
+  if(spec.deliverable_mode) kvRow(s2,'deliverable_mode', spec.deliverable_mode);
+
+  const sc = spec.scope||{};
+  const s3 = sec('scope — outils');
+  s3.appendChild(el('div','mini','allowedTools · '+(sc.allowedTools||[]).length));
+  chipRow(s3, sc.allowedTools||[]);
+  s3.appendChild(el('div','mini','disallowedTools · '+(sc.disallowedTools||[]).length));
+  chipRow(s3, sc.disallowedTools||[], 'var(--rd)');
+  s3.appendChild(el('div','mini','git_ops_denied'));
+  chipRow(s3, sc.git_ops_denied||[], 'var(--rd)');
+
+  const inv = spec.invocation||{};
+  const s4 = sec('invocation');
+  for(const k of ['model','effort','lifetime_scope','permission_mode','boot_at_start','host_native',
+                  'bridge_enabled','remote_control','wake_send_keys','subagent_template'])
+    if(inv[k]!==undefined) kvRow(s4,k, inv[k]===null?'null':inv[k]);
+  if((spec.timeouts||{}).response_sec) kvRow(s4,'timeouts.response_sec', spec.timeouts.response_sec+' s');
+
+  const kn = spec.knowledge||{};
+  const s5 = sec('knowledge');
+  s5.appendChild(el('div','mini','skills')); chipRow(s5, kn.skills||[]);
+  kvRow(s5,'monk_registry', kn.monk_registry==null?'null':kn.monk_registry);
+  kvRow(s5,'monk_instance', kn.monk_instance==null?'null':kn.monk_instance);
+  if('sp_template' in kn) kvRow(s5,'sp_template', kn.sp_template==null?'null':kn.sp_template);
+
+  const mo = spec.modop_set||{};
+  const s6 = sec('modop_set');
+  s6.appendChild(el('div','mini','default')); chipRow(s6, mo.default||[]);
+  s6.appendChild(el('div','mini','optional')); chipRow(s6, mo.optional||[]);
+  s6.appendChild(el('div','mini','incompatible — PAIRES : les deux ne peuvent etre actifs ensemble'));
+  (function(){ const d=el('div');
+    for(const pair of (mo.incompatible||[])){
+      const label = Array.isArray(pair) ? pair.join(' ⟂ ') : String(pair);
+      const c=el('span','chip',label); c.style.color='var(--rd)'; d.appendChild(c);
+    }
+    if(!(mo.incompatible||[]).length) d.appendChild(el('span','mini','aucune'));
+    s6.appendChild(d); })();
+
+  const s7 = sec('project');
+  if(spec.project){ for(const k of Object.keys(spec.project)) kvRow(s7, k, spec.project[k]==null?'null':spec.project[k]); }
+  else s7.appendChild(el('div','mini','null — fleet-level, ou projete au spawn par le dispatch'));
+
+  c.appendChild(body);
 }
 
-function profileCtx(d, name, compact){
-  const prof = CAT && CAT.profiles && CAT.profiles[name];
-  if(!prof){ if(!compact) d.appendChild(el('div','empty','profil hors catalogue (charge l onglet CARTES pour peupler)')); return; }
-  const spec = (prof.data||{}).spec||{}, inv = spec.invocation||{}, scope = spec.scope||{};
-  const pc = el('div','card'); pc.appendChild(el('h4',null,'cap-profile · '+name));
-  const rows = [['mandat', spec.brief_kind||'?'],['modele', (inv.model||'?')+' · '+(inv.effort||'?')],
-                ['vie', inv.lifetime_scope||'?'],['boot', inv.boot_at_start ? 'au demarrage' : 'a la demande'],
-                ['outils', (scope.allowedTools||[]).length + ' permis · ' + (scope.disallowedTools||[]).length + ' interdits'],
-                ['git', (scope.git_ops_denied||[]).length ? 'denie: '+scope.git_ops_denied.join(', ') : 'libre']];
-  for(const [k,v] of rows){
-    const r=el('div','kv'); r.appendChild(el('span','k',k)); r.appendChild(el('span',null,v)); pc.appendChild(r);
-  }
-  d.appendChild(pc);
+function agentRight(){
+  const d = document.getElementById('ctx'); d.innerHTML='';
+  const prof=(CAT.profiles||{})[psel];
+  if(!prof){ d.appendChild(el('div','empty','—')); return; }
+  const rc = el('div','card'); rc.appendChild(el('h4',null,'yaml source (lecture)'));
+  const pre = document.createElement('pre');
+  pre.style.cssText='font:11px/1.45 var(--mono);color:var(--dim);white-space:pre-wrap;max-height:78vh;overflow-y:auto;margin:0';
+  pre.textContent = prof.text||'';
+  rc.appendChild(pre); d.appendChild(rc);
 }
 
-function draw(){
-  if(S.pods.length && !sel) sel = S.pods[0].pod_id;
-  document.getElementById('sub').textContent = S.status ? 'read-model ' + S.status : 'read-model injoignable';
-  const live = document.getElementById('live');
-  live.className = 'live' + (S.fleet ? '' : ' off');
-  live.textContent = S.fleet ? '• LIVE' : '• FLEET OFF';
-  const n = Object.values(S.counts).reduce((a,b)=>a+b,0);
-  document.getElementById('counts').textContent = n ? n + ' evenements' : '';
-  document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
-  rail(); center(); ctx();
-}
-
-async function tick(){
-  try { S = await (await fetch('/api/state',{cache:'no-store'})).json(); if(view==='agents') draw(); } catch(e){}
-}
-tick(); setInterval(tick, 3000);
+loadCatalogue();
 
 /* ─── CARTES ─── */
 async function loadCatalogue(force){
@@ -524,45 +632,51 @@ async function loadCatalogue(force){
   catch(e){ c.innerHTML = '<div class="empty">catalogue injoignable</div>'; return; }
   if(CAT.error){ c.innerHTML = '<div class="empty">le BEAM refuse le dump :<br>'+CAT.error+'</div>'; return; }
   if(!csel){ const names = Object.keys(CAT.cards||{}).sort(); csel = names[0] || null; }
+  if(view==='cards') drawCards(); else drawAgents();
+}
+
+function newCard(){
+  const name = (prompt('nom de la nouvelle carte (slug : [a-z0-9-])')||'').trim();
+  if(!name) return;
+  if(!/^[a-z0-9][a-z0-9-]*$/.test(name)){ alert('slug invalide'); return; }
+  if((CAT.cards||{})[name]){ alert('cette carte existe deja'); return; }
+  const P = pools();
+  csel = name; editing = true;
+  ED = {mode:'form', fits:true, text:'',
+        state:{ints:[], desc:'', pres:'', jury:[], juryOn:false, rework:2,
+               pre:null, audit:null, extra:[],
+               producers:[{name:'build', role:P.producers[0]||'', face:'', inputs:[]}]}};
   drawCards();
-  if(view==='agents') draw();
 }
 
 function drawCards(){
   const r = document.getElementById('crail'); r.innerHTML='';
-  const cards = CAT.cards||{}, drafts = CAT.drafts||{};
-  r.appendChild(el('div','grp','cartes canon · '+Object.keys(cards).length));
+  const cards = CAT.cards||{};
+  const nb = el('button','btn warn','+ nouvelle carte'); nb.style.margin='12px 12px 2px';
+  nb.onclick = newCard; r.appendChild(nb);
+  r.appendChild(el('div','grp','cartes du catalogue · '+Object.keys(cards).length));
   for(const name of Object.keys(cards).sort()){
     const meta = (cards[name].data||{}).metadata||{};
     const b = el('button','row'+(name===csel&&!editing?' on':''));
     b.appendChild(el('span','id', name));
-    b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')));
+    b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')
+      + (meta.status && meta.status!=='canon' ? ' · '+meta.status : '')));
     b.onclick = () => { csel = name; editing=false; ED=null; drawCards(); };
     r.appendChild(b);
-  }
-  if(Object.keys(drafts).length){
-    r.appendChild(el('div','grp','drafts (non servis)'));
-    for(const name of Object.keys(drafts).sort()){
-      const b = el('button','row ghost'+(name===csel&&editing?' on':''));
-      b.appendChild(el('span','id', name+' ✎'));
-      b.appendChild(el('span','meta','draft local'));
-      b.onclick = () => { csel = name; editing=true; ED=null; drawCards(); };
-      r.appendChild(b);
-    }
   }
   cardCenter(); cardCtx();
 }
 
 function cardCenter(){
   const c = document.getElementById('ccenter'); c.innerHTML='';
-  const cards = CAT.cards||{}, drafts = CAT.drafts||{};
-  const src = editing && drafts[csel] ? drafts[csel] : cards[csel];
-  if(!src){ c.appendChild(el('div','empty','selectionne une carte')); return; }
+  const cards = CAT.cards||{};
+  const src = cards[csel] || (editing && ED ? {data:null, text:ED.text||''} : null);
+  if(!src){ c.appendChild(el('div','empty','selectionne une carte, ou cree-en une')); return; }
   const data = src.data||{}, meta = data.metadata||{}, spec = data.spec||{};
 
   const head = el('div','pane-head');
   head.appendChild(el('b', (csel||'').toUpperCase()));
-  head.appendChild(el('span','k', editing ? 'EDITION — draft local, jamais servi' : 'carte canon'));
+  head.appendChild(el('span','k', editing ? ((CAT.cards||{})[csel] ? 'EDITION' : 'NOUVELLE CARTE — pas encore au catalogue') : 'carte du catalogue'));
   const act = el('span','act');
   if(!editing){
     const eb = el('button','btn','éditer'); eb.onclick = () => { editing=true; ED=null; cardCenter(); };
@@ -611,7 +725,7 @@ function cardCenter(){
 function stepBox(sname, st){
   const b = el('div','pbox');
   b.appendChild(el('div','pname', sname));
-  b.appendChild(el('div','prole', st.role||'?'));
+  const pr = el('div','prole'); if(st.role) pr.appendChild(avatar(st.role)); pr.append(st.role||'?'); b.appendChild(pr);
   const f = {};
   if(st.judge_target) f['juge'] = st.judge_target;
   if(st.brief_kind) f['brief_kind'] = st.brief_kind;
@@ -624,7 +738,7 @@ function stepBox(sname, st){
 function judgeBox(name){
   const b = el('div','pbox judge');
   b.appendChild(el('div','pname','juge'));
-  b.appendChild(el('div','prole', name));
+  const pr = el('div','prole'); pr.appendChild(avatar(name)); pr.append(name); b.appendChild(pr);
   const prof = CAT.profiles && CAT.profiles[name];
   const f = {};
   if(prof){
@@ -694,6 +808,24 @@ function enumOf(key){
   return out||[];
 }
 
+/* L'OBSERVATION du canon : quels juges ont deja occupe quel siege. Les profils ne portent
+   AUCUN discriminant brief-juge vs PR-juge aujourd'hui (mesure : qualifier/scoper/reviewer
+   identiques hors nom) — en attendant un champ propre (judge_targets, demande au proprietaire
+   du schema cap-profile), le canon fait office de mesure : un juge jamais vu sur un siege y est
+   VISIBLE mais grise, avec la raison. Pool observe vide → siege ouvert a tous (pas de fantome). */
+function observedSeats(){
+  const o = {brief:new Set(), deliverable:new Set(), jury:new Set()};
+  for(const c of Object.values(CAT.cards||{})){
+    const spec=(c.data||{}).spec||{};
+    for(const j of (spec.jury||[])) o.jury.add(j);
+    for(const sd of Object.values(spec.steps||{})){
+      if(sd.judge_target==='brief') o.brief.add(sd.role);
+      if(sd.judge_target==='deliverable') o.deliverable.add(sd.role);
+    }
+  }
+  return o;
+}
+
 /* Le MODELE A ETAGES est une MESURE des steps (judge_target du schema + pools), pas une grammaire
    posee ici : un step qui ne se classe pas rend la carte « hors grammaire » → yaml brut. */
 function stageModel(data){
@@ -703,13 +835,20 @@ function stageModel(data){
             pres:meta.presentation||'', rework: spec.max_rework_rounds ?? 2,
             jury:(spec.jury||[]).slice(), juryOn:(spec.jury||[]).length>0,
             pre:null, producers:[], audit:null, extra:[]};
+  /* Deux façons de sortir de la grammaire, TOUTES DEUX declarees : un step inclassable, ou un
+     step classable qui porte des champs que le formulaire ne modelise pas (gate:, outputs:, …) —
+     l'ouvrir quand meme AMPUTERAIT ces champs au save, en silence. Attrape vivant sur
+     poc-helloworld (outputs) le soir meme du YOLO. */
+  const KNOWN = ['role','brief_kind','judge_target','face','needs','inputs'];
   for(const n of topoOrder(steps)){
     const sd=steps[n]||{};
+    const unk = Object.keys(sd).filter(k => !KNOWN.includes(k));
+    if(unk.length){ st.extra.push(n+' porte '+unk.join('+')); continue; }
     const item={name:n, role:sd.role||'', face:sd.face||'', inputs:(sd.inputs||[]).slice()};
     if(sd.judge_target==='brief' && !st.pre) st.pre=item;
     else if(sd.judge_target==='deliverable' && !st.audit) st.audit=item;
     else if(P.producers.includes(sd.role)) st.producers.push(item);
-    else st.extra.push(n);
+    else st.extra.push(n+' inclassable');
   }
   return st;
 }
@@ -748,34 +887,35 @@ function editor(body, src){
   if(ED === null){
     const canonData = ((CAT.cards||{})[csel]||{}).data;
     const model = canonData ? stageModel(canonData) : null;
-    const fits = model && !model.extra.length;
-    ED = {mode: fits ? 'form' : 'yaml', state: model, fits: !!fits, text: src.text || ''};
+    const fits = !!(model && !model.extra.length);
+    ED = {mode: fits ? 'form' : 'yaml', state: model, fits: fits, text: src.text || ''};
   }
 
   const mbar = el('div'); mbar.style.cssText='display:flex;gap:8px;margin-bottom:10px;align-items:center';
   const fb = el('button','btn'+(ED.mode==='form'?' warn':''),'formulaire');
   const yb = el('button','btn'+(ED.mode==='yaml'?' warn':''),'yaml brut');
   mbar.appendChild(fb); mbar.appendChild(yb);
-  if(!ED.fits) mbar.appendChild(el('span','mini','carte HORS GRAMMAIRE (step inclassable) — yaml brut seul'));
+  if(!ED.fits) mbar.appendChild(el('span','mini','HORS GRAMMAIRE — '
+    + (((ED.state||{}).extra||[]).join(' · ')||'steps inconnus')
+    + ' → yaml brut seul (le formulaire amputerait ces champs)'));
   body.appendChild(mbar);
 
   const zone = el('div'); body.appendChild(zone);
 
   const bar = el('div'); bar.style.cssText='display:flex;gap:10px;margin-top:10px';
   const vb = el('button','btn','valider (vrai parseur)');
-  const sb = el('button','btn warn','sauver en draft');
+  const sb = el('button','btn warn','sauver au catalogue');
   const cb = el('button','btn','fermer');
   bar.appendChild(vb); bar.appendChild(sb); bar.appendChild(cb);
   body.appendChild(bar);
   const res = el('div','vres'); res.style.display='none'; body.appendChild(res);
 
   const notice = el('div','notice');
-  notice.innerHTML = "La page ne possede AUCUN fait : sieges = capabilities des cap-profiles, "
-    + "champs et valeurs = enums du schema v2.5, ordre des etages = mesure du canon. Le clic ne "
-    + "peut produire que des cartes que ces proprietaires autorisent — et le bouton Valider "
-    + "repasse quand meme par le parseur reel. Un draft n'est jamais servi (image au boot — "
-    + "redeploy = restart). ⚠ Le formulaire regenere le YAML : les commentaires ne survivent "
-    + "pas — pour retoucher une carte commentee, « yaml brut ».";
+  notice.innerHTML = "La page ne possede AUCUN fait : sieges = capabilities, champs = enums du "
+    + "schema v2.5, ordre des etages = mesure du canon — et sauver repasse par le parseur reel "
+    + "avant d ecrire. L ecriture va DIRECTEMENT au catalogue de la boite (YOLO assume) ; la "
+    + "fleet, elle, sert son image de boot : effet au prochain start. ⚠ Le formulaire regenere "
+    + "le YAML : les commentaires ne survivent pas — carte commentee = « yaml brut ».";
   body.appendChild(notice);
 
   let ta = null;
@@ -786,14 +926,20 @@ function editor(body, src){
   let seatSeq = 0;
   function seatRadios(current, pool, onpick, allowNone){
     const g = el('span','ckrow'); const name = 'seat'+(seatSeq++);
-    const mk = (val, label) => {
+    const mk = (val, label, dis, why) => {
       const lb = el('label','ck'+(val===current?'':' off'));
+      if(dis){ lb.style.opacity='.42'; lb.title = why||''; lb.style.cursor='not-allowed'; }
       const rb = document.createElement('input'); rb.type='radio'; rb.name=name; rb.checked = val===current;
+      rb.disabled = !!dis && val!==current;
       rb.onchange = () => onpick(val);
-      lb.appendChild(rb); lb.append(' '+label); g.appendChild(lb);
+      lb.appendChild(rb); lb.append(' '+label+(dis?' ⌀':''));
+      g.appendChild(lb);
     };
-    if(allowNone) mk('', allowNone);
-    for(const r of pool) mk(r, r);
+    if(allowNone) mk('', allowNone, false);
+    for(const r of pool){
+      if(typeof r === 'string') mk(r, r, false);
+      else mk(r.name, r.name, r.off, r.why);
+    }
     return g;
   }
 
@@ -845,9 +991,12 @@ function editor(body, src){
 
     zone.appendChild(stageBox('① PRE-FLIGHT — le brief est juge avant tout', !!st.pre, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'juge du brief'));
-      f.appendChild(seatRadios(st.pre.role, P.judges, v => { st.pre.role = v; renderZone(); }));
+      const obsB = observedSeats().brief;
+      const poolB = P.judges.map(n => ({name:n, off: obsB.size>0 && !obsB.has(n),
+        why:'jamais observe sur ce siege dans le canon — profil sans discriminant, calibrage SP inconnu'}));
+      f.appendChild(seatRadios(st.pre.role, poolB, v => { st.pre.role = v; renderZone(); }));
       box.appendChild(f);
-      box.appendChild(el('div','mini','sieges = brief_kind: judge · inputs auto: ticket.body · needs cable par l ordre'));
+      box.appendChild(el('div','mini','⌀ = jamais vu sur ce siege dans le canon (les profils juges sont indiscrimines — champ judge_targets demande)'));
     }, on => { st.pre = on ? {name:'brief-review', role:P.judges[0]||'', face:'', inputs:[]} : null; renderZone(); }));
 
     const prodBox = el('div','fs');
@@ -866,8 +1015,10 @@ function editor(body, src){
         sh.appendChild(el('span','mini','· face'));
         sh.appendChild(seatRadios(pr.face, faces, v => { pr.face = v; renderZone(); }, '(moteur)'));
       }
-      const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
-      const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
+      if(!(st.producers.length===1 && !st.audit)){
+        const del = el('button','btn del','retirer'); del.onclick = () => { st.producers.splice(idx,1); renderZone(); };
+        const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
+      }
       sf.appendChild(sh);
       sf.appendChild(el('div','mini', (pr.face==='ops' ? 'livrable sur work/ops (chemin ticket-doc)' : pr.face==='code' ? 'livrable sur main (chemin ticket-code)' : 'face par defaut du moteur') + ' · sieges = capabilities: producer'));
       prodBox.appendChild(sf);
@@ -879,34 +1030,32 @@ function editor(body, src){
 
     zone.appendChild(stageBox('③ AUDIT — un juge lit le livrable', !!st.audit, true, (box)=>{
       const f = el('div','frow'); f.appendChild(el('label',null,'auditeur'));
-      f.appendChild(seatRadios(st.audit.role, P.judges, v => { st.audit.role = v; renderZone(); }));
+      const obsD = observedSeats().deliverable;
+      const poolD = P.judges.map(n => ({name:n, off: obsD.size>0 && !obsD.has(n),
+        why:'jamais observe sur ce siege dans le canon'}));
+      f.appendChild(seatRadios(st.audit.role, poolD, v => { st.audit.role = v; renderZone(); }));
       box.appendChild(f);
-    }, on => { st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
+      if(st.producers.length===0) box.appendChild(el('div','mini','seul etage de travail de la carte — desactivation impossible'));
+    }, on => { if(!on && !st.producers.length) { renderZone(); return; }
+       st.audit = on ? {name:'audit', role:P.judges[0]||'', face:'', inputs:['ticket.body','audit_target']} : null; renderZone(); }));
 
     zone.appendChild(stageBox('④ JURY DE PR — verdicts paralleles', st.juryOn, true, (box)=>{
       const jr = el('div','ckrow');
+      const obsJ = observedSeats().jury;
       for(const name of P.judges){
         const on = st.jury.includes(name);
+        const off = obsJ.size>0 && !obsJ.has(name) && !on;
         const lb = el('label','ck'+(on?'':' off'));
-        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
+        if(off){ lb.style.opacity='.42'; lb.title='jamais observe dans un jury du canon (vulcan : siege reserve — codex pas branche)'; }
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on; ck.disabled=off;
         ck.onchange = () => { ck.checked ? st.jury.push(name) : st.jury.splice(st.jury.indexOf(name),1); renderZone(); };
-        lb.appendChild(ck); lb.append(' '+name); jr.appendChild(lb);
+        lb.appendChild(ck); lb.append(' '+name+(off?' ⌀':'')); jr.appendChild(lb);
       }
       box.appendChild(jr);
-      box.appendChild(el('div','mini','le promoteur n est PAS ici — il scelle toujours (etage ⑤)'));
+      box.appendChild(el('div','mini','le promoteur n est PAS ici — il scelle toujours (etage ⑤) · ⌀ = jamais vu dans un jury canon'));
     }, on => { st.juryOn = on; if(!on) st.jury = []; renderZone(); }));
 
-    const workOk = st.producers.length > 0 || !!st.audit;
-    if(!workOk){
-      const warnb = el('div','vres warn');
-      warnb.style.display='block';
-      warnb.textContent = "AUCUN ETAGE DE TRAVAIL : ajoute un producteur (②) ou active l audit (③). "
-        + "Une carte sans travail passerait le schema d aujourd hui — le clic la refuse, et le "
-        + "durcissement (steps minProperties) est demande au proprietaire du schema.";
-      zone.appendChild(warnb);
-    }
-    sb.disabled = !workOk; sb.style.opacity = workOk ? '1' : '.4';
-
+    sb.disabled = false; sb.style.opacity = '1';
     const pm = el('div','fs'); pm.style.borderLeftColor='var(--gr)';
     pm.appendChild(el('div','ftitle','⑤ PROMOTE — jamais une option'));
     pm.appendChild(el('div','kv', (P.promoters.join(' + ')||'?') + ' scelle, quoi qu on coche — capability exception_judge, pas un choix de carte'));
@@ -927,9 +1076,10 @@ function editor(body, src){
   };
   sb.onclick = async () => {
     res.style.display='block'; res.className='vres'; res.textContent='validation puis sauvegarde…';
-    const r = await (await fetch('/api/cards/draft', {method:'POST', headers:{'Content-Type':'application/json'},
+    const r = await (await fetch('/api/cards/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({name: csel, text: currentText()})})).json();
-    if(r.ok){ res.className='vres ok'; res.textContent='DRAFT SAUVE : '+r.path+'\n(non servi — deploiement = geste operateur + restart)'; }
+    if(r.ok){ res.className='vres ok'; res.textContent='ECRIT AU CATALOGUE : '+r.path+'\n(la fleet le servira a son prochain start — image au boot)';
+      editing=false; ED=null; loadCatalogue(true); }
     else { res.className='vres ko'; res.textContent=r.error||'refus'; }
   };
   cb.onclick = () => { editing=false; ED=null; loadCatalogue(); };
@@ -993,6 +1143,24 @@ class Agents(BaseHTTPRequestHandler):
             if "refresh=1" in self.path:
                 _CATALOGUE["payload"] = None
             self._json(catalogue())
+        elif path.startswith("/avatar/"):
+            name = path.split("/avatar/", 1)[1].removesuffix(".svg")
+            if not CARD_NAME_RE.match(name):
+                self._send(404, "no\n", "text/plain"); return
+            if _CATALOGUE["payload"] is None:
+                catalogue()
+            adir = ((_CATALOGUE["payload"] or {}).get("roots") or {}).get("assets") or ""
+            fp = os.path.join(adir, f"{name}.svg")
+            try:
+                raw = open(fp, "rb").read()
+            except OSError:
+                self._send(404, "no\n", "text/plain"); return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "max-age=3600")
+            self.end_headers()
+            self.wfile.write(raw)
         elif path in ("/", "/index.html"):
             self._send(200, PAGE, "text/html; charset=utf-8")
         elif path == "/health":
@@ -1011,12 +1179,12 @@ class Agents(BaseHTTPRequestHandler):
         name, text = body.get("name", ""), body.get("text", "")
         if path == "/api/cards/validate":
             self._json(validate_card(name, text))
-        elif path == "/api/cards/draft":
+        elif path == "/api/cards/save":
             v = validate_card(name, text)
             if not v.get("ok"):
                 self._json(v)
                 return
-            r = save_draft(name, text)
+            r = save_card(name, text)
             r["warnings"] = v.get("warnings", [])
             self._json(r)
         else:

@@ -113,7 +113,7 @@ teardown() {
   unset LCARS_POD_SESSION_NAME_PREFIX
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"RC name prefix required"* ]]
+  [[ "$output" == *"pod label required"* ]]
 }
 
 # =============================================================

@@ -27,7 +27,7 @@
 # compose ; un runner deja enregistre sur une forge MORTE est un zombie — d'ou le `down -v`
 # d'office avant chaque pose : sur un banc, l'histoire du runner ne vaut rien, l'appairage si.
 #
-# USAGE : bench-runner.sh --forge-api <url-api> --admin-token <tok>
+# USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1> --admin-token <tok>
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/project-template]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse

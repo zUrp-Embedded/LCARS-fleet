@@ -146,6 +146,60 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
   # (2) :ready path → the project is resolved THEN the reprovision consumes project["base_sha"].
   # Tested at the Spawn gate level (the :ready pipe requires the pod_info conditions/publishing
   # machinery — dedicated stub): decision pre-resolver, action post-resolver.
+  test "TICKET-LIVE: a context-long producer keyed on the ISSUE is re-briefed, never cleared" do
+    # The defect this pins, measured in production 2026-08-03: a rejected deliverable came back to
+    # the engineer WITH a `/clear` — it re-read everything cold while the reviews faulted decisions
+    # it no longer remembered making. `:ready` means two OPPOSITE things depending on the keying,
+    # and reading it as one thing destroyed the context of every rework round.
+    defmodule TicketLiveSpawner do
+      def pod_info(_pod_id), do: {:ok, %{conditions: [], has_active_task: false}}
+
+      def reprovision_pipe_workspace(pod_id, _project, _opts) do
+        send(self(), {:MUST_NOT_HAPPEN, pod_id})
+        :ok
+      end
+    end
+
+    # instance-keyed + ready = MY ticket coming back (rework) -> re-brief in place
+    assert :proceed =
+             Spawn.project_scope_decision(
+               "pipe",
+               TicketLiveSpawner,
+               "repo-issue-5-engineer",
+               "instance"
+             )
+
+    # project-keyed + ready = free for ANOTHER subject -> the reset stays legitimate there
+    assert :ready_needs_reprovision =
+             Spawn.project_scope_decision("pipe", TicketLiveSpawner, "repo-engineer", "project")
+
+    # and `:proceed` never reaches the action: nothing is reset, nothing is cleared
+    assert :ok =
+             Spawn.maybe_reprovision(
+               :proceed,
+               TicketLiveSpawner,
+               "repo-issue-5-engineer",
+               %{},
+               "work"
+             )
+
+    refute_received {:MUST_NOT_HAPPEN, _}
+  end
+
+  test "TICKET-LIVE: a busy producer still defers, whatever its keying" do
+    defmodule BusyTicketSpawner do
+      def pod_info(_pod_id), do: {:ok, %{conditions: [], has_active_task: true}}
+    end
+
+    assert :role_busy =
+             Spawn.project_scope_decision(
+               "pipe",
+               BusyTicketSpawner,
+               "repo-issue-5-engineer",
+               "instance"
+             )
+  end
+
   test "A-09 (2): :ready pipe → decision WITHOUT project, reprovision WITH project (decision→resolver→action order)" do
     defmodule ReadyPipeSpawner do
       # Real `Pod` :info shape: conditions = LIST (MapSet.to_list in pod_info), not a MapSet.

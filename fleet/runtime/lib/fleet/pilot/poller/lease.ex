@@ -41,8 +41,6 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   require Logger
 
-  alias Fleet.Pilot.StepDispatcher
-
   # workflow_run lock (single source `Fleet.Labels`) — fast-path `classify_issue`
   # (in-flight → ENGAGED without a route read).
   @in_flight Fleet.Labels.in_flight()
@@ -64,7 +62,11 @@ defmodule Fleet.Pilot.Poller.Lease do
       # workflow_map loader (module with .load!/1) — never nil here.
       :workflow_map_loader,
       # Escalation of an unreadable workflow_map (arity 4) — never nil here.
-      :incident_fun
+      :incident_fun,
+      # The dispatcher, in the SAME hardened boundary as the rest: the lease's arithmetic (who
+      # starts, who waits) is not testable against a module referenced by a literal. Defaulted,
+      # so the prod construction site says nothing new.
+      dispatcher: Fleet.Pilot.StepDispatcher
     ]
 
     @type t :: %__MODULE__{
@@ -72,6 +74,7 @@ defmodule Fleet.Pilot.Poller.Lease do
             repo: String.t(),
             forge_opts: keyword(),
             workflow_map_loader: module(),
+            dispatcher: module(),
             incident_fun: (String.t(), String.t(), term(), keyword() -> term())
           }
   end
@@ -122,7 +125,24 @@ defmodule Fleet.Pilot.Poller.Lease do
         {issue, pr?, engaged, prefetch}
       end)
 
-    lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end)
+    # SERIALIZATION, DISCONNECTABLE (2026-08-03) — `:fleet_pilot, :repo_serialized_lease`, default
+    # TRUE (the historical behaviour: at most ONE workflow_run in flight per repo).
+    #
+    # Why it can now be turned off: the lease was the only thing that made a second producer
+    # impossible, so it also made the per-ticket producers (`slot_scope: instance`) and their pool
+    # slots theoretical. Off, a repo starts as many workflow_runs as it has QUEUED issues, and the
+    # real ceilings become the ones that count something: `max_pods_per_role` (15, typed refusal →
+    # the ticket stacks) and the global `max_pods`.
+    #
+    # Why it stays ON by default, and why this is a knob rather than a removal: N producers on one
+    # repo means N branches racing the same base, so merge conflicts stop being an accident and
+    # become the normal case — the remediation rail exists but has never been exercised at that
+    # rate. Turning it off is an operator decision, taken with eyes open, reversible in one
+    # config line.
+    serialized? = Application.get_env(:fleet_pilot, :repo_serialized_lease, true)
+
+    lease_held0 =
+      serialized? and Enum.any?(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end)
 
     {tally, _lease} =
       Enum.reduce(classified, {zero_tally(), lease_held0}, fn
@@ -138,7 +158,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
             # ENGAGED pipeline → dispatches its current step; it HOLDS the lease → lease unchanged.
             engaged ->
-              dispatch_engaged(payload, item_opts, acc, lease)
+              {acc2, lease2} = dispatch_engaged(payload, item_opts, acc, lease, seams.dispatcher)
+              {acc2, serialized? and lease2}
 
             # QUEUED, lease held by another workflow_run → waits.
             lease ->
@@ -146,7 +167,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
             # QUEUED, lease free → STARTS (takes the lease if effectively dispatched).
             true ->
-              start_workflow_run(payload, item_opts, acc)
+              {acc2, lease2} = start_workflow_run(payload, item_opts, acc, seams.dispatcher)
+              {acc2, serialized? and lease2}
           end
       end)
 
@@ -169,8 +191,8 @@ defmodule Fleet.Pilot.Poller.Lease do
   # Hence the 3rd case `wake_unreached` = (started for the LEASE, anomaly for the TALLY). We return
   # `{tally, started?}`; `started?` (= a pod was actually put in flight this tick) drives the lease taking,
   # INDEPENDENTLY of whether the dispatch finished without error.
-  defp step_do_dispatch(payload, opts, acc) do
-    result = StepDispatcher.dispatch_issue(payload, opts)
+  defp step_do_dispatch(payload, opts, acc, dispatcher) do
+    result = dispatcher.dispatch_issue(payload, opts)
     _ = converge_wait_label(payload, opts, result)
 
     case result do
@@ -308,8 +330,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   # Dispatch of an ENGAGED workflow_run (it ALREADY holds the lease): the lease stays unchanged whatever happens
   # (the tally is updated, `started?` is ignored — the engagement comes from the classification, not from this step_run).
-  defp dispatch_engaged(payload, opts, acc, lease) do
-    {acc2, _started?} = step_do_dispatch(payload, opts, acc)
+  defp dispatch_engaged(payload, opts, acc, lease, dispatcher) do
+    {acc2, _started?} = step_do_dispatch(payload, opts, acc, dispatcher)
     {acc2, lease}
   end
 
@@ -317,8 +339,8 @@ defmodule Fleet.Pilot.Poller.Lease do
   # (spawned OR wake_unreached = lock+pod placed), the lease becomes HELD → the other queued issues of the same
   # tick wait (serialization 1 workflow_run/repo). A missed wake holds the lease (the workflow_run is started),
   # NOT a dispatch failure (nothing started).
-  defp start_workflow_run(payload, opts, acc) do
-    {acc2, started?} = step_do_dispatch(payload, opts, acc)
+  defp start_workflow_run(payload, opts, acc, dispatcher) do
+    {acc2, started?} = step_do_dispatch(payload, opts, acc, dispatcher)
     {acc2, started?}
   end
 

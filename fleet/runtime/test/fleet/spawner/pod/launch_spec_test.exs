@@ -56,13 +56,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     # guessing the surroundings — not the whole `/home/projects.work` (other projects' world = noise +
     # over-exposure), not nothing (starvation → it guesses = the poison). `work_root` seam = testable
     # (the real one is hardcoded).
-    test "no project (rc_name absent) → nil: nothing to project" do
+    test "no project (:project_slug absent) → nil: nothing to project" do
       assert LaunchSpec.project_ops_path([], cap_with_mounts([]), "/tmp") == nil
     end
 
     test "project but work/ops ABSENT → nil (the STRICT ro-bind launcher would crash on a missing source)" do
       assert LaunchSpec.project_ops_path(
-               [rc_name: "ghost_test"],
+               [rc_name: "ghost_test", project_slug: "ghost"],
                cap_with_mounts([]),
                "/tmp/nexiste-pas-42"
              ) ==
@@ -75,7 +75,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     } do
       File.mkdir_p!(Path.join(tmp, "myproj"))
 
-      assert LaunchSpec.project_ops_path([rc_name: "myproj_test"], cap_with_mounts([]), tmp) ==
+      assert LaunchSpec.project_ops_path(
+               [rc_name: "myproj_test", project_slug: "myproj"],
+               cap_with_mounts([]),
+               tmp
+             ) ==
                Path.join(tmp, "myproj")
     end
   end
@@ -86,6 +90,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     defp ops_opts(project_extra \\ %{}) do
       [
         rc_name: "myproj_test",
+        project_slug: "myproj",
         project:
           Map.merge(
             %{"repo_path" => "http://f/x.git", "base_branch" => "work/ops"},
@@ -110,6 +115,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
       code_opts = [
         rc_name: "myproj_test",
+        project_slug: "myproj",
         project: %{"repo_path" => "http://f/x.git", "base_branch" => "main"}
       ]
 
@@ -123,6 +129,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
       judge_opts = [
         rc_name: "myproj_test",
+        project_slug: "myproj",
         project: %{"repo_path" => "http://f/x.git", "base_branch" => "lcars/issue-3-scribe"}
       ]
 

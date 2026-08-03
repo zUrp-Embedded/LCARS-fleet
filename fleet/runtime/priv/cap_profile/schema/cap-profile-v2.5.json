@@ -197,6 +197,14 @@
                 "xhigh",
                 "max"
               ]
+            },
+            "slot_scope": {
+              "type": "string",
+              "enum": [
+                "instance",
+                "project"
+              ],
+              "description": "POD IDENTITY GRANULARITY — optional. Absent => DERIVED from lifetime_scope (one-shot => instance, context-long => project), the historical rule. Explicit => wins. Exists because the derivation makes ONE combination inexpressible: context-long AND one pod per ticket (an engineer that survives its rework rounds but does not outlive its ticket)."
             }
           }
         },

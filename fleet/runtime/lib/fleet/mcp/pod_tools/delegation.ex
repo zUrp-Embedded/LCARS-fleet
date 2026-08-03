@@ -1243,6 +1243,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     with {:ok, _} <- forge.post_comment(repo, n, comment, []),
          {:ok, _} <- forge.close_issue(repo, n, []) do
+      # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
+      # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
+      # Pilot, same rule and same shape as `:forge_client`.
+      _ = pod_reaper().reap_issue(repo, n)
       Map.put(result, "supersedes", n)
     else
       err ->
@@ -1526,4 +1530,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   catch
     _, _ -> {:error, :pod_unknown}
   end
+
+  # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a
+  # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
+  @default_pod_reaper Fleet.Pilot.PodReaper
+  defp pod_reaper, do: Application.get_env(:fleet_mcp, :pod_reaper, @default_pod_reaper)
 end

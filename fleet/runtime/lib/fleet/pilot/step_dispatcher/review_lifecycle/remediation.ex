@@ -449,7 +449,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   defp converge_out_of_band(pr_number, head, %Ctx{} = ctx) do
     case RoleDispatch.parse_feature_branch_or_skip(head) do
-      {:ok, {issue_n, _producer}} ->
+      {:ok, {issue_n, producer}} ->
         case Fleet.Pilot.GatekeeperSeal.converge_out_of_band_merge(
                ctx.forge,
                ctx.repo,
@@ -457,7 +457,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
                issue_n,
                ctx.forge_opts,
                # The PR's own base (dispatch_review single site): the face worktree to align.
-               base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
+               base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch),
+               # The branch already names its producer — the reaping needs no second source.
+               producer: producer
              ) do
           :ok -> {:ok, {:merged, pr_number}}
           {:error, _} = err -> err

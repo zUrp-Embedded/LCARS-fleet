@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   (The gatekeeper EVAL dispatch is a DELIBERATE separate rail — completion-triggered, lockless,
   enqueue-before-spawn, fail-loud — NOT merged here; the shared atoms are already factored, only the
   operational contract differs. See `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` for the why.)
-  (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
+  (The opts builders / naming — `feature_slug`/`maybe_put_route`/`resolve_repo_id` —
   live in the Naming cluster at the bottom of this module, quasi-pure, called by both flows.)
 
   ## LOAD-BEARING semantics
@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
   `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -455,11 +455,30 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   poller keeps the same (repo, role) from racing itself, and the downstream gates/compensation
   still hold if the pipe state moved meanwhile.
   """
-  @spec project_scope_decision(String.t(), module(), String.t()) ::
+  @spec project_scope_decision(String.t(), module(), String.t(), String.t()) ::
           :proceed | :role_busy | :ready_needs_reprovision
-  def project_scope_decision("one-shot", _spawner, _pod_id), do: :proceed
+  def project_scope_decision(lifetime_scope, spawner, pod_id, slot_scope \\ "project")
 
-  def project_scope_decision(_context_long, spawner, pod_id) do
+  def project_scope_decision("one-shot", _spawner, _pod_id, _slot), do: :proceed
+
+  # TICKET-LIVE (2026-08-03) — a context-long producer keyed on the ISSUE.
+  # `:ready` does NOT mean the same thing under the two keyings, and reading it as one thing was
+  # the defect: under `project` the pod is shared, so `:ready` = "free for ANOTHER subject" and the
+  # workspace reset + `/clear` are the price of the switch. Under `instance` the pod belongs to ONE
+  # ticket, so `:ready` = "MY ticket is coming back" (rework after REQUEST_CHANGES) — and clearing
+  # there destroys exactly what makes the rework cheap: what the producer built and why. Measured
+  # in production 2026-08-03: deliverable 1 came back to the engineer WITH a `/clear`; it re-read
+  # everything cold while the reviews faulted decisions it no longer remembered making.
+  # So: re-brief in place, no reset, no `/clear`. The context is an asset of the ticket and lives
+  # until the merge.
+  def project_scope_decision(_context_long, spawner, pod_id, "instance") do
+    case pipe_rebrief_state(spawner, pod_id) do
+      :busy -> :role_busy
+      _dead_or_ready -> :proceed
+    end
+  end
+
+  def project_scope_decision(_context_long, spawner, pod_id, _project) do
     case pipe_rebrief_state(spawner, pod_id) do
       :dead -> :proceed
       :busy -> :role_busy
@@ -567,16 +586,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # ── Naming — everything that NAMES/RESOLVES an identity embedded in the spawn_opts:
-  # rc_name, feature_slug, maybe_put_route, resolve_repo_id. Quasi-pure, shared by the
-  # TWO dispatcher flows — the leaf keeps the spawn MECHANIC, this cluster keeps the NAMES. ──
-
-  @doc """
-  Desktop RC name = `<project>_<role>` (project = final segment of the repo, e.g.
-  `fleet/poc-8` → `poc-8`). EXACT label (claude_launch → `--remote-control "<name>"`, zero auto
-  suffix). Distinct from the pod_id (repo-scoped technical key); here it is the human-readable Desktop label.
-  """
-  @spec rc_name(String.t(), String.t()) :: String.t()
-  def rc_name(repo, role), do: "#{Fleet.Layout.project_slug(repo)}_#{role}"
+  # feature_slug, maybe_put_route, resolve_repo_id. Quasi-pure, shared by the
+  # TWO dispatcher flows — the leaf keeps the spawn MECHANIC, this cluster keeps the NAMES.
+  # (The human-facing pod label is NOT here: it is `Fleet.Layout.pod_label/3`, foundation, because
+  # the spawner-side producers — recall, architect — must reach the same single builder.) ──
 
   @doc """
   Speaking slug from the issue title for the LOCAL branch (`feature/<slug>`).

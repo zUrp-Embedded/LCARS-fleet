@@ -79,7 +79,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Spawner.Pod
@@ -166,6 +166,7 @@ defmodule Fleet.Spawner do
     # from the outside (the pod boots, the human just gets an agent holding a worker's contract).
     with {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
          {:ok, _who} <- Fleet.CapProfile.fetch_interlocutor(cap_profile),
+         :ok <- project_guard(opts),
          :ok <- brief_guard(cap_profile, opts) do
       pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
@@ -182,22 +183,37 @@ defmodule Fleet.Spawner do
         # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
         _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
-        args = %{
-          cap_profile: cap_profile,
-          issue_id: issue_id,
-          pod_id: pod_id,
-          opts: opts
-        }
+        # POOL SLOT — decide ICI, avant que le processus existe : la valeur doit etre connue a
+        # l'enregistrement (cf. `Pod.name/2`). C'est aussi la bonne place pour le plafond : un role
+        # a capacite est un REPORT, pas un echec — l'appelant en fait un skip, le ticket empile et
+        # retente. Sans ca, le 16e pod d'un role aurait fait exploser le garde `pool in 0..0xF` de
+        # `SessionId.encode/5` : un plafond de format heurte comme un bug.
+        role = Fleet.CapProfile.name(cap_profile)
+        repo = Keyword.get(opts, :repo)
 
-        spec = pod_child_spec(args)
+        case Fleet.Spawner.PoolSlot.allocate(role, repo) do
+          {:error, :role_at_capacity} = err ->
+            err
 
-        # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
-        # (never produced by our gen_statem, but callers should not have to carry that contract).
-        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-          {:ok, pid} -> {:ok, pid}
-          {:ok, pid, _info} -> {:ok, pid}
-          :ignore -> {:error, :pod_init_ignored}
-          {:error, _} = err -> err
+          {:ok, pool} ->
+            args = %{
+              cap_profile: cap_profile,
+              issue_id: issue_id,
+              pod_id: pod_id,
+              slot: %{role: role, repo: repo, pool: pool},
+              opts: Keyword.put(opts, :pool, pool)
+            }
+
+            spec = pod_child_spec(args)
+
+            # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
+            # (never produced by our gen_statem, but callers should not have to carry that contract).
+            case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+              {:ok, pid} -> {:ok, pid}
+              {:ok, pid, _info} -> {:ok, pid}
+              :ignore -> {:error, :pod_init_ignored}
+              {:error, _} = err -> err
+            end
         end
       else
         {:error, :invalid_pod_id}
@@ -253,7 +269,8 @@ defmodule Fleet.Spawner do
             session_id: uuid,
             resume: true,
             recall_seed_jsonl: jsonl,
-            rc_name: "#{project}_#{role}",
+            rc_name: Fleet.Layout.pod_label(project, role),
+            project_slug: project,
             allow_no_brief: true
           )
         end
@@ -268,6 +285,35 @@ defmodule Fleet.Spawner do
   # PRECONDITION: `cap_profile` already passed `fetch_lifetime_scope/1` in `spawn_pod` (a no-scope
   # profile never reaches here — it is refused upstream, DR-019). So scope is guaranteed present:
   # the guard only decides one-shot→brief, no nil-scope exemption to make.
+  # STRUCTURAL guard, same choke point as `lifetime_scope`/`interlocutor`: a NAMED pod must carry
+  # its `:project` explicitly. The label (`rc_name`) is a label — nobody derives the project back
+  # out of it — so a caller that names a pod and forgets `:project` would get a pod with no cwd
+  # remap, no intra-pod home and no seed store: it BOOTS, it just works on the wrong tree. That is
+  # the silence this refuses. The pair is inseparable BY CONSTRUCTION (every caller builds the
+  # label FROM the project), so requiring both together costs nothing and cannot be satisfied by
+  # guessing.
+  defp project_guard(opts) do
+    named? = is_binary(Keyword.get(opts, :rc_name))
+    project = Keyword.get(opts, :project_slug)
+
+    cond do
+      not named? ->
+        :ok
+
+      is_binary(project) and Fleet.Slug.valid?(project) ->
+        :ok
+
+      true ->
+        Logger.warning(
+          "Spawner: spawn_pod refused: named pod without a valid :project — " <>
+            "rc_name=#{inspect(Keyword.get(opts, :rc_name))} project=#{inspect(project)}. " <>
+            "The label carries no structure: pass :project_slug (what the label was built from)."
+        )
+
+        {:error, :project_required}
+    end
+  end
+
   defp brief_guard(%Fleet.CapProfile{} = cap_profile, opts) do
     brief = Keyword.get(opts, :brief)
     # `nil` AND `""` (empty brief — e.g. a `build_brief` over an empty/malformed
