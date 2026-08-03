@@ -45,7 +45,7 @@ locals {
   # livraison que l'engineer (git-native, forge-blind), sur la face work/ops. Team writers, comme
   # tout producteur. Lecon scoper (BL du 2026-08-02) : un role ajoute au catalogue SANS son compte
   # forge boucle en role_token_unavailable — le compte nait ICI, avec le role.
-  roles = ["architect", "engineer", "scribe", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+  roles = ["architect", "engineer", "scribe", "chief", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {

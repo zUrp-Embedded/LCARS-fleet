@@ -172,11 +172,14 @@ defmodule Fleet.Pilot.RolesTest do
   end
 
   describe "conflict_resolver_role/1 — its OWN capability, so the seal keeps its signatory" do
-    test "resolved by `conflict_resolver`, and today that is the gatekeeper" do
-      # The two responsibilities share a role: that is a CATALOGUE fact, not a law. What matters
-      # is that they are asked through two different keys.
-      assert Roles.conflict_resolver_role() == "gatekeeper"
-      assert Roles.conflict_resolver_role() == Roles.gatekeeper_role()
+    test "the two responsibilities are held by DIFFERENT roles — and the test says the property" do
+      # This asserted `== "gatekeeper"` while the two costumes shared a role. That was a CATALOGUE
+      # fact and the assertion pinned it as if it were a law, so it reddened the day the catalogue
+      # moved — which is exactly what the split was built to allow.
+      #
+      # What is worth pinning is that the two keys resolve INDEPENDENTLY. The incumbents are read
+      # from the catalogue, not restated here.
+      refute Roles.conflict_resolver_role() == Roles.gatekeeper_role()
     end
 
     # Substitution through the OPT, never `Application.put_env`. The env is a NODE-WIDE table: in an
@@ -189,14 +192,18 @@ defmodule Fleet.Pilot.RolesTest do
       # THE property of the item. Under one shared key, substituting the role that resolves an
       # exhausted conflict would also have substituted the role that SIGNS the merge — silently,
       # because nothing would have said the two decisions were the same decision.
+      signatory = Roles.gatekeeper_role()
+
       assert Roles.conflict_resolver_role(conflict_resolver_role: "engineer") == "engineer"
-      assert Roles.gatekeeper_role() == "gatekeeper"
-      assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == "gatekeeper"
+      assert Roles.gatekeeper_role() == signatory
+      assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == signatory
     end
 
     test "and the reverse: moving the signatory does not move the resolver" do
+      resolver = Roles.conflict_resolver_role()
+
       assert Roles.gatekeeper_role(gatekeeper_role: "scoper") == "scoper"
-      assert Roles.conflict_resolver_role() == "gatekeeper"
+      assert Roles.conflict_resolver_role() == resolver
     end
   end
 

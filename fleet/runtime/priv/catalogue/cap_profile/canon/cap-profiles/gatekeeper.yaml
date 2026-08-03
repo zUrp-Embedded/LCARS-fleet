@@ -12,10 +12,10 @@ metadata:
   role_index: 2
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
-  # Two capabilities, two responsibilities that happen to share a role TODAY. `exception_judge`
-  # signs the merge; `conflict_resolver` is handed a conflict the producer could not resolve.
-  # Splitting them is what lets the second move to another role without moving the signature.
-  capabilities: [exception_judge, conflict_resolver]
+  # `exception_judge` ONLY. `conflict_resolver` lived here for as long as this role wore both
+  # costumes; it now belongs to `chief`, whose profile can declare `brief_kind: worker` — which
+  # this one cannot, since it declares `judge` for the gate-escalation path it keeps.
+  capabilities: [exception_judge]
   scope:
     allowedTools:
       - Read

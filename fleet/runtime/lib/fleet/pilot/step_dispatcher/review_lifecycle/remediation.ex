@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -330,7 +330,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
     body =
       "⚠ Conflit de merge non résolu par le producteur (budget de rework épuisé). Passe " <>
-        "d'exception : le gatekeeper tente une dernière résolution avant escalade humaine — il " <>
+        "d'exception : le **chief** tente une dernière résolution avant escalade humaine — il " <>
         "intègre `origin/main`, résout, et re-livre sur CETTE PR ; les juges re-jugeront le nouveau " <>
         "head.\n\n" <> signature
 

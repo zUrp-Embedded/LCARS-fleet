@@ -64,7 +64,7 @@ TOKENS_DIR="/home/private"
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
-ROLES="architect engineer scribe gatekeeper qualifier reviewer scoper vulcan"
+ROLES="architect engineer scribe chief gatekeeper qualifier reviewer scoper vulcan"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
