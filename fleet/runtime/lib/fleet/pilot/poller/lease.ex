@@ -41,6 +41,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   require Logger
 
+  alias Fleet.Pilot.Poller.Admission
+
   # workflow_run lock (single source `Fleet.Labels`) — fast-path `classify_issue`
   # (in-flight → ENGAGED without a route read).
   @in_flight Fleet.Labels.in_flight()
@@ -166,21 +168,32 @@ defmodule Fleet.Pilot.Poller.Lease do
         {issue, pr?, engaged, prefetch}, {acc, lease} ->
           payload = wrap_issue_as_payload(issue, seams.repo)
           item_opts = Keyword.merge(dispatch_opts, prefetch)
+          wait = Admission.current_wait(payload)
 
           cond do
             # Issue with an open fleet PR → JUDGE phase (dispatched via the pulls). SKIP on the
             # issue side (otherwise producer re-spawn). The PR holds the lease.
             pr? ->
-              {%{acc | skipped: acc.skipped + 1}, lease}
+              {acc2, _} =
+                Admission.refuse(:pr_open, item_opts, issue["number"], wait, acc)
+
+              {acc2, lease}
 
             # ENGAGED pipeline → dispatches its current step; it HOLDS the lease → lease unchanged.
             engaged ->
               {acc2, lease2} = dispatch_engaged(payload, item_opts, acc, lease, seams.dispatcher)
               {acc2, serialized? and lease2}
 
-            # QUEUED, lease held by another workflow_run → waits.
+            # QUEUED, lease held by another workflow_run → waits. It now SAYS so: this branch was
+            # the one the wait convergence never reached, so a ticket held back was silent tick
+            # after tick, indistinguishable from a forgotten one. `:at_capacity` and not a reason of
+            # its own — 5.3 makes serial the same ceiling at 1, so this refusal and the `max_fan`
+            # refusal are one refusal wearing two names.
             lease ->
-              {%{acc | skipped: acc.skipped + 1}, lease}
+              {acc2, _} =
+                Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
+
+              {acc2, lease}
 
             # QUEUED, lease free → STARTS (takes the lease if effectively dispatched).
             true ->
@@ -209,140 +222,13 @@ defmodule Fleet.Pilot.Poller.Lease do
   # `{tally, started?}`; `started?` (= a pod was actually put in flight this tick) drives the lease taking,
   # INDEPENDENTLY of whether the dispatch finished without error.
   defp step_do_dispatch(payload, opts, acc, dispatcher) do
-    result = dispatcher.dispatch_issue(payload, opts)
-    _ = converge_wait_label(payload, opts, result)
-
-    case result do
-      {:ok, {:spawned, _pod_id, _role}} ->
-        {%{acc | dispatched: acc.dispatched + 1}, true}
-
-      # workflow_run STARTED (lock + pod + brief placed) but wake unreachable. The lease is TAKEN (started?
-      # = true); the anomaly is still counted in `errors` (surfaced via `last_tally_errors`/telemetry,
-      # never swallowed — it does NOT feed the `err_streak` backoff).
-      {:error, {:wake_unreached, _pod_id, _role, _reason}} ->
-        {%{acc | errors: acc.errors + 1}, true}
-
-      {:skipped, _reason} ->
-        {%{acc | skipped: acc.skipped + 1}, false}
-
-      # Real dispatch failure (nothing started — the compensation removed the lock + killed the fresh pod) → lease FREE.
-      {:error, _reason} ->
-        {%{acc | errors: acc.errors + 1}, false}
-    end
-  end
-
-  # BL-6-48, step 3 (ISSUES half) — the passage point finally WRITES what it was already holding.
-  #
-  # The 63 sites producing a `{:skipped, reason}` are consumed HERE and in `step_process_pulls`, and
-  # both threw the reason away (`{:skipped, _reason} -> skipped + 1`). The "single passage point"
-  # BL-6-48 asked for was never missing: it was forgetting what it held. A queued ticket was
-  # therefore indistinguishable from a forgotten one — an ambiguity that already cost one false
-  # diagnosis.
-  #
-  # THREE states, and the third is the one that gets forgotten:
-  #   {:skipped, r}  -> set `wait/<r>` (or nothing: twelve reasons are silent BY DECISION)
-  #   {:ok, _}       -> REMOVE the `wait/*`: the wait has ended
-  #   {:error, _}    -> touch NOTHING. An error says nothing about what a ticket waits for, and its
-  #                     rail is the incident. Writing here would turn a failure into a "wait" — one
-  #                     more lie, not one less gap.
-  #
-  # WRITE ON CHANGE ONLY. The issue's labels are in the payload the tick already listed (zero forge
-  # call), so we COMPARE before writing. Without that comparison an intermittent
-  # `criterion_unavailable` would make the label flap every 30 s in the issue thread — trading an
-  # invisible wait for permanent noise.
-  #
-  # Native exclusivity does the rest: `wait/` contains a `/`, so `ensure_repo_label` creates these
-  # labels `exclusive: true` and setting one removes the other. The single case exclusivity does NOT
-  # cover is LEAVING the wait — that is the `{:ok, _}` branch above, and omitting it would have
-  # manufactured the stale state this item exists to kill.
-  defp converge_wait_label(payload, opts, result),
-    do: converge_wait(opts, payload["number"], current_wait_label(payload), result)
-
-  @doc """
-  Converges the `wait/*` label of ticket `number` from its `current` value and a dispatch `result`.
-
-  THE single write point of the wait vocabulary — both rails call it, so the two halves cannot
-  drift into two dialects. The issues rail reads `current` from the payload it already listed; the
-  PR rail reads it from the `issue → wait/*` map the tick threads alongside `awaits_arch_ids`.
-  Neither pays a forge call to know it.
-  """
-  @spec converge_wait(keyword(), integer() | nil, String.t() | nil, term()) :: :ok
-  def converge_wait(_opts, nil, _current, _result), do: :ok
-
-  def converge_wait(opts, number, current, result) do
-    case wait_transition(current, desired_wait_label(result)) do
-      :noop -> :ok
-      op -> write_wait(opts, number, op)
-    end
-  end
-
-  @doc """
-  The PURE rule of the wait label: `current` (on the ticket) + `desired` (from the dispatch) →
-  `:noop | {:add, label} | {:remove, label}`.
-
-  Extracted with no I/O for the same reason `ForgeClient.route_from_labels/1` was: a decision buried
-  under a forge call is a decision nobody can exercise. Every branch below is reachable from a test
-  without a network.
-
-  `:keep` is NOT a third label, it is the ABSENCE of an opinion — a dispatch error says nothing
-  about what a ticket is waiting for, and writing on it would turn a failure into a "wait".
-  """
-  @spec wait_transition(String.t() | nil, String.t() | nil | :keep) ::
-          :noop | {:add, String.t()} | {:remove, String.t()}
-  def wait_transition(_current, :keep), do: :noop
-  # `(same, same)` couvre AUSSI `(nil, nil)` : rien porte, rien voulu, rien a faire. Une clause
-  # explicit `(nil, nil)` clause would be dead — and dead code lies without the compiler saying so.
-  def wait_transition(same, same), do: :noop
-  def wait_transition(current, nil), do: {:remove, current}
-  def wait_transition(_current, desired), do: {:add, desired}
-
-  defp current_wait_label(payload) do
-    prefix = Fleet.Labels.wait_prefix()
-
-    (payload["labels"] || [])
-    |> Enum.map(& &1["name"])
-    |> Enum.find(&(is_binary(&1) and String.starts_with?(&1, prefix)))
-  end
-
-  defp desired_wait_label({:ok, _}), do: nil
-  defp desired_wait_label({:error, _}), do: :keep
-
-  defp desired_wait_label({:skipped, reason}) do
-    Fleet.Labels.wait_for(reason)
-  rescue
-    # `wait_for/1` raises on a reason absent from the table — that is the WALL, and a test that
-    # measures `lib/` holds it. In production we degrade rather than abort a whole tick over a
-    # label: the trace is missing, the dispatch goes on. The red belongs to the gate, not the rail.
-    ArgumentError ->
-      Logger.warning(
-        "Poller: skip reason #{inspect(reason)} absent from the BL-6-48 wait table — " <>
-          "no label written (the tick stands; the exhaustiveness test is what must go red)"
-      )
-
-      :keep
-  end
-
-  defp write_wait(opts, number, op) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
-    repo = Keyword.get(opts, :repo)
-    forge_opts = Keyword.get(opts, :forge_opts, [])
-
-    _ =
-      case op do
-        {:add, label} -> forge.add_label(repo, number, label, forge_opts)
-        {:remove, label} -> forge.remove_label(repo, number, label, forge_opts)
-      end
-
-    :ok
-  rescue
-    # Best-effort by obligation: a label that cannot be posted must never block a dispatch. The
-    # trace is missing, the work goes through.
-    e ->
-      Logger.warning(
-        "Poller: wait label #{inspect(op)} on ##{number} failed (#{inspect(e)}) — dispatch unaffected"
-      )
-
-      :ok
+    Admission.admit(
+      fn -> dispatcher.dispatch_issue(payload, opts) end,
+      opts,
+      payload["number"],
+      Admission.current_wait(payload),
+      acc
+    )
   end
 
   # Dispatch of an ENGAGED workflow_run (it ALREADY holds the lease): the lease stays unchanged whatever happens

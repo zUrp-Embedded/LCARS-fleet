@@ -69,6 +69,11 @@ defmodule Fleet.Pilot.Poller do
   # defaults resolved HERE. Also owns the tally vocabulary (`zero_tally/merge_tally`).
   alias Fleet.Pilot.Poller.Lease
 
+  # THE passage point of the two dispatch rails. Every TRANSVERSE rule (accounting, wait
+  # vocabulary) lives there and both rails traverse it — because each of the two had already
+  # forgotten a different one of those rules, and nothing said so.
+  alias Fleet.Pilot.Poller.Admission
+
   # HUMAN lock placed on the ISSUE at escalation (gatekeeper verdict escalate/halt/redirect, or unresolved
   # conflict). The poller computes the SET of issues carrying it (already listed at the tick → zero I/O) and threads
   # it to the pulls → `dispatch_review` skips the judge of a PR whose parent issue awaits the arch.
@@ -901,40 +906,38 @@ defmodule Fleet.Pilot.Poller do
     wait_labels = Keyword.get(opts, :wait_labels, %{})
 
     Enum.reduce(pulls, Lease.zero_tally(), fn pr, acc ->
-      result = StepDispatcher.dispatch_review(pr, opts)
-
       # The issue number comes from the feature-branch name (`lcars/issue-N-<role>`): zero calls. A
-      # foreign PR does not parse → `nil` → `converge_wait` does nothing, which is the correct
+      # foreign PR does not parse → `nil` → the wait convergence does nothing, which is the correct
       # behaviour and not a side effect: it is not our ticket.
       issue_n = pr_issue_number(pr)
-      _ = Lease.converge_wait(opts, issue_n, Map.get(wait_labels, issue_n), result)
 
-      case result do
-        # `:ok` covers `{:spawned, _, _}` (judge/rework spawned) AND `{:merged, _}` (PR sealed).
-        {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
-        {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
-        {:error, _reason} -> %{acc | errors: acc.errors + 1}
-      end
+      # Through the funnel, exactly like the issues rail. `started?` is dropped here and that is the
+      # asymmetry stated rather than hidden: the lease bounds the ENTRY of new workflow_runs, and a
+      # judge of an already-active run is not an entry.
+      {acc2, _started?} =
+        Admission.admit(
+          fn -> StepDispatcher.dispatch_review(pr, opts) end,
+          opts,
+          issue_n,
+          Map.get(wait_labels, issue_n),
+          acc
+        )
+
+      acc2
     end)
   end
 
   # `issue → wait/*` for the issues carrying one. Derived from the issues ALREADY listed by the
   # tick (zero forge call), threaded to the pulls — exact twin of `awaits_arch_ids/1`.
   defp wait_labels(issues) do
-    prefix = Fleet.Labels.wait_prefix()
-
+    # `Admission.current_wait/1` and not a local scan: "what is this ticket waiting for" is a
+    # transverse question, and answering it twice is how the two rails earned two dialects.
     for i <- issues,
         n = i["number"],
-        label = Enum.find_value(i["labels"] || [], &wait_name(&1, prefix)),
+        label = Admission.current_wait(i),
         into: %{},
         do: {n, label}
   end
-
-  defp wait_name(%{"name" => name}, prefix) when is_binary(name) do
-    if String.starts_with?(name, prefix), do: name
-  end
-
-  defp wait_name(_, _), do: nil
 
   defp pr_issue_number(pr) do
     case Fleet.Pilot.ForgeProtocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do

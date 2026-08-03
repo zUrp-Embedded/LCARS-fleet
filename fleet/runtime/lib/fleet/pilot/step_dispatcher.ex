@@ -339,8 +339,14 @@ defmodule Fleet.Pilot.StepDispatcher do
   `pr`: Gitea map (`number`, `head.ref`, `requested_reviewers`, `labels`). `opts` as
   `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:skipped, reason}` | `{:error, _}`.
   """
+  # `{:merged, _}` is NOT a variant of `{:spawned, _, _}`: the seal path closes a PR without ever
+  # opening a pod, and the spec used to omit it. A contract that does not say what it returns sends
+  # its caller to write a mapping against a shape it will not always get.
   @spec dispatch_review(map(), keyword()) ::
-          {:ok, {:spawned, String.t(), String.t()}} | {:skipped, atom()} | {:error, term()}
+          {:ok, {:spawned, String.t(), String.t()}}
+          | {:ok, {:merged, integer()}}
+          | {:skipped, atom()}
+          | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
     # The PR's OWN base (chantier face-projet): the face the deliverable merges into, read off the
     # PR at this single site and threaded via opts → project map → pod.completed → step_run. Every
