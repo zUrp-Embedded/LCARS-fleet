@@ -155,12 +155,34 @@ defmodule Fleet.Spawner.Pod do
   """
   @spec start_link(map()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(args) do
-    # The slot identity travels in the REGISTRY VALUE (cf. `name/2`): `PoolSlot` reads live
-    # allocations from it without calling any pod. Absent (recall, admin spawn, tests that do not
-    # go through the allocator) → plain registration, and that pod simply holds no slot.
-    case Map.get(args, :slot) do
-      %{} = slot -> :gen_statem.start_link(name(args.pod_id, slot), __MODULE__, args, [])
-      _ -> :gen_statem.start_link(name(args.pod_id), __MODULE__, args, [])
+    # POOL SLOT allocated HERE, and not at the spawn site. This function runs in the child process
+    # that `DynamicSupervisor.start_child/2` starts, and that call is synchronous: allocation and
+    # the registration that publishes it happen inside one window no other pod start can enter. The
+    # atomicity is INHERITED, not built — no lock, no extra process, and the Registry stays the
+    # single truth (`name/2` carries the value `PoolSlot` reads back).
+    #
+    # `{:error, :role_at_capacity}` is returned as the child's start result: the supervisor
+    # propagates it verbatim, so `spawn_pod/3` hands the caller a DEFERRAL rather than a crash.
+    #
+    # No `:slot_key` (recall built by hand, tests that do not go through `spawn_pod/3`) → plain
+    # registration: that pod holds no slot and is invisible to the allocation, which is the correct
+    # reading of "outside the managed fan-out".
+    case Map.get(args, :slot_key) do
+      %{role: role, repo: repo} ->
+        scope = Fleet.CapProfile.slot_scope(args.cap_profile)
+
+        case Fleet.Spawner.PoolSlot.allocate(role, repo, scope) do
+          {:error, :role_at_capacity} = err ->
+            err
+
+          {:ok, pool} ->
+            slot = %{role: role, repo: repo, pool: pool}
+            args = %{args | opts: Keyword.put(args.opts, :pool, pool)}
+            :gen_statem.start_link(name(args.pod_id, slot), __MODULE__, args, [])
+        end
+
+      _ ->
+        :gen_statem.start_link(name(args.pod_id), __MODULE__, args, [])
     end
   end
 

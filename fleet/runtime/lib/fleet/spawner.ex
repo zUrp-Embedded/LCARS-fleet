@@ -183,37 +183,38 @@ defmodule Fleet.Spawner do
         # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
         _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
-        # POOL SLOT — decide ICI, avant que le processus existe : la valeur doit etre connue a
-        # l'enregistrement (cf. `Pod.name/2`). C'est aussi la bonne place pour le plafond : un role
-        # a capacite est un REPORT, pas un echec — l'appelant en fait un skip, le ticket empile et
-        # retente. Sans ca, le 16e pod d'un role aurait fait exploser le garde `pool in 0..0xF` de
-        # `SessionId.encode/5` : un plafond de format heurte comme un bug.
-        role = Fleet.CapProfile.name(cap_profile)
-        repo = Keyword.get(opts, :repo)
+        # POOL SLOT — we name WHAT to allocate here and let the CHILD allocate it. The index has to
+        # be known at registration (it travels in the Registry value, cf. `Pod.name/2`), and
+        # deciding it in this process would make read-then-write racy: `spawn_pod/3` runs in
+        # whoever called it, so two callers of the same (role, repo) would both read the same
+        # lowest free index. Done in `Pod.start_link/1` it inherits the serialization of
+        # `DynamicSupervisor.start_child/2` for free. `{:error, :role_at_capacity}` comes back
+        # through the child's start: a role at capacity is a DEFERRAL — the caller turns it into a
+        # skip, the ticket stacks and retries — and it never reaches `SessionId.encode/5`, whose
+        # `pool in 0..0xF` guard would have met a format ceiling as a FunctionClauseError.
+        #
+        # `:repo_id` and NOT `:repo`: the dispatch never puts the `owner/name` string in the
+        # spawn_opts, so keying on it would put every producer and judge of every project in one
+        # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
+        # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
+        # session_id encodes: bucket and identity then designate the same object.
+        args = %{
+          cap_profile: cap_profile,
+          issue_id: issue_id,
+          pod_id: pod_id,
+          slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
+          opts: opts
+        }
 
-        case Fleet.Spawner.PoolSlot.allocate(role, repo) do
-          {:error, :role_at_capacity} = err ->
-            err
+        spec = pod_child_spec(args)
 
-          {:ok, pool} ->
-            args = %{
-              cap_profile: cap_profile,
-              issue_id: issue_id,
-              pod_id: pod_id,
-              slot: %{role: role, repo: repo, pool: pool},
-              opts: Keyword.put(opts, :pool, pool)
-            }
-
-            spec = pod_child_spec(args)
-
-            # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
-            # (never produced by our gen_statem, but callers should not have to carry that contract).
-            case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-              {:ok, pid} -> {:ok, pid}
-              {:ok, pid, _info} -> {:ok, pid}
-              :ignore -> {:error, :pod_init_ignored}
-              {:error, _} = err -> err
-            end
+        # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
+        # (never produced by our gen_statem, but callers should not have to carry that contract).
+        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+          {:ok, pid} -> {:ok, pid}
+          {:ok, pid, _info} -> {:ok, pid}
+          :ignore -> {:error, :pod_init_ignored}
+          {:error, _} = err -> err
         end
       else
         {:error, :invalid_pod_id}

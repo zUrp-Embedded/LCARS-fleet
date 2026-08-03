@@ -278,6 +278,51 @@ defmodule Fleet.SpawnerTest do
                )
     end
 
+    test "CONCURRENT spawns of the same (role, repo) never share a pool index" do
+      # The allocation runs inside `Pod.start_link/1` — that is, inside the window
+      # `DynamicSupervisor.start_child/2` holds open, so it is serialized by the supervisor without
+      # a lock and without an extra process. Run in the CALLER's process (where it first lived),
+      # two of these would read the same lowest free index and hand it out twice: two live pods
+      # sharing a session_id, silently, which is the exact lie the nibble exists to end.
+      n = 6
+      ids = for i <- 1..n, do: "pod-conc-#{System.unique_integer([:positive])}-#{i}"
+
+      pids =
+        ids
+        |> Enum.map(fn id ->
+          Task.async(fn ->
+            Fleet.Spawner.spawn_pod(valid_profile(), "issue-conc",
+              brief: "x",
+              pod_id: id,
+              repo_id: @test_repo_id
+            )
+          end)
+        end)
+        |> Enum.map(fn task ->
+          assert {:ok, pid} = Task.await(task, 15_000)
+          pid
+        end)
+
+      # Six live pods left in a SHARED registry are not this test's business alone: every later
+      # test that enumerates pods (`list_pods/0` → a `GenServer.call` per pod) pays for them.
+      # Measured: without this, `PodToolsTest`'s supersede path times out at 60 s — green in
+      # isolation, red at the gate. Brutal kill on purpose — the graceful `kill_pod/1` is itself a
+      # call, so it would queue behind the very thing being cleaned up.
+      on_exit(fn -> Enum.each(pids, &Process.exit(&1, :kill)) end)
+
+      pools =
+        for {id, pid} <- Enum.zip(ids, pids) do
+          # Matched on the PID: a pod that died would fail here by name rather than vanish from a
+          # comprehension and turn the uniqueness assertion into a tautology on a shorter list.
+          assert [{^pid, %{pool: pool}}] = Registry.lookup(Fleet.Spawner.Registry, id)
+          pool
+        end
+
+      assert length(pools) == n
+      assert Enum.uniq(pools) == pools, "pools collided: #{inspect(pools)}"
+      refute 0 in pools, "an instance-keyed pod took the reserved seat: #{inspect(pools)}"
+    end
+
     test "one-shot + allow_no_brief (admin/diagnostic) → {:ok, _}" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-admin",
