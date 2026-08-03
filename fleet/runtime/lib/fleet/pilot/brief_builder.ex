@@ -13,8 +13,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-03
   """
+
+  require Logger
 
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
   # CARRIES THE SAME git-native instruction as `build_worker_brief` (otherwise `:no_deliverable_commit`: the
@@ -101,8 +103,21 @@ defmodule Fleet.Pilot.BriefBuilder do
     """
   end
 
-  # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable block.
-  # `""` if nothing (read failed or no body) → the brief falls back to the generic instruction (Enum.reject).
+  # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable
+  # block.
+  #
+  # F-C083 again, in its OTHER shape. The seam is three-valued (`{:ok, [_|_]} | {:ok, []} |
+  # {:error, _}`) and a single `_ -> ""` clause used to collapse the last two: a transient read
+  # failure produced the SAME brief as "this PR carries no actionable feedback". The producer then
+  # reworks blind while the PR holds detailed REQUEST_CHANGES it never sees — and, believing there
+  # was nothing to address, it plausibly ships the same defect and burns another review cycle.
+  #
+  # The remedy is NOT fail-closed here, and the asymmetry with `judge_outputs/4` is the point: a
+  # judge given the wrong matter renders a WRONG VERDICT, so it must never run; a producer without
+  # its feedback merely works WORSE. Deferring every rework on a transient forge hiccup would wedge
+  # the rail to avoid a degradation. So we proceed — and we make the gap VISIBLE on both sides: a
+  # warning on the operator rail, and a line in the brief itself, because the pod cannot read our
+  # logs and an unexplained absence is exactly what made this defect silent.
   defp render_rework_feedback(forge, repo, pr, forge_opts) do
     case forge.change_request_feedback(repo, pr, forge_opts) do
       {:ok, [_ | _] = feedbacks} ->
@@ -113,8 +128,21 @@ defmodule Fleet.Pilot.BriefBuilder do
 
         "## Feedback de review à traiter (REQUEST_CHANGES)\n\n#{sections}"
 
-      _ ->
+      {:ok, []} ->
         ""
+
+      {:error, reason} ->
+        # Rail prefix = the FACADE this module was extracted from (StepDispatcher), not its own
+        # last segment: extracting a cluster must never fragment the trace an operator greps.
+        Logger.warning(
+          "StepDispatcher: rework feedback UNREADABLE repo=#{repo} pr=#{pr} " <>
+            "reason=#{inspect(reason)} — the producer reworks without the reviews (degraded, not deferred)"
+        )
+
+        "## Feedback de review — NON LU\n\n" <>
+          "Les reviews REQUEST_CHANGES de cette PR n'ont pas pu être lues sur la forge " <>
+          "(erreur transitoire). Elles EXISTENT : cette PR a été retoquée. Lis-les toi-même sur " <>
+          "la PR avant de corriger — ne suppose pas qu'il n'y avait rien à traiter."
     end
   end
 
@@ -293,26 +321,46 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
-    predecessor =
-      case forge.get_predecessor_result(repo, number, forge_opts) do
-        {:ok, result} when is_map(result) and map_size(result) > 0 -> result
-        _ -> nil
-      end
+    with {:ok, outputs} <- judge_outputs(forge, repo, number, forge_opts) do
+      step_judge_brief(role, forge, repo, number, forge_opts, route, opts, outputs)
+    end
+  end
 
-    # GIT-NATIVE (empty predecessor): the deliverable IS NOT a payload — it's the branch
-    # CODE. The judge clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its
-    # workspace instead of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges
-    # emptiness → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
-    outputs =
-      predecessor ||
-        %{
-          "livrable" =>
-            "git-native — le code à juger est checkout dans TON workspace. Le clone est mono-branche : " <>
-              "la base est `origin/main` (le ref local `main` N'EXISTE PAS). Le diff de la PR = " <>
-              "`git diff origin/main...HEAD` (trois points — point de divergence auto). `git log origin/main..HEAD` " <>
-              "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
-        }
+  # F-C083 — READ-ERROR ≠ ABSENCE, applied to the PREDECESSOR read. The rule is stated 35 lines
+  # below for the CRITERION read and was NOT applied here: a bare `_ -> nil` collapsed the seam's
+  # three-valued contract (`{:ok, map} | :none | {:error, term}`) into two branches, so a TRANSIENT
+  # forge failure landed in the git-native fallback. Consequence, and it is the worst shape a bug
+  # can take here: the judge grades the BRANCH CODE instead of the payload its predecessor actually
+  # produced — a verdict rendered on the wrong matter, silently, and INDISTINGUISHABLE from the
+  # legitimate git-native case. Nothing downstream can catch it: the brief is well-formed, the judge
+  # answers confidently, and the answer is about something else.
+  #
+  #   {:ok, non-empty}      the payload IS the deliverable
+  #   :none / {:ok, %{}}    genuinely no predecessor → git-native, the CODE is the deliverable
+  #   {:error, _}           fail-closed, exactly like the criterion: DEFER, never a blind judge
+  defp judge_outputs(forge, repo, number, forge_opts) do
+    case forge.get_predecessor_result(repo, number, forge_opts) do
+      {:ok, result} when is_map(result) and map_size(result) > 0 -> {:ok, result}
+      {:error, reason} -> {:error, {:criterion_unavailable, {:predecessor, reason}}}
+      _ -> {:ok, git_native_outputs()}
+    end
+  end
 
+  # GIT-NATIVE (no predecessor): the deliverable IS NOT a payload — it's the branch CODE. The judge
+  # clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its workspace instead
+  # of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges emptiness
+  # → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
+  defp git_native_outputs do
+    %{
+      "livrable" =>
+        "git-native — le code à juger est checkout dans TON workspace. Le clone est mono-branche : " <>
+          "la base est `origin/main` (le ref local `main` N'EXISTE PAS). Le diff de la PR = " <>
+          "`git diff origin/main...HEAD` (trois points — point de divergence auto). `git log origin/main..HEAD` " <>
+          "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
+    }
+  end
+
+  defp step_judge_brief(role, forge, repo, number, forge_opts, route, opts, outputs) do
     {workflow_map_name, step} =
       case route do
         {p, s} -> {p, s}

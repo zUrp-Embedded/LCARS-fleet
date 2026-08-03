@@ -71,6 +71,88 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
   end
 
+  describe "build_brief — deliverable-judge, PREDECESSOR read (F-C083, l'autre moitié)" do
+    # La règle était ÉNONCÉE pour le critère et VIOLÉE pour le prédécesseur, 35 lignes plus haut :
+    # un `_ -> nil` écrasait `:none` (pas de prédécesseur, git-native légitime) et `{:error, _}`
+    # (forge injoignable) dans la même branche. Ces tests tiennent la distinction.
+    test "prédécesseur PRÉSENT → le payload est le livrable jugé" do
+      assert {:ok, brief, "judge"} = build(_pred: {:ok, %{"livrable" => "PAYLOAD-XYZ"}})
+      assert brief =~ "PAYLOAD-XYZ"
+      refute brief =~ "git-native"
+    end
+
+    test "AUCUN prédécesseur (`:none`) → git-native : le CODE est le livrable, et c'est légitime" do
+      assert {:ok, brief, "judge"} = build(_pred: :none)
+      assert brief =~ "git-native"
+    end
+
+    test "prédécesseur VIDE (`{:ok, %{}}`) → git-native aussi : vide ≠ erreur" do
+      assert {:ok, brief, "judge"} = build(_pred: {:ok, %{}})
+      assert brief =~ "git-native"
+    end
+
+    test "READ-ERROR sur le prédécesseur → fail-closed, JAMAIS un juge sur la mauvaise matière" do
+      # LE test qui discrimine. Avant le fix, cette lecture ratée tombait dans le git-native : le
+      # juge notait le CODE de la branche au lieu du payload que son prédécesseur avait produit —
+      # un verdict rendu sur autre chose, silencieusement, et indiscernable du cas légitime.
+      assert {:error, {:criterion_unavailable, {:predecessor, :boom}}} =
+               build(_pred: {:error, :boom})
+    end
+  end
+
+  describe "rework brief — le feedback de review NON LU ne se tait pas" do
+    defmodule ReworkForge do
+      def change_request_feedback(_repo, _pr, opts), do: Keyword.get(opts, :_fb, {:ok, []})
+    end
+
+    defp rework(forge_opts),
+      do:
+        BriefBuilder.rework_brief(
+          "engineer",
+          ReworkForge,
+          "acme/widget",
+          7,
+          forge_opts,
+          nil,
+          []
+        )
+
+    test "feedback PRÉSENT → les reviews sont dans le brief, nommées par leur auteur" do
+      brief = rework(_fb: {:ok, [%{"login" => "reviewer-bot", "body" => "REVOIR-LE-NOMMAGE"}]})
+
+      assert brief =~ "## Feedback de review à traiter (REQUEST_CHANGES)"
+      assert brief =~ "reviewer-bot"
+      assert brief =~ "REVOIR-LE-NOMMAGE"
+    end
+
+    test "AUCUN feedback (`{:ok, []}`) → silence : il n'y a rien à dire, et le dire serait du bruit" do
+      brief = rework(_fb: {:ok, []})
+
+      # Le gabarit dit « REQUEST_CHANGES » dans son intro quoi qu'il arrive : ce qui distingue les
+      # trois cas est l'EN-TÊTE DE SECTION, pas le mot.
+      refute brief =~ "## Feedback de review"
+    end
+
+    test "READ-ERROR → le brief DIT que les reviews existent et n'ont pas été lues" do
+      # Le défaut : `{:ok, []}` et `{:error, _}` rendaient le MÊME brief. Le producteur retravaillait
+      # à l'aveugle en croyant qu'on ne lui avait rien reproché — et repartait plausiblement avec le
+      # même défaut, brûlant un cycle de review de plus. Ici on ne diffère pas (un producteur sans
+      # son feedback travaille MOINS BIEN, il ne rend pas un faux verdict) : on rend le trou VISIBLE.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          brief = rework(_fb: {:error, :timeout})
+
+          assert brief =~ "## Feedback de review — NON LU"
+          assert brief =~ "Elles EXISTENT"
+          refute brief =~ "## Feedback de review à traiter"
+        end)
+
+      # Le rail est celui de la FAÇADE dont ce module est extrait, pas son dernier segment.
+      assert log =~ "StepDispatcher: rework feedback UNREADABLE"
+      assert log =~ "timeout"
+    end
+  end
+
   describe "brief pointer (E4) — the ticket points at a work/ops-authored doc" do
     @moduletag :tmp_dir
 
