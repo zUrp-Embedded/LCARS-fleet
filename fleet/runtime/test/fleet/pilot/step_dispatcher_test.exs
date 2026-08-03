@@ -376,9 +376,15 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:spawned, "issue-42", opts}
       assert opts[:brief] =~ "fais le hello"
 
-      # pod-seed: RC Desktop name = <project>_<role> (project = final segment of the repo
-      # "lordzurp/lcars-test" → "lcars-test"). Exact label, distinct from the technical pod_id.
-      assert opts[:rc_name] == "lcars-test_engineer"
+      # pod-seed: RC Desktop name = <project>#<ticket>_<role> (project = final segment of the repo
+      # "lordzurp/lcars-test"). Exact label, distinct from the technical pod_id. With one eng per
+      # ticket, the project alone no longer distinguishes two live pods of the same role — the
+      # number is what the human reads to tell them apart in the Desktop list.
+      assert opts[:rc_name] == "lcars-test#42_engineer"
+
+      # …and the slug travels ALONGSIDE the label, never re-parsed out of it (see `project_slug`
+      # below): that is what keeps the label free to change shape.
+      assert opts[:project_slug] == "lcars-test"
       assert opts[:brief] =~ "git commit"
       assert opts[:brief] =~ "Co-authored-by: LCARS-engineer"
 

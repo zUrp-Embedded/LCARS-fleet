@@ -15,7 +15,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   - `effective_project/2` — EFFECTIVE project (brief `opts[:project]` > static `spec["project"]`).
     Public because shared outside placement (`Pod.CompletedPayload`, bootstrap workspace): single source.
-  - `rc_project/2` — project name slugified from `rc_name`, or `nil`. Public because shared
+  - `rc_project/2` — project slug of the pod (opt `:project_slug`), or `nil`. Public because shared
     outside placement (`maybe_checkpoint_seed`): single source.
   - `pod_cwd/3` — cwd seen by the agent. Public because also called by recall (`maybe_recall_restore`).
   - `sandbox_home/2` — intra-pod home. Public because also passed to `McpProvision` (`:projecting` state).
@@ -40,26 +40,38 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  CLEAN project name from `rc_name` (`<project>_<role>`, canonical source sanitized by the
-  dispatcher). `nil` if no rc_name (permanent / admin pods → no cwd remap). Shared with the
-  checkpoint seed-store.
+  CLEAN project name of the pod, read from the EXPLICIT `:project` opt. `nil` when the caller names
+  no project (permanent / admin pods → no cwd remap). Shared with the checkpoint seed-store.
 
-  Confinement boundary: this `project` is the SOLE derivation of the project name from `rc_name`
-  (a dispatch/recall input, untrusted), and it ends up interpolated into paths/segments — cwd
-  `/home/<project>`, intra-pod home, seed-store directory. So we require it to be a slug HERE, as
-  early as possible: a malformed `rc_name` (`../evil_role`, `a/b_role`) → `nil` (pod with no remap
-  nor seed, neutral state) rather than a traversing `project` that would reach a `Path.join`. Single
-  source → a single point to hold.
+  Confinement boundary: this `project` is a dispatch/recall input (untrusted) that ends up
+  interpolated into paths/segments — cwd `/home/<project>`, intra-pod home, seed-store directory.
+  So we require it to be a slug HERE, as early as possible: a malformed value (`../evil`, `a/b`) →
+  `nil` (pod with no remap nor seed, neutral state) rather than a traversing `project` that would
+  reach a `Path.join`. Single source → a single point to hold.
   """
   @spec rc_project(keyword(), Fleet.CapProfile.t()) :: String.t() | nil
-  def rc_project(opts, cap_profile) do
-    with rc when is_binary(rc) <- Keyword.get(opts, :rc_name),
-         role <- Fleet.CapProfile.name(cap_profile),
-         stripped when stripped != rc <- String.replace_suffix(rc, "_" <> role, ""),
-         true <- Fleet.Slug.valid?(stripped) do
-      stripped
-    else
-      _ -> nil
+  def rc_project(opts, _cap_profile) do
+    # The key is `:project_slug`, NOT `:project`: `:project` is ALREADY the project MAP of the brief
+    # (`effective_project/2` — repo_path / base_branch / repo). Two different objects, two keys. A
+    # slug parked under `:project` is silently swallowed by the map (last writer wins) and lands
+    # here as a non-binary → `nil` → a pod with no remap, which is the exact silence below.
+    #
+    # READ, never re-parsed (2026-08-03). The slug is an EXPLICIT input now: every caller that
+    # names a pod already holds it — it is what `rc_name` was BUILT from. Deriving it back out of
+    # the label made the label a load-bearing structure: its format was frozen by this parse, so
+    # adding the ticket number to the Desktop name (`tetris#42_engineer`) would have made
+    # `Slug.valid?` fail → `nil` → a pod with NO cwd remap and NO seed, silently. One string was
+    # doing two jobs; now the label is a label.
+    #
+    # No fallback to the old parse ON PURPOSE: it would not have saved a missed call site (the
+    # parse fails on the new format anyway), it would only have hidden WHICH site was missed. The
+    # refusal lives at the spawn choke point instead, where the other structural guards are.
+    case Keyword.get(opts, :project_slug) do
+      p when is_binary(p) ->
+        if Fleet.Slug.valid?(p), do: p, else: nil
+
+      _ ->
+        nil
     end
   end
 

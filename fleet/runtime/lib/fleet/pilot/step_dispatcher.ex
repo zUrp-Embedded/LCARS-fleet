@@ -236,6 +236,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                  step_spec
                ) do
             {:ok, brief, brief_kind} ->
+              project_slug = Fleet.Layout.project_slug(repo)
+
               spawn_opts =
                 [
                   brief: brief,
@@ -243,7 +245,10 @@ defmodule Fleet.Pilot.StepDispatcher do
                   # (briefs/ vs gate-briefs/) at the spawn leaf; popped before the pod spawn.
                   brief_kind: brief_kind,
                   pod_id: pod_id,
-                  rc_name: Spawn.rc_name(repo, role),
+                  # The PAIR, built together from one slug: the label for the human, the slug for
+                  # the machine. Never re-derive one from the other (`Fleet.Layout.pod_label/3`).
+                  rc_name: Fleet.Layout.pod_label(project_slug, role, number),
+                  project_slug: project_slug,
                   # Speaking LOCAL branch name (sanitized issue title), not
                   # the pod_id. Used by phase.ex → `feature/<slug>`. Computed once (reused by the gate
                   # for the in-place reprovision of a pipe: same branch at reset as at spawn).

@@ -166,12 +166,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
              pr_number
            ) do
         {:ok, brief, brief_kind} ->
+          project_slug = Fleet.Layout.project_slug(repo)
+
           spawn_opts =
             [
               brief: brief,
               brief_kind: brief_kind,
               pod_id: pod_id,
-              rc_name: Spawn.rc_name(repo, role)
+              # The PAIR, built together (cf. `Fleet.Layout.pod_label/3`). The label carries the
+              # ISSUE number even on a PR-driven dispatch: the human tracks a ticket, not a PR.
+              rc_name: Fleet.Layout.pod_label(project_slug, role, issue_n),
+              project_slug: project_slug
             ]
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)

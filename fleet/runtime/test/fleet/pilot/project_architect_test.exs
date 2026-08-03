@@ -75,6 +75,10 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       assert opts[:repo] == "fleet/demo"
       # One Desktop slot per project.
       assert opts[:rc_name] == "demo_architect"
+
+      # No ticket: the architect is project-bound, not ticket-bound — the label carries no number,
+      # and the slug still travels explicitly (the spawn choke point demands it of every named pod).
+      assert opts[:project_slug] == "demo"
       # NO CLONE (§14.d): the arch is not a producer — its world is the two live host dirs.
       refute Keyword.has_key?(opts, :project)
 

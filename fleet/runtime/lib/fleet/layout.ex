@@ -121,6 +121,33 @@ defmodule Fleet.Layout do
     do: repo |> project_name() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
 
   @doc """
+  Pod LABEL shown to the human: the terminal title and the Claude Desktop entry.
+  `<project>#<ticket>_<role>`, or `<project>_<role>` for a pod bound to a project rather than to a
+  ticket (architect, permanent). Takes the SLUG (`project_slug/1` upstream), never the `owner/name`.
+
+  SINGLE starting point BY DESIGN. The format is a UI/UX judgement that will be re-judged — spaces,
+  `@` and `#` all survive tmux and Desktop, but a label loaded with separators turns to mush in a
+  terminal, and Desktop offers no sort (most recent floats up), so the ticket number is what lets a
+  human tell two live engineers of one project apart. Keeping every producer on this one function is
+  what makes the next judgement a one-line change.
+
+  It is a LABEL: nothing downstream may read a fact back out of it. The project slug travels
+  alongside it as the explicit `:project_slug` spawn opt, and the spawn choke point refuses a named
+  pod that omits it (`Fleet.Spawner`, `:project_required`). Deriving the project from the label
+  instead is what previously froze this format: adding `#42` to the name would have silently
+  produced a pod with no cwd remap and no checkpoint seed.
+  """
+  @spec pod_label(String.t(), String.t(), pos_integer() | nil) :: String.t()
+  def pod_label(project, role, ticket \\ nil)
+
+  def pod_label(project, role, nil) when is_binary(project) and is_binary(role),
+    do: "#{project}_#{role}"
+
+  def pod_label(project, role, ticket)
+      when is_binary(project) and is_binary(role) and is_integer(ticket),
+      do: "#{project}##{ticket}_#{role}"
+
+  @doc """
   Per-human runtime state (`~/.lcars`). An unresolvable HOME means a broken runtime →
   fail-loud (`System.user_home!/0` raises), never a fabricated path: the state must not
   silently scatter.

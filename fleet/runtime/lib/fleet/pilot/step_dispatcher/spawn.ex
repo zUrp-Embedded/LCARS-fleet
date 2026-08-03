@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   (The gatekeeper EVAL dispatch is a DELIBERATE separate rail — completion-triggered, lockless,
   enqueue-before-spawn, fail-loud — NOT merged here; the shared atoms are already factored, only the
   operational contract differs. See `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` for the why.)
-  (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
+  (The opts builders / naming — `feature_slug`/`maybe_put_route`/`resolve_repo_id` —
   live in the Naming cluster at the bottom of this module, quasi-pure, called by both flows.)
 
   ## LOAD-BEARING semantics
@@ -586,16 +586,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # ── Naming — everything that NAMES/RESOLVES an identity embedded in the spawn_opts:
-  # rc_name, feature_slug, maybe_put_route, resolve_repo_id. Quasi-pure, shared by the
-  # TWO dispatcher flows — the leaf keeps the spawn MECHANIC, this cluster keeps the NAMES. ──
-
-  @doc """
-  Desktop RC name = `<project>_<role>` (project = final segment of the repo, e.g.
-  `fleet/poc-8` → `poc-8`). EXACT label (claude_launch → `--remote-control "<name>"`, zero auto
-  suffix). Distinct from the pod_id (repo-scoped technical key); here it is the human-readable Desktop label.
-  """
-  @spec rc_name(String.t(), String.t()) :: String.t()
-  def rc_name(repo, role), do: "#{Fleet.Layout.project_slug(repo)}_#{role}"
+  # feature_slug, maybe_put_route, resolve_repo_id. Quasi-pure, shared by the
+  # TWO dispatcher flows — the leaf keeps the spawn MECHANIC, this cluster keeps the NAMES.
+  # (The human-facing pod label is NOT here: it is `Fleet.Layout.pod_label/3`, foundation, because
+  # the spawner-side producers — recall, architect — must reach the same single builder.) ──
 
   @doc """
   Speaking slug from the issue title for the LOCAL branch (`feature/<slug>`).

@@ -111,7 +111,8 @@ defmodule Fleet.Pilot.ProjectArchitect do
             # resolve "the project" from the channel identity (the arch never names it).
             repo: repo,
             repo_id: repo_id,
-            rc_name: name <> "_architect",
+            rc_name: Fleet.Layout.pod_label(name, "architect"),
+            project_slug: name,
             # The arch's world (moduledoc): live host dirs, not a frozen clone.
             mounts: [
               %{"mode" => "ro", "path" => proj_dir},

@@ -209,6 +209,39 @@ defmodule Fleet.SpawnerTest do
                Fleet.Spawner.spawn_pod(blank, "issue-blank-who", brief: "do x")
     end
 
+    test "NAMED pod without :project_slug → spawn REFUSED (the label carries no structure)" do
+      # Third structural guard at the same choke point. A pod that carries an `rc_name` is a pod
+      # placed IN a project: its cwd, its intra-pod home and its checkpoint seed all derive from the
+      # slug. The slug used to be re-parsed out of the label, which froze the label's format; now it
+      # travels explicitly, so a caller that names a pod and omits it would get a booting pod
+      # working on the wrong tree — silently. Refused instead.
+      assert {:error, :project_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-named",
+                 brief: "do x",
+                 rc_name: "p_engineer"
+               )
+
+      # A slug that is not a slug is the same refusal, not a downgrade to `nil`: the value reaches a
+      # `Path.join`, so the traversing forms die at the door.
+      for bad <- ["../evil", "a/b", "", nil, 42] do
+        assert {:error, :project_required} =
+                 Fleet.Spawner.spawn_pod(valid_profile(), "issue-bad-slug",
+                   brief: "do x",
+                   rc_name: "p_engineer",
+                   project_slug: bad
+                 ),
+               "slug #{inspect(bad)} should be refused"
+      end
+    end
+
+    test "UNNAMED pod (no rc_name) → the slug is not demanded (permanent / admin pods)" do
+      # The guard binds the PAIR, it does not make the slug universally mandatory: a permanent or
+      # admin pod has no Desktop label and no cwd remap. It must fail LATER (on the brief), which
+      # proves the project guard let it through rather than passing for the wrong reason.
+      assert {:error, :brief_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-unnamed")
+    end
+
     test "one-shot + no brief → {:error, :brief_required}" do
       assert {:error, :brief_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-no-brief")
