@@ -24,7 +24,7 @@ defmodule Fleet.Workflow.Provenance do
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
@@ -44,7 +44,8 @@ defmodule Fleet.Workflow.Provenance do
           optional(:role) => String.t() | nil,
           optional(:issue) => term(),
           optional(:started_at) => String.t() | nil,
-          optional(:finished_at) => String.t() | nil
+          optional(:finished_at) => String.t() | nil,
+          optional(:debug_visibility) => boolean() | nil
         }
 
   @doc """
@@ -129,7 +130,11 @@ defmodule Fleet.Workflow.Provenance do
         # configSource = what was asked: the committed brief object. Digest omitted if the brief was not
         # materialized (degraded) — the triplet becomes an input→output pair, never a provenance that
         # LIES about a brief_sha.
-        "invocation" => %{"configSource" => config_source(a)},
+        "invocation" =>
+          drop_nil(%{
+            "configSource" => config_source(a),
+            "environment" => environment(a)
+          }),
         "buildConfig" =>
           drop_nil(%{
             "input_sha" => Map.get(a, :input_sha),
@@ -145,6 +150,23 @@ defmodule Fleet.Workflow.Provenance do
           })
       }
     }
+  end
+
+  # `invocation.environment` — builder-controlled inputs that are not build PARAMETERS. Today one
+  # fact: was the fleet running in debug visibility (`fleet_v2 start --debug`) when this deliverable
+  # was produced. It belongs in the attestation because a pod a human could attach to and type into
+  # is not the same builder as an unattended one, and the triplet's job is to be falsifiable about
+  # what actually happened.
+  #
+  # Stamped ONLY when the caller states it. A missing key means "this runtime did not say", never
+  # "we certify it was clean" — same rule as the brief digest above: omit rather than invent. So a
+  # `false` here is a CLAIM (the fleet was not in debug), which is why it is written out and not
+  # dropped as a falsy value.
+  defp environment(a) do
+    case Map.get(a, :debug_visibility) do
+      flag when is_boolean(flag) -> %{"debug_visibility" => flag}
+      _ -> nil
+    end
   end
 
   defp config_source(a) do

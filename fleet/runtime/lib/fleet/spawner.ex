@@ -512,6 +512,22 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Is the fleet running in DEBUG VISIBILITY mode (`fleet_v2 start --debug`)? — the SINGLE reader of
+  `:fleet_spawner, :debug_visibility`.
+
+  One value for a whole fleet life, fixed at start: nothing toggles it, nothing persists it,
+  nothing reconciles it mid-run. Two consumers, in two domains, which is why the read lives on the
+  facade rather than at each site: `Pod.LaunchSpec.remote_control?/1` widens Desktop visibility
+  with it, and `Pilot.StepRunCompleter` stamps it into the deliverable's provenance. A second
+  `Application.get_env` on this key would be a second derivation of one fact -- the shape that
+  produced a pod visible in Desktop whose slot was never captured.
+  """
+  @spec debug_visibility?() :: boolean()
+  def debug_visibility? do
+    Application.get_env(:fleet_spawner, :debug_visibility, false) == true
+  end
+
+  @doc """
   Number of active pods.
   """
   @spec count_pods() :: non_neg_integer()

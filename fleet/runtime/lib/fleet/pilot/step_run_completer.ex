@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -161,7 +161,13 @@ defmodule Fleet.Pilot.StepRunCompleter do
       input_sha: Map.get(dopts, :base_sha) || Map.get(dopts, "base_sha"),
       pod_id: Map.get(step_run, :pod_id),
       role: Map.get(step_run, :role),
-      issue: Map.get(step_run, :issue_number)
+      issue: Map.get(step_run, :issue_number),
+      # Debug visibility is a property of the BUILDER, not of this deliverable: a pod a human could
+      # attach to and type into is not the same builder as an unattended one, and the triplet only
+      # serves an auditor if it is falsifiable about that. Read from the single authority
+      # (`Fleet.Spawner.debug_visibility?/0`), one value for a whole fleet life — so the mode at
+      # completion IS the mode the pod launched under, with nothing to thread through the step_run.
+      debug_visibility: Fleet.Spawner.debug_visibility?()
     }
 
     # Published best-effort (F-15): the statement only serves auditors if it is READABLE from the

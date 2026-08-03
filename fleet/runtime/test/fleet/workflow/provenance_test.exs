@@ -52,6 +52,28 @@ defmodule Fleet.Workflow.ProvenanceTest do
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
   end
 
+  test "statement: the DEBUG mode is stamped in invocation.environment (a builder property)" do
+    # A pod a human could attach to and type into is not the same builder as an unattended one.
+    # The triplet only serves an auditor if it is falsifiable about that.
+    on = Provenance.statement(%{livrable_sha: "LSHA", debug_visibility: true})
+    off = Provenance.statement(%{livrable_sha: "LSHA", debug_visibility: false})
+
+    assert get_in(on, ["predicate", "invocation", "environment", "debug_visibility"]) == true
+    # `false` is a CLAIM (the fleet was NOT in debug), so it is written, not dropped as falsy.
+    assert get_in(off, ["predicate", "invocation", "environment", "debug_visibility"]) == false
+  end
+
+  test "statement: an UNSTATED debug mode is omitted, never certified clean" do
+    # Same rule as the brief digest: a missing key means "this runtime did not say", never "we
+    # certify it was clean". Inventing a `false` here would be a provenance that lies about its
+    # builder, which is the one thing this object exists not to do.
+    s = Provenance.statement(%{livrable_sha: "LSHA", input_sha: "ISHA"})
+
+    refute Map.has_key?(s["predicate"]["invocation"], "environment")
+    # ...and the rest of the invocation is untouched by the omission.
+    assert Map.has_key?(s["predicate"]["invocation"], "configSource")
+  end
+
   test "emit: issue number known → human-first name provenance/issue-<n>-<sha7>.json",
        %{tmp_dir: tmp} do
     git_init(tmp)

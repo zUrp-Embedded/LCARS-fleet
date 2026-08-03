@@ -237,11 +237,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   """
   @spec remote_control?(Fleet.CapProfile.t() | term()) :: boolean()
   def remote_control?(cap_profile) do
-    Fleet.CapProfile.remote_control?(cap_profile) or debug_visibility?()
+    Fleet.CapProfile.remote_control?(cap_profile) or Fleet.Spawner.debug_visibility?()
   end
-
-  defp debug_visibility?,
-    do: Application.get_env(:fleet_spawner, :debug_visibility, false) == true
 
   defp bound_permission_mode(mode) when mode in @permission_modes, do: mode
 

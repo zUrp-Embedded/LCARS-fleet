@@ -1,5 +1,11 @@
 defmodule Fleet.Pilot.StepRunCompleterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
+  # SYNC on purpose: one test here flips the GLOBAL `:fleet_spawner, :debug_visibility`, which
+  # every pod launch reads through `LaunchSpec.remote_control?/1`. Async peers would see the flip
+  # mid-flight and decide a different visibility than they assert. Same lesson as the
+  # `:require_onboarded` flake: restore-on-exit makes the value right AFTER the test and wrong
+  # DURING it, for everyone else.
 
   alias Fleet.Pilot.ForgeStubs.MergeFailForge
   alias Fleet.Pilot.StepRunCompleter
@@ -442,9 +448,45 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                brief_sha
 
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
+      # The builder's mode travels with the triplet — stated, not omitted, on the nominal path.
+      assert get_in(json, ["predicate", "invocation", "environment", "debug_visibility"]) == false
       # committed, not just written on disk.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
       assert log =~ "provenance: provenance/issue-42-#{sha7}.json"
+    end
+
+    @tag :tmp_dir
+    test "a deliverable produced in DEBUG mode carries the mark", %{tmp_dir: tmp} do
+      # The whole point of the stamp: an auditor reading this file must be able to tell that a
+      # human could reach the pod's REPL while it worked. Asserting it end-to-end (and not only on
+      # `statement/1`) is what pins the WIRING — the completer reading the mode at all.
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :debug_visibility, true)
+
+      work_dir = Path.join(tmp, "lcars-test")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {ws, sha} = init_workspace_repo!(tmp)
+      sha7 = String.slice(sha, 0, 7)
+
+      step_run =
+        pr_step_run(%{
+          brief_sha: String.duplicate("b", 40),
+          brief_ref: "briefs/issue-42-engineer.md",
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: ws,
+            base_sha: "cafe",
+            target_branch: "feature/issue-42"
+          }
+        })
+
+      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+      assert {:ok, %{commit_sha: ^sha}} = StepRunCompleter.open_deliverable_pr(step_run, opts)
+
+      json =
+        Path.join(work_dir, "provenance/issue-42-#{sha7}.json") |> File.read!() |> Jason.decode!()
+
+      assert get_in(json, ["predicate", "invocation", "environment", "debug_visibility"]) == true
     end
 
     # BL-6-34 ordering pin: the engrave lives AFTER the PR is born. A completion that stalls
