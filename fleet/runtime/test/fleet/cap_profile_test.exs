@@ -702,7 +702,7 @@ defmodule Fleet.CapProfileTest do
       refute Fleet.CapProfile.remote_control?(profile)
     end
 
-    test "absent → visible (default true)" do
+    test "absent + PROJECT-keyed → visible (one stable identity, a handle worth having)" do
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
         metadata: %{"name" => "architect"},
@@ -710,6 +710,61 @@ defmodule Fleet.CapProfileTest do
       }
 
       assert Fleet.CapProfile.remote_control?(profile)
+    end
+
+    test "absent + INSTANCE-keyed → invisible (a handle on a pod that dies with its ticket)" do
+      # This is the flat `true` default 4.4 removed. It was tenable while producers were one pod
+      # per repo; the day they fan out per ticket it is Desktop pollution proportional to the
+      # fan-out — which is precisely the direction the fleet is going.
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{"invocation" => %{"lifetime_scope" => "pipe", "slot_scope" => "instance"}}
+      }
+
+      refute Fleet.CapProfile.remote_control?(profile)
+    end
+
+    test "the DECLARATION wins in both directions, over the derivation" do
+      declared_open = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{
+          "invocation" => %{
+            "lifetime_scope" => "pipe",
+            "slot_scope" => "instance",
+            "remote_control" => true
+          }
+        }
+      }
+
+      declared_shut = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "architect"},
+        spec: %{"invocation" => %{"lifetime_scope" => "forever", "remote_control" => false}}
+      }
+
+      assert Fleet.CapProfile.remote_control?(declared_open)
+      refute Fleet.CapProfile.remote_control?(declared_shut)
+    end
+
+    test "a non-boolean value falls to the DERIVATION, it is not read as truthy" do
+      # The schema types this field `boolean`, so a string is an invalid profile. The derivation is
+      # the narrower answer for an instance-keyed role, so an invalid field never opens a door by
+      # accident — the old `!= false` read `"false"` as visible.
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{
+          "invocation" => %{
+            "lifetime_scope" => "pipe",
+            "slot_scope" => "instance",
+            "remote_control" => "false"
+          }
+        }
+      }
+
+      refute Fleet.CapProfile.remote_control?(profile)
     end
 
     test "nil / non-profile input → visible (safe default)" do

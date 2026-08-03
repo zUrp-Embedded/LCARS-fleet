@@ -7,7 +7,13 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   write (`{:skipped, :at_capacity}`); the residual TOCTOU stays covered by `max_children` + the
   compensation (now the rare exception).
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
+  # SYNC on purpose: a describe here flips the GLOBAL `:fleet_pilot, :require_onboarded`, which
+  # every dispatch path reads. Async peers running in that window were refused with
+  # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
+  # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
+  # after the test, and wrong DURING it for everyone else.
 
   alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StepDispatcher.Spawn

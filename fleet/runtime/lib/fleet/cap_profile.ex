@@ -542,15 +542,42 @@ defmodule Fleet.CapProfile do
   def wake_send_keys?(_), do: true
 
   @doc """
-  Is this pod VISIBLE in Claude Desktop? (`spec.invocation.remote_control`, default `true`.)
-  `false` = the launcher omits `--remote-control` (pod functional but invisible — churny judges).
-  Read spawner-side to decide whether to arm the Desktop-slot capture (a no-RC pod never
-  registers a slot → nothing to capture/preserve). Twin of the launcher's jq read of the
-  SAME field. Tolerates `nil`/non-profile input (`true`).
+  Is this pod VISIBLE in Claude Desktop? (`spec.invocation.remote_control`.) `false` = the launcher
+  omits `--remote-control` (pod functional but invisible — churny judges). Read spawner-side to
+  decide whether to arm the Desktop-slot capture (a no-RC pod never registers a slot → nothing to
+  capture/preserve). Tolerates `nil`/non-profile input (`true`).
+
+  **The DECLARATION wins; absent, the answer is DERIVED from `slot_scope/1`** — a Desktop slot is a
+  handle on an IDENTITY, so the granularity of the identity is what decides whether there is
+  anything durable to hold:
+
+    * `"project"` → visible. One stable pod per (repo, role): a handle worth having.
+    * `"instance"` → invisible. One pod per ticket, gone with it. A handle on something that will
+      not be there tomorrow is not a handle, it is a leak — and it scales with the fan-out, which
+      is what made "visible unless someone said otherwise" tenable while producers were one per
+      repo and Desktop pollution the day they fanned out per ticket.
+
+  The flat `true` default was that "unless someone said otherwise", and the two roles it silently
+  covered (`engineer`, `scribe`) are exactly the ones that fan out.
+
+  Not a total derivation: a declaration overrides it in BOTH directions, and `g24_16` requires one
+  from every project-keyed role — the derivation's `"project"` branch is therefore unreachable for
+  a loaded profile, and exists so the function stays total for an unvalidated one.
+
+  A non-boolean value falls to the derivation rather than being read as truthy: the schema types
+  this field `boolean`, so a string is an invalid profile, and the derivation is the NARROWER
+  answer — an invalid field never opens a door by accident.
+
+  `Fleet.Spawner.Pod.LaunchSpec.remote_control?/1` is the EFFECTIVE authority (this, plus the
+  fleet's debug widening); this one answers what the profile itself says.
   """
   @spec remote_control?(t() | nil | term()) :: boolean()
-  def remote_control?(%__MODULE__{spec: spec}) when is_map(spec),
-    do: get_in(spec, ["invocation", "remote_control"]) != false
+  def remote_control?(%__MODULE__{spec: spec} = profile) when is_map(spec) do
+    case get_in(spec, ["invocation", "remote_control"]) do
+      declared when is_boolean(declared) -> declared
+      _absent_or_invalid -> slot_scope(profile) == "project"
+    end
+  end
 
   def remote_control?(_), do: true
 

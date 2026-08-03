@@ -1327,8 +1327,12 @@ defmodule Fleet.Spawner.Pod do
   #      resume IN PLACE: full context back + slot re-attached (the jsonl carries its own RC
   #      identity) — THE per-project arch continuity story, zero restore needed;
   #   4. a captured SEED exists for the identity → resume FROM it via the recall machinery
-  #      (restore copies it under the uuid): slot back, context empty (F5) — judges/one-shots;
+  #      (restore copies it under the uuid): slot back, context empty (F5);
   #   5. nothing → fresh create (first boot ever; the capture seeds the seed for next time).
+  #
+  # Cases 3-5 are for SLOT-BEARING pods only, which since the RC derivation means project-keyed
+  # ones, or an instance-keyed role that DECLARES `remote_control: true`. An undeclared
+  # instance-keyed pod stops at case 2 — it holds no Desktop slot, so there is no slot to give back.
   defp maybe_slot_resume(base) do
     cond do
       base.resume or Keyword.has_key?(base.opts, :recall_seed_jsonl) ->

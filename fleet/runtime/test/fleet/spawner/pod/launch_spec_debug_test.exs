@@ -18,8 +18,15 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
     :ok
   end
 
-  defp cap(remote_control) do
-    invocation = if is_nil(remote_control), do: %{}, else: %{"remote_control" => remote_control}
+  # `remote_control` nil = DECLARES nothing → the answer is derived from `slot_scope`, which is why
+  # the fixture takes the scope explicitly: since 4.4 there is no single "absent" answer.
+  defp cap(remote_control, slot_scope \\ "instance") do
+    invocation = %{"slot_scope" => slot_scope}
+
+    invocation =
+      if is_nil(remote_control),
+        do: invocation,
+        else: Map.put(invocation, "remote_control", remote_control)
 
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
@@ -34,7 +41,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
 
       refute LaunchSpec.remote_control?(cap(false))
       assert LaunchSpec.remote_control?(cap(true))
-      assert LaunchSpec.remote_control?(cap(nil))
+      # Undeclared: the derivation of 4.4 answers, per identity granularity.
+      refute LaunchSpec.remote_control?(cap(nil, "instance"))
+      assert LaunchSpec.remote_control?(cap(nil, "project"))
     end
 
     test "debug ON: a pod DECLARED invisible becomes attachable" do
@@ -52,7 +61,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
       Application.put_env(:fleet_spawner, :debug_visibility, true)
 
       assert LaunchSpec.remote_control?(cap(true))
-      assert LaunchSpec.remote_control?(cap(nil))
+      assert LaunchSpec.remote_control?(cap(nil, "project"))
     end
 
     test "an unset key is OFF, not a crash" do
@@ -61,7 +70,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
       Application.delete_env(:fleet_spawner, :debug_visibility)
 
       refute LaunchSpec.remote_control?(cap(false))
-      assert LaunchSpec.remote_control?(cap(nil))
+      assert LaunchSpec.remote_control?(cap(nil, "project"))
     end
   end
 end

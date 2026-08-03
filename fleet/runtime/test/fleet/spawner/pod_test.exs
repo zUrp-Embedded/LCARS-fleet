@@ -627,13 +627,20 @@ defmodule Fleet.Spawner.PodTest do
     defp gatekeeper_args(pod_id, opts \\ []) do
       # gatekeeper = slot 2 — PROJECT-BOUND since the 2026-07-19 reorg (repo in its UUID): the spawn
       # carries a repo_id, like every non-starfleet pod. Catalog in the metadata.
+      #
+      # DECLARES `remote_control: true`: these tests exercise the Desktop-slot machinery (capture,
+      # seed, resume-from-seed), which only exists for a slot-bearing pod. The base profile is
+      # one-shot, so the derivation would answer invisible — and rightly, it just makes an empty
+      # fixture. The declaration says what the test is about instead of inheriting it from a
+      # default. (It is a FIXTURE property: the canon gatekeeper declares `false`.)
       gk = %{
         valid_profile()
         | metadata: %{
             "name" => "gatekeeper",
             "containment" => "bwrap",
             "role_index" => 2
-          }
+          },
+          spec: put_in(valid_profile().spec, ["invocation", "remote_control"], true)
       }
 
       %{
