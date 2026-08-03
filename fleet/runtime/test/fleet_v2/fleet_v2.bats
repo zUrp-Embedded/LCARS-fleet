@@ -86,16 +86,38 @@ NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { e
   [[ "$output" == *"--nawak"* ]]
 }
 
-@test "--debug arms the visibility variable; without it the variable stays unset" {
-  # The flag's whole mechanism is one exported variable read at the vendor launcher. Asserting the
-  # variable (and not just a zero exit) is what pins that it DOES something.
-  run bash -c "source '$SCRIPT'; parse_start_opts --debug; echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+@test "--debug arms the visibility marker; without it the marker stays unset" {
+  # The flag's whole mechanism is one variable the runtime reads. Asserting the variable (and not
+  # just a zero exit) is what pins that it DOES something. The parser sets a MARKER: the real
+  # variable is posted later, after the env file is sourced (see the test below).
+  run bash -c "source '$SCRIPT'; parse_start_opts --debug; echo \"dbg=[\${DEBUG_VISIBILITY_FLAG:-}]\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"dbg=[1]"* ]]
 
-  run bash -c "source '$SCRIPT'; parse_start_opts; echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+  run bash -c "source '$SCRIPT'; parse_start_opts; echo \"dbg=[\${DEBUG_VISIBILITY_FLAG:-}]\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"dbg=[]"* ]]
+}
+
+@test "--debug BEATS an env file that says otherwise (the flag is applied after the sourcing)" {
+  # `setup_env` sources the human env file with `set -a`. A variable assigned by the parser BEFORE
+  # that sourcing is overwritten by the file: the operator types --debug, the fleet comes up green,
+  # and the mode is off. The marker is applied after, and only ever ADDS.
+  local env_file="$BATS_TEST_TMPDIR/fleet_v2.env"
+  echo 'LCARS_DEBUG_VISIBILITY=false' > "$env_file"
+
+  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+    "source '$SCRIPT'; parse_start_opts --debug; load_env; apply_start_flags; \
+     echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dbg=[1]"* ]]
+
+  # And with no flag, the file is honoured — the flag adds, it does not clobber.
+  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+    "source '$SCRIPT'; parse_start_opts; load_env; apply_start_flags; \
+     echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dbg=[false]"* ]]
 }
 
 @test "the flag does not eat the positionals behind it" {

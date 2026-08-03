@@ -21,6 +21,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `sandbox_home/2` — intra-pod home. Public because also passed to `McpProvision` (`:projecting` state).
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
     `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
+  - `remote_control?/1` — EFFECTIVE Desktop visibility, the ONE authority. Public because its three
+    consumers sit in three places (slot capture, slot resume, and the vendor launcher through
+    `LCARS_POD_REMOTE_CONTROL`); a second derivation is what it exists to prevent.
 
   **Last revised**: 2026-08-03
   """
@@ -222,12 +225,23 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   So this is the single site, and the launcher stops deriving: `LaunchEnv.build/4` exports the
   answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it.
 
-  Today it is exactly the declaration — this commit moves the authority, it does not move the
-  value. What it makes possible is that a widening (the fleet's debug mode) lands in ONE place and
-  reaches all three consumers, instead of in the launcher alone.
+  The declaration is the FLOOR; the fleet's debug mode (`fleet_v2 start --debug` →
+  `:debug_visibility`) is the only thing above it, and it is MONOTONE by construction — an `or`,
+  never a replacement. A mode that could also CLOSE would let an operator ask for observability and
+  lose a pod they had; and a mode that lies in either direction is worse than no mode, because the
+  operator stops looking. So: debug can add a window, it can never take one away.
+
+  The mode is fixed for the fleet's whole life, deliberately: this is read at LAUNCH, so it governs
+  the pods spawned while it is on and does not retro-fit the ones already up. A pod's visibility is
+  therefore a property of its own launch, not a fleet-wide state that shifts under it.
   """
   @spec remote_control?(Fleet.CapProfile.t() | term()) :: boolean()
-  def remote_control?(cap_profile), do: Fleet.CapProfile.remote_control?(cap_profile)
+  def remote_control?(cap_profile) do
+    Fleet.CapProfile.remote_control?(cap_profile) or debug_visibility?()
+  end
+
+  defp debug_visibility?,
+    do: Application.get_env(:fleet_spawner, :debug_visibility, false) == true
 
   defp bound_permission_mode(mode) when mode in @permission_modes, do: mode
 

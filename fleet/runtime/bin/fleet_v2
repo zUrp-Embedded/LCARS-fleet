@@ -145,12 +145,17 @@ setup_env() {
   # explicitly so the wait, the attach and the `lcars` CLI all compute the SAME path.
   export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
-  # Debug visibility (`fleet_v2 start --debug`), exported so it reaches the vendor launcher through
-  # the pod's env. Scope = THIS fleet life: a flag whose lifetime is a process's has no lifecycle of
-  # its own — nothing to toggle, nothing to persist, nothing to reconcile mid-run. Absent = off, and
-  # nothing in `etc/fleet_v2.env.template` offers it: this is a start-time gesture, not a setting.
-  # The variable is only carried here; what it changes lives at the launcher, and it can only ever
-  # ADD visibility (cf. the RC levers in claude_launch.sh).
+  # Debug visibility (`fleet_v2 start --debug`), exported so the RUNTIME reads it (runtime.exs →
+  # `:fleet_spawner, :debug_visibility`). This door carries the flag; it does not decide what it
+  # means: the runtime widens once and hands the already-widened answer to the vendor launcher.
+  # Deciding it here would open Desktop for a pod whose slot the Elixir side never captures.
+  #
+  # Scope = THIS fleet life: a flag whose lifetime is a process's has no lifecycle of its own —
+  # nothing to toggle, nothing to persist, nothing to reconcile mid-run. Absent = off, and nothing
+  # in `etc/fleet_v2.env.template` offers it: this is a start-time gesture, not a setting.
+  #
+  # Applied AFTER `load_env` so the flag beats the file, and by OR so it can only ever ADD.
+  apply_start_flags
   [[ -n "${LCARS_DEBUG_VISIBILITY:-}" ]] && export LCARS_DEBUG_VISIBILITY
 
   # Base of the per-pod MCP sockets (one AF_UNIX channel <base>/<pod_id>/sock per pod). SAME logic as
@@ -221,10 +226,15 @@ parse_start_opts() {
   while (( $# )); do
     case "$1" in
       --debug)
-        # Observability mode for the WHOLE fleet life. Read by the vendor launcher at exec time, so
-        # it applies to the pods spawned while it is on and cannot retro-fit the ones already up —
-        # a property the flag states rather than hides (cf. `--help`).
-        LCARS_DEBUG_VISIBILITY=1
+        # Observability mode for the WHOLE fleet life. It applies to the pods spawned while it is
+        # on and cannot retro-fit the ones already up — a property the flag states rather than
+        # hides (cf. `--help`).
+        #
+        # A MARKER, not the variable itself: `setup_env` sources the human env file, and `set -a`
+        # over a file that names LCARS_DEBUG_VISIBILITY would overwrite an assignment made here —
+        # a flag typed at the door, silenced by a file, with a green start to show for it. The
+        # marker is applied AFTER that sourcing, and only ever ADDS.
+        DEBUG_VISIBILITY_FLAG=1
         shift
         ;;
       --) shift; break ;;
@@ -236,6 +246,18 @@ parse_start_opts() {
   done
 
   START_ARGS=("$@")
+}
+
+# Turns the parser's markers into the env the BEAM reads. A SEPARATE function because it must run
+# after `load_env` (which sources the human env file with `set -a` and would overwrite anything the
+# parser had assigned), and because a test that re-implements this line pins a copy of the rule
+# instead of the rule.
+#
+# Every flag here is ADDITIVE: it can turn something on, never off. So the file stays honoured when
+# no flag is typed, and the flag wins when one is.
+apply_start_flags() {
+  [[ -n "${DEBUG_VISIBILITY_FLAG:-}" ]] && LCARS_DEBUG_VISIBILITY=1
+  return 0
 }
 
 cmd_start() {

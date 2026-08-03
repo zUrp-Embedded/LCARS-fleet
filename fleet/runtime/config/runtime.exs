@@ -208,6 +208,24 @@ if config_env() != :test and not tool_mode? do
       )
 
   # ============================================================
+  # fleet_spawner — debug visibility (`fleet_v2 start --debug`)
+  # Posted by the start door for THIS fleet life. It widens ONE thing:
+  # `Pod.LaunchSpec.remote_control?/1` answers true whatever the cap-profile declares, so a pod
+  # nobody planned to look at is attachable. Read here rather than at the vendor launcher because
+  # the answer also arms the Desktop slot capture and its resume — deciding it at the launcher
+  # alone would show a pod whose slot is never captured.
+  # ============================================================
+  # STRICT parse (bool!): the flag exists to make something VISIBLE, so a typo'd value that
+  # silently kept the fleet closed would be the exact failure the operator typed it to avoid.
+  config :fleet_spawner,
+    debug_visibility:
+      Fleet.EnvParse.bool!(
+        "LCARS_DEBUG_VISIBILITY",
+        System.get_env("LCARS_DEBUG_VISIBILITY"),
+        false
+      )
+
+  # ============================================================
   # fleet_spawner pod_dir: PER-HUMAN, derived from the runtime process HOME (pod.ex `pod_dir_for` →
   # `~/pods/pod_<id>`). User decision: no `LCARS_PODS_ROOT` env knob (it would override the
   # per-human derivation). The human = the user who launches the
