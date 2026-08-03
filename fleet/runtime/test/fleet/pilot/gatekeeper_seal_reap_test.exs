@@ -94,4 +94,28 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
 
     refute_received {:killed, _}
   end
+
+  test "merge HORS BANDE → moisson aussi : la fuite ne doit pas dépendre de QUI a mergé" do
+    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+
+    assert :ok =
+             GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
+               base_branch: "main",
+               producer: "engineer"
+             )
+
+    expected = Fleet.Pilot.PodId.for_issue("fleet/myproj", 42, "engineer")
+    assert_received {:killed, ^expected}
+  end
+
+  test "hors bande SANS producteur nommable → aucune moisson, jamais une identité devinée" do
+    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+
+    assert :ok =
+             GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
+               base_branch: "main"
+             )
+
+    refute_received {:killed, _}
+  end
 end

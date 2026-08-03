@@ -321,6 +321,14 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # Same face rule as the seal path: the out-of-band merge landed on the PR's base.
     _ = worktree_sync().sync(repo, Keyword.fetch!(opts, :base_branch))
 
+    # Same reaping as the nominal seal: this path is a TERMINAL end of ticket too (the PR is
+    # merged, the issue closes), so the ticket-scoped producer dies here as well. Leaving it out
+    # would make the leak depend on WHO merged — a pod that survives its ticket only when the
+    # merge came from outside is the worst kind of gap: invisible until the fleet wedges.
+    # `:producer` is optional here (out-of-band callers that cannot name it skip the reaping
+    # rather than guess an identity).
+    _ = reap_ticket_producer(repo, issue_n, Keyword.get(opts, :producer, ""))
+
     case close_result do
       :ok -> :ok
       {:error, reason} -> {:error, {:close_after_merge, reason}}
