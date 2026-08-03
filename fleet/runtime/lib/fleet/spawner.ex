@@ -254,27 +254,41 @@ defmodule Fleet.Spawner do
 
   `{:ok, pid}` | `{:error, :no_seed}` (no seed) | `{:error, term}`.
   """
-  @spec recall(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
-  def recall(project, role) when is_binary(project) and is_binary(role) do
-    case Fleet.Spawner.SeedStore.read_map(project, role) do
-      :none ->
-        {:error, :no_seed}
+  @spec recall(String.t(), String.t(), pos_integer() | nil) :: {:ok, pid()} | {:error, term()}
+  def recall(project, role, issue \\ nil)
+      when is_binary(project) and is_binary(role) and (is_nil(issue) or is_integer(issue)) do
+    # `resolve` (base + default modops), NOT bare `load` — a recalled pod must come back with the
+    # SAME effective profile a fresh spawn composes, else a structural modop overlay would be
+    # silently dropped on recall. Resolved FIRST because the profile decides how the seed is KEYED.
+    with {:ok, cap_profile} <- Fleet.CapProfile.resolve(Fleet.CapProfile, role),
+         :ok <- recall_key_guard(cap_profile, role, issue),
+         {:ok, %{uuid: uuid, jsonl: jsonl}} <-
+           seed_or_error(Fleet.Spawner.SeedStore.read_map(project, role, issue)) do
+      spawn_pod(cap_profile, "recall-#{project}-#{role}",
+        pod_id: "recall-#{project}-#{role}",
+        session_id: uuid,
+        resume: true,
+        recall_seed_jsonl: jsonl,
+        rc_name: Fleet.Layout.pod_label(project, role),
+        project_slug: project,
+        allow_no_brief: true
+      )
+    end
+  end
 
-      {:ok, %{uuid: uuid, jsonl: jsonl}} ->
-        # `resolve` (base + default modops), NOT bare `load` — a
-        # recalled pod must come back with the SAME effective profile a fresh spawn composes, else a
-        # structural modop overlay would be silently dropped on recall.
-        with {:ok, cap_profile} <- Fleet.CapProfile.resolve(Fleet.CapProfile, role) do
-          spawn_pod(cap_profile, "recall-#{project}-#{role}",
-            pod_id: "recall-#{project}-#{role}",
-            session_id: uuid,
-            resume: true,
-            recall_seed_jsonl: jsonl,
-            rc_name: Fleet.Layout.pod_label(project, role),
-            project_slug: project,
-            allow_no_brief: true
-          )
-        end
+  defp seed_or_error(:none), do: {:error, :no_seed}
+  defp seed_or_error({:ok, _} = ok), do: ok
+
+  # A ticket-keyed role has ONE seed PER TICKET, so "recall the engineer of project P" no longer
+  # has a single answer. Refused by name rather than served with whichever pod died last — that
+  # silent pick is exactly the defect the per-ticket key exists to remove, and honouring the old
+  # two-argument call would have reintroduced it at the only remaining caller: a human.
+  # The symmetric mismatch is refused too: a project-keyed role has one seed and no ticket to name.
+  defp recall_key_guard(cap_profile, role, issue) do
+    case {Fleet.CapProfile.slot_scope(cap_profile), issue} do
+      {"instance", nil} -> {:error, {:ticket_required, role}}
+      {"project", n} when is_integer(n) -> {:error, {:ticket_not_applicable, role}}
+      _ -> :ok
     end
   end
 

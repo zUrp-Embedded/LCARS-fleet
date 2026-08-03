@@ -1195,11 +1195,29 @@ defmodule Fleet.Spawner.Pod do
             data.pod_dir,
             project,
             cap_profile_name(data.cap_profile),
-            data.session_id
+            data.session_id,
+            checkpoint_issue(data)
           )
 
         :ok
     end
+  end
+
+  # How the seed is KEYED, derived from the same axis as everything else: a pod keyed on its TICKET
+  # gets a per-ticket seed, a pod keyed on its PROJECT keeps the historical per-role one (it is the
+  # project's only pod of that role, so the role alone identifies it). No new declaration — the
+  # `slot_scope` already answers the question.
+  #
+  # A ticket-keyed pod whose issue_id is not a step issue (admin spawn, diagnostic) yields nil and
+  # lands on the per-role name: that is the honest fallback, since there is no ticket to name.
+  #
+  # Reads the number through `issue_number_of/1`, the shape-parser this module already owns, and
+  # NOT through `Fleet.Pilot.IssueId` — the boundary refuses `Spawner → Pilot` and it is right to:
+  # an issue_id crosses into this domain as an opaque string, and the day it stops being
+  # `issue-<n>` the one parser here is what needs revisiting, not a dependency edge.
+  defp checkpoint_issue(data) do
+    if Fleet.CapProfile.slot_scope(data.cap_profile) == "instance",
+      do: issue_number_of(data.issue_id)
   end
 
   # ============================================================

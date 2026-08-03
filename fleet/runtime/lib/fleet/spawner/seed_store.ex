@@ -22,7 +22,7 @@ defmodule Fleet.Spawner.SeedStore do
   NB git: the `cp` drops the seed; putting the work repo under git is a SEPARATE gesture (outside the
   teardown hot-path — no `git` in a pod's death).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
   require Logger
 
@@ -58,20 +58,28 @@ defmodule Fleet.Spawner.SeedStore do
   FS/JSON failure is rescued into a logged warning + `{:error, _}` — the teardown proceeds, only the
   session-memory bonus is lost (the work truth lives on the forge).
   """
-  @spec checkpoint(Path.t(), String.t(), String.t(), String.t()) ::
+  @spec checkpoint(Path.t(), String.t(), String.t(), String.t(), pos_integer() | nil) ::
           :ok | :none | {:error, term()}
-  def checkpoint(pod_dir, project, role, session_id)
-      when is_binary(pod_dir) and is_binary(project) and is_binary(role) and is_binary(session_id) do
-    # `project` AND `role` are path COMPONENTS of the seed-store (`<root>/<project>/pods/<role>.jsonl`).
-    # They come from `rc_name` (a dispatch/recall input, uncontrolled by construction): a `..`/`/`
-    # would traverse outside the store (writing an arbitrary host `.jsonl`). We cast both into a slug and
-    # confine the destination directory under the root BEFORE any `mkdir_p!`/`write!` — a malformed name
-    # never reaches the FS (refusal = logged warning + `{:error, _}`; the checkpoint is a non-fatal
+  def checkpoint(pod_dir, project, role, session_id, issue)
+      when is_binary(pod_dir) and is_binary(project) and is_binary(role) and
+             is_binary(session_id) and (is_nil(issue) or is_integer(issue)) do
+    # `project` AND `role` are path COMPONENTS of the seed-store. They come from `rc_name` (a
+    # dispatch/recall input, uncontrolled by construction): a `..`/`/` would traverse outside the
+    # store (writing an arbitrary host `.jsonl`). We cast both into a slug and confine the
+    # destination directory under the root BEFORE any `mkdir_p!`/`write!` — a malformed name never
+    # reaches the FS (refusal = logged warning + `{:error, _}`; the checkpoint is a non-fatal
     # memory bonus, the dying pod proceeds).
     with {:ok, project_slug} <- Fleet.Slug.cast(project),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
          {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug) do
-      do_checkpoint(pod_dir, project_slug, role_slug, session_id, Path.join(project_dir, "pods"))
+      do_checkpoint(
+        pod_dir,
+        project_slug,
+        role_slug,
+        session_id,
+        Path.join(project_dir, "pods"),
+        issue
+      )
     else
       {:error, reason} ->
         Logger.warning(
@@ -92,7 +100,19 @@ defmodule Fleet.Spawner.SeedStore do
       {:error, e}
   end
 
-  defp do_checkpoint(pod_dir, project, role, session_id, dest_dir) do
+  # The seed's basename. `<role>` for a pod keyed on its PROJECT (one per repo by construction,
+  # so the role alone identifies it); `<role>-<issue>` for a pod keyed on its TICKET.
+  #
+  # Before this discriminator, every producer of a project wrote `<role>.jsonl`: the day producers
+  # became ticket-scoped, the engineers of tickets 41 and 42 checkpointed to the SAME file and the
+  # last to die won. A `recall` then resumed whichever session happened to end last — another
+  # ticket's conversation, silently, on a rail whose whole purpose is to restore the right memory.
+  # Same class as the pool nibble: a key that was faithful under "one producer per repo" and became
+  # a lie the moment that assumption was removed.
+  defp seed_basename(role, nil), do: role
+  defp seed_basename(role, issue) when is_integer(issue), do: "#{role}-#{issue}"
+
+  defp do_checkpoint(pod_dir, project, role, session_id, dest_dir, issue) do
     # Active JSONl = the most recent under .claude/projects/*/*.jsonl (shared authority of the glob:
     # `Pod.SessionFiles.latest_jsonl/1`, robust to volatile files).
     case Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir) do
@@ -106,24 +126,31 @@ defmodule Fleet.Spawner.SeedStore do
         # (≠ builder) at recall. Only the `slug` (cwd-slug) and the CONTENT come from the live jsonl.
         uuid = session_id
         slug = Path.basename(Path.dirname(jsonl))
+        base = seed_basename(role, issue)
         File.mkdir_p!(dest_dir)
 
         # We keep ONLY the FIRST ROUND (minimal resumable seed = the pod's initial setup/brief),
         # NOT the whole session — the work re-derives from the forge (single-source axiom).
         # This subset `--resume`s correctly with only the round-1 context.
-        File.write!(Path.join(dest_dir, "#{role}.jsonl"), first_round(jsonl))
+        File.write!(Path.join(dest_dir, "#{base}.jsonl"), first_round(jsonl))
 
-        # Sidecar descriptor. `read_map/2` reads ONLY `uuid` and `slug`; `project` and `role` are
-        # there for a human opening the seed store by hand. Nothing parses them, which is why
-        # renaming the key from its earlier French spelling cannot break a seed already on disk —
-        # an old file keeps resuming, the extra key is simply never looked at.
+        # Sidecar descriptor. `read_map/3` reads ONLY `uuid` and `slug`; the rest is there for a
+        # human opening the seed store by hand. Nothing parses them, which is why adding `issue`
+        # cannot break a seed already on disk — an old file keeps resuming, the extra key is
+        # simply never looked at.
         File.write!(
-          Path.join(dest_dir, "#{role}.json"),
-          Jason.encode!(%{"uuid" => uuid, "slug" => slug, "project" => project, "role" => role})
+          Path.join(dest_dir, "#{base}.json"),
+          Jason.encode!(%{
+            "uuid" => uuid,
+            "slug" => slug,
+            "project" => project,
+            "role" => role,
+            "issue" => issue
+          })
         )
 
         Logger.info(
-          "SeedStore: checkpoint #{project}/#{role} (uuid=#{uuid} = deterministic builder) → #{dest_dir}"
+          "SeedStore: checkpoint #{project}/#{base} (uuid=#{uuid} = deterministic builder) → #{dest_dir}"
         )
 
         :ok
@@ -155,17 +182,19 @@ defmodule Fleet.Spawner.SeedStore do
   Reads the seed map of a checkpointed seed. `{:ok, %{uuid, slug, jsonl}}` (jsonl = the seed's path in the
   store) if the seed map AND the JSONl exist; otherwise `:none`.
   """
-  @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
-  def read_map(project, role) when is_binary(project) and is_binary(role) do
+  @spec read_map(String.t(), String.t(), pos_integer() | nil) :: {:ok, map()} | :none
+  def read_map(project, role, issue)
+      when is_binary(project) and is_binary(role) and (is_nil(issue) or is_integer(issue)) do
     # Leaf-read of the seed-store: `project`/`role` are path components. Same casts as
-    # `checkpoint/4` (an exposed `recall(project, role)` takes these two args from a caller) → an
-    # unconfined name yields `:none` (seed not found) rather than reading an arbitrary host `.json`/`.jsonl`.
+    # `checkpoint/5` (an exposed `recall/3` takes these args from a caller) → an unconfined name
+    # yields `:none` (seed not found) rather than reading an arbitrary host `.json`/`.jsonl`.
     with {:ok, project_slug} <- Fleet.Slug.cast(project),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
          {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug),
          dir = Path.join(project_dir, "pods"),
-         jsonl = Path.join(dir, "#{role_slug}.jsonl"),
-         {:ok, raw} <- File.read(Path.join(dir, "#{role_slug}.json")),
+         base = seed_basename(role_slug, issue),
+         jsonl = Path.join(dir, "#{base}.jsonl"),
+         {:ok, raw} <- File.read(Path.join(dir, "#{base}.json")),
          {:ok, %{"uuid" => uuid} = m} <- Jason.decode(raw),
          true <- File.exists?(jsonl) do
       {:ok, %{uuid: uuid, slug: m["slug"], jsonl: jsonl}}

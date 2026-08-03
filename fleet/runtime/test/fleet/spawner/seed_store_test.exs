@@ -33,7 +33,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     # The live jsonl's uuid ("uuid-abc") is NOT the stored identity; the passed builder is.
     make_jsonl(pod_dir, "-home-x-poc8-engineer", "uuid-abc", content)
 
-    assert :ok = SeedStore.checkpoint(pod_dir, "poc-8", "engineer", "builder-det")
+    assert :ok = SeedStore.checkpoint(pod_dir, "poc-8", "engineer", "builder-det", nil)
 
     seed = File.read!(Path.join([root, "poc-8", "pods", "engineer.jsonl"]))
     # round 1 (user + assistant) kept; round 2 discarded.
@@ -65,7 +65,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     # Two live jsonl files (a `/clear` rotated the uuid). Contract: the workflow_map carries the
     # PASSED builder (single source), INDEPENDENTLY of the live jsonl's uuid — neither the old nor
     # the recent one.
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det", nil)
 
     map = Path.join([root, "p", "pods", "engineer.json"]) |> File.read!() |> Jason.decode!()
     assert map["uuid"] == "builder-det"
@@ -79,7 +79,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     pod_dir = Path.join(tmp, "empty-pod")
     File.mkdir_p!(pod_dir)
 
-    assert :none = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
+    assert :none = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det", nil)
     refute File.exists?(Path.join(root, "p"))
   end
 
@@ -111,11 +111,11 @@ defmodule Fleet.Spawner.SeedStoreTest do
   test "read_map: workflow_map + jsonl present → {:ok, uuid}, otherwise :none", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det", nil)
 
     # read_map re-reads the workflow_map's uuid = the stored builder, NOT the live jsonl's uuid ("u1").
-    assert {:ok, %{uuid: "builder-det"}} = SeedStore.read_map("p", "engineer")
-    assert :none = SeedStore.read_map("p", "inexistant")
+    assert {:ok, %{uuid: "builder-det"}} = SeedStore.read_map("p", "engineer", nil)
+    assert :none = SeedStore.read_map("p", "inexistant", nil)
   end
 
   test "restore: cp the seed at the recall cwd's slug, findable by --resume", %{tmp: tmp} do
@@ -129,8 +129,46 @@ defmodule Fleet.Spawner.SeedStoreTest do
     assert File.read!(dest) == "mem\n"
   end
 
-  test "Spawner.recall: no seed for (project,role) → {:error, :no_seed}" do
-    assert {:error, :no_seed} = Fleet.Spawner.recall("nonexistent-project", "engineer")
+  test "Spawner.recall: no seed for (project, role, ticket) → {:error, :no_seed}" do
+    assert {:error, :no_seed} = Fleet.Spawner.recall("nonexistent-project", "engineer", 42)
+  end
+
+  describe "recall keying — the seed of a ticket-scoped role is per TICKET" do
+    test "recalling a ticket-keyed role WITHOUT a ticket is refused by name" do
+      # `engineer` declares `slot_scope: instance`, so "the engineer of project P" no longer names
+      # one session: each of its tickets checkpointed its own. Serving whichever died last is
+      # exactly the defect the per-ticket key removes — so the ambiguity is refused, not resolved.
+      assert {:error, {:ticket_required, "engineer"}} =
+               Fleet.Spawner.recall("nonexistent-project", "engineer")
+    end
+
+    test "naming a ticket for a project-keyed role is refused too" do
+      # The symmetric mismatch: an architect has ONE seed per project and no ticket to name.
+      # Accepting the argument and ignoring it would let a caller believe it selected something.
+      assert {:error, {:ticket_not_applicable, "architect"}} =
+               Fleet.Spawner.recall("nonexistent-project", "architect", 42)
+    end
+
+    test "two tickets of the same role checkpoint to DISTINCT seeds", %{tmp: tmp} do
+      # The measured defect: keyed on (project, role), the engineers of tickets 41 and 42 wrote the
+      # same file and the last to die won — a recall then resumed another ticket's conversation.
+      round = ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n)
+
+      pod_41 = Path.join(tmp, "pod41")
+      make_jsonl(pod_41, "-home-x-p-engineer", "live-41", round)
+      assert :ok = SeedStore.checkpoint(pod_41, "p", "engineer", "det-41", 41)
+
+      pod_42 = Path.join(tmp, "pod42")
+      make_jsonl(pod_42, "-home-x-p-engineer", "live-42", round)
+      assert :ok = SeedStore.checkpoint(pod_42, "p", "engineer", "det-42", 42)
+
+      assert {:ok, %{uuid: "det-41"}} = SeedStore.read_map("p", "engineer", 41)
+      assert {:ok, %{uuid: "det-42"}} = SeedStore.read_map("p", "engineer", 42)
+
+      # And the per-role name is NOT collaterally written: a project-keyed seed for the same role
+      # would be a different object, and this must not squat it.
+      assert :none = SeedStore.read_map("p", "engineer", nil)
+    end
   end
 
   # ============================================================
@@ -147,7 +185,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     # Escape target: `<root>/../evil/pods/...` = a SIBLING directory of the seed-store root.
     evil_dir = Path.expand(Path.join(root, "../evil"))
 
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "../evil", "engineer", "builder-det")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "../evil", "engineer", "builder-det", nil)
 
     # Proven regression: without the slug+confinement guard, `Path.join([root, "../evil", "pods"])`
     # would write `engineer.jsonl` HERE, outside the root. The guard makes it unrepresentable.
@@ -158,30 +196,33 @@ defmodule Fleet.Spawner.SeedStoreTest do
   test "checkpoint: traversing role (a/b) → REFUSED", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "p", "a/b", "builder-det")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "p", "a/b", "builder-det", nil)
   end
 
   test "checkpoint: empty / NUL / control names → REFUSED", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "", "engineer", "builder-det")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\x00evil", "engineer", "builder-det")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\nevil", "engineer", "builder-det")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "", "engineer", "builder-det", nil)
+
+    assert {:error, _} =
+             SeedStore.checkpoint(pod_dir, "ok\x00evil", "engineer", "builder-det", nil)
+
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\nevil", "engineer", "builder-det", nil)
   end
 
   test "checkpoint: valid name (my_checkpoint-1) → accepted", %{tmp: tmp, root: root} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "my_checkpoint-1", "engineer", "builder-det")
+    assert :ok = SeedStore.checkpoint(pod_dir, "my_checkpoint-1", "engineer", "builder-det", nil)
     assert File.exists?(Path.join([root, "my_checkpoint-1", "pods", "engineer.jsonl"]))
   end
 
   test "read_map: traversing project → :none (does not read outside the store)", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
-    assert :none = SeedStore.read_map("../p", "engineer")
-    assert :none = SeedStore.read_map("p", "../engineer")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det", nil)
+    assert :none = SeedStore.read_map("../p", "engineer", nil)
+    assert :none = SeedStore.read_map("p", "../engineer", nil)
   end
 
   test "restore: uuid escaping the pod_dir → REFUSED (fail-loud raise), no write outside the pod",
@@ -431,7 +472,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
       # The checkpoint completes (never hangs) and writes a bounded seed — well under the
       # full input, capped at the budget.
-      assert :ok = SeedStore.checkpoint(pod_dir, "poc-9", "engineer", "builder-det")
+      assert :ok = SeedStore.checkpoint(pod_dir, "poc-9", "engineer", "builder-det", nil)
 
       seed = File.read!(Path.join([root, "poc-9", "pods", "engineer.jsonl"]))
       assert byte_size(seed) <= 8_000_000
