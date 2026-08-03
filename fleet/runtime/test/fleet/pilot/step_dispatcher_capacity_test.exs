@@ -49,6 +49,19 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
+  # Room available and no live pod: the spawn WOULD proceed — so a refusal in these tests can only
+  # come from the order materialization, never from capacity.
+  defmodule FreshSpawner do
+    def has_capacity?, do: true
+    def pod_info(_pod_id), do: {:error, :not_found}
+
+    def spawn_pod(_p, _i, _o),
+      do: raise("spawn_pod must NEVER be reached: the order refused first")
+
+    def wake_pod(_pod_id), do: :ok
+    def kill_pod(_pod_id), do: :ok
+  end
+
   # Saturated + ALIVE pod: the re-brief creates no child → must NOT be gated.
   defmodule FullAliveSpawner do
     def has_capacity?, do: false
@@ -81,6 +94,53 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
       forge_opts: [],
       wake_recovery: fn _pod_id, _spawn_fn, _opts -> :ok end
     }
+  end
+
+  describe "order materialization — the delivery breaks, it does not degrade" do
+    setup do
+      # The gate the hermetic baseline keeps open (fictional repos have no work/ops on disk). Same
+      # single lever as the poller's admission gate: one policy, two depths.
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+      :ok
+    end
+
+    test "an un-onboarded project REFUSES the dispatch — and takes no lock doing it" do
+      # The refusal happens before `add_label`, which is what makes it free: no compensation, no
+      # forge write, the ticket simply is not dispatched this tick. Asserting the absence of the
+      # label is what pins that ORDER; asserting only the error would pass with the check anywhere.
+      assert {:error, {:order_not_materialized, {:work_dir_missing, _}}} =
+               Spawn.spawn_step(
+                 seams(FreshSpawner),
+                 "pod-x",
+                 "engineer",
+                 profile(),
+                 "brief",
+                 [],
+                 42,
+                 42,
+                 "ctx"
+               )
+
+      refute_received {:add_label, _}
+      refute_received {:remove_label, _}
+    end
+
+    test "a dispatch with NO brief refuses too — that one is a bug upstream, not a setup gap" do
+      assert {:error, {:order_not_materialized, :no_brief}} =
+               Spawn.spawn_step(
+                 seams(FreshSpawner),
+                 "pod-x",
+                 "engineer",
+                 profile(),
+                 "",
+                 [],
+                 42,
+                 42,
+                 "ctx"
+               )
+
+      refute_received {:add_label, _}
+    end
   end
 
   test "saturated + FRESH spawn → {:skipped, :at_capacity}, NO forge write (no lock)" do

@@ -177,6 +177,38 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert BriefArtifact.physicalize_attrs(%{brief: ""}, "fleet/demo") == %{brief: ""}
   end
 
+  describe "materialize/3 — the cause, not just the failure" do
+    # `physicalize/3` flattens every reason into `{nil, nil}`, so a caller could only pick ONE
+    # policy for all of them. It picked "degrade", and three of the four causes are permanent — a
+    # project misconfigured once then produced unauditable work indefinitely, nothing failing.
+    test "names the four causes apart" do
+      assert {:error, :no_brief} = BriefArtifact.materialize(nil, "fleet/demo")
+      assert {:error, :no_brief} = BriefArtifact.materialize("", "fleet/demo")
+      assert {:error, :no_repo} = BriefArtifact.materialize("x", nil)
+      assert {:error, :no_repo} = BriefArtifact.materialize("x", "")
+    end
+
+    test "an un-onboarded project is named as such, not as a git failure", %{tmp_dir: tmp} do
+      # The discriminant that matters: this one is PERMANENT (until a human onboards the project),
+      # where `{:git, _}` is transient. A caller that cannot tell them apart cannot break on one
+      # and retry on the other.
+      assert {:error, {:work_dir_missing, _}} =
+               BriefArtifact.materialize("x\n", "fleet/demo", work_root: tmp)
+    end
+
+    test "and the happy path returns the pair the pointer is built from", %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      git_init(work_dir)
+
+      assert {:ok, {ref, sha}} =
+               BriefArtifact.materialize("do X\n", "fleet/demo", work_root: tmp)
+
+      assert sha =~ ~r/\A[0-9a-f]{40}\z/
+      assert String.starts_with?(ref, "briefs/")
+    end
+  end
+
   test "pointer_brief: the SHORT payload order — names the doc, the sha7, and commands READ-first" do
     sha = (String.duplicate("a1b2c3d", 5) <> "a1b2c") |> String.slice(0, 40)
     order = BriefArtifact.pointer_brief("briefs/issue-9-engineer.md", sha)

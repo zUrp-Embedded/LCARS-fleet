@@ -32,7 +32,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -116,28 +116,72 @@ defmodule Fleet.Workflow.BriefArtifact do
   """
   @spec physicalize(String.t() | nil, String.t() | nil, keyword()) ::
           {String.t() | nil, String.t() | nil}
-  def physicalize(brief, repo, opts \\ [])
+  def physicalize(brief, repo, opts \\ []) do
+    case materialize(brief, repo, opts) do
+      {:ok, {ref, sha}} -> {ref, sha}
+      {:error, _cause} -> {nil, nil}
+    end
+  end
 
-  def physicalize(brief, repo, opts)
+  @doc """
+  Same materialization, but it SAYS WHY it failed instead of flattening every reason into
+  `{nil, nil}`.
+
+  The flattening was the defect: three of the four causes are not transient, and a caller that
+  cannot tell them apart can only pick one policy for all of them. It picked "degrade", so a
+  project misconfigured once produced unauditable work indefinitely — nothing ever failed, it just
+  stopped being provable.
+
+    * `:no_brief` — no brief, or an empty one. Not a degraded dispatch, a bug upstream.
+    * `:no_repo` — no repo to materialize into. Same.
+    * `{:work_dir_missing, dir}` — the project was never onboarded. Permanent until a human
+      onboards it; the fix is the onboarding, not a workaround repeated every tick.
+    * `{:git, reason}` — the only genuinely transient one.
+
+  What each caller does with them is the caller's contract, and they differ on purpose:
+  `physicalize_attrs/3` degrades on all four (it serves TICKET CREATION — an arch writing an issue
+  must not be refused because work/ops is not ready), the step dispatcher breaks on the first three
+  (it serves ORDER DELIVERY — a pod that cannot be given a provable order should not start).
+  """
+  @spec materialize(String.t() | nil, String.t() | nil, keyword()) ::
+          {:ok, {String.t(), String.t()}} | {:error, term()}
+  def materialize(brief, repo, opts \\ [])
+
+  def materialize(brief, repo, opts)
       when is_binary(brief) and brief != "" and is_binary(repo) and repo != "" do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
     work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
 
     case commit(work_dir, brief, Keyword.delete(opts, :work_root)) do
       {:ok, %{ref: ref, sha: sha}} ->
-        {ref, sha}
+        {:ok, {ref, sha}}
+
+      {:error, {:work_dir_missing, _} = cause} ->
+        Logger.warning(
+          "BriefArtifact: brief NOT materialized (repo=#{repo}): #{inspect(cause)} — the project " <>
+            "has no work/ops. PERMANENT until it is onboarded; a caller that degrades here " <>
+            "produces work nobody can prove was asked for."
+        )
+
+        {:error, cause}
 
       {:error, reason} ->
         Logger.warning(
           "BriefArtifact: brief NOT materialized (repo=#{repo}): #{inspect(reason)} — " <>
-            "string only (degraded, dispatch preserved)"
+            "transient git failure"
         )
 
-        {nil, nil}
+        {:error, {:git, reason}}
     end
   end
 
-  def physicalize(_brief, _repo, _opts), do: {nil, nil}
+  def materialize(_brief, repo, _opts) do
+    # Which of the two is missing matters to the caller: both are upstream bugs, but they are not
+    # the same bug and a single `:nothing_to_materialize` would send a reader looking in the wrong
+    # place.
+    cause = if is_binary(repo) and repo != "", do: :no_brief, else: :no_repo
+    {:error, cause}
+  end
 
   @doc """
   Reads a brief object at its PINNED version (`git show <sha>:<ref>` in the project's

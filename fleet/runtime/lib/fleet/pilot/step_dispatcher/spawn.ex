@@ -169,7 +169,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # PHYSICAL brief: materialized ONCE (committed into work/ops → {ref, introducing-commit sha}) BEFORE the spawn,
     # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
     # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
-    # `physicalize` degrades to {nil, nil} (LOUD) without ever breaking the dispatch.
+    # Three of its four failure causes REFUSE the dispatch instead of degrading it — cf.
+    # `materialize_order/5` below for why "provenance degrades, delivery never breaks" was the
+    # wrong rule. Refusal is FREE here: this runs BEFORE `add_label`, so there is no lock to
+    # compensate; the ticket simply is not dispatched this tick.
     # Human-named (`issue-<n>-<role>`), routed by EFFECTIVE kind (worker → briefs/, judge →
     # gate-briefs/ — resolved by BriefBuilder), and PUBLISHED best-effort (F-15: an unpushed
     # triplet is unauditable from the forge and non-durable — a push failure warns and never
@@ -179,18 +182,112 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # re-derives it from a card that may not declare it — the fail-open default this closes.
     brief_kind = Keyword.get(spawn_opts, :brief_kind, "worker")
 
-    {brief_ref, brief_sha} =
-      Fleet.Workflow.BriefArtifact.physicalize(brief, repo,
-        name_hint: "issue-#{issue_number}-#{role}",
-        kind: brief_kind,
-        push: :work_ops
-      )
+    case materialize_order(brief, repo, issue_number, role, brief_kind) do
+      {:error, _} = refusal ->
+        refusal
 
-    spawn_opts =
-      if is_binary(brief_sha),
-        do: Keyword.merge(spawn_opts, brief_sha: brief_sha, brief_ref: brief_ref),
-        else: spawn_opts
+      {:ok, brief, extra_opts} ->
+        spawn_opts = Keyword.merge(spawn_opts, extra_opts)
 
+        locked_spawn_step_run(
+          {forge, spawner, task_queue, repo, forge_opts, wake_recovery},
+          pod_id,
+          role,
+          profile,
+          brief,
+          spawn_opts,
+          lock_target,
+          {issue_id, issue_number},
+          alive_before?,
+          log_ctx
+        )
+    end
+  end
+
+  # The order is materialized BEFORE the lock, and three of its four causes refuse the dispatch.
+  #
+  # The old rule was "provenance degrades, delivery never breaks", and it reads as prudence. It was
+  # the opposite. The nominal path replaces the brief TEXT with a pointer as soon as a sha exists,
+  # so the pointer IS the delivery — and the fallback covered the cheap failure (the commit) while
+  # leaving the expensive one (the pod cannot read its order) with no net at all.
+  #
+  # Worse, three of the four causes are permanent: a project never onboarded, a dispatch with no
+  # brief, a dispatch with no repo. Degrading on those turns a setup defect into a silent permanent
+  # mode — nothing fails, the work simply stops being provable, and the only trace is a warning at
+  # the second it happens. A brief is not instrumentation, it is the ORDER: losing a gauge's
+  # provenance costs a metric, losing the order's costs the ability to answer "what was this pod
+  # asked to do?" about a deliverable that went to production.
+  defp materialize_order(brief, repo, issue_number, role, brief_kind) do
+    case Fleet.Workflow.BriefArtifact.materialize(brief, repo,
+           name_hint: "issue-#{issue_number}-#{role}",
+           kind: brief_kind,
+           push: :work_ops
+         ) do
+      {:ok, {ref, sha}} ->
+        {:ok, Fleet.Workflow.BriefArtifact.pointer_brief(ref, sha),
+         [brief_sha: sha, brief_ref: ref]}
+
+      # The only genuinely transient cause, and the only one that still degrades. But the ARTIFACT
+      # says so: the pod carries its order AND the fact that it has no sha to cite, instead of that
+      # fact living for one second in a log nobody re-reads. A degraded mode visible only in real
+      # time is not a visible degraded mode.
+      {:error, {:git, reason}} ->
+        Logger.warning(
+          "StepDispatcher: brief materialization failed transiently for #{repo}##{issue_number} " <>
+            "(#{inspect(reason)}) — dispatching the INLINE order, marked unprovable"
+        )
+
+        {:ok, degraded_order(brief), []}
+
+      # `{:work_dir_missing, _}` is governed by the SAME lever as the poller's admission gate
+      # (`:require_onboarded`), not by a second one: both enforce the one policy "a project this
+      # fleet serves exists on disk", at two depths. The hermetic test baseline turns it off
+      # because the suite drives fictional repos — and there it degrades to the plain inline brief,
+      # the behaviour that predates this item, so a test asserting a dispatch is asserting a
+      # dispatch and not this gate. Two keys for one policy would diverge at the first change.
+      {:error, {:work_dir_missing, _} = cause} ->
+        if require_onboarded?() do
+          refuse_order(repo, issue_number, role, cause)
+        else
+          {:ok, brief, []}
+        end
+
+      {:error, cause} ->
+        refuse_order(repo, issue_number, role, cause)
+    end
+  end
+
+  defp require_onboarded?, do: Application.get_env(:fleet_pilot, :require_onboarded, true)
+
+  defp refuse_order(repo, issue_number, role, cause) do
+    Logger.error(
+      "StepDispatcher: REFUSING to dispatch #{repo}##{issue_number} role=#{role} — the order " <>
+        "cannot be materialized (#{inspect(cause)}), and the cause is PERMANENT. Dispatching " <>
+        "would produce work nobody can prove was asked for."
+    )
+
+    {:error, {:order_not_materialized, cause}}
+  end
+
+  # Emitted payload → French with its accents (operator/agent-facing data, cf. CLAUDE.md).
+  defp degraded_order(brief) do
+    "⚠ PROVENANCE ABSENTE — cet ordre n'a pas pu être commité dans le work/ops du projet (panne " <>
+      "transitoire). Il n'a donc PAS de sha à citer : signale-le dans ton résultat plutôt que " <>
+      "d'omettre la citation.\n\n" <> brief
+  end
+
+  defp locked_spawn_step_run(
+         {forge, spawner, task_queue, repo, forge_opts, wake_recovery},
+         pod_id,
+         role,
+         profile,
+         brief,
+         spawn_opts,
+         lock_target,
+         {issue_id, issue_number},
+         alive_before?,
+         log_ctx
+       ) do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          # Native time-tracking (discard: pure Gitea metric, NOT load-bearing for the dispatch — a
          # failed start is swallowed here, unlogged; the time is simply not tracked for this run and
@@ -218,7 +315,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
                 )
             end),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, brief_ref, brief_sha) do
+         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, spawn_opts) do
       # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`
       # (pod unreachable, escalated to starfleet) or `{:error, _}` (re-wake failed) means the pod is
       # NOT woken. Discarding this return (`_ = wake(...)`) would always make `spawn_step` return
@@ -311,24 +408,18 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # The `brief` = the role-aware BRIEF already built (build_brief): disarmed GateBrief for the
   # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
-  defp enqueue_brief(task_queue, pod_id, role, number, brief, brief_ref, brief_sha) do
-    # The brief is already materialized ONCE at the leaf → `{brief_ref, brief_sha}` (`{nil, nil}` degraded).
-    # Materialized → the payload is the POINTER order (the committed doc is the SINGLE source;
-    # the pod reads it in its RO work/ops mount — the SP instructs it, and a non-nil sha proves
-    # work/ops exists so the mount is projected). Degraded → the full text keeps the pod
-    # autonomous (legacy path; physicalize already warned LOUD). Ends the transitional
-    # inline-blob + pointer cohabitation (user arbitration 2026-07-18).
-    payload =
-      if is_binary(brief_ref) and is_binary(brief_sha),
-        do: Fleet.Workflow.BriefArtifact.pointer_brief(brief_ref, brief_sha),
-        else: brief
-
+  defp enqueue_brief(task_queue, pod_id, role, number, payload, spawn_opts) do
+    # `payload` is ALREADY the final order — the pointer when the brief was materialized, the
+    # marked inline text on the one transient degradation. It is decided at `materialize_order/5`
+    # and not re-derived here: this used to rebuild it from `{brief_ref, brief_sha}`, which meant
+    # two places could disagree about what the pod receives. The pointer/inline arbitration lives
+    # at one site (user arbitration 2026-07-18, ending the inline-blob + pointer cohabitation).
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
       brief: payload,
-      brief_ref: brief_ref,
-      brief_sha: brief_sha,
+      brief_ref: Keyword.get(spawn_opts, :brief_ref),
+      brief_sha: Keyword.get(spawn_opts, :brief_sha),
       metadata: %{"issue" => number}
     }
 
