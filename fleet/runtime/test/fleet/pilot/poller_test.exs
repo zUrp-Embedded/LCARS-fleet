@@ -335,7 +335,13 @@ defmodule Fleet.Pilot.PollerTest do
       Keyword.get(opts, :_test_pulls, {:ok, []})
     end
 
-    def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+    # Observable comme `remove_label` : la convergence du `wait/*` (BL-6-48) ecrit depuis le
+    # Poller, donc le signal part vers le pid du TEST, pas vers la mailbox du GenServer.
+    def add_label(_repo, n, label, opts) do
+      send(Keyword.get(opts, :_test_pid, self()), {:add_label, n, label})
+      {:ok, :added}
+    end
+
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def start_stopwatch(_repo, _n, _opts), do: :ok
     def stop_stopwatch(_repo, _n, _opts), do: :ok
@@ -1649,8 +1655,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "enumeration des pods KO : on parle au FRANCHISSEMENT, une fois — pas a chaque tick" do
       parent = self()
+
+      # Pas d'`on_exit` pour l'arreter : l'Agent est LIE au process de test, donc il meurt avec lui.
+      # La version precedente faisait `if whereis, do: stop` — un nettoyage qui DOUBLE celui du lien
+      # et court avec lui : `on_exit` s'execute apres la mort du test, le couple whereis/stop n'est
+      # pas atomique, et la suite complete a exhibe la course que le fichier seul cachait.
       {:ok, _} = Agent.start_link(fn -> :boom end, name: :pods_enum)
-      on_exit(fn -> if Process.whereis(:pods_enum), do: Agent.stop(:pods_enum) end)
 
       {name, _pid} =
         start_entry_poller({:ok, []}, %{},
@@ -1676,6 +1686,69 @@ defmodule Fleet.Pilot.PollerTest do
       Agent.update(:pods_enum, fn _ -> :ok end)
       log3 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
       assert log3 =~ "pod enumeration RECOVERED"
+    end
+
+    # BL-6-48 pas 3, moitie PR — le `wait/*` vit sur l'ISSUE, et le chemin PR ne l'a pas en main.
+    # La map `issue → wait/*` est threadee depuis les issues deja listees, jumelle d'`awaits_arch_ids`.
+    test "chemin PR : une issue qui AWAITS-ARCH ne patiente plus — son wait/* est RETIRE" do
+      # Cas reellement atteignable, et semantiquement juste : `lcars-awaits-arch` porte deja
+      # l'attente. Laisser `wait/role` a cote serait deux verites pour un fait — et un etat perime.
+      issues = [
+        %{
+          "number" => 21,
+          "body" => "x",
+          "labels" => [
+            %{"name" => Fleet.Labels.awaits_arch()},
+            %{"name" => "wait/role"}
+          ],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      pulls = [
+        %{
+          "number" => 90,
+          "head" => %{"ref" => "lcars/issue-21-engineer"},
+          "requested_reviewers" => [%{"login" => "reviewer"}]
+        }
+      ]
+
+      {name, _pid} =
+        start_entry_poller({:ok, issues}, %{},
+          forge_opts: [
+            _test_issues: {:ok, issues},
+            _test_pulls: {:ok, pulls},
+            _test_pid: self(),
+            _test_route: {:ok, {"g", "build"}}
+          ]
+        )
+
+      Poller.force_poll(name)
+
+      # Le retrait porte sur l'ISSUE (21), jamais sur la PR (90) : le ticket est ce qu'un humain lit,
+      # il survit a ses PR successives.
+      assert_received {:remove_label, 21, "wait/role"}
+      refute_received {:remove_label, 90, _}
+    end
+
+    test "chemin PR : une PR ETRANGERE n'ecrit rien — ce n'est pas notre ticket" do
+      pulls = [%{"number" => 91, "head" => %{"ref" => "refs/pull/6/head"}}]
+
+      {name, _pid} =
+        start_entry_poller({:ok, []}, %{},
+          forge_opts: [
+            _test_issues: {:ok, []},
+            _test_pulls: {:ok, pulls},
+            _test_pid: self()
+          ]
+        )
+
+      Poller.force_poll(name)
+
+      # Son head ne parse pas en feature-branch → aucun numero d'issue → aucune ecriture. Etiqueter
+      # une PR etrangere reviendrait a ecrire sur le depot de quelqu'un d'autre.
+      refute_received {:add_label, _, _}
+      refute_received {:remove_label, _, _}
     end
 
     test "the tick reconciles each repo's main protection ONCE per period (desired-state, throttled)" do

@@ -215,10 +215,24 @@ defmodule Fleet.Pilot.Poller.Lease do
   # labels `exclusive: true` et poser l'un retire l'autre. Le seul cas que l'exclusivite ne couvre
   # PAS est la sortie d'attente — c'est la branche `{:ok, _}` ci-dessus, et l'oublier aurait
   # fabrique l'etat perime que cet item existe pour tuer.
-  defp converge_wait_label(payload, opts, result) do
-    case wait_transition(current_wait_label(payload), desired_wait_label(result)) do
+  defp converge_wait_label(payload, opts, result),
+    do: converge_wait(opts, payload["number"], current_wait_label(payload), result)
+
+  @doc """
+  Converges the `wait/*` label of ticket `number` from its `current` value and a dispatch `result`.
+
+  THE single write point of the wait vocabulary — both rails call it, so the two halves cannot
+  drift into two dialects. The issues rail reads `current` from the payload it already listed; the
+  PR rail reads it from the `issue → wait/*` map the tick threads alongside `awaits_arch_ids`.
+  Neither pays a forge call to know it.
+  """
+  @spec converge_wait(keyword(), integer() | nil, String.t() | nil, term()) :: :ok
+  def converge_wait(_opts, nil, _current, _result), do: :ok
+
+  def converge_wait(opts, number, current, result) do
+    case wait_transition(current, desired_wait_label(result)) do
       :noop -> :ok
-      op -> write_wait(opts, payload["number"], op)
+      op -> write_wait(opts, number, op)
     end
   end
 

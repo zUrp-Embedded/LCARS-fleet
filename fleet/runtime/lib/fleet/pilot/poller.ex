@@ -692,7 +692,16 @@ defmodule Fleet.Pilot.Poller do
     # project), so the set is returned repo-QUALIFIED (issue numbers collide across repos) and `do_poll`
     # kicks ONCE on the union — that single call reaches every project's architect.
     awaits_arch_ids = awaits_arch_ids(issues)
-    pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
+
+    # BL-6-48 pas 3, moitie PR. Meme geste que la ligne au-dessus, et pour la meme raison : le
+    # chemin PR tient des PULLS, pas des issues — or le `wait/*` vit sur l'ISSUE (c'est le ticket
+    # qu'un humain lit, il survit a ses PR successives). Sans ce threading, ecrire depuis les pulls
+    # couterait un `get_issue` par PR sautee. Les issues sont deja listees AVEC leurs labels : la
+    # map est gratuite, exactement comme `awaits_arch_ids`.
+    pulls_opts =
+      opts
+      |> Keyword.put(:awaits_arch_ids, awaits_arch_ids)
+      |> Keyword.put(:wait_labels, wait_labels(issues))
 
     tally =
       Lease.merge_tally(
@@ -830,14 +839,49 @@ defmodule Fleet.Pilot.Poller do
   # Not guarded by the lease (the judges of an ALREADY active workflow_run must advance; the lease bounds
   # only the ENTRY of new workflow_runs, on the issues side).
   defp step_process_pulls(pulls, opts) do
+    wait_labels = Keyword.get(opts, :wait_labels, %{})
+
     Enum.reduce(pulls, Lease.zero_tally(), fn pr, acc ->
-      case StepDispatcher.dispatch_review(pr, opts) do
+      result = StepDispatcher.dispatch_review(pr, opts)
+
+      # Le numero de l'issue vient du nom de la feature-branch (`lcars/issue-N-<role>`) : zero appel.
+      # Une PR etrangere ne parse pas → `nil` → `converge_wait` ne fait rien, ce qui est le bon
+      # comportement et pas un effet de bord : ce n'est pas notre ticket.
+      issue_n = pr_issue_number(pr)
+      _ = Lease.converge_wait(opts, issue_n, Map.get(wait_labels, issue_n), result)
+
+      case result do
         # `:ok` covers `{:spawned, _, _}` (judge/rework spawned) AND `{:merged, _}` (PR sealed).
         {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
         {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
         {:error, _reason} -> %{acc | errors: acc.errors + 1}
       end
     end)
+  end
+
+  # `issue → wait/*` pour les issues qui en portent un. Derivee des issues DEJA listees par le tick
+  # (zero appel forge), threadee aux pulls — jumelle exacte d'`awaits_arch_ids/1`.
+  defp wait_labels(issues) do
+    prefix = Fleet.Labels.wait_prefix()
+
+    for i <- issues,
+        n = i["number"],
+        label = Enum.find_value(i["labels"] || [], &wait_name(&1, prefix)),
+        into: %{},
+        do: {n, label}
+  end
+
+  defp wait_name(%{"name" => name}, prefix) when is_binary(name) do
+    if String.starts_with?(name, prefix), do: name
+  end
+
+  defp wait_name(_, _), do: nil
+
+  defp pr_issue_number(pr) do
+    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
+      {:ok, {n, _role}} -> n
+      _ -> nil
+    end
   end
 
   # Hardened boundary to `Lease` (repo-serialized lease): the 5 authorized reads, prod defaults
