@@ -19,7 +19,7 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   acceptor (identity IS the channel) and verified by `PodTools`'s clauses — this module
   receives an already-established `pod_id`, never read off the wire.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.TaskQueue
@@ -109,13 +109,26 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   defp present_work_item_id(tid) when is_binary(tid) and tid != "", do: tid
   defp present_work_item_id(_), do: nil
 
-  # JSON envelope of the brief exposed to the pod — work_item_id = correlation_id.
+  # JSON envelope of the work order exposed to the pod — work_item_id = correlation_id.
+  #
   # `brief_ref`/`brief_sha` = the ADDRESS of the physical brief (`briefs/issue-<n>-<role>.md`
   # committed in work/ops; `gate-briefs/` for judges; `brief_sha` = the introducing COMMIT).
-  # Exposed so the pod CITES the version it acted on (auditable from the forge) — the
-  # brief is delivered HERE (MCP, the pod's minimal world); the commit sha ties the delivered
-  # content to a forge-verifiable object, no extra mount needed. nil when the brief was not
-  # physicalized (degraded / non-producer mandate) → nothing to cite.
+  # Exposed so the pod CITES the version it acted on, auditable from the forge by any third party.
+  #
+  # WHAT `"brief"` CARRIES, and it is not what this comment used to claim. On the nominal path it
+  # is the SHORT POINTER (`BriefArtifact.pointer_brief/2`): "your complete work order is the
+  # committed doc <ref> @ <sha7> — READ IT FIRST in ${LCARS_PROJECT_OPS}/<ref>". The full text is
+  # NOT delivered here; the pod reads it in the RO bind of its project's work/ops worktree, and the
+  # SP says the same (`runtime-contract.md`: "the work_item's `brief` field is only a short
+  # pointer; the committed doc is the single source").
+  #
+  # The inline text appears on exactly ONE path: the transient materialization failure, where the
+  # dispatcher marks the order unprovable and sends it whole. That is the DEGRADED case, and this
+  # comment described it as the rule — which cost two turns of design analysis in the chantier that
+  # rewrote this line, on the wrong mechanism, because a reader met the claim before the code.
+  #
+  # nil `brief_ref`/`brief_sha` therefore means exactly that degraded path, or a non-producer
+  # mandate: nothing to cite.
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
       "work_item_id" => t.id,
