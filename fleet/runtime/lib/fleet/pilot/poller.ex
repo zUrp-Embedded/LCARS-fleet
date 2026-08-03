@@ -576,11 +576,72 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = step_forge_client(state)
 
-    # Prior suspects REPO-SCOPED (the refs are repo-qualified precisely for this): the whole
-    # cross-repo union here let an error/kick branch resurrect suspects RESOLVED on other
-    # repos (grace bypassed → reclaim in the registration window of a freshly re-spawned pod).
-    repo_prior =
-      MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
+    # DISCOVERY IS NOT ADMISSION. The org scan says which repos we LOOK AT; it does not say which
+    # ones we can SERVE. A repo that reached the org without ever being onboarded has no project
+    # directory, and the rail half-serves it FOREVER: the route gets engraved on its issues
+    # (`ensure_workflow_map_or_onboard` posts labels and nothing else), then every dispatch
+    # degrades — no work/ops to materialize the brief in, so no `brief_sha`, no provenance; no
+    # `LCARS_PROJECT_OPS` to project, so no project doctrine. Each of those is a LOUD warning on
+    # its own line, once per dispatch, and none of them names the actual cause: this project was
+    # never set up.
+    #
+    # Onboarding is a DELIBERATE gesture and the corpus says so by having four distinct human
+    # verbs for it (`create`, `import`, `open`, `adopt_project`). Auto-provisioning on discovery
+    # would make creating a repo in the org enough to trigger a clone — a policy nobody chose.
+    # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
+    # call, so an unserved repo also stops costing two API calls per tick.
+    if onboarded?(state.repo) do
+      step_do_poll_onboarded(state, mode, pods, started, forge)
+    else
+      not_onboarded_skip(state, repo_scoped_suspects(state))
+    end
+  end
+
+  # Prior suspects REPO-SCOPED (the refs are repo-qualified precisely for this): the whole
+  # cross-repo union let an error/kick branch resurrect suspects RESOLVED on other repos (grace
+  # bypassed → reclaim in the registration window of a freshly re-spawned pod).
+  defp repo_scoped_suspects(state),
+    do: MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
+
+  # The project's work/ops worktree on disk — what `BriefArtifact.physicalize` commits into and
+  # what `LaunchSpec.project_ops_path` projects. Its ABSENCE is the mechanical signature of a repo
+  # that no onboarding verb ever touched: both consumers already degrade on exactly this condition,
+  # each in its own corner and without naming it.
+  # `:require_onboarded` is a TEST-HERMETICITY lever, not an operator knob: the unit tests drive
+  # fictional repos that have no project directory anywhere, so `config/test.exs` turns the gate
+  # off in the same breath as `start_listener: false` and the stub launch backend. The dedicated
+  # test turns it back on to pin the behaviour. In prod it is absent ⟹ true, and nothing in
+  # `etc/fleet_v2.env.template` offers it — a door that only the hermetic baseline opens.
+  defp onboarded?(repo) do
+    if Application.get_env(:fleet_pilot, :require_onboarded, true),
+      do: File.dir?(project_work_dir(repo)),
+      else: true
+  end
+
+  defp project_work_dir(repo),
+    do: Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(repo))
+
+  # Same stance and same shape as `parked_skip/2`: no dispatch, no lease, no reclaim seeding, no
+  # awaits union, suspects passed through unchanged. Logged ONCE per repo (display-only pdict
+  # memory in the Poller singleton) — a ~30s cron must not cry every tick, and an onboarding is
+  # exactly the kind of thing that gets done minutes after the log.
+  defp not_onboarded_skip(state, repo_prior) do
+    unless Process.get({__MODULE__, :not_onboarded_logged, state.repo}) do
+      Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
+
+      Logger.warning(
+        "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no work/ops at " <>
+          "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
+          "and dispatch without provenance or project doctrine. Onboard it " <>
+          "(create / import / open / adopt) to bring it in."
+      )
+    end
+
+    {Lease.zero_tally(), repo_prior, MapSet.new()}
+  end
+
+  defp step_do_poll_onboarded(state, mode, pods, started, forge) do
+    repo_prior = repo_scoped_suspects(state)
 
     # Repo-serialized lease: we list ALL open items (in-flight included) to count the active
     # workflow_runs. We ALSO list the open PRs → the JUDGES are dispatched

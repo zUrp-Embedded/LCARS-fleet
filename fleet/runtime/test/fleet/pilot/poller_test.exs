@@ -651,6 +651,68 @@ defmodule Fleet.Pilot.PollerTest do
     {name, pid}
   end
 
+  describe "admission — discovery is not admission" do
+    # The gate is OFF in the hermetic baseline (`config/test.exs`): the suite drives fictional
+    # repos that exist nowhere on disk. Here it is turned back ON, which is the only way this
+    # behaviour is pinned rather than assumed.
+    setup do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+      :ok
+    end
+
+    test "a repo with no project directory is SKIPPED — and costs not one forge call" do
+      # The check is local and runs BEFORE the listing, so an unserved repo also stops paying two
+      # API calls per tick. Asserting the ABSENCE of the forge call is what pins the ORDER;
+      # asserting only "no spawn" would pass with the check placed anywhere downstream.
+      issues = [
+        %{"number" => 7, "body" => "x", "labels" => [], "assignee" => %{"login" => "lordzurp"}}
+      ]
+
+      {name, pid} = start_step_poller({:ok, issues})
+
+      log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      refute_received {:scoped, :issues, _}
+      refute_received {:spawned, _, _}
+      assert log =~ "NOT ONBOARDED"
+      assert log =~ "create / import / open / adopt"
+
+      GenServer.stop(pid)
+    end
+
+    test "the warning fires ONCE per repo, not once per tick" do
+      {name, pid} = start_step_poller({:ok, []})
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      second = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert first =~ "NOT ONBOARDED"
+      # A ~30s cron that cries every tick teaches an operator to filter the rail out. Same stance
+      # as the parked marker, same pdict memory.
+      refute second =~ "NOT ONBOARDED"
+
+      GenServer.stop(pid)
+    end
+
+    test "an ONBOARDED repo goes through — the gate is the directory, nothing else" do
+      # `work_root` is a compile-time constant, so the directory is created where the code will
+      # actually look: this pins that the gate reads the REAL path rather than a stub of itself.
+      dir = Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name("lordzurp/lcars-test"))
+      existed? = File.dir?(dir)
+      unless existed?, do: File.mkdir_p!(dir)
+      on_exit(fn -> unless existed?, do: File.rm_rf(dir) end)
+
+      {name, pid} = start_step_poller({:ok, []})
+
+      log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      refute log =~ "NOT ONBOARDED"
+      assert_received {:scoped, :issues, _}
+
+      GenServer.stop(pid)
+    end
+  end
+
   describe "step mode — force_poll" do
     test "ROUTELESS assigned issue → onboarded onto the default workflow_map (skip, no spawn)" do
       issues = [

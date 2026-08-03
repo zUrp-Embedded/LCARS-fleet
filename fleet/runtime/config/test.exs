@@ -101,6 +101,14 @@ config :fleet_pilot, forge_write_spacing_ms: 0
 # prouvée en isolation par OpsObjectSyncTest (instance dédiée, nom custom, commit_object/5).
 config :fleet_pilot, start_ops_object_sync: false
 
+# La porte d'admission du Poller (« découverte ≠ admission » : un dépôt de l'org sans répertoire
+# projet sur disque n'a jamais été onboardé, donc le rail step le saute) est OUVERTE en test :
+# la suite pilote des dépôts fictifs (`fleet/p`, `owner/repo`…) qui n'existent nulle part sur
+# disque, et la porte les sauterait tous. Même famille que `start_listener: false` — un levier
+# d'hermétisme, jamais un réglage d'opérateur : absent en prod ⟹ la porte est FERMÉE, et rien
+# dans `etc/fleet_v2.env.template` ne l'offre. `PollerTest` le rallume pour épingler la porte.
+config :fleet_pilot, require_onboarded: false
+
 # (Gatekeeper : plus d'autoboot — juge one-shot per-projet depuis la réorg 2026-07-19,
 # spawné par éval de gate ; les tests stubbent le spawner de GatekeeperEscalation.)
 
