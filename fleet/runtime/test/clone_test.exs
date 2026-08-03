@@ -72,6 +72,43 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(doc, "src.txt"))
   end
 
+  test "the workspace clone brings ONE branch — a neighbour's is not one checkout away", %{
+    tmp_dir: tmp
+  } do
+    src = make_source_repo(Path.join(tmp, "src"))
+
+    # Two more branches on the source, as a repo with tickets in flight has: under a per-ticket
+    # fan-out these are the neighbours' feature branches — unmerged, possibly wrong.
+    {_, 0} = git(["checkout", "-q", "-b", "lcars/issue-41-engineer", "main"], src)
+    File.write!(Path.join(src, "neighbour.txt"), "someone else's unmerged work")
+    {_, 0} = git(["add", "."], src)
+    {_, 0} = git(["commit", "-q", "-m", "neighbour"], src)
+    {_, 0} = git(["checkout", "-q", "-b", "lcars/issue-42-scribe", "main"], src)
+    {_, 0} = git(["commit", "-q", "--allow-empty", "-m", "other neighbour"], src)
+    {_, 0} = git(["checkout", "-q", "main"], src)
+
+    pod_dir = Path.join(tmp, "pod-single-branch")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
+
+    assert {:ok, ws, _feature} = Clone.clone_or_skip(pod_dir, profile, [])
+
+    {out, 0} = git(["branch", "-r"], ws)
+    remotes = out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
+
+    # The measure is on the REMOTE refs, not the checkout: without `--single-branch` all three are
+    # fetched and every one of them is a `git checkout` away from an agent whose job is to reason
+    # from `base`. The bytes are not the point — the forge is local; the material being THERE is.
+    assert Enum.any?(remotes, &String.ends_with?(&1, "origin/main"))
+    refute Enum.any?(remotes, &String.contains?(&1, "issue-41-engineer"))
+    refute Enum.any?(remotes, &String.contains?(&1, "issue-42-scribe"))
+
+    # History is KEPT: this is the code face, and `log`/`blame` are legitimate tools. The doc mount
+    # is the asymmetric twin (present state only). A `--depth` here would be the wrong economy.
+    {log, 0} = git(["log", "--oneline"], ws)
+    assert log =~ "code"
+  end
+
   test "R1-07/08: malformed base_branch (`-inject`) → {:invalid_base_branch} BEFORE any git", %{
     tmp_dir: tmp
   } do

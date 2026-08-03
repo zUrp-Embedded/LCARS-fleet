@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   defmodule Clone do
@@ -116,9 +116,25 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # error, not a cryptic git failure. `Fleet.GitRef` = the foundation check-ref-format authority.
           with true <- Fleet.GitRef.valid?(base) or {:invalid_base_branch, base},
                true <- Fleet.GitRef.valid?(feature) or {:invalid_feature_branch, feature},
+               # `--single-branch`: the workspace needs `base` and the feature branch it cuts from
+               # it, and nothing else. Without it the clone brings EVERY branch of the repo — under
+               # a per-ticket fan-out, that is every neighbour's feature branch, unmerged and
+               # possibly wrong, sitting one `git checkout` away from an agent whose whole job is
+               # to reason from `base`. The cost is not the bytes (the forge is local); it is that
+               # the material is THERE, and a world projected for a pod is exactly the material it
+               # should reason from.
+               #
+               # History is KEPT (no `--depth`): `git log`/`git blame` are legitimate tools for
+               # understanding code, and this is the code face. The doc mount is the asymmetric
+               # twin — a doc is consulted in its present state, so it shallows.
+               #
+               # `pin_base_sha` is unaffected: a pinned `base_sha` is an ancestor of `base` by
+               # construction (the rail captures it from an ls-remote of that branch), so it is in
+               # the fetched history; and its targeted `fetch origin <sha>` fallback stays for the
+               # anomalous case it was written for.
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
-                   ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
+                   ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
                    git_opts
                  ),
                # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
