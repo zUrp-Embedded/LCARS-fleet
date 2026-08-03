@@ -15,6 +15,24 @@ defmodule Fleet.LayoutTest do
     assert Layout.work_root() == "/home/projects.work"
   end
 
+  describe "brief pointer trailer — the ticket says which text is the order" do
+    test "the block names the summary as a summary, and the parser still reads the line" do
+      sha = String.duplicate("a", 40)
+      block = Layout.brief_pointer_trailer("briefs/issue-7-engineer.md", sha)
+
+      # The sentence exists and says the load-bearing part: editing the summary changes nothing.
+      # Without it, a ticket shows a summary and a pointer with nothing saying which one runs — and
+      # the summary is the half a human can edit.
+      assert block =~ "résumé"
+      assert block =~ "éditer ce résumé ne le change pas"
+
+      # And it costs the machine nothing: the `Brief:` line keeps its exact shape, the parser
+      # anchors per line. A prose line above it must not become a parse hazard.
+      body = "Résumé humain sur plusieurs\nlignes.\n\n---\n" <> block
+      assert {:ok, {"briefs/issue-7-engineer.md", ^sha}} = Layout.parse_brief_pointer(body)
+    end
+  end
+
   describe "project_name vs project_slug — a coincidence turned into a contract" do
     # Two derivations of the same thing coexist. `project_name/1` is the DIRECTORY authority (its
     # own @doc says so, and fourteen sites build paths from it); `project_slug/1` folds anything

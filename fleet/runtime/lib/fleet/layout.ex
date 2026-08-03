@@ -195,9 +195,26 @@ defmodule Fleet.Layout do
   # ref shapes: two domains, one truth, foundation).
   @brief_pointer_re Regex.compile!("^Brief: (\\S+) @ ([0-9a-f]{40})$", "m")
 
-  @doc "The pointer line for a work/ops-authored brief: `Brief: <ref> @ <commit-sha>`."
+  @doc """
+  The pointer BLOCK closing a ticket whose brief lives in work/ops: a sentence that names what the
+  body above actually is, then the machine-parseable line `Brief: <ref> @ <commit-sha>`.
+
+  The sentence is not decoration. Without it the ticket shows a summary and a pointer side by side
+  with nothing saying which one the fleet executes — and the summary is the one a human can edit.
+  Editing it changes NOTHING: the order is the doc at that exact commit, and the pod never reads the
+  ticket. A ticket that lets a human believe otherwise is worse than one that says nothing, because
+  the belief is only disproved by a deliverable that ignored the edit.
+
+  The `Brief:` line keeps its exact shape — `parse_brief_pointer/1` anchors per line (`^…$`, `m`),
+  so the sentence above it costs the parser nothing. Emitted payload → French with its accents (it
+  is forge content a human reads), cf. CLAUDE.md.
+  """
   @spec brief_pointer_trailer(String.t(), String.t()) :: String.t()
-  def brief_pointer_trailer(ref, sha), do: "Brief: #{ref} @ #{sha}"
+  def brief_pointer_trailer(ref, sha) do
+    "_Ce qui précède est un **résumé**, pas l'ordre de mission. Ce que la fleet exécute est le doc " <>
+      "ci-dessous, à ce commit exact — éditer ce résumé ne le change pas._\n" <>
+      "Brief: #{ref} @ #{sha}"
+  end
 
   @doc """
   Scans a ticket body for the brief-pointer line. `:none` when absent (inline brief — the
