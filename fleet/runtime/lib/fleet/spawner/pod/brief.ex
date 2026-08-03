@@ -65,12 +65,7 @@ defmodule Fleet.Spawner.Pod.Brief do
     brief = Keyword.get(state.opts || [], :brief)
     role = Fleet.CapProfile.name(state.cap_profile)
 
-    body =
-      if is_binary(brief) and brief != "" do
-        brief
-      else
-        "(No brief provided — issue #{state.issue_id}.)"
-      end
+    body = request_body(brief, state.opts || [], state.issue_id)
 
     """
     Hi. You are an LCARS pod (role #{role}, pod #{state.pod_id}); this session
@@ -84,6 +79,34 @@ defmodule Fleet.Spawner.Pod.Brief do
 
     #{body}
     """
+  end
+
+  # What the file says when the spawn opts carry no `:brief` — which is the PRODUCER's normal case,
+  # not an anomaly: the step dispatcher sends the order through the queue alone.
+  #
+  # It used to say "(No brief provided)". That is FALSE and it is false on the pod's own disk, in a
+  # file named after its issue: the pod HAS an order, and the very opts this function reads carry
+  # its address (`brief_ref` + `brief_sha`, put there by the same dispatch). An artifact that tells
+  # an agent it was asked nothing, while its work item holds an order, is the cheapest possible way
+  # to make it guess: an agent that finds nothing where its order should be infers its surroundings,
+  # and an inferred order is worse than a missing one because it looks like work.
+  #
+  # The pointer NOTATION comes from `Fleet.Layout`, foundation, which already owns it for exactly
+  # this reason ("two domains, one truth"): `Fleet.Workflow.BriefArtifact` is not in this domain's
+  # boundary deps, and re-writing its prose here would be a second source for one sentence.
+  defp request_body(brief, _opts, _issue_id) when is_binary(brief) and brief != "", do: brief
+
+  defp request_body(_brief, opts, issue_id) do
+    ref = Keyword.get(opts, :brief_ref)
+    sha = Keyword.get(opts, :brief_sha)
+
+    if is_binary(ref) and is_binary(sha) do
+      "Your work item carries the order. Pull it with the MCP tool `get_work_item`; it points at " <>
+        "the committed doc, pinned:\n\n" <> Fleet.Layout.brief_pointer_line(ref, sha)
+    else
+      "(No brief in the spawn opts, and no pinned doc either — issue #{issue_id}. If your work " <>
+        "item is empty too, this pod was started without an order: say so rather than guess one.)"
+    end
   end
 
   @doc """

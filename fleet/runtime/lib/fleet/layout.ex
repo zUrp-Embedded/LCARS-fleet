@@ -230,8 +230,19 @@ defmodule Fleet.Layout do
   def brief_pointer_trailer(ref, sha) do
     "_Ce qui précède est un **résumé**, pas l'ordre de mission. Ce que la fleet exécute est le doc " <>
       "ci-dessous, à ce commit exact — éditer ce résumé ne le change pas._\n" <>
-      "Brief: #{ref} @ #{sha}"
+      brief_pointer_line(ref, sha)
   end
+
+  @doc """
+  The bare pointer LINE (`Brief: <ref> @ <sha>`) — the notation, without the ticket framing.
+
+  Split out of `brief_pointer_trailer/2` because that framing says "what PRECEDES is a summary",
+  which is true in a ticket body and false anywhere else. A caller that only needs the address was
+  otherwise choosing between re-writing the notation (a second source for the shape
+  `parse_brief_pointer/1` matches) and shipping a sentence about a summary that is not there.
+  """
+  @spec brief_pointer_line(String.t(), String.t()) :: String.t()
+  def brief_pointer_line(ref, sha), do: "Brief: #{ref} @ #{sha}"
 
   @doc """
   Scans a ticket body for the brief-pointer line. `:none` when absent (inline brief — the
