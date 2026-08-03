@@ -48,6 +48,15 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   So we require it to be a slug HERE, as early as possible: a malformed value (`../evil`, `a/b`) →
   `nil` (pod with no remap nor seed, neutral state) rather than a traversing `project` that would
   reach a `Path.join`. Single source → a single point to hold.
+
+  ⚠ Two of its consumers build HOST paths — `project_ops_path/3` (`<work_root>/<project>`) and
+  `code_reference_path/3` (`<projects_root>/<project>`) — whose documented authority is
+  `Fleet.Layout.project_name/1`, not the slug. The two derivations differ on `_`, `.` and
+  uppercase, so this would place a pod on a directory that does not exist. It does NOT, and the
+  reason is a charset and not a contract: every onboarding entry point validates the project name
+  against `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, strictly inside what the slug preserves, so a project
+  that HAS a directory has a name on which both derivations agree. Pinned as an invariant in
+  `Fleet.LayoutTest` — widen that charset and the test parts company before a pod does.
   """
   @spec rc_project(keyword(), Fleet.CapProfile.t()) :: String.t() | nil
   def rc_project(opts, _cap_profile) do

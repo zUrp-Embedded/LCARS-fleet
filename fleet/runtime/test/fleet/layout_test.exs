@@ -15,6 +15,45 @@ defmodule Fleet.LayoutTest do
     assert Layout.work_root() == "/home/projects.work"
   end
 
+  describe "project_name vs project_slug — a coincidence turned into a contract" do
+    # Two derivations of the same thing coexist. `project_name/1` is the DIRECTORY authority (its
+    # own @doc says so, and fourteen sites build paths from it); `project_slug/1` folds anything
+    # outside `[A-Za-z0-9-]` into `-` and exists for shell/tmux names. They diverge on `_`, `.` and
+    # uppercase — and `LaunchSpec` derives HOST paths (the work/ops mount, the code reference) from
+    # the SLUG, which the plan first read as a live bug.
+    #
+    # It is not one, and the reason is worth pinning rather than remembering: all SEVEN onboarding
+    # entry points go through `validate_name`, whose charset is `^[a-z0-9][a-z0-9-]*[a-z0-9]$` —
+    # strictly inside what the slug preserves. So every project that HAS a directory has a name
+    # where the two derivations agree, and since the poller now refuses a repo without one, no
+    # served project can reach the divergence.
+    #
+    # That makes today's equality a property of the charset, not a contract. This test makes it a
+    # contract: widen `validate_name` and it goes red at the exact place the two part company,
+    # instead of a pod booting healthy on a directory that does not exist.
+    @onboardable_charset ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+
+    test "every name the onboarding admits derives IDENTICALLY through both" do
+      for name <- ~w(tetris poc-8 a1 lcars-fleet x9y my-long-project-name 42 a-b-c-d) do
+        assert Regex.match?(@onboardable_charset, name),
+               "fixture #{inspect(name)} is not onboardable — the test would prove nothing"
+
+        repo = "fleet/#{name}"
+
+        assert Layout.project_name(repo) == Layout.project_slug(repo),
+               "onboardable name #{inspect(name)} derives to two different directories"
+      end
+    end
+
+    test "and OUTSIDE that charset they genuinely differ — the guard is not vacuous" do
+      # Without this, the test above would still pass if someone made `project_slug/1` the identity
+      # function, and the invariant it claims to hold would be empty.
+      assert Layout.project_name("fleet/my_project") == "my_project"
+      assert Layout.project_slug("fleet/my_project") == "my-project"
+      refute Regex.match?(@onboardable_charset, "my_project")
+    end
+  end
+
   test "state_dir is `.lcars` under the resolved HOME (never fabricated)" do
     dir = Layout.state_dir()
     assert String.starts_with?(dir, System.user_home!())
