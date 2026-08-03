@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -1459,7 +1459,26 @@ defmodule Fleet.Pilot.ProjectOnboard do
       required_approvals: length(Roles.project_jury(repo, opts)),
       dismiss_stale_approvals: true,
       block_on_rejected_reviews: true,
-      enable_push: false
+      enable_push: false,
+      # THE CI GATE IS THE FORGE'S, NOT THE RUNTIME'S. Measured 2026-08-03 on a live bench: a PR
+      # whose head carried `CI / ci (push)` = failure was promoted, and the PR showed no check at
+      # all. Two doors were open at once — nothing in `lib/` reads a commit status (the seal merges
+      # on jury verdicts alone), and the forge rule had `enable_status_check: false`. The rail ran,
+      # produced a verdict, and nobody was listening.
+      #
+      # It belongs HERE rather than in the seal: the forge IS the state machine, so a gate the
+      # runtime enforces is a gate that a human pressing "merge" walks straight through. Projected
+      # as protection, it binds every actor.
+      #
+      # `CI / *` and not the exact contexts: Gitea's Actions contexts are
+      # `<workflow name> / <job> (<trigger>)`, so a commit carries BOTH `(push)` and
+      # `(pull_request)`. The glob covers both and survives a project renaming its JOB — which the
+      # shipped workflow explicitly invites ("chaque projet le RÉÉCRIT quand il sait ce qu'il est").
+      # What it does NOT survive is a project renaming the WORKFLOW away from `CI`; that is the
+      # coupling this leaves, deliberately, because the alternative (`*`) would require every
+      # status any tool ever posts on the commit.
+      enable_status_check: true,
+      status_check_contexts: ["CI / *"]
     }
 
     case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do

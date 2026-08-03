@@ -776,6 +776,55 @@ defmodule Fleet.Pilot.ForgeClient do
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
 
+  @doc """
+  Worst CI state on `sha` — `:success | :pending | :failure | :none` (Gitea
+  `GET /repos/{repo}/commits/{sha}/statuses`).
+
+  WHY A WORST-OF AND NOT THE RAW LIST. A commit carries ONE context per workflow-job-trigger pair,
+  so a Gitea Actions run posts BOTH `CI / ci (push)` and `CI / ci (pull_request)` on the same sha
+  (measured 2026-08-03). The caller's question is never "which contexts exist" but "may this merge
+  proceed", and a single failure answers it — reducing here keeps that judgement in one place
+  instead of leaving each caller to re-derive it, differently.
+
+  `:none` (no status at all) is DISTINCT from `:success` on purpose: a repo with no CI and a repo
+  whose CI passed are not the same fact, and collapsing them would let "the rail never ran" wear
+  the face of "the rail is green". The caller decides what an absent rail means for it.
+
+  Statuses are returned newest-first per context; we keep the FIRST occurrence of each context —
+  an older green must never outvote the current red on the same context.
+  """
+  @spec commit_ci_state(String.t(), String.t(), Keyword.t()) ::
+          {:ok, :success | :pending | :failure | :none} | {:error, term()}
+  def commit_ci_state(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, statuses} <-
+           paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
+      latest =
+        statuses
+        |> Enum.reduce(%{}, fn st, acc ->
+          Map.put_new(acc, st["context"], st["status"] || st["state"])
+        end)
+        |> Map.values()
+
+      {:ok, worst_ci_state(latest)}
+    end
+  end
+
+  # Worst-of, in the order that matters to a merge decision: one failure sinks it; otherwise any
+  # unfinished run means "not yet", never "yes".
+  defp worst_ci_state([]), do: :none
+
+  defp worst_ci_state(states) do
+    cond do
+      Enum.any?(states, &(&1 in ["failure", "error"])) -> :failure
+      Enum.any?(states, &(&1 == "pending")) -> :pending
+      Enum.all?(states, &(&1 == "success")) -> :success
+      # An unknown state string is NOT read as success: a forge that grows a new state must not
+      # widen the merge door by default.
+      true -> :pending
+    end
+  end
+
   @doc "Judges re-requested after judgment (timeline). See `Fleet.Pilot.ForgeClient.Jury.pr_rerequested_reviewers/3`."
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)

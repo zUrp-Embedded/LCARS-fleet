@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -483,7 +483,46 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # the rest on the next tick). It's the "re-request a judgment" button doing its job. No
   # re-requested = policy block not mechanically liftable (signed commits required, or — if ever enabled —
   # CI not green, to be gated by a status read before escalating) → honest escalation rather than a silent wedge.
+  # A policy block has TWO causes and they do not go to the same place. This function used to know
+  # only one — the human re-request — so anything else fell through to `{:policy, :no_rerequest}`,
+  # summoning a human with a reason that named the absence of a re-request rather than the actual
+  # cause. Since the CI became a REQUIRED check (`protect_main`), the other cause is the common one.
+  #
+  # A red CI is not a human matter and it does NOT re-converge: nothing changes until the producer
+  # pushes a new commit. So it routes to the producer, exactly like a REQUEST_CHANGES round, and the
+  # rework budget bounds it — a CI that stays red does not loop forever, it ends up escalating with
+  # the rounds spent, which is a true statement about what was tried.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
+    case ctx.forge.commit_ci_state(ctx.repo, head_sha(head, pr_number, ctx), ctx.forge_opts) do
+      {:ok, :failure} ->
+        Logger.info(
+          "StepDispatcher: PR #{ctx.repo}##{pr_number} blocked by a RED CI → producer rework"
+        )
+
+        dispatch_rework(pr_number, head, ctx)
+
+      {:ok, :pending} ->
+        # The rail is still running. Not an incident and not a decision — the next tick asks again.
+        {:skipped, :ci_pending}
+
+      # `:success`, `:none`, or an unreadable status: the CI is not what blocks (or we cannot say it
+      # is), so the question returns to the one cause this function already knew.
+      _ ->
+        reconverge_rerequest(pr_number, head, ctx)
+    end
+  end
+
+  # The head SHA the CI posted its statuses on. `head` is the branch REF; the PR object carries the
+  # sha. Falls back to the ref, which Gitea also resolves — a fallback that costs one redirect, not
+  # a wrong answer.
+  defp head_sha(head, pr_number, %Ctx{} = ctx) do
+    case ctx.forge.get_pull(ctx.repo, pr_number, ctx.forge_opts) do
+      {:ok, %{"head" => %{"sha" => sha}}} when is_binary(sha) -> sha
+      _ -> head
+    end
+  end
+
+  defp reconverge_rerequest(pr_number, head, %Ctx{} = ctx) do
     case ctx.forge.pr_rerequested_reviewers(ctx.repo, pr_number, ctx.forge_opts) do
       {:ok, [judge | _]} ->
         Logger.info(

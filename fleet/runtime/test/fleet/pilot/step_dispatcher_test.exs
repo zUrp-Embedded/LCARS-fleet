@@ -159,6 +159,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # Re-requested judges (timeline) — `_test_rerequested` seam (default none).
     def pr_rerequested_reviewers(_repo, _n, opts),
       do: {:ok, Keyword.get(opts, :_test_rerequested, [])}
+
+    # CI state on the head — `_test_ci` seam. Default `:none` (repo without a CI rail), which is
+    # what every pre-existing test of this module describes: their policy blocks are re-requests.
+    def commit_ci_state(_repo, _sha, opts),
+      do: {:ok, Keyword.get(opts, :_test_ci, :none)}
   end
 
   defmodule StubLoader do
@@ -1299,6 +1304,63 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         )
 
       assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "merge blocked by a RED CI → PRODUCER rework, not a human (the rung, 2026-08-03)" do
+      # Measured on a live bench: a PR whose head carried `CI / ci (push)` = failure was PROMOTED —
+      # nothing in the runtime read a commit status and the forge rule had `enable_status_check:
+      # false`. Requiring the check closes the merge door; this test holds the other half, without
+      # which the fix would only trade a silent promotion for a silent wedge.
+      #
+      # A red CI is not a human matter and does not re-converge: nothing changes until the producer
+      # pushes a new commit. Sending it to the arch — which is what `{:policy, :no_rerequest}` did,
+      # naming the absence of a re-request rather than the actual cause — summons a human for work
+      # only the engineer can do.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
+            _test_rerequested: [],
+            _test_ci: :failure
+          ]
+        )
+
+      # NOT `{:merge_blocked_escalated, _}` — that is the arch, and this is the producer's.
+      refute match?(
+               {:skipped, {:merge_blocked_escalated, 6}},
+               StepDispatcher.dispatch_review(pr, opts)
+             )
+    end
+
+    test "merge blocked while the CI is still PENDING → the next tick asks again, nobody is summoned" do
+      # A rail that has not finished is not a verdict. Escalating here would page a human for the
+      # duration of every CI run, and dispatching rework would ask the producer to fix nothing.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
+            _test_rerequested: [],
+            _test_ci: :pending
+          ]
+        )
+
+      assert {:skipped, :ci_pending} = StepDispatcher.dispatch_review(pr, opts)
     end
 
     test "PR flipped back to DRAFT (judge-dispatch guard) → skip, no review nor merge" do

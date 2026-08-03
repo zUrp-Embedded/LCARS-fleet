@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
   are called directly by `Fleet.Pilot.ProjectOnboard`.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -346,7 +346,12 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   # ONLY by the card-revision lift (`ProjectOnboard.revise_card` — scoped lift-push-restore);
   # the canonical `protect_main` rule does not name them, so an operator whitelist stays
   # untouched outside that one deliberate gesture.
-  @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames)
+  # `enable_status_check`/`status_check_contexts` ARE projected (2026-08-03). The comment above used
+  # to name status checks as the example of an "operator enrichment" the runtime must not clobber —
+  # a posture that assumed an operator who never came: measured on a live bench, every repo had
+  # `enable_status_check: false` and a red CI merged. An enrichment nobody applies is not an
+  # enrichment, it is a hole with a polite name.
+  @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames enable_status_check status_check_contexts)
 
   defp projected_protection_fields(rule) do
     for {k, v} <- rule, sk = to_string(k), sk in @protectable_fields, into: %{}, do: {sk, v}
