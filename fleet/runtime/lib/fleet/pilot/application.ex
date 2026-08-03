@@ -111,12 +111,32 @@ defmodule Fleet.Pilot.Application do
       # StepRunConsumer) while IncidentRegistry / the two Task.Supervisors / IncidentConsumer /
       # WorktreeSync / ArchFeed were dead read hollow-green: the rail NAMED in readiness was not the rail
       # MEASURED. `step_rail_processes/0` IS that rail (locked to `step_children!` by a drift test).
-      if Enum.all?(detail, fn {_key, up?} -> up? end),
+      # La SANTE du tick, à côté de la liste des vivants (BL-6-40). Un rail dont tous les process
+      # sont up mais dont les ticks prennent 40 s est « operational » et ne va pas bien — la
+      # readiness disait le premier et taisait le second.
+      #
+      # ⚠ Et c'est ici que la telemetrie devient LISIBLE. `PollerTelemetry.stats/0` existait depuis
+      # cette nuit sans aucun appelant de production : `RELEASE_DISTRIBUTION=none` par defaut (choix
+      # delibere de `bin/fleet_v2` : pas d'epmd, pas de collision multi-humain), donc AUCUN `rpc`
+      # n'atteint le noeud. Un instrument qu'on ne peut pas interroger mesure pour personne — c'est
+      # le hollow que 6-06 documente, refait par l'instrument cense le combattre.
+      detail = Map.put(detail, :tick, tick_health())
+
+      if Enum.all?(detail, fn {key, up?} -> key == :tick or up? end),
         do: {:operational, detail},
         else: {:degraded, detail}
     else
       {:inactive, %{note: "step_dispatch? off"}}
     end
+  end
+
+  # Resume de sante du tick, ou `:no_data` avant le premier. TOTAL par obligation : la readiness
+  # est ce qu'un operateur consulte quand ca va mal, donc elle ne doit jamais tomber a cause de son
+  # propre instrument. Un telemetre mort rend `:unavailable` et le rail reste lisible.
+  defp tick_health do
+    Fleet.Pilot.PollerTelemetry.stats()
+  catch
+    :exit, _ -> :unavailable
   end
 
   @doc false
