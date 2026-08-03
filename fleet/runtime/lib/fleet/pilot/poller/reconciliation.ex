@@ -134,7 +134,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # et la passe entiere ne reclame rien — exactement ce que `live_owned_refs` faisait seule,
     # sauf que les trois consommateurs sont maintenant couverts par la meme lecture.
     case pods do
-      :error ->
+      {:error, _reason} ->
         prior_suspects
 
       pods when is_list(pods) ->
@@ -154,13 +154,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   que la passe entiere ne reclame rien, et cette regle appartient a la reconciliation, pas au
   poller qui ne fait que la declencher.
   """
-  @spec snapshot_pods(module()) :: [map()] | :error
+  @spec snapshot_pods(module()) :: [map()] | {:error, term()}
   def snapshot_pods(spawner) do
     spawner.list_pods()
   rescue
-    _ -> :error
+    e -> {:error, e}
   catch
-    _, _ -> :error
+    kind, why -> {:error, {kind, why}}
   end
 
   defp reconcile_with_pods(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams, pods) do

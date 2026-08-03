@@ -120,6 +120,10 @@ defmodule Fleet.Pilot.Poller do
     # G6 seam: escalation of an unreadable workflow_map (default nil → `IncidentRegistry.record_or_escalate/4`).
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
+    # Pod enumeration healthy? Carried to speak at the TRANSITION only (BL-6-47.3): a failed
+    # enumeration is a correct fail-safe AND a potentially durable outage, and saying it every tick
+    # would drown the trace it exists to raise. Starts `true` — the first failure IS a transition.
+    pods_snapshot_ok?: true,
     # Desired-state pass of the main branch-protection (default nil →
     # `ProjectOnboard.reconcile_main_protection/2`) — seam for tests (zero forge).
     protection_reconciler: nil,
@@ -392,6 +396,8 @@ defmodule Fleet.Pilot.Poller do
             do: Reconciliation.snapshot_pods(state.spawner || Fleet.Spawner),
             else: :none
 
+        base = note_pods_snapshot(base, pods)
+
         {tally, suspects, awaits} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
                                                                                   {acc_t, acc_s,
@@ -480,6 +486,57 @@ defmodule Fleet.Pilot.Poller do
       state
       | protection_rechecked: Enum.reduce(due, state.protection_rechecked, &Map.put(&2, &1, now))
     }
+  end
+
+  # L'enumeration des pods qui echoue est DEUX choses a la fois : un fail-safe correct (on ne reclame
+  # rien plutot que de deverrouiller a l'aveugle) et une panne potentiellement DURABLE. Tant qu'elle
+  # dure, aucun lock orphelin n'est repris — donc un `lcars-in-flight` survit indefiniment a son pod,
+  # et la brique reste prise sans que personne ne l'apprenne. Muette, elle etait indistinguable d'un
+  # tick ou il n'y avait simplement rien a reclamer : c'est ce qui la rendait invisible, pas son
+  # absence de gravite.
+  #
+  # On parle au FRANCHISSEMENT, jamais a chaque tick — repeter le meme fait toutes les 30 s noierait
+  # la trace, meme discipline que la jauge de mailbox et que le silence du tick nominal. La
+  # RECUPERATION se dit aussi : sans elle, un operateur qui a vu l'alerte ne sait pas si c'est
+  # resorbe ou si le rail est mort.
+  #
+  # `:none` (kick) ne touche a rien : le kick ne PREND PAS de photo, donc il n'a rien a dire sur son
+  # etat. Le confondre avec un succes ferait disparaitre une panne en cours au premier webhook.
+  defp note_pods_snapshot(%__MODULE__{} = state, :none), do: state
+
+  defp note_pods_snapshot(%__MODULE__{} = state, {:error, reason}) do
+    if state.pods_snapshot_ok? do
+      Logger.warning(
+        "Poller: pod enumeration FAILED reason=#{inspect(reason)} — nothing is reclaimed while " <>
+          "this lasts (fail-safe), so an orphaned lock outlives its pod"
+      )
+
+      incident = state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+      _ =
+        try do
+          incident.("pod_enumeration", state.org, :spawner_unreachable,
+            reason_detail: inspect(reason)
+          )
+        catch
+          # never-stall : le rail d'incident observe la panne, il n'en est jamais une condition.
+          kind, why ->
+            Logger.warning(
+              "Poller: incident rail unavailable for pod enumeration " <>
+                "(#{inspect(kind)} #{inspect(why)}) — the fail-safe stands, its escalation does not"
+            )
+        end
+    end
+
+    %{state | pods_snapshot_ok?: false}
+  end
+
+  defp note_pods_snapshot(%__MODULE__{} = state, _pods) do
+    if not state.pods_snapshot_ok? do
+      Logger.info("Poller: pod enumeration RECOVERED — orphaned-lock reclamation resumes")
+    end
+
+    %{state | pods_snapshot_ok?: true}
   end
 
   # DISCOVERY path only (`list_org_repos` KO = the forge itself is down/degraded): feeds

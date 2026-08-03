@@ -1632,6 +1632,52 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid}
     end
 
+    # BL-6-47.3 — une enumeration de pods qui echoue est un fail-safe CORRECT (on ne reclame rien)
+    # et une panne potentiellement DURABLE. Muette, elle etait indistinguable d'un tick sans rien a
+    # reclamer : le `lcars-in-flight` survit a son pod indefiniment et personne ne l'apprend.
+    defmodule FlakySpawner do
+      def spawn_pod(p, i, o), do: StepStubSpawner.spawn_pod(p, i, o)
+      def wake_pod(a, b), do: StepStubSpawner.wake_pod(a, b)
+
+      def list_pods do
+        case Agent.get(:pods_enum, & &1) do
+          :ok -> []
+          :boom -> raise "spawner injoignable"
+        end
+      end
+    end
+
+    test "enumeration des pods KO : on parle au FRANCHISSEMENT, une fois — pas a chaque tick" do
+      parent = self()
+      {:ok, _} = Agent.start_link(fn -> :boom end, name: :pods_enum)
+      on_exit(fn -> if Process.whereis(:pods_enum), do: Agent.stop(:pods_enum) end)
+
+      {name, _pid} =
+        start_entry_poller({:ok, []}, %{},
+          spawner: FlakySpawner,
+          incident_fun: fn op, subject, reason, _o ->
+            send(parent, {:incident, op, subject, reason}) && :recorded
+          end
+        )
+
+      log1 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      assert log1 =~ "Poller: pod enumeration FAILED"
+      assert log1 =~ "an orphaned lock outlives its pod"
+      assert_received {:incident, "pod_enumeration", _org, :spawner_unreachable}
+
+      # Deuxieme tick EN PANNE : silence. Repeter le meme fait toutes les 30 s noierait la trace
+      # qu'il existe pour lever — meme discipline que la jauge de mailbox.
+      log2 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      refute log2 =~ "pod enumeration FAILED"
+      refute_received {:incident, "pod_enumeration", _, _}
+
+      # La RECUPERATION se dit : sans elle, un operateur qui a vu l'alerte ne sait pas si c'est
+      # resorbe ou si le rail est mort.
+      Agent.update(:pods_enum, fn _ -> :ok end)
+      log3 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      assert log3 =~ "pod enumeration RECOVERED"
+    end
+
     test "the tick reconciles each repo's main protection ONCE per period (desired-state, throttled)" do
       parent = self()
 
