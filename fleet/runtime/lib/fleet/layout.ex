@@ -181,10 +181,27 @@ defmodule Fleet.Layout do
   def valid_brief_ref?(ref) when is_binary(ref), do: Regex.match?(@brief_ref_re, ref)
   def valid_brief_ref?(_), do: false
 
-  @doc "Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused."
+  @doc """
+  Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
+
+  `/u` is LOAD-BEARING. Without it the regex works on BYTES, so one accented character — two bytes
+  in UTF-8 — became two dashes: `"D: placement latéral des pièces"` came out
+  `D--placement-lat--ral-des-pi--ces`. Never unsafe (deterministic, still path-safe, still accepted
+  by `valid_brief_ref?/1`), which is why it survived: nothing broke, the names were just wrong in a
+  way only a human reading them would notice. One replacement per CHARACTER is the rule the
+  docstring always claimed.
+
+  It also costs LENGTH, and that is not cosmetic here: this name becomes a `brief_ref`, which is
+  interpolated TWICE into the pointer work-order and is bounded by nothing (no truncation anywhere
+  in `brief_ref/2`). A French ticket title paid two characters per accent for nothing.
+
+  Old refs are unaffected: they are recorded as DATA (a step_run's `brief_ref`, a provenance
+  filename) pointing at immutable git objects, so `git show <sha>:<ref>` on a name minted before
+  this still resolves. Only names minted from now on change.
+  """
   @spec sanitize_artifact_name(String.t()) :: String.t()
   def sanitize_artifact_name(name) do
-    sanitized = String.replace(name, ~r/[^A-Za-z0-9._-]/, "-")
+    sanitized = String.replace(name, ~r/[^A-Za-z0-9._-]/u, "-")
     if Regex.match?(@artifact_name_re, sanitized), do: sanitized, else: "x" <> sanitized
   end
 

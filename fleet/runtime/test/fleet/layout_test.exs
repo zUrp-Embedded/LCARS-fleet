@@ -126,6 +126,21 @@ defmodule Fleet.LayoutTest do
       assert Layout.sanitize_artifact_name(".dotfile") == "x.dotfile"
     end
 
+    test "sanitize_artifact_name: ONE dash per CHARACTER, not per byte" do
+      # The regex ran on bytes, so an accented character — two bytes in UTF-8 — produced TWO
+      # dashes. Never unsafe (deterministic, path-safe, accepted by valid_brief_ref?/1), which is
+      # exactly why it survived: nothing broke, the names were only wrong to a human reading them.
+      # And this name becomes a `brief_ref` that the pointer work-order interpolates TWICE, with no
+      # truncation anywhere — a French title paid two characters per accent for nothing.
+      assert Layout.sanitize_artifact_name("D: placement latéral des pièces") ==
+               "D--placement-lat-ral-des-pi-ces"
+
+      # A whole word of accents: SIX characters, six dashes — not twelve. The `x` prefix is the
+      # leading-char guard doing its job on a name that now starts with a dash; the two rules
+      # compose, they do not overlap.
+      assert Layout.sanitize_artifact_name("éèêàçù") == "x------"
+    end
+
     test "brief pointer notation: trailer round-trips through parse (one truth, two domains)" do
       sha = String.duplicate("a", 40)
       body = "Résumé humain.\n\n---\n" <> Layout.brief_pointer_trailer("briefs/my-slug.md", sha)
