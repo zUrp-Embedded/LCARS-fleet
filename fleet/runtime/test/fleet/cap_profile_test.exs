@@ -82,6 +82,15 @@ defmodule Fleet.CapProfileTest do
     put_in(struct, [Access.key!(:spec), "knowledge", key], value)
   end
 
+  # A fixture that stops being one-shot owes g24_15/g24_16 its declarations — that IS the invariant.
+  # Applied to the fixtures whose subject is another rule, so that a `:ok` there keeps asserting the
+  # rule under test and not the absence of these two.
+  defp declares_its_keying(struct) do
+    struct
+    |> put_invocation("slot_scope", "project")
+    |> put_invocation("remote_control", true)
+  end
+
   defp write_modop(tmp_dir, name, yaml) do
     dir = Path.join([tmp_dir, "modop", name])
     File.mkdir_p!(dir)
@@ -510,12 +519,13 @@ defmodule Fleet.CapProfileTest do
         valid_struct()
         |> put_invocation("boot_at_start", true)
         |> put_invocation("lifetime_scope", "forever")
+        |> declares_its_keying()
 
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
     test "G24-10 passes when boot_at_start absent (nil ≠ true)" do
-      profile = put_invocation(valid_struct(), "lifetime_scope", "run")
+      profile = valid_struct() |> put_invocation("lifetime_scope", "run") |> declares_its_keying()
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
@@ -541,6 +551,7 @@ defmodule Fleet.CapProfileTest do
         valid_struct()
         |> put_invocation("subagent_template", "")
         |> put_invocation("lifetime_scope", "forever")
+        |> declares_its_keying()
 
       assert :ok = Fleet.CapProfile.validate(profile)
     end
@@ -1044,9 +1055,11 @@ defmodule Fleet.CapProfileTest do
       tuple({
         string(:alphanumeric, min_length: 1, max_length: 12),
         member_of(~w(bwrap none)),
-        member_of(~w(one-shot pipe run forever))
+        member_of(~w(one-shot pipe run forever)),
+        member_of(~w(instance project)),
+        boolean()
       }),
-      fn {name, containment, lifetime} ->
+      fn {name, containment, lifetime, slot_scope, remote_control} ->
         %Fleet.CapProfile{
           kind: "CapabilityProfile",
           metadata: %{"name" => name, "containment" => containment},
@@ -1063,7 +1076,14 @@ defmodule Fleet.CapProfileTest do
               "git_ops_denied" => ["push"]
             },
             "knowledge" => %{},
-            "invocation" => %{"lifetime_scope" => lifetime},
+            # g24_15/g24_16: a VALID profile declares its keying whenever the derivation would be a
+            # choice. Generating them always is not a weakening — the generator's job is to produce
+            # profiles that pass, and a one-shot simply carries a redundant (still legal) value.
+            "invocation" => %{
+              "lifetime_scope" => lifetime,
+              "slot_scope" => slot_scope,
+              "remote_control" => remote_control
+            },
             "injects" => %{},
             "modop_set" => %{"default" => []}
           }

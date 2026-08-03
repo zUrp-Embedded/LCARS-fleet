@@ -1149,8 +1149,14 @@ defmodule Fleet.Spawner.PodTest do
 
       profile = valid_profile()
 
+      # g24_15/g24_16: a non-one-shot profile DECLARES its keying — the derivation is a choice on
+      # this side of the axis, and `spawn_pod` validates at the choke point.
       profile =
-        put_in(profile.spec["invocation"], %{"lifetime_scope" => "forever"})
+        put_in(profile.spec["invocation"], %{
+          "lifetime_scope" => "forever",
+          "slot_scope" => "project",
+          "remote_control" => true
+        })
 
       args = %{
         cap_profile: short_timeout(profile),
@@ -1390,8 +1396,10 @@ defmodule Fleet.Spawner.PodTest do
     defp pipe_profile do
       profile = valid_profile()
 
+      # g24_15/g24_16 — a pipe is context-long, so its keying is a declaration, not a derivation.
       put_in(profile.spec["invocation"], %{
-        "lifetime_scope" => "pipe"
+        "lifetime_scope" => "pipe",
+        "slot_scope" => "instance"
       })
     end
 

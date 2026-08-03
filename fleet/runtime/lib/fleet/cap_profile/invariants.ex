@@ -35,7 +35,7 @@ defmodule Fleet.CapProfile.Invariants do
   `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile.validate/1`
   calls `violations/1` (runtime-dep).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.CapProfile
@@ -88,7 +88,9 @@ defmodule Fleet.CapProfile.Invariants do
       {:g24_10, &check_boot_at_start_forever/1},
       {:g24_11, &check_subagent_template_one_shot/1},
       {:g24_12, &check_host_native_containment/1},
-      {:g24_14, &check_monk_registry_pairing/1}
+      {:g24_14, &check_monk_registry_pairing/1},
+      {:g24_15, &check_slot_scope_declared/1},
+      {:g24_16, &check_remote_control_declared/1}
     ]
     |> Enum.reject(fn {_code, fun} -> fun.(profile) == :ok end)
     |> Enum.map(fn {code, _fun} -> code end)
@@ -247,4 +249,37 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   defp monk_present?(v), do: is_binary(v) and String.trim(v) != ""
+
+  # g24_15 — a role that is NOT one-shot must DECLARE its `slot_scope`.
+  #
+  # `slot_scope` derives from `lifetime_scope` when absent, and that derivation is a tautology on
+  # one side and a CHOICE on the other. `one-shot ⟹ instance` has nothing to choose: a one-shot
+  # keyed by project would be one pod per repo dying after a single use, and the next dispatch
+  # would land on a dead id. But `context-long ⟹ project` is a decision — the one that was taken
+  # in silence for a year, and that made "long-lived AND one per ticket" inexpressible while being
+  # exactly what a producer needs.
+  #
+  # So the declaration is required exactly where the derivation LIES, and nowhere else. Not a
+  # schema `required`: that would refuse the one-shot judges, which are right to say nothing. A
+  # named refusal at load, on the half that carries a choice.
+  defp check_slot_scope_declared(%CapProfile{spec: spec}) do
+    if get_in(spec, ["invocation", "lifetime_scope"]) == "one-shot" or
+         get_in(spec, ["invocation", "slot_scope"]) in ~w(instance project),
+       do: :ok,
+       else: :error
+  end
+
+  # g24_16 — a PROJECT-keyed role must DECLARE its `remote_control`.
+  #
+  # Same shape, same reason, one axis over. An instance-keyed pod is ephemeral by construction, so
+  # "no durable Desktop handle" has nothing to choose. A project-keyed pod has a stable identity,
+  # so whether it deserves a handle IS a decision — and leaving it to a default meant "visible
+  # unless someone remembered to say otherwise", which was harmless while producers were one per
+  # repo and became Desktop pollution the day they fanned out per ticket.
+  defp check_remote_control_declared(%CapProfile{spec: spec} = profile) do
+    if CapProfile.slot_scope(profile) != "project" or
+         is_boolean(get_in(spec, ["invocation", "remote_control"])),
+       do: :ok,
+       else: :error
+  end
 end

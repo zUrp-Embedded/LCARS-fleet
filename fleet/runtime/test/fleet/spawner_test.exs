@@ -108,7 +108,13 @@ defmodule Fleet.SpawnerTest do
   end
 
   defp forever_profile do
-    put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => "forever"})
+    # g24_15/g24_16: context-long ⟹ the keying is DECLARED (the derivation is a choice here), and
+    # a project-keyed pod declares whether it deserves a durable Desktop handle.
+    put_in(valid_profile().spec["invocation"], %{
+      "lifetime_scope" => "forever",
+      "slot_scope" => "project",
+      "remote_control" => true
+    })
   end
 
   defp wait_until(fun, tries \\ 80) do

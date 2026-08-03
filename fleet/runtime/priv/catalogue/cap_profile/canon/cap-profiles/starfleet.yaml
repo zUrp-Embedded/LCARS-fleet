@@ -87,6 +87,12 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: forever  # permanent front-desk
+    # DECLARED, not derived (g24_15): one starfleet per fleet, the same identity for its whole
+    # life. Same reason as the architect — the derivation agrees, and that is not the point.
+    slot_scope: project
+    # DECLARED (g24_16): `interlocutor: both` — the fleet-level front desk a human talks to.
+    # Invisible would make the door unreachable.
+    remote_control: true
     model: opus
     effort: high
     # ACTIVATED (reorg 2026-07-19): starfleet is the boot front-desk (the arch → on-demand per-project).

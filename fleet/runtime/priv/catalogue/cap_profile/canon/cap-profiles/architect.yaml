@@ -78,6 +78,15 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: forever  # lives for its project's duration (resumable, holds context) — NOT booted at start
+    # DECLARED, not derived (g24_15): the architect is ONE pod per project, the same identity
+    # across every ticket of that project. The derivation would land on `project` too, but the
+    # derivation is a choice on this side of the axis, and a choice belongs in the catalogue.
+    slot_scope: project
+    # DECLARED (g24_16): a project-keyed pod has a stable identity, so whether it deserves a
+    # durable Desktop handle is a decision. Here it is not even a preference — `interlocutor: both`
+    # means a human addresses this pod, and a pod a human must reach without a handle is a
+    # contradiction.
+    remote_control: true
     model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     # PER-PROJECT: spawned on-open by starfleet (create_project/relaunch), NOT at fleet boot. The
