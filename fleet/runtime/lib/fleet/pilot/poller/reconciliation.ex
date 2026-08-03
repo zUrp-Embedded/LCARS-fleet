@@ -119,7 +119,39 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   """
   @spec reconcile(list(map()), list(map()), MapSet.t(), MapSet.t(), Seams.t()) :: MapSet.t()
   def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams) do
-    case live_owned_refs(seams) do
+    # UN SEUL `list_pods` par passe (BL-6-40 Phase 1). Il y en avait 2 + N : deux duties
+    # l'appelaient, et `lock_diagnosis` une fois PAR verrou candidat. Chaque appel est un
+    # `GenServer.call` a 5 s de timeout vers le Spawner — un seul pod wedge coutait donc
+    # 5 s x (2 + N) x nb_repos par tick, et rien ne le disait (c'est ce que la Phase 0 rend
+    # desormais mesurable).
+    #
+    # Le snapshot est de la DONNEE, pas une seam : il descend en parametre explicite plutot que
+    # d'entrer dans `%Seams{}`, dont le contrat est « les 5 coutures que reconcile/5 lit » et non
+    # « ce qu'elle a lu ». L'ajouter la aurait rendu la structure porteuse d'un cache.
+    #
+    # Le fail-safe se DEPLACE ici sans changer de sens : une enumeration impossible rend `:error`
+    # et la passe entiere ne reclame rien — exactement ce que `live_owned_refs` faisait seule,
+    # sauf que les trois consommateurs sont maintenant couverts par la meme lecture.
+    case snapshot_pods(seams) do
+      :error ->
+        prior_suspects
+
+      pods ->
+        reconcile_with_pods(issues, pulls, pr_issue_ids, prior_suspects, seams, pods)
+    end
+  end
+
+  # Lecture UNIQUE des pods vivants, avec le fail-safe qui vivait dans `live_owned_refs`.
+  defp snapshot_pods(%Seams{spawner: spawner}) do
+    spawner.list_pods()
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
+  end
+
+  defp reconcile_with_pods(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams, pods) do
+    case live_owned_refs(seams, pods) do
       # Pod enumeration unavailable → fail-safe: we reclaim NOTHING (never unlock
       # blindly), we keep the suspects as is.
       :error ->
@@ -170,7 +202,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         # brick is quiesced. Same suspect set, same 2-tick grace: the entries are tagged
         # `{repo, :pod, pod_id}` — the same 3-tuple shape as the lock refs, so the core's
         # repo-filter (`fn {r, _type, _n} -> r == repo end`) threads them with ZERO plumbing.
-        zombie_pods = quiesced_brick_pods(issues, pulls, seams)
+        zombie_pods = quiesced_brick_pods(issues, pulls, seams, pods)
 
         orphaned_now = issue_orphans |> MapSet.union(pr_orphans) |> MapSet.union(zombie_pods)
         to_act = MapSet.intersection(orphaned_now, prior_suspects)
@@ -188,7 +220,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
               false
 
             {_repo, _type, n} ->
-              reclaim_lock(seams, n, lock_diagnosis(seams, n)) == :failed
+              reclaim_lock(seams, n, lock_diagnosis(seams, n, pods)) == :failed
           end)
           |> MapSet.new()
 
@@ -211,11 +243,11 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # fed on this). No reason to live → reaped; a later re-dispatch re-spawns fresh (idempotent
   # dispatch, seed resume).
   # Fail-safe: enumeration failure → empty set (never kill blindly).
-  defp quiesced_brick_pods(issues, pulls, %Seams{} = seams) do
+  defp quiesced_brick_pods(issues, pulls, %Seams{} = seams, pods) do
     locked_issues = for i <- issues, locked?(i), into: MapSet.new(), do: i["number"]
     locked_prs = for p <- pulls, locked?(p), into: MapSet.new(), do: p["number"]
 
-    seams.spawner.list_pods()
+    pods
     |> Enum.flat_map(fn pod ->
       pod_id = pod[:pod_id]
 
@@ -271,9 +303,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # and the 2-tick grace (~60s) would RECLAIM it mid-eval → re-dispatch of the concurrent step (double
   # workflow_run + ghost verdict on return). The union is done INSIDE the try: a failure to enumerate the
   # evals makes `:error` → the fail-safe "reclaim nothing" covers both sources.
-  defp live_owned_refs(%Seams{spawner: spawner, task_queue: tq, repo: repo}) do
+  defp live_owned_refs(%Seams{task_queue: tq, repo: repo}, pods) do
     pod_refs =
-      spawner.list_pods()
+      pods
       # Ownership requires a PULLED task (`pod_pulled?`), not merely an enqueued one. A task stuck at
       # `:pending` (never pulled) is an admission whose wake never LANDED (`wake_unreached` — the pod is
       # spawned + locked + briefed, but the send-keys was lost and the ack-driven kick loop exhausted):
@@ -419,9 +451,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # two rework rounds while the log declared it dead every tick) — a diagnosis the code never
   # made, quoted as one. Same discipline as the arch-onboard log: report what was measured, and
   # when the enumeration itself fails, say UNKNOWN rather than guess.
-  defp lock_diagnosis(%Seams{spawner: spawner, repo: repo}, number) do
+  defp lock_diagnosis(%Seams{repo: repo}, number, pods) do
     live_for_ref =
-      spawner.list_pods()
+      pods
       |> Enum.filter(fn pod ->
         parse_pod_ref(pod[:pod_id], repo)
         |> Enum.any?(fn {_repo, _type, n} -> n == number end)
