@@ -117,8 +117,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   Fail-safe: if the enumeration of the pods fails (`:error`), yields `prior_suspects` unchanged (reclaims
   nothing blindly).
   """
-  @spec reconcile(list(map()), list(map()), MapSet.t(), MapSet.t(), Seams.t()) :: MapSet.t()
-  def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams) do
+  @spec reconcile(list(map()), list(map()), MapSet.t(), MapSet.t(), Seams.t(), [map()] | :error) ::
+          MapSet.t()
+  def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams, pods) do
     # UN SEUL `list_pods` par passe (BL-6-40 Phase 1). Il y en avait 2 + N : deux duties
     # l'appelaient, et `lock_diagnosis` une fois PAR verrou candidat. Chaque appel est un
     # `GenServer.call` a 5 s de timeout vers le Spawner — un seul pod wedge coutait donc
@@ -132,17 +133,29 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # Le fail-safe se DEPLACE ici sans changer de sens : une enumeration impossible rend `:error`
     # et la passe entiere ne reclame rien — exactement ce que `live_owned_refs` faisait seule,
     # sauf que les trois consommateurs sont maintenant couverts par la meme lecture.
-    case snapshot_pods(seams) do
+    case pods do
       :error ->
         prior_suspects
 
-      pods ->
+      pods when is_list(pods) ->
         reconcile_with_pods(issues, pulls, pr_issue_ids, prior_suspects, seams, pods)
     end
   end
 
-  # Lecture UNIQUE des pods vivants, avec le fail-safe qui vivait dans `live_owned_refs`.
-  defp snapshot_pods(%Seams{spawner: spawner}) do
+  @doc """
+  Photo UNIQUE des pods vivants, prise par le TICK et descendue en parametre (BL-6-40).
+
+  Elle vivait dans `reconcile/5`, donc elle etait prise une fois par REPO — R appels
+  `GenServer.call` a 5 s de timeout pour une donnee qui ne change pas utilement d'un repo a
+  l'autre du meme tick. L'appelant la prend une fois avant sa boucle.
+
+  Publique parce que l'appelant est dans un AUTRE module (`Fleet.Pilot.Poller`) : c'est le prix
+  de sortir la lecture du callee. Le fail-safe reste ICI et pas chez l'appelant — `:error` fait
+  que la passe entiere ne reclame rien, et cette regle appartient a la reconciliation, pas au
+  poller qui ne fait que la declencher.
+  """
+  @spec snapshot_pods(module()) :: [map()] | :error
+  def snapshot_pods(spawner) do
     spawner.list_pods()
   rescue
     _ -> :error

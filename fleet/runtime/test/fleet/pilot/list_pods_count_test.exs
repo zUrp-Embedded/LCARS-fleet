@@ -21,7 +21,16 @@ defmodule ListPodsCountTest do
     def stop_stopwatch(_r, _n, _o), do: :ok
   end
 
-  test "UN SEUL list_pods par passe, quel que soit le nombre de verrous candidats" do
+  test "ZERO list_pods dans reconcile — la photo est prise par le TICK, pas par la passe" do
+    # La propriete a CHANGE DE NATURE et elle est plus forte qu'avant. Premiere version :
+    # « un seul appel par passe » (contre 2 + N avant, mesure : 6 pour 5 verrous). Maintenant la
+    # photo remonte au TICK (BL-6-40, contexte de tick), donc `reconcile` n'en prend AUCUNE — sur
+    # R repos, c'est 1 appel au lieu de R.
+    #
+    # Le compteur reste le meme instrument : il prouve que la lecture n'est pas revenue se cacher
+    # dans le callee. Un `list_pods` qui reapparaitrait ici annulerait le gain sans qu'aucun test
+    # de comportement ne le voie — les resultats seraient identiques, seul le nombre d'appels
+    # changerait.
     {:ok, _} = Agent.start_link(fn -> 0 end, name: :lp_counter)
 
     lock = %{"name" => Fleet.Labels.in_flight()}
@@ -36,12 +45,16 @@ defmodule ListPodsCountTest do
       forge_opts: []
     }
 
-    _ = Reconciliation.reconcile(issues, [], MapSet.new(), prior, seams)
+    # Le tick prend la photo UNE fois (ici, a la main : c'est ce que fait `do_poll`).
+    pods = Reconciliation.snapshot_pods(CountingSpawner)
+    assert Agent.get(:lp_counter, & &1) == 1, "la photo du tick doit couter exactement un appel"
+
+    _ = Reconciliation.reconcile(issues, [], MapSet.new(), prior, seams, pods)
 
     calls = Agent.get(:lp_counter, & &1)
     Agent.stop(:lp_counter)
 
-    # Avant : 2 + N (deux duties + un par verrou candidat) => 7 ici. Apres : 1.
-    assert calls == 1, "list_pods appele #{calls} fois pour 5 verrous — le snapshot ne tient pas"
+    assert calls == 1,
+           "reconcile a rappele list_pods (#{calls} au total) — la lecture est revenue dans le callee"
   end
 end

@@ -50,7 +50,7 @@ defmodule Fleet.Pilot.Poller do
     * test seams: `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injected if non-nil).
     * `:start_tick?` — default `true`; `false` = no auto first tick (tests drive via `force_poll/1`).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   use GenServer
@@ -378,11 +378,25 @@ defmodule Fleet.Pilot.Poller do
         #
         # The fold accumulates exactly the two cross-repo monoids step_do_poll yields (tally merge,
         # suspects union) + the awaits-arch union — nothing else survives the per-repo pass.
+        # UN SEUL `list_pods` POUR TOUT LE TICK (BL-6-40, contexte de tick). Il vivait dans
+        # `reconcile/5`, donc il tournait une fois par REPO : sur R repos, R `GenServer.call` a 5 s
+        # de timeout vers le Spawner pour une photo qui ne change pas utilement d'un repo a l'autre.
+        # La photo est de la DONNEE, elle descend en parametre — jamais dans `%Seams{}`, dont le
+        # contrat est « les coutures que reconcile LIT », ni dans `state`, ou elle deviendrait un
+        # cache a invalider.
+        #
+        # `:tick` SEULEMENT : le kick ne reconcilie pas (dispatch-only), donc prendre la photo pour
+        # lui AJOUTERAIT un appel au lieu d'en retirer — exactement l'inverse du but.
+        pods =
+          if mode == :tick,
+            do: Reconciliation.snapshot_pods(state.spawner || Fleet.Spawner),
+            else: :none
+
         {tally, suspects, awaits} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
                                                                                   {acc_t, acc_s,
                                                                                    acc_a} ->
-            {t, s, a} = step_do_poll(%{base | repo: repo}, mode)
+            {t, s, a} = step_do_poll(%{base | repo: repo}, mode, pods)
             {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
           end)
 
@@ -478,7 +492,7 @@ defmodule Fleet.Pilot.Poller do
   # STEP mode — assignee-driven reactor (the forge IS the state machine; this module is its reactor).
   # ============================================================
 
-  defp step_do_poll(state, mode) do
+  defp step_do_poll(state, mode, pods) do
     started = System.monotonic_time()
     forge = step_forge_client(state)
 
@@ -504,7 +518,7 @@ defmodule Fleet.Pilot.Poller do
         parked_skip(state, repo_prior)
       else
         Process.delete({__MODULE__, :parked_logged, state.repo})
-        step_do_poll_live(state, mode, started, issues, pulls, repo_prior)
+        step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods)
       end
     else
       {:error, reason} ->
@@ -542,7 +556,7 @@ defmodule Fleet.Pilot.Poller do
 
   # The LIVE per-repo pass (not parked) — the body step_do_poll always ran; extracted verbatim
   # when the parked guard landed (BL-6-30).
-  defp step_do_poll_live(state, mode, started, issues, pulls, repo_prior) do
+  defp step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods) do
     forge = step_forge_client(state)
 
     pr_issue_ids = pulls_issue_ids(pulls)
@@ -569,7 +583,8 @@ defmodule Fleet.Pilot.Poller do
             pulls,
             pr_issue_ids,
             repo_prior,
-            reconciliation_seams
+            reconciliation_seams,
+            pods
           )
 
         :kick ->
