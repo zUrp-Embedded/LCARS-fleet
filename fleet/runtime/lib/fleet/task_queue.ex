@@ -24,7 +24,7 @@ defmodule Fleet.TaskQueue do
   Every function has a test-seam variant (explicit `server`, e.g. `enqueue/3`,
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.TaskQueue.Server
@@ -96,7 +96,7 @@ defmodule Fleet.TaskQueue do
   def list_pending(server), do: GenServer.call(server, :list_pending)
 
   @doc """
-  Lists the ACTIVE work items (`:pending` | `:assigned` | `:in_progress` — the Server's
+  Lists the ACTIVE work items (`:pending` | `:assigned` — the Server's
   `@active_states` authority, not a re-declaration here). Query Port, no broadcast.
 
   Consumer: the poller's lock reconciliation (G1) — a work unit under an ACTIVE gatekeeper

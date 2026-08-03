@@ -65,7 +65,7 @@ defmodule Fleet.Pilot.PollerTest do
   defmodule ArchBusyTQ do
     def list_active, do: []
     def pod_active_issue_id(_pod_id), do: {:ok, nil}
-    def pod_status(_pod_id), do: {:ok, :in_progress}
+    def pod_status(_pod_id), do: {:ok, :assigned}
     def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
   end
 
@@ -457,7 +457,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # TaskQueue stub: the pod has an ACTIVE task → it legitimately OWNS its lock.
   defmodule ActiveTaskQueue do
-    def pod_status(_pod_id), do: {:ok, :in_progress}
+    def pod_status(_pod_id), do: {:ok, :assigned}
   end
 
   # SLOT-FREEZE: a project-scoped PIPE eng (pod_id `<repo>-engineer`, WITHOUT `-issue-N-` — the
@@ -469,13 +469,13 @@ defmodule Fleet.Pilot.PollerTest do
 
   # TaskQueue stub: the project eng is working BRICK 8 (issue_id "issue-8") -> it owns #8.
   defmodule ProjectTaskQueueIssue8 do
-    def pod_status(_pod_id), do: {:ok, :in_progress}
+    def pod_status(_pod_id), do: {:ok, :assigned}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
   # TaskQueue stub: the project eng is working ANOTHER brick (9) -> it does NOT own #8.
   defmodule ProjectTaskQueueIssue9 do
-    def pod_status(_pod_id), do: {:ok, :in_progress}
+    def pod_status(_pod_id), do: {:ok, :assigned}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
@@ -534,7 +534,7 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
-  # G1 — TaskQueue stub: a PULLED GATEKEEPER EVAL (state :in_progress — the gatekeeper activated)
+  # G1 — TaskQueue stub: a PULLED GATEKEEPER EVAL (state :assigned — the gatekeeper pulled it)
   # carries brick #8 of THIS repo (self-describing MA-03 metadata: gate_eval + resume_n +
   # resume_payload.repository). No live pod otherwise (the producer is done): exactly the eval window.
   defmodule GateEvalTaskQueue do
@@ -543,7 +543,7 @@ defmodule Fleet.Pilot.PollerTest do
     def list_active do
       [
         %{
-          state: :in_progress,
+          state: :assigned,
           metadata: %{
             "gate_eval" => true,
             "resume_n" => 8,
@@ -556,7 +556,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # A gate-eval ADMITTED but never activated: enqueued (state :pending), the gatekeeper never pulled
   # it (wake lost, kick net exhausted). An eval without an executor owns nothing — twin of
-  # GateEvalTaskQueue with :pending instead of :in_progress.
+  # GateEvalTaskQueue with :pending instead of :assigned (enqueued, never pulled).
   defmodule GateEvalPendingTaskQueue do
     def pod_status(_pod_id), do: {:ok, nil}
 
@@ -582,7 +582,7 @@ defmodule Fleet.Pilot.PollerTest do
     def list_active do
       [
         %{
-          state: :in_progress,
+          state: :assigned,
           metadata: %{
             "gate_eval" => true,
             "resume_n" => 8,
@@ -1842,7 +1842,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     defmodule ActiveTaskQueue2 do
-      def pod_status(_pod_id), do: {:ok, :in_progress}
+      def pod_status(_pod_id), do: {:ok, :assigned}
     end
 
     test "a live pod #8/repoB does NOT mask orphan #8/repoA (reclaimed) AND does NOT get #8/repoB reclaimed" do

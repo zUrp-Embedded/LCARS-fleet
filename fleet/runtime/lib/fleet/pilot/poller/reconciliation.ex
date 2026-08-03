@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -78,7 +78,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # `:pending → :assigned` and records the in-band ACK). ONE source for both ownership reads
   # (`pod_pulled?` and `gate_eval_owned_refs`): a `:pending` admission (enqueued, never pulled — the
   # wake was lost) owns nothing, on either side.
-  @pulled_states [:assigned, :in_progress]
+  @pulled_states [:assigned]
 
   defmodule Seams do
     @moduledoc """
@@ -354,7 +354,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   end
 
   # Does a pod have an ACTIVE task (owns its slot/lock)? The state of the pod's latest task (`pod_status`)
-  # must be ACTIVE per the SINGLE AUTHORITY `WorkItem.active?/1` (`:pending`/`:assigned`/`:in_progress`).
+  # must be ACTIVE per the SINGLE AUTHORITY `WorkItem.active?/1` (`:pending`/`:assigned`).
   # `{:ok, nil}` (idle) and the TERMINAL states (`:completed`/`:failed`/`:cleared`) → `false`: a delivered
   # (`:completed`) pod no longer owns its lock (F-C050 — else a completion LOST before open_pr wedges the
   # lock forever). Tolerant (any anomaly → `false`: a pod whose activity cannot be established masks no orphan).
@@ -371,7 +371,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   defp pod_has_active_task?(_tq, _), do: false
 
-  # Has the pod PULLED its latest task (state `:assigned`/`:in_progress`)? The PULL (`get_work_item`,
+  # Has the pod PULLED its latest task (state `:assigned`)? The PULL (`get_work_item`,
   # which transitions `:pending → :assigned` and records the in-band ACK) is the DURABLE proof that
   # the wake LANDED and the agent activated — the distinction the orphan-lock duty needs to tell a
   # PARKED admission (task enqueued but never pulled, `wake_unreached`) from a working pod. Stricter

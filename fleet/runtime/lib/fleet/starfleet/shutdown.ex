@@ -10,7 +10,7 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
     * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
       aggregates the real in-flight + activates quiescence
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
   @callback refuse_new_jobs(opts :: keyword()) :: :ok
   @callback in_flight_count() :: non_neg_integer()
@@ -53,7 +53,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   (it drifts on a crash/restart).
 
     * `Fleet.TaskQueue.list_active/0` — the `@active_states` work-items (`:pending` queued +
-      `:assigned`/`:in_progress` being worked). This IS the real forge work, and it EXCLUDES the idle
+      `:assigned` being worked). This IS the real forge work, and it EXCLUDES the idle
       residents by construction: a project architect (`architect-<name>`, `forever` but NOT
       `permanent-` prefixed) or a `pipe` engineer between briefs has NO active work-item → not counted.
       (The old `list_pods` count kept them in — one open project ⇒ `in_flight > 0` FOREVER ⇒ every stop

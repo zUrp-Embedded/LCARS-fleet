@@ -62,7 +62,7 @@ defmodule Fleet.TaskQueue.Server do
       selection (`find_active`), supersession and the deadline guard — extracting it
       would force either a duplication of that authority, or a dedicated module for 20 LOC.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
   use GenServer
@@ -193,7 +193,7 @@ defmodule Fleet.TaskQueue.Server do
 
       {:ok, work_item} ->
         # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod:
-        # the `:pending` never pulled (drop) AND the in-flight `:assigned`/`:in_progress` (→ `:cleared`). A re-brief
+        # the `:pending` never pulled (drop) AND the in-flight `:assigned` (→ `:cleared`). A re-brief
         # replaces the old one: the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness
         # MUST be held here, not only at read: keeping a stale `:assigned` alongside the new pending
         # would leave it ACTIVE and invisible to the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but
@@ -252,7 +252,7 @@ defmodule Fleet.TaskQueue.Server do
         {:reply, {:ok, assigned}, new_state}
 
       %WorkItem{} = work_item ->
-        # already :assigned/:in_progress → idempotent (no re-broadcast, no double dispatch)
+        # already :assigned → idempotent (no re-broadcast, no double dispatch)
         {:reply, {:ok, work_item}, state}
     end
   end
@@ -306,7 +306,7 @@ defmodule Fleet.TaskQueue.Server do
             # STARTS here: the pod consumes it in `:monitoring` → `pod.completed` → StepRunConsumer). The terminal
             # `:completed` state is committed ONLY after the delivery is confirmed — same ordering doctrine as
             # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
-            # failure NOTHING is committed: the item STAYS active (`:assigned`/`:in_progress`) → `find_active`
+            # failure NOTHING is committed: the item STAYS active (`:assigned`) → `find_active`
             # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
             # `:double_submit_ignored`/"already received" on an UNdelivered item. Pre-CI-03 the commit was done
             # first, so a lost broadcast left a terminal `:completed` + a false success at retry.
@@ -474,7 +474,7 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   # Supersedes EVERY active item of the pod (a fresh work item at enqueue replaces the old one): each active
-  # (`:pending` | `:assigned` | `:in_progress`) is transitioned to `:cleared` — including the `:pending`
+  # (`:pending` | `:assigned`) is transitioned to `:cleared` — including the `:pending`
   # never pulled (SAME transition as the others, it stays traceable in the map; nothing is dropped).
   # The pod abandons the old one: `submit_result` of the old work item will hit `find_active`
   # = nil → `:no_active_work_item`/`:double_submit_ignored`, never a mutation of the new one. Keeps all the rest

@@ -23,10 +23,10 @@ defmodule Fleet.TaskQueue.WorkItem do
   `Fleet.CapProfile`: a data value read across the whole pilot/taskqueue domain, an `@opaque`
   would bark at every legitimate reader.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-03
   """
 
-  @type state :: :pending | :assigned | :in_progress | :completed | :failed | :cleared
+  @type state :: :pending | :assigned | :completed | :failed | :cleared
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -82,7 +82,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   # the poller's lock reconciliation (`pod_has_active_task?`): a dead-or-idle pod whose LAST task is
   # `:completed` no longer owns its lock → an orphaned lock (e.g. a completion LOST before open_pr) is
   # reclaimable (F-C050). Kept here — the owner of the `state` type — not forked per-caller.
-  @active_states [:pending, :assigned, :in_progress]
+  @active_states [:pending, :assigned]
 
   @doc "The states in which a work item still OWNS its pod's slot/lock (single authority — see NB)."
   @spec active_states() :: [state()]
@@ -208,9 +208,19 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp rich_from_map(_), do: {:error, :invalid}
 
   # CLOSED list of states (literal atoms ⇒ guaranteed to exist, no atom-leak nor raise).
+  #
+  # `:in_progress` was in this list, in `@type state`, in `@active_states` and in a dozen guards
+  # across five modules — and NO transition ever set it, in the whole history of the repo (checked
+  # with `git log -S`, not inferred). It announced an intermediate step between `:assigned` and
+  # `:completed` that never existed, so every reader — a human, and an agent reading the type —
+  # inferred a lifecycle the machine does not have. A test even STUBBED it, pinning the fiction as
+  # if it were behaviour. Removed 2026-08-03 (BL-6-42).
+  #
+  # Do not re-add it as documentation of an intention: `:assigned` IS the pulled state (the Server
+  # sets it on `get_work_item`), so the distinction it seemed to offer is already carried. A state
+  # earns its place in this list by having a transition that writes it.
   defp parse_state("pending"), do: {:ok, :pending}
   defp parse_state("assigned"), do: {:ok, :assigned}
-  defp parse_state("in_progress"), do: {:ok, :in_progress}
   defp parse_state("completed"), do: {:ok, :completed}
   defp parse_state("failed"), do: {:ok, :failed}
   defp parse_state("cleared"), do: {:ok, :cleared}

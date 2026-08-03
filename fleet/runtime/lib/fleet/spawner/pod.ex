@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-03
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -630,7 +630,7 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   # Deadline (= state_timeout of :monitoring): RESPONSE timeout. On FIRE, we distinguish:
-  #   - active task (pending/assigned/in_progress) → the pod did NOT respond in time → failure.
+  #   - active task (pending/assigned) → the pod did NOT respond in time → failure.
   #   - no active task → the pod was just waiting for its next task (idle); this is NOT a
   #     response timeout → we let it lapse, NO kill (otherwise idle-kill of a healthy pod). The check
   #     is at the moment of the fire (≠ at arming) → covers the worker-enqueue race AND the inter-step.

@@ -617,7 +617,7 @@ defmodule Fleet.TaskQueueTest do
     assert [_, _, _] = TaskQueue.list_pending(q)
   end
 
-  test "8bis. list_active = pending+assigned+in_progress; cleared (supersede) and completed EXCLUDED",
+  test "8bis. list_active = pending+assigned; cleared (supersede) and completed EXCLUDED",
        %{q: q} do
     # 3 pods: A assigned (pulled), B pending (never pulled), C completed — then D superseded.
     {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "a"})
@@ -641,7 +641,7 @@ defmodule Fleet.TaskQueueTest do
     assert MapSet.member?(active_ids, d2.id)
     refute MapSet.member?(active_ids, d1.id)
     refute MapSet.member?(active_ids, tc.id)
-    assert Enum.all?(active, &(&1.state in [:pending, :assigned, :in_progress]))
+    assert Enum.all?(active, &(&1.state in [:pending, :assigned]))
   end
 
   test "9. clear_for_pod", %{q: q} do
@@ -722,7 +722,7 @@ defmodule Fleet.TaskQueueTest do
 
     work_items = :sys.get_state(q).work_items |> Map.values()
     terminal = Enum.filter(work_items, &(&1.state == :completed))
-    active = Enum.filter(work_items, &(&1.state in [:pending, :assigned, :in_progress]))
+    active = Enum.filter(work_items, &(&1.state in [:pending, :assigned]))
 
     # Hard bound: 5 completed → at most 3 kept (2 pruned).
     assert length(terminal) == 3
@@ -756,7 +756,7 @@ defmodule Fleet.TaskQueueTest do
     active =
       Enum.filter(
         work_items,
-        &(&1.pod_id == "pod-Z" and &1.state in [:pending, :assigned, :in_progress])
+        &(&1.pod_id == "pod-Z" and &1.state in [:pending, :assigned])
       )
 
     # ONLY 1 active = the fresh one (:pending). The old :assigned is superseded → :cleared.
@@ -828,7 +828,7 @@ defmodule Fleet.TaskQueueTest do
     active =
       Enum.filter(
         work_items,
-        &(&1.pod_id == "pod-M" and &1.state in [:pending, :assigned, :in_progress])
+        &(&1.pod_id == "pod-M" and &1.state in [:pending, :assigned])
       )
 
     assert active == []

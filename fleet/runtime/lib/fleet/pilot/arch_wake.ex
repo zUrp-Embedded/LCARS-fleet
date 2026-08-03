@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.ArchWake do
 
   Contract — per-repo outcomes, decided on that arch's LATEST work-item state:
 
-    * mandate `:assigned`/`:in_progress` → `:busy`, complete silence — the arch already
+    * mandate `:assigned` → `:busy`, complete silence — the arch already
       knows its work; waking it again is pure noise (live 2026-07-18).
     * mandate `:pending` (offered but never fetched) → ensure + wake ONLY (`:woken_pending`).
       The signal may have been lost OR the pod died with the mandate pending — the ensure
@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.ArchWake do
   actually left (`:offered`/`:woken_pending`), never on `:busy` / `:wake_unreached` / an
   enqueue error.
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-03
   """
 
   require Logger
@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.ArchWake do
     pod_id = ProjectArchitect.pod_id_for(repo)
 
     case task_queue.pod_status(pod_id) do
-      {:ok, state} when state in [:assigned, :in_progress] ->
+      {:ok, :assigned} ->
         :busy
 
       {:ok, :pending} ->

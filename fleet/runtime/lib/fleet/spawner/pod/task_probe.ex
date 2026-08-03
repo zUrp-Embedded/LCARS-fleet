@@ -8,10 +8,10 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
 
   - `polled?/1` — has the agent already called `get_work_item` (real in-band ACK, `last_poll`)? Stops the
     bootstrap kick as soon as the REPL responds. Takes the `state` (reads `state.pod_id`).
-  - `pod_has_active_task?/1` — does the pod have an ACTIVE task (`pending|assigned|in_progress`) here,
+  - `pod_has_active_task?/1` — does the pod have an ACTIVE task (`pending|assigned`) here,
     right now? Reporting boolean (`pod_info`) ONLY — the `:result_deadline` fire uses
     `active_task_state/1` (3-state: the boolean conflates idle and unknown).
-  - `brief_pulled?/1` — is the brief already pulled (`assigned|in_progress|completed`)? Stops the wake loop.
+  - `brief_pulled?/1` — is the brief already pulled (`assigned|completed`)? Stops the wake loop.
   - `no_pending_brief?/1` — NO brief pending (`{:ok, nil}`, never enqueued)? Distinguishes the
     permanent/interactive pod (bootstrap) from the worker (brief `pending` at spawn).
 
@@ -35,7 +35,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief` (`Pod.Brief`).
   - `brief_slot/1` — enqueue-by-slot decision (`Pod.Brief`, 3-state `:free|:occupied|:unknown`).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-03
   """
 
   @doc """
@@ -70,7 +70,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   end
 
   @doc """
-  Does the pod have an ACTIVE task (`pending`/`assigned`/`in_progress`) here, right now?
+  Does the pod have an ACTIVE task (`pending`/`assigned`) here, right now?
   REPORTING boolean, consumed by `pod_info` alone. NOT the `:result_deadline` fire probe:
   a boolean is the WRONG shape there (it conflates "idle, let it lapse" with
   "broker unknown, don't act on ignorance"); the fire reads `active_task_state/1` (3-state,
@@ -79,7 +79,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   """
   @spec pod_has_active_task?(String.t()) :: boolean()
   def pod_has_active_task?(pod_id),
-    do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
+    do: match?({:ok, s} when s in [:pending, :assigned], safe_pod_status(pod_id))
 
   @doc """
   3-STATE version of `pod_has_active_task?` for the `:result_deadline` fire. The boolean
@@ -87,7 +87,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   *reporting* field but WRONG at the deadline fire: a hung pod whose broker blips at the exact fire
   moment would be classed "idle" → the deadline lapses (never re-armed unless the pod MOVES, which a
   hung pod does not) → orphan. So we distinguish:
-    * `:active`  → a real response timeout (pending/assigned/in_progress) → KILL;
+    * `:active`  → a real response timeout (pending/assigned) → KILL;
     * `:idle`    → genuinely between tasks → let the deadline lapse (no idle-kill);
     * `:unknown` → broker unverifiable → NEITHER (no-kill preserved) but RE-ARM, never lapse.
   Same 3-state fail-closed shape as `brief_slot/1`.
@@ -95,7 +95,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   @spec active_task_state(String.t()) :: :active | :idle | :unknown
   def active_task_state(pod_id) do
     case safe_pod_status(pod_id) do
-      {:ok, s} when s in [:pending, :assigned, :in_progress] -> :active
+      {:ok, s} when s in [:pending, :assigned] -> :active
       {:ok, _} -> :idle
       :error -> :unknown
     end
@@ -103,7 +103,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
 
   @doc """
   Is the brief already pulled by the pod? "Pull" = the task is in a state that PROVES that
-  Claude has called get_work_item: `:assigned | :in_progress | :completed`. Deliberately NOT:
+  Claude has called get_work_item: `:assigned | :completed`. Deliberately NOT:
   `:pending`/`nil` (not yet pulled / not yet enqueued — we keep kicking, which also covers
   the spawn↔enqueue race), nor `:cleared`/`:failed` (deliberate kill / broker deadline — the pod
   has pulled nothing, do NOT stop the kick on a false "pull"; worst case we kick up to the cap,
@@ -112,7 +112,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   """
   @spec brief_pulled?(String.t()) :: boolean()
   def brief_pulled?(pod_id),
-    do: match?({:ok, s} when s in [:assigned, :in_progress, :completed], safe_pod_status(pod_id))
+    do: match?({:ok, s} when s in [:assigned, :completed], safe_pod_status(pod_id))
 
   @doc """
   NO brief (task) pending for this pod: `pod_status == {:ok, nil}` (never enqueued).
