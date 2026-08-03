@@ -1895,6 +1895,55 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    test "a ticket in its JURY phase HOLDS the lease — a QUEUED one does not start beside it" do
+      # The hole this repairs, and it was open in SERIAL, not revealed by the fan-out: the lease
+      # counted only what it saw on its own rail (ENGAGED issues). A ticket that reached its jury
+      # leaves the issues side — it is dispatched through the pulls — so it held nothing, and a
+      # repo serialized to ONE workflow_run happily started a second.
+      issues = [
+        # #21 is in its jury phase: an open fleet PR carries it. Skipped on the issues rail (the
+        # pulls rail advances it), but it IS in flight.
+        %{
+          "number" => 21,
+          "body" => "en jury",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        },
+        # #22 is QUEUED and routeless: with a free lease it would start.
+        %{
+          "number" => 22,
+          "body" => "en attente",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      pulls = [
+        %{
+          "number" => 90,
+          "head" => %{"ref" => "lcars/issue-21-engineer"},
+          "requested_reviewers" => [%{"login" => "reviewer"}]
+        }
+      ]
+
+      {name, pid} =
+        start_entry_poller({:ok, issues}, %{},
+          forge_opts: [
+            _test_issues: {:ok, issues},
+            _test_pulls: {:ok, pulls},
+            _test_pid: self()
+          ]
+        )
+
+      # #21 skipped on the issues rail (its PR advances it), #22 skipped because the lease is HELD.
+      # Before the repair #22 dispatched — a second workflow_run under a serialized lease.
+      tally = Poller.force_poll(name)
+      assert tally.skipped >= 2
+      assert tally.errors == 0
+
+      GenServer.stop(pid)
+    end
+
     test "free lease (no engaged pipeline) -> the QUEUED issue starts" do
       issues = [
         %{

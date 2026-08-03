@@ -141,8 +141,25 @@ defmodule Fleet.Pilot.Poller.Lease do
     # config line.
     serialized? = Application.get_env(:fleet_pilot, :repo_serialized_lease, true)
 
-    lease_held0 =
-      serialized? and Enum.any?(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end)
+    # IN-FLIGHT crosses BOTH dispatch rails. The lease used to count only what it could see on its
+    # own rail — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is
+    # dispatched through the pulls) and therefore held nothing. Consequence, measured and not
+    # theoretical: a repo serialized to one workflow_run started a SECOND one as soon as the first
+    # reached its jury. The hole was already open in serial; the fan-out only makes it visible.
+    #
+    # The two halves were already side by side: `pr_issue_ids` is passed in and already computes
+    # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
+    # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
+    # never a union to deduplicate.
+    #
+    # A count and not a boolean because 5.3 turns the knob into `max_fan`: serial is that ceiling at
+    # 1, not a different mechanism. The `> 0` here is the boolean projection of a number the next
+    # item stops projecting.
+    in_flight =
+      Enum.count(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end) +
+        MapSet.size(pr_issue_ids)
+
+    lease_held0 = serialized? and in_flight > 0
 
     {tally, _lease} =
       Enum.reduce(classified, {zero_tally(), lease_held0}, fn
