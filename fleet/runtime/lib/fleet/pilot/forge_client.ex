@@ -53,6 +53,7 @@ defmodule Fleet.Pilot.ForgeClient do
       http_post: 3,
       http_patch: 3,
       http_delete: 2,
+      http_delete_body: 3,
       paginate: 3,
       forge_bot_login: 2
     ]
@@ -418,6 +419,32 @@ defmodule Fleet.Pilot.ForgeClient do
 
     with {:ok, config} <- resolve_config(opts) do
       http_post(
+        config,
+        "/repos/#{encode_repo(repo)}/issues/#{number}/dependencies",
+        %{index: blocker, owner: owner, repo: name}
+      )
+    end
+  end
+
+  @doc """
+  Removes "`number` depends on `blocker`" (same repo). Inverse of `add_issue_dependency/4`.
+
+  Same body shape and the same `repo`-not-`name` trap: the edge is identified by the OBJECT, so the
+  DELETE carries a body (see `Transport.http_delete_body/3`).
+
+  Needed because a retirement must not leave its edges behind. Closing a blocker RELEASES what it
+  blocked, so a dependent whose blocker is retired would silently become closable as if the work had
+  landed — the retired ticket delivered nothing. Lifting the edge and NAMING the retirement on the
+  dependent is what keeps "unblocked" from meaning "done".
+  """
+  @spec remove_issue_dependency(String.t(), integer(), integer(), Keyword.t()) ::
+          {:ok, map()} | {:error, term()}
+  def remove_issue_dependency(repo, number, blocker, opts \\ [])
+      when is_binary(repo) and is_integer(number) and is_integer(blocker) do
+    [owner, name] = String.split(repo, "/", parts: 2)
+
+    with {:ok, config} <- resolve_config(opts) do
+      http_delete_body(
         config,
         "/repos/#{encode_repo(repo)}/issues/#{number}/dependencies",
         %{index: blocker, owner: owner, repo: name}

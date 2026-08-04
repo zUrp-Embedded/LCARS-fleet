@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     * `:token_file` — file path (default `~/.gitea_token`).
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -210,6 +210,13 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   def http_patch(config, path, body), do: request(config, :patch, path, body)
   @doc false
   def http_delete(config, path), do: request(config, :delete, path, nil)
+
+  # DELETE WITH A BODY. Unusual, and it is the forge that asks for it: Gitea identifies a
+  # dependency edge by the OBJECT to detach (`{index, owner, repo}`), not by an id in the path —
+  # the same body its POST twin takes. Kept separate from `http_delete/2` so that no caller sends a
+  # body by accident on the many endpoints that carry their target in the URL.
+  @doc false
+  def http_delete_body(config, path, body), do: request(config, :delete, path, body)
 
   defp request(config, method, path, body) do
     url = config.base_url <> "/api/v1" <> path
