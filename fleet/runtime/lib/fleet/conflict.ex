@@ -11,6 +11,11 @@ defmodule Fleet.Conflict do
   audit flagged as unreliable. The durable value is the DecisionTrace: every classification records
   WHY, and the refusal is traced as clearly as the resolution.
 
+  The origin is indexed at the ROOT (`NOTICE`), not only here. A credit that lives solely in the
+  prose of the file it applies to is one refactor away from disappearing with it, and the question
+  it answers -- does anything in this repository come from somewhere else -- is asked from outside,
+  by someone who has no reason to open this module.
+
   ## Contract
 
   `resolve/2` returns a `Fleet.Conflict.Report`. `merged` is non-nil ONLY when every hunk is of an
@@ -23,7 +28,7 @@ defmodule Fleet.Conflict do
   Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
   resolution is caught downstream -- the guard the standalone engine lacked.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-05
   """
   alias Fleet.Conflict.{Assemble, Classifier, Parser, Report}
 
