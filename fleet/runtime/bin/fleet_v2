@@ -420,12 +420,38 @@ cmd_stop() {
   fi
 }
 
+# Debug visibility of the RUNNING fleet. Read from the BEAM's own environment, never from the env
+# file nor from this shell: `--debug` is a property of ONE LIFE of the fleet (it is not hot-switchable
+# and it is not persisted), so the only place where its truth lives is the process that carries it.
+# An env file edited after the start would answer for a fleet that does not exist.
+#
+# It is printed because a mode nobody can read is a mode that lies: the operator whose pods do not
+# show up in Claude Desktop has no way, from the outside, to tell "not in debug" from "debug is
+# broken" — asked live 2026-08-04 on a bench, and the status had no answer.
+status_debug_visibility() {
+  local pane_pid beam_pid env_file
+  pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
+  beam_pid=""
+  [[ -n "$pane_pid" ]] && beam_pid="$(pgrep -P "$pane_pid" 2>/dev/null | head -1 || true)"
+  env_file="/proc/${beam_pid}/environ"
+
+  if [[ -z "$beam_pid" || ! -r "$env_file" ]]; then
+    # We do NOT guess: an unreadable environment is not "off".
+    echo "fleet_v2: visibilite debug : indeterminee (environnement du BEAM illisible)"
+  elif tr '\0' '\n' < "$env_file" 2>/dev/null | grep -qx 'LCARS_DEBUG_VISIBILITY=1'; then
+    echo "fleet_v2: visibilite debug : ON (pods spawnes pendant cette vie visibles dans Claude Desktop)"
+  else
+    echo "fleet_v2: visibilite debug : off (relancer avec 'fleet_v2 start --debug' pour l'activer)"
+  fi
+}
+
 cmd_status() {
   # Version FIRST: "which build is running?" answered at a glance, without reading build_info.txt by
   # hand (reuses cmd_version — same data as `fleet_v2 version` and the /api/version endpoint).
   cmd_version
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     echo "fleet_v2: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
+    status_debug_visibility
     LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
       "$BIN_DIR/lcars" list 2>/dev/null || true
   else

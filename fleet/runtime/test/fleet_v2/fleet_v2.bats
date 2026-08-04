@@ -241,3 +241,45 @@ STUB
   [[ "$output" == *"fallback kill"* ]]
   [ -f "$STUB_STATE/kill-server-called" ]
 }
+
+# ─── Visibilite debug dans `status` — un mode qu'on ne peut pas lire est un mode qui ment ────────
+# La verite du flag vit dans l'environnement du BEAM QUI TOURNE : `--debug` porte sur UNE vie de la
+# fleet, il n'est ni commutable a chaud ni persiste. Lire le fichier d'env repondrait pour une fleet
+# qui n'existe pas (fichier edite apres le demarrage).
+
+@test "status: debug ON est lu dans l'environnement du BEAM, pas ailleurs" {
+  export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
+  make_tmux_stub
+
+  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; env -i LCARS_DEBUG_VISIBILITY=1 sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
+  sleep 0.3
+
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ON"* ]]
+}
+
+@test "status: sans le flag dans le BEAM, c'est off — et le message dit comment l'activer" {
+  export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
+  make_tmux_stub
+
+  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; env -i sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
+  sleep 0.3
+
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"off"* ]]
+  [[ "$output" == *"--debug"* ]]
+}
+
+@test "status: un environnement illisible rend INDETERMINEE, jamais 'off'" {
+  # Une sonde qui repond 'off' quand elle ne sait pas fabrique un faux negatif : l'operateur
+  # relancerait --debug en boucle sur une fleet qui l'a deja.
+  export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
+  make_tmux_stub
+  : > "$STUB_STATE/pane.pid"   # pas de pane_pid -> pas de beam_pid
+
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"indeterminee"* ]]
+}
