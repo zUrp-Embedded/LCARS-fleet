@@ -21,7 +21,31 @@ jobs:
       run:
         working-directory: fleet/runtime
     steps:
-      - uses: actions/checkout@v4
+      # PAS D'`actions/checkout` — c'est du node, et aucune image de label n'en porte. Le job
+      # mourait a cette ligne, en 0 seconde, sur `exec: "node": executable file not found in
+      # $PATH` -> exit 127 : un gate qui ne rend jamais de verdict sur le depot qu'il garde
+      # (mesure du 2026-08-04, premier runner de banc reellement enregistre). La regle etait deja
+      # ECRITE, ailleurs : le workflow du `project_template` porte le paragraphe qui l'interdit.
+      # Ce fichier lui est anterieur, il etait le seul du depot a la violer.
+      # `working-directory: .` : le defaut du job pointe `fleet/runtime`, qui n'existe pas encore.
+      # LE JETON N'EST PAS UNE PRECAUTION, C'EST LA CONDITION : `private: false` cote API ne dit
+      # RIEN de git-over-HTTP, qui refuse l'anonyme sur cette forge (`could not read Username`,
+      # exit 128 — mesure du 2026-08-04). Le jeton de job est fourni par la forge elle-meme et vit
+      # le temps du run ; il marche public comme prive, sur le banc comme sur le NAS.
+      - name: Source (shell — l'image du job n'a ni node ni action)
+        working-directory: .
+        env:
+          GATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git init -q .
+          git -c http.extraheader="Authorization: Basic $(printf '%s:' "$GATE_TOKEN" | base64 -w0)" \
+              fetch --depth 1 "${GITHUB_SERVER_URL%/}/${GITHUB_REPOSITORY}.git" "$GITHUB_REF"
+          git checkout -q FETCH_HEAD
+          # La ref peut avoir bouge entre le declenchement et ce fetch : le gate doit dire SUR QUOI
+          # il rend son verdict, ou se taire. Un vert sur un autre arbre est pire qu'un rouge.
+          got="$(git rev-parse HEAD)"
+          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA — la ref a bouge"; exit 1; }
 
       - name: Toolchain (versions)
         run: |
@@ -36,5 +60,10 @@ jobs:
       - name: Deps
         run: mix deps.get
 
+      # `MIX_ENV=test` N'EST PAS UN DETAIL D'ENVIRONNEMENT : `config/runtime.exs` est un fichier de
+      # BOOT, et hors test il exige les ports que `bin/fleet_v2` calcule par humain — d'ou
+      # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien (mesure du
+      # 2026-08-04). C'est exactement la ligne que joue `etc/install.sh` avant de poser la release :
+      # le gate de la CI et le gate du build ne doivent pas etre deux gates.
       - name: Gate (compile strict + suite + contracts.check)
-        run: mix gate
+        run: MIX_ENV=test mix gate

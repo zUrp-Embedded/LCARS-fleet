@@ -61,7 +61,17 @@ services:
       #   `dood` — la publication (.gitea/workflows/publish.yml). Le job tourne dans `docker:cli` et
       #     parle au daemon de l'HÔTE par le socket monté ci-dessous. Docker-out-of-docker : le cache
       #     de layers de la machine est réutilisé, et l'image nommée doit être résoluble par CE daemon.
-      GITEA_RUNNER_LABELS: "shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli"
+      #
+      # ⚠ CE DEFAUT NE SAIT PAS JOUER `mix gate`. L'image nommee pour `elixir` est l'image de BASE
+      # du stage build, pas le stage CONSTRUIT : elle porte Elixir et rien d'autre — ni git, ni
+      # tmux, ni bwrap, ni bats, ni python3, que le gate exige et que le Dockerfile installe
+      # justement dans ce stage (mesure du 2026-08-04 : `command -v git` vide dans l'image). Une
+      # couche trop tot, et c'est celle qui porte tout l'outillage. Le defaut reste celui-ci parce
+      # qu'un operateur quelconque ne peut pas resoudre une image locale de LCARS ; qui veut faire
+      # tourner LE gate sert le stage build de SON build :
+      #   docker build --target build -t lcars-build:<tag> -f .../Dockerfile .
+      #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
     volumes:
       - runner-data:/data
       # Le socket du daemon TEL QU'IL EXISTE DANS LA VM du moteur — pas un chemin de la distro WSL

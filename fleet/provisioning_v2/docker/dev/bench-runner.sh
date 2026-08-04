@@ -30,6 +30,7 @@
 # USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1> --admin-token <tok>
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/project-template]
+#                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli"]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse
 #         3 le runner ne s'enregistre pas · 4 le job de verification ne passe pas
 
@@ -38,6 +39,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK="lcars-ticketforge_default"
 PROJECT="lcars-ticket-runner" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
+# Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
+LABELS="${LCARS_RUNNER_LABELS:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --network)      NETWORK="${2:?}"; shift 2 ;;
     --project)      PROJECT="${2:?}"; shift 2 ;;
     --verify-repo)  VERIFY_REPO="${2:?}"; shift 2 ;;
+    --labels)       LABELS="${2:?}"; shift 2 ;;
     *) echo "bench-runner: option inconnue: $1" >&2; exit 1 ;;
   esac
 done
@@ -92,9 +96,11 @@ EOF
 LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN=" " \
   $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
 LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_NAME="bench-runner" \
+LCARS_RUNNER_LABELS="$LABELS" \
   $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
 $DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-runner-1:/data/bench-config.yaml"
 LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_NAME="bench-runner" \
+LCARS_RUNNER_LABELS="$LABELS" \
   $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
 say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volume)"
 
