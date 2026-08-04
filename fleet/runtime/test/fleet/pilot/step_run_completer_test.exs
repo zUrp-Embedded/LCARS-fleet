@@ -67,6 +67,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   # PR-native forge stub: records the PR calls (send to the test). Returns the REAL
   # `ForgeClient` contract: `post_review`/`merge_pr`/`request_review` → `:ok` (not `{:ok, _}`).
   defmodule PrForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
       {:ok, 7}
@@ -94,6 +99,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   defmodule PrFailForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
 
@@ -111,6 +121,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
   # COMPLETE forge stub for the `complete_pr/2` orchestrator (all PR primitives + issue bridge).
   defmodule OrchForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
       {:ok, 7}

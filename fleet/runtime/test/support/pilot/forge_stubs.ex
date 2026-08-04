@@ -27,6 +27,11 @@ defmodule Fleet.Pilot.ForgeStubs do
       :ok
     end
 
+    # The seal READS who approved before writing its closing comment (it must not claim verdicts
+    # that do not exist). No jury here → empty verdicts, i.e. the zero-judge sentence.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     # WS2: the seal sets stage/merged post-merge — a load-bearing system trace. Its failure is NOT
     # dropped silently: `seal_and_merge` RETRIES it (bounded, `set_stage_merged_with_retry`) and logs
     # loud, since a lost stage/merged left the arch waiting forever on a merged brick (cf.
@@ -47,6 +52,13 @@ defmodule Fleet.Pilot.ForgeStubs do
     @moduledoc "Merge OK but `close_issue` FAILS — proves the seal LOGS LOUD (merged brick stays OPEN)."
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def merge_pr(_repo, _pr, _opts), do: :ok
+
+    # The seal READS who approved before writing its closing comment (it must not claim verdicts
+    # that do not exist). These stubs describe repos with no jury: empty verdicts, which is exactly
+    # the zero-judge sentence the comment must print.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
     def close_issue(_repo, _n, _opts), do: {:error, {:http, 500, "close boom"}}
   end
@@ -68,6 +80,12 @@ defmodule Fleet.Pilot.ForgeStubs do
     end
 
     def merge_pr(_repo, _pr, _opts), do: {:error, {:http, 409, "not fast-forward"}}
+
+    # The seal READS who approved before writing its closing comment (it must not claim verdicts
+    # that do not exist). These stubs describe repos with no jury: empty verdicts, which is exactly
+    # the zero-judge sentence the comment must print.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end

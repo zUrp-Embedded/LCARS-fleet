@@ -23,6 +23,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   end
 
   defmodule CommentFailForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def post_comment(_r, _n, _b, _o), do: {:error, {:http, 500, "boom"}}
 
     def merge_pr(_r, _pr, _o) do
@@ -36,6 +41,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   # F-C066 — merge/comment/stage OK, close ALWAYS failing: proves the honest return (no lying :ok).
   defmodule CloseFailForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def merge_pr(_r, _pr, _o), do: :ok
     def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
@@ -48,6 +58,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   # F-C066 — FLAKY close: fails 2×, succeeds the 3rd (process-dict counter) → proves self-heal via retry.
   defmodule CloseFlakyForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def merge_pr(_r, _pr, _o), do: :ok
     def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
@@ -63,6 +78,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   # CI-06 — FLAKY stage/merged: fails 2×, succeeds the 3rd → proves the load-bearing projection self-heals
   # via its retry (mirror of the close retry). merge/comment/close all OK.
   defmodule StageFlakyForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def merge_pr(_r, _pr, _o), do: :ok
     def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
     def close_issue(_r, _n, _o), do: {:ok, :closed}
@@ -121,6 +141,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   # stage/merged, stayed open with an orphaned lock, and the reconciliation re-dispatched an
   # already-merged brick (double-delivery).
   defmodule TimeoutButMergedForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def merge_pr(_r, _pr, _o), do: {:error, {:http, :timeout, "reply cut mid-flight"}}
     def get_pull(_r, _pr, _o), do: {:ok, %{"merged" => true, "state" => "closed"}}
 
@@ -143,6 +168,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   # Same timeout, but the readback says the PR is NOT merged → the error must propagate
   # untouched (fail-closed), and nothing may post.
   defmodule TimeoutNotMergedForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def merge_pr(_r, _pr, _o), do: {:error, {:http, :timeout, "reply cut mid-flight"}}
 
     def get_pull(_r, _pr, _o),
@@ -253,6 +283,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   # ── Provenance wall (Phase 2) — systematic, card-independent ──────────────
   defmodule WallForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     # branch_head exported → the wall RUNS (stubs without it exercise the skip path,
     # which every other test of this file proves).
     def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}

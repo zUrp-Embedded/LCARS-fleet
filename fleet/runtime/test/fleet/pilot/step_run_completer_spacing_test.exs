@@ -306,6 +306,11 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
 
+    # Read by the seal to name the accounts that approved before it writes its closing
+    # comment (it must not claim verdicts that do not exist). No jury here -> empty.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     def remove_label(_repo, _n, _label, _opts),
       do:
         (

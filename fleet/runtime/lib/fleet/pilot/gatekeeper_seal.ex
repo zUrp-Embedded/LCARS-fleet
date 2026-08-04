@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -102,7 +102,16 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `get_issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Pilot.ForgeProtocol.merge_marker(pr_number)
-    body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
+
+    # WHO ACTUALLY APPROVED — read, never asserted. The comment used to state "the judges APPROVED
+    # the PR (native reviews)" unconditionally, which is FALSE on a zero-judge card: `ops-direct`
+    # declares no jury on purpose (no mechanical ground truth on prose), the seal is nominal there,
+    # and the ticket ended up carrying a sentence claiming approvals that no account ever gave —
+    # measured 2026-08-04 on `hello-world#4`, PR with 0 review. A closing comment is the trace an
+    # operator reads months later; one that names approvers who do not exist is worse than no
+    # comment, and it sat under a line that said "nothing is faked".
+    approvers = approving_judges(forge, repo, pr_number, forge_opts)
+    body = promote_comment(issue_n, pr_number, producer, approvers) <> "\n\n" <> signature
 
     # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
     # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
@@ -567,20 +576,63 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   @doc """
-  DESCRIPTIVE + HONEST closing comment (user traceability): who delivered, who validated, who sealed, and that
-  native branch-protection REQUIRES the approvals (LCARS orchestrates them then the gatekeeper seals;
-  nothing faked). Rebase merge (linear).
+  DESCRIPTIVE + HONEST closing comment (user traceability): who delivered, who validated, who sealed.
+
+  `approvers` is the list of accounts whose APPROVED review was actually read on the PR. Empty is a
+  legitimate, frequent state — a zero-judge card (`ops-direct`) makes the direct seal NOMINAL — and
+  it must READ as that state, not as a jury that stayed silent. The two cases print different
+  sentences on purpose: an operator reading this comment months later must be able to tell a
+  verdict from an absence of verdict without opening the PR.
   """
-  @spec promote_comment(integer(), integer(), String.t()) :: String.t()
-  def promote_comment(issue_n, pr_number, producer) do
+  @spec promote_comment(integer(), integer(), String.t(), [String.t()]) :: String.t()
+  def promote_comment(issue_n, pr_number, producer, approvers \\ []) do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
-    - **Validée par** : les juges ont **APPROUVÉ** la PR (reviews natives).
+    - #{validation_line(approvers)}
     - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge **rebase** (historique linéaire) — ce ticket sera fermé juste après ce commentaire.
-
-    > ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** (push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le `gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**. Traça honnête : rien n'est maquillé.
+    #{interim_note(approvers)}
     """
+  end
+
+  # Judged path: name the accounts. Zero-judge path: say WHY there is no verdict, and on whose
+  # authority the merge happened — the card. « Aucun juge n'a répondu » would describe a failure;
+  # « la carte n'en pose pas » describes the design.
+  defp validation_line([]),
+    do:
+      "**Validée par** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
+        "nominal) ; le mur de provenance reste le plancher mécanique, lui, et il a été franchi."
+
+  defp validation_line(approvers),
+    do:
+      "**Validée par** : " <>
+        Enum.map_join(approvers, ", ", &"`#{&1}`") <>
+        " — review(s) **APPROVED** natives, lues sur la PR."
+
+  # The interim note is about branch-protection REQUIRING approvals. On a zero-judge path there are
+  # none to require: printing it there would contradict the line above it in the same comment.
+  defp interim_note([]), do: ""
+
+  defp interim_note(_approvers),
+    do:
+      "\n> ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** " <>
+        "(push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le " <>
+        "`gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**.\n"
+
+  # Best-effort by construction: this runs AFTER a real merge, and a forge hiccup here must not
+  # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims
+  # nothing about judges that may exist. Under-claiming is the only safe direction for a trace.
+  defp approving_judges(forge, repo, pr_number, forge_opts) do
+    case forge.pr_review_state(repo, pr_number, forge_opts) do
+      {:ok, %{verdicts: verdicts}} when is_map(verdicts) ->
+        verdicts
+        |> Enum.filter(fn {_login, verdict} -> verdict == :approved end)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.sort()
+
+      _ ->
+        []
+    end
   end
 end

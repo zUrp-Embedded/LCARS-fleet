@@ -16,6 +16,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   # Forge sim: §5 (abandon/await) + PR primitives. Step_run counter via forge_opts[:_step_runs].
   defmodule StubForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     # `_sign_fails` (via forge_opts) forces the gate-fail SIGNATURE post to fail (forge write
     # outage) while every other post still succeeds → the failed run cannot be signed onto the
     # budget counter, exercising the "unsigned run must NOT bounce" path.
@@ -1033,6 +1038,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   # `forge_opts` (already passed to the forge_client by `StepRunCompleter`). DelivStub has no opts
   # → relayed via the pid stored at test init.
   defmodule RelayForge do
+    # Read by the seal before it names who approved (it must not claim verdicts that do not
+    # exist). No jury in this stub -> empty verdicts.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
     defp relay(opts, msg), do: send(Keyword.fetch!(opts, :test_pid), msg)
     def post_comment(_r, _n, body, o), do: relay(o, {:comment, body}) && {:ok, :posted}
     def set_assignee(_r, _n, l, o), do: relay(o, {:assignee, l}) && {:ok, :set}

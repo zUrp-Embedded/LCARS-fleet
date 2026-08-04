@@ -39,6 +39,11 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
 
     def merge_pr(_repo, pr, _opts), do: send(self(), {:merge, pr}) && :ok
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+
+    # Read by the seal to name the accounts that approved before it writes its closing
+    # comment (it must not claim verdicts that do not exist). No jury here -> empty.
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
   end
 
   setup %{tmp_dir: tmp} do
