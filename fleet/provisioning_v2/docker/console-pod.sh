@@ -21,7 +21,14 @@ set -uo pipefail
 POD_ID="${1:-}"
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
-die() { printf '\n  %s\n\n  (fermer cet onglet)\n' "$*"; sleep 5; exit 1; }
+# Un refus TIENT L'ECRAN, il ne sort pas. Le client de la console rouvre tout seul : sortir ferme
+# la WebSocket avec un code que le navigateur rejette (« broken close frame » puis 1006), xterm.js
+# se reconnecte, et le meme refus repart — un `sleep` avant `exit` ne ralentit pas la boucle, il en
+# fixe la periode. Mesure: la mort groupee des pods d'un ticket mettait autant de cadres en
+# reconnexion permanente. Le message dit « fermer cet onglet » : il s'adresse a un humain dont on
+# attend qu'il RESTE, donc le processus reste aussi. C'est le navigateur qui coupe, et ttyd tue
+# alors son enfant — rien ne fuit quand le cadre disparait.
+die() { printf '\n  %s\n\n  (fermer cet onglet)\n' "$*"; exec sleep infinity; }
 
 [[ $# -eq 1 ]] || die "console-pod: un seul argument attendu (le pod_id), recu $#."
 [[ "$POD_ID" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "console-pod: pod_id invalide."
