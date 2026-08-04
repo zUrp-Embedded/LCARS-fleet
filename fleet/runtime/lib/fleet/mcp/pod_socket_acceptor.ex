@@ -31,7 +31,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       (MCP convention: a tool error is a result with `isError`, not a protocol
       error — the pod reads it as tool text).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-04
   """
 
   use GenServer
@@ -288,6 +288,17 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # indistinguishable on the bridge side, zero BEAM trace. Another `method`
   # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled above) -> -32601.
   defp handle_line(line, pod_id, tools) do
+    # THE POD IS UP, AND THIS IS THE ONLY IN-BAND PROOF THAT EXISTS DURING A COLD START. A line on
+    # this socket means the pod's MCP client is connected — which happens at TUI init, before the
+    # agent takes any turn, so LONG before the work-item poll that everything else waits on. The
+    # kick loop consumes it: keys typed into a REPL that is not up yet are not lost, tmux buffers
+    # them and the TUI replays each as its own submission (measured 2026-08-04: a scribe took 7
+    # `engage` in its REPL, one per kick fired during the cold start).
+    # Marked on EVERY line, not only the first: it is a cast into a `Map.put_new`, and marking on
+    # `tools/list` alone would miss a pod that reconnects mid-life (fleet restart) without
+    # re-listing.
+    Fleet.TaskQueue.mark_connected(pod_id)
+
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})

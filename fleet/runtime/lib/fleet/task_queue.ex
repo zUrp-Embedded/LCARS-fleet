@@ -24,7 +24,7 @@ defmodule Fleet.TaskQueue do
   Every function has a test-seam variant (explicit `server`, e.g. `enqueue/3`,
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   alias Fleet.TaskQueue.Server
@@ -156,4 +156,27 @@ defmodule Fleet.TaskQueue do
   @spec last_poll(GenServer.server(), String.t()) :: DateTime.t() | nil
   def last_poll(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:last_poll, pod_id})
+
+  @doc """
+  The pod's MCP client has spoken on its socket at least once — i.e. its REPL is UP.
+
+  Weaker than `last_poll/1` and that is what makes it useful: a client connects and lists tools at
+  TUI init, BEFORE the agent takes any turn. It is the only in-band evidence available during a
+  cold start, and the kick loop needs exactly that — keys typed into a REPL that is not up yet are
+  buffered by tmux and replayed by the TUI as that many spurious submissions.
+  """
+  @spec mark_connected(String.t()) :: :ok
+  def mark_connected(pod_id), do: mark_connected(@server, pod_id)
+
+  @spec mark_connected(GenServer.server(), String.t()) :: :ok
+  def mark_connected(server, pod_id) when is_binary(pod_id),
+    do: GenServer.cast(server, {:mark_connected, pod_id})
+
+  @doc "Has this pod's MCP client ever spoken (cf. `mark_connected/1`)? Query Port."
+  @spec connected?(String.t()) :: boolean()
+  def connected?(pod_id), do: connected?(@server, pod_id)
+
+  @spec connected?(GenServer.server(), String.t()) :: boolean()
+  def connected?(server, pod_id) when is_binary(pod_id),
+    do: GenServer.call(server, {:connected?, pod_id})
 end

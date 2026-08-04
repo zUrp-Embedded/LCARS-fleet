@@ -35,7 +35,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief` (`Pod.Brief`).
   - `brief_slot/1` — enqueue-by-slot decision (`Pod.Brief`, 3-state `:free|:occupied|:unknown`).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @doc """
@@ -56,6 +56,28 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   end
 
   def polled?(_), do: false
+
+  @doc """
+  The pod's REPL is UP: its MCP client has spoken on the pod socket at least once.
+
+  Strictly weaker than `polled?/1` — connecting is not taking a turn — and that is the point. It
+  is the only in-band signal available DURING a cold start, which is exactly the window where the
+  kick loop must not type: tmux buffers keys sent to a REPL that has not started, and the TUI
+  replays every buffered line as its own submission.
+
+  Same defensive shape as the other probes: a broker hiccup answers `false`, i.e. "not proven up",
+  which costs one more wait and never a spurious keystroke.
+  """
+  @spec repl_up?(String.t()) :: boolean()
+  def repl_up?(pod_id) when is_binary(pod_id) do
+    Fleet.TaskQueue.connected?(pod_id)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
+
+  def repl_up?(_), do: false
 
   # pod_status guard: a broker hiccup (down/restart, GenServer.call that EXITs) yields `:error`
   # instead of crashing — since `:error` matches no `{:ok, _}`, each probe falls back to `false`

@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod do
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -844,6 +844,20 @@ defmodule Fleet.Spawner.Pod do
         })
 
         {:keep_state_and_data, [cancel_kick_action()]}
+
+      # THE REPL IS NOT UP YET — AND TYPING INTO IT IS NOT A NO-OP. tmux buffers what is sent to a
+      # session whose TUI has not started, and the TUI then replays each buffered line as its own
+      # submission. The loop's stop condition cannot fire during that window either: every ACK it
+      # knows (`pulled`/`polled`) requires a turn, which requires the REPL. So every kick fired
+      # during a cold start is a guaranteed duplicate — measured 2026-08-04: 15 s + 6 x 2.5 s of
+      # cadence against a 20-40 s bwrap cold start = a scribe with SEVEN `engage` in its REPL,
+      # seven spurious turns on one dispatch.
+      # `repl_up?` is the in-band proof that exists in that window: the pod's MCP client speaks on
+      # its socket at TUI init, before any turn. We keep counting attempts — a REPL that never
+      # comes up must still end in the `wake.failed` escalation, and it now says the truth (the
+      # agent never showed up) instead of "it never answered our seven kicks".
+      not TaskProbe.repl_up?(data.pod_id) ->
+        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
 
       Fleet.Spawner.PodTmux.alive?(data.pod_id) ->
         _ = Kick.kick_send(data, polled)

@@ -62,7 +62,7 @@ defmodule Fleet.TaskQueue.Server do
       selection (`find_active`), supersession and the deadline guard — extracting it
       would force either a duplication of that authority, or a dedicated module for 20 LOC.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   use GenServer
@@ -118,6 +118,13 @@ defmodule Fleet.TaskQueue.Server do
       # signal "the agent is up + reached out"). In-mem/ephemeral: recency lives at runtime, not
       # persisted (a restart re-establishes it via subsequent polls).
       polls: %{},
+      # REPL-up per pod: the pod's MCP socket has received AT LEAST ONE line from it. Distinct from
+      # `polls`, and the distinction is the whole point — `polls` proves the agent asked for WORK
+      # (it took a turn), this proves only that its client is CONNECTED, which happens at TUI init,
+      # before any turn. It is what the kick loop needs: typing into a REPL that is not up yet is
+      # not a no-op (tmux buffers the keys and the TUI replays each line as its own submission).
+      # Same in-mem/ephemeral nature as `polls`, same purge point (`clear_for_pod`).
+      connects: %{},
       state_path: state_path,
       persist: persist?,
       topic: Keyword.get(opts, :topic, Bus.main_topic()),
@@ -182,6 +189,14 @@ defmodule Fleet.TaskQueue.Server do
   # ============================================================
   # Command Port
   # ============================================================
+
+  # CAST, not call: this is written from the pod-socket read loop, on every inbound line. A call
+  # would put the broker's mailbox on the critical path of an MCP response — the queue's health
+  # would become the pod's latency. Losing one mark costs nothing: the next line re-posts it.
+  @impl GenServer
+  def handle_cast({:mark_connected, pod_id}, state) do
+    {:noreply, %{state | connects: Map.put_new(state.connects, pod_id, true)}}
+  end
 
   @impl GenServer
   def handle_call({:enqueue, pod_id, attrs}, _from, state) do
@@ -339,7 +354,11 @@ defmodule Fleet.TaskQueue.Server do
     # dead pod_ids indefinitely: `record_poll` only adds entries, and `prune_terminal` only prunes
     # `work_items`. `clear_for_pod` is the pod's canonical purge point → this is where a poll becomes
     # obsolete. `Map.delete` idempotent: no-op if the pod never polled or has no active item.
-    state = %{state | polls: Map.delete(state.polls, pod_id)}
+    state = %{
+      state
+      | polls: Map.delete(state.polls, pod_id),
+        connects: Map.delete(state.connects, pod_id)
+    }
 
     active =
       state.work_items
@@ -414,6 +433,10 @@ defmodule Fleet.TaskQueue.Server do
   # monotonic/token, never DateTime-vs-DateTime — NTP jumps).
   def handle_call({:last_poll, pod_id}, _from, state) do
     {:reply, Map.get(state.polls, pod_id), state}
+  end
+
+  def handle_call({:connected?, pod_id}, _from, state) do
+    {:reply, Map.has_key?(state.connects, pod_id), state}
   end
 
   # ============================================================

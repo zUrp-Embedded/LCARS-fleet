@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -72,7 +72,17 @@ defmodule Fleet.Spawner.Pod.Kick do
   @spec wake_first_delay_ms() :: non_neg_integer()
   def wake_first_delay_ms, do: Application.get_env(:fleet_spawner, :wake_first_delay_ms, 15_000)
 
-  @doc "Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled — `engage` until the pull). Config `:kick_retry_ms`, default 2500 — startup wants frequency."
+  @doc """
+  Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled —
+  `engage` until the pull). Config `:kick_retry_ms`, default 2500.
+
+  The frequency is for the window AFTER the REPL is up, where a kick can actually be consumed.
+  It used to run through the cold start too, and there it bought nothing and cost one spurious
+  turn per tick: no ACK is reachable before the first turn, and tmux buffers every keystroke sent
+  to a TUI that has not started (7 `engage` in a scribe's REPL, measured 2026-08-04). The gate is
+  `TaskProbe.repl_up?/1` in the kick tick, not a wider delay here — spacing the retries would only
+  have made the same duplicates rarer.
+  """
   @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
 
