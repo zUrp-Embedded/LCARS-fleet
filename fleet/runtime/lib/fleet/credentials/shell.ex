@@ -90,7 +90,7 @@ defmodule Fleet.Credentials.Shell do
 
   The caller MUST match: an `{:error, {:timeout, _}}` is not a silent success.
 
-  **Last revised**: 2026-07-20
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -127,8 +127,13 @@ defmodule Fleet.Credentials.Shell do
   #     no "disable all filters" switch); a `filter.<name>.clean` in-tree with an arbitrary name stays
   #     executable by `git add`. The only real lock on the IN-TREE vector is therefore CONTENT-SIDE
   #     (fail-closed refusal of the payload that would write `.git/**` or a `.gitattributes` arming
-  #     `filter=`/`diff=`, done by the caller that places the content), not this flag. This flag closes
-  #     the GLOBAL-config vector.
+  #     `filter=`/`diff=`), not this flag. This flag closes the GLOBAL-config vector.
+  #
+  #     THAT LOCK IS `Fleet.Workflow.PayloadGuard`, and naming it is the point: this file
+  #     DELIBERATELY does not cover the in-tree vector, and a reader who only sees the deliberate
+  #     gap here has no way to learn whether anything covers it. Single dependency, both ends now
+  #     named; the refusal itself is held by a test (`deliverable_test`, `:dangerous_gitattributes`),
+  #     so the fact survives a prose purge.
   @git_safe_config_args [
     "-c",
     "core.hooksPath=/dev/null",

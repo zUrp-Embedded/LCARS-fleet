@@ -33,7 +33,10 @@ defmodule Fleet.Workflow.PayloadGuard do
       the GLOBAL file; the IN-TREE `.gitattributes` stays honored and is NOT
       disablable via `-c` (git has no "disable all filters"). The ONLY real
       lock on this vector is therefore THIS content refusal →
-      `{:dangerous_gitattributes, path}`.
+      `{:dangerous_gitattributes, path}`. `Fleet.Credentials.Shell` closes the
+      GLOBAL-config vector with `core.attributesFile=/dev/null` and leaves this
+      one to us ON PURPOSE — weakening the clause below removes the only net,
+      and nothing upstream will catch it.
     * **Symlink in the chain** — `Path.expand` is LEXICAL (resolves `..`, NOT
       symlinks): a symlink checked into the cloned repo
       (`out -> /home/<human>/.claude`) passes the prefix check, but
@@ -44,7 +47,7 @@ defmodule Fleet.Workflow.PayloadGuard do
   writing without validating is impossible by construction (validation is not
   an optional exposed step).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-05
   """
 
   @doc """
