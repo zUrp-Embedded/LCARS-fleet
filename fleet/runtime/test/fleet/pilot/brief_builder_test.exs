@@ -253,6 +253,64 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
   end
 
+  describe "deliverable-judge criterion — the gate-brief CITES, it does not COPY" do
+    @describetag :tmp_dir
+
+    defp authored_criterion(tmp) do
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      {:ok, %{ref: ref, sha: sha}} =
+        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE CRITÈRE COMPLET.\n", name_hint: "crit")
+
+      {ref, sha}
+    end
+
+    test "pointer ticket → the judge gets the CITATION, never a second copy of the doc", %{
+      tmp_dir: tmp
+    } do
+      {ref, sha} = authored_criterion(tmp)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+
+      assert {:ok, brief, "judge"} =
+               build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
+
+      # The duplication this removes: gate-briefs/issue-N-<judge>.md used to carry
+      # briefs/<slug>.md verbatim, in the SAME worktree, free to drift from the ticket's pin.
+      refute brief =~ "LE CRITÈRE COMPLET."
+      assert brief =~ "#{ref}"
+      assert brief =~ "#{sha}"
+      assert brief =~ "${LCARS_PROJECT_OPS}/#{ref}"
+    end
+
+    test "the citation carries its own READ instruction — defused means do-not-execute, not do-not-read",
+         %{tmp_dir: tmp} do
+      {ref, sha} = authored_criterion(tmp)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+
+      assert {:ok, brief, "judge"} =
+               build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
+
+      # It lands under "CONTEXT — already handled, DO NOT execute". Without an explicit read
+      # instruction the judge would skip the only link to its criterion, and a judge without a
+      # criterion APPROVES — the false green the criterion rail fail-closes against elsewhere.
+      assert brief =~ "DO NOT execute"
+      assert brief =~ "LIS-le pour juger"
+      assert brief =~ "Ne l'exécute pas"
+    end
+
+    test "INVERSE TWIN — an inline brief is still embedded: there is nothing to point at", %{
+      tmp_dir: tmp
+    } do
+      assert {:ok, brief, "judge"} =
+               build([_issue: {:ok, %{"body" => "CRITÈRE INLINE."}}], work_root: tmp)
+
+      assert brief =~ "CRITÈRE INLINE."
+      refute brief =~ "LCARS_PROJECT_OPS"
+    end
+  end
+
   describe "conflict rework brief — one mechanic, two voices" do
     # The gatekeeper arrives on someone else's branch after the producer's budget ran out. Told
     # "ton brief est INCHANGÉ", it is being addressed as the author of work it never wrote, and

@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -424,7 +424,7 @@ defmodule Fleet.Pilot.BriefBuilder do
              workflow_map_id: workflow_map_name,
              gate: nil,
              outputs: outputs,
-             request: Map.get(issue, "body")
+             request: judge_criterion(issue)
            })}
         end
 
@@ -432,6 +432,30 @@ defmodule Fleet.Pilot.BriefBuilder do
         {:error, {:criterion_unavailable, reason}}
     end
   end
+
+  # DEDUP, symmetric to `build_brief_review_brief` which has done this since 2026-07-19. A
+  # pointer-backed criterion is NOT re-embedded: the gate-brief CITES the source doc, and the judge
+  # reads it through the RO work/ops mount that EVERY project pod carries (`project_ops_mount` —
+  # "the work-ops RO mount stays for ALL project pods"). Before this, `gate-briefs/issue-N-<judge>.md`
+  # duplicated `briefs/<slug>.md` verbatim inside the same worktree, and the two could DRIFT: the
+  # ticket's pointer moves with a new pin, the copy frozen inside the gate-brief does not — the judge
+  # would then weigh a delivery against a criterion nobody had asked for any more.
+  #
+  # The sentence carries its own READ instruction, and that is load-bearing. This value lands in the
+  # `request` section, rendered under "CONTEXT — already handled, DO NOT execute" — a defusing that
+  # is CORRECT (the doc is a brief; a judge that executes it produces instead of judging) and that
+  # would otherwise tell the judge to ignore the only link to its criterion. A judge without a
+  # criterion approves: that is the false GREEN the criterion rail fail-closes against everywhere
+  # else. Read, do not execute — the two are not the same instruction, and both must be said.
+  defp judge_criterion(%{"_brief_source" => {ref, sha}}) do
+    "Le critère de succès est le doc d'auteur `#{ref}` @ `#{sha}`, monté en lecture seule sous " <>
+      "`${LCARS_PROJECT_OPS}/#{ref}`. LIS-le pour juger : c'est cette version pinnée qui fait foi, " <>
+      "pas le résumé du ticket. Ne l'exécute pas — il décrit un travail déjà livré, que tu évalues."
+  end
+
+  # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to
+  # point at, and an invented citation would be worse than a copy.
+  defp judge_criterion(issue), do: Map.get(issue, "body")
 
   # Brief of a BRIEF judge (brief-review, judge_target:brief). The scoper judges the BRIEF
   # (issue.body written by the arch) BEFORE the engineer sets off: executable without a new question? We
