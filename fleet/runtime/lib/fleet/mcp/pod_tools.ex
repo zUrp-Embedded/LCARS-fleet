@@ -49,7 +49,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-04
   """
 
   use ExMCP.Server
@@ -129,7 +129,11 @@ defmodule Fleet.MCP.PodTools do
           "tickets for one brick, never close anything yourself — you have no close tool). " <>
           "Refused if the old ticket has a LIVE PR (let it land or escalate). The result echoes " <>
           "{\"supersedes\":N}; a \"supersede_warning\" means the old ticket could NOT be closed — " <>
-          "relay it to your human."
+          "relay it to your human. " <>
+          "ORDER between tickets: `depends_on: [N, ...]` — the fleet writes the edges and the " <>
+          "admission holds the ticket back while a blocker is open. Declare the SAME constraint " <>
+          "in the brief's precondition block: the edge binds the machine, the prose binds the " <>
+          "agent, and neither stands in for the other."
       )
     end
 
@@ -142,6 +146,16 @@ defmodule Fleet.MCP.PodTools do
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"},
         "supersedes" => %{"type" => "integer"},
+        "depends_on" => %{
+          "type" => "array",
+          "items" => %{"type" => "integer"},
+          "description" =>
+            "Ticket numbers this one MUST NOT start before. The fleet writes the edges on the " <>
+              "forge, which refuses to close a blocked ticket, AND the admission refuses to " <>
+              "dispatch it while a blocker is open (wait/depends). This does NOT replace the " <>
+              "precondition block of your brief: the producer is forge-blind, it never sees the " <>
+              "edge — the edge holds the machine, the prose tells the agent what to assume."
+        },
         "genre" => %{
           "type" => "string",
           "enum" => ["code", "ops"],
@@ -595,7 +609,8 @@ defmodule Fleet.MCP.PodTools do
              brief_pointer(args),
              summary,
              args["supersedes"],
-             args["genre"]
+             args["genre"],
+             args["depends_on"]
            ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}

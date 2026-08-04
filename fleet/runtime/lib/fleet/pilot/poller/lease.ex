@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   This module also owns the **tally** vocabulary (`zero_tally/0`, `merge_tally/2`)
   — the observability currency of the tick, produced here and aggregated by the poller.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -198,14 +198,55 @@ defmodule Fleet.Pilot.Poller.Lease do
               {acc2, _} = Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
               {acc2, fan}
 
-            # QUEUED with room → STARTS, and takes a seat only if it actually started.
+            # QUEUED with room → STARTS, unless a PRECONDITION is not met, and takes a seat only if
+            # it actually started.
+            #
+            # LA DÉPENDANCE EST LUE À L'ENTRÉE, PAS SEULEMENT SUBIE À LA SORTIE. La forge applique
+            # déjà les dépendances d'issues : elle refuse la FERMETURE d'un ticket dont un bloqueur
+            # est ouvert. Sans cette lecture-ci, la fleet dispatche quand même — le producteur
+            # travaille, livre, et le mur ne se révèle qu'au merge : deux rails parallèles qui ne
+            # se rencontrent qu'au moment le plus cher, exactement l'état du CI avant sa porte.
+            # La contrainte porte sur le DÉMARRAGE, jamais sur la poursuite : un run ENGAGÉ est
+            # déjà passé au-dessus (clause précédente), et l'interrompre en vol le coincerait.
             true ->
-              {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
-              {acc2, if(started?, do: fan + 1, else: fan)}
+              case open_blockers(issue, seams) do
+                [] ->
+                  {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
+                  {acc2, if(started?, do: fan + 1, else: fan)}
+
+                [blocker | _] ->
+                  {acc2, _} =
+                    Admission.refuse({:depends, blocker}, item_opts, issue["number"], wait, acc)
+
+                  {acc2, fan}
+              end
           end
       end)
 
     tally
+  end
+
+  # Les bloqueurs ENCORE OUVERTS de ce ticket. Un bloqueur fermé compte comme satisfait — c'est la
+  # sémantique de la forge, et on ne la ré-invente pas ici.
+  #
+  # Lecture PARESSEUSE, dans la dernière branche seulement : un ticket déjà en vol, porteur de PR ou
+  # refusé au plafond n'a pas besoin qu'on interroge la forge sur ses arêtes. Le coût est donc UN
+  # GET par ticket réellement candidat au démarrage, pas par ticket vu.
+  #
+  # Forge muette → `[]`, donc on dispatche. C'est le sens sûr : la forge REFUSERA la fermeture si un
+  # bloqueur est ouvert, donc le mur tient de toute façon ; l'inverse (bloquer sur une lecture ratée)
+  # arrêterait la fleet entière sur un hoquet réseau.
+  defp open_blockers(issue, %Seams{} = seams) do
+    case seams.forge.issue_dependencies(seams.repo, Map.get(issue, "number"), seams.forge_opts) do
+      {:ok, deps} when is_list(deps) ->
+        deps
+        |> Enum.filter(&(Map.get(&1, "state") == "open"))
+        |> Enum.map(&Map.get(&1, "number"))
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        []
+    end
   end
 
   # Dispatch of an item + update of the tally AND the lease. Two DISTINCT concerns, that the return of

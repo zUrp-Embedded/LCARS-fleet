@@ -16,6 +16,10 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   alias Fleet.TestEnv
 
   defmodule NoRouteForge do
+    # L'admission lit les preconditions avant de DEMARRER un ticket : un stub sans cette lecture
+    # ne peut pas voir la porte, et la laisserait disparaitre sans qu'un test rougisse.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+
     # No `wfmap/*` route engraved: every issue is a fresh one → QUEUED, never ENGAGED. The lease
     # DERIVES the route from the labels it already holds, so `:none` here is the answer to a
     # question asked without I/O — a stub of `get_route/3` would answer one nobody asks anymore.

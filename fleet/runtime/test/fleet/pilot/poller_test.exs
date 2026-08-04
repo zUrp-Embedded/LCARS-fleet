@@ -307,6 +307,10 @@ defmodule Fleet.Pilot.PollerTest do
   # Forge stub for step mode: list (filter already applied on the real API side, here we return
   # as-is) + the write-ops touched by StepDispatcher.dispatch_issue (add_label / post_comment).
   defmodule StepStubForge do
+    # L'admission lit les preconditions avant de DEMARRER un ticket : un stub sans cette lecture
+    # ne peut pas voir la porte, et la laisserait disparaitre sans qu'un test rougisse.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+
     # WS3 — the poller DISCOVERS its repos by org-membership (`list_org_repos`) BEFORE scanning.
     # Default = THE test repo (single-repo: 1 repo discovered → 1 `step_do_poll`). `_test_repos`
     # for multi-repo, `_test_discover` to simulate a failing discovery (forge down → backoff). No

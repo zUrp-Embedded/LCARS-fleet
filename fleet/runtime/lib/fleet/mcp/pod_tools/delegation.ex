@@ -97,7 +97,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
         brief_pointer \\ nil,
         summary \\ nil,
         supersedes \\ nil,
-        genre \\ nil
+        genre \\ nil,
+        depends_on \\ nil
       )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
@@ -144,6 +145,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
           case do_create_issue(forge, repo, title, full_body, [token: identity.token], genre) do
             {:ok, result} ->
+              # L'ORDRE ENTRE TICKETS S'ÉCRIT SUR LA FORGE, PAS SEULEMENT DANS LA PROSE. La forge
+              # refuse la fermeture d'un ticket bloqué, et l'admission refuse de le DÉMARRER tant
+              # qu'un bloqueur est ouvert (`wait/depends`). Sans l'arête, la contrainte n'existe que
+              # dans le brief : elle tient tant qu'un agent la lit, c'est-à-dire pas.
+              # Best-effort ASSUMÉ, et c'est la seule dissymétrie avec le supersede : ici le ticket
+              # est déjà créé et il est correct — une arête manquante dégrade l'ordre, elle ne rend
+              # rien faux. Le supersede, lui, refuse de fermer si le report échoue, parce que fermer
+              # LIBÈRE. Poser < libérer.
+              result = attach_dependencies(forge, repo, result, depends_on)
               {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
 
             err ->
@@ -1223,6 +1233,35 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp supersedes_preflight(_forge, _repo, _bad), do: {:error, :invalid_supersedes}
+
+  # Pose les arêtes déclarées par l'architecte au moment où il énonce la contrainte. Ce qui échoue
+  # est DIT dans le résultat (l'arch le relaie à son humain), jamais avalé : une dépendance qu'on
+  # croit posée et qui ne l'est pas est pire que pas de dépendance du tout.
+  defp attach_dependencies(_forge, _repo, result, nil), do: result
+  defp attach_dependencies(_forge, _repo, result, []), do: result
+
+  defp attach_dependencies(forge, repo, result, blockers) when is_list(blockers) do
+    n = Map.get(result, "issue")
+
+    failed =
+      Enum.reject(blockers, fn b ->
+        match?({:ok, _}, forge.add_issue_dependency(repo, n, b, []))
+      end)
+
+    case failed do
+      [] ->
+        Map.put(result, "depends_on", blockers)
+
+      some ->
+        result
+        |> Map.put("depends_on", blockers -- some)
+        |> Map.put(
+          "depends_on_warning",
+          "arêtes NON posées sur la forge : #{inspect(some)} — la contrainte n'est portée que par " <>
+            "la prose du brief, fais-la poser par ton humain"
+        )
+    end
+  end
 
   # Reporte les deux sens sur le remplaçant. Un échec REMONTE (le `with` ci-dessus n'ira pas fermer) :
   # un supersede à moitié recâblé qui ferme quand même est exactement le trou qu'on bouche —

@@ -154,6 +154,9 @@ defmodule Fleet.Labels do
   def wait_for(:draining), do: @wait_prefix <> "draining"
   def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"
   def wait_for(:ci_pending), do: @wait_prefix <> "ci"
+  # Précondition NON satisfaite : un bloqueur déclaré sur la forge est encore ouvert. Le ticket
+  # n'attend ni la fleet ni un juge — il attend un AUTRE ticket, et c'est ce que l'étiquette dit.
+  def wait_for({:depends, _blocker}), do: @wait_prefix <> "depends"
   # The CI door defers on a read it could not make (PR object, status list, or the marker that
   # bounds the red loop). From the ticket's side these are ALL the same fact — it is stopped at the
   # CI gate, and nobody is working on it — so they share `wait/ci` rather than teaching a human
