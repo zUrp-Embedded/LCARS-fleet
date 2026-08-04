@@ -67,6 +67,7 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
   defmodule ConformingForge do
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 

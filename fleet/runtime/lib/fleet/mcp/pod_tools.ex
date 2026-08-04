@@ -38,6 +38,18 @@ defmodule Fleet.MCP.PodTools do
         write channel existed without its read half — a radio that transmits but not receives).
       - `get_issue`        : the arch reads ONE ticket in full (body + comment thread).
       - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
+      - `retire_issue`     : the arch abandons a ticket with NO replacement — the live PR is
+        closed, the dependents are told and RELEASED (a supersede carries its edges, a
+        retirement lifts them), `stage/retired`.
+      - `open_project`     : the inverse of `close_project` (the parking marker is lifted).
+      - `delete_project`   : destroys a project. Disarmed by deployment flag.
+      - `list_workflow_cards` : the validation cards a project can be onboarded against.
+
+  ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
+  `retire_issue` was added). The authority is the `deftool` set itself, and the gate reads it from
+  the AST: `mcp.tools_gated` in `lcars.contracts.check` refuses any tool that is neither pod-scoped
+  nor role-gated, and any dispatch clause with no schema. A tool absent from this prose is a stale
+  comment; a tool absent from that check does not exist.
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly
   (the queue, its schema, its storage stay invisible to the pod); everything goes through
@@ -542,6 +554,35 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "retire_issue" do
+    meta do
+      name("Retire Issue")
+
+      description(
+        "RETIRE a ticket of YOUR project WITHOUT replacing it: the work is abandoned, not moved. " <>
+          "Use it when a ticket should never have existed, or no longer should — obsolete, " <>
+          "duplicated, out of scope. To replace a ticket by a corrected one, use " <>
+          "`create_issue` with `supersedes` instead: that one CARRIES the dependencies onto the " <>
+          "successor, this one LIFTS them. `number` = the issue number. `reason` = why, in one " <>
+          "or two sentences — it is posted on the ticket and it is the only trace of your " <>
+          "decision. What happens: the live pull request is closed, every ticket that depended " <>
+          "on this one is commented and released, the reason is posted, the ticket is closed as " <>
+          "`stage/retired` (NOT delivered) and its pods are reaped. Any failure ABORTS and leaves " <>
+          "the ticket open. An already-closed ticket returns \"retired\":false and changes " <>
+          "nothing. Returns {\"issue\":N,\"retired\":true,\"released\":[...],\"pr_closed\":N|null}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "number" => %{"type" => "integer"},
+        "reason" => %{"type" => "string"}
+      },
+      "required" => ["number", "reason"]
+    })
+  end
+
   # ============================================================
   # Dispatch — work-item drive (Fleet.MCP.PodTools.WorkItems)
   # ============================================================
@@ -807,6 +848,19 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("comment_issue", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # Retirement without a replacement (architect gate inside Delegation, repo from the channel).
+  def handle_tool_call("retire_issue", %{"number" => number, "reason" => reason}, state)
+      when is_integer(number) and is_binary(reason) and reason != "" do
+    case Delegation.retire_issue(number, reason, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("retire_issue", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

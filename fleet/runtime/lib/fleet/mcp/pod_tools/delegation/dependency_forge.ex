@@ -47,4 +47,17 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
               blocker :: integer(),
               opts :: keyword()
             ) :: {:ok, map()} | {:error, term()}
+
+  @doc """
+  Removes "`number` depends on `blocker`" (same repo).
+
+  A retirement without a replacement has nowhere to move its edges, so it LIFTS them. Without this,
+  closing the retired blocker would release every dependent as if the work had landed.
+  """
+  @callback remove_issue_dependency(
+              repo :: String.t(),
+              number :: integer(),
+              blocker :: integer(),
+              opts :: keyword()
+            ) :: {:ok, map()} | {:error, term()}
 end

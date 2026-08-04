@@ -187,6 +187,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -259,6 +260,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -393,6 +395,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -474,6 +477,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -638,6 +642,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -714,6 +719,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
@@ -1928,6 +1934,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient

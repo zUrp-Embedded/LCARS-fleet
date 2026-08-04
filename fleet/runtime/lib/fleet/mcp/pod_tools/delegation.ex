@@ -125,7 +125,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, forge} <- conforming_forge(),
          {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
-         {:ok, target_state} <- supersedes_preflight(forge, repo, supersedes) do
+         {:ok, target_state} <- target_state_preflight(forge, repo, supersedes) do
       # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
       # forge POST CONTINUE — a physicalize (push work/ops) + create_issue can exceed it. The agent then
       # re-emits the SAME tool call and a bare create would post a DUPLICATE issue (the forge enforces no
@@ -1220,9 +1220,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Or l'intention d'un retrait — arrêter la machine, borner le coût — ne dépend pas de l'existence
   # d'une PR. On rend donc le geste COMPLET (`:with_pr` → la PR se ferme avec le ticket) au lieu
   # d'interdire le geste.
-  defp supersedes_preflight(_forge, _repo, nil), do: {:ok, nil}
+  defp target_state_preflight(_forge, _repo, nil), do: {:ok, nil}
 
-  defp supersedes_preflight(forge, repo, n) when is_integer(n) and n > 0 do
+  defp target_state_preflight(forge, repo, n) when is_integer(n) and n > 0 do
     case forge.get_issue(repo, n, []) do
       {:ok, %{"state" => "closed"}} ->
         {:ok, :closed}
@@ -1232,19 +1232,19 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok, %{"state" => "open", "number" => pr}} -> {:ok, {:open, pr}}
           {:ok, _closed_pr} -> {:ok, :open}
           :none -> {:ok, :open}
-          {:error, _} -> {:error, {:supersedes_target_unverifiable, n}}
+          {:error, _} -> {:error, {:target_unverifiable, n}}
         end
 
       err ->
         Logger.warning(
-          "Delegation: supersedes preflight ##{n} on #{repo} unreadable (#{inspect(err)}) — REFUSED"
+          "Delegation: target preflight ##{n} on #{repo} unreadable (#{inspect(err)}) — REFUSED"
         )
 
-        {:error, {:supersedes_target_unreadable, n}}
+        {:error, {:target_unreadable, n}}
     end
   end
 
-  defp supersedes_preflight(_forge, _repo, _bad), do: {:error, :invalid_supersedes}
+  defp target_state_preflight(_forge, _repo, _bad), do: {:error, :invalid_target}
   # La PR du ticket retiré meurt avec lui. Un échec REMONTE : fermer l'issue en laissant sa PR
   # vivante recrée exactement l'incohérence que ce geste existe pour empêcher.
   defp close_live_pr(_forge, _repo, nil), do: :ok
@@ -1344,6 +1344,115 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:halt, {:error, {:edge_without_number, issue}}}
       end
     end)
+  end
+
+  @doc """
+  Retires a ticket WITHOUT inventing a replacement.
+
+  Every piece of this gesture already existed — closing the live PR, lifting the pods, `stage/retired`,
+  the comment — as a SIDE EFFECT of `create_issue(supersedes:)`. The cost was measured on the bench:
+  to retire a ticket the architect had to create another one, which then went out to dispatch and
+  landed on a producer with nothing to produce. A real gesture the fleet knows how to execute, that
+  one had to disguise as a ticket for want of a door.
+
+  Where it DIVERGES from the supersede, and why: a supersede moves the edges onto the replacement.
+  A retirement has no replacement, so it LIFTS them. Leaving them would be worse than either — a
+  closed blocker counts as satisfied on the forge, so every dependent would silently become closable
+  as if the work had landed, while nothing was delivered.
+
+  Order is the contract, twice over:
+
+    * the live PR dies FIRST. The pulls rail is INDEPENDENT of the issues rail (`dispatch_review`
+      polls pulls outside the lease and never reads the issue state), so a PR left open on a retired
+      ticket goes on being judged and merged.
+    * on each dependent, the COMMENT lands before the edge is lifted. If the lift then fails, a
+      still-blocked ticket carries a comment about a retirement — noisy, and a human sees it. The
+      reverse order would silently unblock a ticket with nothing said.
+
+  Any failure ABORTS before the close: closing RELEASES, so a half-executed retirement is worse than
+  none. An already-closed target is a no-op success, not an error — the stdio bridge times out a
+  mutation at 30s while the forge call continues, and the agent re-emits.
+  """
+  @spec retire_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def retire_issue(number, reason, state)
+      when is_integer(number) and number > 0 and is_binary(reason) and reason != "" do
+    with {:ok, %{repo: repo}} <- require_architect(state),
+         {:ok, forge} <- conforming_forge(),
+         {:ok, _} <- conforming(DependencyForge, forge),
+         {:ok, target} <- target_state_preflight(forge, repo, number) do
+      do_retire_issue(forge, repo, number, reason, target)
+    end
+  end
+
+  def retire_issue(_number, _reason, _state), do: {:error, :invalid_arguments}
+
+  defp do_retire_issue(_forge, _repo, n, _reason, :closed) do
+    {:ok,
+     %{
+       "issue" => n,
+       "retired" => false,
+       "note" => "##{n} etait deja ferme — rien fait, le retrait est idempotent"
+     }}
+  end
+
+  defp do_retire_issue(forge, repo, n, reason, target) do
+    pr = if match?({:open, _}, target), do: elem(target, 1)
+
+    with :ok <- close_live_pr(forge, repo, pr),
+         {:ok, dependents} <- forge.issue_blocks(repo, n, []),
+         {:ok, released} <- release_dependents(forge, repo, n, dependents),
+         {:ok, _} <- forge.post_comment(repo, n, retire_comment(reason), []),
+         {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
+      # A retired ticket is a DEAD ticket: its pods die with it, same arbitrage and same seam as the
+      # supersede path.
+      _ = pod_reaper().reap_issue(repo, n)
+
+      {:ok, %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}}
+    else
+      {:error, reason} ->
+        Logger.error(
+          "Delegation: retirement of #{repo}##{n} ABORTED (#{inspect(reason)}) — " <>
+            "the ticket is still OPEN, which is the safe half of the failure"
+        )
+
+        {:error, {:retire_aborted, n, reason}}
+    end
+  end
+
+  # Lifts the edges pointing AT the retired ticket, one dependent at a time, and says so on each.
+  # A dependent whose number is not an integer HALTS: an edge we cannot address is an edge we cannot
+  # lift, and skipping it would close the blocker with that dependent still hanging off it.
+  defp release_dependents(_forge, _repo, _n, []), do: {:ok, []}
+
+  defp release_dependents(forge, repo, n, dependents) do
+    Enum.reduce_while(dependents, {:ok, []}, fn dep, {:ok, acc} ->
+      case Map.get(dep, "number") do
+        d when is_integer(d) ->
+          # Comment BEFORE lift — see the order contract in `retire_issue/3`.
+          with {:ok, _} <- forge.post_comment(repo, d, released_comment(n), []),
+               {:ok, _} <- forge.remove_issue_dependency(repo, d, n, []) do
+            {:cont, {:ok, [d | acc]}}
+          else
+            {:error, err} -> {:halt, {:error, {:dependent_not_released, d, err}}}
+          end
+
+        _ ->
+          {:halt, {:error, {:edge_without_number, dep}}}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      err -> err
+    end
+  end
+
+  defp retire_comment(reason) do
+    "Ticket retiré par l'architecte — aucun remplaçant, rien n'a été livré.\n\nMotif : #{reason}"
+  end
+
+  defp released_comment(n) do
+    "Le bloqueur ##{n} a été retiré sans remplaçant : la dépendance est levée sur ce ticket. " <>
+      "Si ce travail restait nécessaire, il doit être redemandé — le retrait n'a rien livré."
   end
 
   # Retirement of the replaced ticket — SYSTEM identity (default token: the system executes,

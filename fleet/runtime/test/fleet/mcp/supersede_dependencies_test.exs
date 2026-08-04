@@ -21,6 +21,8 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     def issue_blocks(_repo, 16, _opts), do: {:ok, [%{"number" => 9}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
 
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     def add_issue_dependency(_repo, number, blocker, _opts) do
       send(self(), {:edge, number, blocker})
       {:ok, %{}}
@@ -42,6 +44,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   defmodule RefusingForge do
     def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:error, {:http, 500, "boom"}}
 
     def post_comment(_repo, n, _body, _opts) do
@@ -59,6 +62,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   defmodule ConflictForge do
     def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:error, {:http, 409, "already"}}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
@@ -125,6 +129,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     def post_comment(_repo, n, _body, _opts) do
@@ -142,6 +147,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     def close_pr(_repo, _pr, _opts), do: {:error, {:http, 500, "boom"}}
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
