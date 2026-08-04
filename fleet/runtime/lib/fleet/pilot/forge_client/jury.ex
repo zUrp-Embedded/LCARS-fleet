@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
   not the requested field. Details in each `@doc`.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-04
   """
 
   import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, paginate: 3]
@@ -74,16 +74,28 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
 
   ## Returns
     * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓],
-      outcome: review_outcome(reviewers, verdicts)}}` — `outcome` is computed HERE (pilot-side)
+      records: [%{"login", "verdict", "submitted_at", "body"}], outcome:
+      review_outcome(reviewers, verdicts)}}` — `outcome` is computed HERE (pilot-side)
       and carried as DATA so a seam consumer (`get_issue_status`) renders the gate's own
       predicate without re-implementing it.
     * `{:error, term()}` — HTTP/transport/config
+
+  `records` carries what `verdicts` cannot: the SUBSTANCE and the TIMING of each in-force verdict.
+  The two are derived from ONE grouping (`decisive_by_reviewer/2`), because "which review is in
+  force for this reviewer" is a single question and two implementations of it would drift — the
+  routing would then act on one answer while the human read the other.
+
+  Why it matters, and it is measured: a rubber stamp and a real review are indistinguishable in
+  `verdicts` — both are `:approved`. On the forge they never were: two `submitted_at` seconds apart
+  versus a minute, and two incomparable bodies. The architect's first blind spot was FALSE at the
+  level of the data and TRUE at the level of its tools; this is the half that was missing.
   """
   @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
           {:ok,
            %{
              verdicts: %{optional(String.t()) => :approved | :changes_requested},
              reviewers: [String.t()],
+             records: [map()],
              outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
            }}
           | {:error, term()}
@@ -92,11 +104,17 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
 
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} <- paginated_reviews(config, repo, index) do
-      verdicts = verdicts_by_reviewer(reviews, head_sha)
+      decisive = decisive_by_reviewer(reviews, head_sha)
+      verdicts = Map.new(decisive, fn {login, r} -> {login, decisive_verdict(r["state"])} end)
       reviewers = jury_reviewers(reviews)
 
       {:ok,
-       %{verdicts: verdicts, reviewers: reviewers, outcome: review_outcome(reviewers, verdicts)}}
+       %{
+         verdicts: verdicts,
+         reviewers: reviewers,
+         records: to_records(decisive),
+         outcome: review_outcome(reviewers, verdicts)
+       }}
     end
   end
 
@@ -139,13 +157,37 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   # is STALE — the judged code no longer exists, the judge must re-judge. Indispensable because Gitea does
   # NOT dismiss a REQUEST_CHANGES on push (only stale approvals via branch-protection are): without this
   # filter, a stale REQUEST_CHANGES that is never re-dispatched blocks the PR FOREVER.
-  defp verdicts_by_reviewer(reviews, head_sha) do
+  # The IN-FORCE review per reviewer, as the raw forge record. ONE definition of "in force", from
+  # which both the routing verdict and the human-facing record derive: two implementations of the
+  # same question drift, and the gate would then route on one answer while the architect reads the
+  # other.
+  defp decisive_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
     |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
     |> reject_stale_reviews(head_sha)
     |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
-    |> Map.new(fn {login, revs} -> {login, decisive_verdict(List.last(revs)["state"])} end)
+    |> Map.new(fn {login, revs} -> {login, List.last(revs)} end)
+  end
+
+  # String keys and string values: these records cross the MCP seam and are rendered as JSON to an
+  # agent. An atom verdict would serialize as a bare string anyway — saying so here keeps the shape
+  # honest rather than leaving it to Jason.
+  #
+  # A body is kept VERBATIM, empty string included: "this judge approved and wrote nothing" is a
+  # FACT about the review, and it is precisely the one worth seeing. Dropping empty bodies would
+  # erase the rubber stamp this exists to make visible.
+  defp to_records(decisive) do
+    decisive
+    |> Enum.map(fn {login, r} ->
+      %{
+        "login" => login,
+        "verdict" => Atom.to_string(decisive_verdict(r["state"])),
+        "submitted_at" => r["submitted_at"],
+        "body" => r["body"] || ""
+      }
+    end)
+    |> Enum.sort_by(& &1["submitted_at"])
   end
 
   # `head_sha == nil` (low-level / legacy callers) → no scoping. Otherwise: strict `commit_id == head`.

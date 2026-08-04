@@ -318,6 +318,23 @@ defmodule Fleet.MCP.PodToolsTest do
          %{
            verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
            reviewers: ["qualifier", "reviewer"],
+           # The two approvals differ ONLY here — same verdict, incomparable substance and 58
+           # seconds apart. That difference is the reason `records` exists, and a stub that
+           # returned two identical records would prove nothing about rendering it.
+           records: [
+             %{
+               "login" => "qualifier",
+               "verdict" => "approved",
+               "submitted_at" => "2026-08-04T10:00:01Z",
+               "body" => ""
+             },
+             %{
+               "login" => "reviewer",
+               "verdict" => "approved",
+               "submitted_at" => "2026-08-04T10:00:59Z",
+               "body" => "Gate vert, 3 cas limites verifies, cf. gate-brief @ abc123."
+             }
+           ],
            outcome: :approved
          }}
 
@@ -600,6 +617,7 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_projects(_opts),
       do: {:ok, [%{"name" => "demo", "repo" => "fleet/demo", "state" => "open"}]}
 
+    @impl true
     def list_stoppable_issues(_repo, _opts), do: {:ok, []}
 
     def close_project(full_name, opts) do

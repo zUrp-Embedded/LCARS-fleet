@@ -1861,10 +1861,22 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # pilot-side (`Jury.review_outcome/2`) and carried as DATA by `pr_review_state` — factored,
   # never copied here.
   defp render_pr(forge, repo, pr) do
-    {verdicts, review} =
+    {verdicts, records, review} =
       case forge.pr_review_state(repo, pr["number"], head_sha: get_in(pr, ["head", "sha"])) do
+        {:ok, %{verdicts: verdicts, outcome: outcome, records: records}} ->
+          {verdicts, records, review_string(outcome)}
+
+        # A seam that answers WITHOUT `records` is not a mute forge and must not be reported as
+        # one: the routing verdicts are usable, only the substance is missing. Distinct message,
+        # distinct rendering — collapsing the two would hide a stub or an out-of-date
+        # implementation behind an outage.
         {:ok, %{verdicts: verdicts, outcome: outcome}} ->
-          {verdicts, review_string(outcome)}
+          Logger.warning(
+            "Delegation: issue_status #{repo} PR##{pr["number"]} — the review seam returned no " <>
+              ":records; verdicts rendered WITHOUT their bodies and timings"
+          )
+
+          {verdicts, [], review_string(outcome)}
 
         # LOUD before the fallback (same stance as get_issue above): a mute forge must not
         # read as "no verdicts yet" — review=unknown marks the degraded read.
@@ -1874,9 +1886,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
               "(pr_review_state → #{inspect(err)}) — falling back to review=unknown"
           )
 
-          {%{}, "unknown"}
+          {%{}, [], "unknown"}
       end
 
+    # `reviews` carries what `verdicts` structurally cannot: WHAT each judge wrote and WHEN. Two
+    # approvals are the same value in `verdicts` and were never the same thing on the forge — one
+    # cites its gate-brief, the other lands a second after being asked. The architect spent three
+    # campaigns reconstituting that difference from the outside; it was in the payload all along.
     %{
       "number" => pr["number"],
       "state" => pr["state"],
@@ -1884,7 +1900,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
       "review" => review,
       "verdicts" => verdicts
     }
+    |> put_present("reviews", presence(records))
   end
+
+  defp presence([]), do: nil
+  defp presence(list), do: list
 
   defp review_string({:pending, _}), do: "pending"
   defp review_string(:no_jury), do: "no_jury"

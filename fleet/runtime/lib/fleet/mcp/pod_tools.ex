@@ -442,12 +442,17 @@ defmodule Fleet.MCP.PodTools do
           "\"closed_without_merge\" (closed WITHOUT delivery: abandon/rejection — do NOT chain) | " <>
           "\"in_review\" (PR open, review running) | \"open\" (no PR yet) | " <>
           "\"unknown\" (forge unreachable — retry, decide nothing on it). " <>
-          "`pr` = {number,state,merged,review,verdicts} of the fleet PR — the review trail " <>
+          "`pr` = {number,state,merged,review,verdicts,reviews} of the fleet PR — the review trail " <>
           "SURVIVES the merge (how it was judged stays readable after delivery). `review` is the " <>
           "merge gate's own predicate: \"approved\" | \"pending\" | \"changes_requested\" | " <>
-          "\"no_jury\" | \"unknown\" (read failed). The `pr` key is ABSENT when no fleet PR " <>
-          "exists (nothing to say); {\"error\":\"forge_unreachable\"} means the PR read failed — " <>
-          "never confuse it with 'no PR'."
+          "\"no_jury\" | \"unknown\" (read failed). `verdicts` maps each judge to its verdict; " <>
+          "`reviews` gives the SUBSTANCE of each one — [{\"login\",\"verdict\"," <>
+          "\"submitted_at\",\"body\"}], oldest first. Two approvals are the same value in " <>
+          "`verdicts` and are not the same thing: read `body` and `submitted_at` before treating " <>
+          "a verdict as a judgement. An empty `body` is a fact, not a missing field. The " <>
+          "`reviews` key is ABSENT when no verdict is in force. The `pr` key is ABSENT when no " <>
+          "fleet PR exists (nothing to say); {\"error\":\"forge_unreachable\"} means the PR read " <>
+          "failed — never confuse it with 'no PR'."
       )
     end
 

@@ -99,15 +99,22 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   @doc """
   Jury state of a PR: `verdicts` (last decisive review per reviewer, scoped to `head_sha`),
-  `reviewers` (stable jury set), and `outcome` — the SAME routing predicate the merge gate runs
-  on (`Jury.review_outcome/2`), computed pilot-side and carried as DATA so no seam consumer
-  (nor any test stub) re-implements the rule.
+  `reviewers` (stable jury set), `outcome` — the SAME routing predicate the merge gate runs on
+  (`Jury.review_outcome/2`), computed pilot-side and carried as DATA so no seam consumer (nor any
+  test stub) re-implements the rule — and `records`.
+
+  `records` is what `verdicts` structurally cannot say: the in-force review of each judge with its
+  `body` and `submitted_at`. Two approvals are the same value in `verdicts` and were never the same
+  thing on the forge — one cites its gate-brief, the other lands a second after being asked. A seam
+  that omits the key is rendered as such (verdicts without substance), NEVER as an unreachable
+  forge: a stub behind an outage message is how a missing implementation stays invisible.
   """
   @callback pr_review_state(repo :: String.t(), index :: integer(), opts :: keyword()) ::
               {:ok,
                %{
                  verdicts: %{optional(String.t()) => :approved | :changes_requested},
                  reviewers: [String.t()],
+                 records: [map()],
                  outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
                }}
               | {:error, term()}
