@@ -65,7 +65,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Pilot.ForgeClient`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
-  alias Fleet.MCP.PodTools.Delegation.{EscalationForge, ForgeClient, ProjectOnboard}
+  alias Fleet.MCP.PodTools.Delegation.{
+    DependencyForge,
+    EscalationForge,
+    ForgeClient,
+    ProjectOnboard
+  }
 
   @doc """
   Places a forge issue ready for the poller — architect gate included.
@@ -1251,43 +1256,70 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Pose les arêtes déclarées par l'architecte au moment où il énonce la contrainte. Ce qui échoue
-  # est DIT dans le résultat (l'arch le relaie à son humain), jamais avalé : une dépendance qu'on
-  # croit posée et qui ne l'est pas est pire que pas de dépendance du tout.
-  defp attach_dependencies(_forge, _repo, result, nil), do: result
-  defp attach_dependencies(_forge, _repo, result, []), do: result
+  # Writes the edges the architect declared at the moment they state the constraint. What fails is
+  # SAID in the result (the arch relays it to its human), never swallowed: an edge believed to be
+  # there and absent is worse than no edge at all.
+  #
+  # PUBLIC (@doc false), same reason as `retire_superseded/5`: the property under test is the SHAPE
+  # OF THE DEGRADATION (the created issue survives a seam that cannot write edges), and reaching this
+  # through `create_issue` would need an arch pod, role credentials and a work/ops tree — a test that
+  # proves the fixture, not the guard.
+  @doc false
+  def attach_dependencies(_forge, _repo, result, nil), do: result
+  def attach_dependencies(_forge, _repo, result, []), do: result
 
-  defp attach_dependencies(forge, repo, result, blockers) when is_list(blockers) do
+  def attach_dependencies(forge, repo, result, blockers) when is_list(blockers) do
     n = Map.get(result, "issue")
 
-    failed =
-      Enum.reject(blockers, fn b ->
-        match?({:ok, _}, forge.add_issue_dependency(repo, n, b, []))
-      end)
+    # SEAM CONFORMANCE, best-effort side. The issue is already created and CORRECT — a
+    # non-conforming seam must degrade the order, not crash a gesture that succeeded. Without this,
+    # a stub missing the callback raised deep inside the loop and the caller lost a created ticket
+    # to an UndefinedFunctionError.
+    case conforming(DependencyForge, forge) do
+      {:ok, _} ->
+        failed =
+          Enum.reject(blockers, fn b ->
+            match?({:ok, _}, forge.add_issue_dependency(repo, n, b, []))
+          end)
 
-    case failed do
-      [] ->
-        Map.put(result, "depends_on", blockers)
+        report_edges(result, blockers, failed)
 
-      some ->
-        result
-        |> Map.put("depends_on", blockers -- some)
-        |> Map.put(
-          "depends_on_warning",
-          "arêtes NON posées sur la forge : #{inspect(some)} — la contrainte n'est portée que par " <>
-            "la prose du brief, fais-la poser par ton humain"
+      {:error, {:seam_misconfigured, mod, missing}} ->
+        Logger.error(
+          "Delegation: dependency seam #{inspect(mod)} is missing #{inspect(missing)} — " <>
+            "no edge written for issue #{n}"
         )
+
+        report_edges(result, blockers, blockers)
     end
   end
 
-  # Reporte les deux sens sur le remplaçant. Un échec REMONTE (le `with` ci-dessus n'ira pas fermer) :
-  # un supersede à moitié recâblé qui ferme quand même est exactement le trou qu'on bouche —
-  # l'ancien ticket reste ouvert, le warning le dit, et un humain tranche. Bruyant plutôt que faux.
+  defp report_edges(result, blockers, []), do: Map.put(result, "depends_on", blockers)
+
+  defp report_edges(result, blockers, failed) do
+    result
+    |> Map.put("depends_on", blockers -- failed)
+    |> Map.put(
+      "depends_on_warning",
+      "arêtes NON posées sur la forge : #{inspect(failed)} — la contrainte n'est portée que par " <>
+        "la prose du brief, fais-la poser par ton humain"
+    )
+  end
+
+  # Carries BOTH directions over to the replacement. A failure PROPAGATES (the `with` above will not
+  # go on to close): a half-rewired supersede that closes anyway is exactly the hole this plugs — the
+  # old ticket stays open, the warning says so, and a human arbitrates. Noisy rather than false.
   #
-  # Le remplaçant peut déjà porter une arête (rejeu) : la forge répond alors en erreur sur ce
-  # doublon, et c'est un état NOMINAL — on ne le compte pas comme un échec de report.
+  # The replacement may already carry an edge (replay): the forge then answers with an error on that
+  # duplicate, and it is a NOMINAL state — not counted as a carry failure.
+  #
+  # SEAM CONFORMANCE, load-bearing side. This runs INSIDE the retirement, AFTER the live PR has been
+  # closed: a missing callback raising here would leave the old ticket closed by a crash, edges
+  # dropped — and closing RELEASES everything it blocked. The guard turns that into the same refusal
+  # as any other carry failure, which the caller already knows not to close through.
   defp carry_dependencies(forge, repo, old_n, new_n) do
-    with {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
+    with {:ok, _} <- conforming(DependencyForge, forge),
+         {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
          {:ok, blocked} <- forge.issue_blocks(repo, old_n, []),
          :ok <- copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end),
          :ok <- copy_edges(blocked, fn b -> forge.add_issue_dependency(repo, b, new_n, []) end) do
