@@ -44,6 +44,10 @@ defmodule Fleet.MCP.PodTools do
       - `retire_issue`     : the arch abandons a ticket with NO replacement — the live PR is
         closed, the dependents are told and RELEASED (a supersede carries its edges, a
         retirement lifts them), `stage/retired`.
+      - `list_projects`    : the READ half of the project surface — the onboarder could destroy a
+        project it had no way to enumerate.
+      - `emergency_stop`   : the brake. Mass CLOSE of everything in flight, fleet-wide (never a
+        kill: killing pods leaves the tickets open and the poller re-dispatches).
       - `open_project`     : the inverse of `close_project` (the parking marker is lifted).
       - `delete_project`   : destroys a project. Disarmed by deployment flag.
       - `list_workflow_cards` : the validation cards a project can be onboarded against.
@@ -560,6 +564,33 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "emergency_stop" do
+    meta do
+      name("Emergency Stop")
+
+      description(
+        "STOP everything the fleet has in flight, across every open project. Use it to break a " <>
+          "runaway — a dispatch loop, pods respawning without end. It CLOSES tickets, it does not " <>
+          "kill pods: killing pods resets nothing (the tickets stay open and the poller " <>
+          "re-dispatches on the next tick), whereas a closed ticket leaves the poller by " <>
+          "construction and its pods are collected on their own. Each ticket gets its live pull " <>
+          "request closed then the ticket retired — the trace says nothing was delivered, because " <>
+          "nothing was. `reason` = why you are pulling the brake; it is posted on every ticket and " <>
+          "it is what a human will read tomorrow. WORK IN PROGRESS IS LOST — that is the trade: " <>
+          "you save the fleet, not the tickets. Projects closed with `close_project` are skipped. " <>
+          "A ticket that resists does NOT stop the sweep: it is listed in `failures` and the rest " <>
+          "still stops. Re-run to finish the job — what is already retired is not listed again. " <>
+          "Returns {\"stopped\":N,\"failed\":N,\"projects\":[...],\"skipped_not_open\":[...]}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{"reason" => %{"type" => "string"}},
+      "required" => ["reason"]
+    })
+  end
+
   deftool "list_projects" do
     meta do
       name("List Projects")
@@ -904,6 +935,19 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("comment_issue", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # The brake (onboarder gate inside Delegation) — a mass CLOSE, never a kill.
+  def handle_tool_call("emergency_stop", %{"reason" => reason}, state)
+      when is_binary(reason) and reason != "" do
+    case Delegation.emergency_stop(reason, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, why} -> {:error, why, state}
+    end
+  end
+
+  def handle_tool_call("emergency_stop", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

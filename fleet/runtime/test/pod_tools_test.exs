@@ -600,6 +600,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_projects(_opts),
       do: {:ok, [%{"name" => "demo", "repo" => "fleet/demo", "state" => "open"}]}
 
+    def list_stoppable_issues(_repo, _opts), do: {:ok, []}
+
     def close_project(full_name, opts) do
       send(self(), {:close_project, full_name, opts})
 

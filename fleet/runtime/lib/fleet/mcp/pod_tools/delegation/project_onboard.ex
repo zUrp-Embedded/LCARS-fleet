@@ -106,6 +106,16 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @callback list_projects(opts :: keyword()) :: {:ok, [map()]} | {:error, term()}
 
   @doc """
+  The open ticket numbers of a repo that the fleet would act on — the scope an emergency stop
+  closes. Composed on the pilot side because it joins two facts of that domain: the poller's own
+  scoping (issues assigned to the human owner) and the parked-marker vocabulary, which MCP cannot
+  even reference (upward boundary). The PARKED MARKER is excluded: closing it would unpark the
+  project.
+  """
+  @callback list_stoppable_issues(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, [integer()]} | {:error, term()}
+
+  @doc """
   REVISES an EXISTING project's validation-card declaration (BL-6-29) — commits the new
   `intensity.json` on `main` through a scoped protection lift, protection re-sized on the new
   card's jury. `opts`: `:workflow_map` (required), `:justification` (required — the revision's

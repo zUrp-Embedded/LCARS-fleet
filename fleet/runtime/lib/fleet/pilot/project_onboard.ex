@@ -403,6 +403,37 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
+  @doc """
+  The open tickets of `full_name` that this fleet would act on — the scope an emergency stop closes.
+
+  Lives here and not on the caller's side for the same reason `list_projects/1` does: "which tickets
+  is the fleet working on" is composed of two facts that belong to this domain — the poller's own
+  scoping (issues assigned to the human owner) and the parked-marker vocabulary. Re-deriving either
+  MCP-side would put a second authority next to the one that creates and closes them, and MCP cannot
+  reference the forge protocol at all (upward boundary).
+
+  The PARKED MARKER IS EXCLUDED, and it is not a detail: that marker is an open issue assigned to
+  the same human, and closing it means UNPARKING the project. A brake that reopens a deliberately
+  closed project does the opposite of stopping.
+  """
+  @spec list_stoppable_issues(String.t(), keyword()) :: {:ok, [integer()]} | {:error, term()}
+  def list_stoppable_issues(full_name, opts \\ []) when is_binary(full_name) do
+    with {:ok, human} <- Fleet.Credentials.Human.current(),
+         {:ok, issues} <-
+           forge_issues(opts).list_open_issues(
+             full_name,
+             Keyword.put(fc_opts(opts), :assigned_by, human)
+           ) do
+      numbers =
+        issues
+        |> Enum.reject(&Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        |> Enum.map(&Map.get(&1, "number"))
+        |> Enum.filter(&is_integer/1)
+
+      {:ok, numbers}
+    end
+  end
+
   defp describe_project(name, root, opts) do
     full_name = "#{Keyword.get(opts, :org, "fleet")}/#{name}"
 

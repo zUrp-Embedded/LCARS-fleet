@@ -33,6 +33,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
     def close_project(_f, _o), do: {:error, :unused}
     def revise_card(_f, _o), do: {:error, :unused}
     def list_projects(_o), do: {:ok, []}
+    def list_stoppable_issues(_r, _o), do: {:ok, []}
   end
 
   setup do

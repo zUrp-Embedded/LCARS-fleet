@@ -1397,6 +1397,89 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Stops everything in flight, fleet-wide: a brake, not a kill.
+
+  It CLOSES tickets, it does not kill pods, and the difference is the whole design. Killing pods
+  resets nothing — the tickets stay open, the poller re-dispatches on the next tick, and the runaway
+  resumes with fresh pods. Closing is what actually stops it: a closed ticket leaves the poller by
+  construction (every inbox lists open only) and the reaper collects its pods on its own.
+
+  So this is `retire_issue` applied in bulk, with the same two gestures per ticket: the live PR
+  closes first (the pulls rail is independent and would otherwise judge and merge into a dead
+  ticket), then `closure: :retired` — the trace says nothing was delivered, because nothing was.
+
+  ONE SEMANTIC DIFFERENCE from the unit gesture, and it inverts its rule. A single retirement ABORTS
+  on the first failure: a half-retired ticket is worse than an open one. A brake does not get to
+  stop halfway because one ticket resisted — leaving the rest running is the failure mode it exists
+  to prevent. So the sweep CONTINUES and every failure is NAMED in the result. Re-running finishes
+  the job: what was retired is closed and no longer listed.
+
+  Two exclusions, both load-bearing:
+
+    * PARKED projects are skipped. They have nothing in flight by definition, and their state IS an
+      open marker issue assigned to the same human — sweeping it would CLOSE the marker, which means
+      UNPARK. An emergency stop that reopens a deliberately closed project is the opposite of a stop.
+    * the parked marker is excluded by title as well, for the project being closed while this runs.
+
+  Scope is what the poller itself dispatches: the open issues assigned to the human owner. A ticket
+  outside that scope is not something this fleet was going to act on.
+  """
+  @spec emergency_stop(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def emergency_stop(reason, state) when is_binary(reason) and reason != "" do
+    with {:ok, _role} <- require_onboarder(state),
+         {:ok, forge} <- conforming_forge(),
+         {:ok, _} <- conforming(DependencyForge, forge),
+         {:ok, onboard} <- conforming_onboard(),
+         {:ok, projects} <- onboard.list_projects([]) do
+      targets = Enum.filter(projects, &(&1["state"] == "open"))
+      skipped = Enum.map(projects -- targets, & &1["repo"])
+
+      swept = Enum.map(targets, &sweep_project(forge, onboard, &1["repo"], reason))
+
+      {:ok,
+       %{
+         "stopped" => Enum.sum(Enum.map(swept, &length(&1["retired"]))),
+         "failed" => Enum.sum(Enum.map(swept, &length(&1["failures"]))),
+         "projects" => swept,
+         "skipped_not_open" => skipped
+       }}
+    end
+  end
+
+  def emergency_stop(_reason, _state), do: {:error, :invalid_arguments}
+
+  defp sweep_project(forge, onboard, repo, reason) do
+    case onboard.list_stoppable_issues(repo, []) do
+      {:ok, numbers} ->
+        Enum.reduce(numbers, %{"repo" => repo, "retired" => [], "failures" => []}, fn n, acc ->
+          record_sweep(acc, n, stop_one(forge, repo, n, reason))
+        end)
+
+      {:error, why} ->
+        %{
+          "repo" => repo,
+          "retired" => [],
+          "failures" => [%{"issue" => nil, "error" => inspect(why)}]
+        }
+    end
+  end
+
+  defp record_sweep(acc, n, {:ok, %{"retired" => true}}),
+    do: Map.update!(acc, "retired", &(&1 ++ [n]))
+
+  defp record_sweep(acc, _n, {:ok, _already_closed}), do: acc
+
+  defp record_sweep(acc, n, {:error, why}),
+    do: Map.update!(acc, "failures", &(&1 ++ [%{"issue" => n, "error" => inspect(why)}]))
+
+  defp stop_one(forge, repo, n, reason) do
+    case target_state_preflight(forge, repo, n) do
+      {:ok, target} -> do_retire_issue(forge, repo, n, reason, target)
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Publishes an authored document on the project's ops face.
 
   The architect COULD already commit — its mount is RW — and could not push: no MCP write tool, no
