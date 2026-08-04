@@ -325,7 +325,35 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
     with {:ok, outputs} <- judge_outputs(forge, repo, number, forge_opts) do
-      step_judge_brief(role, forge, repo, number, forge_opts, route, opts, outputs)
+      step_judge_brief(role, forge, repo, number, forge_opts, route, opts, with_ci(outputs, opts))
+    end
+  end
+
+  # THE MACHINE FACT, HANDED TO THE JUDGE — the other half of `CiGate`. The gate refuses to summon
+  # a jury on red; when it summons, it says on WHAT the rail already ruled. Without this line the
+  # judge re-derives "does it run?" from a diff it cannot execute, i.e. it guesses — and the whole
+  # point of a runner is that guessing stops.
+  #
+  # It is NOT the judge's verdict. `success` answers "it executes"; the judge answers "it proves"
+  # — coverage of the brief, hollow assertions, oracles that assert nothing. Naming the boundary in
+  # the brief itself is what keeps a green CI from being read as a green review.
+  #
+  # Absent key = the card does not require the CI (`spec.ci: ignore`): we add NOTHING rather than
+  # writing "CI: unknown", which a judge would rightly read as a fact about the code.
+  defp with_ci(outputs, opts) do
+    case Keyword.get(opts, :ci_fact) do
+      %{state: :success, sha: sha} when is_binary(sha) ->
+        Map.put(
+          outputs,
+          "ci",
+          "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a EXECUTE la preuve et elle " <>
+            "passe. Ce fait t'est FOURNI : ne le re-derive pas, ne le re-execute pas. Ton travail " <>
+            "commence apres lui — est-ce que cette preuve PROUVE ? (couverture du critere, " <>
+            "assertions creuses, oracles qui n'assertent rien, faux-verts.)"
+        )
+
+      _ ->
+        outputs
     end
   end
 

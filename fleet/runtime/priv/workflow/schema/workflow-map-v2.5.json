@@ -1,222 +1,230 @@
 {
- "$schema": "http://json-schema.org/draft-07/schema#",
- "$id": "urn:lcars:workflow-map-v2.5",
- "title": "LCARS Workflow Map v2.5 (enveloppe kind/metadata/spec)",
- "description": "Structural schema dérivé du canon réel des workflow_maps (standard-qa, audit-only). Enveloppe unique kind/metadata/spec ; pas de champ apiVersion (le versioning vit dans le code, pas dans le YAML).",
- "type": "object",
- "required": [
-  "kind",
-  "metadata",
-  "spec"
- ],
- "additionalProperties": false,
- "properties": {
-  "kind": {
-   "const": "WorkflowMap"
-  },
-  "metadata": {
-   "type": "object",
-   "required": [
-    "name"
-   ],
-   "additionalProperties": false,
-   "properties": {
-    "name": {
-     "type": "string",
-     "minLength": 1
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:workflow-map-v2.5",
+  "title": "LCARS Workflow Map v2.5 (enveloppe kind/metadata/spec)",
+  "description": "Structural schema dérivé du canon réel des workflow_maps (standard-qa, audit-only). Enveloppe unique kind/metadata/spec ; pas de champ apiVersion (le versioning vit dans le code, pas dans le YAML).",
+  "type": "object",
+  "required": [
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "WorkflowMap"
     },
-    "description": {
-     "type": "string"
-    },
-    "presentation": {
-     "type": "string",
-     "minLength": 1,
-     "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the list_workflow_cards tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
-    },
-    "applicable_intensity": {
-     "type": "array",
-     "items": {
-      "enum": [
-       "C0",
-       "C1",
-       "C2",
-       "C3",
-       "C4"
-      ]
-     }
-    },
-    "status": {
-     "enum": [
-      "canon",
-      "smoke",
-      "demo"
-     ],
-     "description": "Card class. Absent = canon (a production card, offered to the architect via list_workflow_cards). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
-    }
-   }
-  },
-  "spec": {
-   "type": "object",
-   "required": [
-    "steps",
-    "max_rework_rounds",
-    "jury"
-   ],
-   "additionalProperties": false,
-   "properties": {
-    "max_rework_rounds": {
-     "type": "integer",
-     "minimum": 0,
-     "description": "Budget anti-emballement du pipeline : nb de restarts complets du workflow tolérés avant escalade humaine (budget total de step-runs = nb_steps × (max_rework_rounds + 1)). OBLIGATOIRE — pas de défaut caché en code : l'auteur du map déclare sa policy de churn (donnée, pas mécanisme figé)."
-    },
-    "steps": {
-     "type": "object",
-     "minProperties": 1,
-     "additionalProperties": false,
-     "patternProperties": {
-      "^[a-zA-Z0-9_-]+$": {
-       "type": "object",
-       "required": [
-        "role"
-       ],
-       "additionalProperties": false,
-       "properties": {
-        "role": {
-         "type": "string",
-         "minLength": 1
-        },
-        "modops": {
-         "type": "array",
-         "items": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
           "type": "string",
           "minLength": 1
-         },
-         "description": "OPTIONAL step-modops (B-01, catalogue chantier 2026-07-20): activates modops the step's ROLE declares in its cap-profile `modop_set.optional` (e.g. `modops: [tdd]` on a `role: engineer` step = an engineer in tdd mode). NEVER loads another role's profile (killed as incoherent). Validated at dispatch by `CapProfile.resolve` (⊆ optional, no incompatible pair) — an out-of-optional modop is refused. Absent = the role's default modops only."
         },
-        "brief_kind": {
-         "enum": [
-          "worker",
-          "judge"
-         ]
-        },
-        "judge_target": {
-         "enum": [
-          "brief",
-          "deliverable"
-         ]
-        },
-        "needs": {
-         "type": "array",
-         "items": {
+        "description": {
           "type": "string"
-         },
-         "uniqueItems": true,
-         "description": "prédécesseurs (noms de steps), SANS doublon : un `needs` répété (copier-coller) posait deux fois la même arête → le graphe partait en rejet :fan_out avec un diagnostic MENTEUR (« 2 successeurs [b, b] » sur une chaîne linéaire). Le rejet vit ICI, en amont, avec le vrai motif."
         },
-        "inputs": {
-         "type": "array",
-         "items": {
-          "type": "string"
-         }
+        "presentation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the list_workflow_cards tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
         },
-        "outputs": {
-         "type": "array",
-         "items": {
-          "type": "string"
-         }
-        },
-        "decisions": {
-         "type": "array",
-         "items": {
-          "type": "string"
-         }
-        },
-        "gate": {
-         "oneOf": [
-          {
-           "type": "null"
-          },
-          {
-           "type": "object",
-           "required": [
-            "type"
-           ],
-           "additionalProperties": false,
-           "properties": {
-            "type": {
-             "enum": [
-              "hard",
-              "soft",
-              "terminal"
-             ]
-            },
-            "rules": {
-             "type": "array",
-             "items": {
-              "type": "string"
-             }
-            },
-            "human_approval_required": {
-             "type": "boolean"
-            },
-            "approval_prompt": {
-             "type": "string"
-            }
-           },
-           "$comment": "F-C110 : les ex-knobs fallback_invoke_gatekeeper / on_blocking_severity / on_revision_severity ont été RETIRÉS — acceptés au schéma + présents au canon mais AUCUN code ne les consommait (couche d'orchestration de sévérité jamais construite). L'escalade gatekeeper vient du `type` (soft/terminal → StepRunConsumer {:dispatch_gatekeeper}) ; le gating par sévérité vit dans `rules` (opérande `severity_max` évalué par Gates.Predicate). additionalProperties:false → un map qui les re-déclare est désormais rejeté au load.",
-           "allOf": [
-            {
-             "$comment": "soft-default #4 : une hard-gate DOIT porter ≥1 règle — sinon Enum.all?([]) la fait passer à vide (fail-open, gate qui n'applique rien). rules REQUIS + minItems 1 pour type=hard ; terminal garde rules optionnel/vide (la gate `finish` est terminal + human_approval sans règle).",
-             "if": {
-              "properties": {
-               "type": {
-                "const": "hard"
-               }
-              },
-              "required": [
-               "type"
-              ]
-             },
-             "then": {
-              "required": [
-               "rules"
-              ],
-              "properties": {
-               "rules": {
-                "type": "array",
-                "items": {
-                 "type": "string"
-                },
-                "minItems": 1
-               }
-              }
-             }
-            }
-           ]
+        "applicable_intensity": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "C0",
+              "C1",
+              "C2",
+              "C3",
+              "C4"
+            ]
           }
-         ]
         },
-        "face": {
-         "type": "string",
-         "enum": [
-          "code",
-          "ops"
-         ],
-         "description": "OPTIONAL project face the step's producer works ON (chantier face-projet 2026-08-02). `code` (default when absent) = the `main` branch: workspace clone base, PR target and post-merge realignment all follow it, the ops face is the RO reference. `ops` = the `work/ops` branch: same mechanics, faces swapped — the deliverable is committed on a branch off work/ops and merges back into it, `main` becomes the RO reference. One knob, threaded once (dispatch -> resolver -> project map); downstream consumers assert its presence rather than re-defaulting (single-default-site doctrine, cf. 01-INVENTAIRE §D). A face on a JUDGE step is meaningless and ignored: judges clone the producer's branch (`base_branch: head`), whatever face it lives on."
+        "status": {
+          "enum": [
+            "canon",
+            "smoke",
+            "demo"
+          ],
+          "description": "Card class. Absent = canon (a production card, offered to the architect via list_workflow_cards). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
         }
-       }
       }
-     }
     },
-    "jury": {
-     "type": "array",
-     "description": "PR-deliverable jury: the roles whose review is requested on a producer's PR and whose approvals gate the seal. THE card is the single source (no engine config) — an empty array is a deliberate zero-judge card (the mechanical floor still holds).",
-     "items": {
-      "type": "string",
-      "minLength": 1
-     }
+    "spec": {
+      "type": "object",
+      "required": [
+        "steps",
+        "max_rework_rounds",
+        "jury"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max_rework_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Budget anti-emballement du pipeline : nb de restarts complets du workflow tolérés avant escalade humaine (budget total de step-runs = nb_steps × (max_rework_rounds + 1)). OBLIGATOIRE — pas de défaut caché en code : l'auteur du map déclare sa policy de churn (donnée, pas mécanisme figé)."
+        },
+        "steps": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-zA-Z0-9_-]+$": {
+              "type": "object",
+              "required": [
+                "role"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "modops": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "OPTIONAL step-modops (B-01, catalogue chantier 2026-07-20): activates modops the step's ROLE declares in its cap-profile `modop_set.optional` (e.g. `modops: [tdd]` on a `role: engineer` step = an engineer in tdd mode). NEVER loads another role's profile (killed as incoherent). Validated at dispatch by `CapProfile.resolve` (⊆ optional, no incompatible pair) — an out-of-optional modop is refused. Absent = the role's default modops only."
+                },
+                "brief_kind": {
+                  "enum": [
+                    "worker",
+                    "judge"
+                  ]
+                },
+                "judge_target": {
+                  "enum": [
+                    "brief",
+                    "deliverable"
+                  ]
+                },
+                "needs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true,
+                  "description": "prédécesseurs (noms de steps), SANS doublon : un `needs` répété (copier-coller) posait deux fois la même arête → le graphe partait en rejet :fan_out avec un diagnostic MENTEUR (« 2 successeurs [b, b] » sur une chaîne linéaire). Le rejet vit ICI, en amont, avec le vrai motif."
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "outputs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "decisions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "gate": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "hard",
+                            "soft",
+                            "terminal"
+                          ]
+                        },
+                        "rules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "human_approval_required": {
+                          "type": "boolean"
+                        },
+                        "approval_prompt": {
+                          "type": "string"
+                        }
+                      },
+                      "$comment": "F-C110 : les ex-knobs fallback_invoke_gatekeeper / on_blocking_severity / on_revision_severity ont été RETIRÉS — acceptés au schéma + présents au canon mais AUCUN code ne les consommait (couche d'orchestration de sévérité jamais construite). L'escalade gatekeeper vient du `type` (soft/terminal → StepRunConsumer {:dispatch_gatekeeper}) ; le gating par sévérité vit dans `rules` (opérande `severity_max` évalué par Gates.Predicate). additionalProperties:false → un map qui les re-déclare est désormais rejeté au load.",
+                      "allOf": [
+                        {
+                          "$comment": "soft-default #4 : une hard-gate DOIT porter ≥1 règle — sinon Enum.all?([]) la fait passer à vide (fail-open, gate qui n'applique rien). rules REQUIS + minItems 1 pour type=hard ; terminal garde rules optionnel/vide (la gate `finish` est terminal + human_approval sans règle).",
+                          "if": {
+                            "properties": {
+                              "type": {
+                                "const": "hard"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          "then": {
+                            "required": [
+                              "rules"
+                            ],
+                            "properties": {
+                              "rules": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "face": {
+                  "type": "string",
+                  "enum": [
+                    "code",
+                    "ops"
+                  ],
+                  "description": "OPTIONAL project face the step's producer works ON (chantier face-projet 2026-08-02). `code` (default when absent) = the `main` branch: workspace clone base, PR target and post-merge realignment all follow it, the ops face is the RO reference. `ops` = the `work/ops` branch: same mechanics, faces swapped — the deliverable is committed on a branch off work/ops and merges back into it, `main` becomes the RO reference. One knob, threaded once (dispatch -> resolver -> project map); downstream consumers assert its presence rather than re-defaulting (single-default-site doctrine, cf. 01-INVENTAIRE §D). A face on a JUDGE step is meaningless and ignored: judges clone the producer's branch (`base_branch: head`), whatever face it lives on."
+                }
+              }
+            }
+          }
+        },
+        "jury": {
+          "type": "array",
+          "description": "PR-deliverable jury: the roles whose review is requested on a producer's PR and whose approvals gate the seal. THE card is the single source (no engine config) — an empty array is a deliberate zero-judge card (the mechanical floor still holds).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ci": {
+          "type": "string",
+          "enum": [
+            "required",
+            "ignore"
+          ],
+          "description": "Politique CI de la carte. `required` : le gate LIT le verdict du runner sur le sha de tete AVANT de convoquer le jury — rouge = rework producteur sans juge, pending/absent = attente BORNEE puis escalade, vert = le jury est convoque ET recoit le fait dans son brief. `ignore` (defaut si la cle est absente) : comportement d'avant la porte CI. La politique vit dans la CARTE, jamais dans le moteur (F-C061, meme regle que le jury)."
+        }
+      }
     }
-   }
   }
- }
 }

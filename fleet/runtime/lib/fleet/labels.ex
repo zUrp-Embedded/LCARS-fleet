@@ -40,7 +40,7 @@ defmodule Fleet.Labels do
   posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
   is the first thing a reader trusts and the last thing anyone updates.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @in_flight "lcars-in-flight"
@@ -154,6 +154,14 @@ defmodule Fleet.Labels do
   def wait_for(:draining), do: @wait_prefix <> "draining"
   def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"
   def wait_for(:ci_pending), do: @wait_prefix <> "ci"
+  # The CI door defers on a read it could not make (PR object, status list, or the marker that
+  # bounds the red loop). From the ticket's side these are ALL the same fact — it is stopped at the
+  # CI gate, and nobody is working on it — so they share `wait/ci` rather than teaching a human
+  # three names for one wait. The distinction lives in the skip reason (logs, tally), where it is
+  # actionable; the label answers "what is this ticket doing", not "which call failed".
+  def wait_for({:ci_head_unreadable, _why}), do: @wait_prefix <> "ci"
+  def wait_for({:ci_unreadable, _why}), do: @wait_prefix <> "ci"
+  def wait_for({:ci_red_marker_unreadable, _why}), do: @wait_prefix <> "ci"
 
   # ─── Already carried by an existing label: a second one would be a second truth ────────────────
   # The one you read is never the one somebody corrected.
@@ -179,6 +187,12 @@ defmodule Fleet.Labels do
   def wait_for({:rework_exhausted_escalated, _pr}), do: nil
   def wait_for({:merge_blocked_escalated, _pr}), do: nil
   def wait_for({:publish_brake_escalated, _pr}), do: nil
+
+  # ─── The red is already GRAVED, and the producer is already reworking on it ────────────────────
+  # `[ci-red:pr-N:<sha>]` on the PR carries the failure and its sha, and the rework it triggered is
+  # in flight. A `wait/ci` label here would say "waiting on the CI" about a ticket whose CI has
+  # already ruled — the opposite of what happened.
+  def wait_for({:ci_red_already_signalled, _sha}), do: nil
 
   # ─── Provenance wall: its forge trace exists since `d31ed188a` (BL-6-47.4) ─────────────────────
   def wait_for({:head_read_failed, _why}), do: nil

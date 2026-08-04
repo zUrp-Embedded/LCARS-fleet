@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   no captures in the `Ctx`: taking them at the source keeps the
   core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -57,6 +57,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
   # EXECUTION leaf of the PR-role spawn (judge/rework/resolution): read-only resolutions then
   # Spawn.spawn_step. Shared by routing ↔ remediation (the flow's acyclic cut).
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   defmodule Ctx do
@@ -135,7 +136,34 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     # a divergence between what the gate does and what the status says would be a second truth.
     case Fleet.Pilot.ForgeClient.Jury.review_outcome(requested, verdicts) do
       {:pending, [next | _]} ->
-        RoleDispatch.dispatch(:judge, pr_number, head, next, ctx)
+        # THE CI IS A PRE-CONDITION OF THE SUMMONS, not an afterthought at merge time. Until this
+        # clause, the machine rail and the judgement rail never met: judges were spawned on code
+        # nobody had built, and the red surfaced at the PROMOTE, after the tokens were spent.
+        # `CiGate` decides (the CARD governs — `spec.ci`), and when it lets through, the fact it
+        # measured RIDES to the judge instead of being re-derived there.
+        case CiGate.decide(pr_number, head, ctx, fn -> issue_card_ci(head, ctx) end) do
+          {:proceed, fact} ->
+            RoleDispatch.dispatch(:judge, pr_number, head, next, with_ci_fact(ctx, fact))
+
+          {:refuse, :ci_red, message} ->
+            Remediation.ci_red_rework(pr_number, head, message, ctx)
+
+          # Three clauses rather than one passthrough, and the verbosity is the point: the BL-6-48
+          # reverse wall reads `lib/` for the reasons the fleet can actually EMIT, and a reason
+          # forwarded through a bare variable is invisible to it — the label table would carry
+          # entries nothing in the tree can be shown to produce.
+          {:wait, :ci_pending} ->
+            {:skipped, :ci_pending}
+
+          {:wait, {:ci_head_unreadable, why}} ->
+            {:skipped, {:ci_head_unreadable, why}}
+
+          {:wait, {:ci_unreadable, why}} ->
+            {:skipped, {:ci_unreadable, why}}
+
+          {:escalate, class, message} ->
+            Remediation.ci_stalled(pr_number, head, class, message, ctx)
+        end
 
       :no_jury ->
         # The CARD arbitrates (doc point 4): zero-judge card → this IS the nominal path, seal
@@ -192,6 +220,34 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       _ -> Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts)
     end
   end
+
+  # The card's CI policy, read exactly like its jury and through the same fallback: the ISSUE's
+  # engraved card when a route exists, `:ignore` otherwise. `:ignore` is the default on purpose —
+  # a card that declares nothing keeps the pre-gate rail rather than inheriting a wall it never
+  # asked for. Only `required` (the string the schema allows) arms the gate.
+  defp issue_card_ci(head, %Ctx{} = ctx) do
+    with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
+         {:ok, {map_name, _step}} <-
+           Fleet.Pilot.StepDispatcher.Spawn.route_for(
+             ctx.forge,
+             ctx.repo,
+             issue_n,
+             ctx.forge_opts
+           ),
+         {:ok, map} when is_map(map) <-
+           Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
+      if Map.get(map, "ci") == "required", do: :required, else: :ignore
+    else
+      _ -> :ignore
+    end
+  end
+
+  # The measured fact travels in the dispatch opts (`review_opts` -> `BriefBuilder`), never as a
+  # second forge read: one dispatch, one CI truth.
+  defp with_ci_fact(%Ctx{} = ctx, nil), do: ctx
+
+  defp with_ci_fact(%Ctx{} = ctx, fact),
+    do: %{ctx | opts: Keyword.put(ctx.opts, :ci_fact, fact)}
 
   # ADOPTION — a PR with NO judge at all (neither volatile requested_reviewers nor stable jury) on a
   # JUDGED card was not set up by the pipeline: typically a HUMAN PR (fork + cross-repo) that the poller

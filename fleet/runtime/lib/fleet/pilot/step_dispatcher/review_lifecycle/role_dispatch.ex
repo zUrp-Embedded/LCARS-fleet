@@ -212,7 +212,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
              issue_n,
              forge_opts,
              route,
-             pr_number
+             pr_number,
+             review_opts
            ) do
         {:ok, brief, brief_kind} ->
           project_slug = Fleet.Layout.project_slug(repo)
@@ -303,7 +304,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
+  # `review_opts` reaches the JUDGE clause alone, and it carries exactly one thing the builder
+  # cannot read for itself: the CI fact the GATE has already measured (`CiGate`). Re-reading it in
+  # the builder would create a SECOND truth — two forge calls, two shas, two possible answers on
+  # one dispatch. The gate decides, the brief quotes it.
+  defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr, opts),
     do:
       BriefBuilder.build_brief(
         profile,
@@ -314,10 +319,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
         %{},
         forge_opts,
         route,
-        %{}
+        %{},
+        opts
       )
 
-  defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
+  defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr, _opts),
     do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker"}
 
   # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
@@ -332,7 +338,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          _issue_n,
          forge_opts,
          route,
-         pr
+         pr,
+         _opts
        ),
        do:
          {:ok,
@@ -350,7 +357,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          _issue_n,
          forge_opts,
          route,
-         pr
+         pr,
+         _opts
        ),
        do:
          {:ok,

@@ -479,6 +479,105 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
+  @doc """
+  CI RED before the jury: the producer reworks, and the red is GRAVED on the PR.
+
+  Bounded by construction, and the bound is the marker itself. The comment carries
+  `[ci-red:pr-N:<sha8>]`, so:
+
+    * the SAME red sha never dispatches twice — the next tick reads its own marker and stands
+      down (a rework is already in flight; re-dispatching every 30 s would burn a producer session
+      per tick, the exact shape the publish brake exists to stop);
+    * DISTINCT red shas are counted — three of them means the producer is looping against the rail,
+      which is no longer a rework, it is an incident: the arch gets it, with the count spent.
+
+  A CI red does NOT consume a jury round: `max_rework_rounds` counts VERDICTS, and no verdict was
+  rendered here. Conflating the two would let a mechanical failure eat the budget of the human-ish
+  one, and the ticket would escalate saying "judges exhausted" about judges that never ran.
+  """
+  @spec ci_red_rework(integer(), String.t(), String.t(), Ctx.t()) ::
+          {:ok, tuple()} | {:skipped, term()} | {:error, term()}
+  def ci_red_rework(pr_number, head, message, %Ctx{} = ctx) do
+    sha8 = message |> extract_sha8() || "unknown"
+    marker = "[ci-red:pr-#{pr_number}:#{sha8}]"
+
+    case ctx.forge.list_comments(ctx.repo, pr_number, ctx.forge_opts) do
+      {:ok, comments} ->
+        bodies = Enum.map(comments, &Map.get(&1, "body", ""))
+
+        cond do
+          Enum.any?(bodies, &String.contains?(&1, marker)) ->
+            {:skipped, {:ci_red_already_signalled, sha8}}
+
+          count_ci_red(bodies, pr_number) >= 2 ->
+            escalate_ci(pr_number, head, ctx, :ci_red_loop, message)
+
+          true ->
+            # `dedup_signature` = the marker: the forge itself refuses the double post if two
+            # ticks race, so the bound does not depend on our read winning.
+            _ =
+              ctx.forge.post_comment(
+                ctx.repo,
+                pr_number,
+                "**CI** — #{message}\n\n#{marker}",
+                ctx.forge_opts
+                |> Keyword.put(:dedup_signature, marker)
+                |> Keyword.put(:dedup_any_author, true)
+              )
+
+            dispatch_rework(pr_number, head, ctx)
+        end
+
+      # Comments unreadable: we do NOT re-dispatch blind (that is how a tick-loop starts) and we do
+      # not swallow it either — the next tick asks again, the reason is named.
+      {:error, reason} ->
+        {:skipped, {:ci_red_marker_unreadable, reason}}
+    end
+  end
+
+  @doc """
+  CI stuck (`pending`/no status at all) past the gate's deadline: nobody serves this label, or the
+  runner is dead. It is escalated LOUD rather than waited on one more tick forever — a silent
+  infinite wait is indistinguishable from a working rail, and that is the failure this whole gate
+  exists to make impossible.
+  """
+  @spec ci_stalled(integer(), String.t(), term(), String.t(), Ctx.t()) ::
+          {:skipped, term()} | {:error, term()}
+  def ci_stalled(pr_number, head, class, message, %Ctx{} = ctx),
+    do: escalate_ci(pr_number, head, ctx, class, message)
+
+  defp escalate_ci(pr_number, head, %Ctx{} = ctx, class, message) do
+    Logger.warning(
+      "StepDispatcher: PR #{ctx.repo}##{pr_number} CI #{inspect(class)} — #{message}"
+    )
+
+    ArchEscalation.escalate_merge_blocked(
+      arch_seams(ctx),
+      pr_number,
+      head,
+      :ci,
+      {class, message}
+    )
+  end
+
+  defp count_ci_red(bodies, pr_number) do
+    prefix = "[ci-red:pr-#{pr_number}:"
+
+    bodies
+    |> Enum.filter(&String.contains?(&1, prefix))
+    |> length()
+  end
+
+  # The sha the gate measured, taken from the message it wrote rather than re-read from the forge:
+  # the marker must key on the SAME sha the decision was made on, and a second read could answer a
+  # different one (a push between the two calls) — which would silently un-bound the loop.
+  defp extract_sha8(message) do
+    case Regex.run(~r/\b([0-9a-f]{8})\b/, message) do
+      [_, sha8] -> sha8
+      _ -> nil
+    end
+  end
+
   # Re-reads the FRESH PR object and classifies it (source of truth = the forge fields, not the merge
   # error message). get_pull failing → `:unknown` (we don't guess → honest escalation rather than a wrong action).
   defp classify_merge_failure(pr_number, %Ctx{} = ctx) do

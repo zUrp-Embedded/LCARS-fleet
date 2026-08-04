@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     }
   end
 
-  defp build(forge_opts),
+  defp build(forge_opts, opts \\ []),
     do:
       BriefBuilder.build_brief(
         judge_profile(),
@@ -45,8 +45,31 @@ defmodule Fleet.Pilot.BriefBuilderTest do
         %{},
         forge_opts,
         {"pipe", "review"},
-        %{}
+        %{},
+        opts
       )
+
+  describe "build_brief — the CI fact rides into the judge brief (porte CI)" do
+    test "a measured green CI is HANDED to the judge, with the boundary of what it means" do
+      assert {:ok, brief, "judge"} =
+               build([], ci_fact: %{state: :success, sha: "cafebabe1234567890"})
+
+      # The sha the GATE measured — not one the builder re-read (a second read = a second truth).
+      assert brief =~ "cafebabe"
+      # And the line that keeps a green CI from being read as a green review.
+      assert brief =~ "PROUVE"
+    end
+
+    test "no CI fact (card on `ci: ignore`) → NOTHING is said, rather than 'CI: unknown'" do
+      assert {:ok, brief, "judge"} = build([])
+      refute brief =~ "CI VERTE"
+    end
+
+    test "a non-success fact never reaches the judge — the gate does not summon on those" do
+      assert {:ok, brief, "judge"} = build([], ci_fact: %{state: :failure, sha: "deadbeef00"})
+      refute brief =~ "deadbeef"
+    end
+  end
 
   describe "build_brief — deliverable-judge, criterion read (F-C083)" do
     test "get_issue OK → {:ok, brief, \"judge\"} that CARRIES the criterion (defused by GateBrief)" do

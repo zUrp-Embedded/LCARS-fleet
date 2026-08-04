@@ -20,6 +20,12 @@ metadata:
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement).
   jury: [qualifier, reviewer]
+  # PORTE CI (chantier qualifier x runner) : le gate LIT le verdict du runner sur le sha de tete
+  # AVANT de convoquer le jury. Rouge -> rework producteur, aucun juge depense sur du rouge.
+  # Pending/aucun statut -> attente BORNEE (45 min) puis escalade LOUD : un runner mort ne doit pas
+  # ressembler a un gate qui travaille. Vert -> le jury est convoque et le FAIT voyage dans son
+  # brief (le juge ne re-derive pas ce qu'une machine atteste mieux que lui).
+  ci: required
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:
