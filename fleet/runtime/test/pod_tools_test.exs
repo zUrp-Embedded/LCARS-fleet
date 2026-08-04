@@ -1517,6 +1517,12 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
       TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, StubOnboard)
 
+      # `delete_project` is DISARMED by deployment (default false) and its switch is checked before
+      # the gate. These tests are about the GATE, so they arm it: otherwise every delete case would
+      # short-circuit on the switch and the role checks below would silently stop covering it —
+      # green, and testing nothing. The disarmed behaviour has its own tests.
+      TestEnv.put_env_restoring(:fleet_mcp, :allow_delete_project, true)
+
       # :pod_resolver is set BY EACH TEST (role under test) — restore only.
       TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
 

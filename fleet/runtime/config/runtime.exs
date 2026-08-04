@@ -52,6 +52,20 @@ if config_env() != :test and not tool_mode? do
   # bridge.py, NOT the BEAM (latent — a per-boot host signal from bin/fleet_v2 would harden further).
   config :fleet_mcp, boot_environment: :host
 
+  # `delete_project` — the ONE irreversible act of the tool surface (forge repo + both worktrees),
+  # aimed by a free argument, reachable by any onboarder pod. Off unless this deployment says
+  # otherwise; `force: true` at the call site makes the gesture deliberate, this makes it AVAILABLE,
+  # and the two are different questions. Cost of arming it, written where the switch is: every
+  # onboarder pod regains a destructive verb for the whole life of the daemon.
+  # The code reads `=== true`, so a non-boolean here does not arm it.
+  config :fleet_mcp,
+         :allow_delete_project,
+         Fleet.EnvParse.bool(
+           "LCARS_ALLOW_DELETE_PROJECT",
+           System.get_env("LCARS_ALLOW_DELETE_PROJECT"),
+           false
+         )
+
   # Env-var parsing is DELEGATED to `Fleet.EnvParse` (foundation, TESTABLE — this file is
   # wrapped `config_env() != :test`, an inline lambda would never be tested).
   # Bounded domain: `port` (1..65535), `positive_ms` (>0), `count` (≥0), `bool` (recognized forms +

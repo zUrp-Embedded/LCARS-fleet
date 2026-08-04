@@ -409,7 +409,10 @@ defmodule Fleet.MCP.PodTools do
           "confirm the destruction (there is no safe auto-detect — an imported repo has real content with " <>
           "0 fleet issues/PRs). Use it to RETIRE a project, or to clean up a FAILED `create_project` " <>
           "(`force: true`) then re-create on clean ground. `full_name` = `owner/name`. Without force → " <>
-          "error `force_required`. Returns {\"status\":\"deleted\",\"repo\":...}."
+          "error `force_required`. DISARMED BY DEFAULT on most deployments: if you get " <>
+          "`delete_project_disabled`, the tool is switched off for this whole fleet — that is not " <>
+          "something you can work around, and it is not a reason to reach for another gesture. " <>
+          "Report it to your human and stop. Returns {\"status\":\"deleted\",\"repo\":...}."
       )
     end
 

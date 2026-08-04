@@ -229,13 +229,42 @@ defmodule Fleet.MCP.PodTools.Delegation do
   returns `{:error, {:force_required, _}}` and destroys nothing (the target is a free argument and the
   delete is irreversible; there is no reliable "valueless" heuristic).
   """
+  # DISARMED BY DEPLOYMENT, checked before the gate and before the arguments.
+  #
+  # `force: true` already made the gesture deliberate, and deliberate is not the same as available.
+  # This is the only irreversible act in the whole tool surface — it destroys the forge repo AND
+  # both worktrees — and it was permanently reachable by any onboarder pod, on a target that is a
+  # free argument. Nothing in the fleet's normal life needs it: end-of-life teardown is an operator
+  # decision, not an agent one.
+  #
+  # Same shape as the bench's `--human-admin`: a real power, off by default, whose cost is written
+  # next to its switch. Off, the refusal is NAMED (`:delete_project_disabled`) rather than looking
+  # like a missing tool — an agent told "disabled" asks its human, an agent told nothing invents a
+  # workaround.
+  @delete_flag :allow_delete_project
+
   @spec delete_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, args, state) when is_binary(full_name) and is_map(args) do
-    case require_onboarder(state) do
-      {:error, reason} -> {:error, reason}
-      {:ok, _role} -> do_delete_project(full_name, args)
+    cond do
+      not delete_armed?() ->
+        Logger.warning(
+          "Delegation: delete_project(#{full_name}) REFUSED — disarmed by deployment " <>
+            "(config :fleet_mcp, #{inspect(@delete_flag)} is not true)"
+        )
+
+        {:error, :delete_project_disabled}
+
+      true ->
+        case require_onboarder(state) do
+          {:error, reason} -> {:error, reason}
+          {:ok, _role} -> do_delete_project(full_name, args)
+        end
     end
   end
+
+  # `=== true`, not truthiness: a flag set to a string, a 1 or an accidental non-nil value must NOT
+  # arm an irreversible gesture. Only the boolean says yes.
+  defp delete_armed?, do: Application.get_env(:fleet_mcp, @delete_flag, false) === true
 
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
   # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
