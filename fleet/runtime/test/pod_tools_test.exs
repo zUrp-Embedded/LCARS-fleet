@@ -176,6 +176,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # Forge stub (`:forge_client` seam): records create_issue + add_label, returns the number.
   # Adopts the seam's behaviour-contract → the compiler checks conformance (anti lying-stub).
   defmodule StubForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -235,6 +241,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # its PR merged with `head.ref` REWRITTEN to `refs/pull/6/head` (branch deleted) → the branch
   # scan CANNOT match; the `[merge:pr-6]` seal marker resolves it (merged_pr_of_issue).
   defmodule MergedMarkerForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -349,6 +361,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
   # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
   defmodule InFlightSupersedeForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -405,6 +423,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # Supersede pre-flight stub: issue 5 is already CLOSED → filiation only, NO retirement write
   # (a re-take of an abandoned brick is legitimate).
   defmodule ClosedTargetForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -556,6 +580,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # `:test_issue_state`. Read-ONLY by design: the contract's write callbacks raise fail-loud — a test
   # writing to the forge through this stub must blow up, not pass silently.
   defmodule RecordingForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -619,6 +649,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # marker-bearing body; `list_open_issues` replays them. A second create with the SAME inputs must
   # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
   defmodule IdempotencyForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -1809,6 +1845,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # contracts declare list_open_issues/post_comment), and the escalation guard checks EXPORTS.
   # Degradations are driven by the process dictionary (the seam runs in the caller's process).
   defmodule ReadChannelForge do
+    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
+    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.

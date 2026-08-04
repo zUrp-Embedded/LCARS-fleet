@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ForgeClient do
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -312,6 +312,55 @@ defmodule Fleet.Pilot.ForgeClient do
              state: "closed"
            }) do
       {:ok, :closed}
+    end
+  end
+
+  @doc """
+  The issues BLOCKING `number` (what it waits on), as returned by the forge.
+
+  Gitea carries issue dependencies natively and enforces them where it matters: it refuses to CLOSE
+  an issue while a blocker is still open. So this is a read, never a rule we re-implement — same
+  stance as branch-protection.
+
+  ⚠ A CLOSED blocker counts as satisfied. That is what makes the supersede path load-bearing: a
+  retired ticket keeps the edges pointing at it, and closing it RELEASES everything it blocked —
+  while the work moved to its replacement and is not delivered (measured 2026-08-04 on the bench).
+  """
+  @spec issue_dependencies(String.t(), integer(), Keyword.t()) ::
+          {:ok, [map()]} | {:error, term()}
+  def issue_dependencies(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
+    with {:ok, config} <- resolve_config(opts) do
+      paginate(config, "/repos/#{encode_repo(repo)}/issues/#{number}/dependencies", "")
+    end
+  end
+
+  @doc "The issues `number` BLOCKS (the inverse edge of `issue_dependencies/3`)."
+  @spec issue_blocks(String.t(), integer(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
+  def issue_blocks(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
+    with {:ok, config} <- resolve_config(opts) do
+      paginate(config, "/repos/#{encode_repo(repo)}/issues/#{number}/blocks", "")
+    end
+  end
+
+  @doc """
+  Adds "`number` depends on `blocker`" (same repo).
+
+  THE BODY FIELD IS `repo`, NOT `name`. The swagger's `IssueMeta` says `name`; sending it yields
+  `404 IsErrRepoNotExist [id: 0, uid: 0]` — an error that accuses the repository while the body is
+  what is wrong. Measured against a live Gitea 1.26.1 on 2026-08-04; both spellings were tried.
+  """
+  @spec add_issue_dependency(String.t(), integer(), integer(), Keyword.t()) ::
+          {:ok, map()} | {:error, term()}
+  def add_issue_dependency(repo, number, blocker, opts \\ [])
+      when is_binary(repo) and is_integer(number) and is_integer(blocker) do
+    [owner, name] = String.split(repo, "/", parts: 2)
+
+    with {:ok, config} <- resolve_config(opts) do
+      http_post(
+        config,
+        "/repos/#{encode_repo(repo)}/issues/#{number}/dependencies",
+        %{index: blocker, owner: owner, repo: name}
+      )
     end
   end
 

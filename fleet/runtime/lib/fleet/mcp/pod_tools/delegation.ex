@@ -57,7 +57,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -1224,24 +1224,75 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp supersedes_preflight(_forge, _repo, _bad), do: {:error, :invalid_supersedes}
 
+  # Reporte les deux sens sur le remplaçant. Un échec REMONTE (le `with` ci-dessus n'ira pas fermer) :
+  # un supersede à moitié recâblé qui ferme quand même est exactement le trou qu'on bouche —
+  # l'ancien ticket reste ouvert, le warning le dit, et un humain tranche. Bruyant plutôt que faux.
+  #
+  # Le remplaçant peut déjà porter une arête (rejeu) : la forge répond alors en erreur sur ce
+  # doublon, et c'est un état NOMINAL — on ne le compte pas comme un échec de report.
+  defp carry_dependencies(forge, repo, old_n, new_n) do
+    with {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
+         {:ok, blocked} <- forge.issue_blocks(repo, old_n, []),
+         :ok <- copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end),
+         :ok <- copy_edges(blocked, fn b -> forge.add_issue_dependency(repo, b, new_n, []) end) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:dependencies_not_carried, reason}}
+    end
+  end
+
+  defp copy_edges(issues, write_fun) do
+    Enum.reduce_while(issues, :ok, fn issue, :ok ->
+      case Map.get(issue, "number") do
+        n when is_integer(n) ->
+          case write_fun.(n) do
+            {:ok, _} -> {:cont, :ok}
+            # Déjà posée (rejeu) : la cible porte l'arête, c'est ce qu'on voulait.
+            {:error, {:http, 409, _}} -> {:cont, :ok}
+            {:error, _} = err -> {:halt, err}
+          end
+
+        _ ->
+          {:halt, {:error, {:edge_without_number, issue}}}
+      end
+    end)
+  end
+
   # Retirement of the replaced ticket — SYSTEM identity (default token: the system executes,
   # the arch only expressed the intent), comment BEFORE close (chronology readable on the forge,
   # same stance as the gatekeeper seal). The awaits-arch label is left as historical trace: a
   # CLOSED issue leaves the poller and the escalation inbox by itself (both list open only).
   # A retirement failure NEVER unwinds the created ticket (it exists): the result says so
   # honestly (`supersede_warning`) and the human closes by hand — loud, no half-lie.
-  defp retire_superseded(_forge, _repo, nil, _target_state, result), do: result
+  # PUBLIC (@doc false) pour que le report d'arêtes soit testable SUR SON ORDRE : la propriété qui
+  # compte ici n'est pas « les arêtes existent » mais « elles sont écrites AVANT la fermeture », et
+  # ça ne s'observe que depuis l'appelant.
+  @doc false
+  def retire_superseded(_forge, _repo, nil, _target_state, result), do: result
 
-  defp retire_superseded(_forge, _repo, n, :closed, result),
+  def retire_superseded(_forge, _repo, n, :closed, result),
     do: Map.put(result, "supersedes", n)
 
-  defp retire_superseded(forge, repo, n, :open, result) do
+  def retire_superseded(forge, repo, n, :open, result) do
     new_number = Map.get(result, "issue")
 
     comment =
       "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
 
-    with {:ok, _} <- forge.post_comment(repo, n, comment, []),
+    # LES ARÊTES DE DÉPENDANCE SE REPORTENT AVANT LA FERMETURE, ET L'ORDRE EST CONTRAIGNANT.
+    # Une dépendance Gitea relie deux issue_id ; `supersedes` n'est PAS une primitive de forge,
+    # c'est une convention LCARS (commentaire + fermeture). La forge ne voit donc pas un
+    # remplacement : elle voit une issue qui meurt et une autre qui naît, et les arêtes restent
+    # accrochées au mort. Les deux sens font mal, et le premier est silencieux :
+    #   * ce que l'ancien BLOQUAIT est libéré à l'instant de sa fermeture (un bloqueur CLOSED
+    #     compte comme satisfait) — alors que le travail a migré et n'est pas livré ;
+    #   * ce dont l'ancien DÉPENDAIT disparaît : le remplaçant naît sans sa précondition.
+    # Mesuré sur banc le 2026-08-04 (A bloque B, supersede A -> A' : `B dependencies` rend
+    # toujours A, fermé, et A' n'a aucune arête).
+    # Fermer d'abord libérerait les bloqués AVANT le recâblage, et un dispatch peut se glisser
+    # dans cette fenêtre. On écrit sur le remplaçant, PUIS on ferme.
+    with :ok <- carry_dependencies(forge, repo, n, new_number),
+         {:ok, _} <- forge.post_comment(repo, n, comment, []),
          {:ok, _} <- forge.close_issue(repo, n, []) do
       # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
       # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
