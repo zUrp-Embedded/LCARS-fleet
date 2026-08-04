@@ -20,7 +20,7 @@ defmodule Fleet.Layout do
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @projects_root "/home/projects"
@@ -39,10 +39,18 @@ defmodule Fleet.Layout do
   @briefs_subdir "briefs"
   @gate_briefs_subdir "gate-briefs"
   @provenance_subdir "provenance"
+  # The one subdir an AGENT may write into. The three above are written by the RUNTIME only
+  # (dispatch materializes the briefs, completion emits the provenance) and they are what a
+  # verdict is later audited against — an actor able to overwrite them could rewrite the record
+  # of what was asked and what was proven, after the fact. `notes/` carries what an architect
+  # authors on its own initiative (campaign reports, analyses) and nothing reads it as evidence,
+  # so a free hand there costs nothing.
+  @notes_subdir "notes"
   @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
                 )
+  @notes_ref_re Regex.compile!("\\A#{@notes_subdir}/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z")
 
   # The two FACES of a project (chantier face-projet 2026-08-02). A project is ONE forge repo with
   # two orthogonal branches — code (`main`) and ops (`work/ops`, orphan) — each checked out in its
@@ -180,6 +188,28 @@ defmodule Fleet.Layout do
   @spec valid_brief_ref?(term()) :: boolean()
   def valid_brief_ref?(ref) when is_binary(ref), do: Regex.match?(@brief_ref_re, ref)
   def valid_brief_ref?(_), do: false
+
+  @doc """
+  work/ops-relative ref of an authored note: `notes/<name>.md` (sanitized, one flat segment).
+  """
+  @spec notes_ref(String.t()) :: String.t()
+  def notes_ref(name), do: Path.join(@notes_subdir, sanitize_artifact_name(name) <> ".md")
+
+  @doc """
+  Validates a note ref SHAPE — the WRITE FRONTIER of an agent on the ops face.
+
+  It is a whitelist and it must stay one: `briefs/`, `gate-briefs/` and `provenance/` are written
+  by the runtime and read back as the record of what was asked and what was proven. An agent that
+  could address them could rewrite that record after the fact, and the audit would still read
+  green. `notes/` is authored material that nothing consumes as evidence.
+
+  Same shape rules as `valid_brief_ref?/1`: one flat path-safe `.md` segment, so `..`, nested
+  paths and a leading dot are refused — a traversal out of `notes/` lands exactly on the trees
+  this frontier exists to protect.
+  """
+  @spec valid_notes_ref?(term()) :: boolean()
+  def valid_notes_ref?(ref) when is_binary(ref), do: Regex.match?(@notes_ref_re, ref)
+  def valid_notes_ref?(_), do: false
 
   @doc """
   Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
