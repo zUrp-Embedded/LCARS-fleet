@@ -57,7 +57,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -308,8 +308,23 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # Axiom (reorg 2026-07-19): no "repo" in the result — the arch has "the project".
       # One meaning per shape (2026-07-19): no polysemous null — `title`/`pr` are ABSENT
       # when there is nothing true to say, never null (cf. put_pr/2).
+      # THE SIGNPOST TRAVELS IN THE ANSWER, not only in the catalogue read once at boot. Measured
+      # on the bench: an architect complained that this status carried no timestamp, WITHOUT
+      # inventorying its own toolbox — while `get_issue`'s description names this tool by name to
+      # orient the choice. That is the exact twin of the producer bias corrected the same night
+      # (delivering costs less than refusing): complaining costs less than looking.
+      #
+      # So the pointer arrives where the agent actually looks — inside what it just received.
+      # Same doctrine as the CI fact riding into the judge's brief: the information goes to the
+      # reader, we do not wait for the reader to come and get it.
       result =
-        %{"issue" => number, "outcome" => outcome(issue_state, issue_labels, pr)}
+        %{
+          "issue" => number,
+          "outcome" => outcome(issue_state, issue_labels, pr),
+          "voir_aussi" =>
+            "`get_issue(#{number})` rend le fil de commentaires et leurs horodatages — " <>
+              "ce status DÉRIVE un état, il ne restitue pas la matière."
+        }
         |> put_present("title", title)
         |> put_pr(pr)
 

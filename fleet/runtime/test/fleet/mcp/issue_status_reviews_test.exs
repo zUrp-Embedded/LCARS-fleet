@@ -142,6 +142,31 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
     end
   end
 
+  describe "the signpost travels in the answer" do
+    setup do
+      Process.put(
+        :review_state,
+        {:ok, %{verdicts: %{}, reviewers: [], records: [], outcome: :no_jury}}
+      )
+
+      :ok
+    end
+
+    test "the status names the tool that holds the thread and the timestamps" do
+      result = status()
+
+      assert result["voir_aussi"] =~ "get_issue(42)"
+      assert result["voir_aussi"] =~ "horodatages"
+    end
+
+    test "it says WHY the two are not redundant — one derives, the other restores" do
+      # The bench defect was not a missing field: an architect complained about an absent
+      # timestamp without inventorying its own toolbox. A pointer that does not say what the
+      # other tool IS gets read as a duplicate and ignored again.
+      assert status()["voir_aussi"] =~ "DÉRIVE"
+    end
+  end
+
   describe "nothing true to say" do
     test "no in-force review → the key is ABSENT, never an empty list" do
       Process.put(
