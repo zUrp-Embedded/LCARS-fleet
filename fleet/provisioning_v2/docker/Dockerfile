@@ -42,6 +42,12 @@ ENV MIX_ENV=prod LANG=C.UTF-8
 # rouge qui ne parle pas du code. C'est un besoin du GATE seul : le runtime, lui, crée ses
 # worktrees en `add -f -B` (vérifié dans pilot/conflict_apply + project_onboard), donc l'image
 # finale garde le git de bookworm sans rien perdre.
+# LA RACINE `work` EST UNE CONSTANTE DE COMPILATION, DONC UNE DÉPENDANCE DU STAGE. `Fleet.Layout`
+# fige `@work_root "/home/projects.work"` ; le test d'admission du poller crée son répertoire de
+# projet LÀ où le code ira le lire — c'est le point du test, il refuse de mesurer un stub de
+# lui-même. Sous `builder`, `/home` appartient à root : `mkdir_p` échoue et le test rougit sans
+# rien dire du code (mesuré 2026-08-04, premier build après le commit qui pose ce test). Même
+# règle que les paquets ci-dessus : on outille le stage, on n'affaiblit pas le gate.
 RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/backports.list \
     && apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -50,7 +56,8 @@ RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/s
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
-    && install -d -o builder -g fleet /local /src /src/fleet /src/fleet/runtime
+    && install -d -o builder -g fleet /local /src /src/fleet /src/fleet/runtime \
+    && install -d -o builder -g fleet /home/projects.work
 
 # HOME suit l'utilisateur — `USER` ne le change PAS (il resterait /root, et mix/hex écriraient
 # leurs caches dans un dossier interdit à builder).
