@@ -212,7 +212,14 @@ function show(tab) {
   // terminal connecte), donc changer d'onglet faisait surgir un « voulez-vous quitter ? ». Et le
   // terminal se reconnectait a chaque retour, perdant son ecran. Montrer/cacher ne decharge rien :
   // la question ne se pose plus, et les sessions gardent leur etat.
-  stage.querySelectorAll('.pane').forEach(f => { f.hidden = true; });
+  // On ne masque JAMAIS le cadre qu'on s'apprete a montrer. `hidden` vaut `display:none` : un
+  // aller-retour, meme d'un seul tick, RETIRE le contenu de la chaine de focus et le demasquage ne
+  // le rend pas. Or `build()` rejoue `show()` sur CHAQUE changement de signature (une transition de
+  // phase d'un pod qu'on ne regarde meme pas suffit) — donc l'humain qui tapait dans un terminal
+  // perdait la main sans que rien de visible n'ait bouge. Un seul passage qui pose l'etat final :
+  // la cible n'est pas touchee, les autres sont masquees. Mesure: document.activeElement retombait
+  // sur <body> a chaque update de la liste des workers.
+  stage.querySelectorAll('.pane').forEach(f => { f.hidden = (f.dataset.key !== tab.key); });
   if (tab.url) {
     panel.style.display = 'none';
     let pane = stage.querySelector(`.pane[data-key="${CSS.escape(tab.key)}"]`);
