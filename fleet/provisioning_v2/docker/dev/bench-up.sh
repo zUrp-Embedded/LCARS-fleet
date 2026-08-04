@@ -33,6 +33,7 @@
 #
 # USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 3700] [--bind 127.0.0.5]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
+#                     [--no-human-admin]
 # EXIT  : 0 banc pret · 1 arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas
 #         4 amorcage forge · 5 creds · 6 le verdict final ne passe pas
 
@@ -49,6 +50,8 @@ IMAGE="lcars-fleet:2"
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
 HUMAN="lcars"
+# Le banc promeut l'humain site-admin par defaut (raison + cout : etape 6-bis du bootstrap).
+BOOTSTRAP_EXTRA=()
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --image)      IMAGE="${2:?}"; shift 2 ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
+    --no-human-admin) BOOTSTRAP_EXTRA+=(--no-human-admin); shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
     -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-up: option inconnue: $1" >&2; exit 1 ;;
@@ -75,6 +79,50 @@ say() { printf '[bench-up] %s\n' "$*"; }
 die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
 
 command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
+
+# ─── 0. LE DAEMON, ET LA SONDE QUI ATTRAPE LE RELAIS MUET ───────────────────────────────────────
+# Sur cette distro, le daemon est Docker Desktop cote Windows : il n'y a NI dockerd NI
+# /var/run/docker.sock ici. Deux chemins d'acces existent, et ILS NE SE VALENT PAS :
+#
+#   a) la socket Docker Desktop elle-meme, /mnt/wsl/docker-desktop/.../docker.proxy.sock —
+#      complete, mais root:root 0755 a la creation (donc inutilisable sans un chgrp fleet) ;
+#   b) le relais systemd du groupe fleet, /run/docker-fleet.sock (systemd-socket-proxyd,
+#      outillage/install-docker-relay.sh) — lisible par tout le groupe, et **AMPUTE**.
+#
+# CE QUE LE RELAIS FAIT DE PIRE (mesure du 2026-08-04) : il repond parfaitement aux commandes qui
+# lisent (`version`, `ps`, `inspect`, `images`) et rend ZERO OCTET, EXIT 0, sur toute commande a
+# flux attache — `exec`, `cp`, `run`, `attach`. Un `docker exec ... gitea --version` ne dit rien et
+# reussit. Consequence pour ce script : chaque valeur capturee par un exec (master token, token
+# systeme, verdict des creds) devient une chaine VIDE que le code prend pour un fait. L'amorçage
+# est mort sur « la forge n'a pas rendu de master token » — un diagnostic qui accuse la forge, qui
+# etait saine. Un instrument qui repond a moitie est pire qu'un instrument absent.
+#
+# D'ou : on prefere (a) quand elle est joignable, on retombe sur (b), et dans TOUS les cas on sonde
+# le flux attache AVANT de commencer — la sonde est un aller-retour reel, pas une supposition.
+if [[ -z "${DOCKER_HOST:-}" ]]; then
+  DD_SOCK="/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"
+  if [[ -S "$DD_SOCK" && -w "$DD_SOCK" ]]; then
+    export DOCKER_HOST="unix://$DD_SOCK"
+    say "daemon : socket Docker Desktop directe"
+  elif [[ -S /run/docker-fleet.sock ]]; then
+    export DOCKER_HOST="unix:///run/docker-fleet.sock"
+    say "daemon : relais fleet (la sonde de flux dira s'il est ampute)"
+  fi
+fi
+
+"$DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1 \
+  || die "aucun daemon docker joignable (DOCKER_HOST=${DOCKER_HOST:-<vide>}) — Docker Desktop lance ?" 1
+
+# La sonde : un aller-retour attache sur l'image qu'on s'apprete a deployer (locale, aucun pull).
+"$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
+  || die "image absente localement: $IMAGE (LCARS_IMAGE=$IMAGE ./docker.sh build)" 1
+PROBE="$("$DOCKER_BIN" run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/dev/null | tr -d '[:space:]')"
+[[ "$PROBE" == "flux-ok" ]] || die \
+  "le daemon repond mais un flux attache revient VIDE (recu: '${PROBE:-<rien>}') — DOCKER_HOST=$DOCKER_HOST
+   C'est le relais systemd : il ne supporte pas le hijack HTTP de docker exec/run/cp.
+   Sortie connue (root, une fois par demarrage de Docker Desktop) :
+     sudo chgrp fleet /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock
+     sudo chmod 660  /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock" 1
 
 # Refus net plutot qu'un ecrasement silencieux : ce script MONTE, il ne remplace pas.
 if "$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX"; then
@@ -145,7 +193,7 @@ say "recette tofu dans $TOFU_DIR (etat PARTAGE par les deux passes)"
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    --tofu-dir "$TOFU_DIR" \
+    --tofu-dir "$TOFU_DIR" ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 1 en echec" 4
 
 # ─── 5. relance de la boite : 50-forge minte les role-tokens sur le seed (piege 2) ───────────────
@@ -162,7 +210,7 @@ done
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    --tofu-dir "$TOFU_DIR" \
+    --tofu-dir "$TOFU_DIR" ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 2 en echec" 4
 
 # ─── 7. verdict MESURE ───────────────────────────────────────────────────────────────────────────
@@ -171,6 +219,10 @@ SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat /home/private/system.gitea_token 2>/d
 
 ROLE_TOKENS="$("$DOCKER_BIN" exec "$BOX" bash -c 'ls /home/private/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
 CREDS_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
+# Le verdict RESONDE la promotion plutot que de repeter le flag : ce qui est affiche est ce que la
+# forge repond, pas ce qu'on lui a demande.
+HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/user" \
+  | python3 -c 'import json,sys; print("site-admin" if json.load(sys.stdin).get("is_admin") else "non-admin")' 2>/dev/null || echo "?")"
 
 say "─────────────────────────────────────────────────────────"
 say "banc PRET"
@@ -178,5 +230,6 @@ say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
 say "  boite     : $BOX   ssh ${BIND}:2222   deck ${BIND}:20999"
 say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
 say "  creds     : $CREDS_OK"
+say "  admin     : $HUMAN_ADMIN_STATE"
 say "  destruire : bench-down.sh --project $PROJECT"
 say "─────────────────────────────────────────────────────────"
