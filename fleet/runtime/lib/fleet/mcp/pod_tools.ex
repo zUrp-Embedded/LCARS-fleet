@@ -557,6 +557,26 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "list_projects" do
+    meta do
+      name("List Projects")
+
+      description(
+        "LIST the projects on this box — the counterpart of the project gestures you already " <>
+          "have. Takes no argument. Returns {\"count\":N,\"projects\":[{\"name\",\"repo\"," <>
+          "\"card\",\"card_source\",\"level\",\"state\"}]}. `card_source` says whether the " <>
+          "validation card was DECLARED by a human (`declared`), never declared (`undeclared` — " <>
+          "the fleet default applies at burn time), or unreadable (`invalid`/`unreadable`): a " <>
+          "project that declared nothing is NOT the same as one that chose the default. `state` " <>
+          "is `open`, `parked` (closed by `close_project`, reopen with `open_project`), or " <>
+          "`unknown` with `state_error` when the forge could not be read — an unknown state is " <>
+          "never reported as open."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}})
+  end
+
   deftool "publish_doc" do
     meta do
       name("Publish Doc")
@@ -882,6 +902,14 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("comment_issue", _bad_args, state) do
     {:error, :invalid_arguments, state}
+  end
+
+  # The READ half of the project surface (onboarder gate inside Delegation).
+  def handle_tool_call("list_projects", _arguments, state) do
+    case Delegation.list_projects(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
   end
 
   # Authored publication on the ops face (architect gate inside Delegation, repo from the channel).

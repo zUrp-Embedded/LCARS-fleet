@@ -595,6 +595,11 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
+    # The READ half of the project surface: a stub that could destroy but not enumerate is exactly
+    # the shape this tool was added to close.
+    def list_projects(_opts),
+      do: {:ok, [%{"name" => "demo", "repo" => "fleet/demo", "state" => "open"}]}
+
     def close_project(full_name, opts) do
       send(self(), {:close_project, full_name, opts})
 

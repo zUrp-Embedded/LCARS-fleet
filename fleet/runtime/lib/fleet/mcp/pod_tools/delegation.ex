@@ -332,6 +332,27 @@ defmodule Fleet.MCP.PodTools.Delegation do
     do: Map.put(map, "pr", %{"error" => "forge_unreachable"})
 
   @doc """
+  Lists the projects on this box (pure read).
+
+  The onboarder could create, open, import, adopt, close, revise AND DELETE a project, and had no
+  way to enumerate them: the most destructive surface in the fleet, aimed by a name it could only
+  have been told. Zero occurrences of any listing — not a filter to widen, a half that was never
+  built.
+
+  Straight pass-through to the onboard seam, which owns both the disk layout and the parked-marker
+  read. Nothing is derived here: re-deriving "which projects exist" MCP-side would be a second
+  authority next to the one that creates and destroys them.
+  """
+  @spec list_projects(map()) :: {:ok, map()} | {:error, term()}
+  def list_projects(state) do
+    with {:ok, _role} <- require_onboarder(state),
+         {:ok, onboard} <- conforming_onboard(),
+         {:ok, projects} <- onboard.list_projects([]) do
+      {:ok, %{"projects" => projects, "count" => length(projects)}}
+    end
+  end
+
+  @doc """
   Reads the validation-card catalogue for the framing interview — from the ACTIVE authority:
   `Loader.canon_names!/0` (the configured maps root, never a hardcoded priv path) and
   `Loader.load!/1` (schema + graph validated — the listing can only offer what the engine can

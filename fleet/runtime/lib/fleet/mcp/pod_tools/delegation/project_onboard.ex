@@ -22,7 +22,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-04
   """
 
   @doc """
@@ -96,6 +96,14 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   """
   @callback close_project(full_name :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
+
+  @doc """
+  LISTS the projects on this box (pure read). Per project: name, repo, the DECLARED card and level
+  (never the effective fallback — an undeclared project must stay distinguishable from one that
+  chose the default), and the parked state read from the forge. A state that cannot be read is
+  `"unknown"` plus `state_error`, never a silent `"open"`.
+  """
+  @callback list_projects(opts :: keyword()) :: {:ok, [map()]} | {:error, term()}
 
   @doc """
   REVISES an EXISTING project's validation-card declaration (BL-6-29) — commits the new

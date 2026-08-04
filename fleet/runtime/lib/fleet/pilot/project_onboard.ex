@@ -360,6 +360,99 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, Fleet.Pilot.ForgeClient)
 
   @doc """
+  Enumerates the projects on this box, with what governs each one.
+
+  The onboarder could `create`, `open`, `import`, `adopt`, `close`, `revise` and `delete` a
+  project, and could not LIST them: it was able to destroy a project it had no way to name. This
+  is that missing half, and it is a pure read — the only listing in the delegation surface that
+  writes nothing.
+
+  Enumerated from DISK (`projects_root`), which is what "this fleet's projects" means: a repo on
+  the forge that was never cloned here is not something this box can act on, and a disk project not
+  yet published is precisely what `adopt_project` exists for.
+
+  Per project, three facts and no derivation:
+
+    * the DECLARED card and level (`intensity.json`), reported as declared or NOT. An undeclared
+      project falls back to the fleet default at burn time, and that fallback is deliberately NOT
+      applied here: reporting the effective card would make an undeclared project indistinguishable
+      from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`
+      records an INCIDENT on the invalid path — a listing must not have side effects.
+    * the STATE, read from the forge: an open parked-marker issue is the state machine
+      (`close_project`'s own truth, not a second reading of it).
+    * `state: "unknown"` with `state_error` when that forge read fails. Never a silent "open" — an
+      unreadable state and a running project must not look the same to the actor that can delete
+      either one.
+  """
+  @spec list_projects(keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_projects(opts \\ []) do
+    root = Keyword.get(opts, :projects_root, @projects_root)
+
+    case File.ls(root) do
+      {:ok, entries} ->
+        projects =
+          entries
+          |> Enum.filter(&File.dir?(Path.join(root, &1)))
+          |> Enum.sort()
+          |> Enum.map(&describe_project(&1, root, opts))
+
+        {:ok, projects}
+
+      {:error, reason} ->
+        {:error, {:projects_root_unreadable, root, reason}}
+    end
+  end
+
+  defp describe_project(name, root, opts) do
+    full_name = "#{Keyword.get(opts, :org, "fleet")}/#{name}"
+
+    %{"name" => name, "repo" => full_name}
+    |> Map.merge(declared_intensity(Path.join(root, name)))
+    |> Map.merge(parked_state(full_name, opts))
+  end
+
+  # What the project DECLARES, never what it would fall back to.
+  defp declared_intensity(proj_dir) do
+    case File.read(Path.join(proj_dir, "intensity.json")) do
+      {:ok, raw} ->
+        case Jason.decode(raw) do
+          {:ok, %{"pipeline_default" => card} = decl} when is_binary(card) ->
+            %{
+              "card" => card,
+              "card_source" => "declared",
+              "level" => Map.get(decl, "intensity_level"),
+              "declared_by" => Map.get(decl, "declared_by")
+            }
+
+          _ ->
+            %{"card" => nil, "card_source" => "invalid", "level" => nil}
+        end
+
+      {:error, :enoent} ->
+        %{"card" => nil, "card_source" => "undeclared", "level" => nil}
+
+      {:error, reason} ->
+        %{
+          "card" => nil,
+          "card_source" => "unreadable",
+          "level" => nil,
+          "card_error" => "#{:file.format_error(reason)}"
+        }
+    end
+  end
+
+  defp parked_state(full_name, opts) do
+    case forge_issues(opts).list_open_issues(full_name, fc_opts(opts)) do
+      {:ok, issues} ->
+        parked? = Enum.any?(issues, &Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        %{"state" => if(parked?, do: "parked", else: "open")}
+
+      {:error, reason} ->
+        %{"state" => "unknown", "state_error" => inspect(reason)}
+    end
+  end
+
+  @doc """
   CLOSES a project (BL-6-30) — the verb between `open` and `delete`: stops the fleet ON this
   project while disk and forge stay intact. The closed state is a FORGE OBJECT (the forge IS
   the state machine): an OPEN marker issue (`ForgeProtocol.parked_issue_title/0`, assignee =
