@@ -571,7 +571,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
   describe "record_review/2 + promote/2 (PR-native)" do
     test "verdict :approve → native APPROVED review (role-generated body)" do
-      step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve
+      }
 
       assert {:ok, :reviewed} =
                StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
@@ -585,6 +591,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     test "verdict :request_changes with explicit body" do
       step_run = %{
         repo: "fleet/proj",
+        issue_number: 42,
         pr_number: 7,
         base_branch: "main",
         role: "reviewer",
@@ -599,7 +606,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "record_review propagates the forge error" do
-      step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve
+      }
 
       assert {:error, {:review, {:http, 500, _}}} =
                StepRunCompleter.record_review(step_run, forge_client: PrFailForge, forge_opts: [])

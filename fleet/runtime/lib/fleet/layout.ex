@@ -46,6 +46,10 @@ defmodule Fleet.Layout do
   # authors on its own initiative (campaign reports, analyses) and nothing reads it as evidence,
   # so a free hand there costs nothing.
   @notes_subdir "notes"
+  # Verdicts committed in full when they exceed the inlining threshold. RUNTIME-written like the
+  # three above, and deliberately OUTSIDE `@notes_subdir`: an agent must never be able to address
+  # the tree its own judgement is recorded in.
+  @verdicts_subdir "verdicts"
   @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
@@ -194,6 +198,20 @@ defmodule Fleet.Layout do
   """
   @spec notes_ref(String.t()) :: String.t()
   def notes_ref(name), do: Path.join(@notes_subdir, sanitize_artifact_name(name) <> ".md")
+
+  @doc """
+  work/ops-relative ref of a committed verdict: `verdicts/issue-<n>-<role>.md`.
+
+  Same plain-human naming as `brief_ref/2`, and the symmetry is the point: an order and the
+  judgement of its delivery sit side by side under the same issue number, readable by eye.
+  """
+  @spec verdict_ref(integer(), String.t()) :: String.t()
+  def verdict_ref(issue_number, role) when is_integer(issue_number) and is_binary(role),
+    do:
+      Path.join(
+        @verdicts_subdir,
+        "issue-#{issue_number}-#{sanitize_artifact_name(role)}.md"
+      )
 
   @doc """
   Validates a note ref SHAPE — the WRITE FRONTIER of an agent on the ops face.

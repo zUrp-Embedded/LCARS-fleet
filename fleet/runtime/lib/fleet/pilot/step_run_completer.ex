@@ -73,6 +73,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # the caller's overrides (`:pr_body`/`:review_body`/`:comment_body`) always take precedence.
   alias Fleet.Pilot.StepRunCompleter.Texts
 
+  # `Fleet.Workflow.Pinning` is aliased under its FULL name deliberately: `StepRunCompleter.Emissions`
+  # already lives in this file, and `Emission`/`Emissions` side by side is the kind of neighbouring
+  # name that gets misread once and then trusted.
+  alias Fleet.Workflow.Pinning
+
   # Protocol vocabulary = single source Fleet.Labels.
   @in_flight_label Labels.in_flight()
 
@@ -140,6 +145,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # `:work_root` (opt, default `Fleet.Layout.work_root()`) = SEAM of the work/ops root — test
   # hermeticity (the real root is a hardcoded global path; injecting it makes the
   # producer→provenance wiring exercisable — otherwise the green never walks the real path).
+  # The project's work/ops worktree, or `nil` when there is none — a project that was never onboarded
+  # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:work_root` seam as
+  # the provenance emission below, for the same reason: the real root is a hardcoded global path.
+  defp verdict_work_dir(repo, opts) do
+    dir =
+      Path.join(
+        Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
+        Fleet.Layout.project_name(repo)
+      )
+
+    if File.dir?(dir), do: dir
+  end
+
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
     work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
 
@@ -384,9 +402,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
   `[step_run:role:sha]` comment: the gate verdict lives as a Gitea review (APPROVED / REQUEST_CHANGES),
   traceable, readable without a custom query. It is the durable HOME of the verdict.
 
-  `step_run`: `:repo`, `:pr_number`, `:role`, `:review_event` (`:approve` | `:request_changes` |
-  `:comment`), `:review_body` (optional, default generated from role + verdict).
+  `step_run`: `:repo`, `:issue_number`, `:pr_number`, `:role`, `:review_event` (`:approve` |
+  `:request_changes` | `:comment`), `:review_body` (optional, default generated from role + verdict).
   Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
+
+  `:issue_number` is REQUIRED and fetched fail-loud: a verdict long enough to be committed is
+  committed at `verdicts/issue-<n>-<role>.md`, and a verdict that cannot name its issue has no
+  business being filed under a guessed one. The real caller always carries it (`build_step_run`);
+  a caller that does not is a caller that has not said which delivery it is judging.
   """
   @spec record_review(map(), keyword()) :: {:ok, :reviewed} | {:error, {:review, term()}}
   def record_review(step_run, opts \\ []) when is_map(step_run) do
@@ -396,8 +419,24 @@ defmodule Fleet.Pilot.StepRunCompleter do
     pr = Map.fetch!(step_run, :pr_number)
     event = Map.fetch!(step_run, :review_event)
 
+    role = Map.get(step_run, :role, "juge")
+
+    # SUMMARY + POINTER above the threshold. A long verdict pasted into a review is unreadable in
+    # the UI, unquotable (nothing addresses a version of it) and EDITABLE — a human amending the
+    # comment amends the only copy, silently. Committed and cited, it is an immutable object with a
+    # name, and the surface keeps what a human scanning the PR actually needs.
+    #
+    # The generic fallback body is short by construction and never pins: `render/2` returns it
+    # untouched, so the cheap path stays one function call with no forge write.
     body =
-      Map.get(step_run, :review_body, Texts.review_body(Map.get(step_run, :role, "juge"), event))
+      step_run
+      |> Map.get(:review_body, Texts.review_body(role, event))
+      |> Pinning.render(
+        work_dir: verdict_work_dir(repo, opts),
+        ref: Fleet.Layout.verdict_ref(Map.fetch!(step_run, :issue_number), role),
+        kind: "Verdict",
+        label: "verdict"
+      )
 
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
     # the review author = qualifier/reviewer (honest avatar/trace), not the system account. Token
