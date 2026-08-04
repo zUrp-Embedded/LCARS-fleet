@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   use Mix.Task
@@ -102,7 +102,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
         check_sanctuary_contained(root),
-        check_mcp_wire_inputschema(root)
+        check_mcp_wire_inputschema(root),
+        check_mcp_tools_gated(root),
+        check_mcp_seam_surface(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1330,6 +1332,283 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       note:
         "socket frontier = wire (camelCase); ExMCP internal shape = snake — F1 locked at the gate"
     }
+  end
+
+  # ── Tool authorization (A1) ──────────────────────────────────────────
+  # `tools/list` is DISCOVERY, not authorization: `tools/call` re-verifies nothing against it.
+  # Every pod's MCP session is handed the same tool catalogue, so what stops a producer from
+  # calling a destructive project op is never the catalogue — it is the gate on that tool's own
+  # dispatch path. The invariant held by discipline alone: nothing refused a new `deftool` wired
+  # to an ungated body, and such a tool is callable by ANY pod with nothing said about it.
+  #
+  # Two admissible forms, and no third:
+  #   * POD-SCOPED — the clause head matches `%{pod_id: _}`. Identity is the CHANNEL (one pod, one
+  #     socket), never the wire.
+  #   * ROLE-GATED — the body calls a `Delegation` function whose own body calls
+  #     `require_architect`/`require_onboarder`, which resolve role AND repo from the spawn binding.
+  # A clause whose body is a bare `{:error, _, state}` (bad arguments) is inert: it neither needs
+  # nor supplies a gate, and a tool made only of those is not gated.
+  #
+  # INVERSE TWIN, and it is the sharper half: a `handle_tool_call` clause with NO `deftool` schema
+  # is not dead code. It is absent from `tools/list` and still dispatched by `tools/call` — a tool
+  # that works and that no catalogue admits.
+  #
+  # Read from the AST, never from a grep: a comment mentioning `require_architect` must not be able
+  # to green this check (BND-111, applied to the thing rather than to a stripped line).
+  #
+  # PUBLIC (@doc false) for the same reason as `code_match?/4`: this check reports ABSENCES, and a
+  # broken parser reports the same absences as a clean tree. Its refusals must be provable against
+  # CRAFTED fixture trees, not only observed green on the real one — the whole-repo smoke test can
+  # never distinguish "nothing wrong" from "nothing measured". It takes its root as an argument
+  # precisely so a test can hand it one.
+  @doc false
+  def check_mcp_tools_gated(root) do
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+    clauses = dispatch_clauses(quoted!(root, tools_rel))
+    gated_fns = role_gated_functions(quoted!(root, deleg_rel))
+
+    ungated =
+      declared
+      |> Enum.reject(&tool_gated?(Map.get(clauses, &1, []), gated_fns))
+      |> Enum.sort()
+
+    undeclared = clauses |> Map.keys() |> Enum.reject(&(&1 in declared)) |> Enum.sort()
+
+    # INSTRUMENT GUARD. Every finding below is an ABSENCE, and an absence is what a broken parser
+    # produces too: a `deftool` shape change would empty `declared`, and this check would pass by
+    # measuring nothing. The floors are set under the state of the day, not at it — they catch a
+    # blind instrument, they do not freeze the tool count.
+    broken =
+      cond do
+        MapSet.size(declared) < 12 ->
+          "only #{MapSet.size(declared)} deftool found (expected 12+)"
+
+        map_size(clauses) < 12 ->
+          "only #{map_size(clauses)} dispatch clauses found (expected 12+)"
+
+        MapSet.size(gated_fns) < 10 ->
+          "only #{MapSet.size(gated_fns)} gated delegations (10+)"
+
+        true ->
+          nil
+      end
+
+    %{
+      id: "mcp.tools_gated",
+      remediation:
+        "give the tool a gate: pattern-match %{pod_id: _} in its handle_tool_call head " <>
+          "(channel identity) or route it through a Delegation function guarded by " <>
+          "require_architect/require_onboarder — tools/call does not re-check tools/list",
+      status: if(is_nil(broken) and ungated == [] and undeclared == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["#{tools_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          ungated != [] ->
+            ["#{tools_rel}: ungated tools #{inspect(ungated)}"]
+
+          undeclared != [] ->
+            ["#{tools_rel}: dispatched without a deftool #{inspect(undeclared)}"]
+
+          true ->
+            []
+        end,
+      note:
+        "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
+          "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
+    }
+  end
+
+  # ── Seam surface ─────────────────────────────────────────────────────
+  # The `conforming/2` guard turns a misconfigured seam into a named error instead of an
+  # UndefinedFunctionError raised deep inside a half-finished gesture. It can only see what a
+  # behaviour DECLARES — so a seam op nobody wrote down is a call the guard vouches for without
+  # having checked it. Measured 2026-08-04: 12 callbacks declared, 16 functions called; the three
+  # dependency ops ran inside the supersede retirement, past the point where the live PR is already
+  # closed, guarded by nothing.
+  #
+  # `Delegation` reaches its seams ONLY through a variable holding a resolved module (the guard
+  # hands it over). So every remote call on a variable in that file is a seam call and must be
+  # declared by one of the four behaviours. One exception, named rather than pattern-matched away:
+  # `behaviour.behaviour_info/1` is the guard reflecting ON a behaviour module, not a call THROUGH
+  # a seam.
+  @seam_behaviours [
+    Fleet.MCP.PodTools.Delegation.ForgeClient,
+    Fleet.MCP.PodTools.Delegation.EscalationForge,
+    Fleet.MCP.PodTools.Delegation.DependencyForge,
+    Fleet.MCP.PodTools.Delegation.ProjectOnboard
+  ]
+
+  # Reflection on a behaviour module, not a seam op. The ONLY admitted exception.
+  @seam_reflection [behaviour_info: 1]
+
+  @doc false
+  def check_mcp_seam_surface(root, behaviours \\ @seam_behaviours) do
+    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
+
+    called = seam_calls(quoted!(root, deleg_rel))
+
+    declared =
+      behaviours
+      |> Enum.flat_map(fn b ->
+        Code.ensure_loaded!(b)
+        b.behaviour_info(:callbacks)
+      end)
+      |> MapSet.new()
+
+    undeclared =
+      called
+      |> Enum.reject(fn {fun, arity} ->
+        MapSet.member?(declared, {fun, arity}) or {fun, arity} in @seam_reflection
+      end)
+      |> Enum.sort()
+
+    # INSTRUMENT GUARD: both sides of the comparison can go empty on their own. An AST shape change
+    # empties `called` and everything is declared; a behaviour that stops resolving empties
+    # `declared` and everything is undeclared — the second is loud, the first is silent.
+    broken =
+      cond do
+        length(called) < 15 -> "only #{length(called)} seam calls found (expected 15+)"
+        MapSet.size(declared) < 20 -> "only #{MapSet.size(declared)} callbacks declared (20+)"
+        true -> nil
+      end
+
+    %{
+      id: "mcp.seam_surface_declared",
+      remediation:
+        "declare the op as a @callback of the behaviour that covers its path " <>
+          "(ForgeClient / EscalationForge / DependencyForge / ProjectOnboard) — " <>
+          "conforming/2 vouches only for what a behaviour declares",
+      status: if(is_nil(broken) and undeclared == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["#{deleg_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          undeclared != [] ->
+            ["#{deleg_rel}: called through a seam, declared nowhere: #{inspect(undeclared)}"]
+
+          true ->
+            []
+        end,
+      note:
+        "#{length(called)} seam calls covered by #{MapSet.size(declared)} callbacks " <>
+          "over #{length(behaviours)} behaviours"
+    }
+  end
+
+  # Remote calls on a VARIABLE (`forge.close_pr(...)`), which in `Delegation` are seam calls and
+  # nothing else. `no_parens` nodes are field access (`identity.token`), not calls.
+  defp seam_calls(ast) do
+    ast
+    |> collect(fn
+      {{:., _, [{var, _, nil}, fun]}, meta, args} when is_atom(var) and is_atom(fun) ->
+        if meta[:no_parens] == true, do: nil, else: {fun, length(args)}
+
+      _ ->
+        nil
+    end)
+    |> Enum.uniq()
+  end
+
+  defp quoted!(root, rel), do: root |> Path.join(rel) |> File.read!() |> Code.string_to_quoted!()
+
+  # `deftool "name" do … end` — the schemas advertised by `tools/list`.
+  defp deftool_names(ast) do
+    ast
+    |> collect(fn
+      {:deftool, _, [name | _]} when is_binary(name) -> name
+      _ -> nil
+    end)
+    |> MapSet.new()
+  end
+
+  # `def handle_tool_call("name", args, state)` clauses, grouped by tool name. The catch-all
+  # (`handle_tool_call(_unknown, …)`) has no literal name and is skipped: it refuses by definition.
+  defp dispatch_clauses(ast) do
+    ast
+    |> collect(fn
+      {:def, _, [head, [do: body]]} -> dispatch_clause(head, body)
+      _ -> nil
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  defp dispatch_clause({:when, _, [inner, _guard]}, body), do: dispatch_clause(inner, body)
+
+  defp dispatch_clause({:handle_tool_call, _, [name, _args, state]}, body) when is_binary(name),
+    do: {name, %{state: state, body: body}}
+
+  defp dispatch_clause(_head, _body), do: nil
+
+  # A `Delegation` function whose own body reaches a role gate. `Macro.to_string/1` on the BODY AST,
+  # so a `require_architect` written in a comment is not in the tree and cannot answer for it.
+  defp role_gated_functions(ast) do
+    ast
+    |> collect(fn
+      {:def, _, [head, [do: body]]} ->
+        name = def_name(head)
+
+        if name && Macro.to_string(body) =~ ~r/require_(architect|onboarder)\(/,
+          do: name,
+          else: nil
+
+      _ ->
+        nil
+    end)
+    |> MapSet.new()
+  end
+
+  defp def_name({:when, _, [inner, _guard]}), do: def_name(inner)
+  defp def_name({name, _, _args}) when is_atom(name), do: name
+  defp def_name(_), do: nil
+
+  # Gated = every clause is pod-scoped, role-gated or inert, AND at least one actually carries a
+  # gate. A tool made only of refusals is not "safe by absence" — it is a tool that does nothing,
+  # and it should not be advertised.
+  defp tool_gated?([], _gated_fns), do: false
+
+  defp tool_gated?(clauses, gated_fns) do
+    Enum.all?(clauses, &clause_ok?(&1, gated_fns)) and
+      Enum.any?(clauses, &(pod_scoped?(&1) or role_gated?(&1, gated_fns)))
+  end
+
+  defp clause_ok?(clause, gated_fns),
+    do: pod_scoped?(clause) or role_gated?(clause, gated_fns) or inert?(clause)
+
+  defp pod_scoped?(%{state: state}), do: Macro.to_string(state) =~ ~r/\bpod_id:/
+
+  defp role_gated?(%{body: body}, gated_fns) do
+    body
+    |> collect(fn
+      {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
+        if List.last(aliases) == :Delegation, do: fun, else: nil
+
+      _ ->
+        nil
+    end)
+    |> Enum.any?(&MapSet.member?(gated_fns, &1))
+  end
+
+  # A bare `{:error, reason, state}` return: no gate, no work.
+  defp inert?(%{body: {:{}, _, [:error | _]}}), do: true
+  defp inert?(_), do: false
+
+  # Walks an AST and keeps every non-nil result of `fun`.
+  defp collect(ast, fun) do
+    {_ast, acc} =
+      Macro.prewalk(ast, [], fn node, acc ->
+        case fun.(node) do
+          nil -> {node, acc}
+          value -> {node, [value | acc]}
+        end
+      end)
+
+    Enum.reverse(acc)
   end
 
   defp render_yaml(overall, checks) do
