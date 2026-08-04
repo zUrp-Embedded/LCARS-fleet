@@ -22,6 +22,9 @@ ARG RUNTIME_IMAGE=debian:bookworm-slim@sha256:60eac759739651111db372c07be6786381
 FROM ${BUILD_IMAGE} AS build
 
 ENV MIX_ENV=prod LANG=C.UTF-8
+# Posé par BuildKit (`amd64`/`arm64`). Déclaré ICI parce qu'un ARG ne traverse pas les stages, et
+# que les caches ci-dessous s'en servent pour ne pas se mélanger entre plateformes.
+ARG TARGETARCH
 # install.sh fait un chgrp fleet best-effort sur le prefix : le groupe doit exister au build
 # (le runtime stage le recrée avec le MÊME gid — contrat entre stages).
 #
@@ -89,9 +92,16 @@ COPY --chown=builder:fleet fleet/runtime /src/fleet/runtime
 # serait illisible pour lui). Gate complet + warnings-as-errors : un build rouge NE produit PAS
 # d'image. Les symlinks PATH échouent ici (pas de droit sur /usr/local/bin) et c'est SANS gravité :
 # install.sh les rapporte non-fatalement, et le stage runtime les pose lui-même.
-RUN --mount=type=cache,target=/home/builder/.hex,uid=1000,gid=2000 \
-    --mount=type=cache,target=/home/builder/.mix,uid=1000,gid=2000 \
-    --mount=type=cache,target=/home/builder/.cache,uid=1000,gid=2000 \
+# LES CACHES SONT SCOPÉS PAR ARCH, ET CE N'EST PAS DU CONFORT. Un cache BuildKit sans `id` est
+# partagé par TOUS les builds de ce Dockerfile — donc entre plateformes. Un `.mix`/`.hex` rempli
+# par un build amd64, remonté dans un build arm64, sert des artefacts et des binaires de la
+# mauvaise machine : mesuré 2026-08-04, premier build arm64 mort en compilant `:file_system` sur
+# un `:gen_server.call` dont le destinataire était un pid SÉRIALISÉ (`<<131, 88, …>>`) — un terme
+# écrit par l'autre arch. L'erreur ne parle ni d'arch ni de cache : elle accuse une dépendance
+# tierce, et on la cherche pendant une heure du mauvais côté.
+RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=1000,gid=2000 \
+    --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
+    --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
     mix local.hex --force && mix local.rebar --force \
     && LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh
 
@@ -147,11 +157,26 @@ RUN chown -R root:fleet /local/LCARS_v2 \
 # il lance `claude`. ttyd n'est PAS dans bookworm (vérifié : « no installation candidate ») ; on
 # prend l'officiel statique — même discipline que le précompilé Elixir de 15-toolchain : version +
 # sha256 épinglés ICI, nulle part ailleurs. Bump = changer la paire.
+#
+# DEUX ARCHS, DEUX PINS, ET LE CHOIX N'EST PAS DEVINÉ. `TARGETARCH` est posé par BuildKit (`amd64`,
+# `arm64`) : c'est la seule source qui sait pour quelle plateforme on construit, y compris en
+# cross-build. Un `uname -m` répondrait pour la machine de BUILD, ce qui est faux dès qu'on bâtit
+# une image arm64 depuis un poste x86 — et l'erreur ne se verrait qu'au premier boot sur la cible.
+# Une arch inconnue ÉCHOUE ici, avec son nom : mieux vaut refuser de bâtir que livrer une image
+# dont la console web ne démarre pas.
 ARG TTYD_VERSION=1.7.7
-ARG TTYD_SHA256=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
-RUN curl -fsSL --proto '=https' -m 120 -o /tmp/ttyd \
-      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
-    && echo "${TTYD_SHA256}  /tmp/ttyd" | sha256sum -c - \
+ARG TTYD_SHA256_AMD64=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+ARG TTYD_SHA256_ARM64=b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) ttyd_asset="ttyd.x86_64";  ttyd_sha="${TTYD_SHA256_AMD64}" ;; \
+      arm64) ttyd_asset="ttyd.aarch64"; ttyd_sha="${TTYD_SHA256_ARM64}" ;; \
+      *) echo "ttyd: arch de build non supportee: '${TARGETARCH}' (attendu amd64 ou arm64)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --proto '=https' -m 120 -o /tmp/ttyd \
+      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${ttyd_asset}" \
+    && echo "${ttyd_sha}  /tmp/ttyd" | sha256sum -c - \
     && install -m 0755 /tmp/ttyd /usr/local/bin/ttyd \
     && rm -f /tmp/ttyd \
     && ttyd --version
