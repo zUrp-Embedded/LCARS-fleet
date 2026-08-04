@@ -71,6 +71,9 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   defp retire(forge),
     do: PodTools.Delegation.retire_superseded(forge, "fleet/p", 16, :open, %{"issue" => 17})
 
+  defp retire_with_pr(forge),
+    do: PodTools.Delegation.retire_superseded(forge, "fleet/p", 16, {:open, 21}, %{"issue" => 17})
+
   describe "carrying the edges" do
     test "both directions are rewritten onto the replacement, BEFORE the close" do
       assert %{"supersedes" => 16} = retire(OrderForge)
@@ -106,6 +109,67 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     test "an edge the replacement already carries is nominal — the close still happens" do
       assert %{"supersedes" => 16} = retire(ConflictForge)
       assert_received {:close, 16}
+    end
+  end
+
+  # ─── La PR vivante meurt avec son ticket ────────────────────────────────────────────────────
+  # Le rail des pulls est INDÉPENDANT (`dispatch_review` scrute les pulls, hors bail) : une PR
+  # laissée ouverte sur un ticket retiré continue d'être jugée puis mergée. L'ancien refus
+  # (`supersedes_target_in_flight`) protégeait de ça en interdisant le geste — c'était un
+  # contournement du fait que rien ne savait fermer une PR.
+  defmodule PrForge do
+    def close_pr(_repo, pr, _opts) do
+      send(self(), {:pr_closed, pr})
+      {:ok, :closed}
+    end
+
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
+    def post_comment(_repo, n, _body, _opts) do
+      send(self(), {:comment, n})
+      {:ok, :posted}
+    end
+
+    def close_issue(_repo, n, opts) do
+      send(self(), {:close, n, Keyword.get(opts, :closure)})
+      {:ok, :closed}
+    end
+  end
+
+  defmodule PrRefusingForge do
+    def close_pr(_repo, _pr, _opts), do: {:error, {:http, 500, "boom"}}
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+
+    def close_issue(_repo, n, _opts) do
+      send(self(), {:close, n})
+      {:ok, :closed}
+    end
+  end
+
+  describe "cible avec une PR vivante" do
+    test "la PR est fermee AVANT le ticket — tant qu'elle vit, elle peut etre mergee" do
+      assert %{"supersedes" => 16} = retire_with_pr(PrForge)
+
+      assert_received {:pr_closed, 21}
+      assert_received {:comment, 16}
+      assert_received {:close, 16, :retired}
+    end
+
+    test "PR non fermable -> le ticket reste OUVERT : le geste incomplet ne s'execute pas a moitie" do
+      result = retire_with_pr(PrRefusingForge)
+
+      refute_received {:close, 16}
+      assert result["supersede_warning"] =~ "encore ouvert"
+    end
+
+    test "sans PR vivante, rien n'est ferme cote pulls" do
+      retire(OrderForge)
+      refute_received {:pr_closed, _}
     end
   end
 end

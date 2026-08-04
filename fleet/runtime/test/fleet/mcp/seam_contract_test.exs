@@ -1,4 +1,11 @@
 defmodule Fleet.MCP.SeamContractTest do
+  # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+  # dans un ticket mort (le rail des pulls est independant).
+  def close_pr(repo, index, opts) do
+    send(self(), {:close_pr, repo, index, opts})
+    {:ok, :closed}
+  end
+
   @moduledoc """
   IMPL-side locks of the duck-typed upward seams (mcp → pilot).
 

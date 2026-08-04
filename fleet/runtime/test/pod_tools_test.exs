@@ -176,6 +176,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # Forge stub (`:forge_client` seam): records create_issue + add_label, returns the number.
   # Adopts the seam's behaviour-contract → the compiler checks conformance (anti lying-stub).
   defmodule StubForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -241,6 +248,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # its PR merged with `head.ref` REWRITTEN to `refs/pull/6/head` (branch deleted) → the branch
   # scan CANNOT match; the `[merge:pr-6]` seal marker resolves it (merged_pr_of_issue).
   defmodule MergedMarkerForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -322,6 +336,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # CI-06: a closed issue WITHOUT `stage/merged` (the seal's projection was lost) but WITH a merged fleet
   # PR — delivery derived from the AUTHORITATIVE PR, not the label. Same as MergedMarkerForge minus the label.
   defmodule MergedNoStageLabelForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
@@ -361,6 +382,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
   # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
   defmodule InFlightSupersedeForge do
+    # Une PR vivante ne REFUSE plus le retrait : elle se ferme AVEC le ticket (le rail des pulls
+    # est independant, une PR laissee ouverte serait jugee puis mergee dans un ticket retire).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -403,26 +431,45 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
+    # Le remplacant se cree normalement : une PR vivante n'interdit plus le geste, elle est fermee
+    # avec le ticket qu'elle porte.
     @impl true
-    def create_issue(_repo, _title, _body, _opts),
-      do: raise("InFlightSupersedeForge: create_issue must NOT be reached (preflight refuses)")
+    def create_issue(repo, title, body, opts) do
+      send(self(), {:create_issue, repo, title, body, opts})
+      {:ok, 78}
+    end
 
     @impl true
-    def add_label(_repo, _n, _label, _opts),
-      do: raise("InFlightSupersedeForge: add_label must NOT be reached")
+    def add_label(repo, n, label, opts) do
+      send(self(), {:add_label, repo, n, label, opts})
+      {:ok, :added}
+    end
 
     @impl true
-    def post_comment(_repo, _n, _body, _opts),
-      do: raise("InFlightSupersedeForge: post_comment must NOT be reached")
+    @impl true
+    def post_comment(repo, n, body, opts) do
+      send(self(), {:post_comment, repo, n, body, opts})
+      {:ok, :posted}
+    end
 
     @impl true
-    def close_issue(_repo, _n, _opts),
-      do: raise("InFlightSupersedeForge: close_issue must NOT be reached")
+    @impl true
+    def close_issue(repo, n, opts) do
+      send(self(), {:close_issue, repo, n, opts})
+      {:ok, :closed}
+    end
   end
 
   # Supersede pre-flight stub: issue 5 is already CLOSED → filiation only, NO retirement write
   # (a re-take of an abandoned brick is legitimate).
   defmodule ClosedTargetForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -580,6 +627,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # `:test_issue_state`. Read-ONLY by design: the contract's write callbacks raise fail-loud — a test
   # writing to the forge through this stub must blow up, not pass silently.
   defmodule RecordingForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -649,6 +703,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # marker-bearing body; `list_open_issues` replays them. A second create with the SAME inputs must
   # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
   defmodule IdempotencyForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -928,17 +989,28 @@ defmodule Fleet.MCP.PodToolsTest do
       refute Map.has_key?(result, "supersede_warning")
     end
 
-    test "supersedes: target with a LIVE fleet PR → REFUSED, nothing created, nothing written" do
+    test "supersedes: target with a LIVE fleet PR → la PR est FERMEE avec le ticket, plus de refus" do
+      # L'ancien refus (`supersedes_target_in_flight`) se lisait comme une politique (« laisse-la
+      # atterrir ») ; c'etait le contournement d'une capacite absente — RIEN ne savait fermer une
+      # PR. Retirer un ticket sans sa PR la laissait sur un rail INDEPENDANT, jugee puis mergee
+      # dans un ticket mort. L'intention d'un retrait (arreter la machine, borner le cout) ne
+      # depend pas de l'existence d'une PR : on complete le geste au lieu de l'interdire.
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, InFlightSupersedeForge)
 
-      assert {:error, {:supersedes_target_in_flight, 5}, _} =
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "create_issue",
                  %{"title" => "Brique v2", "brief" => "x", "supersedes" => 5},
                  pod_state(uniq("pod-arch"))
                )
 
-      refute_received {:create_issue, _, _, _, _}
+      # La PR d'abord : tant qu'elle vit, le rail des pulls peut la merger.
+      assert_received {:close_pr, "fleet/demo", 9, _}
+      assert_received {:post_comment, "fleet/demo", 5, _, _}
+      assert_received {:close_issue, "fleet/demo", 5, _}
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["supersedes"] == 5
     end
 
     test "supersedes: target already CLOSED → filiation only, NO retirement write (re-take of an abandoned brick)" do
@@ -1845,6 +1917,13 @@ defmodule Fleet.MCP.PodToolsTest do
   # contracts declare list_open_issues/post_comment), and the escalation guard checks EXPORTS.
   # Degradations are driven by the process dictionary (the seam runs in the caller's process).
   defmodule ReadChannelForge do
+    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
+    # dans un ticket mort (le rail des pulls est independant).
+    def close_pr(repo, index, opts) do
+      send(self(), {:close_pr, repo, index, opts})
+      {:ok, :closed}
+    end
+
     # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
     # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}

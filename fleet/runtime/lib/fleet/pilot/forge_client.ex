@@ -635,6 +635,31 @@ defmodule Fleet.Pilot.ForgeClient do
   defp review_event(other), do: {:error, {:invalid_review_event, other}}
 
   @doc """
+  Closes a pull request WITHOUT merging it — PATCH `state: closed`.
+
+  It exists because retiring a ticket did not retire its work. The two rails are independent by
+  design: `dispatch_review` polls PULLS, not issues, and it is not lease-guarded. So a supersede
+  that closed the ticket while its PR stayed open left that PR being judged, then merged, into a
+  retired ticket — measured on the bench 2026-08-04.
+
+  The supersede used to REFUSE the gesture instead (`supersedes_target_in_flight`), which read like
+  a policy ("let it land") and was in fact a workaround for this missing capability: nothing in the
+  whole forge client could close a pull. A retirement that cannot retire the work is not a
+  retirement, and the operator's intent — stop the machine, bound the cost — does not care whether
+  a PR exists.
+
+  Idempotent on the Gitea side, like every close.
+  """
+  @spec close_pr(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
+  def close_pr(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <-
+           http_patch(config, "/repos/#{encode_repo(repo)}/pulls/#{index}", %{state: "closed"}) do
+      {:ok, :closed}
+    end
+  end
+
+  @doc """
   Merges (PROMOTES) the PR `index` via **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
   `Do: rebase` by default): replays the PR's commits onto the current `main` then fast-forwards →
   stays **LINEAR** (no merge commit, append-only doctrine preserved) AND handles a `main` that has

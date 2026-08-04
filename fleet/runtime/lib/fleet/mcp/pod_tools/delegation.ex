@@ -1203,11 +1203,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # Supersede pre-flight — BEFORE any write, fail-loud on anything unverifiable: the retirement
-  # is a destructive gesture executed by the SYSTEM on the arch's intent. A target with a LIVE
-  # fleet PR is REFUSED (never decapitate an in-flight brick — let it land or escalate), and a
-  # mute forge is a refusal, not a guess (a half-checked supersede could retire the wrong brick).
-  # An already-closed target is LEGITIMATE (re-take an abandoned brick): filiation only, no
-  # retirement to execute.
+  # is a destructive gesture executed by the SYSTEM on the arch's intent. A mute forge is a refusal,
+  # not a guess (a half-checked supersede could retire the wrong brick). An already-closed target is
+  # LEGITIMATE (re-take an abandoned brick): filiation only, no retirement to execute.
+  #
+  # UNE PR VIVANTE N'EST PLUS UN REFUS, ET L'ANCIEN REFUS ÉTAIT UN CONTOURNEMENT. Il se lisait comme
+  # une politique (« laisse-la atterrir ») ; c'en était une conséquence : RIEN dans le client forge
+  # ne savait fermer une PR. Retirer le ticket sans elle laissait la PR ouverte sur un rail
+  # INDÉPENDANT (`dispatch_review` scrute les pulls, hors bail) — jugée, puis mergée, dans un ticket
+  # retiré. Le refus protégeait donc d'une incohérence que le geste lui-même aurait dû empêcher.
+  # Or l'intention d'un retrait — arrêter la machine, borner le coût — ne dépend pas de l'existence
+  # d'une PR. On rend donc le geste COMPLET (`:with_pr` → la PR se ferme avec le ticket) au lieu
+  # d'interdire le geste.
   defp supersedes_preflight(_forge, _repo, nil), do: {:ok, nil}
 
   defp supersedes_preflight(forge, repo, n) when is_integer(n) and n > 0 do
@@ -1217,7 +1224,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       {:ok, _open} ->
         case find_issue_pr(forge, repo, n) do
-          {:ok, %{"state" => "open"}} -> {:error, {:supersedes_target_in_flight, n}}
+          {:ok, %{"state" => "open", "number" => pr}} -> {:ok, {:open, pr}}
           {:ok, _closed_pr} -> {:ok, :open}
           :none -> {:ok, :open}
           {:error, _} -> {:error, {:supersedes_target_unverifiable, n}}
@@ -1233,6 +1240,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp supersedes_preflight(_forge, _repo, _bad), do: {:error, :invalid_supersedes}
+  # La PR du ticket retiré meurt avec lui. Un échec REMONTE : fermer l'issue en laissant sa PR
+  # vivante recrée exactement l'incohérence que ce geste existe pour empêcher.
+  defp close_live_pr(_forge, _repo, nil), do: :ok
+
+  defp close_live_pr(forge, repo, pr) do
+    case forge.close_pr(repo, pr, []) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:live_pr_not_closed, pr, reason}}
+    end
+  end
 
   # Pose les arêtes déclarées par l'architecte au moment où il énonce la contrainte. Ce qui échoue
   # est DIT dans le résultat (l'arch le relaie à son humain), jamais avalé : une dépendance qu'on
@@ -1312,7 +1329,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
   def retire_superseded(_forge, _repo, n, :closed, result),
     do: Map.put(result, "supersedes", n)
 
-  def retire_superseded(forge, repo, n, :open, result) do
+  # Cible SANS PR vivante : le chemin nominal.
+  def retire_superseded(forge, repo, n, :open, result), do: do_retire(forge, repo, n, nil, result)
+
+  # Cible AVEC une PR vivante : on ferme la PR dans le MÊME geste. L'ordre compte comme pour les
+  # arêtes — la PR d'abord : tant qu'elle vit, le rail des pulls peut la juger et la merger, et il
+  # ne consulte pas l'état de l'issue.
+  def retire_superseded(forge, repo, n, {:open, pr}, result),
+    do: do_retire(forge, repo, n, pr, result)
+
+  defp do_retire(forge, repo, n, pr, result) do
     new_number = Map.get(result, "issue")
 
     comment =
@@ -1330,7 +1356,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # toujours A, fermé, et A' n'a aucune arête).
     # Fermer d'abord libérerait les bloqués AVANT le recâblage, et un dispatch peut se glisser
     # dans cette fenêtre. On écrit sur le remplaçant, PUIS on ferme.
-    with :ok <- carry_dependencies(forge, repo, n, new_number),
+    with :ok <- close_live_pr(forge, repo, pr),
+         :ok <- carry_dependencies(forge, repo, n, new_number),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
          # `closure: :retired` — le supersede ne livre RIEN : le travail a migre sur le remplacant
          # (ses aretes viennent d'y etre reportees, juste au-dessus). Le ticket doit le DIRE.

@@ -28,7 +28,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
     * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
       adopt the behaviour (the compiler checks conformance, anti lying-stub).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   @doc "Creates an issue → `{:ok, number}` (author/assignee/token passed in `opts`)."
@@ -130,6 +130,14 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   and the SYSTEM executes the retirement.
   """
   @callback close_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
+              {:ok, term()} | {:error, term()}
+
+  @doc """
+  Ferme une PR SANS la merger. Le retrait d'un ticket doit retirer SON TRAVAIL : le rail des pulls
+  est independant (`dispatch_review` scrute les pulls, hors bail), donc une PR laissee ouverte sur
+  un ticket retire continue d'etre jugee puis mergee.
+  """
+  @callback close_pr(repo :: String.t(), index :: integer(), opts :: keyword()) ::
               {:ok, term()} | {:error, term()}
 
   @doc """
