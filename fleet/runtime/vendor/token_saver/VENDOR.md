@@ -7,6 +7,17 @@
 
 ---
 
+## Poids dans le dépôt
+
+Le sous-arbre est déclaré `linguist-vendored` et `linguist-generated` dans le `.gitattributes` racine : il est **exclu des statistiques de langage** et replié par défaut dans les diffs. Le chemin contient `vendor/`, que Linguist détecte aussi nativement — la déclaration explicite garantit le comportement quel que soit l'outil (GitHub, Gitea, cloc, tokei).
+
+La couche LCARS est ré-incluse explicitement : `adapter.py`, `lcars_*.py`, `lcars_tests/`, `run_tests.sh`, `update_vendor.sh`, `VENDOR.md`.
+
+| | Lignes | Compté comme LCARS |
+|---|---|---|
+| sous-arbre vendoré (`src/`, `scripts/`, `tests/`) | ~20 000 | non |
+| couche LCARS | ~540 | oui |
+
 ## Ce que c'est
 
 Compression d'output de commandes CLI **avant** son entrée dans le contexte de l'agent. 36 processeurs spécialisés (git, pytest, docker, kubectl, terraform, cargo, npm…), compression mesurée entre 85 % et 99 % sur les sorties qui saturent un contexte.
@@ -58,7 +69,25 @@ Findings issus du reverse. Le harnais `tools/probe_loss.py` est le critère de r
 
 Le projet est actif (124 commits depuis 2026-02-17), Apache-2.0, mono-mainteneur. F3, F6 et F10 sont remontables en PR ; le vendoring n'en dépend pas.
 
-Procédure de mise à jour : re-copier `src/`, `scripts/` et `tests/` depuis le tag amont, puis `./run_tests.sh`. Aucun patch à rejouer tant que la table « modifications » ci-dessus reste vide.
+### Procédure
+
+```bash
+./update_vendor.sh              # inspection : ce qui a bougé en amont, rien n'est écrit
+./update_vendor.sh --apply      # re-copie src/ scripts/ tests/, puis passe le gate
+./update_vendor.sh v2.7.0 --apply
+```
+
+**Aucun patch à rejouer** tant que la table « modifications » ci-dessus reste vide : la couche LCARS vit hors du sous-arbre, la mise à jour est une simple re-copie.
+
+Le script refuse d'écrire si `src/`, `scripts/` ou `tests/` portent des modifications non commitées — la re-copie les écraserait.
+
+### Ce qu'un update peut casser, et comment on le sait
+
+La couche LCARS ne modifie rien : elle **s'accroche** à des points internes du moteur (`utils._DEFAULT_ERROR_RE`, `config._load_config`, `BuildOutputProcessor.process`, `_is_progress_line`…). Aucun ne fait partie d'une API publique — l'amont peut les renommer sans que ce soit une rupture de son point de vue.
+
+Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter.py` continuerait de tourner, ses correctifs ne s'appliqueraient plus. Un `_DEFAULT_ERROR_RE` renommé, et `OOMKilled` redisparaît des logs sans qu'aucun test ne rougisse.
+
+`lcars_tests/test_contrat_amont.py` vérifie chaque ancrage un par un, et **dit ce qui se rouvre** quand il échoue. C'est la liste exhaustive de ce qu'`update_vendor.sh` peut casser — à lire avant tout merge amont.
 
 ---
 
@@ -80,5 +109,7 @@ C'est ce qui fait passer le harnais de **14/24 à 23/24** témoins. Le 24ᵉ est
 | 1 | suite amont, lib **non configurée** | 800 passed, 5 deselected |
 | 2 | suite LCARS, lib **sous adapter** | 16 passed |
 | 3 | harnais de mesure de perte | 23/24 témoins |
+
+La suite LCARS couvre : les deux invariants, F4 (dont l'exploit rejoué dans un processus fils), F6, le placement, le routage, et **le contrat d'ancrage amont**.
 
 La séparation des processus n'est pas cosmétique : importer `adapter` fige la configuration, élargit le vocabulaire d'échec et substitue la méthode du processeur `build` — état global. Exécuter les deux suites ensemble fait échouer 33 cas amont pour la seule raison que la configuration diffère.
