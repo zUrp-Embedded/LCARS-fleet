@@ -35,7 +35,7 @@ Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus :
 
 Conformément à Apache-2.0 § 4(b), toute modification d'un fichier de `vendor_src/` doit porter une mention visible en tête de fichier.
 
-**État : aucun fichier modifié.** Les correctifs vivent dans l'adapter (voir ci-dessous). C'est délibéré — le merge amont reste trivial.
+**État : aucun fichier modifié.** Les correctifs vivent dans `adapter.py` et `lcars_processors.py`, hors sous-arbre. C'est délibéré — le merge amont reste trivial.
 
 ## Correctifs portés dans l'adapter (hors sous-arbre)
 
@@ -47,11 +47,34 @@ Findings issus du reverse. Le harnais `#3_ponce-reverse/token-saver/tools/probe_
 | **F3** | `_DEFAULT_ERROR_RE` ignore `OOMKilled`, `CrashLoopBackOff`, `connection refused`, `FAILED`, `undefined reference` → échecs supprimés des sorties longues | **adapter** : réassignation de la constante de module |
 | **F5** | `min_compression_ratio: 0.0` — garde-fou de gain désarmé | **adapter** : configuration figée |
 | **F7 / F9** | `search` plafonné à 15 fichiers ; `kubectl` perd le pod en échec au-delà de ~120 | **adapter** : seuils relevés |
-| **F6** | `build` répond `'Build succeeded.'` sur une sortie contenant `undefined reference` — **inversion de sens** | post-traitement adapter (à défaut : patch amont) |
-| **F10** | `db_query` tronque **sans marqueur** — seule violation du principe « toute perte laisse une trace » | processeur désactivé jusqu'au correctif |
+| **F6** | `build` répond `'Build succeeded.'` sur une sortie contenant `undefined reference` — **inversion de sens** | `lcars_processors.safe_build_process` : ne jamais affirmer un succès non constaté |
+| **F10** | `db_query` tronque **sans marqueur** — seule violation du principe « toute perte laisse une trace » | **invariant adapter**, valable pour les 36 processeurs |
 
 ## Suivi amont
 
 Le projet est actif (124 commits depuis 2026-02-17), Apache-2.0, mono-mainteneur. F3, F6 et F10 sont remontables en PR ; le vendoring n'en dépend pas.
 
-Procédure de mise à jour : re-copier `src/` et `tests/` depuis le tag amont, relancer `vendor_tests` puis `probe_loss.py`. Aucun patch à rejouer tant que la table ci-dessus reste vide.
+Procédure de mise à jour : re-copier `src/`, `scripts/` et `tests/` depuis le tag amont, puis `./run_tests.sh`. Aucun patch à rejouer tant que la table « modifications » ci-dessus reste vide.
+
+---
+
+## Les deux invariants LCARS
+
+Portés par `adapter.compress()`, donc vrais pour **les 36 processeurs** — y compris un processeur amont ajouté plus tard.
+
+1. **Aucune ligne d'échec n'est perdue.** Les lignes de la sortie originale reconnues comme échec et absentes du résultat sont réinjectées (borne : 40). L'élargissement du vocabulaire seul ne suffisait pas : il ne couvre que les cinq processeurs passant par `compress_log_lines()`, alors que `kubectl get`, `generic` et `test` ont leur propre logique de fenêtre.
+2. **Toute perte de lignes laisse une trace.** Si le résultat compte moins de lignes que l'original sans porter de marqueur, une note est apposée.
+
+C'est ce qui fait passer le harnais de **14/24 à 23/24** témoins. Le 24ᵉ est une limite acceptée, pas un défaut : `REFUND_PENDING` au milieu de 400 lignes SQL est une **donnée métier**, pas un échec — compresser un résultat de requête est le comportement voulu. Le vocabulaire n'a délibérément pas été tordu pour faire passer ce cas.
+
+## Gate
+
+`./run_tests.sh` — trois étapes, **deux processus distincts** :
+
+| Étape | Portée | Attendu |
+|---|---|---|
+| 1 | suite amont, lib **non configurée** | 800 passed, 5 deselected |
+| 2 | suite LCARS, lib **sous adapter** | 16 passed |
+| 3 | harnais de mesure de perte | 23/24 témoins |
+
+La séparation des processus n'est pas cosmétique : importer `adapter` fige la configuration, élargit le vocabulaire d'échec et substitue la méthode du processeur `build` — état global. Exécuter les deux suites ensemble fait échouer 33 cas amont pour la seule raison que la configuration diffère.
