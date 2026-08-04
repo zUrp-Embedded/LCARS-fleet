@@ -1,7 +1,7 @@
 # token_saver — brique vendorée
 
 **Dérivé de** : [`ppgranger/token-saver`](https://github.com/ppgranger/token-saver) @ `098873e04c6c49cbdc25c1c5f795986f5f170f16` (v2.6.3, 2026-06-02) — **Apache-2.0**
-**Forme d'emprunt** : `import` (vendoring de `src/` + `tests/`)
+**Forme d'emprunt** : `import` (vendoring de `src/` + `scripts/` + `tests/`)
 **Analyse** : reverse complet → `#3_ponce-reverse/token-saver/` (specs, architecture, harnais de mesure)
 **Vendoré le** : 2026-08-04
 
@@ -23,13 +23,17 @@ Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus :
 
 | Amont | Ici | Raison |
 |---|---|---|
-| `src/` (10 041 l) | `vendor_src/` — **copié tel quel** | moteur + 36 processeurs, ne pas réécrire |
-| `tests/` (9 931 l) | `vendor_tests/` — copié | arbitre les merges amont, 853 verts |
-| `scripts/hook_pretool.py` | **réécrit** → `hook_pretool.py` | décision de routage = notre I-CBC, nos exclusions |
-| `scripts/wrap.py` | **réécrit** → `wrap.py` | exécution + placement sous notre autorité |
-| `installers/`, `.claude-plugin/`, `antigravity/`, `docs/`, `bin/` | **jeté** | mécanisme de plugin marketplace — on câble par `hooks.yaml` |
+| `src/` (10 041 l) | `src/` — **copié tel quel** | moteur + 36 processeurs, ne pas réécrire |
+| `scripts/` (915 l) | `scripts/` — **copié tel quel** | la décision de routage amont est excellente et testée : exclusions par danger, parseurs quote-aware, fail-open. La réécrire aurait été une perte nette |
+| `tests/` (7 884 l) | `tests/` — copié | arbitre les merges amont |
+| `installers/`, `.claude-plugin/`, `antigravity/`, `docs/`, `bin/` | **jeté** | mécanisme de plugin marketplace — LCARS câble par `hooks.yaml` |
+| — | `adapter.py`, `lcars_processors.py`, `lcars_tests/`, `tools/`, `run_tests.sh` | **notre couche**, hors sous-arbre |
 
-`vendor_src/` s'importe seul : vérifié, `core.compress()` fonctionne sans `scripts/`. Les deux seuls couplages `src → scripts` sont des imports **différés** et ne concernent que `should_compress()` / `explain_decision()`, c'est-à-dire la décision de routage — que nous réécrivons.
+Arborescence identique à l'amont : le merge se fait par re-copie, sans renommage ni rejeu de patch.
+
+Intention initiale révisée en cours de route : `scripts/` devait être réécrit « sous notre I-CBC ». À la lecture, la logique de décision amont s'est révélée meilleure que ce qu'on aurait produit — 460 lignes d'exclusions construites **par danger** (streaming, `sudo`, REPL, redirections, récursion), parseurs quote-aware écrits à la main, fail-open systématique. Elle est vendorée et couverte par `test_hooks.py` (récupéré du même coup). Ce que LCARS ajoute vit au-dessus, dans l'adapter.
+
+Vérifié au reverse : `src/` s'importe seul, `core.compress()` fonctionne sans `scripts/`. Les deux seuls couplages `src → scripts` sont des imports **différés** (`should_compress()`, `explain_decision()`).
 
 ## Modifications du sous-arbre vendoré
 
@@ -39,11 +43,11 @@ Conformément à Apache-2.0 § 4(b), toute modification d'un fichier de `vendor_
 
 ## Correctifs portés dans l'adapter (hors sous-arbre)
 
-Findings issus du reverse. Le harnais `#3_ponce-reverse/token-saver/tools/probe_loss.py` est le critère de recette : **14/24 témoins conformes en configuration native, objectif 24/24**.
+Findings issus du reverse. Le harnais `tools/probe_loss.py` est le critère de recette : **14/24 témoins en configuration amont native, 23/24 sous adapter**.
 
 | # | Finding | Traitement |
 |---|---|---|
-| **F4** | `user_processors_dir` réglable depuis le `.token-saver.json` d'un dépôt → exécution du code du dépôt (confirmé empiriquement) | **adapter** : la config projet n'est jamais lue |
+| **F4** | `user_processors_dir` réglable depuis le `.token-saver.json` d'un dépôt → exécution du code du dépôt (confirmé empiriquement) | **adapter** : substitution du *chargeur* de configuration — `_find_project_config()` n'est jamais appelé, et aucun `reload()` ne peut rouvrir le vecteur |
 | **F3** | `_DEFAULT_ERROR_RE` ignore `OOMKilled`, `CrashLoopBackOff`, `connection refused`, `FAILED`, `undefined reference` → échecs supprimés des sorties longues | **adapter** : réassignation de la constante de module |
 | **F5** | `min_compression_ratio: 0.0` — garde-fou de gain désarmé | **adapter** : configuration figée |
 | **F7 / F9** | `search` plafonné à 15 fichiers ; `kubectl` perd le pod en échec au-delà de ~120 | **adapter** : seuils relevés |
