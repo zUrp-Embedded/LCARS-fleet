@@ -41,6 +41,9 @@ defmodule Fleet.MCP.PodTools do
       - `publish_doc`      : the arch publishes an authored document under `notes/` on the ops
         face and gets a citable `<ref> @ <sha>` pointer — its commits used to be HOSTAGE to the
         next ticket's push.
+      - `add_dependency` / `remove_dependency` : the arch states the order between two tickets
+        AFTER creation. The result SAYS what it does not do — on a ticket already in flight the
+        edge blocks the CLOSURE, it does not stop the run.
       - `retire_issue`     : the arch abandons a ticket with NO replacement — the live PR is
         closed, the dependents are told and RELEASED (a supersede carries its edges, a
         retirement lifts them), `stage/retired`.
@@ -68,7 +71,7 @@ defmodule Fleet.MCP.PodTools do
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   use ExMCP.Server
@@ -569,6 +572,57 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "add_dependency" do
+    meta do
+      name("Add Dependency")
+
+      description(
+        "Declare that a ticket of YOUR project DEPENDS ON another, after both exist. " <>
+          "`number` = the ticket that waits. `blocker` = the ticket it waits for. Use it when the " <>
+          "order between two bricks becomes clear only after you created them — stated in a brief " <>
+          "instead, the constraint holds only as long as someone reads it. READ THE `portee` FIELD " <>
+          "OF THE ANSWER: if `number` is ALREADY in flight, this edge does NOT stop it (the " <>
+          "admission gate reads blockers when a step STARTS, and that reading already happened) — " <>
+          "what it blocks is the CLOSURE of `number` until the blocker is resolved. To order work " <>
+          "that has not started, use `create_issue` with `depends_on`. Returns " <>
+          "{\"issue\":N,\"blocker\":N,\"edge\":\"added\",\"portee\":\"...\"}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "number" => %{"type" => "integer"},
+        "blocker" => %{"type" => "integer"}
+      },
+      "required" => ["number", "blocker"]
+    })
+  end
+
+  deftool "remove_dependency" do
+    meta do
+      name("Remove Dependency")
+
+      description(
+        "LIFT a dependency between two tickets of YOUR project — the inverse of " <>
+          "`add_dependency`. `number` = the ticket that was waiting. `blocker` = what it waited " <>
+          "for. Lifting the LAST blocker makes `number` closable immediately: the forge holds " <>
+          "nothing back any more. Use it when an order you declared turns out not to apply — not " <>
+          "to unblock a ticket whose blocker is simply late (that one is still real work). " <>
+          "Returns {\"issue\":N,\"blocker\":N,\"edge\":\"removed\",\"portee\":\"...\"}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "number" => %{"type" => "integer"},
+        "blocker" => %{"type" => "integer"}
+      },
+      "required" => ["number", "blocker"]
+    })
+  end
+
   deftool "emergency_stop" do
     meta do
       name("Emergency Stop")
@@ -940,6 +994,31 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("comment_issue", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # Order between tickets, declared after creation (architect gate inside Delegation).
+  def handle_tool_call("add_dependency", %{"number" => n, "blocker" => b}, state)
+      when is_integer(n) and is_integer(b) do
+    case Delegation.add_dependency(n, b, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, why} -> {:error, why, state}
+    end
+  end
+
+  def handle_tool_call("add_dependency", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("remove_dependency", %{"number" => n, "blocker" => b}, state)
+      when is_integer(n) and is_integer(b) do
+    case Delegation.remove_dependency(n, b, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, why} -> {:error, why, state}
+    end
+  end
+
+  def handle_tool_call("remove_dependency", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

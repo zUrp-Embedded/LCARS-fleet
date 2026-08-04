@@ -1495,6 +1495,78 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Declares (or lifts) "`number` depends on `blocker`" AFTER creation.
+
+  `create_issue(depends_on:)` could only state the order at birth, so a dependency discovered later
+  had nowhere to go but the prose of a brief — where it holds exactly as long as an agent reads it,
+  which is to say not at all.
+
+  WHAT IT DOES NOT DO, and the result says so rather than letting the caller assume. On a ticket
+  ALREADY in flight the edge does not stop anything: the admission gate reads its blockers when the
+  step STARTS (`wait/depends`), and that reading has happened. What the edge does is block the
+  ticket's CLOSURE, forge-side, until the blocker is resolved. An arch told "dependency added" about
+  a running ticket would believe it had pulled a brake it never touched.
+  """
+  @spec add_dependency(integer(), integer(), map()) :: {:ok, map()} | {:error, term()}
+  def add_dependency(number, blocker, state) do
+    with {:ok, %{repo: repo}} <- require_architect(state), do: edge(:add, repo, number, blocker)
+  end
+
+  @doc """
+  Lifts "`number` depends on `blocker`". Inverse of `add_dependency/3`, same gate, same caveat —
+  and one of its own: lifting the LAST blocker of a ticket makes it closable immediately.
+  """
+  @spec remove_dependency(integer(), integer(), map()) :: {:ok, map()} | {:error, term()}
+  def remove_dependency(number, blocker, state) do
+    with {:ok, %{repo: repo}} <- require_architect(state),
+         do: edge(:remove, repo, number, blocker)
+  end
+
+  # The gate stays in the two PUBLIC functions rather than here, and the wall is what said so:
+  # `mcp.tools_gated` refused this pair when they merely forwarded, because a gate one call deeper
+  # is invisible at the site a reader — or the checker — looks at. Factoring the mechanism is fine;
+  # factoring the authorization out of sight is how a tool loses its door without anyone noticing.
+  defp edge(op, repo, number, blocker)
+       when is_integer(number) and number > 0 and is_integer(blocker) and blocker > 0 and
+              number != blocker do
+    with {:ok, forge} <- conforming_forge(),
+         {:ok, _} <- conforming(DependencyForge, forge),
+         {:ok, _} <- apply_edge(op, forge, repo, number, blocker) do
+      {:ok,
+       %{
+         "issue" => number,
+         "blocker" => blocker,
+         "edge" => if(op == :add, do: "added", else: "removed"),
+         "portee" => edge_scope(op, number)
+       }}
+    end
+  end
+
+  # A ticket cannot depend on itself, and the forge would accept the write. Refused here rather
+  # than discovered as a ticket that can never close.
+  defp edge(_op, _repo, number, blocker) when number == blocker,
+    do: {:error, {:self_dependency, number}}
+
+  defp edge(_op, _repo, _number, _blocker), do: {:error, :invalid_arguments}
+
+  defp apply_edge(:add, forge, repo, number, blocker),
+    do: forge.add_issue_dependency(repo, number, blocker, [])
+
+  defp apply_edge(:remove, forge, repo, number, blocker),
+    do: forge.remove_issue_dependency(repo, number, blocker, [])
+
+  defp edge_scope(:add, n),
+    do:
+      "L'arête est posée sur la forge. Si ##{n} est DÉJÀ en vol, elle ne l'arrête pas — la porte " <>
+        "d'admission lit les bloqueurs au DÉMARRAGE du step, et cette lecture a eu lieu. Ce qu'elle " <>
+        "bloque est la FERMETURE de ##{n} tant que le bloqueur est ouvert."
+
+  defp edge_scope(:remove, n),
+    do:
+      "L'arête est levée. Si c'était le dernier bloqueur de ##{n}, il devient fermable " <>
+        "immédiatement — la forge ne retient plus rien."
+
+  @doc """
   Publishes an authored document on the project's ops face.
 
   The architect COULD already commit — its mount is RW — and could not push: no MCP write tool, no
