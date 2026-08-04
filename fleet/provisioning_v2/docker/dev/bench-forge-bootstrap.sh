@@ -25,7 +25,8 @@
 #   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
 #   4. joue `tofu apply` sur la recette de prod INCHANGEE (org, teams, 8 roles, systeme, humain) ;
 #   5. pose le seed dans la boite pour que le mint A4 des role-tokens converge au prochain boot ;
-#   6. pose le mot de passe de BANC de l'humain, son TOKEN operateur, et cable le token
+#   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
+#      6-bis, --no-human-admin pour s'en passer), pose son TOKEN operateur, et cable le token
 #      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
 #   7. pose les avatars de charte (le scribe en a un depuis le 2026-08-02) ;
 #   8. SEME la forge : `fleet/lcars` (la source que la boite clone) + `fleet/project-template`
@@ -61,6 +62,7 @@
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <copie de fleet/provisioning/deps>] [--no-box] [--no-seed-repos]
+#                                  [--no-human-admin]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 bootstrap admin/token
 #         4 tofu · 5 la boite (seed) · 6 le verdict final ne passe pas · 7 semis des repos
 
@@ -79,6 +81,8 @@ HUMAN_PASSWORD="toto32toto32"
 TOFU_DIR=""
 WITH_BOX=1
 SEED_REPOS=1
+# Propriete de BANC, jamais de prod — la raison, son cout et sa sortie sont a l'etape 6-bis.
+HUMAN_ADMIN=1
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 ADMIN="bootstrap"
 
@@ -93,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --tofu-dir)       TOFU_DIR="${2:?}"; shift 2 ;;
     --no-box)         WITH_BOX=0; shift ;;
     --no-seed-repos)  SEED_REPOS=0; shift ;;
+    --no-human-admin) HUMAN_ADMIN=0; shift ;;
     -h|--help)        sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-forge-bootstrap: option inconnue: $1" >&2; exit 1 ;;
   esac
@@ -187,6 +192,30 @@ fi
     --username "$HUMAN" --password "$HUMAN_PASSWORD" --must-change-password=false >/dev/null 2>&1 \
   || die "mot de passe de banc non pose pour $HUMAN" 6
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
+
+# ─── 6-bis. l'humain de banc est SITE-ADMIN (defaut du banc, jamais de la prod) ──────────────────
+# Meme nature que le mot de passe ci-dessus, et meme frontiere. La recette de PRODUCTION ne rend
+# JAMAIS le quotidien site-admin : `20-DECISION-premier-admin-prerequis-lcars-demo.md` le mesure —
+# un daily-admin rend la team `humans` decorative, donc les droits qu'on croit tester ne sont plus
+# testes par personne. Sur un banc jetable en loopback, l'inverse coute plus cher : l'operateur qui
+# doit inspecter la forge (voir les comptes, purger un depot, debloquer un token) se retrouve
+# bloque par un ecran d'admin auquel son seul compte n'a pas acces, plusieurs fois par jour.
+# LE COUT EST REEL ET IL EST ICI : tant que ce flag est a 1, ce banc ne peut PAS servir a mesurer
+# ce que la team `humans` autorise — elle est court-circuitee. Pour cette mesure-la : --no-human-admin.
+# Gitea n'a pas de commande CLI de promotion ; c'est PATCH /admin/users/<u> avec le master token.
+# `login_name` + `source_id` sont exiges par EditUserOption meme quand on ne touche qu'un booleen.
+if [[ "$HUMAN_ADMIN" -eq 1 ]]; then
+  curl -sf -m 10 -H "Authorization: token $MASTER_TOKEN" -H "Content-Type: application/json" \
+      -X PATCH -d "{\"admin\":true,\"login_name\":\"$HUMAN\",\"source_id\":0}" \
+      "$(api)/admin/users/$HUMAN" >/dev/null \
+    || die "promotion site-admin de $HUMAN refusee par la forge" 6
+  IS_ADMIN="$(curl -s -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/users/$HUMAN" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("is_admin"))' 2>/dev/null || echo "?")"
+  [[ "$IS_ADMIN" == "True" ]] || die "promotion posee mais la forge repond is_admin=$IS_ADMIN" 6
+  say "humain $HUMAN : SITE-ADMIN (propriete de banc, verifiee is_admin=True)"
+else
+  say "humain $HUMAN : non-admin (--no-human-admin) — modele de prod respecte"
+fi
 
 # Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
 # qu'on vient de poser. `read:organization` est LOAD-BEARING et non evident : sans lui le token
