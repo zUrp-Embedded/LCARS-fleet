@@ -185,6 +185,19 @@ def _bootstrap() -> None:
         base.update(_LCARS_CONFIG)
         source = dict.fromkeys(base, "lcars:adapter")
 
+        # L'alias LCARS doit valoir À TOUS LES NIVEAUX, pas seulement dans le
+        # hook : sinon `lcars_wrap.py` appelé directement compresserait alors
+        # que le switch est sur off. Un switch qui ne coupe qu'une des deux
+        # portes n'est pas un switch.
+        if os.environ.get("LCARS_TOKEN_SAVER", "").strip().lower() in (
+            "0",
+            "off",
+            "false",
+            "no",
+        ):
+            base["enabled"] = False
+            source["enabled"] = "env:LCARS_TOKEN_SAVER"
+
         # Overrides d'environnement — liste blanche stricte (voir _ENV_ALLOWED).
         for key in _ENV_ALLOWED:
             if key in _ENV_FORBIDDEN or key not in _config._DEFAULTS:
@@ -228,6 +241,7 @@ _bootstrap()
 
 from src.core import CompressResult  # noqa: E402
 from src.core import compress as _upstream_compress  # noqa: E402
+from src.engine import CompressionEngine  # noqa: E402
 
 # ─── Invariant LCARS : toute perte laisse une trace ───────────────────────────
 #
@@ -279,17 +293,9 @@ def _rescue_failures(output: str, compressed: str) -> tuple[str, int]:
     return compressed + "\n".join(bloc), len(missing)
 
 
-def compress(command: str, output: str, **kw) -> CompressResult:
-    """Compresse, puis applique les deux invariants LCARS.
-
-    1. aucune ligne d'échec n'est perdue (repêchage) ;
-    2. toute perte de lignes est signalée (marqueur).
-    """
-    res = _upstream_compress(command, output, **kw)
-    if not res.was_compressed:
-        return res
-
-    out, rescued = _rescue_failures(output, res.compressed)
+def _apply_invariants(output: str, compressed: str, processor: str) -> str:
+    """Applique les deux invariants à un couple (original, compressé)."""
+    out, _ = _rescue_failures(output, compressed)
 
     n_before = output.count("\n") + 1
     n_after = out.count("\n") + 1
@@ -297,12 +303,36 @@ def compress(command: str, output: str, **kw) -> CompressResult:
         out += "\n[token-saver] %d lignes retirées sur %d (processeur: %s)" % (
             n_before - n_after,
             n_before,
-            res.processor,
+            processor,
         )
+    return out
 
-    if out is res.compressed:
-        return res
-    return res._replace(compressed=out, compressed_len=len(out))
+
+# Les invariants sont posés sur `CompressionEngine.compress`, PAS sur
+# `core.compress` — parce que `scripts/wrap.py` emprunte deux chemins :
+#
+#     commande simple  →  core.compress()   →  engine.compress()
+#     chaîne (&&, ;)   →  engine.compress()   directement, par segment (l. 270)
+#
+# Poser les invariants au-dessus de `core` laisserait donc les chaînes y
+# échapper — c'est-à-dire précisément les commandes composées qu'un agent écrit
+# le plus souvent. Le moteur est le seul point par lequel tout passe.
+_engine_compress_upstream = CompressionEngine.compress
+
+
+def _engine_compress_lcars(self, command: str, output: str):
+    compressed, name, was_compressed = _engine_compress_upstream(self, command, output)
+    if not was_compressed:
+        return compressed, name, was_compressed
+    return _apply_invariants(output, compressed, name), name, was_compressed
+
+
+CompressionEngine.compress = _engine_compress_lcars
+
+
+def compress(command: str, output: str, **kw) -> CompressResult:
+    """Compresse. Les invariants sont appliqués par le moteur (voir ci-dessus)."""
+    return _upstream_compress(command, output, **kw)
 
 
 def is_enabled() -> bool:

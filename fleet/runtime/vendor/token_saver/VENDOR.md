@@ -91,6 +91,21 @@ Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter
 
 ---
 
+## Câblage
+
+```
+fleet/v1/hooks.yaml           → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
+.claude/hooks/token-saver-hook.sh   shim : coupe, résout la brique, passe stdin
+    └→ lcars_hook.py          switch, décision de routage, réécriture de commande
+         └→ lcars_wrap.py     importe `adapter` (bootstrap) puis délègue à scripts/wrap.py
+```
+
+Le shim existe parce que les hooks sont déployés dans `~/.claude/hooks/` alors que la brique vit dans l'arbre : `$LCARS_ROOT` **n'est pas** dans l'environnement au runtime (vérifié — il n'est défini que dans des scripts v1). Le shim résout la brique parmi une liste de candidats, `LCARS_TOKEN_SAVER_HOME` en tête.
+
+**Fail-open à chaque étage** : switch coupé, `python3` absent, brique introuvable, JSON invalide, moteur en erreur — la commande passe intacte. Une compression manquée coûte des tokens ; une commande bloquée coûte un pod.
+
+> ⚠ **Le Dockerfile ne copie pas encore `vendor/`.** La brique n'atterrit donc nulle part dans l'image : le shim ne la trouve pas et s'efface. C'est le cas nominal tant que le `COPY` n'est pas ajouté — à faire avec le déménagement d'arborescence (`beyond_#6/chantier-demenagement-arbo-2026-08-04`).
+
 ## Le switch
 
 ```bash

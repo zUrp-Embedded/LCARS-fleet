@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import shlex
 import textwrap
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -246,3 +247,101 @@ class TestOverridesEnvironnement:
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e)
             assert r.returncode == 0, r.stderr
             assert not os.path.exists(temoin), "code exécuté malgré les deux verrous"
+
+
+class TestHook:
+    """Le point d'entrée : lcars_hook.py, câblé depuis fleet/v1/hooks.yaml."""
+
+    HOOK = os.path.join(_ROOT, "lcars_hook.py")
+
+    def _appel(self, payload, env=None):
+        e = dict(os.environ)
+        e.update(env or {})
+        r = subprocess.run(
+            [sys.executable, self.HOOK],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env=e,
+        )
+        return r
+
+    def test_reecrit_une_commande_compressible(self):
+        r = self._appel({"tool_name": "Bash", "tool_input": {"command": "git status"}})
+        assert r.returncode == 0
+        out = json.loads(r.stdout)
+        cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
+        assert "lcars_wrap.py" in cmd
+        assert "'git status'" in cmd
+        assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_switch_off_ne_reecrit_pas(self):
+        for env in ({"LCARS_TOKEN_SAVER": "off"}, {"TOKEN_SAVER_ENABLED": "0"}):
+            r = self._appel(
+                {"tool_name": "Bash", "tool_input": {"command": "git status"}}, env
+            )
+            assert r.returncode == 0
+            assert r.stdout.strip() == "", "réécriture malgré le switch off : %r" % r.stdout
+
+    def test_commande_gardee_non_reecrite(self):
+        """L'intersection avec pre-scope-check / work-guard doit rester vide."""
+        for c in ("rm -rf work/x", "sed -i 's/a/b/' fleet/mix.exs", "echo x > work/n.md"):
+            r = self._appel({"tool_name": "Bash", "tool_input": {"command": c}})
+            assert r.stdout.strip() == "", "commande gardée réécrite : %s" % c
+
+    def test_outil_non_bash_ignore(self):
+        r = self._appel({"tool_name": "Edit", "tool_input": {"file_path": "/x"}})
+        assert r.stdout.strip() == ""
+
+    def test_fail_open_sur_json_invalide(self):
+        r = subprocess.run(
+            [sys.executable, self.HOOK], input="pas du json",
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 0
+        assert r.stdout.strip() == ""
+
+    def test_commande_quotee_une_seule_fois(self):
+        """La commande voyage comme UN argument — jamais ré-interprétée."""
+        r = self._appel(
+            {"tool_name": "Bash", "tool_input": {"command": "git log --grep='fix; done'"}}
+        )
+        cmd = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+        assert shlex.split(cmd)[-1] == "git log --grep='fix; done'"
+
+
+class TestBoutEnBout:
+    """La chaîne complète : hook → lcars_wrap → moteur → sortie compressée."""
+
+    WRAP = os.path.join(_ROOT, "lcars_wrap.py")
+
+    def _run(self, commande, env=None, cwd=None):
+        e = dict(os.environ)
+        e.update(env or {})
+        return subprocess.run(
+            [sys.executable, self.WRAP, commande],
+            capture_output=True, text=True, env=e, cwd=cwd,
+        )
+
+    def _depot(self, tmp):
+        """Un répertoire de 400 fichiers — `find` est compressible (file_listing)."""
+        for i in range(400):
+            open(os.path.join(tmp, "f%03d.txt" % i), "w").write("x\n")
+        return tmp
+
+    def test_compresse_et_marque(self, tmp_path):
+        d = self._depot(str(tmp_path))
+        r = self._run("find . -type f", cwd=d)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.count("\n") < 400, "pas de compression : %d lignes" % r.stdout.count("\n")
+        assert "token-saver" in r.stdout or "..." in r.stdout, "perte non signalée"
+
+    def test_switch_off_sortie_intacte(self, tmp_path):
+        d = self._depot(str(tmp_path))
+        actif = self._run("find . -type f", cwd=d).stdout
+        coupe = self._run("find . -type f", {"LCARS_TOKEN_SAVER": "off"}, cwd=d).stdout
+        assert coupe.count("\n") == 400, "sortie altérée malgré le switch off"
+        assert actif.count("\n") < coupe.count("\n")
+
+    def test_code_retour_propage(self):
+        assert self._run("exit 42").returncode == 42
