@@ -76,6 +76,55 @@ _LCARS_CONFIG = {
 }
 
 
+# ─── Ce qui reste réglable à chaud, et ce qui ne l'est jamais ─────────────────
+#
+# Figer la configuration pour fermer F4 avait un effet de bord : plus AUCUN
+# override d'environnement n'était appliqué. Sur une flotte, cela veut dire
+# qu'on ne peut pas couper l'outil sans reconstruire l'image — inacceptable.
+#
+# On rouvre donc l'environnement, mais par LISTE BLANCHE. La distinction n'est
+# pas cosmétique :
+#
+#   * les FICHIERS (`.token-saver.json`, global ou projet) ne sont jamais lus —
+#     ils viennent d'un dépôt cloné, donc d'une source non maîtrisée ;
+#   * les VARIABLES D'ENVIRONNEMENT viennent de l'image et du launcher… mais
+#     pas seulement. Mesuré : `export FOO=bar && git status` EST compressible
+#     (`export` est une commande silencieuse au sens de `chain_utils`), donc
+#     `wrap.py` hérite de l'environnement que l'agent vient de poser.
+#
+# Autoriser l'environnement en bloc rouvrirait donc F4 par la porte de derrière.
+# `user_processors_dir` — la seule clé qui fait EXÉCUTER du code — n'est
+# réglable par AUCUNE source. Elle est absente de la liste blanche, et un test
+# de non-régression le vérifie.
+_ENV_ALLOWED = frozenset(
+    {
+        "enabled",  # le switch
+        "debug",
+        "min_compression_ratio",
+        "min_input_length",
+        "wrap_timeout",
+        "max_output_bytes",
+        "disabled_processors",
+        "redaction_allowlist",
+        "search_max_files",
+        "search_max_per_file",
+        "kubectl_keep_head",
+        "kubectl_keep_tail",
+        "docker_log_keep_head",
+        "docker_log_keep_tail",
+        "generic_keep_head",
+        "generic_keep_tail",
+        "db_max_rows",
+        "max_traceback_lines",
+        "max_file_lines",
+        "max_diff_hunk_lines",
+    }
+)
+
+# Jamais réglable, quelle que soit la source.
+_ENV_FORBIDDEN = frozenset({"user_processors_dir"})
+
+
 # ─── F3 : la détection d'erreur par vocabulaire ───────────────────────────────
 #
 # `compress_log_lines()` repêche les lignes d'erreur du milieu d'une sortie
@@ -134,7 +183,22 @@ def _bootstrap() -> None:
     def _load_lcars_config() -> dict:
         base = dict(_config._DEFAULTS)
         base.update(_LCARS_CONFIG)
-        base["_config_source"] = dict.fromkeys(base, "lcars:adapter")
+        source = dict.fromkeys(base, "lcars:adapter")
+
+        # Overrides d'environnement — liste blanche stricte (voir _ENV_ALLOWED).
+        for key in _ENV_ALLOWED:
+            if key in _ENV_FORBIDDEN or key not in _config._DEFAULTS:
+                continue
+            env_key = _config.ENV_PREFIX + key.upper()
+            raw = os.environ.get(env_key)
+            if raw is None:
+                continue
+            coerced = _config._coerce_value(_config._DEFAULTS[key], raw)
+            if coerced is not None:
+                base[key] = coerced
+                source[key] = "env:" + env_key
+
+        base["_config_source"] = source
         return base
 
     _config._load_config = _load_lcars_config
@@ -241,4 +305,27 @@ def compress(command: str, output: str, **kw) -> CompressResult:
     return res._replace(compressed=out, compressed_len=len(out))
 
 
-__all__ = ["compress", "CompressResult"]
+def is_enabled() -> bool:
+    """Le switch, à interroger AVANT toute réécriture de commande.
+
+    `engine.compress()` teste déjà `config.get("enabled")`, mais trop tard : à
+    ce stade la commande a été réécrite, `wrap.py` a été lancé, un interpréteur
+    Python a démarré. Couper là ne coûte pas rien — ça coûte un processus par
+    commande, pour un résultat inchangé.
+
+    Le hook doit appeler ceci en premier et, si c'est faux, laisser passer la
+    commande sans y toucher.
+
+        TOKEN_SAVER_ENABLED=0    # ou false / no — coupe l'outil
+        LCARS_TOKEN_SAVER=off    # alias LCARS, même effet
+
+    Aucun redéploiement d'image n'est requis : la variable suffit.
+    """
+    if os.environ.get("LCARS_TOKEN_SAVER", "").strip().lower() in ("0", "off", "false", "no"):
+        return False
+    from src import config  # noqa: PLC0415
+
+    return bool(config.get("enabled"))
+
+
+__all__ = ["compress", "is_enabled", "CompressResult"]

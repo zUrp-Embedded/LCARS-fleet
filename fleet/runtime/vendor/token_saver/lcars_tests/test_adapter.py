@@ -170,3 +170,79 @@ class TestRoutage:
 
         procs = CompressionEngine().processors
         assert procs[-1].priority == 999
+
+
+class TestSwitch:
+    """Le switch on/off — exigence de flotte : couper sans rebuild d'image."""
+
+    def _dans_env(self, env, expr):
+        code = (
+            "import sys; sys.path.insert(0, %r)\n"
+            "import adapter\n"
+            "from src import config\n"
+            "print(%s)\n" % (_ROOT, expr)
+        )
+        e = dict(os.environ)
+        e.update(env)
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e)
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip()
+
+    def test_actif_par_defaut(self):
+        assert self._dans_env({}, "adapter.is_enabled()") == "True"
+
+    def test_token_saver_enabled_zero_coupe(self):
+        assert self._dans_env({"TOKEN_SAVER_ENABLED": "0"}, "adapter.is_enabled()") == "False"
+
+    def test_alias_lcars_coupe(self):
+        for v in ("off", "0", "false", "no"):
+            assert self._dans_env({"LCARS_TOKEN_SAVER": v}, "adapter.is_enabled()") == "False"
+
+
+class TestOverridesEnvironnement:
+    """Liste blanche : les réglages passent, la clé dangereuse jamais."""
+
+    def _dans_env(self, env, expr):
+        return TestSwitch._dans_env(self, env, expr)
+
+    def test_cle_autorisee_passe(self):
+        out = self._dans_env(
+            {"TOKEN_SAVER_SEARCH_MAX_FILES": "999"}, "config.get('search_max_files')"
+        )
+        assert out == "999"
+
+    def test_user_processors_dir_ignore_meme_en_env(self):
+        """F4 par la porte de derrière : `export VAR=… && git status` EST wrappé,
+        donc wrap.py hérite de l'environnement posé par l'agent."""
+        out = self._dans_env(
+            {"TOKEN_SAVER_USER_PROCESSORS_DIR": "/tmp/evil"},
+            "repr(config.get('user_processors_dir'))",
+        )
+        assert out == "''"
+
+    def test_la_cle_dangereuse_est_hors_liste_blanche(self):
+        assert "user_processors_dir" not in adapter._ENV_ALLOWED
+        assert "user_processors_dir" in adapter._ENV_FORBIDDEN
+
+    def test_exploit_complet_env_plus_fichier(self):
+        """Les deux vecteurs ensemble : fichier projet ET variable d'environnement."""
+        with tempfile.TemporaryDirectory() as depot:
+            os.makedirs(os.path.join(depot, ".evil"))
+            temoin = os.path.join(depot, "PWNED")
+            with open(os.path.join(depot, ".token-saver.json"), "w") as f:
+                json.dump({"user_processors_dir": "./.evil"}, f)
+            with open(os.path.join(depot, ".evil", "p.py"), "w") as f:
+                f.write("import pathlib; pathlib.Path(%r).write_text('x')\n" % temoin)
+
+            code = textwrap.dedent(f"""
+                import sys, os
+                sys.path.insert(0, {_ROOT!r})
+                os.chdir({depot!r})
+                import adapter
+                adapter.compress("git status", "M  f.txt\\n" * 80)
+            """)
+            e = dict(os.environ)
+            e["TOKEN_SAVER_USER_PROCESSORS_DIR"] = os.path.join(depot, ".evil")
+            r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e)
+            assert r.returncode == 0, r.stderr
+            assert not os.path.exists(temoin), "code exécuté malgré les deux verrous"

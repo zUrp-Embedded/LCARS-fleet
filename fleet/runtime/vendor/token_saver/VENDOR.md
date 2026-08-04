@@ -91,6 +91,29 @@ Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter
 
 ---
 
+## Le switch
+
+```bash
+TOKEN_SAVER_ENABLED=0     # coupe l'outil
+LCARS_TOKEN_SAVER=off     # alias LCARS — off | 0 | false | no
+```
+
+`adapter.is_enabled()` est à interroger **avant** toute réécriture de commande. Le moteur teste bien `config.get("enabled")`, mais trop tard : à ce stade la commande est réécrite, `wrap.py` lancé, un interpréteur Python démarré. Couper là coûterait un processus par commande pour un résultat inchangé.
+
+### Ce qui est réglable à chaud, et ce qui ne l'est jamais
+
+Figer la configuration pour fermer F4 avait un effet de bord : plus aucun override d'environnement n'était appliqué — donc impossible de couper l'outil sans reconstruire l'image. L'environnement est rouvert, mais par **liste blanche** (`_ENV_ALLOWED`, 20 clés : seuils, fenêtres, `disabled_processors`, `debug`, le switch).
+
+La distinction tient à la provenance :
+
+| Source | Lue ? | Pourquoi |
+|---|---|---|
+| `.token-saver.json` global ou projet | **jamais** | vient d'un dépôt cloné — source non maîtrisée |
+| `TOKEN_SAVER_*`, clés de la liste blanche | oui | vient de l'image et du launcher |
+| `TOKEN_SAVER_USER_PROCESSORS_DIR` | **jamais** | seule clé qui fait *exécuter* du code |
+
+Cette dernière ligne n'est pas de la prudence de principe. Mesuré : `export FOO=bar && git status` **est compressible** (`export` est silencieuse au sens de `chain_utils`), donc `wrap.py` hérite de l'environnement que l'agent vient de poser. Autoriser l'environnement en bloc rouvrirait F4 par la porte de derrière. La clé est hors liste blanche, dans `_ENV_FORBIDDEN`, et deux tests le vérifient — dont l'exploit complet avec les deux vecteurs à la fois.
+
 ## Les deux invariants LCARS
 
 Portés par `adapter.compress()`, donc vrais pour **les 36 processeurs** — y compris un processeur amont ajouté plus tard.
@@ -107,7 +130,7 @@ C'est ce qui fait passer le harnais de **14/24 à 23/24** témoins. Le 24ᵉ est
 | Étape | Portée | Attendu |
 |---|---|---|
 | 1 | suite amont, lib **non configurée** | 800 passed, 5 deselected |
-| 2 | suite LCARS, lib **sous adapter** | 16 passed |
+| 2 | suite LCARS, lib **sous adapter** | 43 passed |
 | 3 | harnais de mesure de perte | 23/24 témoins |
 
 La suite LCARS couvre : les deux invariants, F4 (dont l'exploit rejoué dans un processus fils), F6, le placement, le routage, et **le contrat d'ancrage amont**.
