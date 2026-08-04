@@ -302,16 +302,77 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Closes the issue (chain terminal). PATCH `state: closed`. Idempotent on the Gitea side.
+  Closes the issue, and SAYS WHICH KIND OF CLOSURE IT IS. PATCH `state: closed`, idempotent on the
+  Gitea side.
+
+  `:closure` is MANDATORY — an unnamed closure is refused, loudly, rather than defaulted:
+
+    * `:delivered` — the work landed (seal after merge, terminal step). Stamps `stage/merged`.
+    * `:retired` — the ticket dies WITHOUT delivering: its work moved (supersede) or was dropped.
+      Stamps `stage/retired`.
+    * `:marker` — not a ticket at all (parking markers of `ProjectOnboard`). Stamps nothing.
+
+  WHY THE ARGUMENT IS REQUIRED, AND NOT DERIVED. Until now "a closed ticket is a delivered ticket"
+  was EMERGENT: it held because no actor owns a close gesture — the human's team is `read`, the
+  architect has no close tool, and every closing path is runtime. An invariant resting on the
+  absence of a tool is one new caller away from lying, and everything downstream reads the CLOSURE,
+  never the intent: a dependency releases on a closed blocker whatever killed it.
+
+  Deriving the kind from "does it carry `stage/merged`?" would rebuild the same weakness one level
+  up — an ABSENCE is not a fact, and the reader would have to guess what silence means. Here the
+  caller states it at the only moment where it is known for certain.
+
+  The stamp is best-effort and the close is not rolled back for it: the closure is authoritative,
+  the label is its trace. A failed stamp is logged, never swallowed.
   """
   @spec close_issue(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
   def close_issue(repo, issue_number, opts \\ []) do
-    with {:ok, config} <- resolve_config(opts),
+    with {:ok, kind} <- fetch_closure_kind(opts),
+         {:ok, config} <- resolve_config(opts),
          {:ok, _} <-
            http_patch(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}", %{
              state: "closed"
            }) do
+      stamp_closure(repo, issue_number, kind, opts)
       {:ok, :closed}
+    end
+  end
+
+  defp fetch_closure_kind(opts) do
+    case Keyword.get(opts, :closure) do
+      kind when kind in [:delivered, :retired, :marker] ->
+        {:ok, kind}
+
+      other ->
+        {:error,
+         {:closure_kind_required,
+          "close_issue: `closure:` manquant ou invalide (#{inspect(other)}) — une fermeture qui " <>
+            "ne dit pas si elle LIVRE ou si elle RETIRE laisse tout l'aval deviner"}}
+    end
+  end
+
+  defp stamp_closure(_repo, _n, :marker, _opts), do: :ok
+
+  defp stamp_closure(repo, n, kind, opts) do
+    stage =
+      case kind do
+        :delivered -> Fleet.Labels.stage_merged()
+        :retired -> Fleet.Labels.stage_retired()
+      end
+
+    label = Fleet.Labels.stage_prefix() <> stage
+
+    case add_label(repo, n, label, opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ForgeClient: #{repo}##{n} closed (#{kind}) but the `#{label}` stamp FAILED " <>
+            "(#{inspect(reason)}) — the closure stands, its nature is not readable on the ticket"
+        )
+
+        :ok
     end
   end
 

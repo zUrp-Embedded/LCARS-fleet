@@ -552,7 +552,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   @close_attempts 3
   defp close_with_retry(forge, repo, issue_n, gk_opts, pr_number, attempt \\ 1) do
-    case forge.close_issue(repo, issue_n, gk_opts) do
+    # `closure: :delivered` — la PR est mergee juste au-dessus : cette fermeture EST la livraison.
+    case forge.close_issue(repo, issue_n, Keyword.put(gk_opts, :closure, :delivered)) do
       {:error, reason} when attempt < @close_attempts ->
         Logger.warning(
           "GatekeeperSeal: PR ##{pr_number} MERGED, issue ##{issue_n} close attempt " <>

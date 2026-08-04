@@ -1332,7 +1332,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # dans cette fenêtre. On écrit sur le remplaçant, PUIS on ferme.
     with :ok <- carry_dependencies(forge, repo, n, new_number),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
-         {:ok, _} <- forge.close_issue(repo, n, []) do
+         # `closure: :retired` — le supersede ne livre RIEN : le travail a migre sur le remplacant
+         # (ses aretes viennent d'y etre reportees, juste au-dessus). Le ticket doit le DIRE.
+         {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
       # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
       # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
       # Pilot, same rule and same shape as `:forge_client`.

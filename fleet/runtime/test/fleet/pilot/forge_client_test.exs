@@ -929,12 +929,29 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.remove_label("fleet/lcars", 42, "lcars-in-flight", opts(handlers))
     end
 
-    test "close_issue: PATCH state closed" do
+    test "close_issue: PATCH state closed + le STAMP de la nature de la fermeture" do
       handlers = %{
-        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {201, %{"state" => "closed"}}
+        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {201, %{"state" => "closed"}},
+        # Le stamp lit les labels courants puis pose le sien : une fermeture DIT ce qu'elle est.
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
+        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+          {200, [%{"id" => 3, "name" => "stage/merged"}]},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, %{}}
       }
 
-      assert {:ok, :closed} = ForgeClient.close_issue("fleet/lcars", 42, opts(handlers))
+      assert {:ok, :closed} =
+               ForgeClient.close_issue(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :closure, :delivered)
+               )
+    end
+
+    test "close_issue SANS nature : refus, et rien n'est ferme" do
+      # L'invariant « ferme = livre » etait EMERGENT (personne n'a d'outil de fermeture). Une
+      # fermeture muette le laisserait redevenir faux au premier appelant nouveau.
+      assert {:error, {:closure_kind_required, _}} =
+               ForgeClient.close_issue("fleet/lcars", 42, opts(%{}))
     end
   end
 

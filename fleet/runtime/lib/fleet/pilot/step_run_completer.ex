@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
   in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   require Logger
@@ -1192,7 +1192,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
       nil ->
-        case forge.close_issue(repo, n, forge_opts) do
+        # `closure: :delivered` — terminal a 1 step : le step_run s'est acheve nominalement.
+        case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, :delivered)) do
           {:ok, _} -> {:ok, :completed}
           {:error, reason} -> {:error, {:close, reason}}
         end

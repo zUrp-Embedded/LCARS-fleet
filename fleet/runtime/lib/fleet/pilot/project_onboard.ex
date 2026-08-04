@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-04
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -337,7 +337,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp close_markers(markers, full_name, forge, opts) do
     Enum.reduce_while(markers, :ok, fn %{"number" => n}, :ok ->
-      case forge.close_issue(full_name, n, fc_opts(opts)) do
+      # `closure: :marker` — ce ne sont PAS des tickets mais les marqueurs de parking de l'onboard :
+      # rien a estampiller, et surtout pas un `stage/*` qui les ferait ressembler a du travail.
+      case forge.close_issue(full_name, n, Keyword.put(fc_opts(opts), :closure, :marker)) do
         {:ok, _} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, {:unpark_failed, {n, reason}}}}
       end

@@ -93,6 +93,9 @@ defmodule Fleet.Labels do
   @wfmap_prefix "wfmap/"
   @stage_review "review"
   @stage_merged "merged"
+  # Fermeture SANS livraison (supersede, abandon) — le pendant positif de `merged`. Cf. `stage_retired/0` :
+  # sans lui, « pas livré » ne s'exprimait que par l'ABSENCE de `merged`, et une absence n'est pas un fait.
+  @stage_retired "retired"
 
   @doc "Scoped prefix of the current step (`stage/`). Scoped → exclusive (mutex)."
   @spec stage_prefix() :: String.t()
@@ -109,6 +112,24 @@ defmodule Fleet.Labels do
   @doc "PR LIFECYCLE step: the brick is merged (terminal). Mechanism, not a map step."
   @spec stage_merged() :: String.t()
   def stage_merged, do: @stage_merged
+
+  @doc """
+  Stage of a ticket closed WITHOUT delivering — its work moved elsewhere (supersede) or was
+  dropped.
+
+  It exists because the opposite fact was EMERGENT. Nothing in the tree said "a closed ticket is a
+  delivered ticket": it held only because no actor owns a close gesture (the human's team is
+  `read`, the architect has no close tool, and the four closing paths are all runtime). An
+  invariant that rests on the absence of a tool is one `add a close button` away from lying — and
+  everything downstream reads the closure, not the intent behind it: a dependency releases on a
+  CLOSED blocker whatever killed it.
+
+  So the closure states its own nature, and this label is the half that says "not delivered". Its
+  twin is `stage/merged`. Being in the SCOPED `stage/` family is what makes them mutually
+  exclusive: a ticket cannot carry both, and the forge itself enforces it.
+  """
+  @spec stage_retired() :: String.t()
+  def stage_retired, do: @stage_retired
 
   # ============================================================
   # FIFTH FAMILY — SCOPED WAIT (BL-6-48, step 1 of its plan)
