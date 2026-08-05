@@ -31,6 +31,7 @@
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/project-template]
 #                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli"]
+#                         [--accept-generic]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse
 #         3 le runner ne s'enregistre pas · 4 le job de verification ne passe pas
 
@@ -41,6 +42,7 @@ FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK="lcars-tick
 PROJECT="lcars-ticket-runner" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
 # Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
 LABELS="${LCARS_RUNNER_LABELS:-}"
+ACCEPT_GENERIC=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,12 +53,67 @@ while [[ $# -gt 0 ]]; do
     --project)      PROJECT="${2:?}"; shift 2 ;;
     --verify-repo)  VERIFY_REPO="${2:?}"; shift 2 ;;
     --labels)       LABELS="${2:?}"; shift 2 ;;
+    --accept-generic) ACCEPT_GENERIC=1; shift ;;
     *) echo "bench-runner: option inconnue: $1" >&2; exit 1 ;;
   esac
 done
 [[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "bench-runner: --forge-api et --admin-token requis" >&2; exit 1; }
 
 say() { echo "[bench-runner] $*"; }
+
+# ─── 0. LES LABELS SONT UNE PROMESSE, ET ELLE SE VERIFIE AVANT DE LA FAIRE ──────────────────────
+# Un label est une CLE que le runner annonce a la forge : « envoie-moi les jobs qui demandent ca ».
+# Le runner s'enregistre VERT quelle que soit l'image derriere, puis rate chaque job qu'on lui
+# confie. C'est mot pour mot le piege n2 de l'en-tete a une autre couche — « un runner vert qui
+# rate tous ses jobs, le pire des etats » — et ce fichier le decrivait en note depuis le 2026-08-02
+# sans rien en faire. Une note qui decrit un silence reste un silence.
+#
+# Deux refus, tous deux avant le moindre appel a la forge :
+#
+#   a) LABELS vide → le defaut de runner-compose sert `elixir` avec l'image de BASE du stage build,
+#      qui porte Elixir et RIEN d'autre (ni git, ni bats, ni bwrap, ni python3). Le gate y meurt.
+#      Ce defaut est correct pour un operateur quelconque, qui ne peut pas resoudre une image
+#      locale de LCARS ; il ne l'est pas pour un BANC, qui sait qu'il est LCARS. On le refuse donc
+#      ici, en donnant la sortie, plutot que de poser un runner dont on a ecrit qu'il ne sait pas
+#      travailler. `--accept-generic` reste la porte : un banc qui ne veut QUE le rail template n'a
+#      rien a faire du gate, et le dire est une decision, pas un oubli.
+#
+#   b) une image nommee qui n'existe pas sur CE daemon. `docker image inspect` est une commande a
+#      flux NON attache : elle traverse le relais systemd du groupe fleet, contrairement a `exec`,
+#      `run` et `cp` qui y rendent zero octet et exit 0. Cette sonde-la marche donc partout.
+check_labels() {
+  if [[ -z "$LABELS" ]]; then
+    [[ "$ACCEPT_GENERIC" -eq 1 ]] && { say "labels: defaut generique ACCEPTE (--accept-generic) — ce runner ne sait pas jouer mix gate"; return 0; }
+    cat >&2 <<'EOM'
+[bench-runner] REFUS : aucun --labels, donc le defaut de runner-compose.yml — dont l'image `elixir`
+[bench-runner]   est celle de BASE du stage build : Elixir et rien d'autre. `mix gate` y meurt sur
+[bench-runner]   `git` introuvable, et le runner aura l'air vert. Sortie :
+[bench-runner]     docker build --target build -t lcars-build:<tag> -f fleet/provisioning_v2/docker/Dockerfile .
+[bench-runner]     bench-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
+[bench-runner]   Un banc qui ne veut que le rail CI du template : --accept-generic (c'est une decision).
+EOM
+    exit 1
+  fi
+
+  local missing=()
+  local entry image
+  local IFS=,
+  for entry in $LABELS; do
+    image="${entry#*docker://}"
+    [[ "$image" == "$entry" ]] && continue   # label sans image (host runner) : rien a resoudre
+    "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1 || missing+=("$image")
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    say "REFUS : image(s) introuvable(s) sur ce daemon : ${missing[*]}"
+    say "  un runner annonce le label quand meme et rate chaque job qui le demande."
+    say "  construis-la (docker build --target build -t <image> ...) ou corrige --labels."
+    exit 1
+  fi
+  say "labels: ${LABELS//,/ }"
+}
+
+check_labels
 
 # ─── 1. Token d'enregistrement, minte par la forge (site-admin, portee instance) ────────────────
 REG=$(curl -s -m 10 -X POST -H "Authorization: token $TOKEN" "$FORGE_API/admin/actions/runners/registration-token" \
