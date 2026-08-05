@@ -21,9 +21,12 @@ defmodule Fleet.Spawner.PermanentWarden do
      any missing one is respawned through the SAME counter/backoff (a reconciliation cannot spend
      more than the event rail). The tick is a no-op when the permanent boot is disabled
      (`LCARS_BOOT_PERMANENT_AT_START=false` — the documented maintenance mode is respected).
-     During a drain, the quiesce gate is expected to live at the mechanical chokepoint
-     (`Fleet.Spawner.spawn_pod` — open arbitration A-13), which covers this tick for free; the
-     seam `:reconcile_enabled_fun` composes it meanwhile.
+     During a drain, the quiesce gate LIVES at the mechanical chokepoint (`Fleet.Spawner.spawn_pod`
+     — A-13 decided 2026-08-05), which covers this tick for free. The composition below stays: it
+     spares a pointless reconcile pass, and it is now belt over braces rather than the only strap.
+     The arbitration mattered because the warden was one of only TWO readers of `quiescing?/0` —
+     the poller's dispatch was not, so a drain could keep spawning fresh pods it then had to wait
+     for.
 
   ## BOUNDED spend (the failure mode = spend, never a churn)
 
@@ -54,7 +57,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-05
   """
 
   use GenServer

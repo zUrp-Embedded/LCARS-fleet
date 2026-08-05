@@ -79,7 +79,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   alias Fleet.Spawner.Pod
@@ -164,7 +164,8 @@ defmodule Fleet.Spawner do
     # contract the pod is provisioned with. Absent, the provisioning would fall back to the
     # machine contract — the exact silence the field exists to end, and one that reads as correct
     # from the outside (the pod boots, the human just gets an agent holding a worker's contract).
-    with {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
+    with :ok <- quiesce_guard(),
+         {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
          {:ok, _who} <- Fleet.CapProfile.fetch_interlocutor(cap_profile),
          :ok <- project_guard(opts),
          :ok <- brief_guard(cap_profile, opts) do
@@ -307,6 +308,25 @@ defmodule Fleet.Spawner do
   # the silence this refuses. The pair is inseparable BY CONSTRUCTION (every caller builds the
   # label FROM the project), so requiring both together costs nothing and cannot be satisfied by
   # guessing.
+  # A DRAIN REFUSES NEW PODS, at the chokepoint rather than at one call site (A-13, decided
+  # 2026-08-05).
+  #
+  # `Quiesce.refuse!/0` is named for exactly this, and it had two readers: the warden's reconcile
+  # gate and the HTTP control surface. The poller's dispatch was not one of them — its ticks are
+  # wrapped in `Quiesce.busy/1`, which makes the drain WAIT for the tick without stopping the tick
+  # from starting a brand-new pod. So the mechanism that makes a drain safe also makes it longer,
+  # once per tick, with no bound: the drain ends up waiting for a pod born after it began.
+  #
+  # The warden composed the check itself (`:reconcile_enabled_fun`) — correct at that call site, and
+  # a PARALLEL PATH to the chokepoint, which is the shape that leaves every other caller uncovered.
+  # Here they all pass: warden respawn, step dispatch, arch wake, boot orchestrator, admin spawn.
+  #
+  # A typed REFUSAL, not a raise: the callers already route `{:error, _}` into their skip-and-retry
+  # path, so a drain simply stops producing work instead of failing a tick.
+  defp quiesce_guard do
+    if Fleet.Shutdown.Quiesce.quiescing?(), do: {:error, :fleet_quiescing}, else: :ok
+  end
+
   defp project_guard(opts) do
     named? = is_binary(Keyword.get(opts, :rc_name))
     project = Keyword.get(opts, :project_slug)
