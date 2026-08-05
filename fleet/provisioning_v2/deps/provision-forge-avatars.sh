@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/provisioning/deps/provision-forge-avatars.sh
+# SOURCE: fleet/provisioning_v2/deps/provision-forge-avatars.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-06
 # STATUS: PROTO-V2 — pose des avatars de charte sur les comptes + l'org forge (frère cosmétique de forge.tf)

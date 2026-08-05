@@ -1,4 +1,4 @@
-# SOURCE: fleet/provisioning/deps/avatars.tf
+# SOURCE: fleet/provisioning_v2/deps/avatars.tf
 # AUTHOR: consultant
 # STARDATE: 2026-08-01
 # STATUS: la charte graphique posee PAR `tofu apply` — un appel, pas une declaration

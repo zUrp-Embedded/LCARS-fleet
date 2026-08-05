@@ -35,7 +35,7 @@
 #   9. rend un verdict MESURE : login humain, comptes de l'org, repos semes.
 #
 # ─── LE MOT DE PASSE HUMAIN DE BANC, ET POURQUOI IL N'EST PAS UNE FAIBLESSE ─────────────────────
-# La recette de PRODUCTION (`fleet/provisioning/deps/forge.tf`) donne a l'humain le seed avec
+# La recette de PRODUCTION (`fleet/provisioning_v2/deps/forge.tf`) donne a l'humain le seed avec
 # `must_change_password = true` : il pose son propre secret au premier login. C'est correct et ce
 # script n'y touche PAS — il agit APRES l'apply, sur la forge jetable seulement.
 # Sur un banc, ce contrat coute une friction a chaque nuke (plusieurs par jour) pour proteger un
@@ -61,7 +61,7 @@
 #
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
-#                                  [--tofu-dir <copie de fleet/provisioning/deps>] [--no-box] [--no-seed-repos]
+#                                  [--tofu-dir <copie de fleet/provisioning_v2/deps>] [--no-box] [--no-seed-repos]
 #                                  [--no-human-admin]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 bootstrap admin/token
 #         4 tofu · 5 la boite (seed) · 6 le verdict final ne passe pas · 7 semis des repos
@@ -153,7 +153,7 @@ say "master token minte ($TOKEN_NAME)"
 # porte des valeurs sensibles) ne se retrouve jamais dans un `git status`.
 if [[ -z "$TOFU_DIR" ]]; then
   TOFU_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-tofu.XXXXXX")"
-  cp -r "$REPO_ROOT/fleet/provisioning/deps/." "$TOFU_DIR/"
+  cp -r "$REPO_ROOT/fleet/provisioning_v2/deps/." "$TOFU_DIR/"
   say "recette tofu copiee dans $TOFU_DIR (tfstate hors de l'arbre)"
 fi
 

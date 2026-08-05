@@ -42,11 +42,17 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # The assertion follows the ARTIFACT: a full checkout must check all four lists; a
     # runtime-only one (the image build stage copies fleet/runtime alone) must NAME what it
     # could not see — the one thing that must never happen is a silent pass on absent ground.
-    # SAME derivation as the check: the runtime root, then its SIBLING provisioning tree
-    # (test/mix -> runtime = "../..", then "../provisioning").
+    # SAME derivation as the check: the runtime root, then its SIBLING tree
+    # (test/mix -> runtime = "../..", then "../provisioning_v2").
+    #
+    # `provisioning_v2`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
+    # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
+    # exists — while the check it mirrors had changed trees. It would have diverged for real the day
+    # someone cleaned up `fleet/provisioning/`, which its own README now says is safe. A condition
+    # that agrees by coincidence is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
-    if File.dir?(Path.expand("../provisioning", runtime_root)) do
+    if File.dir?(Path.expand("../provisioning_v2", runtime_root)) do
       refute lock.note =~ "NOT CHECKED"
     else
       assert lock.note =~ "NOT CHECKED"

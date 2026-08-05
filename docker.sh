@@ -165,7 +165,7 @@ CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
      Dans Gitea : Settings → Applications → Generate New Token, scope « all ».
      Il sert à deux choses, une fois :
        a) poser la STRUCTURE (comptes de rôle, org, teams, hardening) :
-            cd fleet/provisioning/deps && tofu init && \\
+            cd fleet/provisioning_v2/deps && tofu init && \\
             TF_VAR_gitea_url=<url> TF_VAR_gitea_token=<token-master> \\
             TF_VAR_seed_password=<seed> TF_VAR_human_username=<ton-login-DANS-la-boite> \\
             TF_VAR_human_email=<ton-email> tofu apply

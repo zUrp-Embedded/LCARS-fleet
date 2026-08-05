@@ -187,7 +187,7 @@ fi
 # et dix comptes deja poses et meurt en 409. Un script idempotent compose deux fois ne l'est plus
 # des que son etat vit dans un temporaire qu'il recree — mesure du 2026-08-03, premiere execution.
 TOFU_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-tofu-${PROJECT}.XXXXXX")"
-cp -r "$REPO_ROOT/fleet/provisioning/deps/." "$TOFU_DIR/"
+cp -r "$REPO_ROOT/fleet/provisioning_v2/deps/." "$TOFU_DIR/"
 say "recette tofu dans $TOFU_DIR (etat PARTAGE par les deux passes)"
 
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"

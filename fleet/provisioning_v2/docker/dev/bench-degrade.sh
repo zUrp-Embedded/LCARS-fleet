@@ -18,7 +18,7 @@
 #
 # LA RECETTE N'EST PAS TOUCHEE. `forge.tf` continue de poser `must_change_password = true` ;
 # ce script defait ce reglage APRES coup, sur une forge dont on assume qu'elle est jetable.
-# Memo permanent : `fleet/provisioning/deps/forge.tf._DEGRADED-FOR-TEST`.
+# Memo permanent : `fleet/provisioning_v2/deps/forge.tf._DEGRADED-FOR-TEST`.
 #
 # IDEMPOTENT : rejouable apres chaque nuke ; le client OAuth existant est reutilise, pas duplique.
 #

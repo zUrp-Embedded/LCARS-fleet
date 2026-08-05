@@ -1029,7 +1029,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> Enum.sort()
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
-    tf_path = Path.expand("../provisioning/deps/forge.tf", root)
+
+    # `provisioning_v2/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
+    # v1 tree, and this check reading it across trees is what caught the move — the wall working on
+    # the gesture that touched it.
+    tf_path = Path.expand("../provisioning_v2/deps/forge.tf", root)
     lib_path = Path.expand("../provisioning_v2/lib/provision-lib.sh", root)
 
     # The two SIBLING-TREE lists are outside `fleet/runtime`, and one legitimate context does not
@@ -1044,7 +1048,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        {"forge.tf local.roles", tree_scope(Path.expand("../provisioning", root)),
+        {"forge.tf local.roles", tree_scope(Path.expand("../provisioning_v2", root)),
          read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
          "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
            "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
