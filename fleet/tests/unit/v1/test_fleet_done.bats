@@ -3,13 +3,13 @@
 # Ring 2 kernel. Contract: appends timestamped DONE entry to handoff.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Copy SUT to sandbox with fleet-env shim
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-done.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-done.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-done.sh"
 
     cat > "$SANDBOX/fleet-env.sh" <<'ENVSHIM'
@@ -122,6 +122,6 @@ teardown() { _teardown; }
 
 @test "fleet-done: shellcheck clean" {
     if ! command -v shellcheck &>/dev/null; then skip "shellcheck not installed"; fi
-    run shellcheck -S warning "$REPO_ROOT/fleet/fleet-done.sh"
+    run shellcheck -S warning "$REPO_ROOT/fleet/v1/fleet-done.sh"
     assert_success
 }

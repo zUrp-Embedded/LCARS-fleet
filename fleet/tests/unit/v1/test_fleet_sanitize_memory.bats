@@ -10,13 +10,13 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Copy SUT to sandbox with fleet-env.sh shim
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-sanitize-memory.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-sanitize-memory.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-sanitize-memory.sh"
 
     # Create fleet-env shim that provides fleet_roles and HOMES_ROOT
@@ -164,6 +164,6 @@ _read_memory() {
 # ============================================================
 
 @test "sanitize-memory: shellcheck clean" {
-    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/fleet-sanitize-memory.sh"
+    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/v1/fleet-sanitize-memory.sh"
     assert_success
 }

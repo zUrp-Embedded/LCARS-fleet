@@ -6,10 +6,10 @@
 # and error paths only.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
-    SUT="$REPO_ROOT/fleet/fleet-alert.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-alert.sh"
 
     # Mock tmux
     mkdir -p "$BATS_TEST_TMPDIR/bin"

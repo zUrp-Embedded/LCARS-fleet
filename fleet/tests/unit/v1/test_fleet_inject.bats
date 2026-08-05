@@ -3,12 +3,12 @@
 # Ring 2 kernel. Contract: injects snippet content after handoff anchor.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-inject.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-inject.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-inject.sh"
 
     cat > "$SANDBOX/fleet-env.sh" <<'ENVSHIM'
@@ -174,6 +174,6 @@ teardown() { _teardown; }
 
 @test "fleet-inject: shellcheck clean" {
     if ! command -v shellcheck &>/dev/null; then skip "shellcheck not installed"; fi
-    run shellcheck -S warning "$REPO_ROOT/fleet/fleet-inject.sh"
+    run shellcheck -S warning "$REPO_ROOT/fleet/v1/fleet-inject.sh"
     assert_success
 }

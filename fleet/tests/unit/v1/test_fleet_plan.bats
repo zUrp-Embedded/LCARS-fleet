@@ -5,9 +5,9 @@
 # done/check/audit require fleet-dispatch → tested separately.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
-    SUT="$REPO_ROOT/fleet/fleet-plan.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-plan.sh"
 
     # Create a project root with work/
     PROJECT="$BATS_TEST_TMPDIR/project"

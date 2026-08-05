@@ -10,10 +10,10 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
-    SUT="$REPO_ROOT/fleet/handoff-check-utf8.sh"
+    SUT="$REPO_ROOT/fleet/v1/handoff-check-utf8.sh"
 
     # Create mock handoff directories
     MOCK_HANDOFFS="$BATS_TEST_TMPDIR/handoffs"
@@ -161,6 +161,6 @@ _create_corrupted_handoff() {
 # ============================================================
 
 @test "handoff-check-utf8: shellcheck clean" {
-    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/handoff-check-utf8.sh"
+    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/v1/handoff-check-utf8.sh"
     assert_success
 }

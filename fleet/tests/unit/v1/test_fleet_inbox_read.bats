@@ -14,7 +14,7 @@
 
 setup() {
     # Load bats libs WITHOUT mocks (real yq needed by fleet-env.sh)
-    HELPERS_DIR="$(cd "$(dirname "$BATS_TEST_DIRNAME")/helpers" && pwd)"
+    HELPERS_DIR="$(cd "$(dirname "$(dirname "$BATS_TEST_DIRNAME")")/helpers/v1" && pwd)"
     REPO_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
     load "$REPO_ROOT/tests/.bats/bats-support/load.bash"
     load "$REPO_ROOT/tests/.bats/bats-assert/load.bash"
@@ -26,8 +26,8 @@ setup() {
     # --- Create test fleet dir with SUT + fleet-env.sh ---
     FLEET_TMP="$BATS_TEST_TMPDIR/fleet"
     mkdir -p "$FLEET_TMP"
-    cp "$REPO_ROOT/fleet/fleet-inbox-read.sh" "$FLEET_TMP/"
-    cp "$REPO_ROOT/fleet/fleet-env.sh"        "$FLEET_TMP/"
+    cp "$REPO_ROOT/fleet/v1/fleet-inbox-read.sh" "$FLEET_TMP/"
+    cp "$REPO_ROOT/fleet/v1/fleet-env.sh"        "$FLEET_TMP/"
 
     SUT="$FLEET_TMP/fleet-inbox-read.sh"
 
@@ -407,6 +407,6 @@ Hidden body."
 # ============================================================
 
 @test "fleet-inbox-read: shellcheck clean (no warnings/errors)" {
-    run shellcheck --exclude=SC1090,SC2015,SC2016 "$REPO_ROOT/fleet/fleet-inbox-read.sh"
+    run shellcheck --exclude=SC1090,SC2015,SC2016 "$REPO_ROOT/fleet/v1/fleet-inbox-read.sh"
     assert_success
 }

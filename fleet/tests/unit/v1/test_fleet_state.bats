@@ -16,13 +16,13 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Copy SUT to sandbox and create a fleet-env.sh shim next to it
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-state.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-state.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-state.sh"
 
     # Shim fleet-env.sh: re-export the mock variables + stub functions
@@ -288,6 +288,6 @@ EOF
 # ============================================================
 
 @test "fleet-state: shellcheck clean (no warnings/errors)" {
-    run shellcheck --exclude=SC1091,SC2015,SC2016 "$REPO_ROOT/fleet/fleet-state.sh"
+    run shellcheck --exclude=SC1091,SC2015,SC2016 "$REPO_ROOT/fleet/v1/fleet-state.sh"
     assert_success
 }

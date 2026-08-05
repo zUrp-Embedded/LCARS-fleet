@@ -4,13 +4,13 @@
 # Dispatch requires sudo + claude -p → integration test for nominal path.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Create sandbox with fleet-env shim
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-dispatch.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-dispatch.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-dispatch.sh"
 
     # Shim fleet-env: provide variables, stub yq/functions
@@ -47,7 +47,7 @@ teardown() { _teardown; }
 # ============================================================
 
 @test "fleet-dispatch: --help exits 0" {
-    run bash "$REPO_ROOT/fleet/fleet-dispatch.sh" --help
+    run bash "$REPO_ROOT/fleet/v1/fleet-dispatch.sh" --help
     assert_success
     assert_output --partial "NAME"
     assert_output --partial "INTERFACE"
@@ -79,6 +79,6 @@ teardown() { _teardown; }
 
 @test "fleet-dispatch: shellcheck clean" {
     if ! command -v shellcheck &>/dev/null; then skip "shellcheck not installed"; fi
-    run shellcheck -S warning "$REPO_ROOT/fleet/fleet-dispatch.sh"
+    run shellcheck -S warning "$REPO_ROOT/fleet/v1/fleet-dispatch.sh"
     assert_success
 }

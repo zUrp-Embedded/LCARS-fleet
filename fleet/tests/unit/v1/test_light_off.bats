@@ -3,14 +3,14 @@
 # Ring 4 kernel. Tests --help, helpers, shellcheck.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # light_off.sh sources fleet-env then uses fleet functions.
     # Create a sandbox with shim for testable paths.
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/light_off.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/light_off.sh" "$SANDBOX/"
     SUT="$SANDBOX/light_off.sh"
 
     cat > "$SANDBOX/fleet-env.sh" <<'ENVSHIM'
@@ -26,7 +26,7 @@ ENVSHIM
 teardown() { _teardown; }
 
 @test "light_off: --help exits 0" {
-    run bash "$REPO_ROOT/fleet/light_off.sh" --help
+    run bash "$REPO_ROOT/fleet/v1/light_off.sh" --help
     assert_success
     assert_output --partial "NAME"
     assert_output --partial "INTERFACE"
@@ -42,6 +42,6 @@ teardown() { _teardown; }
 
 @test "light_off: shellcheck clean" {
     if ! command -v shellcheck &>/dev/null; then skip "shellcheck not installed"; fi
-    run shellcheck -S warning "$REPO_ROOT/fleet/light_off.sh"
+    run shellcheck -S warning "$REPO_ROOT/fleet/v1/light_off.sh"
     assert_success
 }

@@ -15,13 +15,13 @@ bats_require_minimum_version 1.5.0
 
 setup() {
     # Load bats libs WITHOUT mocks (this script needs real yq)
-    HELPERS_DIR="$(cd "$(dirname "$BATS_TEST_DIRNAME")/helpers" && pwd)"
+    HELPERS_DIR="$(cd "$(dirname "$(dirname "$BATS_TEST_DIRNAME")")/helpers/v1" && pwd)"
     REPO_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
     load "$REPO_ROOT/tests/.bats/bats-support/load.bash"
     load "$REPO_ROOT/tests/.bats/bats-assert/load.bash"
     load "$REPO_ROOT/tests/.bats/bats-file/load.bash"
 
-    SUT="$REPO_ROOT/fleet/fleet-build-yaml.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-build-yaml.sh"
 
     # Verify real yq is available
     command -v yq &>/dev/null || skip "yq not installed"

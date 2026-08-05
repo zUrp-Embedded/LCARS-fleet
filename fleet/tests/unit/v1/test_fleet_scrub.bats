@@ -4,9 +4,9 @@
 # scratchpad/backlog commands require fleet-dispatch → integration tests.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
-    SUT="$REPO_ROOT/fleet/fleet-scrub.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-scrub.sh"
 
     PROJECT="$BATS_TEST_TMPDIR/project"
     mkdir -p "$PROJECT/work"/{TODO,doing,done}

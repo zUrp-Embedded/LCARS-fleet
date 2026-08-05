@@ -6,7 +6,7 @@
 # appends to handoff via fleet-done.sh, copies to ready-room.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     SUT="$REPO_ROOT/.claude/hooks/pre-compact-harvest.sh"

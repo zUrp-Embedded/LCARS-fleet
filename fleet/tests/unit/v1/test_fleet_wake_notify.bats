@@ -5,10 +5,10 @@
 # pending wake file creation, non-wakeable agent handling.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
-    SUT="$REPO_ROOT/fleet/fleet-wake-notify.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-wake-notify.sh"
 
     # Create mock fleet-env.sh in the same dir as SUT so it sources it
     # (fleet-wake-notify resolves fleet-env via dirname BASH_SOURCE)

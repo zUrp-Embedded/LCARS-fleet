@@ -12,12 +12,12 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # fleet-env.sh resolves its own location via BASH_SOURCE.
     # Point it to the real script but with our mock yq and fleet.yaml.
-    SUT="$REPO_ROOT/fleet/fleet-env.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-env.sh"
 
     # Ensure our mock yq is first in PATH (test_helpers already does this)
     # and FLEET_YAML points to our fixture

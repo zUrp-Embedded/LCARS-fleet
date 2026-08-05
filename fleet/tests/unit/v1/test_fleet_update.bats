@@ -10,12 +10,12 @@
 # ============================================================
 
 setup() {
-    HELPERS_DIR="$(cd "$(dirname "$BATS_TEST_DIRNAME")/helpers" && pwd)"
+    HELPERS_DIR="$(cd "$(dirname "$(dirname "$BATS_TEST_DIRNAME")")/helpers/v1" && pwd)"
     REPO_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
     load "$REPO_ROOT/tests/.bats/bats-support/load.bash"
     load "$REPO_ROOT/tests/.bats/bats-assert/load.bash"
 
-    SUT="$REPO_ROOT/fleet/fleet-update.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-update.sh"
     command -v yq &>/dev/null || skip "yq not installed"
     # fleet-update needs full fleet environment (fleet.yaml, /local/LCARS, homes)
     # Skip in CI where fleet is not deployed

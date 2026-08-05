@@ -8,13 +8,13 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Copy SUT to sandbox with fleet-env shim
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-shutdown-clean.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-shutdown-clean.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-shutdown-clean.sh"
 
     # Mock handoff directory
@@ -144,6 +144,6 @@ HO
 # ============================================================
 
 @test "shutdown-clean: shellcheck clean" {
-    run shellcheck --exclude=SC1091,SC1090,SC2016 "$REPO_ROOT/fleet/fleet-shutdown-clean.sh"
+    run shellcheck --exclude=SC1091,SC1090,SC2016 "$REPO_ROOT/fleet/v1/fleet-shutdown-clean.sh"
     assert_success
 }

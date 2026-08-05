@@ -3,9 +3,9 @@
 # Ring 4 kernel. Tests error paths and guards (no real tmux session).
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
-    SUT="$REPO_ROOT/fleet/fleet-launch.sh"
+    SUT="$REPO_ROOT/fleet/v1/fleet-launch.sh"
 }
 
 teardown() { _teardown; }

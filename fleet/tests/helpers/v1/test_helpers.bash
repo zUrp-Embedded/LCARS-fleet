@@ -45,7 +45,7 @@ _setup() {
     # --- Make fleet scripts accessible in PATH ---
     # Tests that need real scripts can source them directly.
     # This PATH addition lets scripts find each other via `command -v`.
-    export PATH="$BATS_TEST_TMPDIR/bin:$REPO_ROOT/fleet:$PATH"
+    export PATH="$BATS_TEST_TMPDIR/bin:$REPO_ROOT/fleet/v1:$PATH"
 }
 
 _teardown() {

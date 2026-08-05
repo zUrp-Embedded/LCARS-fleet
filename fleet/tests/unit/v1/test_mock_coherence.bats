@@ -8,10 +8,10 @@
 # RUNS IN CI: yes (part of unit tests)
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
-    REAL_SCRIPT="$REPO_ROOT/fleet/fleet-env.sh"
-    MOCK_SCRIPT="$REPO_ROOT/tests/helpers/mock_fleet_env.bash"
+    REAL_SCRIPT="$REPO_ROOT/fleet/v1/fleet-env.sh"
+    MOCK_SCRIPT="$REPO_ROOT/fleet/tests/helpers/v1/mock_fleet_env.bash"
 }
 
 teardown() {

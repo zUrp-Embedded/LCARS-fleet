@@ -3,9 +3,9 @@
 # Ring 4 kernel. Tests argument parsing, error paths, deploy gate.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
-    SUT="$REPO_ROOT/fleet/light_on.sh"
+    SUT="$REPO_ROOT/fleet/v1/light_on.sh"
 }
 
 teardown() { _teardown; }

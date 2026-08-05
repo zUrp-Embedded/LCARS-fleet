@@ -10,10 +10,10 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
-    SUT="$REPO_ROOT/fleet/watch-handoff.sh"
+    SUT="$REPO_ROOT/fleet/v1/watch-handoff.sh"
 }
 
 teardown() {
@@ -54,6 +54,6 @@ teardown() {
 # ============================================================
 
 @test "watch-handoff: shellcheck clean" {
-    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/watch-handoff.sh"
+    run shellcheck --exclude=SC1091,SC2016 "$REPO_ROOT/fleet/v1/watch-handoff.sh"
     assert_success
 }

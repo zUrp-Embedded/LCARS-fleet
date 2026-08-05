@@ -3,12 +3,12 @@
 # Ring 2 kernel. Contract: marks first matching [ ] as [x] in handoff.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-action-done.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-action-done.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-action-done.sh"
 
     cat > "$SANDBOX/fleet-env.sh" <<'ENVSHIM'
@@ -134,6 +134,6 @@ HF
 
 @test "fleet-action-done: shellcheck clean" {
     if ! command -v shellcheck &>/dev/null; then skip "shellcheck not installed"; fi
-    run shellcheck -S warning "$REPO_ROOT/fleet/fleet-action-done.sh"
+    run shellcheck -S warning "$REPO_ROOT/fleet/v1/fleet-action-done.sh"
     assert_success
 }

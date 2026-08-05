@@ -8,13 +8,13 @@
 # ============================================================
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     # Copy SUT to sandbox with fleet-env shim
     SANDBOX="$BATS_TEST_TMPDIR/sandbox"
     mkdir -p "$SANDBOX"
-    cp "$REPO_ROOT/fleet/fleet-lock-cleanup.sh" "$SANDBOX/"
+    cp "$REPO_ROOT/fleet/v1/fleet-lock-cleanup.sh" "$SANDBOX/"
     SUT="$SANDBOX/fleet-lock-cleanup.sh"
 
     cat > "$SANDBOX/fleet-env.sh" <<'ENVSHIM'
@@ -122,6 +122,6 @@ _create_orphan_lock() {
 # ============================================================
 
 @test "lock-cleanup: shellcheck clean" {
-    run shellcheck --exclude=SC1091,SC1090,SC2016 "$REPO_ROOT/fleet/fleet-lock-cleanup.sh"
+    run shellcheck --exclude=SC1091,SC1090,SC2016 "$REPO_ROOT/fleet/v1/fleet-lock-cleanup.sh"
     assert_success
 }

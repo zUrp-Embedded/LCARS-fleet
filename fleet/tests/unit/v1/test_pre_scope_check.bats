@@ -7,7 +7,7 @@
 # stdout contains violation warning iff scope breached.
 
 setup() {
-    source "$BATS_TEST_DIRNAME/../helpers/test_helpers.bash"
+    source "$BATS_TEST_DIRNAME/../../helpers/v1/test_helpers.bash"
     _setup
 
     SUT="$REPO_ROOT/.claude/hooks/pre-scope-check.sh"
