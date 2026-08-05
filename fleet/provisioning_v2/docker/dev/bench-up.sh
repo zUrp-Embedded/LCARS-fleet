@@ -26,6 +26,16 @@
 #    l'humain du runtime, `Credentials.Gate.validate` refuse au spawn-boundary et AUCUN pod ne
 #    demarre — la fleet a l'air saine et ne produit rien. Elles sont copiees depuis l'humain de
 #    l'HOTE ; c'est un geste de banc (le lien Anthropic est un compte, pas un artefact du projet).
+# 3bis. LE BINAIRE CLAUDE N'EST PAS DANS L'IMAGE. Il est installe dans le stage `build` (pour le
+#    gate) et ce stage est JETE : l'image finale n'en a pas. Le module `40-claude-bin` le telecharge
+#    au boot depuis claude.ai — donc une boite NEUVE sans reseau n'obtient aucun binaire, aucun pod
+#    ne demarre, et la fleet a l'air saine en ne produisant rien. On seme donc le binaire de l'hote
+#    AVANT le premier boot, a `$PROV_CLAUDE_SEED` (chemin lu dans provision-lib, pas recopie ici).
+#    DEUX raisons pour la fenetre create→start, et pas plus tard : l'humain du runtime n'existe pas
+#    encore (l'entrypoint le cree au boot, donc son home n'est pas un endroit ou deposer quoi que ce
+#    soit), et une graine posee APRES le boot laisserait le module en drift permanent apres avoir
+#    brule un telechargement rate. La source est resolue par `readlink -f` : l'installeur vendor
+#    pose un SYMLINK, et copier le lien donne une cible morte dans la boite.
 # 4. UN BANC NE DOIT JAMAIS COGNER LE BANC D'A COTE. Projet compose, port de forge et adresse de
 #    bind sont TOUS parametres et defaultent sur des valeurs libres. Le geste destructeur (`down -v`)
 #    n'est pas ici : il est dans `bench-down.sh`, separement, pour qu'aucune faute de frappe sur ce
@@ -33,7 +43,7 @@
 #
 # USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 3700] [--bind 127.0.0.5]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
-#                     [--no-human-admin]
+#                     [--claude-from ~/.local/bin/claude] [--no-claude-bin] [--no-human-admin]
 # EXIT  : 0 banc pret · 1 arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas
 #         4 amorcage forge · 5 creds · 6 le verdict final ne passe pas
 
@@ -49,6 +59,8 @@ BIND="127.0.0.5"
 IMAGE="lcars-fleet:2"
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
+CLAUDE_FROM="$HOME/.local/bin/claude"
+WITH_CLAUDE_BIN=1
 HUMAN="lcars"
 # Le banc promeut l'humain site-admin par defaut (raison + cout : etape 6-bis du bootstrap).
 BOOTSTRAP_EXTRA=()
@@ -62,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --image)      IMAGE="${2:?}"; shift 2 ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
+    --claude-from) CLAUDE_FROM="${2:?}"; shift 2 ;;
+    --no-claude-bin) WITH_CLAUDE_BIN=0; shift ;;
     --no-human-admin) BOOTSTRAP_EXTRA+=(--no-human-admin); shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
     -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -155,6 +169,27 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
     "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
   || die "la boite ne se cree pas" 3
+
+# La graine du binaire vendor (piege 3bis) — dans la fenetre create→start, sur un conteneur qui
+# existe et n'a pas demarre. Le chemin cible est lu dans provision-lib : le module qui le consomme
+# en est l'autorite, et un chemin recopie ici derive le jour ou il bouge.
+if [[ "$WITH_CLAUDE_BIN" -eq 1 ]]; then
+  SEED_DEST="$(bash -c '. "$1" >/dev/null 2>&1; echo "$PROV_CLAUDE_SEED"' _ \
+                 "$REPO_ROOT/fleet/provisioning_v2/lib/provision-lib.sh")"
+  CLAUDE_REAL="$(readlink -f "$CLAUDE_FROM" 2>/dev/null || true)"
+  if [[ -z "$SEED_DEST" ]]; then
+    say "graine claude SAUTEE : provision-lib ne rend pas PROV_CLAUDE_SEED (la boite telechargera)"
+  elif [[ ! -x "$CLAUDE_REAL" ]]; then
+    # Degrade en le DISANT, jamais en mourant : un banc avec reseau marche tres bien sans graine.
+    say "graine claude SAUTEE : $CLAUDE_FROM introuvable ou non executable — la boite telechargera au boot (il lui faut du reseau)"
+  else
+    "$DOCKER_BIN" cp "$CLAUDE_REAL" "$BOX:$SEED_DEST" \
+      || die "graine claude non copiee vers $BOX:$SEED_DEST" 3
+    say "graine claude posee ($CLAUDE_REAL -> $SEED_DEST) — 40-claude-bin ne touchera pas au reseau"
+  fi
+else
+  say "graine claude NON posee (--no-claude-bin) — la boite telechargera au boot, par choix"
+fi
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
   || die "la boite ne se branche pas sur le reseau de la forge ($FORGE_NET)" 3
