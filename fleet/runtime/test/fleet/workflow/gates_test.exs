@@ -161,4 +161,39 @@ defmodule Fleet.Workflow.GatesTest do
       end
     end
   end
+
+  describe "shape before verdict — the hard/terminal asymmetry is gone (vanille B3)" do
+    defp hard(rules), do: %{"gate" => %{"type" => "hard", "rules" => rules}}
+    defp terminal(rules), do: %{"gate" => %{"type" => "terminal", "rules" => rules}}
+
+    test "a hard gate with a non-string rule is refused BY NAME, not as an unsatisfied predicate" do
+      assert {:fail, msg} = Gates.evaluate(hard([42]), %{"all_tests_pass" => true}, %{})
+      assert msg =~ "malformed hard gate"
+      assert msg =~ "shape rejected"
+      refute msg =~ "unsatisfied"
+    end
+
+    test "the two gate types now answer the SAME way to the same malformed shape" do
+      {:fail, hard_msg} = Gates.evaluate(hard([%{}]), %{}, %{})
+      {:fail, term_msg} = Gates.evaluate(terminal([%{}]), %{}, %{})
+
+      assert hard_msg =~ "must be a list of strings (shape rejected)"
+      assert term_msg =~ "must be a list of strings (shape rejected)"
+    end
+
+    test "INVERSE TWIN — a genuinely unsatisfied string rule keeps its OWN message" do
+      # The distinction is the whole point: "the work did not satisfy the rule" sends a reader to
+      # the deliverable, "the shape is wrong" sends them to the card. Collapsing them sent every
+      # reader to the wrong place.
+      assert {:fail, msg} =
+               Gates.evaluate(hard(["all_tests_pass"]), %{"all_tests_pass" => false}, %{})
+
+      assert msg =~ "unsatisfied string rule"
+      refute msg =~ "malformed"
+    end
+
+    test "INVERSE TWIN — a satisfied hard gate still passes" do
+      assert :pass = Gates.evaluate(hard(["all_tests_pass"]), %{"all_tests_pass" => true}, %{})
+    end
+  end
 end

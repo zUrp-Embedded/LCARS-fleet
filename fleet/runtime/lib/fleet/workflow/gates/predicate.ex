@@ -92,9 +92,11 @@ defmodule Fleet.Workflow.Gates.Predicate do
     |> Enum.all?(&eval_term(String.trim(&1), outputs))
   end
 
-  # TOTAL fail-closed clause. The hard gate v2.5 applies `eval?` to EVERY item of
-  # `rules` without guaranteeing it is a string: known asymmetry with the terminal
-  # gate, which filters its non-string items upstream (`Enum.all?(rules, &is_binary/1)`).
+  # TOTAL fail-closed clause, and it is now a NET rather than the only guard. Until 2026-08-05 the
+  # hard gate handed every item of `rules` here without checking it was a string, while the terminal
+  # gate filtered upstream — an asymmetry declared "known" and traced on this side only, so the hard
+  # path answered "unsatisfied rule(s)" for a malformed CARD. Both branches now reject the shape by
+  # name before evaluating; this clause stays for what reaches it anyway.
   # A non-string `rule` (an UNSCHEMATIZED override — an in-memory workflow_map that bypassed the
   # loader's schema; there is NO v1 input, a v1 YAML fails the v2.5 schema before normalize)
   # — or non-map `outputs` — renders `false`:

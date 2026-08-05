@@ -35,7 +35,7 @@ defmodule Fleet.Workflow.Gates do
   Any unknown/malformed gate shape falls onto the fail-closed catch-all
   (`{:fail, …}`) — the eval is TOTAL, never a crash, never a silent `:pass`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-05
   """
 
   @behaviour Fleet.Workflow.Gate
@@ -63,12 +63,28 @@ defmodule Fleet.Workflow.Gates do
   # a hard gate that enforces NOTHING is malformed → it falls to the fail-closed catch-all ({:fail}), NEVER
   # a :pass by `Enum.all?([]) == true` vacuity. The schema also rejects it at load (`if type==hard then rules
   # minItems 1`) — this eval-boundary guard is defense-in-depth for a schema-bypassed (in-memory) gate.
+  #
+  # SHAPE BEFORE VERDICT, and the asymmetry it removes was declared "known" and traced on one side
+  # only. The terminal branch below has always refused a non-string `rules` with a NAMED message;
+  # the hard branch handed every item to `Predicate.eval?`, whose total fail-closed clause answers
+  # `false` — so a malformed gate produced "unsatisfied rule(s)", indistinguishable from a rule the
+  # delivery genuinely failed. Someone reads that message and looks at the deliverable; the fault is
+  # in the card.
+  #
+  # The VERDICT does not change (both were and remain a refusal). What changes is that the refusal
+  # says which of the two happened. Same distinction as `Predicate.parse/1`: a rule the engine
+  # cannot read is not a verdict about the work.
   defp eval_by_type(%{"gate" => %{"type" => "hard", "rules" => rules}}, outputs, _ctx)
        when is_list(rules) and rules != [] do
-    if Enum.all?(rules, &Predicate.eval?(&1, outputs)) do
-      :pass
-    else
-      {:fail, "hard gate: unsatisfied string rule(s)"}
+    cond do
+      not Enum.all?(rules, &is_binary/1) ->
+        {:fail, "malformed hard gate: `rules` must be a list of strings (shape rejected)"}
+
+      Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->
+        :pass
+
+      true ->
+        {:fail, "hard gate: unsatisfied string rule(s)"}
     end
   end
 
