@@ -23,11 +23,26 @@ defmodule Fleet.Workflow.Gates.Predicate do
     parentheses nor negation beyond `!=`). A rule = conjunction of all its
     terms.
 
-  Known limitation (outside the canon corpus): a multi-word RHS operand
-  (`severity_max != very critical`) is captured as a single bareword
-  `"very critical"` — bounded to the current corpus (single-word/number
-  operands). To be hardened if a future workflow introduces operands with
-  spaces.
+  ## The two real grammar limits (measured 2026-08-05)
+
+  This section used to name a third one that does not exist: "a multi-word RHS operand is captured
+  as a single bareword". It is — and that is the CORRECT behaviour for `==`/`!=`, the only ops that
+  accept a bareword: `severity_max != very critical` compares against the whole string. Measured
+  against both branches. The note stood unmeasured long enough to be reported as a defect by an
+  audit that quoted it; what follows is what actually breaks.
+
+  1. **`AND` inside an operand splits the rule.** The conjunction is cut BEFORE any parsing, so
+     `severity_max != very AND critical` becomes two terms: `severity_max != very` (true for
+     `"important"`) and the atom `critical` (false) → the rule answers **false where true is
+     correct**. Fixing it needs quoting in the grammar; the canon corpus has no such operand, so it
+     is named here rather than built. A workflow introducing one gets a wrong answer, not an error.
+
+  2. **A malformed comparison used to degrade SILENTLY to an atom.** `tasks count >= 1` (a space in
+     the identifier) does not match the comparison regex, fell through to `{:atom, term}`, and
+     became a lookup of the literal key `"tasks count >= 1"` — absent, therefore false, forever,
+     with no signal. Fail-closed is right for missing EVIDENCE; it is not right for a broken RULE.
+     The gate then rejects every delivery and looks strict. A term that carries an operator and
+     fails to parse is now logged LOUD (see `parse/1`).
 
   ## Fail-closed
 
@@ -42,8 +57,10 @@ defmodule Fleet.Workflow.Gates.Predicate do
   The mapping to `:pass`/`:fail`/`:human_approval`/`:dispatch_gatekeeper` (including the
   refusal to auto-approve a `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-05
   """
+
+  require Logger
 
   @ops ~w(>= <= == != > <)
 
@@ -94,12 +111,38 @@ defmodule Fleet.Workflow.Gates.Predicate do
   end
 
   # "identifier op operand" → {:cmp, ...} ; otherwise bare identifier → {:atom, id}.
+  #
+  # The atom fallback is TOTAL, and that used to swallow malformed comparisons. A term carrying an
+  # operator that does not parse (`tasks count >= 1`, a space in the identifier) became a lookup of
+  # the literal key — absent, false, forever, silent. The gate then rejects every delivery while
+  # looking strict, which is the worst shape a configuration error can take: it does not fail, it
+  # succeeds at being wrong.
+  #
+  # Fail-closed stays (the return is still `false`); what changes is that it now SAYS SO. Missing
+  # evidence is a legitimate false; a rule the evaluator cannot read is not a verdict, it is a
+  # broken instrument answering anyway.
   defp parse(term) do
     case Regex.run(~r/^(\w+)\s*(>=|<=|==|!=|>|<)\s*(.+)$/, term) do
-      [_, lhs, op, rhs] when op in @ops -> {:cmp, lhs, op, operand(String.trim(rhs))}
-      _ -> {:atom, term}
+      [_, lhs, op, rhs] when op in @ops ->
+        {:cmp, lhs, op, operand(String.trim(rhs))}
+
+      _ ->
+        if malformed_comparison?(term) do
+          Logger.warning(
+            "Gates.Predicate: rule term #{inspect(term)} carries an operator but does not parse " <>
+              "as `identifier op operand` — evaluated as a (false) atom. The gate will reject " <>
+              "EVERY delivery until the rule is fixed."
+          )
+        end
+
+        {:atom, term}
     end
   end
+
+  # An operator with whitespace around it, or at a word boundary — enough to tell "this meant to be
+  # a comparison" from an identifier that merely contains `<` (none do, but the test is cheap and
+  # a false positive costs one log line, never a verdict).
+  defp malformed_comparison?(term), do: Regex.match?(~r/(^|\s)(>=|<=|==|!=|>|<)(\s|$)/, term)
 
   defp operand(rhs) do
     case Integer.parse(rhs) do

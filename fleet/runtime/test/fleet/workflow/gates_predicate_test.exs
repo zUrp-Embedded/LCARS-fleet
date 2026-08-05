@@ -92,4 +92,51 @@ defmodule Fleet.Workflow.Gates.PredicateTest do
       refute Predicate.eval?("all_tests_pass", nil)
     end
   end
+
+  describe "the grammar's real limits, measured 2026-08-05" do
+    import ExUnit.CaptureLog
+
+    test "a multi-word RHS is NOT a defect — it compares as the whole string" do
+      # The moduledoc named this a "known limitation" for a year, and an audit reported it as a
+      # defect on that basis. Both branches, so the note can never be re-derived from one.
+      refute Predicate.eval?("severity_max != very critical", %{"severity_max" => "very critical"})
+
+      assert Predicate.eval?("severity_max != very critical", %{"severity_max" => "important"})
+    end
+
+    test "`AND` INSIDE an operand splits the rule and answers WRONG — named, not fixed" do
+      # "important" != "very AND critical" is TRUE. The conjunction is cut before any parsing, so
+      # the rule becomes `severity_max != very` (true) AND the atom `critical` (false) → false.
+      # The canon corpus has no such operand; fixing it needs quoting in the grammar. This test
+      # exists so the day a workflow introduces one, the behaviour is documented rather than
+      # discovered as a gate that rejects for no visible reason.
+      refute Predicate.eval?("severity_max != very AND critical", %{"severity_max" => "important"})
+    end
+
+    test "a malformed comparison is LOUD — fail-closed is for missing evidence, not a broken rule" do
+      log =
+        capture_log(fn ->
+          refute Predicate.eval?("tasks count >= 1", %{"tasks_count" => 5})
+        end)
+
+      assert log =~ "does not parse"
+      assert log =~ "reject EVERY delivery"
+    end
+
+    test "INVERSE TWIN — a legitimate atom stays silent; the warning is not noise on every rule" do
+      log =
+        capture_log(fn ->
+          assert Predicate.eval?("all_tests_pass", %{"all_tests_pass" => true})
+          refute Predicate.eval?("absent_fact", %{})
+        end)
+
+      refute log =~ "does not parse"
+    end
+
+    test "a malformed rule still returns FALSE — the signal is added, the policy is unchanged" do
+      capture_log(fn ->
+        refute Predicate.eval?("tasks count >= 1", %{"tasks count >= 1" => false})
+      end)
+    end
+  end
 end
