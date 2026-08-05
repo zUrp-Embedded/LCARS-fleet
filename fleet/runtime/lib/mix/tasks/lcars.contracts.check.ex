@@ -108,7 +108,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
         check_intensity_max_fan_ceiling(root),
-        check_bats_corpora_on_record(root)
+        check_test_corpora_on_record(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1559,7 +1559,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "one would carry whatever host answered, which is not necessarily the one we address"
   }
 
-  # EVERY bats corpus in the repo, and what happens to it. `:gated` = shell_gate discovers it;
+  # EVERY test corpus in the repo — bats AND python — and what happens to it. `:gated` = shell_gate discovers it;
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
   # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
@@ -1569,11 +1569,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
   # loudly — it rots while reporting a coverage it does not provide, which is the most expensive
   # silence a test can keep.
-  @bats_corpora [
+  @test_corpora [
     {"fleet/runtime/test", :gated},
     {".claude/skills", :gated},
     {"fleet/provisioning_v2/tests", :gated},
     {"fleet/git-hooks/tests", :gated},
+    {"fleet/tests/python/v1",
+     {:out, "v1 python smoke, frozen with the rest of v1 — same decision as the v1 bats corpus"}},
+    {"PoC",
+     {:out,
+      "prototypes kept as EVIDENCE of an experiment. A PoC owes a reader its result, never a green " <>
+        "suite, and gating one would make the product answer for a question already answered"}},
     {"fleet/tests/.bats",
      {:out, "vendored bats-core + its helper libraries: upstream's own suites, not ours to run"}},
     {"fleet/tests/unit/v1",
@@ -1584,7 +1590,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   ]
 
   @doc false
-  def check_bats_corpora_on_record(root) do
+  def check_test_corpora_on_record(root) do
     repo = Path.expand("../..", root)
 
     # `-type f` is load-bearing: `fleet/tests/.bats` is a DIRECTORY whose name matches `*.bats`, and
@@ -1596,8 +1602,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                repo,
                "-type",
                "f",
+               "(",
                "-name",
                "*.bats",
+               "-o",
+               "-name",
+               "test_*.py",
+               "-o",
+               "-name",
+               "*_test.py",
+               ")",
                "-not",
                "-path",
                "*/.git/*",
@@ -1610,7 +1624,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                # "tmp" ANYWHERE, which silently blanks the scan on a tree living under /tmp — a
                # filter broad enough to make the instrument measure nothing and report a pass. Its
                # own test caught it, by building its fixtures exactly there.
-               "*/fleet/runtime/tmp/*"
+               "*/fleet/runtime/tmp/*",
+               # VENDORED python, the twin of the `.bats` submodules: a virtualenv's site-packages
+               # carries hundreds of upstream suites. They are not ours to run and not ours to
+               # declare — excluding them is the declaration.
+               "-not",
+               "-path",
+               "*/.venv/*",
+               "-not",
+               "-path",
+               "*/site-packages/*"
              ],
              stderr_to_stdout: true
            ) do
@@ -1621,7 +1644,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     unknown =
       found
       |> Enum.reject(fn f ->
-        Enum.any?(@bats_corpora, fn {p, _} -> String.starts_with?(f, p <> "/") end)
+        Enum.any?(@test_corpora, fn {p, _} -> String.starts_with?(f, p <> "/") end)
       end)
       |> Enum.map(&Path.dirname/1)
       |> Enum.uniq()
@@ -1638,23 +1661,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           nil
       end
 
-    gated = Enum.count(@bats_corpora, fn {_, v} -> v == :gated end)
+    gated = Enum.count(@test_corpora, fn {_, v} -> v == :gated end)
 
     %{
-      id: "tests.bats_corpora_on_record",
+      id: "tests.corpora_on_record",
       remediation:
-        "wire the corpus into test/shell_gate.sh, or add it to @bats_corpora as {:out, why} — " <>
+        "wire the corpus into test/shell_gate.sh, or add it to @test_corpora as {:out, why} — " <>
           "a corpus nobody runs reports a coverage it does not provide",
       status: if(is_nil(broken) and unknown == [], do: :pass, else: :fail),
       evidence:
         cond do
           broken -> ["INSTRUMENT BROKEN — #{broken}"]
-          unknown != [] -> ["bats corpora on no record: #{inspect(unknown)}"]
+          unknown != [] -> ["test corpora on no record: #{inspect(unknown)}"]
           true -> []
         end,
       note:
-        "#{length(found)} .bats files over #{length(@bats_corpora)} corpora — " <>
-          "#{gated} gated, #{length(@bats_corpora) - gated} deliberately out ON RECORD"
+        "#{length(found)} test files (bats + python) over #{length(@test_corpora)} corpora — " <>
+          "#{gated} gated, #{length(@test_corpora) - gated} deliberately out ON RECORD"
     }
   end
 

@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Lcars.Contracts.BatsCorporaCheckTest do
+defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
   @moduledoc """
   The instrument that answers "which test corpora exist, and which ones do we run".
 
@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BatsCorporaCheckTest do
 
   describe "against the real repo" do
     test "it passes, and the note splits gated from deliberately-out" do
-      result = Check.check_bats_corpora_on_record(File.cwd!())
+      result = Check.check_test_corpora_on_record(File.cwd!())
 
       assert result.status == :pass
       assert result.note =~ "gated"
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BatsCorporaCheckTest do
     test "a tree that is not the repo root FAILS as broken — it never passes by measuring nothing" do
       nowhere = Path.join(System.tmp_dir!(), "nowhere_#{System.unique_integer([:positive])}")
 
-      result = Check.check_bats_corpora_on_record(nowhere)
+      result = Check.check_test_corpora_on_record(nowhere)
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
@@ -55,17 +55,39 @@ defmodule Mix.Tasks.Lcars.Contracts.BatsCorporaCheckTest do
     test "a repo root with zero .bats is BROKEN, not compliant" do
       # Zero findings and full compliance look identical from the outside. The whole class of defect
       # this check exists for is a measurement that returns nothing and reads as a pass.
-      result = Check.check_bats_corpora_on_record(tree([]))
+      result = Check.check_test_corpora_on_record(tree([]))
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
     end
   end
 
+  describe "python counts too — half an answer wearing the costume of a whole one" do
+    test "an undeclared PYTHON suite fails exactly like a bats one" do
+      # The first version scanned `.bats` only, while `shell_gate` also runs a python test. An
+      # instrument that answers for one kind and stays silent on the other reports a coverage it
+      # does not have — the very thing it was built to refuse.
+      result =
+        Check.check_test_corpora_on_record(tree(["fleet/ailleurs/test_quelque_chose.py"]))
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "fleet/ailleurs"
+    end
+
+    test "a vendored virtualenv is NOT a corpus to declare" do
+      # site-packages carries hundreds of upstream suites. Excluding them IS the declaration; making
+      # someone list them would be an inventory that grows with every dependency.
+      runtime =
+        tree(["fleet/runtime/test/x/a.bats", "PoC/p/.venv/lib/site-packages/z/test_up.py"])
+
+      assert Check.check_test_corpora_on_record(runtime).status == :pass
+    end
+  end
+
   describe "an undeclared corpus is a FAILURE, not a note" do
     test "a suite in a directory no record mentions is named" do
       result =
-        Check.check_bats_corpora_on_record(
+        Check.check_test_corpora_on_record(
           tree(["fleet/runtime/test/x/a.bats", "fleet/quelque_part/b.bats"])
         )
 
@@ -83,7 +105,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BatsCorporaCheckTest do
       runtime = tree(["fleet/runtime/test/x/a.bats"])
       File.mkdir_p!(Path.join([runtime, "..", "tests", ".bats"]))
 
-      assert Check.check_bats_corpora_on_record(runtime).status == :pass
+      assert Check.check_test_corpora_on_record(runtime).status == :pass
     end
   end
 end
