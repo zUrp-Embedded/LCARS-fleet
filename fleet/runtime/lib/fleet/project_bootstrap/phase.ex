@@ -68,9 +68,21 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # same one.
     #
     # The rule is now ours and fits in a sentence: if the last non-empty line is already exactly the
-    # trailer, do nothing; otherwise append it as the final line. A deterministic position is not
-    # something to ask an agent for, and not something to delegate to a parser whose notion of
-    # "already there" differs from ours — it is an append at the end of what the agent produced.
+    # trailer, do nothing; otherwise make the trailer the LAST PARAGRAPH. A deterministic position
+    # is not something to ask an agent for, and not something to delegate to a parser whose notion
+    # of "already there" differs from ours.
+    #
+    # PARAGRAPH, not line, and that word is the whole fix. The push gate reads the trailer with
+    # git's own extraction (`%(trailers:key=…)`), which only sees a trailer BLOCK — the last
+    # paragraph, preceded by a blank line. A first version appended `\n<trailer>\n`, which yields a
+    # blank line only when the message already ended with one. `git commit -m` always does, so six
+    # tests passed; a message built without a trailing newline produced
+    # `prose\nCo-authored-by: …` in ONE paragraph, git reported NO trailer, and the gate refused the
+    # push — the exact failure this hook exists to remove, reintroduced by the hook itself.
+    # Measured against real git, both sides of the same constraint.
+    #
+    # `$(cat)` strips trailing newlines, so the printf always yields exactly one blank line whatever
+    # the agent's message ended with. One rule, no shape to know.
     #
     # Survives `--no-verify`, which skips `pre-commit` and `commit-msg` and not this one.
     #
@@ -101,16 +113,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
       body = """
       #!/bin/sh
-      # LCARS — appends the role trailer as the LAST line of every commit message.
-      # Idempotent on the only thing that matters: if the last non-empty line is already exactly
-      # the trailer, nothing is written. No git trailer parsing — the position is ours to decide.
+      # LCARS — the role trailer is the LAST paragraph of every commit message.
+      # `$(cat)` strips trailing newlines, so the printf below always yields EXACTLY one blank
+      # line before the trailer — which is what makes it a git TRAILER BLOCK and not prose.
       set -e
       msg="$1"
       last=$(grep -v '^[[:space:]]*$' "$msg" | tail -n 1 || true)
       if [ "$last" = '#{trailer}' ]; then
         exit 0
       fi
-      printf '\\n%s\\n' '#{trailer}' >> "$msg"
+      body=$(cat "$msg")
+      printf '%s\\n\\n%s\\n' "$body" '#{trailer}' > "$msg"
       """
 
       with :ok <- File.mkdir_p(Path.dirname(path)),

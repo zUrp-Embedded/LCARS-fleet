@@ -144,4 +144,55 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
       assert git!(ws, ["status", "--porcelain"]) == ""
     end
   end
+
+  describe "the trailer must be a git TRAILER BLOCK, not just a last line" do
+    # The push gate reads the trailer with git's own extraction (`%(trailers:key=…)`), which sees
+    # only the last PARAGRAPH preceded by a blank line. A hook that guarantees "last line" and a
+    # gate that requires "last paragraph" are two notions of the same constraint, and the gap
+    # between them refuses the push — the exact failure the hook exists to remove.
+    defp git_trailer(ws) do
+      ws
+      |> git!(["log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)"])
+      |> String.trim()
+    end
+
+    defp commit_from_file(ws, raw_message) do
+      path = Path.join(ws, "msg.txt")
+      File.write!(path, raw_message)
+      File.write!(Path.join(ws, "f.txt"), "x#{System.unique_integer([:positive])}\n")
+      git!(ws, ["add", "f.txt"])
+      git!(ws, ["-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "-F", path])
+      git_trailer(ws)
+    end
+
+    test "a message with NO trailing newline still yields a trailer git can read", %{tmp_dir: tmp} do
+      # THE REGRESSION: `printf '\n%s\n'` gave a blank line only when the message already ended
+      # with one. `git commit -m` always does — which is why six tests passed while this shape
+      # produced `prose\nCo-authored-by: …` in one paragraph and git reported NOTHING.
+      ws = clone(tmp, "engineer")
+
+      assert commit_from_file(ws, "feat: x\nSome prose") =~ "LCARS-engineer"
+    end
+
+    test "a message already ending with a newline yields it too", %{tmp_dir: tmp} do
+      ws = clone(tmp, "engineer")
+
+      assert commit_from_file(ws, "feat: y\n") =~ "LCARS-engineer"
+    end
+
+    test "a message with several paragraphs yields it too", %{tmp_dir: tmp} do
+      ws = clone(tmp, "engineer")
+
+      assert commit_from_file(ws, "feat: z\n\ndu texte\n") =~ "LCARS-engineer"
+    end
+
+    test "INVERSE TWIN — git reads exactly ONE trailer, never a doubled block", %{tmp_dir: tmp} do
+      ws = clone(tmp, "engineer")
+
+      trailer =
+        commit_from_file(ws, "feat: w\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>\n")
+
+      assert trailer == "LCARS-engineer <engineer@lcars.local>"
+    end
+  end
 end
