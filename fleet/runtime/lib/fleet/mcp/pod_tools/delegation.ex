@@ -1028,6 +1028,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
         justification: Map.get(args, "justification"),
         intensity_level: Map.get(args, "intensity_level"),
         nature: Map.get(args, "nature"),
+        # Throughput of THIS project (workflow_runs in flight). Absent leaves the declaration
+        # untouched — the fleet default answers, and it is not frozen into the project's record.
+        max_fan: Map.get(args, "max_fan"),
         revised_by: role
       ]
 

@@ -47,10 +47,10 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     end
   end
 
-  defp seams do
+  defp seams(repo \\ "fleet/p") do
     %Lease.Seams{
       forge: NoRouteForge,
-      repo: "fleet/p",
+      repo: repo,
       forge_opts: [],
       workflow_map_loader: Fleet.Workflow.Loader,
       incident_fun: fn _, _, _, _ -> :ok end,
@@ -58,7 +58,37 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     }
   end
 
-  defp opts, do: [forge_client: NoRouteForge, repo: "fleet/p", forge_opts: []]
+  defp opts(extra \\ []),
+    do: [forge_client: NoRouteForge, repo: "fleet/p", forge_opts: []] ++ extra
+
+  # A projects root holding one declaration per project, the shape `ProjectIntensity` reads.
+  defp declare(decls) do
+    root = Path.join(System.tmp_dir!(), "maxfan_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    Enum.each(decls, fn {repo, body} ->
+      dir = Path.join(root, Fleet.Layout.project_name(repo))
+      File.mkdir_p!(dir)
+
+      File.write!(
+        Path.join(dir, "intensity.json"),
+        Jason.encode!(
+          Map.merge(
+            %{
+              "_schema" => "lcars/intensity-v1",
+              "declared_at" => "2026-08-05",
+              "declared_by" => "architect",
+              "justification" => "banc",
+              "pipeline_default" => "brief-gate"
+            },
+            body
+          )
+        )
+      )
+    end)
+
+    root
+  end
 
   defp issues, do: for(n <- [41, 42, 43], do: %{"number" => n, "labels" => []})
 
@@ -188,6 +218,52 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
 
       Application.put_env(:fleet_pilot, :max_fan, "trois")
       assert Admission.max_fan() == 5
+    end
+  end
+
+  describe "the ceiling is PER PROJECT — the counter always was, the knob was not" do
+    test "a project that declares 1 serializes ALONE while the fleet default stays 3" do
+      # The item, in one test. `--max-fan 1` to watch one pipeline end to end used to serialize
+      # every other project in the fleet: a brake laid on unrelated work.
+      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 3)
+      root = declare(%{"fleet/p" => %{"max_fan" => 1}})
+
+      declared = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+      assert declared.dispatched == 1
+      assert declared.skipped == 2
+
+      # Same tick, same fleet, a project that declared nothing: untouched by its neighbour's choice.
+      other =
+        Lease.process_issues(
+          issues(),
+          MapSet.new(),
+          opts(projects_root: root, repo: "fleet/other"),
+          seams("fleet/other")
+        )
+
+      assert other.dispatched == 3
+    end
+
+    test "a declaration ABOVE the hard ceiling is clamped, never granted" do
+      # 16 producers means a 16th pool seat, and seats are 1..15. A project cannot declare its way
+      # into a slot that does not exist.
+      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      root = declare(%{"fleet/p" => %{"max_fan" => 99}})
+
+      tally = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+
+      assert tally.dispatched == 3
+      assert Admission.max_fan("fleet/p", projects_root: root) == Admission.max_fan_ceiling()
+    end
+
+    test "a project with a declaration that names no throughput falls back to the fleet default" do
+      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+      root = declare(%{"fleet/p" => %{}})
+
+      tally = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+
+      # Absent is not zero and not one: the key was never written, so the fleet answers.
+      assert tally.dispatched == 2
     end
   end
 end

@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   alias Fleet.Pilot.ForgeClient
@@ -1217,6 +1217,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       intensity_justification: Keyword.get(opts, :justification),
       intensity_level: Keyword.get(opts, :intensity_level),
       intensity_nature: Keyword.get(opts, :nature),
+      max_fan: Keyword.get(opts, :max_fan),
       onboarded_by: Keyword.get(opts, :revised_by) || "unknown"
     ]
   end

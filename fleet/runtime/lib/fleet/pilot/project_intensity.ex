@@ -15,11 +15,18 @@ defmodule Fleet.Pilot.ProjectIntensity do
   off-matrix (level outside the card's `applicable_intensity`) it is logged LOUD and the
   disagreement stays visible in the committed file; the human has the last word.
 
+  **The declaration also names its THROUGHPUT** (`max_fan`, optional): how many workflow_runs this
+  project may hold in flight. It lives HERE and not on the workflow card, and the difference is not
+  cosmetic — a card serves one workflow_run and a project can carry several, so a per-card ceiling
+  could not bound a project whose tickets route through two different cards. Absent = the fleet
+  default (`--max-fan` / `LCARS_MAX_FAN`), which is what made serializing ONE project impossible:
+  the counter was per project and the knob was per box.
+
   Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
   the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
   default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
 
-  **Last revised**: 2026-08-01
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -119,6 +126,28 @@ defmodule Fleet.Pilot.ProjectIntensity do
     end
   end
 
+  @doc """
+  The project's declared throughput — workflow_runs in flight, `nil` if undeclared.
+
+  Deliberately QUIETER than `pipeline_default/2` on a broken file: that one records an INCIDENT,
+  because substituting a card changes the project's judgment layer. Falling back to the fleet
+  default throughput changes a RATE. Alarming twice for one bad file would teach a reader that the
+  second alarm means something new. The resolution + clamp belong to `Admission.max_fan/2`, the
+  single owner of the ceiling; this function only reports what the human wrote.
+  """
+  @spec declared_max_fan(String.t(), keyword()) :: pos_integer() | nil
+  def declared_max_fan(repo, opts \\ []) when is_binary(repo) do
+    root = Keyword.get(opts, :projects_root, Fleet.Layout.projects_root())
+    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
+
+    with {:ok, raw} <- File.read(path),
+         {:ok, %{"max_fan" => n}} when is_integer(n) <- Jason.decode(raw) do
+      n
+    else
+      _ -> nil
+    end
+  end
+
   defp compose(opts) do
     level = Keyword.get(opts, :intensity_level)
     justification = Keyword.get(opts, :intensity_justification)
@@ -156,8 +185,17 @@ defmodule Fleet.Pilot.ProjectIntensity do
         true -> Map.put(base, "level", "C0")
       end
 
-    case Keyword.get(opts, :intensity_nature) do
-      nature when is_binary(nature) and nature != "" -> Map.put(base, "nature", nature)
+    base =
+      case Keyword.get(opts, :intensity_nature) do
+        nature when is_binary(nature) and nature != "" -> Map.put(base, "nature", nature)
+        _ -> base
+      end
+
+    # Written ONLY when declared. A key absent means "the fleet default", and materializing that
+    # default into the file would freeze today's flag into the project's permanent record — the
+    # human would then be bound by a number they never chose.
+    case Keyword.get(opts, :max_fan) do
+      n when is_integer(n) -> Map.put(base, "max_fan", n)
       _ -> base
     end
   end

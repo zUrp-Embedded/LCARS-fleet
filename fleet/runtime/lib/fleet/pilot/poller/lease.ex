@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   This module also owns the **tally** vocabulary (`zero_tally/0`, `merge_tally/2`)
   — the observability currency of the tick, produced here and aggregated by the poller.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -138,7 +138,10 @@ defmodule Fleet.Pilot.Poller.Lease do
     # Two behaviour changes to state rather than discover: `serialized? = false` used to mean
     # UNLIMITED and now means 5 by default; and a repo can now hold several runs without the operator
     # flipping anything, which is the point of the item and the reason the ceiling is low.
-    max_fan = Admission.max_fan()
+    # PER PROJECT, not per box (2026-08-05): the count was already per project and the knob was
+    # fleet-wide, so serializing one project to watch its pipeline end to end serialized every other
+    # project too. `dispatch_opts` carries the `:projects_root` seam tests inject.
+    max_fan = Admission.max_fan(seams.repo, dispatch_opts)
 
     # IN-FLIGHT crosses BOTH dispatch rails. It used to count only what it could see on its own rail
     # — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is dispatched

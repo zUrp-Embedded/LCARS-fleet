@@ -388,7 +388,9 @@ defmodule Fleet.MCP.PodTools do
           "applies to FUTURE tickets only. `full_name` = `owner/name`. Returns " <>
           "{\"status\":\"card_revised\",\"outcome\":\"revised\"|\"unchanged\",\"card\":...," <>
           "\"previous_card\":...}; \"unchanged\" = the identical declaration already stands " <>
-          "(honest no-op, nothing pushed)."
+          "(honest no-op, nothing pushed). OPTIONAL `max_fan` = how many tickets THIS project may " <>
+          "run at once (1..15). Omit it and the fleet default answers; set it to 1 to watch one " <>
+          "pipeline end to end WITHOUT slowing the other projects down."
       )
     end
 
@@ -399,7 +401,8 @@ defmodule Fleet.MCP.PodTools do
         "workflow_map" => %{"type" => "string"},
         "justification" => %{"type" => "string"},
         "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
-        "nature" => %{"type" => "string"}
+        "nature" => %{"type" => "string"},
+        "max_fan" => %{"type" => "integer", "minimum" => 1, "maximum" => 15}
       },
       "required" => ["full_name", "workflow_map", "justification"]
     })

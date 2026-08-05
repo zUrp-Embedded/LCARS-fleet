@@ -154,4 +154,58 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
                "the two and nothing says which"
     end
   end
+
+  describe "max_fan/2 — the project's declaration, or the fleet's" do
+    defp root_with(body) do
+      root = Path.join(System.tmp_dir!(), "adm_maxfan_#{System.unique_integer([:positive])}")
+      dir = Path.join(root, "p")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(root) end)
+      File.write!(Path.join(dir, "intensity.json"), body)
+      root
+    end
+
+    defp decl(n),
+      do:
+        Jason.encode!(%{
+          "_schema" => "lcars/intensity-v1",
+          "declared_at" => "2026-08-05",
+          "declared_by" => "architect",
+          "justification" => "x",
+          "pipeline_default" => "brief-gate",
+          "max_fan" => n
+        })
+
+    test "a declared value wins over the fleet flag" do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 7)
+      assert Admission.max_fan("fleet/p", projects_root: root_with(decl(2))) == 2
+    end
+
+    test "clamped to the pool seats at both ends — a declaration is not a way past the ceiling" do
+      root_hi = root_with(decl(99))
+      root_lo = root_with(decl(0))
+
+      assert Admission.max_fan("fleet/p", projects_root: root_hi) == Admission.max_fan_ceiling()
+      assert Admission.max_fan("fleet/p", projects_root: root_lo) == 1
+    end
+
+    test "no project directory at all → the fleet default, quietly (legacy projects are normal)" do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      assert Admission.max_fan("fleet/nowhere", projects_root: root_with(decl(2))) == 4
+    end
+
+    test "an UNPARSEABLE declaration does not invent a throughput" do
+      # `pipeline_default/2` alarms on a broken file because substituting a CARD changes the
+      # judgment layer. Here the fallback changes a RATE, and a second alarm for the same file
+      # would teach a reader that it means something new.
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      assert Admission.max_fan("fleet/p", projects_root: root_with("{ not json")) == 4
+    end
+
+    test "a non-integer max_fan is refused rather than coerced" do
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      body = decl(3) |> Jason.decode!() |> Map.put("max_fan", "beaucoup") |> Jason.encode!()
+      assert Admission.max_fan("fleet/p", projects_root: root_with(body)) == 4
+    end
+  end
 end

@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   site that maps a dispatch result to a tally. A rail that starts accounting on its own reddens,
   which is the moment a rule is about to be duplicated.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -66,8 +66,9 @@ defmodule Fleet.Pilot.Poller.Admission do
   @max_max_fan 15
 
   @doc """
-  Ceiling on the workflow_runs one project may hold in flight — `:fleet_pilot, :max_fan`,
-  default #{@default_max_fan}, clamped to `1..#{@max_max_fan}`.
+  The FLEET default ceiling on workflow_runs in flight — `:fleet_pilot, :max_fan`, default
+  #{@default_max_fan}, clamped to `1..#{@max_max_fan}`. A project that declares its own throughput
+  overrides it: `max_fan/2` is what a dispatch decision reads.
 
   **Serial is this ceiling at 1**, not another mechanism. The boolean it replaces
   (`:repo_serialized_lease`) and this counter were the same parameter at two resolutions, which is
@@ -86,6 +87,26 @@ defmodule Fleet.Pilot.Poller.Admission do
     |> case do
       n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
       _ -> @default_max_fan
+    end
+  end
+
+  @doc """
+  The ceiling for THIS project: its declaration if it made one, the fleet default otherwise.
+
+  The item this closes, in one sentence: the counter was per project and the knob was per box, so
+  `--max-fan 1` to watch one pipeline end to end serialized every other project in the fleet —
+  a brake laid on unrelated work. The declaration lives in `<project>/intensity.json` (see
+  `ProjectIntensity`) because a project can route its tickets through several cards, and a
+  per-card ceiling cannot bound something that spans them.
+
+  Clamped HERE and only here: `max_fan/0` and this share one authority for `1..#{@max_max_fan}`,
+  so a declaration cannot buy a 16th pool seat that does not exist.
+  """
+  @spec max_fan(String.t(), keyword()) :: pos_integer()
+  def max_fan(repo, opts \\ []) when is_binary(repo) do
+    case Fleet.Pilot.ProjectIntensity.declared_max_fan(repo, opts) do
+      n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
+      _ -> max_fan()
     end
   end
 

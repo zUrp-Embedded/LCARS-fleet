@@ -106,7 +106,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_tools_gated(root),
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
-        check_forge_mutations_exposed(root)
+        check_forge_mutations_exposed(root),
+        check_intensity_max_fan_ceiling(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1556,6 +1557,69 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       "URLs are composed from repo + number against the configured base_url; a forge-supplied " <>
         "one would carry whatever host answered, which is not necessarily the one we address"
   }
+
+  @doc false
+  # ONE FACT, TWO RENDERS — the hard ceiling on a project's in-flight workflow_runs. It is typed in
+  # Elixir (`Admission.max_fan_ceiling/0`, itself derived from the pool seats a role actually has)
+  # and AGAIN in `intensity-v1.json`, because a JSON Schema cannot call a function. The declaration
+  # a human writes is validated by the schema; the value the dispatcher enforces comes from the
+  # module. Let those two drift and a project declares a throughput the schema accepts and the
+  # engine silently clamps away — a declaration that validates and does not apply, which is the
+  # worst of the three possible outcomes.
+  def check_intensity_max_fan_ceiling(root) do
+    path = Path.join([root, "priv", "cap_profile", "schema", "intensity-v1.json"])
+    src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
+
+    # Read from the SOURCE, never by calling `Admission.max_fan_ceiling/0`. Two reasons, and the
+    # first is the one that bites: `Admission` is not exported by the `Fleet.Pilot` boundary, and
+    # widening an export so a checker can peek is the reflex the boundary exists to refuse. The
+    # second is the older rule of this file — a gate instrument MEASURES the tree, it does not run
+    # the product; a check that needs the app compiled cannot report on a tree that does not build.
+    module_ceiling =
+      with {:ok, code} <- File.read(src),
+           [_, n] <- Regex.run(~r/@max_max_fan\s+(\d+)/, code) do
+        String.to_integer(n)
+      else
+        _ -> nil
+      end
+
+    schema_ceiling =
+      with {:ok, raw} <- File.read(path),
+           {:ok, json} <- Jason.decode(raw),
+           %{"maximum" => max} <- get_in(json, ["properties", "max_fan"]) do
+        max
+      else
+        _ -> nil
+      end
+
+    broken =
+      cond do
+        is_nil(schema_ceiling) -> "#{path} has no properties.max_fan.maximum — nothing to compare"
+        is_nil(module_ceiling) -> "#{src} has no @max_max_fan — nothing to compare"
+        true -> nil
+      end
+
+    %{
+      id: "intensity.max_fan_ceiling",
+      remediation:
+        "make properties.max_fan.maximum in intensity-v1.json equal " <>
+          "Admission.max_fan_ceiling/0 — the module is the authority, the schema is its render",
+      status: if(is_nil(broken) and schema_ceiling == module_ceiling, do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          schema_ceiling != module_ceiling ->
+            ["schema says #{schema_ceiling}, module says #{module_ceiling}"]
+
+          true ->
+            []
+        end,
+      note:
+        "max_fan ceiling agrees: schema #{inspect(schema_ceiling)} = @max_max_fan #{inspect(module_ceiling)}"
+    }
+  end
 
   @doc false
   def check_forge_fields_read(root) do
