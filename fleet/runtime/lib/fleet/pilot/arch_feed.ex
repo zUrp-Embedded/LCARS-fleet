@@ -28,17 +28,14 @@ defmodule Fleet.Pilot.ArchFeed do
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
   `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-05
   """
 
   use GenServer
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Pilot.ProjectArchitect
-
-  @max_lines 200
-  @feed_file "fleet.feed"
+  alias Fleet.Pilot.{PodFeed, ProjectArchitect}
 
   # `step.unlocked` = the PROGRESS rail (user design 2026-07-18): every lock release IS a
   # step crossed, emitted at the gesture itself (after the forge reflects it — no announce
@@ -183,41 +180,18 @@ defmodule Fleet.Pilot.ArchFeed do
 
   defp normalize_number(_), do: nil
 
-  # ── Feed file: append + bound (never a growing log) ──
+  # -- Feed file: the FORMAT belongs to `PodFeed` (shared with `FleetFeed`); the RAIL belongs here. --
 
   defp append(pod_id, line, state) do
-    with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(pod_id) do
-      path = Path.join(pod_dir, @feed_file)
-      {{_y, _m, _d}, {h, mi, _s}} = :calendar.local_time()
-      stamp = :io_lib.format("~2..0B:~2..0B", [h, mi]) |> IO.iodata_to_binary()
-
-      existing =
-        case File.read(path) do
-          {:ok, content} -> String.split(content, "\n", trim: true)
-          _ -> []
-        end
-
-      lines = Enum.take(existing ++ ["#{stamp} #{line}"], -@max_lines)
-
-      case File.write(path, Enum.join(lines, "\n") <> "\n") do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning(
-            "ArchFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)"
-          )
-      end
+    with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(pod_id),
+         {:error, reason} <- PodFeed.append(pod_dir, line) do
+      Logger.warning(
+        "ArchFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)"
+      )
     else
-      # This project's arch is not up (not opened yet / test) → drop, lossy by doctrine.
+      # Either the write landed, or this project's arch is not up (not opened yet / test) — the
+      # second is not a failure, it is a feed with no reader. Drop, lossy by doctrine.
       _ -> :ok
     end
-  rescue
-    e ->
-      Logger.warning(
-        "ArchFeed: append raised (#{Exception.message(e)}) — line dropped (lossy by doctrine)"
-      )
-
-      :ok
   end
 end

@@ -26,7 +26,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-07-23
+  **Last revised**: 2026-08-05
 
   """
 
@@ -44,6 +44,16 @@ defmodule Fleet.Spawner.PermanentBoot do
   @spec parse_permanent(String.t()) :: {:ok, String.t()} | :not_permanent
   def parse_permanent(@permanent_prefix <> role) when role != "", do: {:ok, role}
   def parse_permanent(_), do: :not_permanent
+
+  @doc """
+  Builds a permanent pod_id from its role — the CONSTRUCTOR half of the same authority.
+
+  The prefix was typed once and readable only backwards: consumers could recognize a permanent
+  pod_id, and anyone needing to NAME one (a feed addressing the front desk, say) had to retype the
+  literal. One authority, both directions.
+  """
+  @spec pod_id_for(String.t()) :: String.t()
+  def pod_id_for(role) when is_binary(role) and role != "", do: @permanent_prefix <> role
 
   @doc """
   Should this cap-profile boot at fleet startup (Type 1)?
@@ -277,7 +287,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
     # DETERMINISTIC pod_id (stable, no timestamp suffix) → idempotent re-spawn (same id: reap-orphan +
     # relaunch if dead, `{:already_started}` no-op if alive; no more holder-leak/accumulation).
-    pod_id = @permanent_prefix <> name
+    pod_id = pod_id_for(name)
 
     # No boot-from-base anymore (reorg 2026-07-19): the pod itself runs the UNIFIED seed decision
     # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured seed →

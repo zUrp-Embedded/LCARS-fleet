@@ -20,6 +20,22 @@ defmodule Fleet.Spawner.PermanentBootTest do
     }
   end
 
+  describe "the permanent pod_id — one authority, both directions" do
+    test "build then parse round-trips: the constructor and the parser cannot drift apart" do
+      # The prefix was typed once and readable only BACKWARDS: a consumer could recognize a
+      # permanent pod_id, and anyone needing to NAME one had to retype the literal. Two halves of
+      # one authority, and only one of them was enforced.
+      for role <- ~w(starfleet architect engineer) do
+        assert {:ok, ^role} = PermanentBoot.parse_permanent(PermanentBoot.pod_id_for(role))
+      end
+    end
+
+    test "an ordinary pod_id is NOT permanent — the parser still refuses what it always refused" do
+      assert :not_permanent = PermanentBoot.parse_permanent("fleet-demo-issue-3-engineer")
+      assert :not_permanent = PermanentBoot.parse_permanent("permanent-")
+    end
+  end
+
   describe "boot_at_start?/1 — Type 1 fleet-level" do
     test "true: boot_at_start true + forever + host_native false (starfleet)" do
       assert PermanentBoot.boot_at_start?(

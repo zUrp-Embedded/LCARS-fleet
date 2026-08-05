@@ -21,10 +21,12 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
       SP suspect / Cat-5 max severity) — the diagnosis guides the sysadmin toward the root-cause.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-05
   """
 
   require Logger
+
+  alias Fleet.EventRouter.Bus
 
   @doc """
   Opens a system issue (default label `error_system` — `opts[:label]` overrides, e.g. `error_cat5`;
@@ -73,22 +75,61 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     #{marker}
     """
 
-    case find_open_incident(list_fun, repo, marker) do
-      {:ok, existing} ->
-        # An open issue already carries this occurrence's marker — the create either landed and its
-        # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
-        # a duplicate. `nil` = readback said "none" (or was unreadable → create, fail-closed toward
-        # having an issue rather than suppressing an alarm).
-        Logger.info(
-          "IncidentRegistry: incident #{inspect(sig)} already open as ##{existing} — reusing (idempotent), no duplicate"
-        )
+    result =
+      case find_open_incident(list_fun, repo, marker) do
+        {:ok, existing} ->
+          # An open issue already carries this occurrence's marker — the create either landed and its
+          # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
+          # a duplicate. `nil` = readback said "none" (or was unreadable → create, fail-closed toward
+          # having an issue rather than suppressing an alarm).
+          Logger.info(
+            "IncidentRegistry: incident #{inspect(sig)} already open as ##{existing} — reusing (idempotent), no duplicate"
+          )
 
-        finalize_escalation(add_label_fun, repo, existing, label)
+          finalize_escalation(add_label_fun, repo, existing, label)
 
-      nil ->
-        create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label)
-    end
+        nil ->
+          create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label)
+      end
+
+    _ = announce(result, kind, subject, repo, label, opts)
+    result
   end
+
+  # The escalation ARRIVES somewhere. Until 2026-08-05 it ended at an `error_system` issue assigned
+  # to starfleet — and starfleet's tool surface is the portfolio head, with no forge read: the one
+  # role with a human in front of it could not open the issue naming it as assignee. The fact was
+  # established, written durably, addressed correctly, and discovered by a probe or not at all.
+  #
+  # Announced HERE, at the single point both branches return `{:ok, number}` through, so the reuse
+  # path (a create whose ack was lost, or a concurrent escalation) announces too. That can duplicate
+  # a feed line for one incident; a duplicated alarm is not in the same class of error as a missing
+  # one, and the recurrence gate upstream is what bounds the volume.
+  #
+  # Lossy on purpose: `safe_emit` logs and swallows. An escalation whose ANNOUNCE failed is still an
+  # escalation — the issue is on the forge, which is the durable channel.
+  defp announce({:ok, number}, kind, subject, repo, label, opts) do
+    Bus.safe_emit(
+      :pilot,
+      "incident.escalated",
+      [
+        payload: %{
+          "kind" => to_string(kind),
+          "subject" => subject,
+          "number" => number,
+          "repo" => repo,
+          "label" => label
+        },
+        correlation_id: opts[:correlation_id]
+      ],
+      context: "IncidentRegistry"
+    )
+  end
+
+  # A FAILED escalation announces NOTHING. A feed line saying an incident was escalated, when the
+  # issue is unfindable or was never created, is the lying `{:escalated}` this module refuses one
+  # function above — said to a second audience.
+  defp announce(_not_ok, _kind, _subject, _repo, _label, _opts), do: :ok
 
   defp create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label) do
     # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the

@@ -72,6 +72,15 @@ events:
   # `Fleet.Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
   # twin of pod.failed, keyed on the ROLE (no pod was ever created): recurrence = "this role
   # keeps failing to spawn".
+  # incident.escalated: emitted by `IncidentRegistry.Escalation` (source :pilot) once a sysadmin
+  # issue has ACTUALLY landed — both branches, the create and the idempotent reuse. Payload
+  # `kind`/`subject`/`number`/`repo`/`label`. Consumed by `Fleet.Pilot.FleetFeed` (one line into the
+  # permanent starfleet pod's feed + the typed flag notify). UNROUTED (`[]`): this is the OUTCOME of
+  # a routing, never an input to one — giving it an action would loop the incident chain onto itself.
+  # A FAILED escalation emits nothing: an announce for an issue that does not exist is the lying
+  # `{:escalated}` the escalation refuses one function earlier, said to a second audience.
+  incident.escalated: []
+
   spawn.failed:
     source: spawner
     action: incident

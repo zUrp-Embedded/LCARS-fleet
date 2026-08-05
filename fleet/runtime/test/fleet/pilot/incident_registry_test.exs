@@ -713,6 +713,101 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     end
   end
 
+  describe "the escalation ANNOUNCES itself — the alarm reaches the role it names" do
+    alias Fleet.EventRouter.Bus
+    alias Fleet.Pilot.IncidentRegistry.Escalation
+
+    setup do
+      :ok = Bus.subscribe()
+      :ok
+    end
+
+    test "a landed escalation emits incident.escalated with what a front desk can relay" do
+      # Until 2026-08-05 the chain ended at an `error_system` issue assigned to starfleet — whose
+      # tool surface is the portfolio head, with NO forge read. The alarm was written durably,
+      # addressed to the right role, and unreachable by it.
+      assert {:ok, 7} =
+               Escalation.escalate(
+                 :sp_suspect,
+                 "permanent-engineer-announce",
+                 :dead,
+                 "sig:announce:1",
+                 list_issues_fun: fn _r, _o -> {:ok, []} end,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 7} end,
+                 add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end,
+                 correlation_id: "corr-1"
+               )
+
+      # Matched on the SUBJECT, not the type alone: this file is `async: true` and it is not the
+      # only suite escalating on the shared Bus. A bare type match would let these assertions read
+      # another suite's event — and make the two refutations below fail on somebody else's alarm.
+      assert_receive %Fleet.Event{
+                       type: :"incident.escalated",
+                       payload: %{"subject" => "permanent-engineer-announce"} = p,
+                       correlation_id: "corr-1"
+                     },
+                     500
+
+      assert p["kind"] == "sp_suspect"
+      assert p["subject"] == "permanent-engineer-announce"
+      assert p["number"] == 7
+      assert p["label"] == "error_system"
+      assert is_binary(p["repo"]) and p["repo"] != ""
+    end
+
+    test "the REUSE branch announces too — a lost ack must not cost the alarm its delivery" do
+      sig = "sig:announce:2"
+      marker = "<!-- lcars-incident:#{sig} -->"
+
+      assert {:ok, 42} =
+               Escalation.escalate(:recurrence, "issue-7-engineer-announce", :dead, sig,
+                 list_issues_fun: fn _r, _o -> {:ok, [%{"number" => 42, "body" => marker}]} end,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 999} end,
+                 add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+               )
+
+      # It can duplicate a feed line for one incident. A duplicated alarm and a missing one are not
+      # in the same class of error, and the recurrence gate upstream is what bounds the volume.
+      assert_receive %Fleet.Event{
+                       type: :"incident.escalated",
+                       payload: %{"subject" => "issue-7-engineer-announce", "number" => 42}
+                     },
+                     500
+    end
+
+    test "a FAILED escalation announces NOTHING — no second audience for a lying {:escalated}" do
+      assert {:error, _} =
+               Escalation.escalate(:recurrence, "subject-announce-3", :dead, "sig:announce:3",
+                 list_issues_fun: fn _r, _o -> {:ok, []} end,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
+               )
+
+      refute_receive %Fleet.Event{
+                       type: :"incident.escalated",
+                       payload: %{"subject" => "subject-announce-3"}
+                     },
+                     50
+    end
+
+    test "an issue created but NOT label-discoverable announces nothing either" do
+      # F-C075: the issue exists and is invisible to label-filtered discovery. `escalate` surfaces
+      # that as an error rather than a clean `{:ok, number}` — and the announce follows the SAME
+      # verdict. A feed line for an unfindable issue would restore the lie at the other end.
+      assert {:error, {:discovery_label_failed, 8, _}} =
+               Escalation.escalate(:recurrence, "subject-announce-4", :dead, "sig:announce:4",
+                 list_issues_fun: fn _r, _o -> {:ok, []} end,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 8} end,
+                 add_label_fun: fn _r, _n, _l, _o -> {:error, :nope} end
+               )
+
+      refute_receive %Fleet.Event{
+                       type: :"incident.escalated",
+                       payload: %{"subject" => "subject-announce-4"}
+                     },
+                     50
+    end
+  end
+
   describe "Escalation idempotency (create is not idempotent, readback is)" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
 
