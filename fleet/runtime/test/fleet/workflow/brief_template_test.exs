@@ -13,13 +13,11 @@ defmodule Fleet.Workflow.BriefTemplateTest do
         "role" => "engineer",
         "issue" => "3",
         "brief_body" => "Do X.",
-        "brief_source" => "brief inline du ticket",
-        "signature" => "SIGN"
+        "brief_source" => "brief inline du ticket"
       })
 
     assert out =~ "# Ordre de mission — engineer — ticket #3"
     assert out =~ "Do X."
-    assert out =~ "SIGN"
     refute out =~ "{{"
   end
 

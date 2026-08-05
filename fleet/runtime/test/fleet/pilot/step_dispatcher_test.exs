@@ -391,7 +391,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # below): that is what keeps the label free to change shape.
       assert opts[:project_slug] == "lcars-test"
       assert opts[:brief] =~ "git commit"
-      assert opts[:brief] =~ "Co-authored-by: LCARS-engineer"
+
+      # AUCUN trailer dans l'ordre de mission (2026-08-05). Il est pose MECANIQUEMENT par le hook
+      # `prepare-commit-msg` installe au clone, donc le pod n'a aucune action a prendre dessus — et
+      # ce sur quoi il n'a pas d'action n'a pas a exister dans son monde. L'ordre le DEMANDAIT (un
+      # run de producteur refait le jour ou une ligne a atterri au milieu du message), puis l'a
+      # brievement ANNONCE, ce qui etait la meme faute un cran plus discret.
+      refute opts[:brief] =~ "Co-authored-by"
 
       # The eng's voice (outgoing info): the brief asks for a `summary` posted on the PR by the system.
       assert opts[:brief] =~ "summary"

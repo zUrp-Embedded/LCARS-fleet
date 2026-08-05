@@ -44,12 +44,21 @@ defmodule Fleet.ProjectBootstrap.Phase do
         else: {:error, {:unsafe_pod_dir, pod_dir}}
     end
 
-    # THE FORMAT IS PLACED, NOT ASKED FOR. The role trailer IS transmitted — `coauthor_instruction/1`
-    # says "add the exact trailer to EVERY git commit" and rides in the work order — but it says
-    # WHAT, never WHERE. Git only parses the LAST paragraph, so an agent that obeys to the letter and
-    # puts the line mid-message fails the push gate. Measured cost of one such miss on the bench: the
-    # deliverable is refused after `submit_result` succeeded, nothing lands, the poller re-dispatches
-    # — a full producer run redone, clone included, for a line in the wrong place.
+    # THE FORMAT IS PLACED, AND NOT MENTIONED. The work order used to DEMAND the trailer ("add the
+    # exact trailer to EVERY git commit") — it said WHAT and never WHERE, git parses only the last
+    # paragraph, and one line placed mid-message meant the push was refused after `submit_result`
+    # had succeeded: a full producer run redone, clone included, for a formatting detail.
+    #
+    # The demand is gone, and so is the notice that briefly replaced it. A thing the agent has no
+    # action to take on does not belong in its world — announcing it is the same mistake one step
+    # quieter, and it spends brief on something that cannot change what the pod does.
+    #
+    # NOTHING IS ASKED OF THE AGENT, and the trailer is placed SYSTEMATICALLY. The brief used to
+    # carry a demand ("MANDATORY signature — add the exact trailer to EVERY git commit"); since
+    # 2026-08-05 it carries a NOTICE that the signature happens on its own. A deterministic position
+    # is not an agent's to produce: the instruction could say WHAT and never WHERE, git parses only
+    # the last paragraph, and one line placed mid-message meant the push was refused after
+    # `submit_result` had succeeded — a full producer run redone, clone included.
     #
     # A MECHANICAL APPEND, not `git interpret-trailers`. The first version used git's own trailer
     # parser with `--if-exists doNothing`, which reads far more forgiving than it is: the flag

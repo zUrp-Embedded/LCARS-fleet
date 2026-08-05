@@ -75,7 +75,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   rewrite itself lives outside Elixir (`etc/publish-to-github.sh`, `git filter-repo`): this module
   stays the authority for the LOCAL forge identities, not the executor of the publish transformation.
 
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-05
   """
 
   @role_email_domain "lcars.local"
@@ -136,19 +136,6 @@ defmodule Fleet.Credentials.ForgeIdentity do
     # We apply the SAME hygiene to the role here (sink-side, source-agnostic). No-op on the clean canon slugs.
     clean = strip_control(role)
     "Co-authored-by: LCARS-#{clean} <#{role_email(clean)}>"
-  end
-
-  @doc """
-  Signature instruction to inject into the pod's brief — SINGLE SOURCE of the trailer.
-  Derives from `coauthor_trailer/1`: every brief (built by `Pilot.BriefBuilder.build_brief`)
-  must use it, otherwise the chain (pod-side instruction / needle of the commit-identity gate)
-  diverges from the canon.
-  """
-  @spec coauthor_instruction(String.t()) :: String.t()
-  def coauthor_instruction(role) when is_binary(role) do
-    "MANDATORY signature — add the exact trailer to EVERY git commit:\n" <>
-      "`#{coauthor_trailer(role)}`\n" <>
-      "(without it, the deliverable is rejected at push)."
   end
 
   @doc """

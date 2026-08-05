@@ -36,8 +36,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       "role" => role,
       "pr" => to_string(pr),
       "feedback_section" =>
-        conflict_section(opts) <> render_rework_feedback(forge, repo, pr, forge_opts),
-      "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+        conflict_section(opts) <> render_rework_feedback(forge, repo, pr, forge_opts)
     })
   end
 
@@ -267,15 +266,20 @@ defmodule Fleet.Pilot.BriefBuilder do
   # the issue's brief + the git-native DELIVERY instruction. Without the delivery contract,
   # the pod "submits the contents" instead of COMMITTING → the git_native publish finds no
   # commit (`:no_deliverable_commit`). The pod commits LOCALLY; the SYSTEM pushes + opens the
-  # PR (forge-blind). The trailer is mandatory (push gate, single source
-  # `ForgeIdentity.coauthor_instruction` — the {{signature}} slot).
+  # PR (forge-blind).
+  #
+  # NO SIGNATURE SLOT (removed 2026-08-05). The role trailer is appended MECHANICALLY by a
+  # `prepare-commit-msg` hook installed at clone time, so the pod has no action to take on it — and
+  # a thing an agent has no action to take on does not belong in its world. The order used to demand
+  # it, which cost a full producer run the day a line landed mid-message; then it briefly ANNOUNCED
+  # it, which was the same mistake one step quieter. Minimal world: only what it needs, and all of
+  # what it needs.
   defp build_worker_brief(role, issue) do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
       "brief_body" => issue["body"] || "",
-      "brief_source" => brief_source_line(issue),
-      "signature" => Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+      "brief_source" => brief_source_line(issue)
     })
   end
 

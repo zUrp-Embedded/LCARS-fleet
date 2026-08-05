@@ -93,4 +93,42 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
   end
+
+  describe "probe n°4 — a gesture with no door" do
+    test "the real repo passes, and the note gives the two-column split" do
+      result = Check.check_forge_mutations_exposed(File.cwd!())
+
+      assert result.status == :pass
+      assert result.note =~ "reachable by a tool"
+      assert result.note =~ "runtime-only ON RECORD"
+    end
+
+    test "a delegation it cannot parse FAILS as broken — never a pass by measuring nothing" do
+      root = Path.join(System.tmp_dir!(), "nodeleg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      result = Check.check_forge_mutations_exposed(root)
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
+    end
+
+    test "a delegation reaching NO mutation is broken too, not compliant" do
+      root = Path.join(System.tmp_dir!(), "emptydeleg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "lib/fleet/mcp/pod_tools"))
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      File.write!(
+        Path.join(root, "lib/fleet/mcp/pod_tools/delegation.ex"),
+        "defmodule D do\n  def nothing, do: :ok\nend\n"
+      )
+
+      result = Check.check_forge_mutations_exposed(root)
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
+      assert hd(result.evidence) =~ "seam calls parsed"
+    end
+  end
 end

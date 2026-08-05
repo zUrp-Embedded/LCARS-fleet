@@ -2,9 +2,10 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
   @moduledoc """
   The format is PLACED, not asked for.
 
-  The role trailer IS transmitted — `coauthor_instruction/1` says "add the exact trailer to EVERY git
-  commit" and rides in the work order. It says WHAT, never WHERE. Git parses only the LAST paragraph,
-  so an agent that obeys to the letter and writes the line mid-message fails the push gate.
+  The brief used to DEMAND it — "add the exact trailer to EVERY git commit". It said WHAT and never
+  WHERE, and git parses only the LAST paragraph, so an agent obeying to the letter and writing the
+  line mid-message failed the push gate. The brief now carries a NOTICE instead: the signature is
+  placed for you, do not add it. Nothing is asked, and it happens systematically.
 
   Measured cost of one such miss on the bench: `submit_result` succeeds, the publication is refused
   after, nothing lands, the poller re-dispatches — a full producer run redone, clone included, for a

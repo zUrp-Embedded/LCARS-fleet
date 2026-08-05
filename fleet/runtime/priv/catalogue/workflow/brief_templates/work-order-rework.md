@@ -13,6 +13,3 @@ REWORK — une review REQUEST_CHANGES a été déposée sur la PR #{{pr}}. Corri
 
 **Ta voix — le `payload` de `submit_result` DOIT contenir un champ `summary`** (ex. `payload = {"summary": "Corrigé le point A en faisant B ; pour le point C, ..."}`). Le `summary` = COMMENT tu as répondu à CHAQUE point de la review (ce que tu as corrigé). C'est ta NARRATION (pas le code — déjà committé). Le SYSTÈME le poste sur la PR : ta réponse traçable au reviewer.
 
-## Signature
-
-{{signature}}

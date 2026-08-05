@@ -105,7 +105,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
         check_mcp_seam_surface(root),
-        check_forge_fields_read(root)
+        check_forge_fields_read(root),
+        check_forge_mutations_exposed(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1587,6 +1588,95 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       note:
         "#{length(@forge_read_fields)} fields read, #{map_size(@forge_unread_fields)} deliberately " <>
           "not (1 of them with no reason recorded — that is a queue, not an answer)"
+    }
+  end
+
+  # ── Forge mutations: which have a door, and for whom ─────────────────
+  # PROBE N°4 of the pattern hunt — "a gesture with no door". The family that produced the five
+  # tools of lot 1: `retire_issue`, `publish_doc`, `list_projects`, `emergency_stop` all existed as
+  # CAPABILITIES the runtime could already execute, and had to be disguised as something else (or
+  # were simply unreachable) for want of a tool exposing them. An absence raises no error, which is
+  # why it survives: nothing fails, the gesture is just performed sideways.
+  #
+  # Mechanised as a two-column table the gate holds: every mutating op of the forge client is either
+  # REACHED from a delegation tool, or listed here with why it is runtime-only. The runtime-only
+  # answer is the common and correct one — the point is that it becomes a decision on record rather
+  # than an omission nobody looked at.
+  #
+  # `merged_pr_of_issue` is not in the inventory: its name reads like a mutation and it is a READ
+  # (it finds the merged PR of an issue). Named here because the next reader will wonder.
+  @forge_mutations ~w(add_issue_dependency add_label close_issue close_pr create_branch
+                      create_issue merge_pr post_comment post_review post_route
+                      remove_issue_dependency remove_label)
+
+  @forge_mutations_runtime_only %{
+    "create_branch" =>
+      "the feature branch is cut by the dispatch, from the base the card decided; an agent " <>
+        "choosing where to cut would decide the face, which is not its call",
+    "merge_pr" =>
+      "the merge is the gatekeeper seal's, behind branch protection and the jury; a tool would " <>
+        "put a second door on the one gesture the whole rail exists to guard",
+    "post_review" =>
+      "a native review carries a VERDICT and the merge gate counts approvals; the judge posts " <>
+        "through its step, never as a tool it could call twice",
+    "post_route" =>
+      "the route is engraved by the burn from the project card — an agent writing it would " <>
+        "choose its own pipeline",
+    "add_label" =>
+      "labels are the forge-side state machine (`stage/*`, `wait/*`); a tool would let an actor " <>
+        "write the state instead of reaching it",
+    "remove_label" => "same reason as `add_label` — the state is reached, never set"
+  }
+
+  @doc false
+  def check_forge_mutations_exposed(root) do
+    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
+    path = Path.join(root, deleg_rel)
+
+    called =
+      if File.exists?(path) do
+        path
+        |> File.read!()
+        |> Code.string_to_quoted!()
+        |> seam_calls()
+        |> MapSet.new(&elem(&1, 0))
+      else
+        MapSet.new()
+      end
+
+    undecided =
+      Enum.reject(@forge_mutations, fn m ->
+        MapSet.member?(called, String.to_atom(m)) or
+          Map.has_key?(@forge_mutations_runtime_only, m)
+      end)
+
+    stale = Enum.filter(Map.keys(@forge_mutations_runtime_only), &(&1 not in @forge_mutations))
+
+    broken =
+      cond do
+        not File.exists?(path) -> "#{deleg_rel} not found under #{root}"
+        length(@forge_mutations) < 8 -> "inventory shrank to #{length(@forge_mutations)}"
+        MapSet.size(called) < 5 -> "only #{MapSet.size(called)} seam calls parsed"
+        true -> nil
+      end
+
+    %{
+      id: "forge.mutations_exposed",
+      remediation:
+        "expose the capability through a gated delegation tool, or record it in " <>
+          "@forge_mutations_runtime_only with WHY it stays runtime-only",
+      status: if(is_nil(broken) and undecided == [] and stale == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          undecided != [] -> ["mutations with no door and no decision: #{inspect(undecided)}"]
+          stale != [] -> ["listed runtime-only but no longer a mutation: #{inspect(stale)}"]
+          true -> []
+        end,
+      note:
+        "#{length(@forge_mutations)} forge mutations — " <>
+          "#{length(@forge_mutations) - map_size(@forge_mutations_runtime_only)} reachable by a " <>
+          "tool, #{map_size(@forge_mutations_runtime_only)} runtime-only ON RECORD"
     }
   end
 
