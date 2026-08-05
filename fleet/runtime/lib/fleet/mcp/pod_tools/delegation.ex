@@ -1773,11 +1773,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   def retire_superseded(_forge, _repo, n, :closed, result),
     do: Map.put(result, "supersedes", n)
 
-  # Cible SANS PR vivante : le chemin nominal.
+  # Target with NO live PR: the nominal path.
   def retire_superseded(forge, repo, n, :open, result), do: do_retire(forge, repo, n, nil, result)
 
-  # Cible AVEC une PR vivante : on ferme la PR dans le MÊME geste. L'ordre compte comme pour les
-  # edges — the PR first: while it lives, the pulls rail can judge and merge it, and that rail
+  # Target WITH a live PR: the PR is closed in the SAME gesture. The order binds here as it does for
+  # the edges — the PR first: while it lives, the pulls rail can judge and merge it, and that rail
   # never reads the issue's state.
   def retire_superseded(forge, repo, n, {:open, pr}, result),
     do: do_retire(forge, repo, n, pr, result)
@@ -1790,7 +1790,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     # THE DEPENDENCY EDGES ARE CARRIED BEFORE THE CLOSE, AND THE ORDER IS BINDING.
     # A Gitea dependency links two issue_ids; `supersedes` is NOT a forge primitive,
-    # c'est une convention LCARS (commentaire + fermeture). La forge ne voit donc pas un
+    # it is an LCARS convention (comment + close). So the forge does not see a
     # replacement: it sees one issue die and another appear, and the edges stay attached to the
     # dead one. Both directions hurt, and the first one is silent:
     #   * what the old ticket BLOCKED is released the instant it closes (a CLOSED blocker counts as
@@ -1803,8 +1803,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with :ok <- close_live_pr(forge, repo, pr),
          :ok <- carry_dependencies(forge, repo, n, new_number),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
-         # `closure: :retired` — le supersede ne livre RIEN : le travail a migre sur le remplacant
-         # (ses aretes viennent d'y etre reportees, juste au-dessus). Le ticket doit le DIRE.
+         # `closure: :retired` — a supersede delivers NOTHING: the work moved onto the replacement
+         # (its edges were carried there just above). The ticket has to SAY it.
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
       # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
       # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
