@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -196,13 +196,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   # Tier-0 conflict handling (deterministic, config-gated, OFF by default). A diagnosis routes the
-  # conflict BEFORE any producer round: an all-semantic conflict escalates straight to the arch (no
-  # wasted rounds), an all-trivial one is auto-resolved and pushed by the runtime (the jury re-judges
-  # the new head, so a wrong resolution is caught downstream), anything else — and any probe/apply
-  # failure — falls through to the legacy producer conflict-rework. The gain only ever SHORTENS a
-  # path, never breaks one. Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are
-  # injectable seams (`:conflict_diagnoser` / `:conflict_applier`). NB tier-2 (the outsider's
-  # inference pass) is a distinct increment — tier-0 is the deterministic pre-filter in front of it.
+  # conflict BEFORE any producer round: an all-semantic one goes to the CHIEF's exception pass (the
+  # producer is skipped on evidence — the engine has proven there is nothing shallow to fix — and
+  # the chief is not, because composing two jury-approved intentions is its case); an all-trivial
+  # one is auto-resolved and pushed by the runtime (the jury re-judges the new head, so a wrong
+  # resolution is caught downstream); anything else — and any probe/apply failure — falls through to
+  # the legacy producer conflict-rework. The gain only ever SHORTENS a path, never breaks one.
+  # Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are injectable seams
+  # (`:conflict_diagnoser` / `:conflict_applier`).
+  #
+  # The ladder in one line: L1 engine → L2 producer → L3 chief → L4 arch. Tier-0 may skip L2 on
+  # evidence; it has none about L3, and it used to skip it anyway — straight to a human.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     if diagnosis_enabled?() do
       case tier0_conflict_route(pr_number, head, reason, ctx) do
@@ -223,8 +227,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   @doc false
   # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
-  @spec tier0_decision(map()) :: :escalate | :apply | :fall_through
-  def tier0_decision(%{totals: %{none_trivial?: true}}), do: :escalate
+  #
+  # `:chief`, NOT `:escalate` (2026-08-05). An all-semantic conflict used to go STRAIGHT to the arch
+  # — "rounds skipped" — jumping tiers 2 AND 3 to immobilize a human. Skipping the PRODUCER is right
+  # and is the whole point of the deterministic pre-filter: the engine has just proven there is
+  # nothing shallow to fix, so a producer round would burn a full run to rediscover it.
+  #
+  # Skipping the CHIEF was not. Composing two intentions that both passed their jury, on a branch
+  # the outsider did not write, IS the chief's case — it is what the exception pass exists for. The
+  # ladder is L1 engine → L2 producer → L3 chief → L4 arch, and tier-0 may skip L2 on evidence; it
+  # has no evidence about L3. The atom is renamed with the routing so the name cannot outlive the
+  # behaviour (`:escalate` would now describe a hand-off that escalates nothing).
+  @spec tier0_decision(map()) :: :chief | :apply | :fall_through
+  def tier0_decision(%{totals: %{none_trivial?: true}}), do: :chief
 
   # `all_writable?`, not `all_trivial?`: the write path is authorized by what the machine may safely
   # do alone, not by how shallow the conflict looks. A shallow-but-unwritable conflict (whitespace,
@@ -233,19 +248,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   def tier0_decision(%{totals: %{all_writable?: true}}), do: :apply
   def tier0_decision(_), do: :fall_through
 
-  defp tier0_act(:escalate, pr_number, head, reason, ctx) do
+  # The chief's exception stage is REUSED as-is, marker and all: it reads the forge-visible
+  # `[conflict-chief:pr-N` count, so this path cannot loop and cannot spend a second pass if the
+  # producer route already spent one. `producer_rounds: 0` is the honest figure on this path — no
+  # producer round was run, and the arch escalation message must not claim otherwise.
+  defp tier0_act(:chief, pr_number, head, reason, ctx) do
     Logger.info(
-      "Remediation: PR #{ctx.repo}##{pr_number} conflict is all-semantic → arch escalation (tier-0, rounds skipped)"
+      "Remediation: PR #{ctx.repo}##{pr_number} conflict is all-semantic → chief exception pass " <>
+        "(tier-0, producer rounds skipped on evidence)"
     )
 
-    {:handled,
-     ArchEscalation.escalate_merge_blocked(
-       arch_seams(ctx),
-       pr_number,
-       head,
-       :conflict,
-       {:conflict_all_semantic, reason}
-     )}
+    {:handled, exception_stage(pr_number, head, {:conflict_all_semantic, reason}, ctx, 0)}
   end
 
   defp tier0_act(:apply, pr_number, head, _reason, ctx) do
@@ -305,7 +318,34 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
     case exception_stage_decision(count) do
       :dispatch ->
-        dispatch_exception_rework(pr_number, head, ctx)
+        # THE LAST RUNG MUST NOT SWALLOW THE CASE. `RoleDispatch.dispatch` answers `{:skipped, _}`
+        # when the `conflict_resolver` role does not resolve (absent from the catalogue, typo in a
+        # card) or when the head is not a fleet branch. That skip is already LOUD — an unresolvable
+        # role goes on the incident rail and its recurrence opens a sysadmin issue — but loud is not
+        # the same as handled: the conflict itself would then sit on the PR with nobody left to look
+        # at it, because the tier that was supposed to try LAST could not run at all.
+        #
+        # Pre-existing on the producer-exhausted path, and tier-0 would have extended it to the
+        # all-semantic one. A rung that cannot be climbed hands over to the next, it does not end
+        # the ladder.
+        case dispatch_exception_rework(pr_number, head, ctx) do
+          {:skipped, why} ->
+            Logger.warning(
+              "Remediation: PR #{ctx.repo}##{pr_number} chief exception pass NOT dispatched " <>
+                "(#{inspect(why)}) — escalating to the arch rather than dropping the conflict"
+            )
+
+            escalate_exhausted(
+              pr_number,
+              head,
+              {:exception_pass_undispatchable, why, reason},
+              ctx,
+              producer_rounds
+            )
+
+          other ->
+            other
+        end
 
       :escalate ->
         escalate_exhausted(pr_number, head, {:exception_pass_spent, reason}, ctx, producer_rounds)

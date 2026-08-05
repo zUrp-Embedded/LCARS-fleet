@@ -1422,12 +1422,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       )
     end
 
-    test "tier-0 : un conflit TOUT-SEMANTIQUE escalade sans bruler un round de producteur" do
+    test "tier-0 : un conflit TOUT-SEMANTIQUE saute le producteur, et sans chief il atteint l'arch" do
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllSemanticProbe)
 
       # Le gain de tier-0 RACCOURCIT un chemin, il n'en casse aucun : un conflit dont rien n'est
       # trivial ne deviendra pas resoluble en y envoyant un producteur trois fois.
+      #
+      # Depuis le 2026-08-05 le cas va d'abord au CHIEF (L3), pas droit a l'arch (L4). Cette
+      # fixture n'a pas de role `conflict_resolver` : la passe d'exception ne se dispatche pas, et
+      # la ladder RETOMBE sur l'arch au lieu de laisser tomber le conflit. C'est exactement ce que
+      # ce tuple prouve maintenant — pas le routage nominal, mais le fait que le dernier barreau
+      # passe la main quand il ne peut pas etre grimpe.
       assert {:skipped, {:merge_blocked_escalated, 6}} =
                StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
 

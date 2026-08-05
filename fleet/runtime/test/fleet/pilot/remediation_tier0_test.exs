@@ -6,9 +6,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationTier0Test do
   defp diag(totals), do: %{files: %{}, totals: totals}
 
   describe "tier0_decision (pure routing)" do
-    test "all-semantic -> :escalate (skip the producer rounds)" do
+    test "all-semantic -> :chief — the producer is skipped ON EVIDENCE, the chief is not" do
       totals = %{trivial: 0, complex: 2, total: 2, all_trivial?: false, none_trivial?: true}
-      assert Remediation.tier0_decision(diag(totals)) == :escalate
+      # It used to answer `:escalate` and hand the case straight to the arch, jumping tiers 2 AND
+      # 3 to immobilize a human. Skipping the PRODUCER is the point of the deterministic
+      # pre-filter — the engine has just proven there is nothing shallow to fix, so a producer
+      # round would burn a full run to rediscover it. Skipping the CHIEF was not: composing two
+      # intentions that both passed their jury, on a branch the outsider did not write, IS its case.
+      assert Remediation.tier0_decision(diag(totals)) == :chief
     end
 
     test "all-WRITABLE -> :apply (auto-resolve)" do
