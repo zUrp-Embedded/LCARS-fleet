@@ -36,8 +36,11 @@ defmodule Fleet.Pilot.FleetFeed do
   agent to read a file on its next turn. The notify is the typed flag (no kick net, no send-keys) —
   it costs the human nothing.
 
-  Lossy by doctrine, like its twin: starfleet not up, feed unwritable → the line is dropped. The
-  truth is the forge issue; this is a courtesy mirror that makes it REACH someone.
+  Lossy by doctrine, like its twin: no front desk, feed unwritable → the line is dropped. The truth
+  is the forge issue; this is a courtesy mirror that makes it REACH someone. But a front desk that
+  is UP and merely unreachable is a different fact from one that does not exist, and it is logged:
+  a channel whose breakage is indistinguishable from its idle state is the defect this module was
+  built to remove, and it would be absurd to rebuild it here.
 
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
   `:notify` (default `Fleet.Spawner.notify_pod/2`).
@@ -77,30 +80,51 @@ defmodule Fleet.Pilot.FleetFeed do
     line = render_line(payload)
     pod_id = PermanentBoot.pod_id_for(@front_desk_role)
 
-    with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(pod_id) do
-      case PodFeed.append(pod_dir, line) do
-        :ok ->
-          # EVERY escalation pushes. The gate that decides "does a human need this" already ran in
-          # the registry; a feed line nobody is told about would re-introduce the polling this
-          # module exists to remove.
-          _ = state.notify.(pod_id, "info : " <> line)
-
-        {:error, reason} ->
-          Logger.warning(
-            "FleetFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)"
-          )
-      end
-    else
-      _ ->
-        # No front desk up (fleet booting, or a deploy without starfleet). The issue exists on the
-        # forge either way — this drops the courtesy line, never the alarm.
-        :ok
-    end
+    deliver(state, pod_id, line)
 
     {:noreply, state}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
+
+  # The two failures of `pod_info/1` are NOT the same fact, and collapsing them is what makes a
+  # broken channel look like an idle one — the exact shape this module exists to end.
+  #
+  #   * `:not_found` — no front desk. Nothing to deliver to, nothing to say.
+  #   * `:unreachable` — the front desk EXISTS and did not answer in time (`pod_info`'s own contract:
+  #     a timeout is not a death proof). An alarm was not delivered to a LIVE reader, and that is
+  #     worth a line in the log even though the feed itself stays lossy.
+  defp deliver(state, pod_id, line) do
+    case state.pod_info.(pod_id) do
+      {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) ->
+        write_and_push(state, pod_id, pod_dir, line)
+
+      {:error, :unreachable} ->
+        Logger.warning(
+          "FleetFeed: front desk #{pod_id} UNREACHABLE (alive, no answer) — escalation line dropped. " <>
+            "The forge issue stands; the front desk was simply not told."
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp write_and_push(state, pod_id, pod_dir, line) do
+    case PodFeed.append(pod_dir, line) do
+      :ok ->
+        # EVERY escalation pushes. The gate that decides "does a human need this" already ran in the
+        # registry; a feed line nobody is told about would re-introduce the polling this module
+        # exists to remove.
+        _ = state.notify.(pod_id, "info : " <> line)
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "FleetFeed: feed write failed (#{inspect(reason)}) — line dropped (lossy by doctrine)"
+        )
+    end
+  end
 
   # One line, self-sufficient for RELAYING: starfleet cannot open the issue (no forge tool), so the
   # line must be sayable to a human as-is. It names the kind, the subject and the address; the

@@ -126,13 +126,35 @@ defmodule Fleet.Pilot.FleetFeedTest do
   end
 
   describe "lossy by doctrine — a courtesy mirror never breaks the alarm" do
-    test "no front desk up → the line is dropped, the consumer lives", %{tmp_dir: tmp} do
-      pid = start_feed(tmp, pod_info: fn _ -> {:error, :not_found} end)
+    test "a front desk that is UP but UNREACHABLE is logged — not the same fact as absent",
+         %{tmp_dir: tmp} do
+      pid = start_feed(tmp, pod_info: fn _ -> {:error, :unreachable} end)
 
-      send(pid, escalated(%{"kind" => "cat5", "subject" => "y", "number" => 7}))
-      sync(pid)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, escalated(%{"kind" => "cat5", "subject" => "y", "number" => 7}))
+          sync(pid)
+        end)
 
-      assert Process.alive?(pid)
+      # `pod_info`'s contract: a timeout is NOT a death proof. An alarm silently not delivered to a
+      # LIVE reader is a broken channel wearing the costume of an idle one — the exact shape this
+      # module exists to end, and it would be absurd to rebuild it here.
+      assert log =~ "UNREACHABLE"
+      refute_received {:notified, _, _}
+    end
+
+    test "no front desk up → the line is dropped SILENTLY, the consumer lives", %{tmp_dir: tmp} do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          pid = start_feed(tmp, pod_info: fn _ -> {:error, :not_found} end)
+          send(pid, escalated(%{"kind" => "cat5", "subject" => "y", "number" => 7}))
+          sync(pid)
+          assert Process.alive?(pid)
+        end)
+
+      # Nothing to deliver to, nothing to say. A warning here would cry on every fleet that runs
+      # without a front desk.
+      refute log =~ "UNREACHABLE"
       refute File.exists?(Path.join(tmp, "fleet.feed"))
       refute_received {:notified, _, _}
     end
