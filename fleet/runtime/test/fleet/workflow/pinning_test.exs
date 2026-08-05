@@ -112,4 +112,41 @@ defmodule Fleet.Workflow.PinningTest do
       refute_received {:committed, _, _, _, _}
     end
   end
+
+  describe "one ref family per NATURE of artifact (settled 2026-08-05)" do
+    alias Fleet.Layout
+
+    test "the four trees are distinct, and none is a suffix inside another" do
+      # The collision that forced the rule: a verdict on a delivery and a gate-decision trace share
+      # the same (issue, role) pair, and a conflict report shares the PR. Filed together, the second
+      # write displaces the first while its pointer keeps naming it — git holds both versions, and
+      # the citation silently points at the wrong one.
+      refs = [
+        Layout.verdict_ref(42, "qualifier"),
+        Layout.gate_verdict_ref(42, "qualifier"),
+        Layout.conflict_ref(7),
+        Layout.notes_ref("bilan")
+      ]
+
+      assert length(Enum.uniq(refs)) == 4
+      assert Enum.all?(refs, &String.ends_with?(&1, ".md"))
+    end
+
+    test "the SAME role on the SAME issue lands in two different trees, not two suffixed files" do
+      verdict = Layout.verdict_ref(42, "gatekeeper")
+      gate = Layout.gate_verdict_ref(42, "gatekeeper")
+
+      refute verdict == gate
+      # Same axis the brief trees already use: `briefs/` is a worker order, `gate-briefs/` a judge
+      # order. The vocabulary existed; the verdict side had only half of it.
+      assert String.starts_with?(verdict, "verdicts/")
+      assert String.starts_with?(gate, "gate-verdicts/")
+      assert String.ends_with?(verdict, "issue-42-gatekeeper.md")
+      assert String.ends_with?(gate, "issue-42-gatekeeper.md")
+    end
+
+    test "a conflict report is keyed on the PR — a conflict is a property of the merge" do
+      assert Layout.conflict_ref(7) == "conflicts/pr-7.md"
+    end
+  end
 end

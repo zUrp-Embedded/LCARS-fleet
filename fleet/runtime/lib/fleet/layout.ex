@@ -55,6 +55,11 @@ defmodule Fleet.Layout do
   # `verdicts/` would also collide by name — one PR can carry a verdict and a conflict report from
   # the same role — and the second write would displace the first while its pointer kept naming it.
   @conflicts_subdir "conflicts"
+  # Gate-decision traces. Distinct from `verdicts/` on the SAME axis the brief trees already use:
+  # `briefs/` is a worker order and `gate-briefs/` a judge order; `verdicts/` judges a DELIVERY and
+  # this one records a gate decision. Same role, same issue, two different acts — one tree each,
+  # never a suffix inside one.
+  @gate_verdicts_subdir "gate-verdicts"
   @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
@@ -203,6 +208,17 @@ defmodule Fleet.Layout do
   """
   @spec notes_ref(String.t()) :: String.t()
   def notes_ref(name), do: Path.join(@notes_subdir, sanitize_artifact_name(name) <> ".md")
+
+  @doc """
+  work/ops-relative ref of a committed gate-decision trace: `gate-verdicts/issue-<n>-<role>.md`.
+  """
+  @spec gate_verdict_ref(integer(), String.t()) :: String.t()
+  def gate_verdict_ref(issue_number, role) when is_integer(issue_number) and is_binary(role),
+    do:
+      Path.join(
+        @gate_verdicts_subdir,
+        "issue-#{issue_number}-#{sanitize_artifact_name(role)}.md"
+      )
 
   @doc """
   work/ops-relative ref of a committed conflict report: `conflicts/pr-<n>.md`.

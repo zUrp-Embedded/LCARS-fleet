@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       (and a `.complete` that crashes is isolated by the supervised task). An arity-1 runner stays a
       valid seam shape (legacy tests) — it simply carries no death-witness meta (BL-6-03 S2).
 
-  **Last revised**: 2026-08-02
+  **Last revised**: 2026-08-05
   """
 
   use GenServer
@@ -922,6 +922,23 @@ defmodule Fleet.Pilot.StepRunConsumer do
          %{n: n, role: role, payload: payload, workflow_map: workflow_map, step: step} = ctx,
          state
        ) do
+    # SUMMARY + POINTER above the threshold, at the ONE site every emission path of this trace goes
+    # through. The trace is composed from the judge's `reason`/`details`/`chain`, so its length is
+    # the judge's and not ours; below ten lines `render/2` hands it back untouched and nothing is
+    # written.
+    #
+    # `gate-verdicts/`, not `verdicts/`: the deliverable review already owns the second tree for the
+    # same (issue, role) pair, and these are two different acts — one judges a DELIVERY, this one
+    # records a gate decision. Same axis the brief trees already use (`briefs/` worker order,
+    # `gate-briefs/` judge order), so the vocabulary was already there.
+    trace =
+      Fleet.Workflow.Pinning.render(trace,
+        work_dir: verdict_work_dir(state),
+        ref: Fleet.Layout.gate_verdict_ref(n, role),
+        kind: "Verdict",
+        label: "gate-verdict"
+      )
+
     case decision do
       "continue" ->
         # The producer/judge split is NOT optional. If the intent were `if is_nil(next_assignee),
@@ -1026,6 +1043,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # coarsely translated to a decision-v1 `{decision: "escalate", reason: "audit_verdict"}` (which matches
   # the coord policy `escalate.audit_verdict`); the REAL verdict + issue + role + trace ride in `details`
   # so nothing is lost. Routed by DriftMonitor DIRECTLY to CoordBackend.handle_decision.
+  # The project's work/ops worktree, or nil when there is none. A project never onboarded has
+  # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
+  # brief materialization already takes on that path.
+  defp verdict_work_dir(state) do
+    dir =
+      Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(Map.get(state, :repo, "")))
+
+    if File.dir?(dir), do: dir
+  end
+
   defp emit_audit_verdict_draft(verdict, n, role, trace) do
     decision_json =
       Jason.encode!(%{
