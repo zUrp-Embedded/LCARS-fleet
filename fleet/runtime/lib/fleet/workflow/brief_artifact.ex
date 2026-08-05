@@ -40,7 +40,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -49,13 +49,15 @@ defmodule Fleet.Workflow.BriefArtifact do
   # connections + the poller dispatch) on the same project's work/ops worktree would race on
   # `.git/index.lock`. `OpsObjectSync` funnels one git transaction at a time; `OpsObject` stays the
   # engine (reached only via the gate). Same signature, so the switch is a one-liner.
-  alias Fleet.Workflow.OpsObjectSync
+  alias Fleet.Workflow.{OpsObject, OpsObjectSync}
 
-  @type ok :: %{ref: String.t(), sha: String.t()}
+  @type ok :: %{ref: String.t(), sha: String.t(), push: OpsObject.push_state() | :unknown}
 
   @doc """
   Commits the brief `content` into `work_dir` (the project's work/ops worktree) and returns
-  `{:ok, %{ref, sha}}` — `sha` = the introducing COMMIT (the version's identity). Idempotent
+  `{:ok, %{ref, sha, push}}` — `sha` = the introducing COMMIT (the version's identity), `push` the
+  publication outcome (`OpsObject.push_state/0`, plus `:unknown` when a serializer timeout lost the
+  reply that carried it). Idempotent
   (same content already committed → the introducing commit, no new commit — cf. `OpsObject`).
 
   `opts`:
@@ -72,7 +74,10 @@ defmodule Fleet.Workflow.BriefArtifact do
     ref = Fleet.Layout.brief_ref(Keyword.get(opts, :kind), object_name(content, opts))
 
     case OpsObjectSync.commit_object(work_dir, ref, content, Keyword.put(opts, :label, "brief")) do
-      {:ok, commit_sha} -> {:ok, %{ref: ref, sha: commit_sha}}
+      # `push` carried through: a brief is READ by the pod from the local worktree mount, so its
+      # publication is not load-bearing for the dispatch — but a human following the ticket's
+      # pointer reaches the forge, and "not there yet" must be answerable.
+      {:ok, commit_sha, push} -> {:ok, %{ref: ref, sha: commit_sha, push: push}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -169,7 +174,12 @@ defmodule Fleet.Workflow.BriefArtifact do
     work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
 
     case commit(work_dir, brief, Keyword.delete(opts, :work_root)) do
-      {:ok, %{ref: ref, sha: sha}} ->
+      # `push` is dropped HERE and only here: the brief's load-bearing reader is the pod, which
+      # reads the object from its LOCAL `--ro-bind` of the worktree at its pin. A publication that
+      # has not landed yet changes nothing for the delivery this function serves, and `OpsObject`
+      # already warns on a failed push, so the trace exists without threading the state through
+      # four callers that have no decision to make with it.
+      {:ok, %{ref: ref, sha: sha, push: _}} ->
         {:ok, {ref, sha}}
 
       {:error, {:work_dir_missing, _} = cause} ->

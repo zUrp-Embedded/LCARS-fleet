@@ -24,7 +24,7 @@ defmodule Fleet.Workflow.Provenance do
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
@@ -80,13 +80,17 @@ defmodule Fleet.Workflow.Provenance do
 
         with :ok <- subject_reachable(subject_workspace, livrable_sha),
              {:ok, json} <- encode(statement(attrs)),
-             {:ok, _commit_sha} <-
+             {:ok, _commit_sha, _push} <-
                OpsObjectSync.commit_object(
                  work_dir,
                  ref,
                  json,
                  Keyword.put(opts, :label, "provenance")
                ) do
+          # The push state is DELIBERATELY not surfaced here: a provenance statement is an audit
+          # artifact whose consumers read it from the worktree, and this function's result is
+          # already `%{path:, ref:}` — a caller wanting the publication asks the object, not the
+          # emitter. Matched explicitly so a future third element cannot slip through unread.
           {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
         end
     end

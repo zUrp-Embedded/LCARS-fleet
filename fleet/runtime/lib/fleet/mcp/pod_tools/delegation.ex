@@ -1603,16 +1603,43 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, ref} <- notes_ref_or_refuse(name),
          work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
          work_dir = Path.join(work_root, Fleet.Layout.project_name(repo)),
-         {:ok, sha} <-
+         {:ok, sha, push} <-
            Fleet.Workflow.OpsObjectSync.commit_object(work_dir, ref, content,
              label: "doc",
              push: :work_ops
            ) do
-      {:ok, %{"ref" => ref, "sha" => sha, "pointer" => "Doc: #{ref} @ #{sha}"}}
+      {:ok,
+       %{
+         "ref" => ref,
+         "sha" => sha,
+         "pointer" => "Doc: #{ref} @ #{sha}",
+         "publication" => publication_note(push)
+       }}
     end
   end
 
   def publish_doc(_name, _content, _state, _opts), do: {:error, :invalid_arguments}
+
+  # The publication is BEST-EFFORT and now it SAYS which of the three things happened, instead of
+  # letting the arch assume the doc is reachable. Until 2026-08-05 the answer existed inside
+  # `OpsObject.maybe_push/2` and was discarded one function before this one — so `publish_doc`
+  # handed back a citable pointer that could name something present nowhere but this disk.
+  defp publication_note(:pushed),
+    do: "poussé sur la forge — le pointeur est suivable dès maintenant"
+
+  defp publication_note(:local_only),
+    do:
+      "commit LOCAL seulement : le push a échoué (la fleet réessaiera au prochain push de la " <>
+        "branche). Le pointeur est valide, mais un humain qui le suit ne trouvera rien tant que " <>
+        "la branche n'est pas repartie — dis-le si tu le cites maintenant."
+
+  defp publication_note(:unknown),
+    do:
+      "commit confirmé, sort du push INCONNU (la réponse a été perdue sur un timeout du " <>
+        "sérialiseur). Ne promets pas que le doc est en ligne."
+
+  defp publication_note(_not_requested),
+    do: "commit local, aucune publication demandée"
 
   defp notes_ref_or_refuse(name) do
     ref = Fleet.Layout.notes_ref(name)

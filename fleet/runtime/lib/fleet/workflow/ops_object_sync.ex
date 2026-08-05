@@ -59,7 +59,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
   starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   use GenServer
@@ -93,7 +93,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   to a direct `OpsObject` call otherwise (cf. moduledoc).
   """
   @spec commit_object(Path.t(), String.t(), String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
+          {:ok, String.t(), OpsObject.push_state() | :unknown} | {:error, term()}
   def commit_object(work_dir, ref, content, opts),
     do: commit_object(__MODULE__, work_dir, ref, content, opts)
 
@@ -103,7 +103,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   global singleton that the rest of the suite resolves.
   """
   @spec commit_object(GenServer.server(), Path.t(), String.t(), String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
+          {:ok, String.t(), OpsObject.push_state() | :unknown} | {:error, term()}
   def commit_object(server, work_dir, ref, content, opts)
       when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
     case resolve(server) do
@@ -151,7 +151,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
                     "(#{String.slice(sha, 0, 12)}) — transaction LANDED before the exit"
                 )
 
-                {:ok, sha}
+                {:ok, sha, :unknown}
 
               :not_committed ->
                 {:error, {:ops_sync_unavailable, reason}}
@@ -160,6 +160,12 @@ defmodule Fleet.Workflow.OpsObjectSync do
     end
   end
 
+  # ⚠ THE READBACK PATHS ANSWER `:unknown` FOR THE PUSH, and that is not a shrug. `committed_sha/3`
+  # proves the COMMIT landed — it walks the ref's history read-only. It says nothing about the
+  # publication, because the reply that carried the push outcome is exactly what the caller lost by
+  # timing out. `:local_only` would claim a failure nobody observed; `:pushed` would invent a
+  # success. The fourth state exists because the other three would each be a lie here.
+  #
   # The two-step post-timeout verdict. Step 1: immediate readback — landed? Step 2 (the step whose
   # absence made a negative verdict a LIE): drain-confirm. The server processes its mailbox in
   # order, so a sync ping enqueued NOW returns only after our original {:commit, …} has fully run —
@@ -176,7 +182,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
             "— transaction LANDED, confirmed by read-only readback (no retry, no race)"
         )
 
-        {:ok, sha}
+        {:ok, sha, :unknown}
 
       :not_committed ->
         try do
@@ -189,7 +195,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
                   "(#{String.slice(sha, 0, 12)}) — late but definitive, no false failure"
               )
 
-              {:ok, sha}
+              {:ok, sha, :unknown}
 
             :not_committed ->
               Logger.warning(

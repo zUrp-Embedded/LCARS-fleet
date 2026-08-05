@@ -24,7 +24,7 @@ defmodule Fleet.Workflow.Pinning do
   would let the summary misrepresent the body it points at, and the summary is the part a human
   reads and stops at. A truncation cannot claim something the text does not say.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -52,7 +52,8 @@ defmodule Fleet.Workflow.Pinning do
     * `:ref` — work/ops-relative ref to commit at (REQUIRED to pin)
     * `:kind` — the pointer keyword and the noun of the disclaimer, e.g. `"Verdict"`
     * `:label` — commit-message prefix handed to `OpsObject` (default `"emission"`)
-    * `:commit_fun` — seam (tests): `(work_dir, ref, content, opts) -> {:ok, sha} | {:error, term}`
+    * `:commit_fun` — seam (tests): `(work_dir, ref, content, opts) -> {:ok, sha, push_state} |
+      {:error, term}`
 
   Always returns a body to post. It never returns an error: an emission that cannot be pinned is
   still an emission that must reach the forge.
@@ -78,7 +79,12 @@ defmodule Fleet.Workflow.Pinning do
     commit = Keyword.get(opts, :commit_fun, &OpsObjectSync.commit_object/4)
 
     case commit.(work_dir, ref, body, label: label, push: :work_ops) do
-      {:ok, sha} ->
+      # `:local_only` does NOT fall back to inlining, and that is a deliberate asymmetry with the
+      # commit failure below. A commit that did not happen leaves the pointer naming nothing, ever.
+      # A push that did not land leaves an object that exists, is addressable by sha, and reaches
+      # the forge at the branch's next successful push — the citation is late, not false. Inlining
+      # it would trade a temporary lateness for a permanently unquotable wall of text.
+      {:ok, sha, _push_state} ->
         pointer_body(body, ref, sha, Keyword.get(opts, :kind, "Doc"))
 
       {:error, reason} ->

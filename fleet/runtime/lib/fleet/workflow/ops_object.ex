@@ -16,7 +16,7 @@ defmodule Fleet.Workflow.OpsObject do
   a push failure logs LOUD and keeps the local success — the branch catches up whole at the
   next successful push. Local commit failure remains a real failure.
 
-  **Last revised**: 2026-07-30
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -28,7 +28,15 @@ defmodule Fleet.Workflow.OpsObject do
 
   @doc """
   Commits `content` at `ref` (work/ops-relative) inside `work_dir` and returns
-  `{:ok, commit_sha}` — the introducing commit (the version's identity).
+  `{:ok, commit_sha, push_state}` — the introducing commit (the version's identity), and what
+  happened to the publication.
+
+  `push_state` is carried rather than dropped, and it is NOT a boolean because three different
+  things are not "false": `:pushed` (the push ran and landed), `:local_only` (it ran and failed —
+  the object exists here and nowhere else), `:not_requested` (no `:push` opt: nobody asked). A
+  caller that CITES this commit to a human — `publish_doc` handing back a pointer, `Pinning`
+  rendering `<ref> @ <sha>` — is naming something that may not be reachable, and until 2026-08-05
+  the answer existed inside `maybe_push/2` and was thrown away one function before its reader.
 
   `opts`:
   - `:label` — commit-message prefix (`"<label>: <ref>"`), REQUIRED (the artifact family
@@ -38,8 +46,10 @@ defmodule Fleet.Workflow.OpsObject do
 
   `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
   """
+  @type push_state :: :pushed | :local_only | :not_requested
+
   @spec commit_object(Path.t(), String.t(), String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
+          {:ok, String.t(), push_state()} | {:error, term()}
   def commit_object(work_dir, ref, content, opts)
       when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
     abs = Path.join(work_dir, ref)
@@ -51,8 +61,12 @@ defmodule Fleet.Workflow.OpsObject do
       File.exists?(abs) and File.read!(abs) == content ->
         # Same version already on disk → identity = the commit that introduced it. Empty sha
         # (written but never committed — crash residue) → re-materialize to give it one.
+        #
+        # No push is attempted on this path and none is claimed: the idempotent hit says nothing
+        # about where the object was published, and `:not_requested` is the honest answer to a
+        # question this branch never asked.
         case Git.last_commit_sha(work_dir, ref) do
-          {:ok, sha} when sha != "" -> {:ok, sha}
+          {:ok, sha} when sha != "" -> {:ok, sha, :not_requested}
           _ -> materialize(work_dir, abs, ref, content, opts)
         end
 
@@ -114,9 +128,8 @@ defmodule Fleet.Workflow.OpsObject do
   defp materialize(work_dir, abs, ref, content, opts) do
     with :ok <- File.mkdir_p(Path.dirname(abs)),
          :ok <- File.write(abs, content),
-         {:ok, commit_sha} <- commit_or_recover(work_dir, ref, opts),
-         :ok <- maybe_push(work_dir, opts) do
-      {:ok, commit_sha}
+         {:ok, commit_sha} <- commit_or_recover(work_dir, ref, opts) do
+      {:ok, commit_sha, maybe_push(work_dir, opts)}
     end
   end
 
@@ -153,10 +166,14 @@ defmodule Fleet.Workflow.OpsObject do
     }
   end
 
+  # Returns the push STATE instead of a uniform `:ok`. The publication stays BEST-EFFORT — a failed
+  # push never fails the commit, the local object is the truth and the branch catches up at the next
+  # successful push — but "it failed" and "it was never asked" stop being the same answer.
+  @spec maybe_push(Path.t(), keyword()) :: push_state()
   defp maybe_push(work_dir, opts) do
     case Keyword.get(opts, :push) do
       nil ->
-        :ok
+        :not_requested
 
       :work_ops ->
         do_push(work_dir, @work_ops_push, opts)
@@ -169,7 +186,7 @@ defmodule Fleet.Workflow.OpsObject do
   defp do_push(work_dir, {remote, refspec}, opts) do
     case Git.push(work_dir, remote, refspec) do
       {:ok, _} ->
-        :ok
+        :pushed
 
       {:error, reason} ->
         Logger.warning(
@@ -177,7 +194,7 @@ defmodule Fleet.Workflow.OpsObject do
             "#{inspect(reason)}) — local object kept, forge catches up at next push"
         )
 
-        :ok
+        :local_only
     end
   end
 end

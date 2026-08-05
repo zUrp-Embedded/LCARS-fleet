@@ -97,10 +97,21 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
     # `:work_ops` resolves to origin/work-ops — no such remote in this repo → Git.push fails;
     # the materialization must NOT (F-15: local commit = base truth, publication degrades LOUD).
-    assert {:ok, %{ref: ref}} = BriefArtifact.commit(tmp, "pushed brief\n", push: :work_ops)
+    # And it SAYS SO. `:ok` alone was the whole answer until 2026-08-05: the caller got a citable
+    # pointer and no way to learn the object it names is reachable from nowhere but this disk.
+    assert {:ok, %{ref: ref, push: :local_only}} =
+             BriefArtifact.commit(tmp, "pushed brief\n", push: :work_ops)
 
     assert File.exists?(Path.join(tmp, ref))
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
+  end
+
+  test "no `:push` opt is NOT a failed push — the two are different answers", %{tmp_dir: tmp} do
+    git_init(tmp)
+
+    # `:local_only` means a publication was attempted and did not land; `:not_requested` means none
+    # was asked for. Collapsing them into `false` is what made the outcome unreportable.
+    assert {:ok, %{push: :not_requested}} = BriefArtifact.commit(tmp, "unpushed\n")
   end
 
   test "default author = the SYSTEM identity SSoT (forge-linkable email, never a retyped literal)",

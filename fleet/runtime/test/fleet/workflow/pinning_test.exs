@@ -21,7 +21,7 @@ defmodule Fleet.Workflow.PinningTest do
   defp ok_commit do
     fn work_dir, ref, content, opts ->
       send(self(), {:committed, work_dir, ref, content, opts})
-      {:ok, @sha}
+      {:ok, @sha, :pushed}
     end
   end
 
@@ -85,6 +85,24 @@ defmodule Fleet.Workflow.PinningTest do
       # Longer than a body that just fits under the threshold (10), and deliberately so: what
       # matters is the ceiling, not beating the inline case.
       assert length(thirty) <= 14
+    end
+  end
+
+  describe "a push that did not land is NOT a commit that did not happen" do
+    test "`:local_only` still pins — the citation is LATE, never false", %{} do
+      posted =
+        pin(long(), fn _, _, _, _ -> {:ok, @sha, :local_only} end)
+
+      # Deliberate asymmetry with the failure branch below: a commit that did not happen leaves the
+      # pointer naming nothing, ever. An object committed but not yet pushed exists, is addressable
+      # by sha, and reaches the forge at the branch's next successful push. Inlining it would trade
+      # a temporary lateness for a permanently unquotable wall of text.
+      assert posted =~ "Verdict: verdicts/issue-42-qualifier.md @ #{@sha}"
+      refute posted =~ "ligne 30"
+    end
+
+    test "`:unknown` pins too — the commit is proven, only its publication is unobserved" do
+      assert pin(long(), fn _, _, _, _ -> {:ok, @sha, :unknown} end) =~ "@ #{@sha}"
     end
   end
 

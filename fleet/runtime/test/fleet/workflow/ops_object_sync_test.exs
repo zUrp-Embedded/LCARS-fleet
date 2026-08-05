@@ -38,7 +38,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
 
-    assert {:ok, sha} =
+    assert {:ok, sha, _push} =
              OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "content\n", label: "test")
 
     assert File.read!(Path.join(tmp, "briefs/x.md")) == "content\n"
@@ -59,16 +59,22 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       spawn(fn -> Process.sleep(:infinity) end)
     end
 
-    test "timeout but the object IS already committed → {:ok, sha} via readback", %{tmp_dir: tmp} do
+    test "timeout but the object IS already committed → {:ok, sha, :unknown} via readback",
+         %{tmp_dir: tmp} do
       git_init(tmp)
 
       # Pre-commit directly (as if the server had landed our transaction just before we timed out).
-      {:ok, sha} =
-        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "landed\n", label: "t")
+      # No `push:` opt, so the direct call did not even attempt one.
+      assert {:ok, sha, :not_requested} =
+               Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "landed\n", label: "t")
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, ^sha} =
+          # `:unknown`, and it is the point of the readback path: `committed_sha/3` proves the
+          # COMMIT landed and says NOTHING about a publication. The reply that carried the push
+          # outcome is exactly what the timeout lost — reporting `:local_only` here would invent an
+          # observation, reporting `:pushed` would invent a success.
+          assert {:ok, ^sha, :unknown} =
                    OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/x.md", "landed\n",
                      label: "t"
                    )
@@ -101,7 +107,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       :ok
     end
 
-    test "commit QUEUED/mid-flight at timeout → drain-confirm waits it out → {:ok, sha}, no false failure",
+    test "commit QUEUED/mid-flight at timeout → drain-confirm waits it out, no false failure",
          %{tmp_dir: tmp} do
       git_init(tmp)
 
@@ -122,7 +128,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, sha} =
+          assert {:ok, sha, _push} =
                    OpsObjectSync.commit_object(name, tmp, "briefs/late.md", "lands late\n",
                      label: "t"
                    )
@@ -170,10 +176,10 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       # version that displaced ours.
       git_init(tmp)
 
-      {:ok, ours} =
+      {:ok, ours, _push} =
         Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1 ours\n", label: "t")
 
-      {:ok, theirs} =
+      {:ok, theirs, _push} =
         Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2 theirs\n", label: "t")
 
       assert ours != theirs
@@ -182,7 +188,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, ^ours} =
+          assert {:ok, ^ours, :unknown} =
                    OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/x.md", "V1 ours\n",
                      label: "t"
                    )
@@ -198,8 +204,8 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       # The adverse half: widening the readback from the tip to the history must not turn it into a
       # yes-machine. A ref with real history, and a version that was never committed to it.
       git_init(tmp)
-      {:ok, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
-      {:ok, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
+      {:ok, _, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
+      {:ok, _, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
 
       assert :not_committed =
                Fleet.Workflow.OpsObject.committed_sha(tmp, "briefs/x.md", "never written\n")
@@ -224,10 +230,10 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
        %{tmp_dir: tmp, server: srv} do
     git_init(tmp)
 
-    assert {:ok, sha1} =
+    assert {:ok, sha1, _push} =
              OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
 
-    assert {:ok, sha2} =
+    assert {:ok, sha2, _push} =
              OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "same\n", label: "test")
 
     assert sha1 == sha2
@@ -239,7 +245,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   } do
     git_init(tmp)
     # No process registered under this name → whereis nil → direct OpsObject call.
-    assert {:ok, sha} =
+    assert {:ok, sha, _push} =
              OpsObjectSync.commit_object(:ops_sync_absent, tmp, "briefs/y.md", "z\n",
                label: "test"
              )
@@ -267,7 +273,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       )
       |> Enum.map(fn {:ok, r} -> r end)
 
-    assert Enum.all?(results, &match?({:ok, _sha}, &1)),
+    assert Enum.all?(results, &match?({:ok, _sha, _push}, &1)),
            "every serialized commit must succeed: #{inspect(results)}"
 
     # N distinct objects, serialized → N commits (no lost/failed write, no corrupt index).
@@ -315,7 +321,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       )
       |> Enum.map(fn {:ok, r} -> r end)
 
-    assert Enum.all?(results, &match?({:ok, _sha}, &1)),
+    assert Enum.all?(results, &match?({:ok, _sha, _push}, &1)),
            "both projects must land through the single node-global server: #{inspect(results)}"
 
     # Each repo carries exactly its OWN commit — the shared server never cross-wrote.
