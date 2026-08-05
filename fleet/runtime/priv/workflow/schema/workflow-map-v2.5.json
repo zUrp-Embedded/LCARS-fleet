@@ -120,6 +120,7 @@
                   }
                 },
                 "outputs": {
+                  "description": "DOCUMENTAIRE — aucun lecteur runtime (mesure 2026-08-05 : zero occurrence de step[\"outputs\"] dans lib/). Declare ce que l'etape doit produire, a l'usage d'un humain qui lit la carte. Le systeme ne verifie PAS ces chemins, et ne resout aucun gabarit ({date} et consorts ne sont interpretes par rien). Une porte qui veut attester une production lit aujourd'hui un fait AUTO-DECLARE par le pod (cf. audit-only.yaml, 'audit_doc_exists') — la declaration et la verification sont deconnectees.",
                   "type": "array",
                   "items": {
                     "type": "string"

@@ -54,6 +54,8 @@ spec:
         - ticket.body
         - audit_target  # files/repos à auditer (path explicit dans ticket.body)
       outputs:
+        # DOCUMENTAIRE : rien ne lit ce champ (cf. la description du schema v2.5), et `{date}`
+        # n'est resolu par personne. Il dit a un humain ce que l'etape doit produire.
         - audits/scoper-{date}.json
       gate:
         # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
@@ -61,5 +63,12 @@ spec:
         # du type: terminal (StepRunConsumer {:dispatch_gatekeeper} sur règle en échec).
         type: terminal
         rules:
+          # ⚠ FAITS AUTO-DECLARES PAR LE POD. `Gates.evaluate` recoit les `outputs` du RESULTAT du
+          # pod : c'est le scoper qui atteste que son propre document existe et n'est pas vide.
+          # Aucune ligne de `lib/` ne produit ces deux cles. Le systeme a pourtant le workspace
+          # (`payload["workspace"]`, cree par lui via `Layout.pod_workspace_path`) et la carte
+          # declare le chemin attendu juste au-dessus — mais ce champ n'a aucun lecteur, donc la
+          # declaration et la verification ne se rejoignent nulle part.
+          # Mesure et arbitrage en attente : cf. R-37 du plan de vol.
           - "audit_doc_exists AND audit_doc_non_empty"
 
