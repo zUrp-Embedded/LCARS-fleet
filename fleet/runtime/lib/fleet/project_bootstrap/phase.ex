@@ -19,7 +19,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-05
   """
 
   defmodule Clone do
@@ -44,7 +44,73 @@ defmodule Fleet.ProjectBootstrap.Phase do
         else: {:error, {:unsafe_pod_dir, pod_dir}}
     end
 
-    defp do_clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec}, opts) do
+    # THE FORMAT IS PLACED, NOT ASKED FOR. The role trailer IS transmitted — `coauthor_instruction/1`
+    # says "add the exact trailer to EVERY git commit" and rides in the work order — but it says
+    # WHAT, never WHERE. Git only parses the LAST paragraph, so an agent that obeys to the letter and
+    # puts the line mid-message fails the push gate. Measured cost of one such miss on the bench: the
+    # deliverable is refused after `submit_result` succeeded, nothing lands, the poller re-dispatches
+    # — a full producer run redone, clone included, for a line in the wrong place.
+    #
+    # `git interpret-trailers --if-exists doNothing` places it in the trailer BLOCK even when a
+    # paragraph follows, and survives `--no-verify` (which skips `pre-commit` and `commit-msg`, not
+    # this one).
+    #
+    # MEASURED against real git, because the flag reads more forgiving than it is: `doNothing` looks
+    # at the trailer BLOCK, not at the whole message. A line stranded mid-message does not count as
+    # existing, so a second one is appended. That is exactly why this fixes the failing case rather
+    # than leaving it — and the duplicate is the accepted cost: the commit now ENDS with a valid
+    # block, the gate passes, the run is not redone. Cosmetic redundancy against a redone producer
+    # run is not a close call. A trailer already IN the block is left alone.
+    #
+    # What the wall then catches CHANGES: not negligence — a run burnt over placement — but
+    # FALSIFICATION, a commit that removed or forged the trailer. That is the only case it was ever
+    # interesting for.
+    #
+    # It lives in `.git/hooks/`, OUTSIDE the working tree, so the clean-world rule holds: the agent
+    # sees no LCARS artifact in the material it reasons from.
+    #
+    # Best-effort by construction: a hook that cannot be written must not fail a clone. The push gate
+    # is still there, and losing the convenience is not losing the guarantee.
+    # The role is read off the cap-profile rather than threaded through `opts`: the caller already
+    # hands the profile, and a parameter a future call site can forget to pass is a hook a future
+    # pod silently does without.
+    defp install_trailer_hook(ws, %Fleet.CapProfile{metadata: meta}) do
+      case Map.get(meta || %{}, "name") do
+        role when is_binary(role) and role != "" ->
+          write_trailer_hook(ws, Fleet.Credentials.ForgeIdentity.coauthor_trailer(role))
+
+        _ ->
+          :ok
+      end
+    end
+
+    defp write_trailer_hook(ws, trailer) do
+      path = Path.join([ws, ".git", "hooks", "prepare-commit-msg"])
+
+      body = """
+      #!/bin/sh
+      # LCARS — places the role trailer in the trailer BLOCK of every commit message.
+      # `--if-exists doNothing`: an agent that already wrote it correctly is left alone.
+      exec git interpret-trailers --in-place --if-exists doNothing \
+        --trailer '#{trailer}' "$1"
+      """
+
+      with :ok <- File.mkdir_p(Path.dirname(path)),
+           :ok <- File.write(path, body),
+           :ok <- File.chmod(path, 0o755) do
+        :ok
+      else
+        {:error, reason} ->
+          Logger.warning(
+            "Phase.Clone: trailer hook NOT installed in #{ws} (#{inspect(reason)}) — the push " <>
+              "gate still holds, the agent just has to place the line itself"
+          )
+
+          :ok
+      end
+    end
+
+    defp do_clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec} = cap_profile, opts) do
       project = spec["project"] || %{}
 
       case project["repo_path"] do
@@ -147,6 +213,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []),
+               :ok <- install_trailer_hook(ws, cap_profile),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
