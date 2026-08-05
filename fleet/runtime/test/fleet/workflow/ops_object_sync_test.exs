@@ -276,11 +276,18 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
   test "the scope is NODE-GLOBAL: two DIFFERENT work_dirs go through the SAME server (BL-6-43.4)",
        %{tmp_dir: tmp, server: srv} do
-    # The gap this closes, in the module's own words: "Sharding per `work_dir` (`:via` a Registry)
-    # is the exit if the head-of-line blocking ever bites; NO test pins the node-wide scope, so a
-    # green suite would not by itself prove such a change safe." The CI-11 test above proves
-    # serialization within ONE work_dir — and a per-work_dir sharding would keep it green while
-    # silently dropping the cross-project guarantee.
+    # ⚠ HISTORICAL, and it must read as such: the module USED TO say "NO test pins the node-wide
+    # scope, so a green suite would not by itself prove such a change safe". THIS test is what
+    # closed that gap on 2026-08-03 (BL-6-43.4), and the module now says so. The old sentence is
+    # quoted here only to name what was missing — it is NOT the current state.
+    #
+    # That distinction cost two false confirmations on 2026-08-05: an audit grepped the sentence,
+    # read it as live, and reported the scope as unpinned; a second pass "verified" it against a
+    # truncated listing that stopped before this line. A verbatim obsolete claim living inside its
+    # own fix is a trap for whoever searches rather than reads.
+    #
+    # What the gap WAS: the CI-11 test above proves serialization within ONE work_dir, and a
+    # per-work_dir sharding would keep it green while silently dropping the cross-project guarantee.
     #
     # What is pinned here is the ROUTING KEY: `work_dir` travels as PAYLOAD, the server is the only
     # address. Two unrelated repos are committed through one explicitly-named instance, and both
