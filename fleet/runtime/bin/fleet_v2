@@ -187,6 +187,14 @@ setup_env() {
   # an unconditional export here silently turned that intent into a full boot. The
   # engine side refuses an unparseable value (EnvParse.bool! in runtime.exs): a typo on
   # a reduction-of-effects switch stops the boot, it never becomes the active default.
+  # HOST-BOOT SIGNAL (fleet_mcp containment, D2). runtime.exs declares `boot_environment: :host`
+  # ONLY when this is set, so the "positive declaration" of the containment guard is made by the
+  # LAUNCHER and not by the config file declaring it about itself. A pod's projected env is a
+  # whitelist and carries nothing like this, so a BEAM started in that world stays :pod and the
+  # MCP supervisor refuses. Not overridable from the caller's env on purpose: the signal means
+  # "fleet_v2 started this", and only fleet_v2 can honestly say it.
+  export LCARS_HOST_BOOT=1
+
   export LCARS_BOOT_PERMANENT_AT_START="${LCARS_BOOT_PERMANENT_AT_START:-true}"
   export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
 

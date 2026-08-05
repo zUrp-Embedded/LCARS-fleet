@@ -45,12 +45,26 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_mcp — fail-closed boot guard
   # ============================================================
-  # The code default of `Fleet.MCP.Server.boot_environment` is `:pod` (refuses BY OMISSION). runtime.exs
-  # only runs at the HOST daemon boot → we declare `:host` POSITIVELY here. A boot that goes through
-  # neither this file nor config/test.exs is refused, never started permissively. Wire-time residual: a pod
-  # that ran the full BEAM would also execute runtime.exs; pods are claude REPLs +
-  # bridge.py, NOT the BEAM (latent — a per-boot host signal from bin/fleet_v2 would harden further).
-  config :fleet_mcp, boot_environment: :host
+  # The code default of `Fleet.MCP.Server.boot_environment` is `:pod` — it refuses BY OMISSION, and
+  # a boot that declares neither here nor in config/test.exs is refused, never started permissively.
+  #
+  # THE POSITIVE DECLARATION IS NOW ACTUALLY POSITIVE (D2, closed 2026-08-05). This line used to be
+  # unconditional, so ANY BEAM running this app declared itself host — including, in principle, one
+  # started inside a pod. The doctrine said "a boot that does not declare `:host` is refused by
+  # omission"; the declaration was made by the file itself, so the omission could not happen and the
+  # guard vouched for a fact nobody had checked.
+  #
+  # `LCARS_HOST_BOOT` is exported by `bin/fleet_v2` at daemon start. A pod's projected environment is
+  # a WHITELIST built by `LaunchEnv` (`LCARS_POD_*`, `LCARS_PROJECT_OPS`, …) and carries no such
+  # variable, so a BEAM launched in that world falls to the fail-closed `:pod` and the MCP
+  # supervisor refuses to boot.
+  #
+  # COST, written next to the switch: a boot that bypasses `bin/fleet_v2` — a developer's
+  # `iex -S mix` starting the whole app — must now say so: `LCARS_HOST_BOOT=1 iex -S mix`. That is
+  # the point rather than a side effect; the alternative is a declaration that declares nothing.
+  # (`mix test` is unaffected: `config/test.exs` declares `:host` on its own.)
+  config :fleet_mcp,
+    boot_environment: if(System.get_env("LCARS_HOST_BOOT") == "1", do: :host, else: :pod)
 
   # `delete_project` — the ONE irreversible act of the tool surface (forge repo + both worktrees),
   # aimed by a free argument, reachable by any onboarder pod. Off unless this deployment says

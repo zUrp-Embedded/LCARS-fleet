@@ -10,9 +10,13 @@ defmodule Fleet.MCP.Server do
   (`config :fleet_mcp, boot_environment: :host` in `runtime.exs` on the daemon boot, and in
   `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
   permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
-  (Residual, wire-time: a pod running the full lcars_fleet BEAM would still run `runtime.exs` → `:host`;
-  pods run a `claude` REPL + `bridge.py`, NOT the BEAM, so this is latent — a per-boot host signal from
-  `bin/fleet_v2` would harden it further.)
+  The wire-time residual is CLOSED (2026-08-05): `runtime.exs` no longer declares `:host`
+  unconditionally. It declares it only when `LCARS_HOST_BOOT=1`, which `bin/fleet_v2` exports at
+  daemon start. Until then the declaration was made by the config file ABOUT ITSELF, so the
+  "refused by omission" doctrine described something that could not happen — a pod running the full
+  BEAM would have read the same file and been declared host by it. A pod's projected environment is
+  a whitelist (`LaunchEnv`) and carries no such variable. Cost of the hardening, stated where it
+  bites: a boot bypassing the launcher must say so (`LCARS_HOST_BOOT=1 iex -S mix`).
 
   ## Why this process exists
 
@@ -24,7 +28,7 @@ defmodule Fleet.MCP.Server do
   **GenServer with no business state**: the process exists to be the supervised
   child whose `start_link` runs the guard at boot (idle thereafter).
 
-  **Last revised**: 2026-07-18
+  **Last revised**: 2026-08-05
   """
 
   use GenServer
