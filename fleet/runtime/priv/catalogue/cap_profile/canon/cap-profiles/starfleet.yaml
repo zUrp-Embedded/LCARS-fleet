@@ -27,11 +27,21 @@ metadata:
   # RW on both — NOT to edit files routinely (the skills create_project/import_project do the structured
   # work, system-side), but as a LEVER to act as the human's hand when needed. Default runtime activity
   # is low. (An ordinary parametric pod: this wide RW mount is the only thing that sets its focal length.)
+  # RO on both faces (user, 2026-08-05). The RW was declared for a "manual fix, an exceptional
+  # intervention on the human's behalf" — a lever the nominal flow never uses: every portfolio
+  # gesture goes through an MCP tool executed RUNTIME-side (`ProjectOnboard`), `revise_project_card`
+  # included. What it bought was an exception; what it cost was the widest write surface in the
+  # fleet, on every project present and future, held by the ONLY role with `interlocutor: both` —
+  # the most steerable pod carrying the broadest hand.
+  #
+  # Closed knowingly, and the user said so: the exception path goes away with it, and a better
+  # answer will be designed if its absence is felt. Losing a lever nobody pulled is cheaper than
+  # keeping one anybody can.
   mounts:
-    - path: /home/projects        # RW: act on any project's main on the human's behalf, when needed
-      mode: rw
-    - path: /home/projects.work   # RW: the DOC (moon-shot/beyond), upstream of tickets
-      mode: rw
+    - path: /home/projects        # RO: read any project, act on it only through the runtime verbs
+      mode: ro
+    - path: /home/projects.work   # RO: the DOC (moon-shot/beyond), upstream of tickets
+      mode: ro
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
   capabilities: [onboarder]
