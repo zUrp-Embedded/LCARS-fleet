@@ -90,7 +90,20 @@ defmodule LcarsFleet.MixProject do
         # is what an unenforced convention converges to.
         "format --check-formatted",
         "compile --warnings-as-errors",
-        "test",
+        # WRAPPED, and not the bare `"test"` it was until 2026-08-06. `mix test` is the ONLY step of
+        # this chain that does not HALT it: it posts its exit status through `System.at_exit` and
+        # hands control back, so `format`, `shell_gate`, `contracts.check` and `topology` all stop
+        # the chain on failure and `test` alone does not. Measured with a deliberately red canary:
+        # the gate returned 2 — the contract held — while shell_gate, the contracts and dialyzer all
+        # ran afterwards, so the LAST line a reader saw was dialyzer's own
+        # "done (passed successfully)" at the end of a FAILED gate.
+        #
+        # The exit code was always right; the OUTPUT invited the mistake, and it collected one — a
+        # session read that trailing line as the verdict for about ten commits (BL-6-69). Making the
+        # step behave like its five neighbours costs the "see every failure in one run" property,
+        # which a re-run gives back; it removes a green last line after a red step, which attention
+        # does not give back.
+        &test_gate/1,
         &shell_gate/1,
         "lcars.contracts.check",
         # Topology map freshness: lib/fleet/README.md is a generated projection of the
@@ -103,6 +116,31 @@ defmodule LcarsFleet.MixProject do
         "dialyzer"
       ]
     ]
+  end
+
+  # `mix gate` step: the ExUnit suite, as a SUBPROCESS so its failure halts the chain.
+  #
+  # A subprocess and not `Mix.Task.run("test", …)`: the mix task signals failure only through
+  # `System.at_exit`, which is unreadable from inside the run that is still going. The exit code of
+  # a child process is readable, and it is the same instrument every other step of this chain uses.
+  #
+  # Streamed line by line rather than captured: the suite is the long step, and a gate that goes
+  # silent for ninety seconds teaches its operator to run something else.
+  defp test_gate(args) do
+    {_, status} =
+      System.cmd("mix", ["test" | args],
+        env: [{"MIX_ENV", "test"}],
+        into: IO.stream(:stdio, :line),
+        stderr_to_stdout: true
+      )
+
+    if status != 0 do
+      Mix.raise(
+        "gate: the ExUnit suite FAILED (exit #{status}) — chain stopped here. " <>
+          "Every step after this one is skipped ON PURPOSE: their output would end with a green " <>
+          "line under a red suite, which is how a failed gate gets read as a passing one."
+      )
+    end
   end
 
   # `mix gate` step: the net for OUT-of-mix tests (python of the MCP stdio bridge + bats
