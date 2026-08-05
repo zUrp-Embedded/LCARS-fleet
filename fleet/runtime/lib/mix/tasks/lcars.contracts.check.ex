@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-08-05
+  **Last revised**: 2026-08-06
   """
 
   use Mix.Task
@@ -107,7 +107,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
-        check_intensity_max_fan_ceiling(root)
+        check_intensity_max_fan_ceiling(root),
+        check_bats_corpora_on_record(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1557,6 +1558,105 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       "URLs are composed from repo + number against the configured base_url; a forge-supplied " <>
         "one would carry whatever host answered, which is not necessarily the one we address"
   }
+
+  # EVERY bats corpus in the repo, and what happens to it. `:gated` = shell_gate discovers it;
+  # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
+  #
+  # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
+  # answered "which test corpora exist, and which ones do we run". `fleet/provisioning_v2/tests`
+  # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
+  # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
+  # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
+  # loudly — it rots while reporting a coverage it does not provide, which is the most expensive
+  # silence a test can keep.
+  @bats_corpora [
+    {"fleet/runtime/test", :gated},
+    {".claude/skills", :gated},
+    {"fleet/provisioning_v2/tests", :gated},
+    {"fleet/git-hooks/tests", :gated},
+    {"fleet/tests/.bats",
+     {:out, "vendored bats-core + its helper libraries: upstream's own suites, not ours to run"}},
+    {"fleet/tests/unit/v1",
+     {:out,
+      "v1 frozen since 2026-04-18; 246 of 447 cases still red after the BL-6-68 repair. Gating it " <>
+        "would turn the gate red on code nobody changes, and the remaining failures are a decision " <>
+        "about whether v1 is maintained, not a repair"}}
+  ]
+
+  @doc false
+  def check_bats_corpora_on_record(root) do
+    repo = Path.expand("../..", root)
+
+    # `-type f` is load-bearing: `fleet/tests/.bats` is a DIRECTORY whose name matches `*.bats`, and
+    # without it the scan reports a corpus that is a folder.
+    found =
+      case System.cmd(
+             "find",
+             [
+               repo,
+               "-type",
+               "f",
+               "-name",
+               "*.bats",
+               "-not",
+               "-path",
+               "*/.git/*",
+               "-not",
+               "-path",
+               "*/_build/*",
+               "-not",
+               "-path",
+               # `*/fleet/runtime/tmp/*`, NOT `*/tmp/*`: the second excludes any path containing
+               # "tmp" ANYWHERE, which silently blanks the scan on a tree living under /tmp — a
+               # filter broad enough to make the instrument measure nothing and report a pass. Its
+               # own test caught it, by building its fixtures exactly there.
+               "*/fleet/runtime/tmp/*"
+             ],
+             stderr_to_stdout: true
+           ) do
+        {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&Path.relative_to(&1, repo))
+        _ -> []
+      end
+
+    unknown =
+      found
+      |> Enum.reject(fn f ->
+        Enum.any?(@bats_corpora, fn {p, _} -> String.starts_with?(f, p <> "/") end)
+      end)
+      |> Enum.map(&Path.dirname/1)
+      |> Enum.uniq()
+
+    broken =
+      cond do
+        not File.dir?(Path.join(repo, "fleet/runtime/test")) ->
+          "#{repo} does not look like the repo root — nothing was scanned"
+
+        found == [] ->
+          "no .bats file found under #{repo}; this check measured nothing"
+
+        true ->
+          nil
+      end
+
+    gated = Enum.count(@bats_corpora, fn {_, v} -> v == :gated end)
+
+    %{
+      id: "tests.bats_corpora_on_record",
+      remediation:
+        "wire the corpus into test/shell_gate.sh, or add it to @bats_corpora as {:out, why} — " <>
+          "a corpus nobody runs reports a coverage it does not provide",
+      status: if(is_nil(broken) and unknown == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["INSTRUMENT BROKEN — #{broken}"]
+          unknown != [] -> ["bats corpora on no record: #{inspect(unknown)}"]
+          true -> []
+        end,
+      note:
+        "#{length(found)} .bats files over #{length(@bats_corpora)} corpora — " <>
+          "#{gated} gated, #{length(@bats_corpora) - gated} deliberately out ON RECORD"
+    }
+  end
 
   @doc false
   # ONE FACT, TWO RENDERS — the hard ceiling on a project's in-flight workflow_runs. It is typed in
