@@ -80,23 +80,23 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
           "feat: something\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>\n\nEt une explication qui suit."
         )
 
-      # MEASURED, and it contradicts the obvious reading of `--if-exists doNothing`: that flag looks
-      # at the trailer BLOCK, not at the whole message. A line stranded mid-message does not count
-      # as existing, so a second one is appended — and that is precisely why the mechanism fixes
-      # this case instead of leaving it broken.
+      # The rule is an APPEND and it fits in a sentence: the last non-empty line is not the trailer,
+      # so the trailer becomes the last line. The stray one the agent left mid-message stays where
+      # it is — a duplicate, stated rather than hidden, and the accepted cost: the commit now ENDS
+      # with the trailer, the push gate passes, and the producer run is not redone. Cosmetic
+      # redundancy against a redone run is not a close call.
       #
-      # The duplicate is the accepted cost, stated rather than hidden: the commit now ENDS with a
-      # valid trailer block, so the push gate passes and the run is not burnt. Cosmetic redundancy
-      # against a redone producer run is not a close call.
+      # An earlier version delegated this to `git interpret-trailers --if-exists doNothing`, whose
+      # notion of "already there" is the trailer BLOCK rather than the message — same outcome here,
+      # by a rule that took a real-git measurement to learn and that the next reader would have had
+      # to make again.
       assert body |> String.trim() |> String.split("\n") |> List.last() =~
                "Co-authored-by: LCARS-engineer"
 
       assert length(String.split(body, "Co-authored-by: LCARS-engineer")) == 3
     end
 
-    test "a trailer ALREADY IN THE BLOCK is not duplicated — that is what doNothing covers", %{
-      tmp_dir: tmp
-    } do
+    test "a trailer already on the LAST line is not duplicated", %{tmp_dir: tmp} do
       ws = clone(tmp, "engineer")
 
       body =

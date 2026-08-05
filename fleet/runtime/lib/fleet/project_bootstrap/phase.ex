@@ -51,16 +51,19 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # deliverable is refused after `submit_result` succeeded, nothing lands, the poller re-dispatches
     # — a full producer run redone, clone included, for a line in the wrong place.
     #
-    # `git interpret-trailers --if-exists doNothing` places it in the trailer BLOCK even when a
-    # paragraph follows, and survives `--no-verify` (which skips `pre-commit` and `commit-msg`, not
-    # this one).
+    # A MECHANICAL APPEND, not `git interpret-trailers`. The first version used git's own trailer
+    # parser with `--if-exists doNothing`, which reads far more forgiving than it is: the flag
+    # inspects the trailer BLOCK, not the message, so a line stranded mid-message did not count as
+    # existing and a second one was appended anyway. The behaviour was acceptable; the RULE was
+    # git's, it took a real-git measurement to learn, and the next reader would have had to make the
+    # same one.
     #
-    # MEASURED against real git, because the flag reads more forgiving than it is: `doNothing` looks
-    # at the trailer BLOCK, not at the whole message. A line stranded mid-message does not count as
-    # existing, so a second one is appended. That is exactly why this fixes the failing case rather
-    # than leaving it — and the duplicate is the accepted cost: the commit now ENDS with a valid
-    # block, the gate passes, the run is not redone. Cosmetic redundancy against a redone producer
-    # run is not a close call. A trailer already IN the block is left alone.
+    # The rule is now ours and fits in a sentence: if the last non-empty line is already exactly the
+    # trailer, do nothing; otherwise append it as the final line. A deterministic position is not
+    # something to ask an agent for, and not something to delegate to a parser whose notion of
+    # "already there" differs from ours — it is an append at the end of what the agent produced.
+    #
+    # Survives `--no-verify`, which skips `pre-commit` and `commit-msg` and not this one.
     #
     # What the wall then catches CHANGES: not negligence — a run burnt over placement — but
     # FALSIFICATION, a commit that removed or forged the trailer. That is the only case it was ever
@@ -89,10 +92,16 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
       body = """
       #!/bin/sh
-      # LCARS — places the role trailer in the trailer BLOCK of every commit message.
-      # `--if-exists doNothing`: an agent that already wrote it correctly is left alone.
-      exec git interpret-trailers --in-place --if-exists doNothing \
-        --trailer '#{trailer}' "$1"
+      # LCARS — appends the role trailer as the LAST line of every commit message.
+      # Idempotent on the only thing that matters: if the last non-empty line is already exactly
+      # the trailer, nothing is written. No git trailer parsing — the position is ours to decide.
+      set -e
+      msg="$1"
+      last=$(grep -v '^[[:space:]]*$' "$msg" | tail -n 1 || true)
+      if [ "$last" = '#{trailer}' ]; then
+        exit 0
+      fi
+      printf '\\n%s\\n' '#{trailer}' >> "$msg"
       """
 
       with :ok <- File.mkdir_p(Path.dirname(path)),
