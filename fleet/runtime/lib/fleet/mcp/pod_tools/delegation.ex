@@ -150,14 +150,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
           case do_create_issue(forge, repo, title, full_body, [token: identity.token], genre) do
             {:ok, result} ->
-              # L'ORDRE ENTRE TICKETS S'ÉCRIT SUR LA FORGE, PAS SEULEMENT DANS LA PROSE. La forge
-              # refuse la fermeture d'un ticket bloqué, et l'admission refuse de le DÉMARRER tant
-              # qu'un bloqueur est ouvert (`wait/depends`). Sans l'arête, la contrainte n'existe que
-              # dans le brief : elle tient tant qu'un agent la lit, c'est-à-dire pas.
-              # Best-effort ASSUMÉ, et c'est la seule dissymétrie avec le supersede : ici le ticket
-              # est déjà créé et il est correct — une arête manquante dégrade l'ordre, elle ne rend
-              # rien faux. Le supersede, lui, refuse de fermer si le report échoue, parce que fermer
-              # LIBÈRE. Poser < libérer.
+              # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge
+              # refuses to close a blocked ticket, and admission refuses to START one while a
+              # blocker is open (`wait/depends`). Without the edge the constraint lives only in the
+              # brief: it holds as long as an agent reads it, which is to say it does not.
+              #
+              # Best-effort ASSUMED, and it is the only asymmetry with the supersede: here the
+              # ticket is already created and correct — a missing edge degrades the ORDER, it makes
+              # nothing false. The supersede refuses to close when the carry-over fails, because
+              # closing RELEASES. Writing an edge < releasing one.
               result = attach_dependencies(forge, repo, result, depends_on)
               {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
 
@@ -1277,14 +1278,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # not a guess (a half-checked supersede could retire the wrong brick). An already-closed target is
   # LEGITIMATE (re-take an abandoned brick): filiation only, no retirement to execute.
   #
-  # UNE PR VIVANTE N'EST PLUS UN REFUS, ET L'ANCIEN REFUS ÉTAIT UN CONTOURNEMENT. Il se lisait comme
-  # une politique (« laisse-la atterrir ») ; c'en était une conséquence : RIEN dans le client forge
-  # ne savait fermer une PR. Retirer le ticket sans elle laissait la PR ouverte sur un rail
-  # INDÉPENDANT (`dispatch_review` scrute les pulls, hors bail) — jugée, puis mergée, dans un ticket
-  # retiré. Le refus protégeait donc d'une incohérence que le geste lui-même aurait dû empêcher.
-  # Or l'intention d'un retrait — arrêter la machine, borner le coût — ne dépend pas de l'existence
-  # d'une PR. On rend donc le geste COMPLET (`:with_pr` → la PR se ferme avec le ticket) au lieu
-  # d'interdire le geste.
+  # A LIVE PR IS NO LONGER A REFUSAL, AND THE OLD REFUSAL WAS A WORKAROUND. It read as a policy
+  # ("let it land"); it was a CONSEQUENCE: nothing in the forge client knew how to close a PR.
+  # Retiring the ticket without closing it left the PR open on an INDEPENDENT rail
+  # (`dispatch_review` polls pulls, outside the lease) — judged, then merged, into a retired ticket.
+  # So the refusal protected against an incoherence the gesture itself should have prevented.
+  #
+  # And the intent of a retirement — stop the machine, bound the cost — does not depend on whether a
+  # PR exists. So the gesture is made COMPLETE (`:with_pr` → the PR closes with the ticket) instead
+  # of being forbidden.
   defp target_state_preflight(_forge, _repo, nil), do: {:ok, nil}
 
   defp target_state_preflight(forge, repo, n) when is_integer(n) and n > 0 do
@@ -1310,8 +1312,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp target_state_preflight(_forge, _repo, _bad), do: {:error, :invalid_target}
-  # La PR du ticket retiré meurt avec lui. Un échec REMONTE : fermer l'issue en laissant sa PR
-  # vivante recrée exactement l'incohérence que ce geste existe pour empêcher.
+
+  # The retired ticket's PR dies with it. A failure PROPAGATES: closing the issue while leaving its
+  # PR alive recreates the exact incoherence this gesture exists to prevent.
   defp close_live_pr(_forge, _repo, nil), do: :ok
 
   defp close_live_pr(forge, repo, pr) do
@@ -1400,7 +1403,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         n when is_integer(n) ->
           case write_fun.(n) do
             {:ok, _} -> {:cont, :ok}
-            # Déjà posée (rejeu) : la cible porte l'arête, c'est ce qu'on voulait.
+            # Already written (replay): the target carries the edge, which is what we wanted.
             {:error, {:http, 409, _}} -> {:cont, :ok}
             {:error, _} = err -> {:halt, err}
           end
@@ -1734,9 +1737,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # CLOSED issue leaves the poller and the escalation inbox by itself (both list open only).
   # A retirement failure NEVER unwinds the created ticket (it exists): the result says so
   # honestly (`supersede_warning`) and the human closes by hand — loud, no half-lie.
-  # PUBLIC (@doc false) pour que le report d'arêtes soit testable SUR SON ORDRE : la propriété qui
-  # compte ici n'est pas « les arêtes existent » mais « elles sont écrites AVANT la fermeture », et
-  # ça ne s'observe que depuis l'appelant.
+  # PUBLIC (@doc false) so the edge carry-over is testable ON ITS ORDER: the property that matters
+  # here is not "the edges exist" but "they are written BEFORE the close", and that is only
+  # observable from the caller.
   @doc false
   def retire_superseded(_forge, _repo, nil, _target_state, result), do: result
 
@@ -1747,8 +1750,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   def retire_superseded(forge, repo, n, :open, result), do: do_retire(forge, repo, n, nil, result)
 
   # Cible AVEC une PR vivante : on ferme la PR dans le MÊME geste. L'ordre compte comme pour les
-  # arêtes — la PR d'abord : tant qu'elle vit, le rail des pulls peut la juger et la merger, et il
-  # ne consulte pas l'état de l'issue.
+  # edges — the PR first: while it lives, the pulls rail can judge and merge it, and that rail
+  # never reads the issue's state.
   def retire_superseded(forge, repo, n, {:open, pr}, result),
     do: do_retire(forge, repo, n, pr, result)
 
@@ -1758,18 +1761,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
     comment =
       "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
 
-    # LES ARÊTES DE DÉPENDANCE SE REPORTENT AVANT LA FERMETURE, ET L'ORDRE EST CONTRAIGNANT.
-    # Une dépendance Gitea relie deux issue_id ; `supersedes` n'est PAS une primitive de forge,
+    # THE DEPENDENCY EDGES ARE CARRIED BEFORE THE CLOSE, AND THE ORDER IS BINDING.
+    # A Gitea dependency links two issue_ids; `supersedes` is NOT a forge primitive,
     # c'est une convention LCARS (commentaire + fermeture). La forge ne voit donc pas un
-    # remplacement : elle voit une issue qui meurt et une autre qui naît, et les arêtes restent
-    # accrochées au mort. Les deux sens font mal, et le premier est silencieux :
-    #   * ce que l'ancien BLOQUAIT est libéré à l'instant de sa fermeture (un bloqueur CLOSED
-    #     compte comme satisfait) — alors que le travail a migré et n'est pas livré ;
-    #   * ce dont l'ancien DÉPENDAIT disparaît : le remplaçant naît sans sa précondition.
-    # Mesuré sur banc le 2026-08-04 (A bloque B, supersede A -> A' : `B dependencies` rend
-    # toujours A, fermé, et A' n'a aucune arête).
-    # Fermer d'abord libérerait les bloqués AVANT le recâblage, et un dispatch peut se glisser
-    # dans cette fenêtre. On écrit sur le remplaçant, PUIS on ferme.
+    # replacement: it sees one issue die and another appear, and the edges stay attached to the
+    # dead one. Both directions hurt, and the first one is silent:
+    #   * what the old ticket BLOCKED is released the instant it closes (a CLOSED blocker counts as
+    #     satisfied) — while the work has moved and is not delivered;
+    #   * what the old ticket DEPENDED ON vanishes: the replacement is born without its precondition.
+    # Measured on the bench 2026-08-04 (A blocks B, supersede A -> A': `B dependencies` still
+    # returns A, closed, and A' carries no edge at all).
+    # Closing first would release the blocked ones BEFORE the rewiring, and a dispatch can slip into
+    # that window. We write onto the replacement, THEN we close.
     with :ok <- close_live_pr(forge, repo, pr),
          :ok <- carry_dependencies(forge, repo, n, new_number),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
