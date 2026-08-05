@@ -41,6 +41,29 @@ set -euo pipefail
 STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 [[ -z "$STAGED" ]] && exit 0
 
+# --- Evidence directories: a captured piece is worth the byte the agent read ---
+# A campaign corpus (a captured SP, a verbatim brief, a replay input) is valuable PRECISELY because
+# it is what the agent read. Inserting four lines of metadata at its top changes what a replay
+# replays: that is falsifying a piece of evidence, not bringing a file into compliance.
+#
+# A MARKER rather than a path list, and the reason is that the list cannot be written: a future
+# campaign is not predictable from inside this hook. Every campaign so far went in under
+# `--no-verify`, which does not skip GO-7 for the corpus — it skips EVERY check for EVERY file in
+# that commit. That silent blast radius is the real cost, not the missing header.
+#
+# It covers PASS 1 as well as pass 2, and that is the half a check-only exemption would miss:
+# pass 1 does `sed -i` on date stamps. Exempting the verdict while letting the auto-fix rewrite the
+# piece would protect the file from being refused and not from being altered.
+is_evidence_dir() {
+    local d
+    d=$(dirname "$1")
+    while :; do
+        [[ -f "$d/.go7-exempt" ]] && return 0
+        [[ "$d" == "." || "$d" == "/" ]] && return 1
+        d=$(dirname "$d")
+    done
+}
+
 # --- Source hook-config.sh for repo type detection ---
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK_CONFIG="$HOOK_DIR/hook-config.sh"
@@ -57,6 +80,7 @@ if [[ "$HOOK_DATE_FORMAT" == "stardate" ]]; then
     STARDATE_PATTERN="STARDATE: [0-9][0-9][0-9][0-9]\.[0-9][0-9][0-9]"
     while IFS= read -r file; do
         [[ -z "$file" || ! -f "$file" ]] && continue
+        is_evidence_dir "$file" && continue
         if grep -q "$STARDATE_PATTERN" "$file"; then
             CURRENT=$(grep -oE "STARDATE: [0-9]{4}\.[0-9]{3}" "$file" | head -1 | cut -d' ' -f2 || true)
             if [[ "$CURRENT" != "$STARDATE" ]]; then
@@ -69,6 +93,7 @@ else
     TODAY=$(date '+%Y-%m-%d')
     while IFS= read -r file; do
         [[ -z "$file" || ! -f "$file" ]] && continue
+        is_evidence_dir "$file" && continue
         ext="${file##*.}"
         case "$ext" in
             md)
@@ -152,6 +177,10 @@ check_ex_stamp() {
 
 while IFS= read -r file; do
     [[ -z "$file" || ! -f "$file" ]] && continue
+    # Evidence directories opt out of GO-7 ENTIRELY, every extension: a captured script is as much
+    # a piece as a captured brief, and the source-header rule would falsify it the same way. The
+    # marker is the declaration, and it sits next to what it exempts rather than in this file.
+    is_evidence_dir "$file" && continue
 
     ext="${file##*.}"
     [[ "$ext" == "$(basename "$file")" ]] && continue

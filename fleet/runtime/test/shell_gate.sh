@@ -86,6 +86,10 @@ fi
 #    verifie. Le repertoire est hors du runtime, d'ou la seconde recherche ; son absence n'est pas
 #    une erreur (un depot sans skills reste valide).
 #
+#    `fleet/git-hooks/tests/` : meme raison encore. Le pre-commit est le SEUL mur qui s'applique a
+#    tout le depot, y compris a lui-meme, et il n'avait aucun test — un mur non teste ne se
+#    distingue d'un mur absent que le jour ou on le contourne.
+#
 #    `fleet/provisioning_v2/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
 #    2026-07-30 et AUCUN gate ne les jouait — un test que personne ne lance est un test qui
 #    pourrit, et il donne la couverture sans la donner. Meme raison que les skills : le
@@ -95,10 +99,12 @@ fi
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
 PROVISION_TESTS="$REPO_ROOT/fleet/provisioning_v2/tests"
+HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"
 mapfile -t BATS_FILES < <(
   find "$HERE" -type f -name '*.bats'
   [[ -d "$SKILLS_TESTS" ]] && find "$SKILLS_TESTS" -type f -path '*/tests/*.bats'
   [[ -d "$PROVISION_TESTS" ]] && find "$PROVISION_TESTS" -type f -name '*.bats'
+  [[ -d "$HOOK_TESTS" ]] && find "$HOOK_TESTS" -type f -name '*.bats'
   true
 )
 mapfile -t BATS_FILES < <(printf '%s\n' "${BATS_FILES[@]}" | sort -u)
@@ -113,7 +119,7 @@ fi
 if [[ "$BATS_FILE_COUNT" -eq 0 ]]; then
   echo "--- bats : aucun fichier .bats trouve sous $HERE (rien a lancer) ---"
 elif command -v bats >/dev/null 2>&1; then
-  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills+provisioning — execution ---"
+  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills+provisioning+hooks — execution ---"
   set +e
   bats "${BATS_FILES[@]}"
   BATS_RC=$?
