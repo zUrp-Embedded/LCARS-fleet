@@ -1168,4 +1168,67 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert :sys.get_state(pid).gate_evals == %{}
     refute_received {:open_pr, _, _, _}
   end
+
+  describe "one fact, one vocabulary — the system translates, not the pod (2026-08-05)" do
+    alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+    alias Fleet.Pilot.StepRunConsumer.Verdict
+
+    # Three vocabularies were in play for the same fact: the system reads `summary`/`blocked`, the
+    # `subagent-driven` modop teaches its subagents `status: "BLOCKED|NEEDS_CONTEXT"` + `concerns`,
+    # and the envelope clause tolerated a shape no live producer emits. The shape actually produced
+    # matched neither — a pod forwarding its subagent's refusal DELIVERED IN SILENCE.
+
+    test "a forwarded BLOCKED report escalates instead of delivering silently" do
+      report = %{"status" => "BLOCKED", "task_id" => "3", "concerns" => ["spec manquante"]}
+
+      unwrapped = Verdict.unwrap_worker_envelope(report)
+
+      assert TerminalEscalation.blocked_flag?(unwrapped)
+      assert Verdict.eng_summary(%{"result" => report}) =~ "spec manquante"
+    end
+
+    test "NEEDS_CONTEXT counts as blocked — same family, same wedge" do
+      assert %{"status" => "NEEDS_CONTEXT"}
+             |> Verdict.unwrap_worker_envelope()
+             |> TerminalEscalation.blocked_flag?()
+    end
+
+    test "case-insensitive: an LLM writing `blocked` must not slip through a string comparison" do
+      assert %{"status" => "blocked"}
+             |> Verdict.unwrap_worker_envelope()
+             |> TerminalEscalation.blocked_flag?()
+    end
+
+    test "the outer status of the enveloped shape is CARRIED IN, not dropped" do
+      # It used to be discarded one function before the field that reads it.
+      enveloped = %{"status" => "BLOCKED", "result" => %{"concerns" => ["il manque X"]}}
+
+      unwrapped = Verdict.unwrap_worker_envelope(enveloped)
+
+      assert TerminalEscalation.blocked_flag?(unwrapped)
+      assert unwrapped["summary"] =~ "il manque X"
+    end
+
+    test "FAIL-SAFE — a blocked status wins over an explicit `blocked: false`" do
+      # Asymmetric on purpose: a false positive costs a human one glance; a miss costs a silent
+      # wedge and a brick nobody knows is stuck.
+      assert %{"status" => "BLOCKED", "blocked" => false}
+             |> Verdict.unwrap_worker_envelope()
+             |> TerminalEscalation.blocked_flag?()
+    end
+
+    test "INVERSE TWIN — a DONE report is untouched, and its own summary wins over concerns" do
+      done = %{"status" => "DONE", "summary" => "fait X", "concerns" => ["broutille"]}
+      unwrapped = Verdict.unwrap_worker_envelope(done)
+
+      refute TerminalEscalation.blocked_flag?(unwrapped)
+      assert unwrapped["summary"] == "fait X"
+    end
+
+    test "INVERSE TWIN — a judge verdict passes through untouched" do
+      judge = %{"decision" => "continue", "reason" => "ok"}
+
+      assert Verdict.unwrap_worker_envelope(judge) == judge
+    end
+  end
 end

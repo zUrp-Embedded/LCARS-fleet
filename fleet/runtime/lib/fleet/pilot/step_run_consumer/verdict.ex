@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   (equality pinned by `GateDecisionTest`). The only side effect in this module is that
   refusal warning — no state is carried.
 
-  **Last revised**: 2026-07-31
+  **Last revised**: 2026-08-05
   """
 
   require Logger
@@ -123,8 +123,71 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # `%{"decision"=>...}` / the outputs, or the envelope `%{"status"=>"ok","result"=>...}`.
   # Without unwrapping: decision/outputs buried → false escalation / wrongful hard-gate.
   def unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
-  def unwrap_worker_envelope(%{"status" => _, "result" => inner}) when is_map(inner), do: inner
-  def unwrap_worker_envelope(other), do: other
+
+  # The outer `status` is CARRIED IN rather than dropped: it is the very field the normalization
+  # below reads, and discarding it here was losing the fact one function before it could be used.
+  def unwrap_worker_envelope(%{"status" => status, "result" => inner}) when is_map(inner),
+    do: inner |> Map.put_new("status", status) |> normalize_producer()
+
+  def unwrap_worker_envelope(other), do: normalize_producer(other)
+
+  # ── One fact, one vocabulary — enforced by the SYSTEM, not by the pod's memory ──
+  #
+  # THREE vocabularies were in play for the same fact, measured 2026-08-05:
+  #   * the system reads `summary` + `blocked: true` (SP block `producer-output.md`);
+  #   * the `subagent-driven` modop teaches its SUBAGENTS to report
+  #     `{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", "concerns": [...]}`;
+  #   * the clause above tolerated `%{"status", "result"}` — a shape NO live producer emits (two
+  #     test fixtures do, one of them under `_archived_gates/`): the tolerance aimed at a fossil.
+  #
+  # The shape actually produced matched NEITHER. Measured end to end: a report
+  # `{"status": "BLOCKED", "concerns": [...]}` forwarded as `result` yielded `eng_summary` = "" and
+  # `blocked_flag?` = false. A pod passing its subagent's refusal through DELIVERED IN SILENCE —
+  # the exact wedge the flag exists to prevent, and the one `producer-output.md` spends three
+  # paragraphs teaching the pod to avoid.
+  #
+  # Translating between the two vocabularies was pure pod cognition, taught in neither document.
+  # Nothing caught a pod that forgot, and forgetting cost an escalation nobody received. So the
+  # system does the translation: what it can take charge of leaves the agent's head.
+  #
+  # It MOVES the agent's words, it never writes any. `concerns` fill the `summary` slot only when
+  # the pod left it empty — the aggregation of several subagents into one narration stays the pod's
+  # job, because choosing what matters is substance.
+  @blocked_statuses ~w(blocked needs_context)
+
+  # `status` is TRANSPORT, not business data — the same call the TaskQueue already makes on
+  # `work_item_id` ("a correlator, not business data of the result"). It is read here, turned into
+  # the canonical `blocked`, and dropped: what leaves this funnel has ONE shape, and a deliverable's
+  # `outputs` are not polluted by the vocabulary that carried it. An existing gate test asserted
+  # exactly that and was right against my first version.
+  defp normalize_producer(m) when is_map(m) do
+    m |> block_from_status() |> summary_from_concerns() |> Map.delete("status")
+  end
+
+  defp normalize_producer(other), do: other
+
+  # FAIL-SAFE direction, deliberately asymmetric: a status in the blocked family sets the flag even
+  # if the pod wrote `blocked: false`. A false positive costs a human one glance at an escalation; a
+  # miss costs a silent wedge and a brick nobody knows is stuck. Case-insensitive for the same
+  # reason — the vocabulary is uppercase in the modop, and an LLM writing `blocked` must not slip
+  # through a string comparison.
+  defp block_from_status(m) do
+    status = m |> Map.get("status") |> safe_str() |> String.downcase() |> String.trim()
+
+    if status in @blocked_statuses, do: Map.put(m, "blocked", true), else: m
+  end
+
+  defp summary_from_concerns(m) do
+    summary = m |> Map.get("summary") |> safe_str() |> String.trim()
+
+    case {summary, Map.get(m, "concerns")} do
+      {"", [_ | _] = concerns} ->
+        Map.put(m, "summary", Enum.map_join(concerns, "\n", &"- #{safe_str(&1)}"))
+
+      _ ->
+        m
+    end
+  end
 
   # ============================================================
   # Text rendering — verdict trace / review body / eng voice
