@@ -20,7 +20,7 @@ defmodule Fleet.Layout do
 
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   @projects_root "/home/projects"
@@ -50,6 +50,11 @@ defmodule Fleet.Layout do
   # three above, and deliberately OUTSIDE `@notes_subdir`: an agent must never be able to address
   # the tree its own judgement is recorded in.
   @verdicts_subdir "verdicts"
+  # Conflict-engine reports. A DELIBERATELY SEPARATE tree from `verdicts/`: a conflict report is not
+  # a judgement on a delivery, it is a machine explaining what it did to a branch. Filing it under
+  # `verdicts/` would also collide by name — one PR can carry a verdict and a conflict report from
+  # the same role — and the second write would displace the first while its pointer kept naming it.
+  @conflicts_subdir "conflicts"
   @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
@@ -198,6 +203,17 @@ defmodule Fleet.Layout do
   """
   @spec notes_ref(String.t()) :: String.t()
   def notes_ref(name), do: Path.join(@notes_subdir, sanitize_artifact_name(name) <> ".md")
+
+  @doc """
+  work/ops-relative ref of a committed conflict report: `conflicts/pr-<n>.md`.
+
+  Keyed on the PULL REQUEST, not the issue: a conflict is a property of the merge, and the same
+  issue can carry several. One file per PR, versioned by git like every other object here — a second
+  conflict on the same PR is a new version of the same story, not a new story.
+  """
+  @spec conflict_ref(integer()) :: String.t()
+  def conflict_ref(pr_number) when is_integer(pr_number),
+    do: Path.join(@conflicts_subdir, "pr-#{pr_number}.md")
 
   @doc """
   work/ops-relative ref of a committed verdict: `verdicts/issue-<n>-<role>.md`.

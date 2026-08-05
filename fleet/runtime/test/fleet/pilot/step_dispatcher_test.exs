@@ -1375,12 +1375,68 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # (le routage PUR) etait deja teste, mais le CABLAGE — flag → diagnoser → decision → acte —
     # n'avait aucun test. Le trou tombait exactement entre une fonction prouvee et le monde, soit
     # la portion que ces seams existent pour rendre testable.
+    # Les deux sondes rendent la forme REELLE d'un diagnostic (`files` + `totals`), pas seulement
+    # les totaux que le routage consomme. Un fake qui rend une forme de seam inexistante n'affaiblit
+    # pas un test, il l'INVERSE : celui-ci passait vert alors que le rendu du rapport, ajoute le
+    # 2026-08-05, ne pouvait pas s'executer sur cette forme.
     defmodule AllSemanticProbe do
-      def probe(_repo, _ref, _opts), do: {:ok, %{totals: %{none_trivial?: true}}}
+      def probe(_repo, _ref, _opts) do
+        {:ok,
+         %{
+           files: %{
+             "lib/a.ex" => %{
+               hunks: [
+                 %Fleet.Conflict.Hunk{
+                   base_lines: [],
+                   ours_lines: ["a"],
+                   theirs_lines: ["b"],
+                   start_line: 12,
+                   type: :complex,
+                   confidence: %Fleet.Conflict.ConfidenceScore{score: 10, label: :low},
+                   explanation: "deux intentions distinctes",
+                   trace: %Fleet.Conflict.DecisionTrace{
+                     selected: :complex,
+                     summary: "aucun motif trivial ne s'applique",
+                     has_base: false
+                   },
+                   zdiff3: false
+                 }
+               ]
+             }
+           },
+           totals: %{none_trivial?: true, total: 1, trivial: 0, complex: 1, writable: 0}
+         }}
+      end
     end
 
     defmodule AllWritableProbe do
-      def probe(_repo, _ref, _opts), do: {:ok, %{totals: %{all_writable?: true}}}
+      def probe(_repo, _ref, _opts) do
+        {:ok,
+         %{
+           files: %{
+             "lib/b.ex" => %{
+               hunks: [
+                 %Fleet.Conflict.Hunk{
+                   base_lines: ["x"],
+                   ours_lines: ["x", "y"],
+                   theirs_lines: ["x"],
+                   start_line: 3,
+                   type: :one_side_change,
+                   confidence: %Fleet.Conflict.ConfidenceScore{score: 90, label: :high},
+                   explanation: "un seul cote a bouge",
+                   trace: %Fleet.Conflict.DecisionTrace{
+                     selected: :one_side_change,
+                     summary: "la base prouve que seul `ours` a change",
+                     has_base: true
+                   },
+                   zdiff3: false
+                 }
+               ]
+             }
+           },
+           totals: %{all_writable?: true, total: 1, trivial: 1, complex: 0, writable: 1}
+         }}
+      end
     end
 
     defmodule BlindProbe do

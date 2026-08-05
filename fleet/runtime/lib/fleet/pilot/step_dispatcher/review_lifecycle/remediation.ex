@@ -35,7 +35,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
+  alias Fleet.Pilot.ConflictReport
+  alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
+  alias Fleet.Workflow.Pinning
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   @doc """
@@ -220,9 +223,64 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
     case diagnoser().probe(ctx.repo, head, conflict_face_opts(ctx)) do
-      {:ok, diagnosis} -> tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx)
-      {:error, _} -> :fall_through
+      {:ok, diagnosis} ->
+        tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx, diagnosis)
+
+      {:error, _} ->
+        :fall_through
     end
+  end
+
+  # THE ENGINE'S REASONING REACHES A READER. `Fleet.Conflict` names the DecisionTrace its durable
+  # value — "the REFUSAL is documented as much as the acceptance" — and it was produced per hunk,
+  # carried by every Report, and dropped here: this router read `totals` and nothing else. The engine
+  # wrote a machine's worth of reasoning and published a count.
+  #
+  # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by
+  # `lcars-conflict-engine`. The two are different facts and both are true: the engine held the pen,
+  # the chief owns the act (user split — gatekeeper = verdicts, chief = the merge). Signing the
+  # report with the engine would name a machine as the responsible party for a call a role answers
+  # for.
+  #
+  # Best-effort by construction: a report that cannot be posted must never turn an auto-resolution
+  # into a failure, nor block a hand-off. It logs and the routing continues — the reasoning is a
+  # reader's aid, not a precondition of the act it describes.
+  defp post_conflict_report(pr_number, diagnosis, outcome, %Ctx{} = ctx) do
+    body =
+      diagnosis
+      |> ConflictReport.render(outcome)
+      |> Pinning.render(
+        work_dir: conflict_report_work_dir(ctx),
+        ref: Fleet.Layout.conflict_ref(pr_number),
+        kind: "Rapport",
+        label: "conflict"
+      )
+
+    case ForgeClient.as_role(ctx.forge_opts, Fleet.Pilot.Roles.conflict_resolver_role()) do
+      {:ok, role_opts} ->
+        case ctx.forge.post_comment(ctx.repo, pr_number, body, role_opts) do
+          {:ok, _} ->
+            :ok
+
+          {:error, why} ->
+            Logger.warning(
+              "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} " <>
+                "(#{inspect(why)}) — the routing stands, only its explanation is missing"
+            )
+        end
+
+      {:error, why} ->
+        Logger.warning(
+          "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} — no chief " <>
+            "identity (#{inspect(why)}); posting it under the system account would name the " <>
+            "wrong owner for the call"
+        )
+    end
+  end
+
+  defp conflict_report_work_dir(%Ctx{} = ctx) do
+    dir = Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(ctx.repo))
+    if File.dir?(dir), do: dir
   end
 
   @doc false
@@ -252,7 +310,27 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # `[conflict-chief:pr-N` count, so this path cannot loop and cannot spend a second pass if the
   # producer route already spent one. `producer_rounds: 0` is the honest figure on this path — no
   # producer round was run, and the arch escalation message must not claim otherwise.
-  defp tier0_act(:chief, pr_number, head, reason, ctx) do
+  defp tier0_act(:chief, pr_number, head, reason, ctx, diagnosis) do
+    _ = post_conflict_report(pr_number, diagnosis, :all_semantic, ctx)
+    do_tier0_chief(pr_number, head, reason, ctx)
+  end
+
+  defp tier0_act(:apply, pr_number, head, reason, ctx, diagnosis) do
+    case do_tier0_apply(pr_number, head, reason, ctx) do
+      {:handled, _} = handled ->
+        # AFTER the write, not before: a report announcing a resolution that then failed to apply
+        # would be the only durable trace of something that did not happen.
+        _ = post_conflict_report(pr_number, diagnosis, :auto_resolved, ctx)
+        handled
+
+      other ->
+        other
+    end
+  end
+
+  defp tier0_act(:fall_through, _pr, _head, _reason, _ctx, _diagnosis), do: :fall_through
+
+  defp do_tier0_chief(pr_number, head, reason, ctx) do
     Logger.info(
       "Remediation: PR #{ctx.repo}##{pr_number} conflict is all-semantic → chief exception pass " <>
         "(tier-0, producer rounds skipped on evidence)"
@@ -261,7 +339,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     {:handled, exception_stage(pr_number, head, {:conflict_all_semantic, reason}, ctx, 0)}
   end
 
-  defp tier0_act(:apply, pr_number, head, _reason, ctx) do
+  defp do_tier0_apply(pr_number, head, _reason, ctx) do
     case applier().apply(ctx.repo, head, conflict_face_opts(ctx)) do
       {:ok, :auto_resolved} ->
         Logger.info(
@@ -274,8 +352,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         :fall_through
     end
   end
-
-  defp tier0_act(:fall_through, _pr_number, _head, _reason, _ctx), do: :fall_through
 
   defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
 
