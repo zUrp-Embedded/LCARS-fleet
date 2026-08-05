@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-05
   """
 
   use Mix.Task
@@ -104,7 +104,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
-        check_mcp_seam_surface(root)
+        check_mcp_seam_surface(root),
+        check_forge_fields_read(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1513,6 +1514,100 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         nil
     end)
     |> Enum.uniq()
+  end
+
+  # ── Forge payload fields: received, and read? ────────────────────────
+  # PROBE N°1 of the 2026-08-04 pattern hunt, promoted from a one-off command to a wall.
+  #
+  # The forge hands back whole objects. The code picks what it needs and the rest is dropped
+  # silently — which is correct, right up until the dropped part is the answer to a question someone
+  # is reconstructing from the outside. Measured that day: `submitted_at`, `merged_at`, `closed_at`
+  # and `html_url` arrived in payloads already fetched (`get_pull`, `get_issue`, `reviews`) and NO
+  # line of `lib/` touched them. That list was EXACTLY what the architect had spent three campaigns
+  # rebuilding — and one command produced it, with no bench and no agent.
+  #
+  # `submitted_at` has three readers since 2026-08-05 (the reviews now carry their substance to the
+  # arch), which is the probe having already paid for itself.
+  #
+  # WHAT THIS IS NOT: a demand that every field be consumed. Most have no business being read. The
+  # wall is on the DECISION: a field is read, or it is listed below with what we know about why. An
+  # entry with no recorded reason says so in those words — an allowlist that invents rationales is
+  # worse than one that admits it is a queue.
+  #
+  # FROZEN at the current state, per the arbitration: this catches a field that LOSES its last
+  # reader, and a new field added to the inventory without a decision. It does not re-litigate the
+  # past.
+  @forge_read_fields ~w(state merged number title body labels commit_id dismissed login head base
+                        sha assignees full_name submitted_at created_at updated_at)
+
+  @forge_unread_fields %{
+    "merged_at" =>
+      "the merge is PROVEN by the `stage/merged` label (WS1, set by the seal at merge); a " <>
+        "timestamp would be a second source of the same fact, and the two can disagree",
+    "closed_at" =>
+      "no decision recorded — not read, no reason established. A candidate for the next pass, " <>
+        "not a justification",
+    "html_url" =>
+      "URLs are composed from repo + number against the configured base_url; a forge-supplied " <>
+        "one would carry whatever host answered, which is not necessarily the one we address"
+  }
+
+  @doc false
+  def check_forge_fields_read(root) do
+    lib = Path.join(root, "fleet/runtime/lib")
+    lib = if File.dir?(lib), do: lib, else: Path.join(root, "lib")
+
+    unread = Enum.reject(@forge_read_fields, &field_read?(lib, &1))
+    resurrected = Enum.filter(Map.keys(@forge_unread_fields), &field_read?(lib, &1))
+
+    # INSTRUMENT GUARD: the whole check is a set of greps over a tree. A wrong root, a moved lib/,
+    # and every field reads as unread — a loud failure, which is survivable — or the inventory goes
+    # empty and everything passes, which is not.
+    broken =
+      cond do
+        not File.dir?(lib) -> "lib/ not found under #{root}"
+        length(@forge_read_fields) < 10 -> "inventory shrank to #{length(@forge_read_fields)}"
+        true -> nil
+      end
+
+    %{
+      id: "forge.payload_fields_read",
+      remediation:
+        "either read the field where it answers a real question, or move it to " <>
+          "@forge_unread_fields WITH what is known about why — including \"no reason recorded\" " <>
+          "when that is the truth",
+      status: if(is_nil(broken) and unread == [] and resurrected == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          unread != [] -> ["fields that LOST their last reader: #{inspect(Enum.sort(unread))}"]
+          resurrected != [] -> ["now read, remove from the allowlist: #{inspect(resurrected)}"]
+          true -> []
+        end,
+      note:
+        "#{length(@forge_read_fields)} fields read, #{map_size(@forge_unread_fields)} deliberately " <>
+          "not (1 of them with no reason recorded — that is a queue, not an answer)"
+    }
+  end
+
+  # A quoted key anywhere in `lib/`, MINUS `lib/mix/tasks/`. Deliberately coarse on the pattern: the
+  # question is "does anything in this code touch that name", and a stricter parse would answer a
+  # narrower one.
+  #
+  # THE EXCLUSION IS THE LOAD-BEARING PART, and the first run proved it: the allowlist below LIVES in
+  # this file, so `"closed_at" =>` counted as a reader and all three deliberately-unread fields
+  # reported themselves as read. The instrument was measuring its own declaration — the exact defect
+  # class this check exists to catch, arriving first in the check itself.
+  #
+  # Gate tooling is excluded on its own merit too: a field named in a mix task is named by the
+  # machinery that audits the product, not by the product answering a question with it.
+  defp field_read?(lib, field) do
+    args = ["-rq", "--include=*.ex", "--exclude-dir=tasks", ~s("#{field}"), lib]
+
+    case System.cmd("grep", args, stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
   end
 
   defp quoted!(root, rel), do: root |> Path.join(rel) |> File.read!() |> Code.string_to_quoted!()
