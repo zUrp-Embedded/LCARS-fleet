@@ -245,8 +245,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # to prevent). So we grep the WHOLE coord lib (glob of REAL files, not a
     # dead file) for the `NotWiredYet` placeholder that must not reappear
     # in the coord gate-path.
+    coord_sources = Path.wildcard(Path.join(root, "lib/fleet/coord/**/*.ex"))
+
     notwired =
-      Path.wildcard(Path.join(root, "lib/fleet/coord/**/*.ex"))
+      coord_sources
       |> Enum.flat_map(fn file ->
         file
         |> grep_lines(~r/NotWiredYet/)
@@ -263,15 +265,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     evidence = notwired ++ gates_coord_dep
 
-    %{
-      id: "coord.backend.wired_or_pure",
-      remediation:
-        "keep the LLM gate on the gatekeeper (pure Gates) — no residual NotWiredYet nor coord delegation",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "LLM gate consolidated on the gatekeeper (pure Gates); no residual NotWiredYet nor coord delegation"
-    }
+    if measured_nothing?(coord_sources) do
+      broken_result("coord.backend.wired_or_pure", "source under lib/fleet/coord")
+    else
+      %{
+        id: "coord.backend.wired_or_pure",
+        remediation:
+          "keep the LLM gate on the gatekeeper (pure Gates) — no residual NotWiredYet nor coord delegation",
+        status: if(evidence == [], do: :pass, else: :fail),
+        evidence: evidence,
+        note:
+          "LLM gate consolidated on the gatekeeper (pure Gates); no residual NotWiredYet nor coord delegation"
+      }
+    end
   end
 
   # `compose_claude_md/3` must read `spec.invocation.lifetime_scope` (the canonical
@@ -474,14 +480,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     unregistered = Enum.reject(consumed, &MapSet.member?(registry, &1))
 
-    %{
-      id: "events.registry.keys_aligned",
-      remediation:
-        "add the consumed type(s) to events.yaml (every handle_info %Fleet.Event{type:} must be a registry key)",
-      status: if(unregistered == [], do: :pass, else: :fail),
-      evidence: Enum.map(unregistered, &"consumed type outside registry: #{&1}"),
-      note: "every consumed type (handle_info %Fleet.Event{type:}) must be an events.yaml key"
-    }
+    # BOTH sides are the population here: an empty registry makes every consumed type unregistered
+    # (loud, fine), but an empty SOURCE set makes `consumed` empty and the wall green about a code
+    # base it never opened.
+    cond do
+      measured_nothing?(registry) ->
+        broken_result("events.registry.keys_aligned", "key in events.yaml")
+
+      measured_nothing?(Path.wildcard(Path.join(root, "lib/**/*.ex"))) ->
+        broken_result("events.registry.keys_aligned", "source under lib/")
+
+      true ->
+        %{
+          id: "events.registry.keys_aligned",
+          remediation:
+            "add the consumed type(s) to events.yaml (every handle_info %Fleet.Event{type:} must be a registry key)",
+          status: if(unregistered == [], do: :pass, else: :fail),
+          evidence: Enum.map(unregistered, &"consumed type outside registry: #{&1}"),
+          note: "every consumed type (handle_info %Fleet.Event{type:}) must be an events.yaml key"
+        }
+    end
   end
 
   defp registry_event_keys(root) do
@@ -521,8 +539,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_no_cowboy_bypass(root) do
     builder = "lib/fleet/event_router/listener.ex"
 
+    lib_sources = Path.wildcard(Path.join(root, "lib/**/*.ex"))
+
     bypass =
-      Path.wildcard(Path.join(root, "lib/**/*.ex"))
+      lib_sources
       |> Enum.reject(&(Path.relative_to(&1, root) == builder))
       |> Enum.flat_map(fn file ->
         file
@@ -533,18 +553,24 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         |> Enum.map(fn {ln, _} -> "#{Path.relative_to(file, root)}:#{ln}" end)
       end)
 
-    %{
-      id: "listener.no_cowboy_bypass",
-      remediation: "route the listener through Fleet.EventRouter.Listener.cowboy_child/1",
-      status: if(bypass == [], do: :pass, else: :fail),
-      evidence:
-        Enum.map(
-          bypass,
-          &"#{&1} : a Plug.Cowboy listener child-spec is built outside listener.ex — loopback-by-construction bypassed"
-        ),
-      note:
-        "the Plug.Cowboy listener child-spec has a single builder (Listener.cowboy_child/1, loopback :ip by construction); no surface builds one of its own"
-    }
+    # The BUILDER is part of the population too: this wall says "nobody but the listener builds a
+    # Cowboy child", and if the listener itself has moved, the sentence is about nothing.
+    if measured_nothing?(lib_sources) or not File.exists?(Path.join(root, builder)) do
+      broken_result("listener.no_cowboy_bypass", "source under lib/ (or the listener itself)")
+    else
+      %{
+        id: "listener.no_cowboy_bypass",
+        remediation: "route the listener through Fleet.EventRouter.Listener.cowboy_child/1",
+        status: if(bypass == [], do: :pass, else: :fail),
+        evidence:
+          Enum.map(
+            bypass,
+            &"#{&1} : a Plug.Cowboy listener child-spec is built outside listener.ex — loopback-by-construction bypassed"
+          ),
+        note:
+          "the Plug.Cowboy listener child-spec has a single builder (Listener.cowboy_child/1, loopback :ip by construction); no surface builds one of its own"
+      }
+    end
   end
 
   # ── Remediation rails ─────────────────────────────────────────────
@@ -851,6 +877,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (absent file = 0 hit = pass): list here only live files whose
   # existence is guarded elsewhere — for a residue on a potentially
   # dead file, grep a glob (cf. check_coord_backend_wired).
+  # POPULATION GUARD — zero subjects and zero violations are indistinguishable at the output of an
+  # absence-of-violation wall. Every check below that answers "nothing violates X" owes its reader
+  # the count it looked at: a glob that matches nothing, a registry that loads empty, a directory
+  # that moved, all read as compliance otherwise. Measured 2026-08-06 by pointing the checker at an
+  # empty tree — SEVEN of twenty-nine passed (BL-6-70), including walls whose subject had already
+  # moved twice that night.
+  # Two clauses, and no third for integers: nothing counts before asking. A speculative clause is a
+  # branch no test can reach and no reader can trust — dialyzer named it, and it was right.
+  defp measured_nothing?(population) when is_list(population), do: population == []
+  defp measured_nothing?(%MapSet{} = population), do: MapSet.size(population) == 0
+
+  defp broken_result(id, what) do
+    %{
+      id: id,
+      remediation:
+        "point the check at a tree that contains its subject, or fix the path it scans",
+      status: :fail,
+      evidence: ["INSTRUMENT BROKEN — no #{what} found; this check measured nothing"],
+      note: "population empty"
+    }
+  end
+
   defp residue_check(root, opts) do
     confirm = Map.get(opts, :confirm) || opts.pattern
 
@@ -872,13 +920,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         end
       end)
 
-    %{
-      id: opts.id,
-      remediation: opts.remediation,
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note: opts.note
-    }
+    # The existing hollow-green guard below covers a NAMED file that vanished. It cannot cover a
+    # GLOB that matched nothing: the flat_map produces no evidence and the wall reports compliance
+    # about a set it never had. Same defect, one level up.
+    if measured_nothing?(opts.files) do
+      broken_result(opts.id, "file to scan")
+    else
+      %{
+        id: opts.id,
+        remediation: opts.remediation,
+        status: if(evidence == [], do: :pass, else: :fail),
+        evidence: evidence,
+        note: opts.note
+      }
+    end
   end
 
   # Family C — evidence-list: `items` = [{ok?, message}], conditions evaluated at the
@@ -1119,24 +1174,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
-    duplicates =
+    indexed =
       scan_catalogue_roles(root)
       |> Enum.filter(&is_integer(&1.role_index))
+
+    duplicates =
+      indexed
       |> Enum.group_by(& &1.role_index, & &1.name)
       |> Enum.filter(fn {_idx, names} -> length(names) > 1 end)
 
-    %{
-      id: "roles.role_index_unique",
-      remediation:
-        "two catalogue entries claim the same role_index slot — reassign one (0..15, " <>
-          "see each file's metadata comment for the taken slots)",
-      status: if(duplicates == [], do: :pass, else: :fail),
-      evidence:
-        Enum.map(duplicates, fn {idx, names} ->
-          "role_index #{idx} claimed by: #{Enum.join(Enum.sort(names), ", ")}"
-        end),
-      note: "role_index (hexspeak UUID slot) unique across the canon catalogue, seats included"
-    }
+    if measured_nothing?(indexed) do
+      broken_result("roles.role_index_unique", "catalogue role carrying a role_index")
+    else
+      %{
+        id: "roles.role_index_unique",
+        remediation:
+          "two catalogue entries claim the same role_index slot — reassign one (0..15, " <>
+            "see each file's metadata comment for the taken slots)",
+        status: if(duplicates == [], do: :pass, else: :fail),
+        evidence:
+          Enum.map(duplicates, fn {idx, names} ->
+            "role_index #{idx} claimed by: #{Enum.join(Enum.sort(names), ", ")}"
+          end),
+        note: "role_index (hexspeak UUID slot) unique across the canon catalogue, seats included"
+      }
+    end
   end
 
   # The word "sanctuaire"/"sanctuary" carries a dominant NL prior — sacred, untouchable — and its
@@ -1159,9 +1221,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   )
 
   defp check_sanctuary_contained(root) do
-    offenders =
+    scanned =
       ["lib", "bin", "etc"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs,sh}"])) end)
+
+    offenders =
+      scanned
       |> Enum.filter(fn f ->
         rel = Path.relative_to(f, root)
 
@@ -1171,18 +1236,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       end)
       |> Enum.map(&Path.relative_to(&1, root))
 
-    %{
-      id: "vocab.sanctuary_contained",
-      remediation:
-        "le mot « sanctuaire »/« sanctuary » porte un prior NL dominant (sacre, intouchable) que " <>
-          "seule de la prose corrige — et la prose est ce qu'une compression de contexte retire " <>
-          "d'abord. Employer un terme descriptif (le monde projete, le perimetre du pod), ou " <>
-          "ajouter le fichier a @sanctuary_allowed EN Y METTANT l'anticorps",
-      status: if(offenders == [], do: :pass, else: :fail),
-      evidence: offenders,
-      note:
-        "le mot reste borne aux #{length(@sanctuary_allowed)} fichiers qui portent son anticorps (BL-6-44)"
-    }
+    if measured_nothing?(scanned) do
+      broken_result("vocab.sanctuary_contained", "source under lib/, bin/ or etc/")
+    else
+      %{
+        id: "vocab.sanctuary_contained",
+        remediation:
+          "le mot « sanctuaire »/« sanctuary » porte un prior NL dominant (sacre, intouchable) que " <>
+            "seule de la prose corrige — et la prose est ce qu'une compression de contexte retire " <>
+            "d'abord. Employer un terme descriptif (le monde projete, le perimetre du pod), ou " <>
+            "ajouter le fichier a @sanctuary_allowed EN Y METTANT l'anticorps",
+        status: if(offenders == [], do: :pass, else: :fail),
+        evidence: offenders,
+        note:
+          "le mot reste borne aux #{length(@sanctuary_allowed)} fichiers qui portent son anticorps (BL-6-44)"
+      }
+    end
   end
 
   # `provision-lib.sh` is SOURCED, so it inherits its caller's shell flags — it sets none of its
