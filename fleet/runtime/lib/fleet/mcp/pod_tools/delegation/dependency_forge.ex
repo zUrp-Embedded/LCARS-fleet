@@ -9,7 +9,8 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
   `{:seam_misconfigured, mod, missing}` instead of an obscure `UndefinedFunctionError` deep in the
   delegation — and for the dependency ops it could not, because it only knows what a behaviour
   declares. The guard was not wrong; it was blind to a surface nobody had written down. Measured
-  2026-08-04: 12 callbacks declared, 16 functions called through the seam.
+  A seam call with no @callback on its path is vouched for by nothing: `conforming/2` can only
+  answer for what a behaviour declares.
 
   The failure it prevents is not cosmetic. The edge carry-over runs INSIDE the supersede retirement,
   after the live PR has been closed: an `UndefinedFunctionError` there leaves the old ticket closed
@@ -24,7 +25,7 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
   not against a fresh resolution: the question is whether THIS module carries the surface, and
   re-resolving could answer about a different one.
 
-  **Last revised**: 2026-08-04
+  **Last revised**: 2026-08-06
   """
 
   @doc "The issues BLOCKING `number` — what it waits on (raw Gitea maps)."

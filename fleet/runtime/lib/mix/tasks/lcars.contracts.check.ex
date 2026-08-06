@@ -897,9 +897,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # POPULATION GUARD — zero subjects and zero violations are indistinguishable at the output of an
   # absence-of-violation wall. Every check below that answers "nothing violates X" owes its reader
   # the count it looked at: a glob that matches nothing, a registry that loads empty, a directory
-  # that moved, all read as compliance otherwise. Measured 2026-08-06 by pointing the checker at an
-  # empty tree — SEVEN of twenty-nine passed (BL-6-70), including walls whose subject had already
-  # moved twice that night.
+  # that moved, all read as compliance otherwise. The probe that finds them: point the checker at an
+  # EMPTY tree and read what still returns `pass` (BL-6-70). Walls whose subject has moved out from
+  # under them are the ones it catches, and a subject moves in the same commit that adds the wall.
   # Two clauses, and no third for integers: nothing counts before asking. A speculative clause is a
   # branch no test can reach and no reader can trust — dialyzer named it, and it was right.
   defp measured_nothing?(population) when is_list(population), do: population == []
@@ -1527,7 +1527,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The `conforming/2` guard turns a misconfigured seam into a named error instead of an
   # UndefinedFunctionError raised deep inside a half-finished gesture. It can only see what a
   # behaviour DECLARES — so a seam op nobody wrote down is a call the guard vouches for without
-  # having checked it. Measured 2026-08-04: 12 callbacks declared, 16 functions called; the three
+  # having checked it. Every seam call must be covered by a @callback of the behaviour on its path; the three
   # dependency ops ran inside the supersede retirement, past the point where the live PR is already
   # closed, guarded by nothing.
   #
@@ -1625,7 +1625,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # line of `lib/` touched them. That list was EXACTLY what the architect had spent three campaigns
   # rebuilding — and one command produced it, with no bench and no agent.
   #
-  # `submitted_at` has three readers since 2026-08-05 (the reviews now carry their substance to the
+  # `submitted_at` is READ (the reviews carry their substance to the
   # arch), which is the probe having already paid for itself.
   #
   # WHAT THIS IS NOT: a demand that every field be consumed. Most have no business being read. The
