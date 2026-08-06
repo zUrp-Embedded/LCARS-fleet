@@ -9,7 +9,7 @@
 # (CHECK-ON any, APPLY-ON sans docker : les paquets sont des layers de l'image — mais bwrap
 # opérationnel et l'outillage présent doivent être VRAIS en conteneur, et le doctor les y sonde.)
 #
-# Le strict nécessaire au RUNTIME v2 (le contrat vit dans fleet/runtime/etc/README.md) :
+# Le strict nécessaire au RUNTIME v2 (le contrat vit dans fleet/etc/README.md) :
 #   tmux        — sessions pod (host_launch/bwrap_launch) + le daemon fleet_v2
 #   bubblewrap  — containment des pods (bwrap_launch.sh, sanctuaire)
 #   git         — push per-step-run vers la forge

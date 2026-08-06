@@ -289,7 +289,7 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     # push a la main : le contenu vient du catalogue, la tache est la seule a savoir l'assembler.
     printf '%s\n' "$SYS_TOKEN" > "$HERE/.bench-system.token"
     chmod 600 "$HERE/.bench-system.token"
-    ( cd "$REPO_ROOT/fleet/runtime" && FORGE_BASE_URL="$FORGE_URL" \
+    ( cd "$REPO_ROOT/fleet" && FORGE_BASE_URL="$FORGE_URL" \
         FORGE_TOKEN_FILE="$HERE/.bench-system.token" mix lcars.project_template.sync >/dev/null 2>&1 ) \
       && say "fleet/project-template : synchronise (contenu + flag + labels)" \
       || say "fleet/project-template : sync EN ECHEC (onboard degradera en bare-create)"

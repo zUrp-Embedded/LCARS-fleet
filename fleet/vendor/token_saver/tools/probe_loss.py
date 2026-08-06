@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/runtime/vendor/token_saver/tools/probe_loss.py
+# SOURCE: fleet/vendor/token_saver/tools/probe_loss.py
 # AUTHOR: starfleet (reverse ppgranger/token-saver, 2026-08-03)
 # STARDATE: 2026-08-03
 # STATUS: harnais de mesure de PERTE — critere de recette de la brique (14/24 amont natif,

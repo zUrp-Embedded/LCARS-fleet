@@ -53,14 +53,15 @@ esac
 command -v python3 >/dev/null 2>&1 || exit 0
 
 # Resolution — du plus explicite au plus devine. Premier trouve gagne.
+# Les candidats etaient APPARIES (chemin post-demenagement avant chemin pre-) pour survivre a la
+# bascule sans etre touches. Le demenagement est fait (2026-08-07) : les trois chemins
+# `fleet/runtime/vendor` ne designent plus rien et sont retires. Garder un candidat mort n'est pas
+# gratuit — il fait croire a une couverture qu'il n'assure plus.
 _candidats=(
     "${LCARS_TOKEN_SAVER_HOME:-}"
     "/opt/lcars/fleet/vendor/token_saver"
-    "/opt/lcars/fleet/runtime/vendor/token_saver"
     "/local/LCARS_v2/fleet/vendor/token_saver"
-    "/local/LCARS/fleet/runtime/vendor/token_saver"
     "${LCARS_ROOT:-}/fleet/vendor/token_saver"
-    "${LCARS_ROOT:-}/fleet/runtime/vendor/token_saver"
 )
 
 _hook=""

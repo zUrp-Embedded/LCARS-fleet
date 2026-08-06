@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/runtime/vendor/token_saver/lcars_wrap.py
+# SOURCE: fleet/vendor/token_saver/lcars_wrap.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: bootstrap de l'adapter puis delegation a scripts/wrap.py

@@ -10,7 +10,7 @@
 # RO, la release présente et le câblage bin sont l'état-cible PARTOUT — le doctor conteneur qui ne
 # les sondait pas était muet sur les faits les plus pertinents du substrat.)
 #
-# Ce module N'INVENTE PAS le déploiement : fleet/runtime/etc/install.sh est l'autorité (modèle
+# Ce module N'INVENTE PAS le déploiement : fleet/etc/install.sh est l'autorité (modèle
 # 3 zones SOURCE→INSTALL→STATE, release self-contained, idempotent). Ici, on mécanise la carte de
 # déploiement AUTOUR de lui — les gestes qui étaient à la main :
 #   1. dévérouiller $PREFIX pour l'humain-bâtisseur (install.sh tourne SANS sudo, la carte l'exige :
@@ -29,7 +29,7 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-RUNTIME_DIR="$(repo_root)/fleet/runtime"
+RUNTIME_DIR="$(repo_root)/fleet"
 # Le manifeste qu'install.sh consomme — le doctor est aussi aveugle au contenu que l'installeur :
 # ajouter/retirer un fichier livré se fait DANS etc/install.manifest, jamais ici.
 MANIFEST="$RUNTIME_DIR/etc/install.manifest"
@@ -111,8 +111,8 @@ apply() {
   src_sha="$(git -C "$(repo_root)" rev-parse --short HEAD 2>/dev/null || true)"
   deployed_sha="$(build_sha)"
   if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
-      && git -C "$(repo_root)" diff --quiet HEAD -- fleet/runtime 2>/dev/null && release_present; then
-    p_ok "build déployé $deployed_sha == HEAD source (fleet/runtime propre) — rien à bâtir"
+      && git -C "$(repo_root)" diff --quiet HEAD -- fleet 2>/dev/null && release_present; then
+    p_ok "build déployé $deployed_sha == HEAD source (fleet propre) — rien à bâtir"
     # Le câblage /usr/local/bin peut quand même avoir dérivé : on le re-converge, c'est gratuit.
     local name _mode is_link
     while read -r name _mode is_link; do

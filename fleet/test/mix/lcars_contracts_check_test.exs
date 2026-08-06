@@ -27,8 +27,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     assert fails == [], "non-green checks: #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
   end
 
-  # BL-6-45 / bench 2026-08-02: the check reads TWO lists outside `fleet/runtime`, and the image
-  # BUILD stage copies fleet/runtime ALONE before running this gate — a fail-closed on their
+  # BL-6-45 / bench 2026-08-02: the check reads TWO lists outside `fleet`, and the image
+  # BUILD stage copies fleet ALONE before running this gate — a fail-closed on their
   # absence broke the image build (measured: `forge.tf: list not readable` inside the Docker
   # build). Absence is scoped at the TREE level: no sibling tree = out of scope, SKIPPED and
   # NAMED in the note; the equality still runs on what the artifact does carry.
@@ -40,10 +40,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     assert lock.status == :pass
 
     # The assertion follows the ARTIFACT: a full checkout must check all four lists; a
-    # runtime-only one (the image build stage copies fleet/runtime alone) must NAME what it
+    # runtime-only one (the image build stage copies fleet alone) must NAME what it
     # could not see — the one thing that must never happen is a silent pass on absent ground.
     # SAME derivation as the check: the runtime root, then its SIBLING tree
-    # (test/mix -> runtime = "../..", then "../deploy").
+    # (test/mix -> la racine Mix = "../..", puis "deploy" — depuis le demenagement `deploy/` est un
+    # ENFANT de la racine, plus un frere : le prefixe `../` visait `fleet/` quand la racine etait
+    # `fleet/runtime`.)
     #
     # `deploy`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
     # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
@@ -52,7 +54,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # that agrees by coincidence is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
-    if File.dir?(Path.expand("../deploy", runtime_root)) do
+    if File.dir?(Path.expand("deploy", runtime_root)) do
       refute lock.note =~ "NOT CHECKED"
     else
       assert lock.note =~ "NOT CHECKED"

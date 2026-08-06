@@ -1,4 +1,4 @@
-# SOURCE: fleet/runtime/vendor/token_saver/adapter.py
+# SOURCE: fleet/vendor/token_saver/adapter.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: adaptateur LCARS du moteur token-saver — correctifs F3/F4/F5/F6/F7/F9/F10 hors sous-arbre vendore

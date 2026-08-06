@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/runtime/test/test_fleet_mcp_stdio_bridge.py
+# SOURCE: fleet/test/test_fleet_mcp_stdio_bridge.py
 # AUTHOR: starfleet (consolidation run 2026-05-27)
 # STARDATE: 2026.147
 # STATUS: regression test — MCP stdio bridge (bin/fleet_mcp_stdio_bridge.py), central STUBBED (AF_UNIX
@@ -13,7 +13,7 @@
 # Does NOT cover (= supervised e2e gates): the real central fleet_mcp (Elixir round-trip), execution in
 # a real bwrap pod. Nor any tool SCHEMA: since F-C138 the bridge holds no catalogue, so there is nothing
 # schema-shaped here to test — see the Elixir side (test/pod_socket_test.exs).
-# Run: python3 fleet/runtime/test/test_fleet_mcp_stdio_bridge.py  (exit 0 = pass).
+# Run: python3 fleet/test/test_fleet_mcp_stdio_bridge.py  (exit 0 = pass).
 import json
 import os
 import socketserver

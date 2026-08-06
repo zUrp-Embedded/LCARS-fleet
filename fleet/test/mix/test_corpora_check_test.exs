@@ -19,8 +19,11 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     root = Path.join(System.tmp_dir!(), "batscorp_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(root) end)
 
-    # The check derives the repo root as `../..` from the runtime dir it is handed.
-    runtime = Path.join([root, "fleet", "runtime"])
+    # The check derives the repo root as `..` from the Mix root it is handed. It was `../..` while
+    # the Mix root was `fleet/runtime`; the 2026-08-07 move made `fleet/` itself the root, and a
+    # fixture that keeps building the old shape makes the check's INSTRUMENT GUARD fire — which is
+    # what it did, loudly, instead of measuring an empty tree and reporting a pass.
+    runtime = Path.join(root, "fleet")
     File.mkdir_p!(Path.join(runtime, "test"))
 
     Enum.each(files, fn rel ->
@@ -78,7 +81,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       # site-packages carries hundreds of upstream suites. Excluding them IS the declaration; making
       # someone list them would be an inventory that grows with every dependency.
       runtime =
-        tree(["fleet/runtime/test/x/a.bats", "PoC/p/.venv/lib/site-packages/z/test_up.py"])
+        tree(["fleet/test/x/a.bats", "PoC/p/.venv/lib/site-packages/z/test_up.py"])
 
       assert Check.check_test_corpora_on_record(runtime).status == :pass
     end
@@ -91,7 +94,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       # ungated", a sentence that is false about a production file: the wall satisfied, the
       # statement a lie.
       runtime =
-        tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/processors/test_output.py"])
+        tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/processors/test_output.py"])
 
       assert Check.check_test_corpora_on_record(runtime).status == :pass
     end
@@ -101,7 +104,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       # wins. Otherwise the rule would hide real suites to avoid one false positive.
       result =
         Check.check_test_corpora_on_record(
-          tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/tests/test_engine.py"])
+          tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/tests/test_engine.py"])
         )
 
       assert result.status == :fail
@@ -111,7 +114,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     test "a `.bats` file needs no such care — the extension has one meaning anywhere" do
       result =
         Check.check_test_corpora_on_record(
-          tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/b.bats"])
+          tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/b.bats"])
         )
 
       assert result.status == :fail
@@ -123,7 +126,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     test "a suite in a directory no record mentions is named" do
       result =
         Check.check_test_corpora_on_record(
-          tree(["fleet/runtime/test/x/a.bats", "fleet/quelque_part/b.bats"])
+          tree(["fleet/test/x/a.bats", "fleet/quelque_part/b.bats"])
         )
 
       assert result.status == :fail
@@ -131,14 +134,14 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
 
       # The declared one must NOT be reported: a check that cries about what it accepts teaches its
       # reader to stop reading it.
-      refute hd(result.evidence) =~ "fleet/runtime/test"
+      refute hd(result.evidence) =~ "fleet/test"
     end
 
     test "a DIRECTORY named `.bats` is not mistaken for a corpus" do
       # `find -name '*.bats'` matches it, because `*` matches the empty string. Without `-type f`
       # the scan reports a folder as a suite — an instrument tripping on its own glob.
-      runtime = tree(["fleet/runtime/test/x/a.bats"])
-      File.mkdir_p!(Path.join([runtime, "..", "tests", ".bats"]))
+      runtime = tree(["fleet/test/x/a.bats"])
+      File.mkdir_p!(Path.join([runtime, "tests", ".bats"]))
 
       assert Check.check_test_corpora_on_record(runtime).status == :pass
     end

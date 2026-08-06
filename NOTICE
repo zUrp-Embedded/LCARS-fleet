@@ -12,7 +12,7 @@ GitWand
 
   What            An external TypeScript engine for automatic git-conflict
                   resolution.
-  Where in LCARS  `fleet/runtime/lib/fleet/conflict/` — the deterministic core
+  Where in LCARS  `fleet/lib/fleet/conflict/` — the deterministic core
                   (pattern matching, hunk classification, the composite score)
                   was RE-IMPLEMENTED in pure Elixir from a reverse-engineering
                   study. No GitWand source, artifact or dependency ships here.
@@ -23,7 +23,7 @@ GitWand
                   drop the rest, and put it behind our own jury loop, which
                   neutralises the data-loss motive: nothing is written without
                   being re-judged.
-  Provenance      `fleet/runtime/CONFLICT-ENGINE-handoff.md` carries the full
+  Provenance      `fleet/CONFLICT-ENGINE-handoff.md` carries the full
                   chain — audit, what was kept, what was refused and why.
 
   The study itself lives outside this repository and stays there DELIBERATELY:

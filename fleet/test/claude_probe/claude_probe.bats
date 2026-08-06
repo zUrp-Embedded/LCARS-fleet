@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/runtime/test/claude_probe/claude_probe.bats
+# SOURCE: fleet/test/claude_probe/claude_probe.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
 # STATUS: tests de la sonde de contrat vendor

@@ -14,7 +14,7 @@
 #   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il
 #      INSTRUIT le geste bootstrap (« ./docker.sh forge-bootstrap ») et n'exécute RIEN : même
 #      famille de gestes d'identité que « claude /login », sondés et instruits, jamais faits ;
-#   2. converge les TOKENS — délégués à fleet/runtime/etc/provision-role-tokens.sh (A4, une
+#   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
 #      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
 #      bootstrap est posé (PROV_FORGE_SEED_FILE = le TF_VAR_seed_password de tofu — les bots
@@ -35,7 +35,7 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 : "${PROV_PASSWORDS_FILE:=$PROV_TOKENS_DIR/forge-role-passwords.json}"
-A4_SCRIPT="$(repo_root)/fleet/runtime/etc/provision-role-tokens.sh"
+A4_SCRIPT="$(repo_root)/fleet/etc/provision-role-tokens.sh"
 ACCOUNTS="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
 
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }

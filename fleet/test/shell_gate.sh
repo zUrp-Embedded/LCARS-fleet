@@ -91,7 +91,7 @@ fi
 # commis trois fois de suite le 2026-08-06 (marqueur oublie, liste d'exemptions perimee, deux des
 # trois formes d'en-tete acceptees). Le hook reste l'autorite ; ce pas le REJOUE sur tout l'arbre.
 #
-# PERIMETRE : `fleet/runtime/` seulement, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
+# PERIMETRE : `fleet/` seulement, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
 # fichiers non conformes, tous dans `.claude/` (les artefacts de Claude Code lui-meme),
 # `docs_OBSOLETE/` (que le demenagement archive) ou v1 (que l'excommunion supprime) — gater ces
 # trois zones ferait rougir le gate sur du sursis. Le runtime, lui, est a ZERO aujourd'hui : le mur
@@ -100,7 +100,7 @@ fi
 # `REPO_ROOT` est (re)defini ICI et pas plus bas : la premiere version de ce pas le lisait avant sa
 # definition, donc `$GO7_HOOK` valait "/fleet/git-hooks/pre-commit", le `-f` echouait, et le pas
 # entier se sautait EN SILENCE — un mur pose le matin meme ou j'en fermais six de cette forme.
-REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 GO7_HOOK="$REPO_ROOT/fleet/git-hooks/pre-commit"
 
 # ABSENCE = ECHEC, jamais un saut. Le hook vit DANS le depot : s'il manque, l'arbre est casse, ce
@@ -112,7 +112,7 @@ if [[ ! -f "$GO7_HOOK" ]]; then
 fi
 
 if true; then
-  echo "--- GO-7 : en-tetes declaratifs sous fleet/runtime/ ---"
+  echo "--- GO-7 : en-tetes declaratifs sous fleet/ ---"
   eval "$(sed -n '/^is_ipc_exception()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^check_md_header()/,/^}/p' "$GO7_HOOK")"
@@ -141,10 +141,10 @@ if true; then
       # donc tout marqueur de presence serait vert par construction. Le motif complet est dans
       # l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
-  done < <(git -C "$REPO_ROOT" ls-files fleet/runtime)
+  done < <(git -C "$REPO_ROOT" ls-files fleet)
 
   if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
-    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/runtime/ :" >&2
+    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/ :" >&2
     printf '   %s
 ' "${GO7_BAD[@]}" >&2
     echo "   (le hook pre-commit dit la forme attendue par extension)" >&2
@@ -207,7 +207,7 @@ fi
 #    provisioning est ce qui fabrique la machine sur laquelle tout le reste tourne. Absence du
 #    repertoire = pas une erreur (meme regle que les skills).
 # ---------------------------------------------------------------------------
-REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
 PROVISION_TESTS="$REPO_ROOT/fleet/deploy/tests"
 HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/runtime/vendor/token_saver/lcars_hook.py
+# SOURCE: fleet/vendor/token_saver/lcars_hook.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: hook LCARS — switch, decision de routage, reecriture de commande

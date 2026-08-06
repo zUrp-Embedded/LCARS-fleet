@@ -8,18 +8,18 @@ name: Gate runtime (I-CBC)
 on:
   push:
     paths:
-      - 'fleet/runtime/**'
+      - 'fleet/**'
       - '.gitea/workflows/gate.yml'
   pull_request:
     paths:
-      - 'fleet/runtime/**'
+      - 'fleet/**'
 
 jobs:
   gate:
     runs-on: elixir
     defaults:
       run:
-        working-directory: fleet/runtime
+        working-directory: fleet
     steps:
       # PAS D'`actions/checkout` — c'est du node, et aucune image de label n'en porte. Le job
       # mourait a cette ligne, en 0 seconde, sur `exec: "node": executable file not found in
@@ -27,7 +27,7 @@ jobs:
       # (mesure du 2026-08-04, premier runner de banc reellement enregistre). La regle etait deja
       # ECRITE, ailleurs : le workflow du `project_template` porte le paragraphe qui l'interdit.
       # Ce fichier lui est anterieur, il etait le seul du depot a la violer.
-      # `working-directory: .` : le defaut du job pointe `fleet/runtime`, qui n'existe pas encore.
+      # `working-directory: .` : le defaut du job pointe `fleet`, qui n'existe pas encore.
       # LE JETON N'EST PAS UNE PRECAUTION, C'EST LA CONDITION : `private: false` cote API ne dit
       # RIEN de git-over-HTTP, qui refuse l'anonyme sur cette forge (`could not read Username`,
       # exit 128 — mesure du 2026-08-04). Le jeton de job est fourni par la forge elle-meme et vit

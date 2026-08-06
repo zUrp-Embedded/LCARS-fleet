@@ -1,4 +1,4 @@
-# SOURCE: fleet/runtime/vendor/token_saver/lcars_processors.py
+# SOURCE: fleet/vendor/token_saver/lcars_processors.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: processeurs LCARS — safe_build_process (F6 : ne jamais affirmer un succes non constate)

@@ -1,4 +1,4 @@
-# SOURCE: fleet/runtime/vendor/token_saver/lcars_tests/test_contrat_amont.py
+# SOURCE: fleet/vendor/token_saver/lcars_tests/test_contrat_amont.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: MUR D'ANCRAGE AMONT — verifie un a un les symboles internes auxquels l'adapter s'accroche
@@ -192,7 +192,7 @@ class TestAncrageRoutage:
             "rm -rf work/scratchpad",
             "mv work/plan.md work/done/",
             "cp secrets.env /tmp/x",
-            "sed -i 's/a/b/' fleet/runtime/mix.exs",
+            "sed -i 's/a/b/' fleet/mix.exs",
             "echo x > work/notes.md",
             "cat foo >> work/journal.md",
             "chmod 777 /home/projects/LCARS",

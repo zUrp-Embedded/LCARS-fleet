@@ -1,4 +1,4 @@
-# SOURCE: fleet/runtime/vendor/token_saver/lcars_tests/test_adapter.py
+# SOURCE: fleet/vendor/token_saver/lcars_tests/test_adapter.py
 # AUTHOR: starfleet
 # STARDATE: 2026-08-04
 # STATUS: suite LCARS de l'adapter

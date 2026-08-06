@@ -46,6 +46,6 @@ jobs:
           done
 
           echo
-          echo "Comparer a fleet/runtime/mix.lock. Monter est le DEFAUT ; ne pas monter demande"
+          echo "Comparer a fleet/mix.lock. Monter est le DEFAUT ; ne pas monter demande"
           echo "une justification ecrite (BL-6-15). cowlib est une posture connue : la derniere"
           echo "version porte encore ses CVE, il n'y a rien vers quoi monter."

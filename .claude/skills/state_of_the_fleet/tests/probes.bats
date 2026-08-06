@@ -501,7 +501,7 @@ JSON
 
 mk_decl() { # <projects_root> <depot> <branche livrable> <branche work> [<work_root declare>]
   local root="$1" name="$2" mb="$3" wb="$4" wr="${5:-$TMP/w}" d
-  d="$root/$name/fleet/runtime/lib/fleet"; mkdir -p "$d/pilot"
+  d="$root/$name/fleet/lib/fleet"; mkdir -p "$d/pilot"
   printf '%s\n' \
     "    GitOps.run([\"clone\", \"--branch\", \"$mb\", url, proj_dir], auth: true)" \
     "    with :ok <- GitOps.run([\"init\", \"-q\", \"-b\", \"$wb\", work_dir], auth: false) do" \

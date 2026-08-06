@@ -1,7 +1,7 @@
 # fleet/deploy — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-07-31
+**Dernière révision** : 2026-08-07
 **Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
 tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
 corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
@@ -70,7 +70,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
 | 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
-| 60-deploy | wsl linux | any | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 60-deploy | wsl linux | any | orchestre `fleet/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même

@@ -29,7 +29,7 @@
 # Pass 1: auto-updates date stamps (STARDATE / **Dernière révision** / **Last revised**,
 #         incl. the **Last revised** footer inside Elixir @moduledoc) — accepted convenience.
 # Pass 2: checks header presence only — never auto-fixes missing headers. Two language
-#         regimes by path: runtime code paths (fleet/runtime/{lib,test,bin,etc}) use EN
+#         regimes by path: runtime code paths (fleet/{lib,test,bin,etc}) use EN
 #         labels (**Last revised**); everything else keeps FR labels.
 #
 # NO RULE FOR `.ex` — RETIRED 2026-08-06, and the reason belongs here. The clause required a
@@ -143,7 +143,7 @@ is_ipc_exception() {
     # demenagement du catalogue. L'exemption avait donc cesse de matcher EN SILENCE, et le mur
     # refusait ce qu'il avait ete ecrit pour laisser passer.
     [[ "$1" == *"project_template/"* ]] && return 0
-    # LE PACKAGE SP — hors perimetre par doctrine (`fleet/runtime/CLAUDE.md`, §Langue) : « ce n'est ni
+    # LE PACKAGE SP — hors perimetre par doctrine (`fleet/CLAUDE.md`, §Langue) : « ce n'est ni
     # du code ni de la sortie, c'est un package de configuration [...] il ne se traduit pas, il se
     # RE-ECRIT ». Un en-tete GO-7 y entrerait dans le contexte injecte a l'agent.
     #
@@ -172,12 +172,12 @@ check_source_header() {
     head -20 "$1" 2>/dev/null | grep -qEi "SOURCE:|AUTHOR:|STARDATE:"
 }
 
-# EN-label wall scope: the runtime's code tree. Deliberately NOT covered: fleet/runtime
+# EN-label wall scope: the runtime's code tree. Deliberately NOT covered: fleet
 # root files (CLAUDE.md, README.md — agent-control/user-facing surfaces, FR by design)
 # and priv/** (system prompts, FR by engraved rule).
 is_runtime_code_path() {
     case "$1" in
-        fleet/runtime/lib/*|fleet/runtime/test/*|fleet/runtime/bin/*|fleet/runtime/etc/*) return 0 ;;
+        fleet/lib/*|fleet/test/*|fleet/bin/*|fleet/etc/*) return 0 ;;
         *) return 1 ;;
     esac
 }

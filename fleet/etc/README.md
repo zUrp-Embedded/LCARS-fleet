@@ -47,7 +47,7 @@ d'alerté). Seuls les **symlinks PATH** vivent dans `/usr/local/bin` :
 
 Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c'est le contrat.
 
-**Procédure de deploy** (depuis `fleet/runtime`, gate vert exigé avant) :
+**Procédure de deploy** (depuis `fleet`, gate vert exigé avant) :
 
 ```bash
 MIX_ENV=prod mix release --overwrite

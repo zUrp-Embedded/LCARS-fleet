@@ -3,13 +3,13 @@
 # minimal = build rapide, zéro fuite (pas de work/, pas de credentials, pas de PoC) et un cache
 # qui ne s'invalide pas pour un fichier sans rapport.
 *
-!fleet/runtime
+!fleet
 !fleet/deploy
 !LICENSE
 
 # Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et
 # état d'éditeur — jamais dans une image (le stage build refait deps+release proprement).
-fleet/runtime/_build
-fleet/runtime/deps
-fleet/runtime/apps/*/tmp
-fleet/runtime/.elixir_ls
+fleet/_build
+fleet/deps
+fleet/apps/*/tmp
+fleet/.elixir_ls

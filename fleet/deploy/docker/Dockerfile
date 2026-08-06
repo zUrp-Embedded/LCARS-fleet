@@ -59,7 +59,7 @@ RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/s
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
-    && install -d -o builder -g fleet /local /src /src/fleet /src/fleet/runtime \
+    && install -d -o builder -g fleet /local /src /src/fleet /src/fleet \
     && install -d -o builder -g fleet /home/projects.work
 
 # HOME suit l'utilisateur — `USER` ne le change PAS (il resterait /root, et mix/hex écriraient
@@ -77,14 +77,32 @@ RUN curl -fsSL --proto '=https' -m 300 -o /tmp/claude-install.sh https://claude.
     && rm -f /tmp/claude-install.sh \
     && "$HOME/.local/bin/claude" --version
 
-WORKDIR /src/fleet/runtime
+WORKDIR /src/fleet
 # Le source runtime seul (contexte = racine repo, taillé par .dockerignore). Pas de .git : depuis
 # un worktree c'est un pointeur mort — build_info.txt dégrade proprement (sha=unknown) et la
 # vérité de révision est portée par le label OCI org.opencontainers.image.revision (build-arg).
 # La destination est PRÉ-CRÉÉE au bon owner ci-dessus : `--chown` ne couvre que le contenu copié,
 # jamais les dossiers que COPY crée en chemin (ils naîtraient root, et `mix deps.get` — qui écrit
 # `deps/` DANS ce dossier — mourrait en :eacces).
-COPY --chown=builder:fleet fleet/runtime /src/fleet/runtime
+# COPY EXPLICITE, jamais `COPY fleet /src/fleet` (piege P4 du plan de demenagement). Depuis que
+# `fleet/` EST la racine Mix, un COPY du repertoire entier embarquerait `deploy/`, `git-hooks/` et
+# `system-prompt/` dans l'etage de compilation Elixir — des arbres qui n'y etaient jamais avant le
+# demenagement (l'ancien `COPY fleet/runtime` ne voyait que le runtime). La liste ci-dessous EST
+# l'ancien perimetre, nomme.
+#
+# Elle contient plus que lib+priv+config parce que CE STAGE JOUE LE GATE COMPLET : `test/` porte la
+# suite et `test/shell_gate.sh`, `vendor/` porte la brique token-saver dont le gate joue la suite
+# d'ancrage amont, et les quatre dotfiles portent format/credo/dialyzer. Retirer l'un d'eux ne
+# casse pas le COPY : il rend le gate vert sur moins, ce qui ne se voit pas.
+COPY --chown=builder:fleet fleet/mix.exs fleet/mix.lock /src/fleet/
+COPY --chown=builder:fleet fleet/.formatter.exs fleet/.credo.exs fleet/.dialyzer_ignore.exs /src/fleet/
+COPY --chown=builder:fleet fleet/lib    /src/fleet/lib
+COPY --chown=builder:fleet fleet/priv   /src/fleet/priv
+COPY --chown=builder:fleet fleet/config /src/fleet/config
+COPY --chown=builder:fleet fleet/test   /src/fleet/test
+COPY --chown=builder:fleet fleet/bin    /src/fleet/bin
+COPY --chown=builder:fleet fleet/etc    /src/fleet/etc
+COPY --chown=builder:fleet fleet/vendor /src/fleet/vendor
 
 # hex/rebar + build + pose sous /local/LCARS_v2 — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
@@ -182,9 +200,13 @@ RUN set -eu; \
     && ttyd --version
 
 # Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
-# les chemins inter-arbre (le module 50-forge délègue à fleet/runtime/etc/provision-role-tokens.sh).
+# les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
 COPY fleet/deploy /opt/lcars/fleet/deploy
-COPY fleet/runtime/etc     /opt/lcars/fleet/runtime/etc
+COPY fleet/etc     /opt/lcars/fleet/etc
+# P11 — LA BRIQUE token-saver DOIT ETRE DANS L'IMAGE. Sans ce COPY le shim la cherche, ne la trouve
+# pas et s'efface : fail-open, AUCUN symptome, et la compression annoncee ne tourne jamais. C'est le
+# seul defaut du lot dont personne ne peut s'apercevoir en regardant tourner la fleet.
+COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
 COPY fleet/deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/deploy/docker/console.sh         /opt/lcars/console.sh
 COPY fleet/deploy/docker/console-humans.sh  /opt/lcars/console-humans.sh
@@ -202,7 +224,7 @@ COPY fleet/deploy/docker/skel.bashrc      /etc/skel/.bashrc
 
 # ─── A FAIRE — token-saver n'est PAS embarque, et le hook s'efface donc ─────────────────────────
 #
-# La brique de compression d'output (fleet/runtime/vendor/token_saver/, Apache-2.0 + glue LCARS)
+# La brique de compression d'output (fleet/vendor/token_saver/, Apache-2.0 + glue LCARS)
 # est cablee cote hooks — vehicule NON TRANCHE depuis que fleet/v1/hooks.yaml est parti — mais AUCUN
 # COPY ne l'amene ici. Le shim la cherche parmi une liste de candidats, ne la trouve pas, et passe
 # la commande intacte : fail-open. Rien ne casse, rien ne compresse. AUCUN SYMPTOME VISIBLE —
@@ -217,7 +239,7 @@ COPY fleet/deploy/docker/skel.bashrc      /etc/skel/.bashrc
 # python3 est deja installe plus haut — la brique est stdlib pure, aucune dependance a ajouter.
 # Le switch reste LCARS_TOKEN_SAVER=off, sans rebuild.
 #
-# Ref : fleet/runtime/vendor/token_saver/VENDOR.md
+# Ref : fleet/vendor/token_saver/VENDOR.md
 #       work/beyond_#6/chantier-demenagement-arbo-2026-08-04/02-PLAN.md
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -249,7 +271,7 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
-               /opt/lcars/fleet/runtime/etc/provision-role-tokens.sh
+               /opt/lcars/fleet/etc/provision-role-tokens.sh
 
 # /home = LE volume d'état (les humains : ~/.lcars, ~/.claude, ~/pods ; /home/private : tokens ;
 # les clés d'hôte sshd y persistent aussi — un conteneur recréé garde son identité SSH).

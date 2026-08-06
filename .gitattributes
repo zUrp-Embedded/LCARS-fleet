@@ -15,16 +15,16 @@ Dockerfile text eol=lf
 # du code LCARS. Le chemin contient déjà `vendor/`, que Linguist détecte
 # nativement — la déclaration explicite garantit le comportement quel que soit
 # l'outil (GitHub, Gitea, cloc, tokei…).
-fleet/runtime/vendor/** linguist-vendored=true
-fleet/runtime/vendor/** linguist-generated=true
+fleet/vendor/** linguist-vendored=true
+fleet/vendor/** linguist-generated=true
 
 # ...sauf la couche LCARS, qui est du code à nous et doit être comptée et revue.
-fleet/runtime/vendor/*/adapter.py           linguist-vendored=false
-fleet/runtime/vendor/*/adapter.py           linguist-generated=false
-fleet/runtime/vendor/*/lcars_*.py           linguist-vendored=false
-fleet/runtime/vendor/*/lcars_*.py           linguist-generated=false
-fleet/runtime/vendor/*/lcars_tests/**       linguist-vendored=false
-fleet/runtime/vendor/*/lcars_tests/**       linguist-generated=false
-fleet/runtime/vendor/*/run_tests.sh         linguist-vendored=false
-fleet/runtime/vendor/*/update_vendor.sh     linguist-vendored=false
-fleet/runtime/vendor/*/VENDOR.md            linguist-vendored=false
+fleet/vendor/*/adapter.py           linguist-vendored=false
+fleet/vendor/*/adapter.py           linguist-generated=false
+fleet/vendor/*/lcars_*.py           linguist-vendored=false
+fleet/vendor/*/lcars_*.py           linguist-generated=false
+fleet/vendor/*/lcars_tests/**       linguist-vendored=false
+fleet/vendor/*/lcars_tests/**       linguist-generated=false
+fleet/vendor/*/run_tests.sh         linguist-vendored=false
+fleet/vendor/*/update_vendor.sh     linguist-vendored=false
+fleet/vendor/*/VENDOR.md            linguist-vendored=false

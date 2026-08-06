@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/runtime/bin/claude_probe.sh
+# SOURCE: fleet/bin/claude_probe.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
 # STATUS: sonde du CONTRAT VENDOR — les drapeaux dont le launcher depend existent-ils encore ?

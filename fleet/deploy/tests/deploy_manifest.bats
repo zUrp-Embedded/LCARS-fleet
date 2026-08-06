@@ -14,11 +14,11 @@
 setup() {
   SRC="$BATS_TEST_DIRNAME/.."
   ROOT="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$ROOT/fleet/deploy/lib" "$ROOT/fleet/runtime/etc"
+  mkdir -p "$ROOT/fleet/deploy/lib" "$ROOT/fleet/etc"
   cp "$SRC/lib/provision-lib.sh" "$ROOT/fleet/deploy/lib/"
   cp "$SRC/modules.d/60-deploy.sh" "$BATS_TEST_TMPDIR/60-deploy.sh"
 
-  cat > "$ROOT/fleet/runtime/etc/install.manifest" <<'EOF'
+  cat > "$ROOT/fleet/etc/install.manifest" <<'EOF'
 # test manifest
 fleet_v2         exec   link
 bwrap_launch.sh  exec
@@ -83,7 +83,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 @test "missing manifest is a probe ERROR (rc 2), not a silent pass" {
-  rm "$BATS_TEST_TMPDIR/repo/fleet/runtime/etc/install.manifest"
+  rm "$BATS_TEST_TMPDIR/repo/fleet/etc/install.manifest"
   run_check
   [ "$status" -eq 2 ]
   [[ "$output" == *"manifest introuvable"* ]]

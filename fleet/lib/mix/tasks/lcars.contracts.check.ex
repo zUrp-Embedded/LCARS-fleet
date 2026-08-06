@@ -1098,11 +1098,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `deploy/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
     # the gesture that touched it.
-    tf_path = Path.expand("../deploy/deps/forge.tf", root)
-    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
+    tf_path = Path.expand("deploy/deps/forge.tf", root)
+    lib_path = Path.expand("deploy/lib/provision-lib.sh", root)
 
-    # The two SIBLING-TREE lists are outside `fleet/runtime`, and one legitimate context does not
-    # carry them: the image BUILD stage copies `fleet/runtime` ALONE (Dockerfile), then runs this
+    # The two SIBLING-TREE lists are outside `fleet`, and one legitimate context does not
+    # carry them: the image BUILD stage copies `fleet` ALONE (Dockerfile), then runs this
     # gate — a runtime-only artifact cannot prove anything about a provisioning list it does not
     # ship. So absence is read at the TREE level: no sibling tree at all = out of scope, SKIPPED
     # and named in the note (never a silent pass on unmeasured ground); tree present but file or
@@ -1113,11 +1113,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        {"forge.tf local.roles", tree_scope(Path.expand("../deploy", root)),
+        {"forge.tf local.roles", tree_scope(Path.expand("deploy", root)),
          read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
          "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
            "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
+        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
          "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
            "absent here gets no token on a fresh fleet)"}
@@ -1276,10 +1276,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
   @doc false
   def check_sourcers_set_strict(root) do
-    # `root` IS fleet/runtime (project_root/0) — the sibling trees hang off `..`, exactly as the
+    # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
     # run, which is the worst of the three outcomes: a green that checked nothing.
-    dir = Path.expand("../deploy", root)
+    dir = Path.expand("deploy", root)
 
     case tree_scope(dir) do
       :out_of_scope ->
@@ -1318,7 +1318,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
               "expands to \"\" and the recipe provisions the wrong thing in silence",
           status: if(offenders == [], do: :pass, else: :fail),
-          evidence: Enum.map(offenders, &Path.relative_to(&1, Path.expand("..", root))),
+          evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
           note:
             "every sourcer of provision-lib.sh sets -u (BL-6-36: bash's silent-coercion class)"
         }
@@ -1650,12 +1650,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # loudly — it rots while reporting a coverage it does not provide, which is the most expensive
   # silence a test can keep.
   @test_corpora [
-    {"fleet/runtime/test", :gated},
+    {"fleet/test", :gated},
     {".claude/skills", :gated},
     {"fleet/deploy/tests", :gated},
     {"fleet/git-hooks/tests", :gated},
-    {"fleet/runtime/vendor/token_saver/lcars_tests", :gated},
-    {"fleet/runtime/vendor/token_saver/tests",
+    {"fleet/vendor/token_saver/lcars_tests", :gated},
+    {"fleet/vendor/token_saver/tests",
      {:out,
       "upstream suites of the vendored engine (7 884 l). They arbitrate UPSTREAM merges — " <>
         "update_vendor.sh plays them at the moment they serve — and gating them would make every " <>
@@ -1770,7 +1770,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   @doc false
   def check_test_corpora_on_record(root) do
-    repo = Path.expand("../..", root)
+    repo = Path.expand("..", root)
 
     # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (the vendored bats-core lived in
     # one until the v1 excommunication), and
@@ -1800,11 +1800,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                "*/_build/*",
                "-not",
                "-path",
-               # `*/fleet/runtime/tmp/*`, NOT `*/tmp/*`: the second excludes any path containing
+               # `*/fleet/tmp/*`, NOT `*/tmp/*`: the second excludes any path containing
                # "tmp" ANYWHERE, which silently blanks the scan on a tree living under /tmp — a
                # filter broad enough to make the instrument measure nothing and report a pass. Its
                # own test caught it, by building its fixtures exactly there.
-               "*/fleet/runtime/tmp/*",
+               "*/fleet/tmp/*",
                # VENDORED python, the twin of the `.bats` submodules: a virtualenv's site-packages
                # carries hundreds of upstream suites. They are not ours to run and not ours to
                # declare — excluding them is the declaration.
@@ -1837,7 +1837,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     broken =
       cond do
-        not File.dir?(Path.join(repo, "fleet/runtime/test")) ->
+        not File.dir?(Path.join(repo, "fleet/test")) ->
           "#{repo} does not look like the repo root — nothing was scanned"
 
         found == [] ->
@@ -1932,7 +1932,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   @doc false
   def check_forge_fields_read(root) do
-    lib = Path.join(root, "fleet/runtime/lib")
+    lib = Path.join(root, "fleet/lib")
     lib = if File.dir?(lib), do: lib, else: Path.join(root, "lib")
 
     unread = Enum.reject(@forge_read_fields, &field_read?(lib, &1))

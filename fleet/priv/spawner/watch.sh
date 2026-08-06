@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/runtime/priv/spawner/watch.sh
+# SOURCE: fleet/priv/spawner/watch.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-06
 # STATUS: monitor in-pod canonique (pattern #548 / PoC mcp-debate). Provisionné par
