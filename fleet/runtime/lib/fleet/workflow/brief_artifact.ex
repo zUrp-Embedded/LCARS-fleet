@@ -105,15 +105,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   end
 
   @doc """
-  Augments enqueue attrs (`%{brief: content, ...}`) with the physical artifact: commits the brief
-  into project `repo`'s work/ops worktree (`<work_root>/<name>`) and adds `:brief_ref`/`:brief_sha`.
-  The same-code funnel both enqueue sites share.
-
-  **DEGRADES, NEVER breaks the dispatch**: no brief / empty brief / nil `repo` / missing work_dir
-  (non-onboarded project) / git failure → attrs UNCHANGED (brief string alone), LOUD warning.
-  Provenance is desirable, not load-bearing for delivery — a project without work/ops still dispatches.
-
-  `opts[:work_root]` (default `Fleet.Layout.work_root/0`) — injectable for tests.
+  Adds ref/SHA when physicalization succeeds; otherwise leaves dispatch attrs unchanged.
   """
   @spec physicalize_attrs(map(), String.t() | nil, keyword()) :: map()
   def physicalize_attrs(attrs, repo, opts \\ [])
@@ -230,10 +222,7 @@ defmodule Fleet.Workflow.BriefArtifact do
     end
   end
 
-  # `owner/name` → `name` (the work/ops lives at `<work_root>/<name>`, cf. ProjectOnboard).
-
-  # Plain human name from the hint (versions live in git history, not in the filename). No
-  # hint → the content's sha256 (legacy/test path).
+  # Human hint or content hash; versions live in Git history.
   defp object_name(content, opts) do
     case Keyword.get(opts, :name_hint) do
       nil -> :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)

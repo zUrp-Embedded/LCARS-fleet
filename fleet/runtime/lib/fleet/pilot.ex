@@ -87,7 +87,6 @@ defmodule Fleet.Pilot do
       Fleet.Catalogue,
       Fleet.Event,
       Fleet.SchemaCache,
-      # Deterministic conflict classifier (tier-0 diagnosis in Remediation) — pure foundation.
       Fleet.Conflict,
       Fleet.EventRouter,
       Fleet.Workflow,

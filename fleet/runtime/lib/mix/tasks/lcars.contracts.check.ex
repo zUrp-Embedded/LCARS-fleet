@@ -59,17 +59,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc """
-  Runs all checks and returns `{overall, checks}` WITHOUT printing or `exit`.
-
-  Reusable form of the check logic: called by `run/1` (CLI: print +
-  exit) AND by the `mix release` step (`mix.exs` `contracts_gate/1`: refuses to
-  build the release if red). Since the sources are present at build (release built
-  from the project), the grep/introspection checks run; a red check →
-  release refused = the mechanical realization of "the boot refuses to come up if a
-  contract has been reopened" (make the forbidden state impossible upstream, not catch it after the fact).
-
-  Assumes the code is already compiled (the caller compiles: `run/1` via `Mix.Task.run`,
-  the release step after the compile phase).
+  Runs the compiled-source checks without printing or exiting.
   """
   @spec run_checks() :: {:pass | :fail, [map()]}
   def run_checks do

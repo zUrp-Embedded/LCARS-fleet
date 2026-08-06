@@ -75,27 +75,12 @@ defmodule Fleet.Workflow.OpsObject do
     end
   end
 
-  # How far back a readback walks `ref`'s history looking for its own version. Bounded so a
-  # long-lived ref cannot turn a post-timeout confirmation into an unbounded scan; generous enough
-  # that a realistic burst of concurrent writers on ONE ref cannot bury a commit that just landed.
+  # Bounded post-timeout history readback.
   @readback_history_depth 50
 
   @doc """
-  READ-ONLY probe: has `content` been committed at `ref`? `{:ok, sha}` (the commit carrying that
-  version) or `:not_committed`. Takes NO index.lock (only `git log` + `git show`, both read-only),
-  so a caller that TIMED OUT waiting on the serializer can confirm whether its transaction landed
-  WITHOUT reintroducing the concurrent-git race the serializer exists to prevent. Never materializes.
-
-  Asks "did MY version land", NOT "is my version at the TIP". The distinction is the whole point:
-  the tip answers for the LAST writer only, so under two concurrent writes on one ref the first
-  one's commit is in the history, is real, is pushed — and a tip-identity readback reported it as
-  never having happened. That negative was then logged as DEFINITIVE, and a caller acting on it
-  retries and overwrites the version that displaced it. Walking `ref`'s bounded history instead
-  matches the identity model this module already declares (identity = the introducing commit),
-  and a version present anywhere in that history HAS landed, whatever sits at the tip now.
-
-  Content-identity, deliberately: two writers of the SAME content are indistinguishable and
-  equivalent here — exactly the idempotency `commit_object/4` already promises for that case.
+  Read-only bounded probe for a content version's introducing SHA. Searches history,
+  not the tip, so concurrent writers cannot turn a landed version into a false negative.
   """
   @spec committed_sha(Path.t(), String.t(), String.t()) :: {:ok, String.t()} | :not_committed
   def committed_sha(work_dir, ref, content)
@@ -110,9 +95,7 @@ defmodule Fleet.Workflow.OpsObject do
   defp find_committed_version(work_dir, ref, content) do
     case Git.commits_touching(work_dir, ref, @readback_history_depth) do
       {:ok, shas} ->
-        # Newest first: under concurrency the answer is normally the tip, so the common case still
-        # costs one `git show`. An unreadable commit is SKIPPED, never fatal — this probe exists to
-        # turn a maybe into a fact, and one bad object must not make it lie in the other direction.
+        # Skip unreadable commits; the probe must not turn them into a false negative.
         Enum.find_value(shas, :not_committed, fn sha ->
           case Git.show(work_dir, sha, ref) do
             {:ok, ^content} -> {:ok, sha}
@@ -133,8 +116,7 @@ defmodule Fleet.Workflow.OpsObject do
     end
   end
 
-  # `Git.commit` returns the new HEAD sha; `:nothing_to_commit` (identical content raced in by
-  # another writer) recovers the introducing commit — never an error for an existing version.
+  # A racing identical write recovers its introducing commit.
   defp commit_or_recover(work_dir, ref, opts) do
     case Git.commit(commit_opts(work_dir, ref, opts)) do
       {:ok, sha} -> {:ok, sha}
@@ -144,11 +126,7 @@ defmodule Fleet.Workflow.OpsObject do
   end
 
   defp commit_opts(work_dir, ref, opts) do
-    # Default author = the SYSTEM identity from its SINGLE AUTHORITY
-    # (`ForgeIdentity.system_identity/0`) — a name/email literal retyped here WAS the
-    # divergence: `system@lcars.local` matched no forge account, so every work-order and
-    # provenance commit rendered as plain text (no profile link, no avatar) on Gitea,
-    # while onboard commits (already on the SSoT) rendered linked.
+    # ForgeIdentity is the single source for default system author.
     %{name: sys_name, email: sys_email} = Fleet.Credentials.ForgeIdentity.system_identity()
     {name, email} = Keyword.get(opts, :author, {sys_name, sys_email})
     label = Keyword.fetch!(opts, :label)
@@ -160,8 +138,7 @@ defmodule Fleet.Workflow.OpsObject do
       committer_name: name,
       committer_email: email,
       message: "#{label}: #{ref}",
-      # `add_paths` limited to the object — never `["."]` (an artifact commit must not sweep
-      # an entire work/ops worktree: one object, atomic).
+      # One object per commit.
       add_paths: [ref]
     }
   end

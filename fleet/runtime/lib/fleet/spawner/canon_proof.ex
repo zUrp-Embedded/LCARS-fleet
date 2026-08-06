@@ -1,27 +1,8 @@
 defmodule Fleet.Spawner.CanonProof do
   @moduledoc """
-  Boot-time proof that EVERY canon role is spawn-ready — before the fleet reports
-  readiness.
-
-  Readiness used to prove only that the supervisors started: the G24 invariants and
-  the SP assets (role draft, modop bundles, subagent template, protocole) were first
-  exercised at SPAWN, so a daemon could report ready and then refuse the first spawn
-  of a non-permanent role, far from the deploy fault.
-
-  The proof CALLS the functions the spawn path calls — `Fleet.CapProfile.resolve/3`
-  (structural composition + the B-01 guard), `Fleet.CapProfile.validate/1` (G24, on
-  the resolved profile), `Fleet.SPBuilder.compose/3` and the `Pod.Assets` reads —
-  never a re-derivation: a divergent copy of the spawn checks would be one more
-  dialect of "spawnable". Per role it proves the DEFAULT composition, then each
-  `optional` modop individually: a supported option that cannot compose is a broken
-  deploy, refused here instead of at the first step that activates it.
-
-  Consumption does NOT change: the spawn still validates at use — defense in depth
-  on the same definitions. `config :fleet_spawner, :prove_canon_at_boot` (default
-  true) exists ONLY for the hermetic test baseline; tests call `prove_all!/0`
-  directly.
-
-  **Last revised**: 2026-07-30
+  Boot-time proof that every canon role and each optional modop is spawn-ready.
+  It calls the actual resolve, validate, compose, and asset-read paths rather than
+  re-deriving another definition of spawnability.
   """
 
   require Logger

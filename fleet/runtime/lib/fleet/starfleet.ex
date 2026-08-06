@@ -1,8 +1,4 @@
 defmodule Fleet.Starfleet do
-  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
-  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
-  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
-  # deliberate API gesture.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -10,7 +6,6 @@ defmodule Fleet.Starfleet do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      # Validated verdict, foundation value (moved down out of Starfleet so Coord can require it): Gatekeeper BUILDS it.
       Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.Shutdown.Quiesce,

@@ -1,12 +1,8 @@
 defmodule Fleet.CapProfile.Loader do
   @moduledoc """
-  Behaviour for the Capability Profile loader/composer/validator.
+  Behaviour implemented by capability-profile loaders, composers, and validators.
 
-  Exposed to allow mock implementations in tests and a future second
-  vendor (alternate schema or transport). The default implementation is
-  `Fleet.CapProfile`.
-
-  **Last revised**: 2026-07-21
+  `Fleet.CapProfile` is the default implementation.
   """
 
   @callback load(role :: String.t()) ::

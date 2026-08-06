@@ -35,30 +35,10 @@ defmodule Fleet.Pilot.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # The forge pool starts UNCONDITIONALLY, before the step rail: the ForgeClient is also called
-    # by `create_issue` (fleet_mcp) outside the Poller/StepRunConsumer rail, so the pool must exist as soon as
-    # fleet_pilot boots. Lazy (no connection until a request) → harmless outside prod/tests.
-    #
-    # SAME always-on rationale for the work/ops write serializer (CI-11): `create_issue` (MCP)
-    # materializes briefs (`BriefArtifact` → `OpsObjectSync`) OUTSIDE the step rail, so the gate that
-    # serializes concurrent git transactions on the shared worktree must exist as soon as the node
-    # boots, not only in `:step_dispatch?` mode. Domain-owned engine (Fleet.Workflow), pilot only
-    # starts it (pilot → workflow, declared). No ordering constraint with the step rail (a leaf).
-    # `start_ops_object_sync: false` in :test (hermeticity): the suite takes OpsObjectSync's direct
-    # fallback (in-process OpsObject logs, no serialization-induced capture_log bleed) — the
-    # serialization is proven in isolation by OpsObjectSyncTest's own instance.
+    # CI-11: MCP brief writes require the ops serializer outside step mode too.
     children = [forge_finch_spec()] ++ ops_object_sync_child() ++ step_children()
 
-    # `:one_for_one` (not `:rest_for_one`) even though the children refer to each other in order
-    # (Task.Supervisor + IncidentRegistry started BEFORE Poller + StepRunConsumer which use them):
-    # these references are by GLOBAL NAME (resolved at EACH call — `Task.Supervisor.start_child(name, …)`,
-    # `IncidentRegistry` via its process name), NEVER a pid captured at init. So if IncidentRegistry
-    # or the Task.Supervisor crashes and restarts, the Poller/StepRunConsumer re-finds it under the same name on
-    # the next call — no need to restart them in cascade (which `:rest_for_one` would do). Per-process
-    # isolation (a crash kills only one) is the right regime here.
-    #
-    # EXPLICIT restart bounds (aligned with TaskQueue 3/60): >3 crashes/60s of a rail singleton =
-    # crash loop → we bubble up to the root supervisor rather than hammering. Deliberate window choice.
+    # Children resolve collaborators by name, so one-for-one recovery is sufficient.
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,

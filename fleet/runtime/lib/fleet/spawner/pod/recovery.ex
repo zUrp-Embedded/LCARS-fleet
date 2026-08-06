@@ -1,54 +1,13 @@
 defmodule Fleet.Spawner.Pod.Recovery do
   @moduledoc """
-  Recovery DECISION for a (re)spawned pod — a PURE computation island extracted from `Fleet.Spawner.Pod`.
+  Pure recovery decisions for a deliberately respawned pod.
 
-  From the SOLE phase observed in the `state.json` snapshot (+ the `recovery`/`phase` already set
-  in the state), decides WHAT to relaunch at Pod startup, without ever holding state, a Port, a timer,
-  nor doing I/O:
-
-  - `recovery_action/1` — the terminal phase (`:succeeded`/`:released`/`:killed`) → `:release` (nothing to
-    relaunch); everything else → `:recreate` (from scratch, fresh session). Recovery NEVER attempts
-    `--resume` on a server-side dead session (claude exits → zombie pod).
-  - `apply_recovery/4` — projects this decision into the `state` (`:recreate` leaves the base intact =
-    fresh session; `:release` records the terminal phase + the release flag).
-  - `first_continue_for/1` — picks the RESUME POINT from the state's `recovery` decision. It is
-    BINARY by construction (`:allocate` = from scratch | `:release` = terminal, nothing to relaunch):
-    `recovery_action/1` collapses every non-terminal phase into `:recreate`, so a mid-flight resume
-    point (`:launch`, `:monitor`, …) CANNOT exist — resuming mid-flight on a dead backend is exactly
-    what this module forbids. `Pod.init/1` maps it to a starting state via `continue_to_phase/1`.
-  - `phase_from_string/1` — decodes the `state.json` phase string into an existing atom (`nil` if unknown).
-
-  Only deterministic `Map`/`String` operations: no external dependency (no `Logger`, no
-  `File`, no TaskQueue). The `Pod` passes it `phase`/`state`/`base` as arguments; the module calls back
-  no private of `Pod` (no cycle). `recover_or_init`/`initial_state`/`deterministic_session_id`
-  (constructor + startup orchestrator) STAY at the core of the `Pod`.
-
-  ## Contract (called by `Pod`)
-
-  - `recovery_action/1` — called by `recover_or_init`; the `recovery_test.exs` test exercises it DIRECTLY
-    via `Fleet.Spawner.Pod.Recovery.recovery_action/1`.
-  - `apply_recovery/4` — called by `recover_or_init` (projects the decision into the state).
-  - `first_continue_for/1` — called by `init/1` (resume point → starting gen_statem state via
-    `continue_to_phase/1`).
-  - `phase_from_string/1` — called by `recover_or_init` AND `clear_terminal_snapshot`.
-
-  **Last revised**: 2026-07-18
+  Terminal snapshots release without relaunch. Every non-terminal or ambiguous snapshot recreates a
+  fresh session; recovery never resumes a dead backend mid-flight.
   """
 
   @doc """
-  Recovery decision for a (re)spawned pod that has a `state.json` snapshot.
-  PURE, a function of the **observed phase** alone. Under `:temporary` the supervisor
-  never resuscitates: it is a deliberate (re)spawn that calls `init/1`, and the
-  decision is explicit (no implicit resume
-  `first_continue_for(:monitoring)` on a dead backend).
-
-    * `:release`  — terminal phase (`:succeeded`/`:released`/`:killed`) → nothing to relaunch.
-    * `:recreate` — everything else (`:failed`/`:pending`/an IN-FLIGHT phase `:launching`/
-                    `:monitoring`/`:extracting`/`:releasing`/ambiguous) → from scratch,
-                    fresh session. An in-flight phase on a (re)spawn = dead backend
-                    (under `:temporary`): we reroll. We do NOT attempt `--resume` on
-                    a server-side dead session → claude exits → zombie pod;
-                    the task stays queued and re-drives a fresh REPL.
+  Maps terminal phases to `:release` and every other phase to `:recreate`.
   """
   @spec recovery_action(atom()) :: :release | :recreate
   def recovery_action(phase) do
@@ -56,10 +15,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
   end
 
   @doc """
-  Projects the recovery decision into the `state`. `:recreate` → fresh, a new session (base
-  intact: fresh session_id, resume=false, only the `:recovery` flag is set). `:release` →
-  terminal: records the observed phase + the flag — the pod will stop cleanly (state `:releasing`
-  on a nil backend). Called by `recover_or_init` (`Pod`).
+  Projects the recovery decision into fresh pod state.
   """
   @spec apply_recovery(map(), :recreate | :release, String.t() | nil, atom()) :: map()
   def apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
@@ -69,14 +25,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
   end
 
   @doc """
-  `:continue` resume point for a (re)spawned pod — BINARY by construction: `:allocate` (from
-  scratch, fresh session) | `:release` (terminal, nothing to relaunch). `recover_or_init` produces
-  exactly two state shapes: a valid snapshot → `apply_recovery` ALWAYS sets `:recovery`
-  (`:recreate`/`:release`, first two clauses); no/corrupt snapshot → no `:recovery` key, phase
-  left `:pending` (fallback clause → from scratch). A mid-flight resume point (`:launch`,
-  `:monitor`, …) cannot exist — `recovery_action/1` collapses every non-terminal phase into
-  `:recreate`; a per-phase mapping would resume onto a dead backend, the exact move this
-  module forbids.
+  Returns the only valid startup continuation: fresh allocation or terminal release.
   """
   @spec first_continue_for(map()) :: :allocate | :release
   def first_continue_for(%{recovery: :recreate}), do: :allocate
@@ -84,22 +33,17 @@ defmodule Fleet.Spawner.Pod.Recovery do
   def first_continue_for(_fresh_or_corrupt), do: :allocate
 
   @doc """
-  `:continue` resume point (output of `first_continue_for/1`) → starting gen_statem state NAME.
-  Total over the BINARY resume domain; an atom outside it is an upstream bug we let crash (visible).
+  Maps a startup continuation to its gen_statem phase.
   """
   @spec continue_to_phase(:allocate | :release) :: :allocating | :releasing
   def continue_to_phase(:allocate), do: :allocating
   def continue_to_phase(:release), do: :releasing
 
   @doc """
-  Decodes the `state.json` phase string into an EXISTING atom (`nil` if unknown — snapshot from an
-  earlier version, or a corrupted field). Called by `recover_or_init` (`Pod`) AND by
-  `StateFs.clear_terminal_snapshot/3`.
+  Decodes a snapshot phase to an existing atom, or returns `nil`.
   """
   @spec phase_from_string(term()) :: atom() | nil
   def phase_from_string(s) when is_binary(s) do
-    # String.to_existing_atom/1 ALWAYS returns an atom (or raises ArgumentError if the atom does not
-    # exist — caught below → nil). No `case`/fallback: a non-atom branch would be dead code.
     String.to_existing_atom(s)
   rescue
     ArgumentError -> nil

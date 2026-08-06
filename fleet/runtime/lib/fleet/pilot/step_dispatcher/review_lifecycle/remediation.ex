@@ -59,13 +59,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, rounds} <-
                ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts),
-             # The PUBLISH brake (chantier frein-publish) — checked with the SAME budget, on the
-             # OTHER counter: `rounds` counts judge verdicts and freezes the moment a rework's
-             # publication fails (no delivery → no re-judge), which is exactly when the spend
-             # runs away. The streak is the largest same-base `[publish-fail:...]` marker group
-             # on the issue (the gate base moves only on a successful push, so same-base ≡
-             # consecutive). An unreadable counter escalates like an unreadable budget: never a
-             # blind loop.
+             # Same budget bounds consecutive same-base publish failures.
              {:ok, publish_fails} <-
                count_publish_failures(ctx, issue_n) do
           cond do
@@ -89,8 +83,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
               )
           end
         else
-          # Budget not verifiable (unreadable route/map) OR unreadable counter → we do NOT enter a
-          # blind loop: we escalate to the arch (symmetric to the issue brake `rework_budget_unreadable`).
+          # Unverifiable brake escalates instead of looping blind.
           {:error, reason} ->
             ArchEscalation.escalate_rework(
               arch_seams(ctx),
@@ -105,13 +98,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # PR rework budget = the SAME `spec.max_rework_rounds` as the issue brake (the pipeline's SINGLE churn
-  # policy, read as DATA — never a hand-aligned hard-coded default). Issue route → map name →
-  # budget. Routeless / unreadable map → `{:error}`: the caller escalates (never a blind loop).
-  # Seam-tolerant read of the publish-failure streak: a forge stub without the counter (every
-  # pre-brake test, and any minimal seam) reads as ZERO failures — the brake only ever FIRES on a
-  # forge that records the markers, it never blocks a rework for lack of instrumentation. A real
-  # counter error, though, propagates (the `with` escalates it like an unreadable budget).
+  # Minimal forge seams without the optional publish counter read zero failures.
   defp count_publish_failures(%Ctx{} = ctx, issue_n) do
     if function_exported?(ctx.forge, :count_publish_failures, 3) do
       ctx.forge.count_publish_failures(ctx.repo, issue_n, ctx.forge_opts)

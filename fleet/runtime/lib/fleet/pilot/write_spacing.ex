@@ -1,22 +1,7 @@
 defmodule Fleet.Pilot.WriteSpacing do
   @moduledoc """
-  Anti-tie gap BETWEEN two forge writes whose DISPLAY ORDER matters (Gitea dashboard/activity).
-  Gitea timestamps events to the SECOND and, within a tied second, the feed displays actions in
-  INSERTION order (oldest on top) inside an anti-chronological list — so any same-second pair
-  renders inverted ("logically before, displayed after").
-
-  A SINGLE primitive, shared consumers (all pilot-side, where the forge writes live):
-  `StepRunCompleter` (verdict comment → route/stage; target-branch birth → content push) and
-  `ProjectOnboard` (create_repo → push main → push work/ops) and `ForgeClient.merge_pr`
-  (merge → head-branch delete). Same config, same test seam.
-
-  The gap only orders writes BETWEEN two distinct forge calls. Two actions born from ONE call
-  cannot be spaced — and a branch BIRTH always is one (twin "created"+"snapshot" pair, measured
-  on both the push and the API channel): the twin tie is accepted everywhere (both lines tell
-  the same fact), while the CONTENT push is kept OUT of it via API pre-birth + gap (cf.
-  `ForgeClient.create_branch/4`). Same acceptance for the merge transaction's own pair.
-
-  **Last revised**: 2026-07-18
+  Shared gap between distinct forge writes whose second-resolution display order
+  matters. Events produced by one forge call remain inseparable by construction.
   """
 
   @doc """

@@ -78,9 +78,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   end
 
   @doc """
-  Vocabulary of the fleet feature-branch, mapped to the poller's contract: non-fleet head →
-  `{:skipped, :not_fleet_branch}` (never an error — a foreign PR is not an
-  anomaly). Shared by the whole review flow (routing/remediation/promotion).
+  Maps feature-branch parsing to the poller's skip contract.
   """
   @spec parse_feature_branch_or_skip(String.t()) ::
           {:ok, {integer(), String.t()}} | {:skipped, :not_fleet_branch}

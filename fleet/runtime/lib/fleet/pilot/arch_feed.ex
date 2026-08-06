@@ -71,17 +71,12 @@ defmodule Fleet.Pilot.ArchFeed do
 
   @impl true
   def handle_info(%Fleet.Event{type: type, payload: payload}, state) when type in @watched do
-    # PER-PROJECT routing: the event's repo names the architect. No repo → no route → drop
-    # (courtesy feed; failures reach the arch via the escalation rail regardless).
     case payload["repo"] || payload[:repo] do
       repo when is_binary(repo) and repo != "" ->
         pod_id = ProjectArchitect.pod_id_for(repo)
-        # Title read from the FORGE at render (source of truth, never cached) — best-effort:
-        # unreadable → the line renders without it, exactly the pre-title behavior.
         line = render_line(type, annotate_title(payload, repo, state))
         _ = append(pod_id, line, state)
 
-        # The ONLY push: a DELIVERED brick (the `:delivered` unlock — terminal milestone).
         if type == :"step.unlocked" and payload["milestone"] == "delivered",
           do: _ = state.notify.(pod_id, "info : " <> line)
 
@@ -93,9 +88,6 @@ defmodule Fleet.Pilot.ArchFeed do
   end
 
   def handle_info(_other, state), do: {:noreply, state}
-
-  # ── Rendering — one short FR line per milestone (the arch relays it to the human). ──
-  # Axiom: the repo is NEVER named (the arch has "the project") — issue numbers only.
 
   defp render_line(:"step.unlocked", %{"milestone" => "delivered"} = p),
     do: "brique ##{p["number"]}#{title_part(p)} LIVRÉE — mergée, scellée, verrou levé"

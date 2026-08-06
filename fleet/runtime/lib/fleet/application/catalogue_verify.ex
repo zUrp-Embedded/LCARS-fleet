@@ -1,43 +1,8 @@
 defmodule Fleet.Application.CatalogueVerify do
   @moduledoc """
-  Standalone verification of a catalogue root — the boot proof, run off the supervision path.
-
-  ## One truth, two doors
-
-  The daemon proves its catalogue as it boots: `Fleet.Catalogue.verify!` (root + manifest +
-  `api_version`), the two proven-good images, `CanonProof.prove_all!`, the card jury/step guards,
-  the structural-role resolution and the escalation-policy load — each raised by a different
-  domain's `Application`. This module runs the SAME functions, in the same order, against an
-  arbitrary root, so an operator editing a catalogue can prove it before a fleet ever tries to boot
-  on it. It calls those functions; it never re-lists their checks — a divergent copy would be one
-  more dialect of "valid", the exact thing `CanonProof`'s doc forbids.
-
-  It sits in the OTP root's boundary because that is the only layer whose deps already span the six
-  domains involved. The one it does NOT reach directly is `Fleet.Workflow` (not a dep of the root):
-  the card guards read it, so they are driven through `Fleet.Pilot.Application.verify_cards_and_roles!/1`,
-  which keeps the workflow catalogue on Pilot's side of the boundary.
-
-  ## What it does NOT check, and why the difference must be stated
-
-  It covers the CATALOGUE, never the DEPLOYMENT. The boot also guards the forge base_url, tokens and
-  credentials — configuration of a running fleet, not properties of a catalogue. A verifier that
-  refused a good catalogue on a machine with no forge would send the operator to the wrong fix, so
-  those guards are deliberately absent here.
-
-  And it proves a DIRECTORY taken whole, where the boot proves the deployment's actual ASSEMBLY —
-  fine per-tree overrides included (`:fleet_cap_profile, :root_dir` and its siblings keep
-  precedence). An operator who panachages — this root plus a fine key pointing elsewhere — can get a
-  green verify and a red boot with no check differing: the two simply do not read the same
-  assembly. `verify/1` therefore returns the root it read and a note that it ignores fine overrides,
-  and the CLI prints them as a header. That header is the whole defence against the false green.
-
-  ## Runs in a STANDALONE process only
-
-  Publishing the images writes process-global `:persistent_term`. This is written for a `mix` task
-  or a release `eval` — an ephemeral VM that exits right after — never the live node, whose running
-  images it would replace. A TEST driving it restores image state on exit, like `Fleet.CatalogueTest`.
-
-  **Last revised**: 2026-08-01
+  Standalone catalogue-root proof using the daemon's own verification functions in
+  boot order. It proves one directory, not deployment credentials or fine-grained
+  overrides, and must run in an ephemeral VM because image publication is global.
   """
 
   require Logger

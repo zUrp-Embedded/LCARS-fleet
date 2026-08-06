@@ -63,9 +63,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   defmodule Seams do
     @moduledoc """
-    Boundary contract of the arch escalation cluster: the 3 forge-write seams read from the dispatch
-    (`forge`/`repo`/`forge_opts`). Built by the caller BEFORE `escalate_rework/4` or
-    `escalate_merge_blocked/5` — the cluster never receives the whole `ctx`/`opts`.
+    Narrow forge-write dependency boundary.
     """
     @enforce_keys [:forge, :repo, :forge_opts]
     defstruct [:forge, :repo, :forge_opts]

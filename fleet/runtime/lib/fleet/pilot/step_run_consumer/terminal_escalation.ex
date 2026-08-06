@@ -53,10 +53,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   defmodule Seams do
     @moduledoc """
-    Armored boundary of the terminal escalation: the ONLY authorized reads/effects.
-    Built by the consumer from its DERIVED per-step-run state (`repo` comes from
-    the event, multi-project). `run_completion` = the consumer's `(label, fun) -> outcome`
-    closure (sync/offload discipline, single source consumer-side).
+    Forge completion and architect-notification dependencies for an escalation.
     """
     @enforce_keys [
       :repo,
@@ -67,19 +64,11 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       :run_completion
     ]
     defstruct [
-      # Repo "owner/name" of the step_run (per-step-run, derived from the event).
       :repo,
-      # Completer module (seam, consumer-side default = Fleet.Pilot.StepRunCompleter).
       :step_run_completer,
-      # Opts passed to the completer ([forge_opts: …] + optional :forge_client).
       :completer_opts,
-      # Spawner for the arch kick (seam, consumer-side default = Fleet.Spawner).
       :spawner,
-      # Broker for the arch's arbitration mandate (seam, consumer-side default = Fleet.TaskQueue) —
-      # freeze_to_arch's post-commit offer-then-wake enqueues BEFORE it wakes (ArchWake), inside the
-      # offloaded completion unit and only after a confirmed await_arch commit (CI-04).
       :task_queue,
-      # Closure (label :: String.t(), fun :: (-> outcome)) -> outcome — sync/offload execution.
       :run_completion
     ]
 
@@ -94,32 +83,14 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   end
 
   @doc """
-  Does a producer's result carry the `blocked` flag (missing dependency/info)?
-  Predicate of the `escalate_blocked_producer/4` trigger — called by the consumer on
-  the UNWRAPPED result (`Verdict.unwrap_worker_envelope`).
+  Whether an unwrapped producer result explicitly reports that it is blocked.
   """
   @spec blocked_flag?(term()) :: boolean()
   def blocked_flag?(m) when is_map(m), do: m["blocked"] == true
   def blocked_flag?(_), do: false
 
   @doc """
-  G2 (funnel) — which end-of-step_run errors are TERMINAL NON-TRANSIENT
-  (= a human wall, to be escalated) vs bubbled up as-is:
-
-    * `rework_exhausted`: the budget is a MONOTONIC counter (signed step_runs) →
-      re-dispatch = re-fail, never convergence without intervention → ESCALATE.
-    * `rework_budget_unreadable`: the code explicitly chooses to "surface" rather
-      than bounce blindly (an unverifiable bounce could loop) → ESCALATE.
-    * `gate_fail_unsigned`: the failed run could not be signed onto the budget counter
-      (forge write outage). Rebounding on an unbudgeted run would reopen the runaway
-      (counter frozen while rework spawns) → SURFACE, not bounce → ESCALATE. Symmetric
-      to `rework_budget_unreadable` (budget unreadable ↔ budget unwritable).
-    * `human_approval_required` (D2/G3): human approval required (gate) → direct escalation
-      (not a failure, not a rework).
-
-  Everything else (`:no_gatekeeper` wrapped as `gatekeeper_dispatch`, workflow_map nav, workflow_map
-  load…) stays bubbled up: transient (the one-shot gatekeeper is (re)spawned next tick) or of a
-  different concern (G6 → IncidentRegistry).
+  Whether a completion error requires human arbitration instead of retry or propagation.
   """
   @spec terminal_escalate?(term()) :: boolean()
   def terminal_escalate?({:rework_exhausted, _}), do: true
@@ -127,18 +98,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def terminal_escalate?({:gate_fail_unsigned, _}), do: true
   def terminal_escalate?({:human_approval_required, _}), do: true
 
-  # DR-013: an unloadable cap-profile at completion is a TERMINAL config anomaly (the producer/judge
-  # property is unknown). ESCALATE, never bubble: bubbling would let the reaper re-dispatch a persistently
-  # broken profile forever (G2 churn) without notifying a human.
+  # DR-013
   def terminal_escalate?(:cap_profile_unloadable), do: true
   def terminal_escalate?(_), do: false
 
   @doc """
-  Escalates a BLOCKED PRODUCER to the human, reason = its `summary` voice (extracted from
-  the `pod.completed` payload). A producer that cannot deliver marks `blocked: true`
-  in its result; WITHOUT this escalation, the publish without a commit fail-louds
-  `:no_deliverable_commit` = silent WEDGE (an honest eng refuses to guess →
-  un-escalated blockage). Reuses the whole `freeze_to_arch/5` net.
+  Escalates a blocked producer with its summary as the human-facing reason.
   """
   @spec escalate_blocked_producer(map(), pos_integer(), String.t(), Seams.t()) :: term()
   def escalate_blocked_producer(payload, n, role, %Seams{} = seams) do
@@ -153,21 +118,14 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   end
 
   @doc """
-  Escalates a TERMINAL error (classified by `terminal_escalate?/1`) to the human,
-  explanatory message derived from the `reason` (rework exhausted / unreadable budget / required approval).
+  Escalates a terminal error with a reason-specific human message.
   """
   @spec escalate_terminal_error(term(), pos_integer(), String.t(), Seams.t()) :: term()
   def escalate_terminal_error(reason, n, role, %Seams{} = seams),
     do: freeze_to_arch(n, role, :terminal_error, terminal_error_message(reason, role), seams)
 
   @doc """
-  THE single freeze-to-arch gesture: `await_arch` (comment + `lcars-awaits-arch` +
-  unlock) via `run_completion`, THEN — inside the SAME offloaded unit, GATED on a confirmed
-  commit — the offer-then-wake of the arch (`ArchWake`, latency only: the durable truth is the
-  forge state — label + comment — and a failed kick, logged warning, is retried by the Poller's
-  cooldown-capped awaits-arch net). Returns the completion's outcome (the kick never alters the
-  result). Also called by the consumer for the fail-closed verdicts (redirect/escalate_user/halt_*)
-  — net parity.
+  Commits the await-architect state, then offers and wakes the architect only after success.
   """
   @spec freeze_to_arch(pos_integer(), String.t(), term(), String.t(), Seams.t()) :: term()
   def freeze_to_arch(n, role, decision, comment_body, %Seams{} = seams) do
@@ -179,18 +137,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       comment_body: comment_body
     }
 
-    # WAKE-AFTER-COMMIT, inside the offloaded unit (CI-04). `run_completion` is SYNC by default but
-    # in prod it OFFLOADS onto a Task.Supervisor and returns `{:ok, :offloaded}` at once — so an
-    # offer-then-wake placed AFTER this call (outside the closure) fired BEFORE await_arch's forge
-    # writes, or on a synchronous `{:error, _}`: the arch was woken onto a mandate that did not exist
-    # yet. This reopened, one layer up, the very 2026-07-18 signal-before-content race that ArchWake's
-    # internal enqueue-then-wake order (design 2026-07-19: "first kick immediate, protection BEHIND")
-    # was built to close. The fix is ORDERING, not deferral to the poll grid: the offer-then-wake now
-    # lives INSIDE the completion closure and only after await_arch returns `{:ok, _}` — a confirmed
-    # forge commit (comment + label). On `{:error, _}` the escalation did NOT commit → we do NOT wake
-    # the arch onto a non-existent mandate; the Poller net (cooldown-capped) re-derives the wake next
-    # tick from the durable forge state, if any took. The offer stays best-effort (`safe_offer_then_wake`
-    # NEVER alters the completion's outcome).
+    # CI-04
     seams.run_completion.(label(n, decision), fn ->
       case seams.step_run_completer.await_arch(step_run, seams.completer_opts) do
         {:ok, _} = committed ->
@@ -203,9 +150,6 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     end)
   end
 
-  # The immediate kick must never take the completion down with it (the escalation is GRAVED
-  # on the forge at this point): any raise is demoted to a loud warning — the Poller net
-  # covers the latency.
   defp safe_offer_then_wake(%Seams{} = seams, n) do
     _ =
       Fleet.Pilot.ArchWake.offer_then_wake(
@@ -225,8 +169,6 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
       :ok
   catch
-    # A GenServer.call on a dead/absent broker EXITS (it does not raise) — same demotion:
-    # the escalation is already graved on the forge, the net covers the latency.
     :exit, reason ->
       Logger.warning(
         "StepRunConsumer: immediate arch offer-then-wake exited #{inspect(reason)} (non-blocking — " <>
@@ -237,26 +179,17 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   end
 
   @doc """
-  NOTIFIES the arch (the SOLE airlock to the human) of a TERMINAL verdict (abandon) — the brief was
-  discarded, the issue is CLOSED, there is nothing for the arch to fetch. The notification CARRIES ITS
-  CONTENT (`message`) through `notify_pod` (typed turn-flag message, the in-pod monitor emits it
-  verbatim), NOT `wake_pod`: a mandate wake arms the ack-driven pull loop expecting a `get_work_item`
-  that will never come (the issue is closed, no `lcars-awaits-arch` label) — a content-less wake whose
-  send-keys fallback eventually types into the human's terminal for nothing. Here the arch SEES what
-  happened in the wake itself, no phantom mandate to re-derive. Seam fallback to `wake_pod` for a
-  spawner that predates `notify_pod`. **NO reboot** (the arch is the human's SESSION), non-blocking.
+  Sends terminal verdict content to the project architect. Falls back to a bare wake when the spawner
+  does not implement notification. Failures are logged and remain non-blocking.
   """
   @spec kick_architect(module(), String.t(), String.t()) :: :ok
   def kick_architect(spawner, repo, message) do
-    # Pod id of THIS project's architect (per-project since the 2026-07-19 reorg) — SINGLE
-    # AUTHORITY `Fleet.Pilot.ProjectArchitect.pod_id_for/1` (no rebuilt literal).
     pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(repo)
 
     if function_exported?(spawner, :notify_pod, 2) do
       _ = spawner.notify_pod(pod_id, message)
       :ok
     else
-      # Degraded (a spawner seam without notify_pod): a bare wake, content stays on the closed issue.
       case spawner.wake_pod(pod_id) do
         :ok ->
           :ok
@@ -276,8 +209,6 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       :ok
   end
 
-  # Completion log label — derived from the decision (same wording as the
-  # consumer's history: continuity of existing greps/logs).
   defp label(n, :blocked_dep), do: "##{n} (blocked)"
   defp label(n, :terminal_error), do: "##{n} (terminal-error)"
   defp label(n, _other), do: "##{n}"

@@ -76,7 +76,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # boot_orchestrator events (canonical schema).
   def handle_info(
         %Fleet.Event{source: :starfleet, type: type, payload: payload},
         state
@@ -86,7 +85,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Pod GenServer Port stream lifecycle (canonical schema).
   def handle_info(
         %Fleet.Event{source: :spawner, type: type, payload: payload},
         state
@@ -96,8 +94,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # pod.drift: DORMANT — NO producer emits it. This AuditConsumer clause stays
-  # TYPE-ONLY (audit rail, no anti-spoof), UNLIKE DriftMonitor which matches source: :spawner.
   def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
     Logger.warning(
       "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>
@@ -107,12 +103,10 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Ignore other unhandled %Fleet.Event{} (the audit trail is selective, not exhaustive).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # task_queue lifecycle.
   defp log_task_queue_event(:"work_item.enqueued", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.enqueued pod=#{pid} work_item=#{tid}")
   end
@@ -134,9 +128,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
          correlation_id: tid,
          payload: p
        }) do
-    # ATOM key only: the single producer (task_queue/server) emits %{reason: …} and the Bus is
-    # in-process (Phoenix.PubSub, no JSON round-trip that would stringify) — a string-key
-    # fallback would re-validate a shape the boundary already guarantees.
     reason = Map.get(p, :reason, "?")
 
     Logger.warning(
@@ -150,7 +141,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   defp log_task_queue_event(_other, _event), do: :ok
 
-  # boot_orchestrator canonical schema dispatcher.
   defp log_boot_event(:"fleet.boot_complete", payload) do
     Logger.info("AUDIT fleet.boot_complete #{inspect(payload)}")
   end

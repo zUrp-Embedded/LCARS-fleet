@@ -1,7 +1,6 @@
 defmodule Fleet.Workflow.Gates.Predicate do
   @moduledoc """
-  Predicate evaluator for gate `rules` v2.5 (strings) against the `outputs`
-  self-reported by the pod. **Pure** module (no runtime state).
+  Pure fail-closed evaluator for v2.5 string predicates over pod outputs.
 
   ## Grammar (bounded to the canon corpus `standard-qa` / `audit-only`)
 
@@ -159,9 +158,7 @@ defmodule Fleet.Workflow.Gates.Predicate do
     end
   end
 
-  # Fail-closed: fact absent OR present-as-nil → predicate false (no pass on
-  # missing evidence). The nil case is critical for `!=`: `nil != "critical"`
-  # would be `true` in bare Elixir — we neutralize it (nil ≡ absent).
+  # `nil` is absent: it cannot make `!=` pass.
   defp compare(:__absent__, _op, _operand), do: false
   defp compare(nil, _op, _operand), do: false
   defp compare(lhs, "==", operand), do: lhs == operand
@@ -176,6 +173,5 @@ defmodule Fleet.Workflow.Gates.Predicate do
     end
   end
 
-  # Incompatible type (e.g. `>=` on a non-number) → fail-closed.
   defp compare(_lhs, _op, _operand), do: false
 end

@@ -1,56 +1,18 @@
 defmodule Fleet.Credentials.ForgeAuth do
   @moduledoc """
-  System-side git auth for private forge ops (clone / fetch / ls-remote / push). SINGLE source:
-  this helper has one owner here rather than a byte-for-byte duplicate in `Fleet.Workflow.Git` AND
-  `Fleet.ProjectBootstrap.Phase.Clone` — the `workflow ⇄ bootstrap` compile cycle forbids sharing
-  between them. The credentials domain sits below both (common dependency) → the right owner; and
-  the forge token IS a credential.
-
-  ## Secret kept off the argv
-
-  The token (`%{url_prefix, token}` under `:fleet_credentials, :forge_auth`, set at boot from
-  the env/secret) is injected via the **ENVIRONMENT** variables `GIT_CONFIG_COUNT` /
-  `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (git ≥ 2.31), **not** on the argv. Passing the token via
-  `-c http.<prefix>.extraheader=Authorization: token <T>` would expose it in
-  `/proc/<pid>/cmdline` — **world-readable**: a process of ANOTHER human on the host would read it via
-  `ps`. The environ (`/proc/<pid>/environ`) is mode 0400 owner-only. Git applies the env-config
-  exactly like `-c` (verified git 2.43). Never persisted into the workspace's `.git/config` → the
-  pod inherits a remote WITHOUT credential (forge-blind barrier).
-
-  ## Usage
-
-      System.cmd("git", ["clone", url, dst], env: Fleet.Credentials.ForgeAuth.git_env())
-
-  The secret then lives in the environ of the **child git process** (short-lived), never in the
-  BEAM's (`System.cmd env:` touches only the child). Not configured (local repo `file://`, mirror) →
-  just `[@git_no_prompt]` (the unconditional anti-prompt bound), no forge auth header added.
-
-  **Last revised**: 2026-07-18
+  Single system-side git-auth source. Git 2.43 was verified to accept the token
+  through `GIT_CONFIG_*` child-environment variables, keeping it out of argv and
+  workspace config. Every result also disables interactive credential prompts.
   """
 
-  # `GIT_TERMINAL_PROMPT=0` set UNCONDITIONALLY in the single source of the git env. Without it,
-  # an absent/expired token (or a repo that demands an auth we don't have) makes git OPEN AN interactive
-  # PROMPT (username/password); launched by the BEAM WITHOUT a TTY, the prompt HANGS indefinitely → the
-  # git process never returns → the calling GenServer (Pod, Poller) stays frozen on `System.cmd`. The
-  # `0` bound forces git to FAIL immediately (rc≠0) instead of prompting — the typed error propagates up
-  # and the bounded wrapper (`Fleet.Credentials.Shell.run/2`) can kill it within its timeout. Set even
-  # when `forge_auth` is NOT configured (local repo `file://`): that is precisely the case where the
-  # absence of credential would trigger the prompt. Covers ALL call-sites going through `git_env()`.
+  # Anti-prompt is unconditional, including absent-auth local/test configurations.
   require Logger
 
   @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
 
   @doc """
-  The system-side git auth env WITH an explicit result for auth-REQUIRED ops (push, private
-  `ls-remote`, `GitOps.run(auth: true)`): `{:ok, env} | {:error, :forge_auth_malformed}` (DR-024).
-
-    * `{:ok, [@git_no_prompt | …auth…]}` — `:forge_auth` valid → auth extraheader added.
-    * `{:ok, [@git_no_prompt]}` — `:forge_auth` ABSENT (nil): the LEGITIMATE "no auth configured" state
-      (tests, local `file://`). The CALLER decides whether an unauthenticated op is acceptable.
-    * `{:error, :forge_auth_malformed}` — `:forge_auth` PRESENT but broken (empty/missing field, or a
-      control char in `url_prefix`). An auth-required op MUST fail-loud HERE, never run UNAUTHENTICATED:
-      a present-but-broken credential must not be masked as a later 401/403 (or silently succeed on a
-      public remote). Present-invalid ≠ absent-legit.
+  Returns anti-prompt environment plus optional auth. DR-024 distinguishes an
+  absent legitimate configuration from a present malformed credential.
   """
   @spec git_env_result() :: {:ok, [{String.t(), String.t()}]} | {:error, :forge_auth_malformed}
   def git_env_result do

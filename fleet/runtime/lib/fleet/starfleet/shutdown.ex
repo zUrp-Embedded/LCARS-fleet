@@ -18,10 +18,8 @@ end
 
 defmodule Fleet.Starfleet.Shutdown.NoOpDispatcher do
   @moduledoc """
-  **Test/fallback** backend — immediate drain, 0 in-flight. Honestly-degraded:
-  no job to drain. Default in `:test` (hermeticity) and config fallback when no
-  real backend is wired. NOT silent (documented), not a Goodhart. The prod
-  backend is `AggregateDispatcher`.
+  Test and unwired fallback backend. It accepts quiescence and reports no
+  in-flight work, so shutdown drains immediately.
   """
   @behaviour Fleet.Starfleet.Shutdown.Dispatcher
 
@@ -134,8 +132,6 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   defp task_queue_mod,
     do: Application.get_env(:fleet_starfleet, :task_queue_mod, @task_queue_default)
 
-  # The nominal return IS a list (`list_active/0` spec) — the real "broker down mid-quiesce" protection
-  # is the rescue/catch (noproc/exit → `:error` → sentinel), never a mask as `0`.
   defp safe_count_active do
     {:ok, length(task_queue_mod().list_active())}
   rescue
@@ -144,19 +140,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     :exit, _ -> :error
   end
 
-  # In-flight completion offloads via the runtime seam (cf. ## Boundary). ASYMMETRIC vs the broker ONLY
-  # for a genuinely dead/absent completion supervisor: its Tasks are ALREADY dead (work lost, not the
-  # drain's concern) → the seam returns an honest integer 0. But a supervisor PRESENT whose count could
-  # not run returns `:unknown`, and a raising seam fun is caught here — BOTH map to the fail-CLOSED
-  # sentinel, never a fake 0 we could not measure (the Tasks may be alive mid-push).
   defp completion_phases do
     case Application.get_env(:fleet_starfleet, :completion_inflight_fun, fn -> 0 end).() do
       n when is_integer(n) and n >= 0 ->
         n
 
-      # The completion supervisor is PRESENT but its count failed: we do NOT know how many
-      # completions are in flight → fail-CLOSED sentinel, never a fake 0 that could cut a live
-      # completion mid-push. The genuinely-absent supervisor returns an honest 0 (integer) above.
       :unknown ->
         Logger.error(
           "Shutdown: completion count :unknown (supervisor present but uncountable) — drain stays cautious"
@@ -181,37 +169,18 @@ end
 
 defmodule Fleet.Starfleet.Shutdown do
   @moduledoc """
-  Coordinated grace shutdown. The trigger is `fleet_v2 stop` (no systemd):
-  `bin/fleet_v2` cmd_stop RPCs `Fleet.Starfleet.Shutdown.begin(grace_ms: …)` then
-  `:init.stop()`. The GenServer serves that RPC; the drain is LIVE.
+  Coordinated shutdown server. `fleet_v2 stop` sends SIGTERM; OTP invokes
+  `Fleet.Application.prep_stop/1`, which calls `begin/1` before supervisors stop.
 
-  `begin/1` is the SOLE prod entry (`bin/fleet_v2 stop` RPCs it): it refuses new jobs (dispatcher
-  gate) THEN drains in ONE loop — `wait_drain` polls `in_flight_count` (the broker's active work-items +
-  the in-flight completion offloads, cf. `AggregateDispatcher`) until it reads 0 on N consecutive polls
-  (the CI-02 debounce) or `grace_ms`. `bin/fleet_v2` then calls `:init.stop()` (ordered OTP stop).
-  `drain_in_flight/1` re-enters that same drain WITHOUT the refuse step — a TEST-ONLY seam to exercise
-  `wait_drain` in isolation (convergence/timeout); no prod caller.
+  `begin/1` refuses new jobs, then synchronously polls the configured dispatcher
+  until it observes zero in-flight work on consecutive reads or reaches its grace
+  deadline. Synchronous handling is required so teardown cannot proceed before the
+  drain replies. The launcher has a separate outer fallback and may terminate the
+  BEAM before the default internal deadline.
 
-  ## Dispatcher backend (seam `:shutdown_dispatcher`)
-
-  Configurable backend `:fleet_starfleet, :shutdown_dispatcher` (default
-  `NoOpDispatcher` test/fallback; prod = `AggregateDispatcher` wired in
-  `runtime.exs`). The seam IS the drain abstraction (user decision:
-  no `Fleet.Dispatcher` god-module).
-
-  No cosmetic Goodhart: `wait_drain` polls a real `in_flight_count`
-  until 0 or deadline (not an arbitrary `sleep`).
-
-  ## Synchronous blocking REQUIRED (not an anti-pattern to refactor)
-
-  `begin/1`/`drain_in_flight/1` block inside the `handle_call` until the drain
-  ends: this is the required semantics. The caller (the shutdown trigger →
-  `Fleet.Starfleet.Shutdown.begin` then `:init.stop()`) MUST know the
-  drain is finished before stopping the umbrella. An async reply
-  (`handle_continue`/`Task`) would stop the node DURING the drain → guarantee
-  broken. During a shutdown there is no legitimate concurrent call to this
-  GenServer; the block is bounded by `grace_ms` (no automatic SIGKILL backstop
-  exists — systemd is gone; the operator is the last resort).
+  `drain_in_flight/1` runs the same bounded loop without refusing work and exists
+  for tests. `NoOpDispatcher` is the unwired default; production config selects
+  `AggregateDispatcher`.
   """
 
   use GenServer
@@ -296,12 +265,8 @@ defmodule Fleet.Starfleet.Shutdown do
 
   defp server(opts), do: Keyword.get(opts, :name, __MODULE__)
 
-  # --- GenServer ---
-
   @impl true
   def init(opts) do
-    # `opts[:dispatcher]` = injected test override; otherwise the backend resolved from
-    # config via the single source (canonical NoOp default included).
     backend = opts[:dispatcher] || configured_dispatcher()
 
     {:ok,
@@ -309,9 +274,6 @@ defmodule Fleet.Starfleet.Shutdown do
        status: :running,
        backend: backend,
        in_flight: 0,
-       # Poll interval + debounce count (opts for fast tests; prod defaults 500ms / 3 confirmations).
-       # `confirmations` clamped to ≥ 1: 0 would make `zero_streak >= 0` conclude `:drained` on the FIRST
-       # poll regardless of `in_flight` (fail-OPEN, the exact opposite of the debounce's purpose).
        poll_ms: Keyword.get(opts, :poll_ms, @default_poll_ms),
        confirmations:
          max(1, Keyword.get(opts, :drain_confirmations, @default_drain_confirmations))
@@ -329,17 +291,11 @@ defmodule Fleet.Starfleet.Shutdown do
     {:reply, :ok, wait_drain(state, grace_ms)}
   end
 
-  # --- real drain (no Goodhart) ---
-
   defp wait_drain(state, grace_ms) do
     deadline = System.monotonic_time(:millisecond) + grace_ms
     do_wait_drain(state, deadline, 0)
   end
 
-  # `zero_streak` = number of CONSECUTIVE `in_flight == 0` reads so far. Conclude `:drained` only when it
-  # reaches `state.confirmations` (the debounce, CI-02): a lone transitory 0 (handoff window) does not end
-  # the drain. Any non-zero read RESETS the streak. NB the streak bounds only SHORT handoffs — see the
-  # `@default_drain_confirmations` note: a handoff stretched by a slow forge read outlasts it.
   defp do_wait_drain(state, deadline, zero_streak) do
     in_flight = state.backend.in_flight_count()
     zero_streak = if in_flight == 0, do: zero_streak + 1, else: 0

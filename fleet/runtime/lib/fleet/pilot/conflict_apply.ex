@@ -1,24 +1,12 @@
 defmodule Fleet.Pilot.ConflictApply do
   @moduledoc """
-  Tier-0 AUTO-RESOLUTION (the write half). When the diagnosis says a conflict is entirely trivial,
-  the runtime performs the merge itself in a throwaway `git worktree`, RE-resolves each conflicted
-  file with `Fleet.Conflict` in the real merge orientation (ours = the feature HEAD, theirs =
-  `origin/main`) -- and only if EVERY file resolves, commits and pushes the feature branch.
-
-  Why this is safe to write: the poller re-detects the new head and the jury re-judges it. A wrong
-  trivial resolution is caught downstream -- the safety net the standalone engine lacked. The
-  diagnosis is only a hint; this module re-checks in the authoritative merge context and refuses on
-  the first residual (`merge --abort`), so the caller falls back to the producer conflict-rework.
-
-  Never destructive to the shared clone: a worktree in a temp dir, removed afterwards, so
-  `WorktreeSync`'s working tree is never touched.
-
-  **Last revised**: 2026-08-02
+  Tier-0 conflict write path. It rechecks every file in an isolated worktree,
+  aborts on any residual, and pushes only a complete deterministic resolution.
+  The normal jury then re-judges the new head.
   """
   alias Fleet.Conflict
   alias Fleet.Pilot.GitOps
 
-  # Automated resolution author -- the committer stays the human (GitOps identity), for traceability.
   @author %{name: "lcars-conflict-engine", email: "conflict-engine@lcars.local"}
 
   @doc """

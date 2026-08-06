@@ -1,21 +1,9 @@
 defmodule Fleet.Starfleet.CoordBackend do
   @moduledoc """
-  Behaviour seam over `Fleet.Coord`.
+  Backend seam for validated decisions and Cat 5 escalations.
 
-  Default `NotWiredYet` (test/fallback, returns `:ok` — Cat 5 escalation is
-  audit-only, no runtime side effect); prod wires `Fleet.Coord` via `runtime.exs`
-  (`:fleet_starfleet, :coord_backend`). Consistent with the deny-by-default +
-  fail-safe stance (the audit log is written regardless of the backend).
-
-  Only the canonical arities with an explicit correlation_id exist — no compat
-  shims.
-
-  ## Callbacks
-
-    * `handle_decision/2` — consume a validated decision (gatekeeper output) +
-      explicit correlation_id
-    * `handle_escalation/3` — consume a Cat 5 escalation (source + payload) +
-      explicit correlation_id
+  The configured backend receives an explicit correlation ID. `NotWiredYet` is
+  the side-effect-free default; audit ownership stays with each caller.
   """
 
   @callback handle_decision(
@@ -29,12 +17,7 @@ defmodule Fleet.Starfleet.CoordBackend do
               correlation_id :: String.t() | nil
             ) :: :ok | {:error, term()}
 
-  @doc """
-  The wired coord escalation backend (config `:fleet_starfleet, :coord_backend`),
-  or `NotWiredYet` by default (coord not wired). SINGLE SOURCE of
-  this lookup for the escalation producers (`Cat5Escalator`, `DriftMonitor`) — a
-  single default to keep aligned.
-  """
+  @doc "Returns the configured coord backend or `NotWiredYet`."
   @spec resolved() :: module()
   def resolved do
     Application.get_env(:fleet_starfleet, :coord_backend, __MODULE__.NotWiredYet)

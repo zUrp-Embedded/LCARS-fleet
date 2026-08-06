@@ -102,15 +102,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   defp read_role_from_disk(role) do
-    # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
-    # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,
-    # which masks the config error as a mere typo'd role name). `list/1` already distinguishes; so must
-    # `read_role`, the path `load/1`/`compose/2` take for a single role.
     if File.dir?(root_dir()) do
-      # EXHAUSTIVE on name_index's tagged returns: it also yields `{:error, :name_collision}`
-      # (two catalogue files with the same metadata.name — broken deploy artifact). An uncaught
-      # variant here crashed load/spawn with an opaque CaseClauseError instead of the fail-loud
-      # tag (name_index already logged the colliding path). Propagated as-is, like `list/1`.
       case name_index(root_dir()) do
         {:ok, index} ->
           case Map.fetch(index, role) do
@@ -202,10 +194,6 @@ defmodule Fleet.CapProfile.Catalog do
             _ ->
               base = Path.basename(path)
 
-              # A no-name file is a DELIBERATE overlay fragment ONLY by the `_`-prefix convention
-              # (mirror of `_frozen-monks/`). A NON-prefixed file with no
-              # `metadata.name` looks like a role whose name was lost → make the silent skip VISIBLE
-              # (warning), otherwise that role vanishes from the index (load → `:not_found`) with no signal.
               unless String.starts_with?(base, "_") do
                 Logger.warning(
                   "Catalog: #{base} has no metadata.name — skipped (a role needs a name; " <>
@@ -226,29 +214,11 @@ defmodule Fleet.CapProfile.Catalog do
     end)
   end
 
-  # ============================================================
-  # Modop reading
-  # ============================================================
-
   @doc """
-  Reads and validates the named modop fragments (declared order preserved), returns the raw maps.
-
-  Each name (an untrusted input, serving as a path COMPONENT `modop/<name>/profile.yaml`) is cast
-  to a slug and confined under `<root>/modop/` BEFORE any `Path.join` — a malformed name
-  (`..`/`/`) never reaches the FS (fail-closed → `:invalid_modop`). Each fragment is validated
-  via `Fleet.CapProfile.Schema` (reserved keys + modop JSON-schema).
-
-  ## Exit codes
-    * `{:ok, [raw]}` — all modops read and conformant.
-    * `{:error, :modop_not_found}` — a named modop is absent (logged).
-    * `{:error, :invalid_modop}` — name not confined, reserved key, or nonconformant fragment.
-    * `{:error, :invalid_schema}` / `{:error, :schema_unavailable}` — decode/schema (see Schema).
+  Reads named modop fragments in order and validates their paths and schemas.
   """
   @spec read_modops([String.t()]) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set) when is_list(modop_set) do
-    # IMAGE-FIRST (same closed world as `read_role/1`): a published image carries the validated
-    # overlays — an overlay absent from the image is `:modop_not_found`, and a traversal-shaped
-    # name simply misses the map (the keys were enumerated from the canon at publish).
     case Fleet.CapProfile.Image.published() do
       %{overlays: overlays} ->
         Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
@@ -274,11 +244,6 @@ defmodule Fleet.CapProfile.Catalog do
   defp read_modops_from_disk(modop_set) do
     result =
       Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        # The modop name comes from the catalogue / a composer (untrusted input) and serves as a path
-        # COMPONENT (`modop/<name>/profile.yaml`). A name with `..`/`/` would traverse outside the
-        # modop_root (loading an arbitrary host YAML as a "modop"). We cast it to a slug BEFORE any
-        # `Path.join` AND confine the leaf under `<root>/modop/`: a malformed name never reaches the
-        # FS (fail-closed → `:invalid_modop`, like a reserved/nonconformant fragment).
         modop_root = Path.join(root_dir(), "modop")
 
         case Fleet.Slug.confined_join(modop_root, name) do
@@ -313,10 +278,6 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # ============================================================
-  # YAML decode + catalogue root
-  # ============================================================
-
   defp decode_yaml(path) do
     case YamlElixir.read_from_file(path) do
       {:ok, map} when is_map(map) -> {:ok, map}
@@ -326,9 +287,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Full role index from the live disk — the IMAGE BUILDER's input (`Fleet.CapProfile.Image`).
-  Same enumeration/decode authority as `read_role/1`'s disk path (name_index): one disk
-  knowledge, two consumers. Schema validation is the Image's job (it raises; this snapshots).
+  Returns the live disk role index used to build an image.
   """
   @spec snapshot_roles() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_roles do
@@ -338,8 +297,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Every modop overlay from the live disk, VALIDATED (same checks as `read_modops/1`'s disk
-  path) — the image builder's input. Keys = the modop dir basenames under `<root>/modop/`.
+  Returns validated live-disk overlays keyed by modop directory name.
   """
   @spec snapshot_overlays() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_overlays do
@@ -360,18 +318,10 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Root of the cap-profiles catalogue (`<root_dir>/<role>.yaml`). **SINGLE SOURCE**: every
-  enumerator (e.g. `Fleet.Spawner.PermanentBoot`) MUST scan this dir, otherwise enum and load
-  drift apart.
+  Returns the domain-specific catalogue root or the shared catalogue default.
   """
   @spec root_dir() :: String.t()
   def root_dir do
-    # A `:root_dir` explicitly set to nil (e.g. a cross-test env leak) must NEVER
-    # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
-    # Default = the CATALOGUE root's cap-profiles tree (bundled priv unless `LCARS_CATALOGUE_ROOT`
-    # says otherwise) → resolves in a RELEASE as in dev WITHOUT any env. `:root_dir` stays the FINE
-    # override and keeps precedence: the coarse knob brings a whole catalogue, this one moves this
-    # tree alone.
     Application.get_env(:fleet_cap_profile, :root_dir) || Fleet.Catalogue.cap_profiles_root()
   end
 end

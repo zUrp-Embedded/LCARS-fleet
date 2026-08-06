@@ -1,23 +1,8 @@
 defmodule Fleet.Pilot.WakeRecovery do
   @moduledoc """
-  Hardening of `Fleet.Spawner.wake_pod/1`. A wake failure (pod unreachable: `:not_found`,
-  tmux absent/dead) is NOT blocking in itself. The model:
-
-    - **already seen** — the incident is in the persistent registry `Fleet.Pilot.IncidentRegistry` (so already
-      occurred, possibly in a previous session) → **DIRECT escalation**: pattern, not random → root-cause;
-    - **first time** → **re-roll** (injected re-spawn + re-wake):
-        - re-wake OK → **recovered** → we RECORD the incident in the registry (anchor for next time);
-        - re-wake FAIL → the re-roll did not repair → **IMMEDIATE escalation** (active problem).
-
-  Escalation = system issue (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin), `reason`
-  preserved, 2 distinct gates (`:recurrence` / `:reroll_failed`). Boundary: a failed wake = **a FLEET
-  problem → starfleet** (which can re-spawn/repair), NOT the gatekeeper (project judge). **The memory
-  lives in the PROJECT** (registry `work/ops`), not the session: session executes, project remembers,
-  system repairs.
-
-  Seams (functions) for testing; defaults = the real fns. `wake/3` API unchanged for the callers.
-
-  **Last revised**: 2026-07-21
+  Recovery policy for failed pod wakes. Recurrent failures escalate directly;
+  first failures re-roll once, record successful recovery, and escalate a failed
+  repair. `:unreachable` is not proof of death and never triggers destructive re-roll.
   """
   require Logger
 

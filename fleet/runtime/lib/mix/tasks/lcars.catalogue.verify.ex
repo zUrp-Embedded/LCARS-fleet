@@ -6,27 +6,13 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
   @shortdoc "Proves a catalogue root the way the boot would — off the supervision path"
 
   @moduledoc """
-  Standalone verification of a catalogue directory: the boot proof, run without starting a fleet.
+  Proves a catalogue directory with the daemon's own boot checks without starting a fleet.
 
       mix lcars.catalogue.verify <root>     # human report + exit 0/1
       mix lcars.catalogue.verify <root> -q  # exit code only
 
-  `<root>` is a catalogue root — the directory that carries `catalogue.yaml` and the nine business
-  trees. The task runs the SAME checks the daemon runs at boot, through the same functions
-  (`Fleet.Application.CatalogueVerify`): manifest + api_version, both proven-good images, the canon
-  spawn-proof, the card jury/step guards, the structural roles, and the escalation policies.
-
-  It covers the catalogue, NEVER the deployment (no forge/token/credential guard — those are
-  properties of a running fleet, not of a catalogue). It reads the root TAKEN WHOLE and ignores the
-  fine per-tree overrides, which it states in a header: an operator who panachages a fine key can
-  get a green here and a red boot, and the header is what makes that legible rather than a false
-  green.
-
-  The image face lives in the release, not here (`mix` does not ship in the image): the entrypoint
-  calls the SAME `Fleet.Application.CatalogueVerify.verify/1` via a release `eval`. One truth, two
-  doors.
-
-  **Last revised**: 2026-08-01
+  The root is read whole. Deployment credentials and fine per-tree overrides are
+  intentionally outside this proof and are printed as assumptions.
   """
 
   use Mix.Task
@@ -38,10 +24,7 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
 
     case args do
       [root] ->
-        # `loadpaths`, NOT `app.config`: the latter evaluates `runtime.exs`, which demands the
-        # deployment env (`FLEET_API_PORT` etc.) — the very deployment config this verifier exists to
-        # stay clear of. loadpaths puts the compiled app on the code path (so `:code.priv_dir` and the
-        # modules resolve) and applies the compile-time env, without a running fleet or its ports.
+        # Avoid runtime deployment configuration while loading compiled modules and priv paths.
         _ = Mix.Task.run("loadpaths")
         report(Fleet.Application.CatalogueVerify.verify(root), quiet?)
 

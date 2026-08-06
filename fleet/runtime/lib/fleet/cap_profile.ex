@@ -95,43 +95,14 @@ defmodule Fleet.CapProfile do
           active_modops: [String.t()] | nil
         }
 
-  # Default containment mode = SANDBOXED pod. SINGLE SOURCE of the literal: a config gap
-  # (missing `metadata.containment` key) ALWAYS assumes the confined mode, never the host. Read by
-  # `containment/1` (default) and `bwrap?/1` (predicate), and referenced cross-app by API admission.
   @default_containment "bwrap"
 
-  # ============================================================
-  # Loader behaviour
-  # ============================================================
-
-  @doc """
-  Publishes the proven-good cap-profile image (delegate — the facade is the boundary surface;
-  called by the ROOT at boot, gated `:fleet_cap_profile, :publish_image`). Raises on any
-  invalid artifact: do not boot. Cf. `Fleet.CapProfile.Image`.
-  """
+  @doc "Publishes the validated catalogue image, raising on an invalid artifact."
   defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
 
   @doc """
-  Loads the cap-profile for the given role and validates its STRUCTURE against
-  `priv/schema/cap-profile-v2.5.json`.
-
-  Two-stage validation (deliberate): `load`/`compose` check only the STRUCTURAL schema here. The G24
-  SEMANTIC invariants (`validate/1`) are enforced at the SPAWN boundary (`Fleet.Spawner.Pod` do_allocate,
-  asserted by `mix lcars.contracts.check`) — the "validated world" is established at use, not at read: a
-  profile can be loaded for listing/inspection without being spawn-ready.
-
-  Resolution is by `metadata.name` (the profile's internal property), NOT by
-  filename — see `Fleet.CapProfile.Catalog`; the filename is cosmetic.
-
-  ## Exit codes
-    * `{:ok, %Fleet.CapProfile{}}` — load + STRUCTURAL validation OK (G24 invariants checked at spawn)
-    * `{:error, :not_found}` — no profile carries this name
-    * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
-      distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
-    * `{:error, :name_collision}` — two catalogue files carry the same `metadata.name`
-      (broken deploy artifact — propagated from `Catalog.read_role/1`, fail-loud)
-    * `{:error, :invalid_schema}` — malformed YAML OR schema-nonconformant
-    * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
+  Loads a profile by `metadata.name` and validates its structure against the v2.5 schema.
+  Semantic invariants are checked separately by `validate/1` at the spawn boundary.
   """
   @impl Fleet.CapProfile.Loader
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
@@ -143,39 +114,16 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Composes a cap-profile from a base and an ordered list of modops.
-  Deep-merge last-wins, declared order = precedence.
+  Deep-merges an ordered modop set into a base profile and validates the result.
 
-  Two forms. The STRUCT form is the resolve path: it composes from the base ALREADY
-  loaded — no second catalogue read, so the returned profile is the same EPOCH as the
-  base whose defaults/optional/incompatible were just validated (the two-read shape
-  could mix two epochs under a concurrent catalogue redeploy). The STRING form is the
-  direct/tooling convenience: it loads the role first, then delegates — two reads of a
-  live catalogue are two epochs, don't use it where an epoch was already pinned.
-
-  The result is re-validated against the cap-profile schema post-merge.
-
-  ## Exit codes
-    * `{:ok, %Fleet.CapProfile{}}` — composition OK
-    * `{:error, :not_found}` — base role absent (string form)
-    * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
-      distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
-    * `{:error, :name_collision}` — two catalogue files carry the same `metadata.name`
-      (broken deploy artifact — propagated from `Catalog.read_role/1`, fail-loud)
-    * `{:error, :modop_not_found}` — at least one named modop is absent
-      (the missing modop name is logged via `Logger.warning/1`)
-    * `{:error, :invalid_schema}` — base or post-merge result nonconformant
-    * `{:error, :invalid_modop}` — invalid modop YAML or reserved keys
-    * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
+  The struct form preserves the already-loaded catalogue epoch. The role-name form loads
+  its base first and is intended for callers that have not already pinned one.
   """
   @impl Fleet.CapProfile.Loader
   @spec compose(t() | String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
   def compose(role_or_base, modop_set)
 
   def compose(%__MODULE__{} = base, modop_set) when is_list(modop_set) do
-    # The base was schema-validated at load (`to_struct/1` is the single construction
-    # boundary); only the post-merge result needs validating here. The raw form is the
-    # struct's three faces — the schema root admits nothing else.
     raw = %{"kind" => base.kind, "metadata" => base.metadata, "spec" => base.spec}
 
     with {:ok, modops} <- Catalog.read_modops(modop_set),
@@ -189,12 +137,7 @@ defmodule Fleet.CapProfile do
     with {:ok, base} <- load(role), do: compose(base, modop_set)
   end
 
-  @doc """
-  The role's DEFAULT modops — `spec.modop_set.default` — the overlays applied AT SPAWN (their SP fragments
-  are composed into the pod's system prompt by `SPBuilder.compose`). `[]` if absent, or if
-  `modop_set`/`default` is any shape other than a map holding a list (defensive: a malformed/stub spec
-  yields no overlay rather than crashing the spawn).
-  """
+  @doc "Returns `spec.modop_set.default`, or `[]` when absent or malformed."
   @spec default_modops(t()) :: [String.t()]
   def default_modops(%__MODULE__{spec: spec}) do
     case spec do
@@ -204,13 +147,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Does the profile declare the business CAPABILITY `cap`? (catalogue chantier L3, B-03 2026-07-20).
-
-  A capability is a RESPONSIBILITY the role carries (`spec.capabilities`, e.g. `onboarder`,
-  `project_delegate`, `exception_judge`, `producer`) — the gates resolve a CAPABILITY, never a magic
-  role name (`role in ["starfleet","architect"]`). A rename/substitution of a role becomes a
-  cap-profile edit, not an Elixir change. Absent/malformed `capabilities` → `false` (a role has a
-  capability only if it DECLARES it, fail-closed for a gate).
+  Returns whether the profile explicitly declares `cap` in `spec.capabilities`.
+  Missing or malformed capability data returns `false`.
   """
   @spec has_capability?(t(), atom() | String.t()) :: boolean()
   def has_capability?(%__MODULE__{spec: spec}, cap) do
@@ -223,22 +161,9 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Roles of the catalogue that DECLARE the capability `cap`, sorted. The RESOLVER twin of the
-  `has_capability?/2` predicate: the predicate answers "does this role carry it", this answers
-  "who carries it" — the question a structural role (the producer, the sealer) actually asks.
-
-  Reads the proven-good image when one is published (`:persistent_term`, no IO — the same regime as
-  `list_from_published/0`), the disk catalogue otherwise. The two agree by construction: the image
-  is a snapshot of that same catalogue, frozen at boot.
-
-  Fail-CLOSED like the predicate: a role whose profile does not load is absent from the result
-  rather than raising. An unloadable catalogue role is a broken deploy, and it is already refused
-  before readiness by `Fleet.Spawner.CanonProof` — swallowing it here would only duplicate that
-  guard in a second dialect.
-
-  Returns the LIST, never the singleton: a capability may legitimately be carried by several roles
-  (`onboarder` is, in the bundled catalogue). Whether it must be unique is a property of the
-  CALLER's concept, not of the catalogue — `Fleet.Pilot.Roles` enforces it for the structural ones.
+  Returns the sorted catalogue roles that explicitly declare `cap`.
+  Uses the published image when available and otherwise reads the catalogue. Profiles that
+  fail to load are omitted; uniqueness, when required, belongs to the caller.
   """
   @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def roles_with_capability(cap) do
@@ -278,7 +203,6 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # The image holds the RAW validated map, not a `%CapProfile{}` — same read, one level up.
   defp raw_has_capability?(raw, cap) do
     want = to_string(cap)
 
@@ -289,38 +213,20 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Turns a `role` into a SPAWN-READY cap-profile: base + its `default` modops (+ optional `extra`
-  step-modops). THE single launch-site authority (catalogue chantier L1a) — every spawn path calls
-  this via its injected `loader`, so the structural modop overlay is applied IDENTICALLY everywhere.
+  Resolves a spawn-ready profile from its base, default modops and optional step modops.
 
-  Before this, the 5 launch sites diverged: architect/gatekeeper composed the modops, the dispatch/
-  admin/permanent paths only `load`ed the base — a latent bug (the day a `modop/<n>/profile.yaml`
-  overlay carries structural data, the same modop would behave differently by launch origin,
-  A-01). `default_modops/1` is called on the loaded STRUCT (pure — a stub loader needs only
-  `load`+`compose`, never `default_modops`).
-
-  `loader` = the injected cap-profile loader (prod `Fleet.CapProfile`); `extra_modops` = step-level
-  modops (validated against the role's `optional` by the caller — cf. B-01), `[]` by default.
+  Extra modops must be declared optional; when present, the complete active set must contain
+  no incompatible pair. The result records that set for `SPBuilder.compose/3`. A loader without
+  `compose/2` returns its fixed base with the active set stamped, which supports test stubs.
   """
   @spec resolve(module(), String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
   def resolve(loader, role, extra_modops \\ [])
       when is_atom(loader) and is_binary(role) and is_list(extra_modops) do
     with {:ok, base} <- loader.load(role),
          :ok <- validate_extra_modops(base, extra_modops) do
-      # A loader seam without `compose/2` is a TEST STUB (a fixed `%CapProfile{}` with no modop
-      # overlays) → the base IS the resolved profile (composing empty overlays is a no-op). The
-      # prod loader `Fleet.CapProfile` always exposes `compose/2`, so this branch never yields the
-      # base in prod — it spares the stubs a trivial `compose` clause, nothing more.
-      # The ACTIVE list is decided here — and it must survive to the SP composition. `compose/2` merges
-      # the overlays but returns a profile that no longer says WHICH modops were asked for, so stamping
-      # it is what makes a step's optional modop reach `SPBuilder.compose` instead of being validated
-      # above and then silently dropped (the spawn path re-derived the role's defaults).
       active = default_modops(base) ++ extra_modops
 
       if function_exported?(loader, :compose, 2) do
-        # Composed from the BASE just loaded and validated — never from the role name:
-        # a second catalogue read could return a different epoch than the one whose
-        # optional/incompatible sets the guard above just checked.
         with {:ok, composed} <- loader.compose(base, active),
              do: {:ok, %{composed | active_modops: active}}
       else
@@ -329,40 +235,11 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  @doc """
-  The modops ACTIVE for this composition — what `SPBuilder.compose` must receive so their `sp.md`
-  fragments reach the pod's system prompt.
-
-  Stamped by `resolve/3` (role defaults ++ the step's validated optional modops). `nil` means the
-  profile never went through `resolve/3` (hand-built struct, fixture, direct `compose/2`): we then fall
-  back to the role's declared defaults, which is exactly what the spawn path used to do for everyone.
-  """
+  @doc "Returns the resolved active modops, falling back to declared defaults when unresolved."
   @spec active_modops(t()) :: [String.t()]
   def active_modops(%__MODULE__{active_modops: mods}) when is_list(mods), do: mods
   def active_modops(%__MODULE__{} = profile), do: default_modops(profile)
 
-  # B-01 GUARD: a STEP can only activate a modop the role itself declares in `modop_set.optional`
-  # — it can never turn a reviewer into an engineer (that would be the killed profile-swap), only
-  # run its own role in an optional mode (`role: engineer, modops: [tdd]`). And no `incompatible`
-  # pair may end up both active (default ∪ extra). A modop outside `optional` = LOUD refusal, never
-  # a silent mix.
-  #
-  # WHERE WHAT THIS GUARD ADMITS ACTUALLY LANDS. A modop's effect is NOT a cap-profile mutation: every
-  # overlay under `canon/cap-profiles/modop/*/profile.yaml` is a deliberate empty identity overlay (its
-  # own header says so), so `compose/2`'s deep-merge is a no-op BY DESIGN. The behaviour is carried by
-  # the bundle's `canon/modop-bundles/<name>/sp.md`, injected by `SPBuilder.compose/3`.
-  #
-  # The route from here to there is the `active_modops` struct field: `resolve/3` stamps the validated
-  # list (defaults ++ the step's extras), `active_modops/1` reads it back with a fallback to the role's
-  # defaults, and `Spawner.Pod` hands THAT to `SPBuilder.compose`. So a step's `modops:` entry survives
-  # validation and reaches the pod's system prompt.
-  #
-  # This used to be a real hole — the list was validated here and then re-derived from
-  # `default_modops/1` downstream, so an extra silently vanished. It was closed on the struct rather
-  # than in the spec (which would have needed a schema change: `modop_set` and the root are both
-  # `additionalProperties: false`) or through `resolve/3`'s return shape (~8 call sites). Regression:
-  # `cap_profile_test.exs`, via a loader whose `compose/2` returns `spec: %{}` — the exact shape that
-  # used to lose them.
   defp validate_extra_modops(_base, []), do: :ok
 
   defp validate_extra_modops(%__MODULE__{} = base, extra) do
@@ -402,26 +279,12 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Validates a `%Fleet.CapProfile{}` against the pure G24 semantic invariants
-  (cap-profile canon v2.5 + containment gate). Pure: no process or FS read
-  (same struct ⇒ same verdict).
-
-  The per-code catalogue (what each `:g24_*` enforces) and the impure
-  invariants excluded from `validate/1` live in `Fleet.CapProfile.Invariants`,
-  the single source — this wrapper only carries the return contract.
-
-  ## Exit codes
-    * `:ok` — every invariant passes
-    * `{:error, [codes]}` — the list of violated invariants, atoms among
-      `:g24_1`, `:g24_3`, `:g24_4`, `:g24_6`, `:g24_8`, `:g24_9_strict`,
-      `:g24_9_prefix`, `:g24_10`, `:g24_11`, `:g24_12`, `:g24_14`
+  Validates the pure semantic invariants defined by `Fleet.CapProfile.Invariants`.
+  Returns `:ok` or `{:error, violations}`.
   """
   @impl Fleet.CapProfile.Loader
   @spec validate(t()) :: :ok | {:error, [atom()]}
   def validate(%__MODULE__{} = profile) do
-    # The pure invariant cluster (one function per check) lives in
-    # `Fleet.CapProfile.Invariants`. Here we keep ONLY the single-authority
-    # return contract consumed out-of-app: `[]` ⇒ `:ok`, otherwise `{:error, [codes]}`.
     case Fleet.CapProfile.Invariants.violations(profile) do
       [] -> :ok
       violations -> {:error, violations}
@@ -429,18 +292,7 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Builds a `%Fleet.CapProfile{}` from an IN-MEMORY map (≠ `load/1`, which resolves a disk-catalogue
-  profile by `metadata.name`), crossing the **SAME** schema validation as `load`/`compose`.
-
-  **The only validated entry path** for a profile outside the catalogue: without it, code (fixtures,
-  ad-hoc composition) hand-forges `%CapProfile{spec: %{}}` → the schema is short-circuited and the
-  invalid state becomes representable again. A profile coming out of HERE IS schema-conformant
-  (kind/metadata/spec + required fields); `to_struct/1` (private) stays the sole MAKER of the struct,
-  never reached without prior validation (load / compose / here).
-
-    * `{:ok, %Fleet.CapProfile{}}` — schema-conformant map
-    * `{:error, :invalid_schema}` — nonconformant (SAME verdict as `load`)
-    * `{:error, :schema_unavailable}` — the priv schema file is absent/corrupt
+  Validates an in-memory map against the same schema as `load/1` and constructs a profile.
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, atom() | String.t()}
   def from_map(raw) when is_map(raw) do
@@ -450,11 +302,7 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Bang variant of `from_map/1`: returns the struct, or **raises** if the map is not
-  schema-conformant. Meant for NOMINAL fixtures (the `Fleet.Support.CapProfileFixture` support
-  builder relies on it) — a nominal fixture then crosses the SAME boundary as production instead
-  of forging a partial `%CapProfile{}`. (A DELIBERATELY schema-bypassed profile, to test an
-  accessor's fail-loud, stays hand-built in a test explicitly named "schema bypass".)
+  Returns a validated profile or raises `ArgumentError` for a nonconformant map.
   """
   @spec from_map!(map()) :: t()
   def from_map!(raw) do
@@ -469,87 +317,44 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # ============================================================
-  # Public helpers
-  # ============================================================
-
-  @doc """
-  Translates `spec.scope.git_ops_denied` into claude CLI `disallowedTools`
-  patterns `Bash(git <entry>:*)`. **Delegates** to the resolution cluster
-  `Fleet.CapProfile.DisallowedTools`. Public (tests + internal).
-  """
+  @doc "Translates `spec.scope.git_ops_denied` into Claude disallowed-tool patterns."
   @spec git_ops_denied_patterns(t()) :: [String.t()]
   defdelegate git_ops_denied_patterns(profile), to: DisallowedTools
 
   @doc """
-  Returns a `%CapProfile{}` whose `spec.scope.disallowedTools` merges (uniq,
-  order preserved: existing, intangible universal baseline, profile patterns).
-  Idempotent. Application point: `Fleet.Spawner.Pod.do_allocate/1` (writing the
-  pod's `.cap-profile.json`). **Public + consumed by pod.ex** — **delegates** to
-  `Fleet.CapProfile.DisallowedTools.with_resolved/1` (the API carried here stays put).
+  Resolves `spec.scope.disallowedTools` from existing entries, the universal baseline
+  and profile-specific git restrictions. The merge is ordered, unique and idempotent.
   """
   @spec with_resolved_disallowed_tools(t()) :: t()
   defdelegate with_resolved_disallowed_tools(profile), to: DisallowedTools, as: :with_resolved
 
-  @doc """
-  The `disallowedTools` patterns of the intangible universal baseline
-  (`priv/cap_profile/baseline/git-denied.yaml`) — **raises** fail-closed if
-  the baseline is absent/corrupt. **Delegates** to
-  `Fleet.CapProfile.DisallowedTools.baseline_patterns/0`. Public (tests + internal).
-  """
+  @doc "Returns the universal git-denial patterns, raising if the baseline is invalid."
   @spec baseline_git_ops_denied_patterns() :: [String.t()]
   defdelegate baseline_git_ops_denied_patterns(), to: DisallowedTools, as: :baseline_patterns
 
   @doc """
-  Returns a `%CapProfile{}` whose `spec.project` is REPLACED by the given effective project (a map of
-  string keys, same shape as the YAML's `spec.project`: `repo_path`, `repo`, `remote`…).
-
-  A project pod may receive its project from the BRIEF (issue→repo dispatch, `opts[:project]`) rather
-  than from the static cap-profile: the readers of `spec.project` (e.g. `Fleet.ProjectBootstrap.Phase.Clone`)
-  then receive this EFFECTIVE cap-profile. **SINGLE SOURCE** of this substitution — the call sites
-  (`Fleet.Spawner.Pod.Scaffold.maybe_bootstrap_project_workspace`, the workspace reprovision in
-  `Fleet.Spawner.Pod`) do not re-build the `spec` map by hand. Pure (returns a new struct).
+  Replaces `spec.project` with an effective project whose keys are recursively stringified.
   """
   @spec with_project(t(), map()) :: t()
   def with_project(%__MODULE__{spec: spec} = cap, project) when is_map(project),
-    # `stringify_keys` (deeply): the injected `project` may arrive with ATOM keys (from a brief/dispatch),
-    # but readers (`Phase.Clone` → `project["repo_path"]`) use STRING keys — preserve the deep-string-keys
-    # invariant that `to_struct/1` establishes, so this substitution can't silently null out a reader.
     do: %{cap | spec: Map.put(spec, "project", stringify_keys(project))}
 
   @doc """
-  The profile's containment mode (`metadata.containment`). `"bwrap"` = sandboxed pod (RO mounts +
-  tmpfs /home + bind credentials, the default); `"none"` = host-native, the OUT-OF-BAND mode
-  (`bin/host_launch.sh`) for an off-fleet interactive session — the pod runs ON THE HOST *as* the human,
-  outside the sandbox = the strongest power in the fleet. No canon cap-profile is host-native since the
-  2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator); the guard below still forbids it.
-
-  **SINGLE SOURCE** of this read (the spawner selects the N0 launcher off it, the spawn API forbids
-  host-native). Default `"bwrap"` if the key is absent: missing containment ⇒ we assume the confined
-  mode, never the host — a config gap must NEVER open the host by default.
+  Returns `metadata.containment`, defaulting to sandboxed `"bwrap"` when absent.
   """
   @spec containment(t()) :: String.t()
-  # String key ONLY: `to_struct/1` deep-stringifies metadata, so an atom `:containment` key is
-  # structurally impossible here — an atom fallback would re-validate what the boundary guarantees.
   def containment(%__MODULE__{metadata: meta}) when is_map(meta),
     do: Map.get(meta, "containment") || @default_containment
 
   def containment(%__MODULE__{}), do: @default_containment
 
-  @doc """
-  The default containment mode (`"bwrap"`, sandboxed pod) — SINGLE SOURCE of the literal, referenced
-  by cross-app readers rather than re-typing it.
-  """
+  @doc "Returns the default containment mode, `\"bwrap\"`."
   @spec default_containment() :: String.t()
   def default_containment, do: @default_containment
 
   @doc """
-  Is the send-keys wake FALLBACK authorized for this pod? (`spec.invocation.wake_send_keys`,
-  default `true`.) `false` = flag-only pod: the kick loop NEVER types into its terminal — set
-  on the ARCHITECT, whose terminal is the HUMAN's interactive session (a fallback `wake` lands
-  in the human's prompt and costs a spurious turn, live 2026-07-19); the no-ACK `wake.failed`
-  escalation remains that pod's terminal net. Tolerates `nil`/non-profile input (`true` — test
-  stubs build pod data without a cap_profile).
+  Returns whether terminal send-keys fallback is allowed. Defaults to `true`, including
+  for absent or non-profile input; `false` protects interactive human-facing terminals.
   """
   @spec wake_send_keys?(t() | nil | term()) :: boolean()
   def wake_send_keys?(%__MODULE__{spec: spec}) when is_map(spec),
@@ -669,13 +474,8 @@ defmodule Fleet.CapProfile do
   def name(%__MODULE__{}), do: raise(ArgumentError, "CapProfile without a name — forbidden state")
 
   @doc """
-  Resolves the requested cap-profile NAME from an admin-spawn request DTO (string-keyed map):
-  `cap_profile_name` takes precedence, `role` is the fallback; both blank-normalized (`""` / non-string
-  → `nil`, so a truthy `""` never masks a valid `role`). SINGLE SOURCE of the `cap_profile_name || role`
-  interpretation, shared by the API admission
-  (`Fleet.API.SpawnAdmission`) and the async consumer (`Fleet.Spawner.PublishConsumer`) — the Bus is NOT
-  a trust boundary, so both parse, but from ONE parser: the DTO interpretation cannot drift between what
-  admission validates and what the consumer executes.
+  Extracts a requested profile name from a string-keyed DTO. `cap_profile_name` takes
+  precedence over `role`; blank and non-string values are ignored.
   """
   @spec name_from_request(map()) :: String.t() | nil
   def name_from_request(dto) when is_map(dto) do
@@ -686,21 +486,13 @@ defmodule Fleet.CapProfile do
   defp blank_to_nil(_), do: nil
 
   @doc """
-  The role's index in the hexspeak UUID (`metadata.role_index`, 0..15) — the `R` nibble of the
-  deterministic session_id. The role → slot catalogue lives HERE: the encoder `Fleet.Spawner.SessionId`
-  no longer catalogues, it receives this index. **SINGLE SOURCE** of this read.
-
-  **No fabricated default**: a cap-profile without an integer `role_index` is not a catalogued role (no
-  hexspeak identity to rebuild) → we **raise** (fail-loud, like `name/1`). To branch WITHOUT risking the
-  raise, first test presence with `catalogued?/1`.
+  Returns `metadata.role_index` in `0..15`, raising when absent or invalid.
+  Use `catalogued?/1` when absence is an expected branch.
   """
   @spec role_index(t()) :: 0..15
   def role_index(%__MODULE__{metadata: %{"role_index" => r}}) when is_integer(r) and r in 0..15,
     do: r
 
-  # An out-of-range integer (or a missing/non-integer) role_index is NOT a valid nibble (the `R` of the
-  # hexspeak session_id is 4 bits, 0..15): fail-loud rather than encode a corrupt identity. The `@spec`
-  # `0..15` is now ENFORCED, not merely declared.
   def role_index(%__MODULE__{}),
     do:
       raise(
@@ -778,51 +570,27 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  @doc """
-  Is the cap-profile a CATALOGUED role (carries an integer `role_index`)? A predicate WITHOUT a raise —
-  it is the presence test `Fleet.Spawner.Pod.SessionMint.mint/2` queries BEFORE calling `role_index/1`:
-  a non-catalogued role (ad-hoc, out-of-fleet) has no deterministic identity to rebuild → a random
-  session_id is legitimate for it, not an error.
-  """
+  @doc "Returns whether the profile has a valid catalogued `role_index` in `0..15`."
   @spec catalogued?(t()) :: boolean()
   def catalogued?(%__MODULE__{metadata: meta}) when is_map(meta) do
-    # SAME 0..15 predicate as `role_index/1`: `catalogued?` true ⟺ `role_index/1` returns without raising
-    # (the doc's promise — branch on `catalogued?` to avoid the raise). An out-of-range integer is NOT a
-    # catalogued nibble.
     r = Map.get(meta, "role_index")
     is_integer(r) and r in 0..15
   end
 
   def catalogued?(%__MODULE__{}), do: false
 
-  @doc """
-  Returns the canonical JSON sha256 (lowercase hex) of a composed map
-  or struct. Used by callers to assert deterministic composition.
-  Underlying map iteration order is irrelevant — the canonical encoder
-  (`Fleet.CapProfile.CanonicalJson`) sorts keys recursively before encoding.
-  """
+  @doc "Returns the lowercase SHA-256 of the recursively key-sorted canonical JSON."
   @spec sha256(t() | map()) :: String.t()
   def sha256(%__MODULE__{} = profile), do: profile |> struct_to_map() |> sha256()
   def sha256(map) when is_map(map), do: CanonicalJson.sha256(map)
 
-  # ============================================================
-  # Catalogue FS (delegated)
-  # ============================================================
-
-  @doc """
-  Lists the NAMES (`metadata.name`) of the catalogue's cap-profiles (`dir`, default `root_dir/0`).
-  **Delegates** to the FS cluster `Fleet.CapProfile.Catalog`. Public + **consumed out-of-app**
-  (`Fleet.Spawner.PermanentBoot` enumerates, `Fleet.Observation.Deck` lists the dashboard) →
-  the API carried here stays put.
-  """
+  @doc "Lists catalogue profile names, optionally below `dir`."
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   defdelegate list(), to: Catalog
   defdelegate list(dir), to: Catalog
 
   @doc """
-  Role names from the published cap-profile image when available; `:not_published` otherwise.
-  Preferred over `list/1` (disk scan) when the image is available — returns instantly from
-  `:persistent_term`, no IO, no YAML parse on the hot path (permanent-boot / reconciliation).
+  Returns sorted role names from the published image, or `{:error, :not_published}`.
   """
   @spec list_from_published() :: {:ok, [String.t()]} | {:error, :not_published}
   def list_from_published do
@@ -842,17 +610,9 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  @doc """
-  Root of the cap-profiles catalogue (`<root_dir>/<role>.yaml`). **SINGLE SOURCE**: every
-  enumerator (e.g. `Fleet.Spawner.PermanentBoot`) MUST scan this dir, otherwise enum and load
-  drift apart. **Delegates** to `Fleet.CapProfile.Catalog.root_dir/0` (consumed out-of-app).
-  """
+  @doc "Returns the cap-profile catalogue root."
   @spec root_dir() :: String.t()
   defdelegate root_dir(), to: Catalog
-
-  # ============================================================
-  # Deep merge
-  # ============================================================
 
   defp deep_merge_last_wins(left, right) when is_map(left) and is_map(right) do
     Map.merge(left, right, fn _key, lv, rv ->
@@ -862,16 +622,9 @@ defmodule Fleet.CapProfile do
 
   defp deep_merge_last_wins(_left, right), do: right
 
-  # ============================================================
-  # Struct conversion
-  # ============================================================
-
   @doc """
-  Canonical accessor for a cap-profile's `lifetime_scope` (`spec.invocation.lifetime_scope`,
-  schema v2.5). **Single source**: the extraction must NOT be re-implemented at the readers
-  (spawner/step_runner/sp_builder/pod) — otherwise inconsistent defaults. `default` defaults to
-  `"one-shot"` (the canon default); readers that want to distinguish absence (e.g. brief_guard)
-  pass `nil`.
+  Returns `spec.invocation.lifetime_scope`, using `"one-shot"` or the supplied default
+  when absent.
   """
   @spec lifetime_scope(t(), term()) :: String.t() | term()
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
@@ -879,17 +632,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Load-bearing accessor for `lifetime_scope` — NO default. `{:ok, scope}` iff the
-  schema-REQUIRED field is present as a non-empty string, `{:error, :no_lifetime_scope}` otherwise.
-
-  `lifetime_scope` decides at least four things (brief-required, slot scope, state-fs scope, release).
-  A `%CapProfile{}` without it is an INVALID state that the STRUCT type still allows (a schema-loaded
-  profile always has it; a hand-forged/unvalidated struct may not). The SPAWN path (`Fleet.Spawner.
-  spawn_pod`, the choke point of every spawn) gates on THIS: an absent lifetime_scope is REFUSED, never
-  spawned — otherwise the same profile receives DIVERGENT downstream reads (brief-exempt at the guard,
-  yet `"one-shot"` at extraction via the lenient `lifetime_scope/2` default → releases). The lenient
-  `lifetime_scope/2` stays for the derivations that run AFTER the gate (`slot_scope`, `Pod.Paths`),
-  where the scope is guaranteed present.
+  Fetches a non-empty `lifetime_scope` without a default. The spawn boundary uses this
+  strict form before downstream lifecycle derivations.
   """
   @spec fetch_lifetime_scope(t()) :: {:ok, String.t()} | {:error, :no_lifetime_scope}
   def fetch_lifetime_scope(%__MODULE__{spec: spec}) do
@@ -900,10 +644,7 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Canonical accessor for `deliverable_mode` (`spec.deliverable_mode`, schema v2.5). **Single source**:
-  the publication-mode selection (`Fleet.Workflow.Deliverable.publish/1`) is read HERE, not
-  re-implemented at the readers. `default` `"payload"` (the canon default, back-compat: a profile
-  without the field = the-system-writes-the-payload). Code roles declare `git_native`.
+  Returns `spec.deliverable_mode`, using `"payload"` or the supplied default when absent.
   """
   @spec deliverable_mode(t(), term()) :: String.t() | term()
   def deliverable_mode(%__MODULE__{spec: spec}, default \\ "payload") do
@@ -911,21 +652,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Canonical accessor for `brief_kind` (`spec.brief_kind`, schema v2.5). The INPUT dual of
-  `deliverable_mode` (output): it declares the **shape of the brief** the role receives, by catalogue
-  and NOT by a magic role name.
-
-    * `"worker"` — the brief is an executable instruction (the issue body): the role ACTS (engineer,
-      architect…). A worker profile can still be driven as a judge for a SPECIFIC step via the
-      workflow_map's per-step `brief_kind: judge` override (`Fleet.Pilot.BriefBuilder`).
-    * `"judge"` — the role JUDGES: it receives a `GateBrief` that is structurally **defused** (context +
-      deliverable + verdict contract, NO executable instruction — otherwise the judge would run the body).
-
-  `brief_kind` is **REQUIRED** by the schema (`spec.required`): judge-ness is a security property, NEVER
-  inferred — a profile without it is REJECTED at load. There is NO silent `worker` default (a judge that
-  forgot `judge` would otherwise fall back to worker=execute, running attacker-controlled issue content —
-  the fail-open this closes). Returns `nil` only for a hand-built struct that bypassed the schema → the
-  consumer (`BriefBuilder`) fail-louds on `nil` (out-of-vocab), never a silent worker.
+  Returns the required `spec.brief_kind`. `"worker"` receives executable work;
+  `"judge"` receives a defused verdict brief. There is no default.
   """
   @spec brief_kind(t()) :: String.t() | nil
   def brief_kind(%__MODULE__{spec: spec}) do
@@ -933,24 +661,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Canonical accessor for `interlocutor` (`spec.interlocutor`, schema v2.5) — WHO the role's REPL
-  converses with, and therefore which protocol contract its `.lcars/protocole-user.md` carries.
-
-    * `"fleet"` — the fleet alone (engineer, judges): machine protocol only. `engage` opens a
-      work-item cycle; nobody is there to be answered.
-    * `"both"` — the fleet AND a human on the same terminal (architect, starfleet): machine
-      protocol PLUS the human addendum. The machine kicks this pod and a human also talks to it.
-    * `"human"` — a human alone: no work-item rail, no `engage`; the human is the source of work.
-
-  Three values rather than a human/machine boolean because FEEDING and FACING are independent
-  axes, and the architect is the proof that they are (machine-kicked through `wake_send_keys`,
-  human-facing through the Desktop bridge and `lcars attach`). The fourth cell of that 2x2 — fed
-  by a human with nobody in front — has no referent, so one three-valued field makes it
-  unrepresentable instead of legal-but-meaningless.
-
-  `interlocutor` is **REQUIRED** by the schema (`spec.required`), never inferred. Until it existed
-  every pod was served the worker protocol unconditionally, which is how an interactive architect
-  came up holding a contract that told it `SeeU` closes nothing and no handoff exists.
+  Returns the required `spec.interlocutor`: `"fleet"`, `"both"` or `"human"`.
+  The value selects the machine, combined or human conversation protocol.
   """
   @spec interlocutor(t()) :: String.t() | nil
   def interlocutor(%__MODULE__{spec: spec}) do
@@ -958,15 +670,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Load-bearing accessor for `interlocutor` — NO default. `{:ok, who}` iff the schema-REQUIRED
-  field is present as a non-empty string, `{:error, :no_interlocutor}` otherwise.
-
-  Same shape and same reason as `fetch_lifetime_scope/1`: the field decides WHICH protocol a pod
-  is provisioned with, so a `%CapProfile{}` without it is an invalid state the struct type still
-  allows. Defaulting it would reinstate exactly the silence this field exists to end — an
-  undeclared profile would quietly get the machine contract, and a human-facing role would look
-  correct while being provisioned as a worker. The spawn choke point (`Fleet.Spawner.spawn_pod`)
-  gates on THIS.
+  Fetches a non-empty `interlocutor` without a default. The spawn boundary uses this
+  strict form before selecting a pod protocol.
   """
   @spec fetch_interlocutor(t()) :: {:ok, String.t()} | {:error, :no_interlocutor}
   def fetch_interlocutor(%__MODULE__{spec: spec}) do
@@ -977,12 +682,8 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  The role's fleet-MCP tool surface, DERIVED from `spec.scope.allowedTools` — the `mcp__fleet__<tool>`
-  entries, stripped to `<tool>`. **Single source**: the pod-facing MCP `tools/list` is BUILT from
-  this (the central serves it, filtered per role by the names the spawner threads from HERE) —
-  one catalogue, no second copy anywhere on the wire path. The UNIVERSAL base
-  (`get_work_item`/`submit_result` — every pod is a task-worker) is NOT here: it is the pod interface,
-  added by the MCP authority; this returns only the role-GATED extras. Absent/empty `allowedTools` → `[]`.
+  Returns role-gated fleet MCP tool names derived from `spec.scope.allowedTools`.
+  Universal worker tools are added separately by the MCP authority.
   """
   @spec mcp_fleet_tools(t()) :: [String.t()]
   def mcp_fleet_tools(%__MODULE__{spec: spec}) do
@@ -1000,12 +701,6 @@ defmodule Fleet.CapProfile do
     }
   end
 
-  # `metadata`/`spec` are guaranteed to have **deeply STRING keys**, here at
-  # production (the single boundary `to_struct`). Readers (ProjectBootstrap,
-  # sp_builder, spawner) access with string keys WITHOUT a defensive atom|string
-  # double-lookup — the inconsistent shape (mixed keys) becomes structurally
-  # impossible downstream. Structs (DateTime…) and scalars pass through as-is;
-  # only map KEYS are stringified.
   defp stringify_keys(map) when is_map(map) and not is_struct(map),
     do: Map.new(map, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
 

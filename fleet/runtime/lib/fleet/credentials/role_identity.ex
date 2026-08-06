@@ -1,17 +1,8 @@
 defmodule Fleet.Credentials.RoleIdentity do
   @moduledoc """
-  Smart-constructor for a role's forge identity. A `%RoleIdentity{}` CANNOT be built without a VERIFIED,
-  non-empty role token: `for_role/1` returns `{:error, :role_token_unavailable}` when the role's token is
-  absent / unreadable / empty (or the role is not path-safe). It makes "act as role X on the forge" a value
-  that is UNREPRESENTABLE when the token is missing — so a consumer (pilot `ForgeClient.as_role`, mcp
-  `Delegation.create_issue`) can NEVER silently fall back to the SYSTEM token, which would be a privilege
-  ESCALATION (the system account is the most powerful) and would break forge traceability (wrong actor).
-  The void (nil token) is caught HERE, at construction, not at the forge-write site.
-
-  `RoleToken` stays policy-NEUTRAL (it reports `nil` + a warning); THIS module carries the fail-closed
-  policy, shared by both consumers — a single source, no divergence.
-
-  **Last revised**: 2026-07-18
+  Fail-closed smart constructor for forge role identity. A struct requires a
+  verified non-empty token, making silent fallback to the privileged system account
+  unrepresentable. `RoleToken` only reports availability; policy lives here.
   """
   alias Fleet.Credentials.RoleToken
 

@@ -37,15 +37,10 @@ defmodule Fleet.API.ControlRouter do
   require Logger
 
   plug(:match)
-  # EXPLICIT body bound (Plug default 8 MB is implicit). 1 MB >> the biggest legitimate POST
-  # (admin/spawn: cap-profile + brief).
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, length: 1_048_576)
   plug(:dispatch)
 
   post "/api/admin/spawn" do
-    # "New operator pod" chokepoint: refused during a shutdown drain (Fleet.Shutdown.Quiesce).
-    # REST is the ONLY producer of the `admin.spawn.request` event → gating here fully covers
-    # top-level pod admission.
     if Fleet.Shutdown.Quiesce.quiescing?() do
       send_resp(conn, 503, ~s|{"error":"quiescing — shutdown drain in progress"}|)
     else
@@ -57,8 +52,6 @@ defmodule Fleet.API.ControlRouter do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
   end
 
-  # ADMISSION VERDICT → HTTP mapping. Moved verbatim from `Fleet.API.Rest` (the write left TCP):
-  # the WHY of each guard lives in `Fleet.API.SpawnAdmission.admit/1`.
   defp do_admin_spawn(conn) do
     raw = conn.body_params || %{}
 
@@ -140,16 +133,6 @@ defmodule Fleet.API.ControlRouter do
   end
 
   defp do_broadcast_spawn(conn, payload) do
-    # The 202 must not LIE. `broadcast/1` goes over the lossy Bus (D1) and returns `:ok` even with
-    # NO subscriber — so a dead/unsubscribed PublishConsumer (its restart window, a crash loop, the
-    # gate off) made this door answer `202 queued` into the void: the operator believed a pod was on
-    # the way, nothing took the command, and there is NO forge net for the admin-spawn path (unlike
-    # the step rail's reconciliation). Unlike the work-item/pod.completed broadcasts, this command has
-    # no durable backing, so we PRE-FLIGHT the rail's readiness (the same authority the readiness probe
-    # reads) and refuse with 503 when the subscriber is not live — the 202 now means a live consumer
-    # exists to take it. The residual TOCTOU (the consumer dying in the microseconds between the check
-    # and the broadcast) is negligible against the real failure mode it closes (a consumer down for a
-    # whole restart window). Seam `:spawn_dispatch_status_fun` for tests.
     case dispatch_status_fun().() do
       {:degraded, info} ->
         Logger.warning(
@@ -181,25 +164,11 @@ defmodule Fleet.API.ControlRouter do
   # ── AF_UNIX control-socket listener ──
 
   @doc """
-  Child-spec start for the AF_UNIX listener serving this router. Removes any stale socket file
-  BEFORE binding (a previous instance's socket is not auto-removed on close → a restart would
-  hit `eaddrinuse`; same reason as the MCP cold-boot sweep) and tightens the file to `0600`
-  (defense-in-depth — the real boundary is the pod's mount namespace, which never contains the
-  file). Returns `{:ok, pid}` of the EMBEDDED ranch tree, LINKED to the calling supervisor.
-
-  The tree MUST be embedded — `Plug.Cowboy.child_spec` start, never `Plug.Cowboy.http`. The
-  obvious `http/3` parks the listener under ranch's OWN application supervisor: the pid returned
-  here gets a foreign parent, so our supervisor's shutdown signal has no authority over it (a
-  supervisor only obeys its real parent) and the stop hangs on a 'DOWN' that never comes
-  (`type: :supervisor` → shutdown `:infinity`), down to the launcher's fallback kill. Embedded,
-  the ranch sup is a true child: the shutdown drains and the BEAM dies clean. (`Listener.cowboy_child`
-  is not used on purpose: BindAddress governs NETWORK surfaces — an AF_UNIX path is not one — and
-  the stale-socket rm + chmod must run at every (re)start, hence this MFA.)
+  Removes a stale socket, starts an embedded Ranch tree linked to the caller,
+  and commits readiness only after chmod 0600 succeeds.
   """
   @spec start_control_listener(Path.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_control_listener(sock, opts \\ []) when is_binary(sock) do
-    # `chmod_fun` (test seam, default `&File.chmod/2`) — lets a test force the chmod to FAIL and prove the
-    # fail-closed readiness (CI-12). The MFA child-spec start `[sock]` keeps working (opts defaults).
     chmod_fun = Keyword.get(opts, :chmod_fun, &File.chmod/2)
 
     _ = File.mkdir_p(Path.dirname(sock))
@@ -209,11 +178,7 @@ defmodule Fleet.API.ControlRouter do
       Plug.Cowboy.child_spec(
         scheme: :http,
         plug: __MODULE__,
-        # Unique per start, never a stable name: ranch keys transport options by ref in the
-        # global `ranch_server` and clears them from an async 'DOWN' — a same-ref restart can
-        # lose its own options to its predecessor's cleanup and bind elsewhere. The bind is
-        # synchronous, so waiting for the socket to appear would hide that, not fix it.
-        # Nothing addresses this listener by ref (the embedded tree stops through its owner).
+        # A unique ref isolates this start from its predecessor's async Ranch cleanup.
         options: [
           ip: {:local, sock},
           port: 0,
@@ -223,12 +188,7 @@ defmodule Fleet.API.ControlRouter do
 
     case apply(m, f, a) do
       {:ok, pid} = ok ->
-        # CI-12 (audit integrite 2026-07-20): the chmod is part of the READINESS COMMIT, not an
-        # afterthought. This AF_UNIX socket is the ONLY admin WRITE door; `LCARS_API_SOCK` is overridable
-        # and confidentiality vs OTHER host users rests on the 0600 mode (the pod mount-ns isolation covers
-        # pods, not host peers). A swallowed chmod would announce "host-only" while the file kept its default
-        # mode — a FALSE readiness. On failure: tear the listener down + remove the socket + return an error
-        # (a host-readable admin door is NEVER announced ready).
+        # CI-12
         case chmod_fun.(sock, 0o600) do
           :ok ->
             Logger.info(
@@ -244,8 +204,7 @@ defmodule Fleet.API.ControlRouter do
                 "admin door is never announced ready)"
             )
 
-            # The just-bound ranch tree is LINKED to us → unlink BEFORE shutting it down, else its exit
-            # would take us with it.
+            # Unlink before deliberately shutting down the linked child.
             Process.unlink(pid)
             Process.exit(pid, :shutdown)
             _ = File.rm(sock)

@@ -100,17 +100,10 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   @doc """
-  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in
-  `priv/cap_profile/schema/cap-profile-v2.5.json` — a physical dedup is impossible (a JSON
-  schema cannot reference Elixir), so a drift test locks the two copies
-  (`cap_profile_v25_conformance_test.exs`). Exposed as the code-side copy that test reads.
+  Returns the code-side `lifetime_scope` enum used by the schema drift test.
   """
   @spec lifetime_scope_enum() :: [String.t()]
   def lifetime_scope_enum, do: @lifetime_scope_enum
-
-  # ============================================================
-  # G24 invariants (one function per check)
-  # ============================================================
 
   defp check_containment(%CapProfile{metadata: meta}) do
     if Map.get(meta, "containment") in @containment_enum, do: :ok, else: :error
@@ -121,34 +114,14 @@ defmodule Fleet.CapProfile.Invariants do
   end
 
   defp check_lifetime_scope(%CapProfile{spec: spec}) do
-    # Canon: lifetime_scope is nested under `spec.invocation` (schema
-    # cap-profile-v2.5.json + canon cap-profiles), not at the `spec` level —
-    # reading `spec.lifetime_scope` directly would miss the value.
     if get_in(spec, ["invocation", "lifetime_scope"]) in @lifetime_scope_enum,
       do: :ok,
       else: :error
   end
 
-  # g24_5 retired: workers MAY push when their cap-profile allows it. The successor is the
-  # disallowedTools mechanism (`with_resolved_disallowed_tools/1` + `baseline/git-denied.yaml`):
-  # the destructive patterns (`push --force`, `reset --hard`, `--no-verify`, …) are universally
-  # denied without forbidding `push` wholesale.
-
   defp check_modop_incompatible(%CapProfile{spec: spec} = profile) do
-    # `modop_set` is a MAP (schema v2.5: default/optional/incompatible), not a list; the
-    # incompatible pairs live under `spec.modop_set.incompatible`. The ACTIVE set is
-    # `CapProfile.active_modops/1` — the resolve decision (role defaults ++ the step's
-    # validated extras), falling back to the declared defaults for a profile that never
-    # went through resolve. Do NOT widen this to `default ++ optional`: an
-    # available-but-unactivated option is not active, and two mutually exclusive
-    # OPTIONALS are a coherent catalogue shape — B-01 already refuses their real
-    # co-activation at resolve; this invariant re-checks the SAME definition of active
-    # at the spawn boundary, never a broader one.
     modop_set = Map.get(spec, "modop_set", %{})
 
-    # Canon modop_set = a MAP. A legacy/empty profile may carry it as a LIST (`[]`) →
-    # `Map.get` would crash (BadMapError). The non-map form reads as "no incompatible
-    # pair declared" — made harmless by construction, not caught by a rescue.
     pairs = if is_map(modop_set), do: Map.get(modop_set, "incompatible", []), else: []
     active = MapSet.new(Fleet.CapProfile.active_modops(profile))
 
@@ -162,10 +135,6 @@ defmodule Fleet.CapProfile.Invariants do
 
     if conflict?, do: :error, else: :ok
   end
-
-  # g24_7 retired: no API = no budget to enforce. The response timeout is a default keyed by
-  # lifetime_scope in `Fleet.Spawner.Pod.Liveness.monitor_timeout_ms/1`; a per-cap-profile
-  # override (`spec.timeouts.response_sec`) is optional, never required.
 
   defp check_metadata_name(%CapProfile{metadata: meta}) do
     case Map.get(meta, "name") do
@@ -190,16 +159,6 @@ defmodule Fleet.CapProfile.Invariants do
     if prefix_ok, do: :ok, else: :error
   end
 
-  # ------------------------------------------------------------
-  # G24-10..14 — v2.5 extensions
-  #
-  # STRING keys/values: the struct is deeply stringified (`to_struct`). The
-  # compared values are therefore strings, not atoms (`"forever"`, `"one-shot"`
-  # with a hyphen, `"none"`) — comparing to an atom `:forever` would always miss.
-  # ------------------------------------------------------------
-
-  # G24-10: boot_at_start: true ⟹ lifetime_scope: forever.
-  # Doubles the JSON-schema `allOf` (belt-and-suspenders, with a verbose error atom).
   defp check_boot_at_start_forever(%CapProfile{spec: spec}) do
     if get_in(spec, ["invocation", "boot_at_start"]) == true and
          get_in(spec, ["invocation", "lifetime_scope"]) != "forever" do
@@ -209,11 +168,6 @@ defmodule Fleet.CapProfile.Invariants do
     end
   end
 
-  # G24-11: non-empty subagent_template ⟹ lifetime_scope: one-shot.
-  # `subagent_template` (invocation) implies a one-shot dispatch; distinct from
-  # `knowledge.sp_template` (the SP template of a permanent monk/archivist pod)
-  # which is NOT constrained here. nil or "" = no template → no constraint
-  # (consistent with the schema's `minLength: 1`).
   defp check_subagent_template_one_shot(%CapProfile{spec: spec}) do
     template = get_in(spec, ["invocation", "subagent_template"])
     scope = get_in(spec, ["invocation", "lifetime_scope"])
@@ -225,10 +179,6 @@ defmodule Fleet.CapProfile.Invariants do
     end
   end
 
-  # G24-12: host_native: true ⟹ metadata.containment: none.
-  # `containment` lives in `metadata` (not `spec`). No `system_user` clause:
-  # that field does not exist in schema v2.5. G24-12 real = `containment: none`
-  # alone, aligned with the JSON `allOf`.
   defp check_host_native_containment(%CapProfile{spec: spec, metadata: meta}) do
     if get_in(spec, ["invocation", "host_native"]) == true and
          Map.get(meta, "containment") != "none" do
@@ -238,13 +188,7 @@ defmodule Fleet.CapProfile.Invariants do
     end
   end
 
-  # G24-14: monk_registry ⟺ monk_instance pairing (both-or-neither).
-  # The PURE, structural part (not carried by the JSON-schema, which declares
-  # both independently nullable). The registry's FS existence + the
-  # `monk_instance` lookup are I/O ⟹ load-time (`compose/2`), not here.
   defp check_monk_registry_pairing(%CapProfile{spec: spec}) do
-    # A BLANK/whitespace string counts as ABSENT, like nil: `monk_registry: ""` is not a real pairing.
-    # The former `is_nil`-only test let `{"x", ""}` pass (both non-nil) — a half-declared, broken pairing.
     registry? = monk_present?(get_in(spec, ["knowledge", "monk_registry"]))
     instance? = monk_present?(get_in(spec, ["knowledge", "monk_instance"]))
 

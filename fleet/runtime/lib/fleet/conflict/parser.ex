@@ -1,15 +1,7 @@
 defmodule Fleet.Conflict.Parser do
   @moduledoc ~S"""
-  Parses git conflict-marked content into ordered segments (`:text` | `:conflict`). Supports diff2
-  (no base) and diff3, and detects zdiff3 (Git 2.35+, where the base section is truncated to only
-  the diverging lines).
-
-  CRLF scar: the separator matcher tolerates a trailing `\r` (`={7}\r?$`). The engine this was
-  ported from anchored the separator with `^={7}$`, which on a CRLF file never matched `=======\r`;
-  the parser then never switched into the theirs section and mis-parsed the whole hunk. The head/tail
-  markers use `(\s|$)`, which already tolerates the `\r` that `String.split(_, "\n")` leaves behind.
-
-  **Last revised**: 2026-07-30
+  Parses diff2, diff3, and truncated zdiff3 conflict markers into ordered segments.
+  The separator deliberately accepts trailing CR from CRLF input.
   """
 
   @marker_ours ~r/^<{7}(\s|$)/

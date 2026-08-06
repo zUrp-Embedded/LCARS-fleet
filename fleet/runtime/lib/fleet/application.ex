@@ -1,7 +1,4 @@
 defmodule Fleet.Application do
-  # COMPILED frontier of the root: deps = every domain the root supervises (nothing
-  # else may name it), exports = []. The compiler refuses any violation — no
-  # discipline required.
   use Boundary,
     deps: [
       Fleet.EventRouter,
@@ -123,24 +120,14 @@ defmodule Fleet.Application do
       do: Fleet.SPBuilder.publish_image!()
 
     children = [
-      # The Bus first (everyone's PubSub substrate).
       Fleet.EventRouter.Application,
-      # Work-item broker (dep: Bus).
       Fleet.TaskQueue.Application,
-      # MCP substrate (per-pod sockets). ⚠ BEFORE spawner (F8 scar, cf. moduledoc).
       Fleet.MCP.Supervisor,
-      # Spawner (pods). After mcp: its socket provisioner resolves to MCP at runtime.
       Fleet.Spawner.Application,
-      # Coord policies (init_policies! fail-fast in its init/1).
       Fleet.Coord.Application,
-      # Starfleet audit + monitors (DriftMonitor/AuditConsumer/Shutdown/MCP*). The BootOrchestrator
-      # is NOT among them: triggered post-boot by the root (cf. bottom of start/2).
       Fleet.Starfleet.Application,
-      # Forge driver (inert without :step_dispatch?).
       Fleet.Pilot.Application,
-      # REST/WS surface (readiness probes the domains above).
       Fleet.API.Application,
-      # Read-only observation deck (nothing depends on it → last).
       Fleet.Observation.Application
     ]
 
@@ -148,19 +135,7 @@ defmodule Fleet.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # End-of-boot side effect (build-info trace): AFTER the start_link OK = the whole
-        # fleet up, api listener bound included. Detailed contract in
-        # `Fleet.API.Application.post_boot/0`.
         Fleet.API.Application.post_boot()
-
-        # BootOrchestrator (spawn of the permanent pods = REAL claude spend) triggered HERE,
-        # structurally POST-boot: as a mid-boot child of starfleet, its async Task could spawn
-        # BEFORE pilot/api are up — if a later domain failed its start_link (port taken), the
-        # permanents would already be running in a half-dead fleet (wasted spend, orphaned
-        # processes). Here, if the boot aborts, NO spawn has happened. Via the FACADE (the
-        # domain owns its `:start_boot_orchestrator` gate — false in test, hermetic — and its
-        # trigger; the root only says "now"): boundary refuses a direct call to
-        # Starfleet.Application, rightly — the facade IS the surface.
         Fleet.Starfleet.boot_orchestrate()
 
         {:ok, pid}
@@ -172,14 +147,6 @@ defmodule Fleet.Application do
 
   @impl Application
   def prep_stop(state) do
-    # The graceful door of the NOMINAL stop: `fleet_v2 stop` sends SIGTERM, the BEAM turns
-    # it into `:init.stop`, and OTP calls prep_stop BEFORE any supervisor dies — the one
-    # spot where refuse-new + drain-in-flight (`Shutdown.begin`) can run while every
-    # finalizer is still alive. Without this, the drain was reachable only through the
-    # opt-in debug RPC (distribution ON), i.e. never in the operator's normal gesture.
-    # A drain failure must never WEDGE the stop: begin bounds itself (grace + call
-    # timeout), any error is logged and the teardown proceeds. Server absent (hermetic
-    # test boots) → nothing to drain, pass through.
     if Process.whereis(Fleet.Starfleet.Shutdown) do
       try do
         _ = Fleet.Starfleet.Shutdown.begin()

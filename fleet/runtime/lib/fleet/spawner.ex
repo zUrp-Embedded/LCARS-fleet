@@ -1,7 +1,4 @@
 defmodule Fleet.Spawner do
-  # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the
-  # MEASURED cross-domain surface. The compiler refuses any violation — widening an
-  # export or adding a dep is an API decision, visible in review.
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -87,19 +84,11 @@ defmodule Fleet.Spawner do
   require Logger
 
   @doc """
-  Validates that a `pod_id` is safe as a component of paths and socket/session names.
+  Returns whether a pod ID is safe for paths, sockets and session names.
 
-  The `pod_id` is interpolated into the pod dir (`~/pods/pod_<id>`), the FS state,
-  the tmux/MCP sockets and the session names. This function is therefore the public
-  authority for the boundaries that accept a `pod_id` supplied by an external or
-  inter-app caller.
+  IDs are 1–100 characters, start alphanumeric, use `[A-Za-z0-9._-]`, and exclude `..`.
   """
   @spec valid_pod_id?(term()) :: boolean()
-  # Single authority for the pod_id shape, satisfying ALL consumers by construction: head ALPHANUM
-  # (a leading `.`/`_`/`-` would make a degenerate pkill pattern / a hidden path component), charset
-  # `[A-Za-z0-9._-]`, no `..`, length 1..100 (anti-DoS sanity — the exact `sun_path` ≤ 108 bound is
-  # enforced where the base dir is known, at the socket boundary). `\A…\z`, NOT `^…$` (line anchors in
-  # PCRE → a trailing `\n` would sneak through).
   def valid_pod_id?(id) when is_binary(id),
     do:
       Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/, id) and
@@ -108,11 +97,9 @@ defmodule Fleet.Spawner do
   def valid_pod_id?(_), do: false
 
   @doc """
-  A one-shot cap-profile requires a brief. Shared authority (brief_guard +
-  the boundaries that validate at admission, e.g. the API). Reads only the EXPLICIT
-  `"one-shot"`; a missing lifetime_scope → false, but that is now a dead-safe default —
-  the spawn choke point (`spawn_pod`) refuses a no-scope profile via `fetch_lifetime_scope/1`
-  BEFORE this predicate is consulted (DR-019), and admission only ever schema-loads.
+  Returns whether the profile explicitly declares `one-shot` and therefore requires a brief.
+
+  A missing scope returns false here; `spawn_pod/3` rejects it before consulting this predicate.
   """
   @spec brief_required?(Fleet.CapProfile.t()) :: boolean()
   def brief_required?(%Fleet.CapProfile{spec: spec}) do
@@ -120,11 +107,9 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Does the `role`'s cap-profile declare the business capability `cap`? (catalogue chantier L3,
-  B-03 — the cross-boundary capability resolver). `Fleet.MCP`'s delegation gates cannot reference
-  `Fleet.CapProfile` (forbidden boundary edge) but CAN reference `Fleet.Spawner` — this is the
-  bridge: load the role's profile, read its `capabilities`. Fail-closed: a role that does not load
-  has NO capability (an unknown identity is never admitted by a gate).
+  Returns whether a role declares a business capability.
+
+  This cross-boundary resolver fails closed when the role's profile cannot be loaded.
   """
   @spec role_has_capability?(String.t(), atom() | String.t()) :: boolean()
   def role_has_capability?(role, cap) when is_binary(role) do
@@ -209,8 +194,6 @@ defmodule Fleet.Spawner do
 
         spec = pod_child_spec(args)
 
-        # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
-        # (never produced by our gen_statem, but callers should not have to carry that contract).
         case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
           {:ok, pid} -> {:ok, pid}
           {:ok, pid, _info} -> {:ok, pid}
@@ -222,8 +205,6 @@ defmodule Fleet.Spawner do
       end
     else
       {:error, :no_lifetime_scope} ->
-        # Invalid state refused at the boundary (DR-019), not silently defaulted: the profile never
-        # came from the schema → do not spawn it. LOUD (error): a caller forged/mutated a struct.
         Logger.error(
           "Spawner: spawn_pod refused — cap-profile has no lifetime_scope (schema-required; " <>
             "an unvalidated/hand-forged struct is not a spawnable state)."
@@ -362,11 +343,7 @@ defmodule Fleet.Spawner do
       Keyword.get(opts, :allow_no_brief, false) ->
         :ok
 
-      # Same verdict as `scope == "one-shot"`, but via the shared PUBLIC predicate
-      # `brief_required?/1` (single authority for the one-shot→brief rule, also called
-      # at admission by the API) → no duplicated rule that could diverge.
       brief_required?(cap_profile) ->
-        # Diagnosable (not a silent refusal): clearly distinguishes the case.
         Logger.warning(
           "Spawner: spawn_pod refused: one-shot pod without brief — " <>
             "provide :brief (the work) or :allow_no_brief (admin/diagnostic)."
@@ -374,7 +351,6 @@ defmodule Fleet.Spawner do
 
         {:error, :brief_required}
 
-      # Long-lived (forever/run/pipe): pulls its work via MCP → exempted.
       true ->
         :ok
     end
@@ -387,11 +363,6 @@ defmodule Fleet.Spawner do
   def kill_pod(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # DELIBERATE release first — the Pod's `:kill` handler
-        # (`handle_event({:call, from}, :kill, ...)`, `GenServer.call` gen_statem-compatible) does
-        # backend teardown + clear_for_pod + terminal state :killed, then stop. Brutal terminate_child
-        # fallback ONLY if the pod does not respond (timeout / already dead).
-        # Never a bypass of the release transition.
         try do
           :ok = GenServer.call(pid, :kill, 5_000)
           :ok
@@ -399,13 +370,7 @@ defmodule Fleet.Spawner do
           :exit, _reason ->
             _ = DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
 
-            # The pod did NOT answer :kill (timeout / already dead) → brutal terminate, so it could not
-            # run its OWN clear_for_pod. Without releasing the mandate here, the work item stays ACTIVE →
-            # the poller reclaims it → re-dispatch → a kill/timeout LOOP. So we release it (the
-            # load-bearing part; the `:killed` tombstone is secondary and lost with the dead pod).
-            # Fail-safe toward the caller only: a TaskQueue that is itself down must never make
-            # `kill_pod` crash — a failed release is logged ERROR by `safe_clear_for_pod` (the
-            # reclaim-loop stake is spelled out there).
+            # A mute pod cannot release its mandate; do it after forced termination.
             _ = safe_clear_for_pod(pod_id)
             :ok
         end
@@ -415,17 +380,11 @@ defmodule Fleet.Spawner do
     end
   end
 
-  # Release a pod's active mandate (used by the brutal `kill_pod` fallback): a TaskQueue that is
-  # itself down/absent must never propagate an exit into `kill_pod` — but the failure is NOT silent:
-  # logged ERROR below (the stake: stale active item → poller reclaim → kill/re-dispatch loop).
   defp safe_clear_for_pod(pod_id) do
     Fleet.TaskQueue.clear_for_pod(pod_id)
     :ok
   rescue
     e ->
-      # The rescue/catch is legitimately fail-safe (must NEVER make kill_pod crash). But it must not be
-      # SILENT: this is the load-bearing mandate release — if it fails, the work item stays active → the
-      # poller reclaims it → kill/re-dispatch LOOP (exactly what the release exists to prevent). Log LOUD.
       Logger.error(
         "Spawner: kill_pod could NOT release the mandate of #{pod_id} (#{inspect(e)}) — the work item may " <>
           "stay active → poller reclaim → kill/re-dispatch loop"
@@ -443,18 +402,15 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Reprovisions a RESIDENT pipe pod's workspace for its next issue (slot-freeze): git reset
-  IN-PLACE (NO rm_rf — the ws is bind-mounted in the live sandbox) on the basis of the new `project`
-  + `/clear` of the REPL context. Called by the dispatcher when re-briefing a `:ready` pipe. Returns
-  `:ok` | `{:error, _}` (incl. `:not_found` if the pod does not exist, `{:reset_failed, _}` if the git fails).
+  Reprovisions a resident pipe pod in place for its next project and clears its REPL context.
+
+  Returns `:ok` or a typed error, including `:not_found` and `{:reset_failed, reason}`.
   """
   @spec reprovision_pipe_workspace(String.t(), map(), keyword()) :: :ok | {:error, term()}
   def reprovision_pipe_workspace(pod_id, project, opts \\ [])
       when is_binary(pod_id) and is_map(project) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # Bounded git ops (Shell.git 30s each) but reset+clean+checkout can add up → generous
-        # call (60s). An :exit (pod dead during the call) → typed error, no caller crash.
         try do
           GenServer.call(pid, {:reprovision_pipe_workspace, project, opts}, 60_000)
         catch
@@ -466,33 +422,20 @@ defmodule Fleet.Spawner do
     end
   end
 
-  @doc """
-  Deliverable workspace from an ALREADY-known `pod_dir` (`<pod_dir>/workspace`). PUBLIC entry
-  point (app boundary: external consumers do not depend on the internal `pod/*` tree); the
-  AUTHORITY of the computation (the `"workspace"` literal) lives in `Pod.Paths.pod_workspace_path/1`
-  — the `Pod.*` islands (LaunchSpec, CompletedPayload) call it directly, without going back up to the facade.
-  """
+  @doc "Returns the deliverable workspace for an already-known pod directory."
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
     do: Fleet.Spawner.Pod.Paths.pod_workspace_path(pod_dir)
 
   @doc """
-  Returns a pod's current state (`%{phase, conditions, ...}`).
-
-  THREE outcomes, kept distinct up to every destructive decision: `{:ok, info}` (alive),
-  `{:error, :not_found}` (genuinely absent), `{:error, :unreachable}` (info call TIMED
-  OUT or exited oddly — the pod may be ALIVE and slow). Flattening `:unreachable` into
-  `:not_found` let compensations kill a living pod and reset a workspace mid-write;
-  destructive consumers must DEFER on `:unreachable`, never treat it as death.
-  (`timeout` is a test seam — prod callers use the default.)
+  Returns a live pod's info, `:not_found` for proven absence, or `:unreachable` when
+  the call fails without proving death. Destructive consumers must defer on `:unreachable`.
   """
   @spec pod_info(String.t(), timeout()) :: {:ok, map()} | {:error, :not_found | :unreachable}
   def pod_info(pod_id, timeout \\ 5_000) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # The pid may be dead but still briefly in the Registry (async cleanup via
-        # monitor) — a `GenServer.call` exits there. A DEAD pid (noproc/normal/shutdown)
-        # is genuinely absent; a TIMEOUT (or any other exit) is NOT a death proof.
+        # A timeout is uncertainty, not proof of death.
         try do
           {:ok, GenServer.call(pid, :info, timeout)}
         catch
@@ -509,13 +452,9 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Enumerates the `:info` of live pods — **observability read seam** (read-only).
+  Enumerates reachable live pods for observability without exposing the Registry.
 
-  Lists the keys of `Fleet.Spawner.Registry` and collects each one's `:info`
-  via `pod_info/1`; pods that are dead but still briefly registered (async monitor
-  cleanup race, cf. `pod_info/1`) are discarded. Read-only — alters no
-  state. This is the only exposed enumeration seam: readers (the surface
-  observability deck) go through here, **never** through the Registry directly.
+  Absent and unreachable entries are both omitted; destructive decisions use `pod_info/2`.
   """
   @spec list_pods() :: [map()]
   def list_pods do
@@ -672,13 +611,10 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  INFORMATIONAL wake — flag ONLY, typed message. Writes `"<token> <message>"` into the
-  pod's `turn.flag`: the in-pod monitor emits the message verbatim (vs the fixed
-  "ton tour" of a mandate wake). Deliberately does NOT arm the ack-driven kick net nor
-  the response deadline: an info wake expects NO pull (`get_work_item`), so the send-keys
-  fallback would eventually type into the human's terminal for nothing — the exact
-  interference the info channel must never cause. Best-effort: unknown/flagless pod →
-  `:ok` (the durable trail is the arch feed file; a lost info wake costs nothing).
+  Sends a best-effort informational wake through `turn.flag`.
+
+  It carries the message but arms neither the mandate kick fallback nor its response deadline.
+  Unknown or unreachable pods are ignored.
   """
   @spec notify_pod(String.t(), String.t()) :: :ok
   def notify_pod(pod_id, message) when is_binary(pod_id) and is_binary(message) do
@@ -689,25 +625,14 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  A pod's restart strategy: `:temporary` for ALL scopes. The
-  `DynamicSupervisor` NEVER resurrects a pod — a
-  dead pod (normal exit OR crash) is removed, full stop. Resurrection
-  is a deliberate act of the boot-orchestrator (recovery `release|recreate`).
+  Returns `:temporary` for every lifetime scope.
 
-  `:temporary` children do not count toward the supervisor's global
-  `max_restarts` intensity → no more fleet-wide cascade possible.
-  `lifetime_scope` drives RECOVERY, not restart (scope-typo
-  detection therefore lives with `lifetime_scope`, no longer here).
+  Recovery is deliberate; the supervisor never resurrects a pod or counts it toward restart intensity.
   """
   @spec restart_strategy_for(String.t() | nil) :: :temporary
   def restart_strategy_for(_scope), do: :temporary
 
-  @doc """
-  Proves every canon role spawn-ready against the currently-resolved catalogue — the boot check
-  (`Spawner.Application`) reachable off the supervision path, for the standalone catalogue
-  verifier. Delegates to `Fleet.Spawner.CanonProof`: the SAME function the boot calls, never a
-  copy — a divergent proof would be one more dialect of "spawnable".
-  """
+  @doc "Runs the same canonical-role spawn-readiness proof used at boot."
   defdelegate prove_canon!(), to: Fleet.Spawner.CanonProof, as: :prove_all!
 
   defp pod_child_spec(args) do
@@ -718,14 +643,7 @@ defmodule Fleet.Spawner do
       id: args.pod_id,
       start: {Pod, :start_link, [args]},
       restart: restart_strategy_for(scope),
-      # Supervisor SHUTDOWN bound = the TEARDOWN time (kill tmux + rm + seed checkpoint,
-      # seconds), NOT the pod's lifetime (an ex-attempt tied it to the pod lifetime = 600s waited
-      # 10 min on a pod stubborn to stop — dead config without trap_exit, a real wall with it). 15s then
-      # OTP brutal-kill — which cuts `terminate/3` short. Both footprints have a RUNTIME reaper on
-      # that path: the PodWarden reconciles the tmux sessions/pod_dirs, and `Fleet.MCP.SocketWarden`
-      # reconciles the per-pod MCP socket (acceptor, AF_UNIX listener, Registry entry, socket file)
-      # against the live pods — same 2-tick grace. Cold boot keeps its own sweep
-      # (`PodSocketSupervisor.sweep_stale_sockets/0`) for what a BEAM crash left behind.
+      # Bounds teardown, not pod lifetime; runtime wardens reap leftovers after brutal kill.
       shutdown: 15_000,
       type: :worker
     }

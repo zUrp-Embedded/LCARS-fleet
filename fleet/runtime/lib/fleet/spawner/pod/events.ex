@@ -1,66 +1,25 @@
 defmodule Fleet.Spawner.Pod.Events do
   @moduledoc """
-  BUS broadcasts of the pod lifecycle — cluster extracted from `Fleet.Spawner.Pod`.
+  Broadcasts pod lifecycle events in the canonical `%Fleet.Event{source: :spawner}` envelope.
 
-  A single role: broadcast a pod's lifecycle events on the `fleet.events` bus, under the strict
-  canonical envelope `%Fleet.Event{source: :spawner}`. The load-bearing vs LOSSY separation
-  (cf. the section comment below) is the heart of the module: a `pod.completed` swallowed silently
-  would wedge the step_run (forge lock held for life), a swallowed `pod.failed`/`wake.failed` is
-  only a loss of observability.
+  `lossy_broadcast/2` carries observability events through `Fleet.EventRouter.Bus.safe_emit/4` and
+  always returns `:ok`. `required_broadcast/2` carries `pod.completed`; it returns a broadcast error
+  so the pod remains in extraction and can retry instead of releasing an orphaned completion.
 
-  No state, no Port, no timer: the `Pod` passes `event_type` (binary) + `payload` (map) as
-  arguments; the module builds the envelope and broadcasts it.
+  The `:fleet_spawner, :event_bus` seam applies only to the required path. Both paths correlate the
+  lifecycle event with the issue identifier in the payload.
 
-  ## Contract (called by `Pod`)
-
-  - `lossy_broadcast/2` (PUBLIC) — OBSERVABILITY/escalation (`pod.failed`, `wake.failed`).
-    A failure is non-blocking; always returns `:ok`. Emits via the protected core
-    `Fleet.EventRouter.Bus.safe_emit/4` (the UNIFIED lossy-emit policy, single substrate authority: failure logged,
-    never a crash of the pod).
-  - `required_broadcast/2` (PUBLIC) — load-bearing LIFECYCLE (`pod.completed`). The failure is NOT
-    swallowed: returns `:ok` | `{:error, {:broadcast_failed, _}}`. The `:extracting` state
-    (`do_extract_proceed`) does NOT release/kill the pod on an orphaned completion. DELIBERATELY
-    outside `Bus.safe_emit` (cf. its comment — the Bus propagates a delivery `{:error, _}`, but
-    safe_emit flattens it into a logged `:ok`: loud in the logs, yet the caller still gets `:ok` and
-    cannot branch on it, which `required` must).
-
-  The app-env SEAM (`:fleet_spawner, :event_bus`, default `Fleet.EventRouter.Bus`) carries ONLY the
-  load-bearing path `required_broadcast/2`: it serves to inject a DETERMINISTIC failure on
-  `pod.completed` in test (a stub that raises / returns `{:error,_}`) without touching the global
-  registry — injecting a failure on a lossy broadcast has no observable (the failure is
-  swallowed there by contract). `event_bus/0` and `build_spawner_event/2` are internal (called ONLY
-  by `required_broadcast/2`).
-
-  **Last revised**: 2026-07-21
+  **Last revised**: 2026-08-02
   """
 
   require Logger
 
   alias Fleet.EventRouter.Bus
 
-  # Load-bearing vs lossy classification of the broadcast (cf. task_queue/server.ex, same move).
-  # A single `safe_broadcast` that would swallow EVERY exception into `:ok` would also engulf `pod.completed`
-  # which the StepRunConsumer DEPENDS on to finish the step_run: a swallowed `pod.completed` = the pod "succeeds" (release/
-  # kill for a one-shot) BUT the end-of-step-run never fires → forge lock held for life (silent
-  # wedge). Hence the SEPARATION:
-  #   - `lossy_broadcast/2`: OBSERVABILITY/escalation (`pod.failed`, `wake.failed`). A failure is
-  #     non-blocking (logged by `Bus.safe_emit/4`, the shared lossy-emit core) — a fleet_pilot consumer
-  #     records them into the read-model (a lost event = a missing record; the loss is logged at emit),
-  #     nobody FINISHES a step_run on them.
-  #   - `required_broadcast/2`: load-bearing LIFECYCLE (`pod.completed`). The failure is NOT swallowed: it
-  #     bubbles up `{:error, {:broadcast_failed, _}}` → the `:extracting` state does NOT release/kill the pod on an
-  #     orphaned completion; it stays alive (a bounded :extract_retry timer re-fires the extract), fail-loud. Both go
-  #     through the strict canonical envelope `%Fleet.Event{source: :spawner}`.
-
   @doc """
-  OBSERVABILITY/escalation broadcast (`pod.failed`, `wake.failed`): emission via the protected core
-  `Bus.safe_emit/4` (the lossy-emit policy has ONE substrate authority). An event_router crash
-  (malformed event, unknown type name) NEVER crashes the pod process (gen_statem):
-  safe_emit logs and neutralizes. The BINARY `event_type` is passed as-is — the anti atom-leak
-  conversion (`to_existing_atom`) lives UNDER safe_emit's rescue. `:on_unregistered` default
-  (`:log`): the loss of an observability event stays visible in the log. Always returns `:ok`
-  (fire-and-forget contract — the `{:error,_}` PubSub passthrough is discarded: nobody FINISHES a
-  step_run on these events).
+  Emits an observability event through the lossy bus policy and always returns `:ok`.
+
+  Conversion of the binary event type and emission failures are contained by `Bus.safe_emit/4`.
   """
   @spec lossy_broadcast(String.t(), map()) :: :ok
   def lossy_broadcast(event_type, payload) when is_binary(event_type) do
@@ -70,9 +29,6 @@ defmodule Fleet.Spawner.Pod.Events do
         event_type,
         [
           pod_id: Map.get(payload, "pod_id"),
-          # Traceability: correlate the pod-lifecycle event to the ISSUE it serves (the end-to-end key
-          # spawn→work→complete→review→merge). Without it every pod.failed/wake.failed leaves with a
-          # nil correlation_id and no incident is tie-able to the mandate that caused it.
           correlation_id: Map.get(payload, "issue_id"),
           payload: payload
         ],
@@ -83,12 +39,10 @@ defmodule Fleet.Spawner.Pod.Events do
   end
 
   @doc """
-  load-bearing LIFECYCLE broadcast (`pod.completed`): the failure is NOT swallowed. DELIBERATELY
-  outside the `Bus.safe_emit/4` core: safe_emit flattens every failure into a logged `:ok` (its
-  contract: "never crash the emitter", the loss stays visible in the log only) — indistinguishable from a success for the caller,
-  whereas here the `:extracting` state MUST distinguish in order to retain the pod. Returns `:ok` or
-  `{:error, {:broadcast_failed, reason}}` (raise OR `{:error, _}` from Bus.broadcast). Logged ERROR:
-  a `pod.completed` not broadcast = potential wedge (the step_run does not finish, lock held).
+  Emits a load-bearing lifecycle event without flattening failures.
+
+  Returns `:ok` or `{:error, {:broadcast_failed, reason}}`; raised bus failures use the same error
+  shape.
   """
   @spec required_broadcast(String.t(), map()) :: :ok | {:error, {:broadcast_failed, term()}}
   def required_broadcast(event_type, payload) when is_binary(event_type) do
@@ -114,19 +68,11 @@ defmodule Fleet.Spawner.Pod.Events do
       {:error, {:broadcast_failed, e}}
   end
 
-  # Bus seam (default = the real `Fleet.EventRouter.Bus`). App-env override (same pattern as the
-  # other pod seams: claude_dir, state_fs_root…) → a test injects a stub bus that returns `{:error,_}` / raises
-  # on `pod.completed`, without touching the global registry. Carries ONLY the load-bearing path
-  # `required_broadcast/2`: the lossy path goes through `Bus.safe_emit/4` directly (a failure stub has
-  # no observable there, the failure is swallowed by contract).
   defp event_bus, do: Application.get_env(:fleet_spawner, :event_bus, Bus)
 
-  # Builds the canonical envelope %Fleet.Event{source: :spawner} for the load-bearing path
-  # (`required_broadcast/2` — the lossy path builds its own via `Bus.safe_emit/4`/`Fleet.Event.new`).
   defp build_spawner_event(event_type, payload) do
     Fleet.Event.new(:spawner, String.to_existing_atom(event_type),
       pod_id: Map.get(payload, "pod_id"),
-      # Traceability: correlate to the ISSUE the pod serves (end-to-end key) — cf. lossy_broadcast.
       correlation_id: Map.get(payload, "issue_id"),
       payload: payload
     )

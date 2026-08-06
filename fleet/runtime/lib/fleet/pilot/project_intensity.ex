@@ -58,10 +58,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
     end
   end
 
-  # ATOMIC write (CI-07): write a sibling temp then rename (atomic on POSIX, same dir/FS). A crash
-  # mid-write never leaves a TRUNCATED intensity.json — which `pipeline_default/2` would otherwise read
-  # as invalid → fall back LOUD to the default card (a real project silently sized C0 until someone reads
-  # the warning). The temp is removed on failure.
+  # CI-07
   defp atomic_write(path, content) do
     tmp = path <> ".tmp"
 
@@ -76,9 +73,8 @@ defmodule Fleet.Pilot.ProjectIntensity do
   end
 
   @doc """
-  The project's declared validation card. Reads `<projects_root>/<name>/intensity.json`:
-  valid → its `pipeline_default`; absent → the delegation default card (legacy project,
-  normal); invalid → LOUD warning + default card. `opts[:projects_root]` injectable (tests).
+  Returns the project's declared card. Absence quietly uses the delegation default; invalid or
+  unreadable data logs, records an incident, and uses that default.
   """
   @spec pipeline_default(String.t(), keyword()) :: String.t()
   def pipeline_default(repo, opts \\ []) when is_binary(repo) do
@@ -90,7 +86,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
          :ok <- validate(declaration) do
       declaration["pipeline_default"]
     else
-      # Absent = legacy/undeclared project → the default card, the normal quiet path.
       {:error, :enoent} ->
         Fleet.Pilot.Roles.delegation_workflow_map(opts)
 
@@ -100,11 +95,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
             "falling back to the delegation default card (re-declare to repair)"
         )
 
-        # The fallback is the documented never-stall design — but it CHANGES the project's
-        # judgment layer (an audit-only project burns as a producing rail). A warning is
-        # not a durable fact: the substitution is recorded as an INCIDENT (recurrence →
-        # sysadmin issue on the forge), so a policy silently replaced cannot stay a
-        # whisper. Seam `:incident_fun` (tests, zero forge).
         incident =
           Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
 
@@ -114,8 +104,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
               reason_detail: "#{path}: #{inspect(other)}"
             )
           catch
-            # An incident that cannot record must not break the burn (never-stall) — but it
-            # says so loud instead of vanishing.
             kind, why ->
               Logger.warning(
                 "ProjectIntensity: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
@@ -153,18 +141,8 @@ defmodule Fleet.Pilot.ProjectIntensity do
     justification = Keyword.get(opts, :intensity_justification)
     card = Keyword.get(opts, :workflow_map)
 
-    # Naming a card IS a declaration (the card choice is the criticality mechanic — the
-    # doctrine above, applied): the C0 system-default applies ONLY when the human declared
-    # NOTHING at all. An explicit card without a level records the level as ABSENT (never
-    # fabricated into an C0 the human did not say) — `declared_by` stays truthful.
     declared? = is_binary(level) or is_binary(card)
 
-    # `declared_by` is an ATTRIBUTION, and it ships in the project's repo for good. It carries the
-    # role that actually onboarded (threaded as `:onboarded_by` by the delegation path). A caller
-    # that declares without saying who leaves it UNKNOWN — naming a role that may not have declared
-    # anything writes a permanent false record, and the schema requires a non-empty string, so the
-    # absence is RECORDED rather than filled. Same rule the level follows one branch below, and the
-    # same refusal `GatekeeperSeal` applies to signing under the system token.
     onboarded_by = Keyword.get(opts, :onboarded_by) || "unknown"
 
     base = %{
@@ -177,11 +155,8 @@ defmodule Fleet.Pilot.ProjectIntensity do
 
     base =
       cond do
-        # Declared level → recorded verbatim.
         is_binary(level) -> Map.put(base, "level", level)
-        # Card chosen without a level → the level is honestly ABSENT (schema allows it).
         is_binary(card) -> base
-        # Nothing declared → the honest C0 default posture, explicitly marked.
         true -> Map.put(base, "level", "C0")
       end
 
@@ -220,12 +195,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
     end
   end
 
-  # An explicit override outside the card's `applicable_intensity` is a CHOICE, not an
-  # error — accepted, logged LOUD (the human has the last word; a wall here would teach
-  # lying). Compared ONLY against a DECLARED level: an absent level (card-only
-  # declaration) is not a disagreement — a system default can never be "off-matrix"
-  # against a human choice. A card that declares no applicable_intensity gives no basis
-  # to warn either.
   defp warn_off_matrix(declaration, opts) do
     with level when is_binary(level) <- declaration["level"],
          override when is_binary(override) <- Keyword.get(opts, :workflow_map),
@@ -247,8 +216,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
   defp safe_load_card(name) do
     Fleet.Workflow.Loader.load!(name)
   rescue
-    # Unknown/broken card named as override: the declaration still writes (the burn will
-    # warn and fall back at read time) — creation is never walled on a card typo.
     e ->
       Logger.warning(
         "ProjectIntensity: override card #{inspect(name)} does not load (#{Exception.message(e)}) — " <>
@@ -258,10 +225,6 @@ defmodule Fleet.Pilot.ProjectIntensity do
       %{}
   end
 
-  # Resolved via the foundation authority `Fleet.SchemaCache` (read+decode+resolve,
-  # cached in :persistent_term), keyed by the resolved path. Fail-loud on an absent or
-  # malformed schema file — a broken deploy artifact, same contract as the workflow
-  # loader's schema; an error is never cached, the next call retries.
   defp schema do
     path = Path.join([to_string(:code.priv_dir(:lcars_fleet)), @schema_rel])
     Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)

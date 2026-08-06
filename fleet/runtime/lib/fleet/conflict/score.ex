@@ -1,11 +1,6 @@
 defmodule Fleet.Conflict.Score do
   @moduledoc """
-  THE composite-score formula and label derivation -- the single authority.
-
-  The ported engine kept three divergent copies (a seven-dimension formula in one place, a
-  five-dimension recompute in two others); a hunk lost a penalty silently the first time a secondary
-  path re-scored it. Here it lives once. Patterns pass dimensions; the score is derived here or
-  nowhere.
+  Single authority for composite confidence scoring and label derivation.
 
       score = type_classification
               - data_risk           * 0.40
@@ -15,9 +10,7 @@ defmodule Fleet.Conflict.Score do
               - algorithm_stability * 0.10
               - post_merge_risk     * 0.20
 
-  Labels by threshold: >= 92 certain, >= 68 high, >= 44 medium, else low.
-
-  **Last revised**: 2026-07-30
+  Labels: >=92 certain, >=68 high, >=44 medium, otherwise low.
   """
   alias Fleet.Conflict.ConfidenceScore
 

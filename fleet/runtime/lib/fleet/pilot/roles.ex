@@ -62,9 +62,6 @@ defmodule Fleet.Pilot.Roles do
       resolve_producer!()
   end
 
-  # Several producers is NOT a broken catalogue — it is a catalogue with `eng_hw` and `eng_sw`. The
-  # refusal belongs to this fallback path, not to boot: the cards name their producer, and a fleet
-  # that specialises its producers must not be refused readiness for it.
   defp resolve_producer! do
     case Fleet.CapProfile.roles_with_capability(@producer_capability) do
       {:ok, [role]} ->
@@ -88,18 +85,7 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  PER-PROJECT DELEGATE role — the one a project's escalations are addressed to, and the one
-  `ProjectArchitect.ensure/2` keeps alive per repo. Override by the opt `:project_delegate_role`,
-  then config `:fleet_pilot, :project_delegate_role`; otherwise RESOLVED by the `project_delegate`
-  capability.
-
-  EXACTLY one, like the sealer and unlike the producer: nothing SELECTS a delegate the way a card
-  selects a producer — it is ensured per repo, not dispatched by name — so two roles carrying the
-  capability is an ambiguity about who arbitrates, not a specialisation.
-
-  `Fleet.MCP.PodTools.Delegation.require_architect/1` already gated on this capability rather than on
-  `role == "architect"` (B-03). The two call sites that still named the role — the ensure and the
-  escalation mandate — now read the same source.
+  Returns the configured project delegate or the sole role with that capability.
   """
   @spec project_delegate_role(keyword()) :: String.t()
   def project_delegate_role(opts \\ []) do
@@ -150,7 +136,6 @@ defmodule Fleet.Pilot.Roles do
     end
   end
 
-  # EXACTLY one — the sealer is a singleton by design, not by convention.
   defp resolve_structural!(capability, label) do
     case Fleet.CapProfile.roles_with_capability(capability) do
       {:ok, [role]} ->
@@ -174,16 +159,8 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Jury (PR judges) of the single-brick model: the roles whose review is requested on a
-  producer's PR, whose approvals gate the seal, and whose count sizes the branch
-  protection at onboarding.
-
-  **THE CARD is the single source** (`spec.jury`, schema-required — the card governs the
-  judgment layer; there is NO engine config for the jury). Pass the loaded workflow map
-  when in hand; `nil` loads the delegation DEFAULT card (today: every issue runs it —
-  per-project card selection is the intensity chain, F-29). The `:reviewer_roles` opt is
-  an INJECTION SEAM (tests / hermetic overrides), never a config: the config key died
-  with the parallel lane.
+  Returns the card jury, or the injected `:reviewer_roles`. A `nil` card loads the delegation
+  default.
   """
   @spec jury(map() | nil, keyword()) :: [String.t()]
   def jury(workflow_map, opts \\ []) do
@@ -197,16 +174,10 @@ defmodule Fleet.Pilot.Roles do
   defp jury_of(nil, opts), do: Fleet.Workflow.Loader.load!(delegation_workflow_map(opts))["jury"]
 
   @doc """
-  Jury of the PROJECT's declared card — the per-issue jury source at every PR call-site
-  (review laying, verdict classification, orphan adoption, branch-protection sizing).
-  Resolution: `Fleet.Pilot.ProjectIntensity.pipeline_default/2` (the committed declaration;
-  absent → delegation default) → loaded card → `spec.jury`. An empty jury is a DELIBERATE
-  zero-judge card (schema doctrine) — the caller decides what that means (no review round,
-  straight to the sealed merge; the mechanical floor holds regardless).
+  Returns the jury of the project's declared card, checking `:reviewer_roles` first.
 
-  The `:reviewer_roles` opt is the injection seam (tests), checked FIRST — no disk read
-  under the seam. A declared card that no longer loads falls back LOUD to the delegation
-  default (same repair doctrine as the burn: re-declare to fix, never a stalled rail).
+  An unloadable declaration logs, records an incident, and falls back to the delegation card. An
+  empty card jury remains valid.
   """
   @spec project_jury(String.t(), keyword()) :: [String.t()]
   def project_jury(repo, opts \\ []) when is_binary(repo) do
@@ -229,9 +200,6 @@ defmodule Fleet.Pilot.Roles do
             "(#{Exception.message(e)}) — falling back to the delegation default card"
         )
 
-        # Same stance as the intensity fallback: the never-stall substitution stays, but
-        # swapping a project's DECLARED card for the default is a judgment-layer change —
-        # recorded as an incident (recurrence → sysadmin issue), never only a warning.
         incident =
           Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
 
@@ -241,7 +209,6 @@ defmodule Fleet.Pilot.Roles do
               reason_detail: "#{inspect(name)}: #{Exception.message(e)}"
             )
           catch
-            # An incident that cannot record must not break the burn (never-stall) — loud, not silent.
             kind, why ->
               Logger.warning(
                 "Roles: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
@@ -253,10 +220,7 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Name of the delegation DEFAULT workflow map (burned on any routeless issue and used as
-  the jury source when no per-issue map is in hand). Opt `:delegation_workflow_map` (test),
-  else config `:fleet_pilot, :delegation_workflow_map` (default `"brief-gate"`). SINGLE
-  accessor — the literal is not rewritten at the callers.
+  Returns the delegation workflow map, defaulting to `"brief-gate"`.
   """
   @spec delegation_workflow_map(keyword()) :: String.t()
   def delegation_workflow_map(opts \\ []) do
@@ -265,11 +229,7 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Name of the OPS workflow map — burned on a routeless issue carrying the `genre/ops` label
-  (chantier face-projet): the documentary path is a base function of EVERY project, whatever card
-  its criticality declared, so it does not live in `intensity.json`. Opt `:ops_workflow_map`
-  (test), else config `:fleet_pilot, :ops_workflow_map` (default `"ops-direct"`). SINGLE accessor,
-  same shape as `delegation_workflow_map/1`.
+  Returns the workflow map for routeless `genre/ops` issues, defaulting to `"ops-direct"`.
   """
   @spec ops_workflow_map(keyword()) :: String.t()
   def ops_workflow_map(opts \\ []) do
@@ -278,9 +238,7 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  GATEKEEPER role (PR guardian, signs the merges). Override by the opt `:gatekeeper_role`
-  (project/test), then config `:fleet_pilot, :gatekeeper_role`; otherwise RESOLVED from the catalogue
-  by the `exception_judge` capability. Raises if no role declares it, or if several do.
+  Returns the configured gatekeeper or the sole role with the `exception_judge` capability.
   """
   @spec gatekeeper_role(keyword()) :: String.t()
   def gatekeeper_role(opts \\ []) do

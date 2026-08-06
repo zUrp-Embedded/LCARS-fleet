@@ -1,34 +1,14 @@
 defmodule Fleet.Spawner.Pod.SessionFiles do
   @moduledoc """
-  Location of a pod's claude session JSONLs — a shared FS-READ island.
+  Shared read authority for session JSONLs under
+  `<pod_dir>/.claude/projects/<cwd-slug>/<uuid>.jsonl`.
 
-  One knowledge, one authority: a pod's claude sessions live under
-  `<pod_dir>/.claude/projects/<cwd-slug>/<uuid>.jsonl` (one directory per cwd-slug, one
-  append-only file per session — layout laid down by Claude Code, not by the fleet). The three
-  consumers (UUID GC at re-spawn, liveness probe, seed-store checkpoint) share THIS single glob;
-  each keeps its own logic (rm / size / content of the most-recent).
-
-  No state, no timer, no FS WRITE: only `Path.wildcard` + `File.stat` (that is what
-  distinguishes it from `Pod.Paths`, a PURE-computation island with no FS read — a glob would have no place there).
-  No dependency on `Fleet.Spawner.Pod` (no cycle).
-
-  ## Contract
-
-  - `jsonl_paths(pod_dir)` — ALL of the pod's session jsonls (all cwd-slugs, all uuids).
-    Called by `Fleet.Spawner.SeedStore` (via `latest_jsonl/1`).
-  - `jsonl_paths(pod_dir, session_id)` — the jsonls of THIS session, all cwd-slugs (the cwd-slug
-    is not known to the caller: claude derives it from the REPL's cwd, hence the `*`). Called by
-    `Pod.Scaffold.gc_stale_session_jsonl` (GC) and `Pod.Liveness` (cumulative size).
-  - `latest_jsonl(pod_dir)` — the ACTIVE jsonl (most recent mtime) → `{:ok, path}` | `:none`.
-    Called by `Fleet.Spawner.SeedStore` (seed checkpoint).
-
-  **Last revised**: 2026-07-18
+  Callers may enumerate every session, one UUID across cwd slugs, or the most
+  recently modified session.
   """
 
   @doc """
-  Paths of the session jsonls under `<pod_dir>/.claude/projects/*/`. Arity 1 = all of the pod's
-  jsonls; arity 2 = those of `session_id` (file `<session_id>.jsonl`, all cwd-slugs). Returns `[]` if
-  none (session not yet written / pod_dir absent — `Path.wildcard` does not raise).
+  Lists session JSONLs across all cwd slugs, optionally restricted to one session ID.
   """
   @spec jsonl_paths(Path.t(), String.t()) :: [Path.t()]
   def jsonl_paths(pod_dir, session_id \\ "*")
@@ -39,10 +19,7 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   end
 
   @doc """
-  The pod's ACTIVE jsonl = the most recently modified under `.claude/projects/*/` (the LIVE session,
-  robust to the UUID rotation of a `/clear`). `:none` if no jsonl. Robust to volatile files:
-  a `File.stat` that fails (file vanished between the glob and the stat) ignores the entry
-  instead of raising.
+  Returns the most recently modified session JSONL, ignoring entries that vanish during stat.
   """
   @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none
   def latest_jsonl(pod_dir) when is_binary(pod_dir) do

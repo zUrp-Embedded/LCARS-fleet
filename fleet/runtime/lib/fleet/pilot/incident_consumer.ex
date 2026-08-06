@@ -79,23 +79,9 @@ defmodule Fleet.Pilot.IncidentConsumer do
   @doc false
   def task_supervisor, do: @task_supervisor
 
-  # ASYNC runner (prod, injected as `:runner`) — offloads the record/escalate into the consumer's own
-  # `Task.Supervisor`: the registry's forge does not block the mailbox. Shared skeleton
-  # `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor and its consequence.
-  #
-  # Pool SATURATED (`:max_children`) → the work runs INLINE instead of being dropped: the incident
-  # is the durable memory the whole escalation chain rests on (the PermanentWarden's HALT assumes
-  # "sysadmin issue already opened by the incident rail"), and a failure burst is precisely when
-  # the pool saturates — dropping the record there loses the recurrence anchor at the moment it
-  # matters most. Inline cost: the consumer's mailbox waits one registry write (bounded by the
-  # forge timeouts). BOTH consumers now share this policy (`Offload.async_or_inline` — the
-  # completion consumer's former drop-on-saturation lost a completion the reconciliation could
-  # only reclaim by CHURN, re-dispatching finished work). The crash isolation the Task gave is
-  # kept by the rescue: a poisoned incident payload must not kill the singleton.
+  # Saturation runs inline: incident memory is never dropped.
   @doc false
   def offload_async(fun) do
-    # ONE inline-fallback policy, factored in Offload (shared with StepRunConsumer) — the local
-    # try/rescue copy this used to carry was exactly the duplication async_or_inline absorbs.
     Fleet.Pilot.Offload.async_or_inline(
       @task_supervisor,
       fun,

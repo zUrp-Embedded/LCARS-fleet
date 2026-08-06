@@ -1,27 +1,8 @@
 defmodule Fleet.Observation.Deck.View do
   @moduledoc """
-  PURE HTML rendering of the observation deck — the template (inline HTML + CSS + JS),
-  separated from the controller (`Fleet.Observation.Deck`: Plug routing + role-catalogue
-  derivation + live snapshots): ~85% of this file is template, zero router logic.
-
-  Two views, two philosophies:
-
-    * `page/0` — the LCARS "7 decks" shell: STATIC skeleton (no server
-      data), all content is pulled client-side by the embedded JS
-      (`fetch /api/pods` + `/api/projection`, 3 s refresh). 0-arity function:
-      the page depends on NO state — the data flows through the JSON endpoints.
-    * `table_page/2` — the basic table rendered SERVER-SIDE (zero CSS, zero
-      JS, auto-refresh `<meta refresh>`): receives the data from the controller
-      (roles + pods grouped by role) and does ONLY render them. Pure: same
-      arguments ⇒ same HTML.
-
-  Frontier: this module reads NEITHER the spawner NOR the read-model NOR the
-  cap-profiles catalogue — all data arrives as an argument. The choice of WHAT to display
-  (which roles, which pods) stays in `Deck`; here we decide only
-  HOW to show it. Every value interpolated server-side goes through
-  the `h/1` escaping (client-side, through `esc()` in the embedded JS).
-
-  **Last revised**: 2026-07-21
+  Pure HTML rendering for the observation deck. The LCARS shell pulls JSON
+  client-side; the basic table renders supplied data server-side. This module
+  reads no runtime source, and all interpolated values are escaped.
   """
 
   @doc """

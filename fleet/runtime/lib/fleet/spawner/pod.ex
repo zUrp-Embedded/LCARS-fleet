@@ -89,9 +89,6 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
 
-  # Event-driven completion: the result arrives via the Bus event
-  # `task_queue.work_item.completed` (%Fleet.Event{}, emitted by the broker on submit_result), NOT via a file.
-
   @type state_name ::
           :allocating
           | :cleaning
@@ -107,8 +104,7 @@ defmodule Fleet.Spawner.Pod do
           | :stream_alive
           | :output_extracted
           | :home_released
-          # SLOT-FREEZE: a pipe is :publishing between its submit and the confirmation that its deliverable is
-          # on the forge (event deliverable.published). Cleared -> ready to reset/re-brief (step 4).
+          # Gates pipe reset until publication is confirmed or explicitly lifted.
           | :publishing
 
   @type data :: %{
@@ -116,7 +112,6 @@ defmodule Fleet.Spawner.Pod do
           pod_id: String.t(),
           issue_id: String.t(),
           session_id: String.t() | nil,
-          # `started_at` ISO8601 frozen at Pod creation, persisted as-is in `state.json`.
           started_at: DateTime.t(),
           resume: boolean(),
           cap_profile: Fleet.CapProfile.t(),
@@ -244,13 +239,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # ============================================================
-  # state_enter — arming :monitoring (the only state that needs it)
-  # ============================================================
-
-  # We subscribe to the Bus on the 1st entry (from :launching) ONLY: a re-subscription on the
-  # return from :extracting (long-lived pod) would double the messages. Then we (re-)arm the
-  # response watchdogs (state_timeout :result_deadline + generic timeout :liveness).
+  # Monitoring re-entry re-arms watchdogs but never duplicates the Bus subscription.
   @impl :gen_statem
   def handle_event(:enter, old_state, :monitoring, data) do
     first_entry? = old_state != :extracting
@@ -258,11 +247,7 @@ defmodule Fleet.Spawner.Pod do
     if first_entry? do
       :ok = Bus.subscribe()
 
-      # BL-6-06, scoped cut: the ONE lifecycle milestone with a REAL consumer — `pod.spawned`
-      # feeds the per-project ArchFeed ("engineer parti sur #7"). Emitted at launch-PROVEN
-      # (first entry into :monitoring), the real producer the registry demands. `pod.phase` /
-      # `pod.alive` stay OUT: no consumer exists — re-adding them would recreate the hollow
-      # the registry cleanup removed (the deck reads the live snapshot by design).
+      # BL-6-06
       Events.lossy_broadcast("pod.spawned", %{
         "pod_id" => data.pod_id,
         "issue_id" => data.issue_id,
@@ -286,16 +271,8 @@ defmodule Fleet.Spawner.Pod do
     {:keep_state_and_data, actions}
   end
 
-  # All other states: entry does nothing (the work lives in `:proceed`).
   def handle_event(:enter, _old_state, _state, _data), do: :keep_state_and_data
 
-  # ============================================================
-  # Boot chain — internal :proceed event (priority over the mailbox)
-  # ============================================================
-
-  # ALLOCATE — non-bang I/O via safe_* (error → clean transition_failed, no brutal crash).
-  # `with_resolved_disallowed_tools` may raise on a corrupt baseline (fail-closed, non-bypassable)
-  # → caught via safe_resolve_disallowed + transition_failed.
   def handle_event(:internal, :proceed, :allocating, data) do
     cap_profile_path = Path.join(data.pod_dir, ".cap-profile.json")
 
@@ -401,15 +378,12 @@ defmodule Fleet.Spawner.Pod do
          {:ok, agent_draft} <- Assets.read_agent_draft(data.cap_profile),
          {:ok, protocole_user} <- Assets.read_protocole_user(data.cap_profile),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
-         # `.claude/` pod-owned = target of the creds-only bind (bwrap_launch). We create ONLY the dir,
-         # no settings.json inside → 0 human hook. bwrap mounts `.credentials.json` there.
          :ok <- Fs.safe_mkdir_p(pod_claude_dir),
          :ok <-
            Fs.safe_write(
              Path.join(lcars_dir, "system-prompt.md"),
              sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft
            ),
-         # Custom CLAUDE.md at the pod ROOT (project/cwd, not hidden); the rest in .lcars/.
          :ok <- Fs.safe_write(Path.join(data.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <-
@@ -423,12 +397,7 @@ defmodule Fleet.Spawner.Pod do
              Path.join(issues_dir, "#{Brief.issue_id_to_filename(data.issue_id)}.md"),
              Brief.default_brief(data)
            ),
-         # The scaffold above is the READABLE context; the CANONICAL channel for the brief is the
-         # TaskQueue (`get_work_item`). Idempotent (skip if already queued). Without this enqueue, an
-         # `admin.spawn` (no dispatcher) would see `get_work_item` return `{done:true}` → idle pod.
          :ok <- Brief.maybe_enqueue_brief(data),
-         # Provision the per-pod MCP socket BEFORE the launch (the bwrap bind fails if the socket
-         # file does not exist yet). Failure → propagated to the `with` → transition_failed.
          {:ok, mcp_socket_path} <-
            McpProvision.ensure_pod_socket(
              data.pod_id,
@@ -458,17 +427,11 @@ defmodule Fleet.Spawner.Pod do
   end
 
   def handle_event(:internal, :proceed, :launching, data) do
-    # A Pod crash does NOT kill the bwrap/tmux/claude (`--die-with-parent` = BEAM, not the
-    # gen_statem process) → live ORPHAN pod (OAuth+RAM). Before any (re)launch, we REAP a possible
-    # orphan of the same pod_id: no-op for a fresh pod; on recovery (:recreate) it cleans up the
-    # undead BEFORE relaunching (otherwise sock/process collision), which makes recovery viable.
+    # A crashed Pod can leave its launcher alive; reap the same pod ID before every launch.
     Backend.reap_orphan_pod(data.pod_id)
     role = cap_profile_name(data.cap_profile)
     containment = cap_profile_containment(data.cap_profile)
 
-    # The N0 launcher depends on the containment, read HERE (otherwise bwrap blind for everyone).
-    # "none" (host-native, out-of-band interactive session) → host_launch.sh (host, no sandbox);
-    # otherwise the bwrap chain. (No canon cap-profile is host-native post-2026-07-19 reorg.)
     launcher_path =
       if containment == "none", do: Backend.host_launch_path(), else: Backend.bwrap_launch_path()
 
@@ -476,56 +439,30 @@ defmodule Fleet.Spawner.Pod do
       role: role,
       pod_id: data.pod_id,
       pod_dir: data.pod_dir,
-      # N0 launcher selected by containment (host_launch.sh | bwrap_launch.sh). The argv stays
-      # identical on both sides (same contract <role> <pod_id> <pod_dir> <command...>). The opaque
-      # command (claude_launch.sh …) is claude_launch_path below.
       launcher_path: launcher_path,
       claude_launch_path: Backend.claude_launch_path(),
-      # SP no longer in the argv (/proc/cmdline leak + brushes ARG_MAX): claude_launch reads
-      # pod_dir/.lcars/system-prompt.md via --system-prompt-file (written in projecting). That is the SOURCE.
       session_id: data.session_id
     }
 
-    # Build the full env + resolve/validate the credentials in `Pod.LaunchEnv.build/4`.
-    # Returns `{:ok, env}` (auth bind placed + the human's git identity + login-validity gate passed) or an
-    # ALREADY-tagged `{:error, reason}` (:launch_env_unresolved / :credentials_invalid / :git_identity_unresolved)
-    # → transition_failed (same cleanup as the other launch failures).
     case LaunchEnv.build(data, role, containment, Backend.claude_launch_path()) do
       {:ok, env} -> do_launch_backend(data, args, env)
       {:error, reason} -> transition_failed(data, reason)
     end
   end
 
-  # EXTRACT — the result comes from the Bus event (data.submitted_result), not from a file.
-  # A TWO-HOP RELAY, NOT A REDUNDANCY: `work_item.completed` (broker→pod) is the end-of-MANDATE
-  # signal — the event-driven wake of THIS pod out of :monitoring (the deliberate replacement of
-  # file polling); `pod.completed` (pod→pilot) is the end-of-STEP, enriched HERE
-  # (workspace/base_sha/repo via CompletedPayload — the pod is the ONLY one that knows them).
-  # Unifying the two would require either the pod consuming its own event, or re-introducing
-  # shared state: the two hops are irreducible. Do NOT "simplify" this relay.
-  # Bounded re-fire of pod.completed after a failed broadcast. The 1000ms delay is NOT
-  # cosmetic: it keeps the pod ALIVE in :monitoring between retries (never release/kill
-  # on an orphan completion) and spaces them; @extract_retry_max caps them before transition_failed.
+  # Broker completion wakes the Pod; the enriched pod.completed event finishes the Pilot step.
   @extract_retry_max 5
   @extract_retry_delay_ms 1_000
 
-  # `pod.completed` is load-bearing LIFECYCLE (the StepRunConsumer depends on it to finish the step_run).
-  # Broadcast via `required_broadcast`: its failure is NOT swallowed. If it fails, we do NOT progress
-  # to release/kill (one-shot) nor to the re-monitoring that DROPS `submitted_result`
-  # (long-lived): the pod STAYS in :monitoring with its result RETAINED → a bounded `:extract_retry`
-  # timer re-fires the extract (capped at @extract_retry_max, then transition_failed) instead of an
-  # ORPHAN completion — never a silent wedge.
+  # A failed required broadcast retains the result and retries before any release or reset.
   def handle_event(:internal, :proceed, :extracting, data) do
     result = data.submitted_result || %{}
 
     case Events.required_broadcast("pod.completed", CompletedPayload.build(data, result)) do
       :ok ->
-        # Reset the retry counter on every SUCCESSFUL broadcast: a long-lived pod's cycle N must not
-        # inherit cycle N-1's retries.
         do_extract_proceed(%{data | extract_retries: 0}, result)
 
       {:error, _reason} ->
-        # Fail-loud (already logged ERROR by required_broadcast). submitted_result RETAINED (no drop).
         n = data.extract_retries
 
         if n >= @extract_retry_max do
@@ -536,19 +473,13 @@ defmodule Fleet.Spawner.Pod do
 
           transition_failed(data, {:pod_completed_undeliverable, n})
         else
-          # BOUNDED retry rail: back to :monitoring + a dedicated :extract_retry timer re-fires the
-          # extract (the ONLY re-fire path — the broker emits work_item.completed just once, so a
-          # missed broadcast would otherwise wedge the pod FOREVER with its result in hand).
           {:next_state, :monitoring, %{data | extract_retries: n + 1},
            [schedule_extract_retry_action()]}
         end
     end
   end
 
-  # RELEASE — kills the interactive pod (Port.close → claude/bwrap/script terminated) then NORMAL STOP
-  # (otherwise DynamicSupervisor memory leak). Under `:temporary` the :normal stop is never
-  # resurrected. No clear_for_pod here — release = post-EXTRACT success (task already completed).
-  # Checkpoint the seed BEFORE killing the backend (JSONl still intact).
+  # Capture the live seed before teardown removes access to the JSONL.
   def handle_event(:internal, :proceed, :releasing, data) do
     maybe_checkpoint_seed(data)
     Backend.teardown_backend(data)
@@ -557,81 +488,38 @@ defmodule Fleet.Spawner.Pod do
     {:stop, :normal, data}
   end
 
-  # Defensive: a :proceed in a state that does not expect one (direct recovery into :monitoring, dead
-  # path) does not crash — :monitoring's work is in its `:enter`, not in `:proceed`.
   def handle_event(:internal, :proceed, _state, _data), do: :keep_state_and_data
-
-  # ============================================================
-  # Synchronous calls ({:call, from}) — GenServer.call-compatible
-  # ============================================================
 
   def handle_event({:call, from}, :info, state, data) do
     info = %{
       pod_id: data.pod_id,
       issue_id: data.issue_id,
-      # The ROLE is recorded at SPAWN (= the cap-profile's `metadata.name`), exposed via the Registry. It is
-      # the AUTHENTICATED role identity (the pod cannot forge it over the wire).
       role: cap_profile_name(data.cap_profile),
-      # The repo the pod is BOUND to (`opts[:repo]`, `owner/name`) — the channel-side identity the MCP
-      # delegation tools resolve "the project" from (the pod never names its repo over the wire; it has
-      # "the project", nothing else). nil for unbound pods (starfleet, admin).
       repo: Keyword.get(data.opts, :repo),
-      # `phase` = the gen_statem state NAME reconstructed for pod_info (consumers depend on it:
-      # tests read phase, and the dispatcher reads conditions+has_active_task below).
       phase: state,
       conditions: MapSet.to_list(data.conditions),
-      # SLOT-FREEZE: the dispatcher's gate distinguishes an IDLE pipe (re-briefable) from a pipe still
-      # WORKING a task. Combined with :publishing to decide :ready.
       has_active_task: TaskProbe.pod_has_active_task?(data.pod_id),
       session_id: data.session_id,
       pod_dir: data.pod_dir,
       state_fs_path: data.state_fs_path,
       last_error: data.last_error,
       last_result: data.last_result,
-      # tmux_session: name of the pod's tmux session (set by LauncherPortBackend, nil for
-      # StubBackend). Exposed for Fleet.Spawner.wake_pod/1.
       tmux_session: data.tmux_session
     }
 
     {:keep_state_and_data, [{:reply, from, info}]}
   end
 
-  # SLOT-FREEZE: COLD in-place reset of a RESIDENT pipe's workspace for the next issue. NO
-  # rm_rf (live bind mount) — reset --hard base + clean + checkout -B feature/work via
-  # ProjectBootstrap.reset_in_place, then /clear the REPL. Destructive by design: `--hard` moves HEAD
-  # and overwrites tracked content, `clean -fdx` removes everything untracked including ignored files.
-  #
-  # Gated on the pod reading `:ready`, which means `:publishing` is absent (`StepDispatcher.Spawn`:
-  # `:publishing in conds -> :busy`). That flag is the ONLY gate. It falls on THREE paths, and the
-  # safety argument only covers the first:
-  #   - `deliverable.published` confirmed on the forge → the push already READ the workspace, so the
-  #     reset cannot race it. This is the path the guarantee is written for.
-  #   - `deliverable.publish_lost` (BL-6-03 S2) → the completion Task DIED mid-work; the flag is
-  #     cleared for that NAMED cause, without the confirmation (the push may or may not have read
-  #     the workspace — same unproven premise as the deadline, honestly stated at the source).
-  #   - the `:publish_deadline` fail-safe → the flag is cleared WITHOUT that confirmation and
-  #     WITHOUT a named cause — the net when the publish_lost event itself is lost.
+  # Cold pipe reset is destructive and relies on the caller's :ready/:publishing gate.
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
-    # cap_profile carrying the EFFECTIVE project (the call's, not the static one) for reset_in_place.
     eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
 
-    # F-28: on SUCCESS the fresh project map must ALSO replace the pod's OWN copy
-    # (`opts[:project]`) — `CompletedPayload` derives base_sha/gate_base_sha from it. A
-    # `keep_state_and_data` here applied the fresh base to the WORKSPACE and threw the map
-    # away: every payload of the reused pipe then reported the SPAWN-time base — a LYING
-    # provenance input_sha (lived: issue built on 2d70d4a attested as built on b2707cd) and
-    # a RECEDED base-ancestor gate (a HEAD rewriting the intermediate brick away would still
-    # pass the mechanical wall). On FAILURE the old map stays — the workspace kept the old
-    # base, updating the map anyway would be the INVERSE lie (fresh claim, stale disk).
+    # F-28: only a successful disk reset may advance the payload's project provenance.
     repinned = %{data | opts: Keyword.put(data.opts, :project, project)}
 
     case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
       {:ok, ws, branch} ->
-        # `/clear` is the OTHER load-bearing half of the cold reset (git workspace + REPL context). A failed
-        # `/clear` leaves the REPL carrying the PREVIOUS issue's conversation → context BLEED into the next
-        # issue — and the "+ /clear" log would lie. We surface it (the workspace IS reset; only the REPL clear
-        # failed) rather than swallow + falsely report success. We still proceed (:ok) — the git isolation
-        # holds and a tmux hiccup is transient; the bleed is now VISIBLE, not silent.
+        # Git isolation succeeded; a failed /clear is visible but does not undo the disk reset.
         case Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear") do
           :ok ->
             Logger.info(
@@ -653,10 +541,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # kill = a DELIBERATE release transition, not a brutal supervisor kill. Checkpoint the seed +
-  # teardown backend + release the task (abort, not success → clear) + record phase :killed, then stop
-  # :normal replying :ok to the caller. The brutal fallback (terminate_child) is only used if this call
-  # times out (cf. kill_pod/1).
   def handle_event({:call, from}, :kill, _state, data) do
     maybe_checkpoint_seed(data)
     Backend.teardown_backend(data)
@@ -731,29 +615,12 @@ defmodule Fleet.Spawner.Pod do
     {:keep_state, data, actions}
   end
 
-  # Residual tick outside :monitoring (generic timeout not auto-cancelled on state change) → no-op.
   def handle_event({:timeout, :liveness}, :tick, _state, _data), do: :keep_state_and_data
 
-  # SLOT-FREEZE fail-safe: deliverable.published did not arrive within the deadline. NOT "a role with no git
-  # deliverable" — those never arm this deadline (Publishing.maybe_enter_publishing gates on git_native).
-  # TWO triggers, and only one of them is a question:
-  #   - a LOST emission → the workspace read already happened, so clearing is safe outright;
-  #   - a crashed or STUCK completion → a git op may still be reading the workspace when we clear.
-  # The second case used to be argued away by a timing bound ("the git ops are SIGKILL'd under the
-  # deadline, so no live reader survives"). That bound was counted wrong — see
-  # `Publishing.publish_deadline_ms`, which now carries the real 165_000 (150_000 without the role trailer)
-  # against a 120_000 deadline.
-  # We clear ANYWAY, and that part is not in question: otherwise the pod stays never-:ready hence never
-  # re-briefed, which is a certain wedge against an unproven race. What is NOT established is the
-  # safety, in either direction — nobody has shown the reset landing on a live git process either.
-  # Logs WARNING: a missed confirmation must be visible.
+  # Publication deadlines lift a stuck flag unless a live publish observation says to re-arm.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     cond do
-      # OBSERVATION: a publish is still IN FLIGHT for this pod (the Pilot completion marked
-      # it, `Fleet.Publish.InFlight`). The deadline was the arithmetic backstop; the mark is the
-      # fact. A running publish must not be reset out from under a live git process — re-arm the
-      # deadline (a fresh bounded window) instead of lifting. A crashed publish clears its mark
-      # (while_publishing's `after`), so this can never defer forever.
+      # Live observation outranks the arithmetic backstop; the mark clears in an `after` block.
       Publishing.publishing?(data) and Fleet.Publish.InFlight.in_flight?(data.pod_id) ->
         Logger.warning(
           "pod #{data.pod_id} :publish_deadline fired but a publish is IN FLIGHT — re-arming " <>
@@ -767,28 +634,14 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # UNIFIED ack-driven KICK loop (bootstrap + wake-fallback, parameterized: cap/retry/keyword/ACK).
-  # Bounded tick. The control = the agent's ACK (`acked?/3`), NEVER a proxy:
-  #   - ACK (pull for a wake / poll for a bootstrap) → cancel the :kick generic timeout;
-  #   - cap without ACK → broadcast `wake.failed` (layer-clean escalation: Bus broadcast, no upward call) + cancel;
-  #   - tmux reachable → kick_send (keyword `engage` bootstrap / `wake` fallback) + reschedule;
-  #   - tmux not up yet → reschedule without consuming a send-keys.
-  # A send-keys error does not interrupt the pod (the monitor time-out covers it).
+  # One bounded ACK-driven loop handles bootstrap engage and wake fallback.
   def handle_event({:timeout, :kick}, {:attempt, n}, _state, %{tmux_session: session} = data)
       when is_binary(session) do
-    # A pod with NO pending brief (interactive/forever, or a permanent cold-booted) has NOTHING to
-    # pull: its briefs arrive later via `wake_pod`. We settle for a BOOTSTRAP — waking the REPL —
-    # bounded and SPACED OUT. A worker (brief enqueued at spawn) keeps the kick frequent until the pull.
     bootstrap? = TaskProbe.no_pending_brief?(data.pod_id)
 
-    # polled? = the agent has already called get_work_item (in-band ACK). Computed once: used for bootstrap-stop AND
-    # for the keyword choice (not polled yet = bootstrap-arm "engage"; already polled = running pod → "wake").
     polled = TaskProbe.polled?(data)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
 
-    # Three cadences, one per situation: bootstrap probe (spaced), worker startup engage-until-pull
-    # (frequent — nobody types in a fresh worker tmux), wake FALLBACK on a RUNNING pod (slow —
-    # it paces itself BEHIND the carrier, cf. Kick.wake_retry_ms/0).
     retry =
       cond do
         bootstrap? -> Kick.kick_bootstrap_retry_ms()
@@ -797,7 +650,6 @@ defmodule Fleet.Spawner.Pod do
       end
 
     cond do
-      # ACK = the agent reached out → we STOP the loop (cancel the :kick generic timeout).
       Kick.acked?(TaskProbe.brief_pulled?(data.pod_id), bootstrap?, polled) ->
         Logger.debug(
           "pod #{data.pod_id} acked (pull/poll) → kick stopped (carrier rail takes over)"
@@ -805,12 +657,7 @@ defmodule Fleet.Spawner.Pod do
 
         {:keep_state_and_data, [cancel_kick_action()]}
 
-      # Human-terminal pod (cap-profile `wake_send_keys: false`) with NOTHING pending: a
-      # flag-only bootstrap loop has NO action left (every send-keys gated, engage included) and
-      # would only burn its cap into a FALSE `wake.failed` escalation — the human/bridge side
-      # is the armer of this class (live 2026-07-19: resumed starfleet, `polled?` wiped by the
-      # fleet restart). A pod WITH a pending brief keeps the loop: `wake.failed` stays the
-      # terminal net of an unpulled mandate.
+      # Flag-only human terminals with no brief have no meaningful bootstrap action.
       bootstrap? and not Kick.profile_send_keys?(data) ->
         Logger.debug(
           "pod #{data.pod_id} bootstrap kick canceled (profile is flag-only, nothing pending)"
@@ -819,24 +666,16 @@ defmodule Fleet.Spawner.Pod do
         {:keep_state_and_data, [cancel_kick_action()]}
 
       n >= cap ->
-        # Cap exhausted = the agent NEVER acked. Layer-clean: we BROADCAST → a fleet_pilot
-        # consumer `record_or_escalate` → recurring = `:sp_suspect`.
         phase = if bootstrap?, do: :bootstrap, else: :wake
 
         Logger.warning(
           "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalating"
         )
 
-        # JSON-safe payload (the WS edge encodes it raw) WITHOUT losing the dedup bucket:
-        # "reason" = stable category ("no_ack" — same IncidentRegistry signature as the raw
-        # tuple), "reason_detail" = full term for the human diag.
         {reason, reason_detail} = Fleet.Event.reason_fields({:no_ack, phase})
 
         Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
-          # issue_id feeds correlation_id (Events.lossy_broadcast derives it from the payload):
-          # without it every wake.failed leaves with correlation_id=nil and the :sp_suspect
-          # escalation issue comes out without its linked-mandate block.
           "issue_id" => data.issue_id,
           "reason" => reason,
           "reason_detail" => reason_detail,
@@ -868,14 +707,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # No tmux_session (StubBackend, or vanished session/kill race) → no kick.
   def handle_event({:timeout, :kick}, {:attempt, _n}, _state, _data), do: :keep_state_and_data
 
-  # Desktop-slot capture loop (generic timeout `:capture_slot`, RC-visible pods only). Bounded poll
-  # of the live jsonl until claude has written its `bridge_status` (RC registration), then persist it
-  # to the per-identity sidecar and STOP. Best-effort: a cap without capture gives up quietly (the
-  # slot is re-minted + re-captured next boot). Isolated from kick/liveness/deadline — a failure here
-  # never touches the pod's core loop.
+  # RC-visible pods poll boundedly for a slot record; failure never touches the core loop.
   def handle_event({:timeout, :capture_slot}, {:attempt, n}, :monitoring, data) do
     case Fleet.Spawner.SeedStore.capture_slot_bridge(data.pod_dir, data.session_id) do
       :ok ->
@@ -899,29 +733,17 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Residual capture tick outside :monitoring (generic timeout not auto-cancelled on state change) → no-op.
   def handle_event({:timeout, :capture_slot}, {:attempt, _n}, _state, _data),
     do: :keep_state_and_data
 
-  # BOUNDED extract-retry timer — the ONLY re-fire of pod.completed after a failed
-  # broadcast. Guarded on :monitoring + a non-nil submitted_result: a no-op if a long-lived cycle has
-  # meanwhile reset the result (the extract already succeeded or the pod moved on).
+  # Only retained results may re-fire a failed pod.completed broadcast.
   def handle_event({:timeout, :extract_retry}, :fire, :monitoring, %{submitted_result: r} = data)
       when not is_nil(r),
       do: {:next_state, :extracting, data, [{:next_event, :internal, :proceed}]}
 
   def handle_event({:timeout, :extract_retry}, :fire, _state, _data), do: :keep_state_and_data
 
-  # ============================================================
-  # Port / Bus events (event type :info) + catch-all
-  # ============================================================
-  #
-  # Event-driven completion: the fleet_task_queue broker broadcasts %Fleet.Event{work_item.completed} on
-  # fleet.events. We only react to OURS (pod_id) in :monitoring. The result has arrived → the
-  # :monitoring → :extracting transition NATIVELY CANCELS the :result_deadline state_timeout (= the
-  # result_deadline_cancelled invariant); we additionally cancel the :liveness generic timeout (which does not
-  # cancel itself on state change). SLOT-FREEZE: we ADOPT the issue_id of the completed TASK (carried by
-  # the event) → the deliverable is attributed to the RIGHT brick (otherwise the 2nd deliverable overwrites the branch/PR of the 1st).
+  # Only this pod's completion advances it; leaving monitoring cancels the state timeout natively.
   def handle_event(
         :info,
         %Fleet.Event{
@@ -944,7 +766,6 @@ defmodule Fleet.Spawner.Pod do
      [cancel_liveness_action(), {:next_event, :internal, :proceed}]}
   end
 
-  # %Fleet.Event{work_item.completed} from another pod, or outside :monitoring → ignore.
   def handle_event(
         :info,
         %Fleet.Event{source: :task_queue, type: :"work_item.completed"},
@@ -953,9 +774,7 @@ defmodule Fleet.Spawner.Pod do
       ),
       do: :keep_state_and_data
 
-  # SLOT-FREEZE: THIS pod's deliverable is confirmed on the forge (push + PR OK -> the push already READ the
-  # workspace). We clear :publishing -> the pod is :ready (reset/re-brief safe, step 4) + we cancel
-  # the publish_deadline. Matched by pod_id; deliverable.published from OTHER pods -> ignored.
+  # Forge confirmation makes this pipe re-briefable and cancels its publication deadline.
   def handle_event(
         :info,
         %Fleet.Event{type: :"deliverable.published", pod_id: pid},
@@ -973,12 +792,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
     do: :keep_state_and_data
 
-  # BL-6-03 S2 — the completion Task carrying THIS pod's publication DIED (witnessed by the
-  # consumer's :DOWN, event-carried): lift :publishing NOW for a NAMED cause instead of letting
-  # the 120s deadline expire blind. Same reset-safety semantics as the deadline lift (the task
-  # died mid-work — the push may or may not have read the workspace); what changes is the honesty
-  # and the latency. The deadline is canceled here BECAUSE this event replaces it; it stays the
-  # NET for the case where this event itself is lost. Matched by pod_id; other pods' → ignored.
+  # BL-6-03: a witnessed publication-task death lifts the flag with a named cause.
   def handle_event(
         :info,
         %Fleet.Event{type: :"deliverable.publish_lost", pod_id: pid} = ev,
@@ -1001,14 +815,12 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:info, %Fleet.Event{type: :"deliverable.publish_lost"}, _state, _data),
     do: :keep_state_and_data
 
-  # Port lifecycle: if the result was extracted (work_item.completed event received → :output_extracted),
-  # the exit is the normal post-release stop. Otherwise the process died WITHOUT submitting a result → failure.
+  # A Port exit is normal only after extraction; otherwise it fails and releases the active task.
   def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)
       when is_port(port) do
     if MapSet.member?(data.conditions, :output_extracted) do
       {:stop, :normal, data}
     else
-      # Process died WITHOUT a submitted result → orphan active task. Release it.
       clear_pod_task(data.pod_id)
 
       Events.lossy_broadcast("pod.failed", %{
@@ -1024,25 +836,15 @@ defmodule Fleet.Spawner.Pod do
 
       Logger.warning("pod #{data.pod_id} exited before submitting result (exit=#{exit_code})")
 
-      # TOMBSTONE: record state.json phase=:failed BEFORE the stop. Without it the state.json
-      # stays at :monitoring (set at launch) → neither clear_terminal_snapshot nor the
-      # PodWarden (which only GCs the @terminal_phases) ever reclaims the pod_dir (a full git
-      # clone) = a monotonic leak, exactly what the warden exists to kill. Parity with
-      # transition_failed (its twin), pod.failed payload unchanged (exit_code kept).
+      # The failed tombstone lets recovery and the warden reclaim this pod directory.
       data = Map.put(data, :last_error, {:exited_before_result, exit_code})
       StateFs.write_state_fs(put_phase(data, :failed))
       {:stop, {:shutdown, {:exited_before_result, exit_code}}, data}
     end
   end
 
-  # Silent catch-all: other info messages (down, monitor, exit_status of a foreign port, etc.).
   def handle_event(:info, _msg, _state, _data), do: :keep_state_and_data
 
-  # 3-STATE decision at the :result_deadline fire, split out (grouped OUTSIDE the handle_event/4
-  # clauses) to be testable without a live-vs-unreachable TaskQueue. `:active` = real response timeout →
-  # kill; `:idle` = between tasks → lapse (no idle-kill); `:unknown` = broker unverifiable → no-kill
-  # (preserved) BUT re-arm, never lapse (a bare lapse orphans a hung pod whose broker blipped at the fire —
-  # the liveness only re-arms on movement).
   @doc false
   def result_deadline_fire(:active, data),
     do: transition_failed(data, {:result_timeout, data.pod_id})
@@ -1052,24 +854,7 @@ defmodule Fleet.Spawner.Pod do
   def result_deadline_fire(:unknown, data),
     do: {:keep_state_and_data, arm_result_deadline_actions(data)}
 
-  # ============================================================
-  # terminate/3 — GUARANTEED teardown net (anti-orphan + anti-socket-leak)
-  # ============================================================
-  #
-  # OTP calls `terminate/3` on EVERY `{:stop, _, _}` (success, kill, transition failure,
-  # exit-before-result) AND on a callback crash. The success (releasing) and kill paths
-  # ALREADY call `teardown_backend` explicitly BEFORE their stop — we keep them (the order
-  # "checkpoint the seed BEFORE killing the backend" is co-located there). `terminate/3` is the NET
-  # for the other stops (transition failure, exit-before-result) that would otherwise leave the
-  # backend a live ORPHAN (claude burns OAuth+RAM). `teardown_backend/1` is idempotent (already-closed
-  # port short-circuited, kill tmux no-op on a dead target, File.rm_rf does not raise on the absent),
-  # so the double call is harmless. Guarded by rescue/catch: `terminate` must NEVER raise
-  # (otherwise it masks the real stop reason). The `after` releases the per-pod MCP socket on every
-  # path that runs `terminate/3` to completion (even if teardown_backend raises). If the supervisor
-  # brutal-kills a wedged teardown (15s shutdown bound exceeded), the `after` never runs — the
-  # acceptor, AF_UNIX listener, Registry entry and socket file survive their pod; `Fleet.MCP.SocketWarden`
-  # reconciles them against the live pods and releases them (2-tick grace), so the leak is bounded by
-  # its tick, not by the next BEAM boot.
+  # Idempotent teardown is the net for every stop and callback crash; it must not mask the reason.
   @impl :gen_statem
   def terminate(reason, _state, data) do
     Backend.teardown_backend(data)
@@ -1089,14 +874,9 @@ defmodule Fleet.Spawner.Pod do
 
       :ok
   after
-    # Always executed → the socket is released even if teardown_backend raises. `release_pod_socket/1`
-    # (Pod.McpProvision — the whole MCP channel lives over there) is self-protected (never raises):
-    # a raise here would propagate out of `terminate`.
     McpProvision.release_pod_socket(data)
   end
 
-  # Local "issue-N" → N parse (feed context only): Spawner cannot reach Pilot's IssueId
-  # (upward edge), and the feed needs a best-effort integer — nil when the shape differs.
   defp issue_number_of("issue-" <> rest) do
     case Integer.parse(rest) do
       {n, ""} -> n
@@ -1108,16 +888,6 @@ defmodule Fleet.Spawner.Pod do
 
   defp do_publish_deadline_lift(data) do
     if Publishing.publishing?(data) do
-      # THIS WARNING IS THE ONLY TRACE, AND IT IS NOT RECOVERABLE. There is no file backend on the
-      # logger (`config :logger, level:` only), so it lands in the daemon's tmux pane — a 2000-line
-      # ring buffer that dies with the daemon. The durable NDJSON (`Starfleet.AuditLog.write/1`) is
-      # written by `Cat5Escalator` and `DriftMonitor` alone: Cat-5 forensics, not this.
-      #
-      # Consequence, and it is the reason the safety question above stays open: nobody can find out
-      # AFTER THE FACT whether this ever fired. Not for lack of access — because nothing records it.
-      # So "does the reset ever land on a live git process?" is unanswerable as the code stands, in
-      # both directions. Making it answerable is a design call (Cat-5 rail? a durable audit rail? or
-      # accept the log?), deliberately not taken here.
       Logger.warning(
         "pod #{data.pod_id} :publishing -> :ready by DEADLINE (deliverable.published not received in time)"
       )
@@ -1127,62 +897,35 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  # ============================================================
-  # Launch backend
-  # ============================================================
-
   defp do_launch_backend(data, args, env) do
-    # F-C041 — conformity guard BEFORE dispatch: a misconfigured `:launch_backend` (typo/absent → no
-    # `launch/2`) would raise `UndefinedFunctionError` HERE and crash the gen_statem WITH NO
-    # transition_failed (orphan task + stale state.json). `launch_backend_conforming/0` folds it to a
-    # typed error → clean pod failure (mirror of the MCP provisioner conformity guard).
+    # F-C041
     with {:ok, backend} <- Backend.launch_backend_conforming(),
          {:ok, launched} when is_map(launched) <- backend.launch(args, env) do
-      # Extract the port (LauncherPortBackend includes it, StubBackend does not). nil-able: a stub test
-      # has no Port → the exit_status clauses never match → legacy behavior preserved.
       port = Map.get(launched, :port)
-
-      # tmux_session set by LauncherPortBackend (bwrap AND host); nil for StubBackend.
       tmux_session = Map.get(launched, :tmux_session)
 
       data =
         data
         |> Map.put(:port, port)
         |> Map.put(:tmux_session, tmux_session)
-        # PRE-ALLOCATED session_id (data) — no init_msg capture (the -p model is dead).
         |> Map.put(:session_id, data.session_id)
         |> add_condition(:process_launched)
         |> add_condition(:stream_alive)
 
       StateFs.write_state_fs(put_phase(data, :monitoring))
 
-      # Brief delivery to the long-lived RC pod: PodTmux send-keys on the per-pod sock (universal,
-      # bwrap AND host). Stub path (tests): no-op (no tmux_session returned → kick not armed).
-      # We arm the ack-driven kick loop as a transition ACTION (1st tick = bootstrap "engage").
       {:next_state, :monitoring, data, brief_kick_actions(data)}
     else
-      # Guard misconfig `{:launch_backend_misconfigured, _}` OR launch `{:error, _}` → both fail the pod
-      # cleanly via transition_failed (no UndefinedFunctionError crash, no orphaned task).
       {:error, reason} -> transition_failed(data, {:launch_failed, reason})
     end
   end
 
-  # The 1st send-keys will be `engage` (bootstrap); the role's SP (`core/runtime-contract` block) carries the
-  # get_work_item→submit_result workflow. No tmux_session (StubBackend/kill race) → no action.
   defp brief_kick_actions(%{tmux_session: nil}), do: []
 
   defp brief_kick_actions(%{tmux_session: session}) when is_binary(session),
     do: [schedule_kick_action(0, Kick.kick_first_delay_ms())]
 
-  # ============================================================
-  # Extract — progression / payload pod.completed
-  # ============================================================
-
-  # Normal progression AFTER a `pod.completed` broadcast successfully. Branches by lifetime_scope:
-  #   - `one-shot`: extract → release → stop (1 task = 1 pod life).
-  #   - others (pipe/run/forever): long-lived pod. Back to :monitoring (its enter re-arms the
-  #     deadline), reset submitted_result + :output_extracted. Release only on external kill_pod
-  #     or deadline timeout. (Pulled out of the path so a broadcast failure NEVER advances here.)
+  # Successful extraction releases one-shots and resets long-lived pods for another cycle.
   defp do_extract_proceed(data, result) do
     data =
       data
@@ -1194,32 +937,18 @@ defmodule Fleet.Spawner.Pod do
         {:next_state, :releasing, data, [{:next_event, :internal, :proceed}]}
 
       _other ->
-        # Reset :output_extracted on re-monitoring (otherwise a REPL crash on cycle 2 is masked as
-        # {:stop, :normal} via the exit_status handler's guard → pod.failed/clear never emitted).
-        # Bus.subscribe not re-called: :monitoring's enter only subscribes from :launching.
         data =
           data
           |> Map.put(:submitted_result, nil)
           |> remove_condition(:output_extracted)
 
-        # SLOT-FREEZE: enter_publishing -> the pipe is :publishing as long as its deliverable is not
-        # confirmed on the forge (deliverable.published); it is not re-briefable while it publishes.
-        # Decision + flag + arming of :publish_deadline in `Pod.Publishing` (git_native gate included).
         {data, pub_actions} = Publishing.maybe_enter_publishing(data)
-
-        # Back to :monitoring: its `:enter` re-arms result_deadline + liveness.
         {:next_state, :monitoring, data, pub_actions}
     end
   end
 
-  # Delegates to the single source `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # At the death of a PROJECT pod (rc_name present), checkpoints its ACTIVE session JSONl to the
-  # seed-store for later recall (`--resume`). Permanents (no rc_name) → no seed-store.
-  # Non-fatal by contract: SeedStore.checkpoint never raises (it rescues internally, logs warning,
-  # returns `{:error, _}` — discarded here); a failed checkpoint loses only the session-memory
-  # bonus, the death path proceeds (the work truth lives on the forge).
   defp maybe_checkpoint_seed(data) do
     case LaunchSpec.rc_project(data.opts, data.cap_profile) do
       nil ->
@@ -1275,16 +1004,11 @@ defmodule Fleet.Spawner.Pod do
         case Jason.decode(json) do
           {:ok, %{"session_id" => sid, "phase" => phase_str} = snap} when is_binary(sid) ->
             if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
-              # SAME fleet life: the pod died while this fleet was alive (crash/wedge) →
-              # the fresh-reroll recovery doctrine (never resume a dead pod's accumulated session).
+              # Same-epoch crash recovery creates a fresh session.
               phase = Recovery.phase_from_string(phase_str) || :launching
               Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
             else
-              # PREVIOUS fleet life (clean stop / fleet crash — the whole BEAM was down): the
-              # snapshot is STALE, nothing was mid-flight in THIS life → the unified seed decision
-              # applies exactly as on a first boot (live jsonl → resume in place; seed → resume;
-              # else fresh). Live scar 2026-07-19: without this, every clean reboot fell into
-              # :recreate and the slot/context never came back.
+              # Previous-epoch snapshots use the normal live/seed/fresh decision.
               Logger.info(
                 "pod #{base.pod_id} recover: state.json from a PREVIOUS fleet life " <>
                   "(stale epoch) → unified seed decision (not a crash recovery)"
@@ -1293,10 +1017,6 @@ defmodule Fleet.Spawner.Pod do
               maybe_slot_resume(base)
             end
 
-          # state.json PRESENT but CORRUPT/incomplete (bad JSON, missing session_id/phase) = a broken
-          # recovery point. We fresh-init (cannot recover), but LOUD (error = real loss: the durable
-          # recovery point is gone), like the TaskQueue emits `state.corrupt` — a silent fresh init would
-          # masquerade the data loss as a normal boot.
           _ ->
             Logger.error(
               "pod #{base.pod_id} recover: state.json PRESENT but CORRUPT at #{base.state_fs_path} " <>
@@ -1306,7 +1026,6 @@ defmodule Fleet.Spawner.Pod do
             base
         end
 
-      # File present but UNREADABLE (perms/IO) = also a broken recovery point → LOUD, fresh init.
       {:error, reason} ->
         Logger.error(
           "pod #{base.pod_id} recover: state.json UNREADABLE (#{inspect(reason)}) at " <>
@@ -1322,22 +1041,12 @@ defmodule Fleet.Spawner.Pod do
     pod_dir = Paths.pod_dir_for(args.pod_id, args.opts)
 
     %{
-      # `phase: :pending` = the fresh-boot marker; `Pod.Recovery.first_continue_for/1` matches on
-      # `:recovery` ALONE (its fallback clause covers this fresh/no-snapshot shape → :allocate).
-      # The field is then DROPPED from the gen_statem data (the phase IS the state).
       phase: :pending,
       conditions: MapSet.new(),
       pod_id: args.pod_id,
       issue_id: args.issue_id,
-      # Session UUID PRE-ALLOCATED at spawn: `--session-id <uuid>` on the 1st creation. Recovery
-      # from state.json does NOT reuse this sid (recreate = fresh session). The explicit seed
-      # (`opts[:session_id]`, e.g. arch recall) TAKES PRECEDENCE over the
-      # mint (`Pod.SessionMint`) — but is CAST as a valid UUID first (see resolve_session_id/1).
       session_id: resolve_session_id(args),
-      # ISO8601 timestamp frozen at creation, persisted as-is in state.json.
       started_at: DateTime.utc_now(),
-      # default false; ONLY a deliberate recall (`opts[:resume]`) sets it to true → claude
-      # `--resume <session_id>`. Recovery from state.json never resumes.
       resume: Keyword.get(args.opts, :resume, false),
       cap_profile: args.cap_profile,
       env_vars: %{},
@@ -1391,8 +1100,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Is the identity's live jsonl already in the pod_dir? (Same path shape as `SeedStore.restore`
-  # writes and `--resume <uuid>` reads: `.claude/projects/<slugify(cwd)>/<uuid>.jsonl`.)
   defp live_jsonl_exists?(base) do
     cwd = LaunchSpec.pod_cwd(base.opts, base.cap_profile, base.pod_dir)
 
@@ -1407,12 +1114,7 @@ defmodule Fleet.Spawner.Pod do
     |> File.exists?()
   end
 
-  # The explicit seed (`opts[:session_id]`) PRECEDES the mint but must be a VALID session UUID —
-  # an arch recall resumes a real vendor session, and the value is exported to the
-  # launcher + persisted for recovery. A present-but-non-UUID seed is a caller/seed corruption: we REFUSE
-  # it loud (raise → `init/1` rescue → `{:error, _}` at start_link, no launch), never accept an arbitrary
-  # binary as identity nor silently fall back to the mint (that would MASK the corrupt seed with a mint id
-  # under a wrong recall/resume intent). Absent seed → the mint (a valid UUID by construction).
+  # Explicit recall identity precedes minting but must retain the vendor UUID shape.
   defp resolve_session_id(args) do
     case Keyword.get(args.opts, :session_id) do
       nil ->
@@ -1432,31 +1134,15 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # SINGLE accessor of the role (= metadata.name) for ALL pod sites. Delegates to the SINGLE
-  # SOURCE `Fleet.CapProfile.name/1`, which RAISES if the name is absent/empty — NO fabricated default.
   defp cap_profile_name(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.name(cap)
 
-  # `metadata.containment` ∈ {"bwrap","none"} (conservative default "bwrap"). "none" = host_native →
-  # host_launch.sh (NO sandbox); otherwise the bwrap chain. Delegates to the SINGLE SOURCE
-  # `Fleet.CapProfile.containment/1`.
   defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
 
-  # Non-struct fallback = the conservative default, read from the SINGLE AUTHORITY (no re-typed "bwrap"
-  # literal that would go stale if the default changed).
   defp cap_profile_containment(_), do: Fleet.CapProfile.default_containment()
 
-  # ============================================================
-  # Helpers
-  # ============================================================
-
-  # Rebuilds a map with `:phase` (the gen_statem state) for the Pod.* modules that depend on it —
-  # `StateFs.write_state_fs/1` reads `state.phase` + `state.conditions`. The phase is no longer in
-  # `data` (it IS the state): we re-inject it when writing the recovery snapshot.
+  # Recovery snapshots need the state name reattached to the callback data.
   defp put_phase(data, phase), do: Map.put(data, :phase, phase)
 
-  # Transition failure: the pod dies without relaunch → release its active task (otherwise orphaned),
-  # record state.json phase=failed, signal on the Bus, then `{:shutdown, reason}` stop (terminate/3
-  # is the backend teardown net). Twin of the `pod.failed` broadcast in the exit_status handler.
   defp transition_failed(data, reason) do
     Logger.warning("pod #{data.pod_id} failed: #{inspect(reason)}")
 
@@ -1464,9 +1150,7 @@ defmodule Fleet.Spawner.Pod do
     data = Map.put(data, :last_error, reason)
     StateFs.write_state_fs(put_phase(data, :failed))
 
-    # All callers pass tuple reasons ({:allocate_failed,_}, {:launch_failed,_}, …) — non-JSON
-    # terms crash the WS edge. Normalize to the stable category (same IncidentRegistry dedup
-    # signature as the tuple: both bucket to elem(0)) + full detail aside.
+    # Normalize terms before the raw JSON websocket edge while retaining diagnostic detail.
     {category, reason_detail} = Fleet.Event.reason_fields(reason)
 
     Events.lossy_broadcast("pod.failed", %{
@@ -1486,20 +1170,11 @@ defmodule Fleet.Spawner.Pod do
     Map.update!(data, :conditions, &MapSet.put(&1, condition))
   end
 
-  # Removes a condition. `:output_extracted` MUST be reset on re-monitoring of a long-lived pod —
-  # otherwise a REPL crash on cycle 2 stays masked as {:stop, :normal} (the exit_status handler's guard
-  # stays true) → pod.failed/clear never emitted.
   defp remove_condition(data, condition) do
     Map.update!(data, :conditions, &MapSet.delete(&1, condition))
   end
 
-  # Releases the active task of a pod that dies without completing it. Non-fatal for the death path:
-  # the Pod is otherwise decoupled from TaskQueue (event-driven completion) — we do not crash a pod's
-  # death if TaskQueue is unavailable (e.g. a test context with no broker). A failed release is logged
-  # warning below; the stale ACTIVE item does not outlive it silently: the broker holds no persisted
-  # state (a down broker restarts EMPTY) and a later enqueue for the same pod supersedes any stale
-  # active item — cf. `Spawner.safe_clear_for_pod` (kill path twin, logged ERROR there because the
-  # staleness feeds the poller-reclaim/re-dispatch loop).
+  # Task release is non-fatal on a Pod death but never silent.
   defp clear_pod_task(pod_id) do
     Fleet.TaskQueue.clear_for_pod(pod_id)
     :ok
@@ -1513,16 +1188,7 @@ defmodule Fleet.Spawner.Pod do
       :ok
   end
 
-  # ============================================================
-  # Native timer actions (state_timeout + generic timeouts)
-  # ============================================================
-
-  # RESPONSE deadline (state_timeout of :monitoring) + liveness watchdog (recurring generic timeout).
-  # Preserved policy: no arming for a `forever` pod (a permanent has no bounded response
-  # window; idle = normal, legitimate slow-task, governed by external kill_pod) → we emit the
-  # cancellation ACTIONS (time :infinity) to guarantee the absence of both a deadline AND liveness.
-  # Otherwise: the deadline is NOT a "time to finish" budget — it is a SILENCE watchdog. The
-  # `:liveness` re-arms this deadline as long as the pod MOVES → an agent at work NEVER times out.
+  # Forever pods cancel both watchdogs; other deadlines measure silence, not work duration.
   defp arm_result_deadline_actions(data) do
     if lifetime_scope(data.cap_profile) == "forever" do
       [{:state_timeout, :infinity, :result_deadline}, {{:timeout, :liveness}, :infinity, :tick}]
@@ -1537,14 +1203,9 @@ defmodule Fleet.Spawner.Pod do
   defp liveness_tick_action(data),
     do: {{:timeout, :liveness}, Liveness.liveness_tick_ms(data), :tick}
 
-  # Cancels the :liveness generic timeout (a generic timeout does NOT cancel itself on state change,
-  # unlike the :result_deadline state_timeout). Emitted on :monitoring → :extracting.
   defp cancel_liveness_action, do: {{:timeout, :liveness}, :infinity, :tick}
 
-  # SLOT-FREEZE: adopts the issue_id of the completed task (from the work_item.completed event) as the pod's
-  # current issue. A re-briefed pipe changes brick on every task; without this state.issue_id
-  # would stay the spawn one -> all attributions would point at the 1st brick. Absent/empty ->
-  # we keep the existing one.
+  # Re-briefed pipes attribute completion to the current task rather than their spawn issue.
   defp adopt_task_issue_id(data, payload) do
     case payload[:issue_id] || payload["issue_id"] do
       t when is_binary(t) and t != "" -> %{data | issue_id: t}
@@ -1552,24 +1213,14 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # ============================================================
-  # Kick (generic timeout :kick) — arming actions
-  # ============================================================
-
-  # Kick loop (generic timeout named `:kick`, only 1 alive per name). (Re-)arming it RESTARTS the
-  # timer (a wake_pod during bootstrap does not create a 2nd loop). The bounds/cadences + the
-  # decision/I-O live in `Pod.Kick`; here we only build the timer ACTION.
   defp schedule_kick_action(n, delay), do: {{:timeout, :kick}, delay, {:attempt, n}}
 
   defp schedule_extract_retry_action,
     do: {{:timeout, :extract_retry}, @extract_retry_delay_ms, :fire}
 
-  # Cancel = set the :kick generic timeout to :infinity (= no timer).
   defp cancel_kick_action, do: {{:timeout, :kick}, :infinity, {:attempt, 0}}
 
-  # Desktop-slot capture (generic timeout `:capture_slot`) — arming/cancel + cadence. Wider window
-  # than the kick: claude's RC registration lands after the cold-start (~15s under bwrap), so the
-  # default 5s + 20×5s ≈ 105s comfortably covers it. Best-effort, no escalation on cap.
+  # Slot capture gets a wider best-effort window than the boot kick.
   defp schedule_capture_action(n, delay), do: {{:timeout, :capture_slot}, delay, {:attempt, n}}
   defp cancel_capture_action, do: {{:timeout, :capture_slot}, :infinity, {:attempt, 0}}
 
@@ -1587,10 +1238,7 @@ defmodule Fleet.Spawner.Pod do
     e -> {:error, {:baseline_corrupt, Exception.message(e)}}
   end
 
-  # Containment gate (including the deny of Anthropic native server-tools) wired at the spawn boundary.
-  # If `validate/1` (all the containment semantics) were called ONLY by the tests, the gate
-  # would be hollow: a fresh profile would silently bypass. Fail-loud: invalid profile → :failed,
-  # the pod is NEVER launched. The JSON-schema does NOT cover all these rules — hence validate/1 here.
+  # Runtime containment validation covers rules beyond the JSON schema.
   defp gate_cap_profile(resolved) do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
@@ -1598,11 +1246,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Drift of the prompt material against the epoch the image opened. `warning`, not `error`: nothing
-  # is lost and nothing is degraded — the pod gets the proven-good content either way — but the
-  # deployed program no longer matches what boot validated, which an operator must not learn by
-  # accident. Silent, this is the failure mode the doctrine names first: active suspicion of silent
-  # failure. Unpublished (tests, tooling) → nothing was validated, so nothing can have drifted.
+  # Pods keep using the proven image; disk divergence remains operator-visible.
   defp warn_on_image_drift do
     case SPBuilder.image_drift() do
       {:ok, []} ->

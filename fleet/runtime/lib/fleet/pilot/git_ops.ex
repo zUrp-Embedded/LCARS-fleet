@@ -1,31 +1,13 @@
 defmodule Fleet.Pilot.GitOps do
   @moduledoc """
-  Bounded git — single source of the `git` wrapper for the pilot's FS operations (onboarding a project,
-  aligning a worktree). The real BOUND (dedicated process-group + WALL deadline that kills the group +
-  anti-prompt) lives in `Fleet.Credentials.Shell.git`; this module adds three shared things to it:
-
-    * auth injection (forge token in env, NEVER on the argv) for the network ops (clone/fetch/push);
-    * the commit identity (author set by the caller, committer = the human for traceability);
-    * a TYPED return `:ok | {:error, {:git_failed | :git_timeout | :git_exit, …}}`.
-
-  Shared by `Fleet.Pilot.ProjectOnboard` (clone/scaffold/commit/push) and `Fleet.Pilot.WorktreeSync`
-  (fetch/reset): a single place where a pilot `git` runs — not two wrappers to keep in sync.
-
-  **Last revised**: 2026-07-21
+  Pilot adapter over bounded `Fleet.Credentials.Shell.git`: injects forge auth
+  outside argv, applies commit identity, and returns typed failures.
   """
 
   alias Fleet.Credentials.ForgeAuth
 
   @doc """
-  Runs bounded `git args`. `opts`:
-
-    * `:auth` (default `false`) → forge token in env (`ForgeAuth.git_env`) for the network ops
-      (clone/fetch/push). The local ops (reset/commit/worktree add) don't need it.
-    * `:author` (`%{name, email}` | `nil`) → `GIT_AUTHOR_*`. The committer is left to the human
-      identity resolution (traceability), not to the author.
-
-  Return: `:ok` (exit 0) | `{:error, …}`. The args are truncated to 3 in the error (enough to
-  identify the op: `git -C <dir> <verb>`, without dumping the rest).
+  Runs bounded git, optionally with forge auth and an explicit author.
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
   def run(args, opts \\ []) do

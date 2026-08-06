@@ -88,11 +88,11 @@ defmodule Fleet.Pilot.Poller.Lease do
           errors: non_neg_integer()
         }
 
-  @doc "Blank tally (single source). The error paths use `%{zero_tally() | errors: 1}`."
+  @doc "Blank tally."
   @spec zero_tally() :: tally()
   def zero_tally, do: %{dispatched: 0, skipped: 0, errors: 0}
 
-  @doc "Field-by-field sum of two tallies (issues+pulls aggregation, cross-repo)."
+  @doc "Field-by-field tally sum."
   @spec merge_tally(tally(), tally()) :: tally()
   def merge_tally(a, b) do
     %{
@@ -103,10 +103,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   end
 
   @doc """
-  Classifies then dispatches the issues of the tick under the repo-serialized lease. `pr_issue_ids` =
-  issues carrying an open fleet PR (JUDGE phase, dispatched via the pulls → SKIP on the issue
-  side, the PR holds the lease). `dispatch_opts` = opts for `StepDispatcher.dispatch_issue`
-  (prepared once per tick by the poller). Yields the tally of the issues path.
+  Classifies and dispatches issues under the repository lease.
   """
   @spec process_issues([map()], MapSet.t(), keyword(), Seams.t()) :: tally()
   def process_issues(issues, pr_issue_ids, dispatch_opts, %Seams{} = seams) do

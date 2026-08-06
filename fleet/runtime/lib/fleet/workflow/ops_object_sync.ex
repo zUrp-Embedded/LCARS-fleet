@@ -67,19 +67,14 @@ defmodule Fleet.Workflow.OpsObjectSync do
 
   alias Fleet.Workflow.OpsObject
 
-  # Generous: a single transaction is write + local commit + a best-effort push (network to the forge);
-  # under a burst, callers queue behind it. Mirrors WorktreeSync's 60s call budget.
+  # One transaction includes best-effort network push.
   @default_call_timeout 60_000
 
-  # Configurable for tests (a tiny value + a non-responding server exercises the timeout readback);
-  # prod keeps the 60s budget. A LONGER budget would only defer, not remove, the composed-budget
-  # overrun the readback now handles safely.
+  # Test-configurable timeout budget.
   defp call_timeout,
     do: Application.get_env(:fleet_workflow, :ops_sync_call_timeout, @default_call_timeout)
 
-  # The drain-confirm budget: how long the post-timeout ping may wait for the queue (ours included)
-  # to finish. Default = one more full call budget; its own knob so tests drive the wedged-vs-drained
-  # branches deterministically.
+  # Test-configurable ordered drain-confirm budget.
   defp drain_timeout,
     do: Application.get_env(:fleet_workflow, :ops_sync_drain_timeout, call_timeout())
 
@@ -108,11 +103,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
       when is_binary(work_dir) and is_binary(ref) and is_binary(content) do
     case resolve(server) do
       nil ->
-        # The direct path is the DOCUMENTED optional-layer posture (moduledoc) — but in a
-        # booted daemon whose config STARTS the serializer, reaching it means the gate is
-        # DOWN (supervised restart window, crash loop): said loud, per call — bypassing a
-        # serialization gate must never be silent. The deliberate no-serializer modes
-        # (:test hermeticity, standalone tooling) configure it off and stay quiet.
+        # A configured-but-missing serializer is visible; explicit direct modes stay quiet.
         if Application.get_env(:fleet_pilot, :start_ops_object_sync, true) do
           Logger.warning(
             "OpsObjectSync: serializer NOT registered — direct OpsObject write " <>
@@ -126,23 +117,11 @@ defmodule Fleet.Workflow.OpsObjectSync do
         try do
           GenServer.call(pid, {:commit, work_dir, ref, content, opts}, call_timeout())
         catch
-          # A caller TIMEOUT does not undo the server's work: our transaction may be mid-flight (or
-          # queued behind others whose composed budget exceeds @call_timeout), and the server keeps
-          # going after our exit. A blind retry would either duplicate or — worse — race the live
-          # server on the same work_dir (the very `.git/index.lock` collision this serializer
-          # prevents). The verdict is sought in TWO steps (`confirm_after_timeout`): an immediate
-          # read-only readback (already landed?), then — because a NEGATIVE immediate readback proves
-          # nothing while our commit may still be queued or mid-flight — a DRAIN-CONFIRM: a sync ping
-          # that the server answers only AFTER every message ahead of it (ours included), making the
-          # second readback DEFINITIVE. Only a ping that itself times out (server wedged) leaves the
-          # verdict genuinely ambiguous.
+          # A timeout does not cancel server work; readback then ordered drain avoids unsafe retry.
           :exit, {:timeout, _} = reason ->
             confirm_after_timeout(pid, work_dir, ref, content, reason)
 
-          # NON-timeout exit (:noproc — server died between resolve and call —, :shutdown, a crash
-          # mid-call): this path is reached from best-effort provenance callers, and an uncaught exit
-          # crashed THEM for a serializer hiccup. Classify instead: the work may have landed just
-          # before the death (readback), otherwise a typed unavailability — never a caller crash.
+          # Server exit may follow a landed transaction; read back before classifying unavailable.
           :exit, reason ->
             case OpsObject.committed_sha(work_dir, ref, content) do
               {:ok, sha} ->
@@ -207,8 +186,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
           end
         catch
           :exit, _drain_exit ->
-            # The ping itself timed out / died: the server is wedged or the queue exceeds a second
-            # full budget — genuinely ambiguous, the one case the caller must treat as unknown.
+            # Failed drain leaves the transaction genuinely ambiguous.
             {:error, {:ops_sync_timeout, reason}}
         end
     end
@@ -219,20 +197,16 @@ defmodule Fleet.Workflow.OpsObjectSync do
 
   @impl GenServer
   def init(opts) do
-    # `commit_fun` — test seam ONLY (a hermetic test injects a slow/failing engine to drive the
-    # timeout + drain-confirm paths deterministically); prod = the real `OpsObject` engine.
+    # Test seam for deterministic timeout and drain paths.
     {:ok, %{commit_fun: Keyword.get(opts, :commit_fun, &OpsObject.commit_object/4)}}
   end
 
-  # One message at a time → the git transactions of ALL concurrent writers are serialized, never two
-  # `git` on the same work/ops worktree (the `.git/index.lock` + moving-HEAD race). The engine is
-  # `OpsObject` verbatim (via the seam): no logic here, only the ordering.
+  # One message at a time; engine logic remains in OpsObject.
   @impl GenServer
   def handle_call({:commit, work_dir, ref, content, opts}, _from, state) do
     {:reply, state.commit_fun.(work_dir, ref, content, opts), state}
   end
 
-  # Drain-confirm ping (cf. `confirm_after_timeout/5`): answered only once every message ahead of
-  # it has been processed — the mailbox IS the proof, this clause carries no logic.
+  # FIFO mailbox makes this an ordered drain confirmation.
   def handle_call(:drain_confirm, _from, state), do: {:reply, :drained, state}
 end

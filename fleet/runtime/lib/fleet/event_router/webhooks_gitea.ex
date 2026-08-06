@@ -31,9 +31,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   plug(:match)
 
-  # `length`: EXPLICIT bound (Plug's implicit default is 8MB). 1 MB >> the largest legitimate Gitea
-  # webhook (push/issue events). NB: the HMAC is verified AFTER the parse — the bound limits what an
-  # unauthenticated caller can make us decode (listener opt-in, loopback by default).
   plug(Plug.Parsers,
     parsers: [:json],
     json_decoder: Jason,
@@ -50,31 +47,17 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   post "/webhook/gitea" do
     case verify_hmac(conn) do
       :ok ->
-        # body_params guaranteed to be a map by `Plug.Parsers` upstream (malformed JSON → 415 before reaching here).
-        # No `|| %{}`: that net is dead (body_params never nil) AND would not handle the
-        # `%Plug.Conn.Unfetched{}` case either (≠ nil) — the real input guard is Plug.Parsers, not a default here.
         body = conn.body_params
-        # Do NOT blindly default to "push": prefer the action (routed by
-        # events.yaml, e.g. gitea.opened/closed), otherwise the authoritative event (header X-Gitea-Event),
-        # otherwise "unknown" — an event with no action and non-push must not be mislabeled "push".
-        # Plug.Parsers guarantees `body` is a map, NOT that `action` is a string: a non-string action
-        # (e.g. `{"action": 123}`) fed to `<>` would raise OUTSIDE the try below → Cowboy 500,
-        # bypassing the 422-on-drift discipline. Non-string ≈ absent (unusable) → same header fallback.
         action = body["action"]
         action = if is_binary(action), do: action, else: nil
         event_type = "gitea." <> (action || gitea_event_header(conn) || "unknown")
         issue_id = extract_issue(body)
 
-        # Strict canonical schema: %Fleet.Event{source: :event_router}.
         try do
           type_atom = String.to_existing_atom(event_type)
 
           payload = Map.put(body, "issue_id", issue_id)
 
-          # `Bus.emit` can return an `{:error, _}` TUPLE (PubSub adapter down), NOT only raise. A dropped
-          # event must NEVER be ACKed 200 (module invariant) → MATCH the return: `:ok` → 200, `{:error}` →
-          # 422 so Gitea retries/alerts (same fail-loud stance as the rescue clauses below). `emit_fun` seam
-          # (test): forces the `{:error}` path deterministically.
           emit_fun =
             Application.get_env(
               :fleet_event_router,
@@ -95,13 +78,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
               send_resp(conn, 422, "broadcast failed")
           end
         rescue
-          # A dropped event must NEVER be ACKed 200. The two cases below are
-          # DRIFT (not an intentional drop — there is no "known but deliberately
-          # not-routed" category in this handler): we return 422 so the Gitea forge
-          # logs/retries/alerts instead of believing the event was delivered.
           ArgumentError ->
-            # Atom unknown to the BEAM (String.to_existing_atom failed) = a `gitea.*` type
-            # never declared → producer/registry drift, or a forged type.
             Logger.warning(
               "WebhooksGitea: unknown event type #{inspect(event_type)} " <>
                 "— DRIFT (unknown atom), 422"
@@ -109,10 +86,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
             send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
 
-          # Do NOT swallow silently. A `gitea.*` type whose atom exists but which is not
-          # in `events.yaml` = registry/producer drift → otherwise a silent drop (webhook
-          # 200 but the event never routed). We make it VISIBLE (the registry must list every
-          # action emitted by WebhooksGitea; see events.yaml, gitea section).
           _e in Fleet.Event.UnregisteredError ->
             Logger.warning(
               "WebhooksGitea: type #{inspect(event_type)} outside the events.yaml " <>
@@ -127,8 +100,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         end
 
       {:error, reason} ->
-        # `reason` is a structured atom (:hmac_mismatch | :secret_missing) — the human message
-        # lives HERE (log + 401 wire body), not in the tuple. Jason encodes the atom as a string.
         Logger.warning("WebhooksGitea: webhook REFUSED 401 — HMAC verification: #{reason}")
         send_resp(conn, 401, Jason.encode!(%{error: reason}))
     end
@@ -142,17 +113,9 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   def read_raw_body(conn, opts) do
     case Plug.Conn.read_body(conn, opts) do
       {:ok, body, conn} ->
-        # The COMPLETE body: `read_body` accumulates internally up to `:length` (1 MB), so `{:ok}` always
-        # carries the whole payload. This is the ONLY `:raw_body` `verify_hmac` ever reads — the HMAC is
-        # computed over exactly these bytes.
         {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
 
       {:more, partial, conn} ->
-        # `{:more}` ⟺ body > `:length` ⟹ `Plug.Parsers` raises `RequestTooLargeError` BEFORE the dispatch,
-        # so `verify_hmac` NEVER runs on this path (the 1 MB cap IS the read boundary). We deliberately do
-        # NOT stash `partial` as `:raw_body`: a truncated body is never a valid HMAC input, and leaving it
-        # unset keeps the HMAC path fail-CLOSED (nil → "" → mismatch → 401) even if this branch were ever
-        # reached. This is why a large payload yields the 413 bound, not a truncated-HMAC 401.
         {:more, partial, conn}
 
       {:error, _} = err ->
@@ -161,11 +124,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   @doc """
-  Verifies the SHA256 HMAC of `raw_body` against the `x-gitea-signature` header.
-
-  Returns `:ok` or `{:error, :hmac_mismatch | :secret_missing}` — STRUCTURED atoms
-  that are pattern-matchable (the old strings `"hmac mismatch"`/`"secret missing"` were
-  not); the human rendering lives in the logs and the handler's 401 body.
+  Verifies the raw body's SHA256 HMAC against `x-gitea-signature`.
   """
   @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
@@ -174,12 +133,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
     case File.read(secret_path) do
       {:ok, secret} ->
-        # An EXISTING but EMPTY/whitespace secret file would go through this `{:ok, secret}` path →
-        # `compute_hmac("", body)` → EMPTY-KEY HMAC → anyone who knows the algo forges a valid signature
-        # (fail-OPEN: the HMAC check would be neutralized without us knowing). An empty-after-trim secret is
-        # therefore REJECTED fail-closed like an absent secret (never an empty-key HMAC). (The webhooks
-        # listener is gated by the opt-in `LCARS_FLEET_WEBHOOKS`, but we close the fail-open anyway: a
-        # webhooks enabled on an empty secret is a hole, not a valid config.)
         case String.trim(secret) do
           "" ->
             Logger.error(
@@ -205,8 +158,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   @doc """
-  Computes the SHA256 HMAC of a body with a secret. Utility exposed
-  for tests (generating the expected signature).
+  Computes a lowercase SHA256 HMAC for `body`.
   """
   @spec compute_hmac(String.t(), iodata()) :: String.t()
   def compute_hmac(secret, body) when is_binary(secret) do

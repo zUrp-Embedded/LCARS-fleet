@@ -44,9 +44,7 @@ defmodule Fleet.MCP.Server do
   end
 
   @doc """
-  Effective boot environment: `opts[:boot_environment]` >
-  `Application.get_env(:fleet_mcp, :boot_environment)` > **`:pod`** (fail-closed default: absence of
-  any positive `:host` declaration → refuse). Exposed for the conformance test "zero MCP server pod-side".
+  Resolves option, application environment, then the fail-closed `:pod` default.
   """
   @spec boot_environment(keyword()) :: atom()
   def boot_environment(opts \\ []) do

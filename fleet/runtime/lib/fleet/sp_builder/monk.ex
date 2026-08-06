@@ -1,28 +1,8 @@
 defmodule Fleet.SPBuilder.Monk do
   @moduledoc """
-  Monk-injection resolution — split out of `Fleet.SPBuilder` (a distinct data
-  source: a YAML registry, the composer's only non-markdown I/O).
-
-  If the cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`, the
-  module reads the YAML registry (memory registry, shape `spec.monks`), finds the
-  `monk_instance` entry and returns `%{persona_hint, corpus_paths}`. The injection
-  is purely ADDITIVE: for a non-monk, the `compose/3` flow stays byte-identical (no
-  branch traverses it) — that is the contract of `resolve_or_empty/2`.
-
-  **Pure** functions (FS read only, no process). The composer's public API stays
-  `Fleet.SPBuilder.resolve_monk_injection/2` (defdelegate to `resolve/2`).
-
-  ## Monks are FROZEN — reactivation is dormant by design
-
-  The registry root defaults to `Fleet.Catalogue.monk_registry_root/0` (`<catalogue>/cap_profile/canon/cap-profiles/monks`), a tree
-  that is **intentionally ABSENT**: the monks were FROZEN into `priv/catalogue/cap_profile/canon/_frozen-monks/`
-  (deliberately NOT scanned). No ACTIVE cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`,
-  so `resolve_or_empty/2` returns `:not_a_monk` → the empty injection everywhere (the `compose/3` flow stays
-  byte-identical). A "Memory-X reactivation" (setting the monk fields) would target the absent
-  `cap-profiles/monks/` and fail — this is the DORMANT-by-design state (kept, documented) until an explicit
-  thaw wires the frozen tree back as the registry root. See also the LEGACY banner in `runtime/priv/canon/README.md`.
-
-  **Last revised**: 2026-08-01
+  Pure YAML-backed resolution of optional monk persona and corpus injection.
+  Profiles without both knowledge keys remain byte-identical. The default registry
+  is intentionally absent while the frozen monk catalogue is dormant.
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}

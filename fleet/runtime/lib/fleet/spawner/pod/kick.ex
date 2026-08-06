@@ -158,18 +158,13 @@ defmodule Fleet.Spawner.Pod.Kick do
   end
 
   @doc """
-  Does the pod's cap-profile allow kick send-keys at all? (`invocation.wake_send_keys`,
-  default true.) `false` = the human-terminal class (arch, starfleet): flag-only, engage included —
-  also read by the pod's `:kick` handler to cancel a bootstrap loop that would have NO action.
+  Returns whether the cap profile permits any kick send-keys, including `engage`.
   """
   @spec profile_send_keys?(map()) :: boolean()
   def profile_send_keys?(state),
     do: Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
 
   @doc false
-  # PURE decision of the keyword (testable). `polled` = the agent has already called get_work_item;
-  # `fallback_on?` = global knob `:wake_send_keys` (wake fallback only); `profile_allows?` =
-  # cap-profile gate (EVERY send-keys, engage included — cf. kick_send/2). `nil` ⇒ no send-keys.
   @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
   def kick_keyword(polled, fallback_on?, profile_allows?) do
     cond do

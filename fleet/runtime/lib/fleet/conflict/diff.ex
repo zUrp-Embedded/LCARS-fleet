@@ -1,15 +1,7 @@
 defmodule Fleet.Conflict.Diff do
   @moduledoc """
-  LCS and the 3-way non-overlapping merge -- the algorithmic layer under `non_overlapping` and
-  `insertion_at_boundary`.
-
-  `lcs/2` is a plain DP (hunks are small; the Histogram backend the ported engine defaults to is a
-  later optimization, not a correctness need). `merge_non_overlapping/3` diffs base->ours and
-  base->theirs, and merges only when no edit of one side overlaps an edit of the other -- otherwise
-  it returns `nil` and the hunk stays a conflict. The tie-break mirrors the ported DP backtrack
-  (`>` : on a tie, advance the branch index) so the pairs are stable.
-
-  **Last revised**: 2026-07-30
+  LCS and three-way non-overlapping merge primitives. Conflicting edit ranges
+  return `nil`; deterministic tie-breaking keeps index pairs stable.
   """
 
   @type op :: %{type: :keep | :add | :remove, line: String.t(), index: non_neg_integer()}

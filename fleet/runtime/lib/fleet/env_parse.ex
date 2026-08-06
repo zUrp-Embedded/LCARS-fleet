@@ -58,9 +58,9 @@ defmodule Fleet.EnvParse do
   @falsy ~w(false 0 no off)
 
   @doc """
-  Boolean env value. Recognizes `true/1/yes/on` and `false/0/no/off` (case-insensitive, trimmed). `nil`
-  (unset) → `default`. An UNRECOGNIZED value → `default` + a LOUD warning (a typo like `flase`
-  must not silently become the default — it is logged).
+  Parses `true/1/yes/on` and `false/0/no/off`, case-insensitively.
+
+  Unset values return `default`; unknown values log a warning and return it.
   """
   @spec bool(String.t(), String.t() | nil, boolean()) :: boolean()
   def bool(_name, nil, default) when is_boolean(default), do: default
@@ -84,12 +84,9 @@ defmodule Fleet.EnvParse do
   end
 
   @doc """
-  Strict variant of `bool/3` for flags whose WRONG reading is dangerous in one direction
-  (a maintenance / reduction-of-effects switch): unset → `default`, recognized → its
-  value, UNRECOGNIZED → raise (the boot refuses). `bool/3` warns-and-defaults, which is
-  fail-open exactly when the operator asked for fewer effects — a typo there must stop
-  the boot, never silently become the active default. Adopt per-flag, deliberately:
-  strictness on an ordinary tuning knob would trade a boot for a cosmetic typo.
+  Strict boolean parser for safety flags.
+
+  Unset values return `default`; unknown values raise instead of falling back.
   """
   @spec bool!(String.t(), String.t() | nil, boolean()) :: boolean()
   def bool!(_name, nil, default) when is_boolean(default), do: default
@@ -111,9 +108,8 @@ defmodule Fleet.EnvParse do
   end
 
   @doc """
-  Normalize an operator-provided path: `Path.expand` (resolves `~`/relative → absolute). A NUL/control
-  char, or a `..` traversal → raise = boot refused. NO root-policy: the operator sets these
-  paths intentionally; only the manifestly-broken is refused.
+  Expands an operator-provided path. Control characters and `..` raise; no
+  root policy is imposed.
   """
   @spec path(String.t(), String.t()) :: String.t()
   def path(name, value) when is_binary(value) do

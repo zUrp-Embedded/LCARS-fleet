@@ -35,14 +35,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   alias Fleet.Spawner.Pod.SessionFiles
 
   @doc """
-  Removes any residual `<session_id>.jsonl` under the pod_dir (all cwd-slugs, shared glob
-  `SessionFiles.jsonl_paths/2`) → frees the UUID for `--session-id` (a stale jsonl would trip
-  "Session ID already in use" on the deterministic re-spawn). A leftover jsonl does not FAIL here — it
-  resurfaces at the `--session-id` launch itself as the vendor's "Session ID already in use" error (the
-  launch, not this GC, carries the blocking failure). But we log the REAL result per file, never a blanket
-  "removed": actually removed → info; already absent → silent; a removal that FAILED → warning (so the
-  residue is diagnosed here too, not only at the later launch). Called by the `:cleaning` state
-  (skipped on `resume` — `SeedStore.restore` overwrites the jsonl).
+  Removes stale JSONLs for the deterministic session ID across all cwd slugs.
+
+  Removal is best-effort and logged per file; a residue is surfaced by the later
+  vendor launch.
   """
   @spec gc_stale_session_jsonl(map()) :: :ok
   def gc_stale_session_jsonl(state) do
@@ -60,7 +56,6 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           )
 
         {:error, :enoent} ->
-          # Nothing to remove (the UUID slot is already free) — the nominal case, silent.
           :ok
 
         {:error, reason} ->
@@ -104,7 +99,6 @@ defmodule Fleet.Spawner.Pod.Scaffold do
         :ok
 
       _repo_path ->
-        # cap_profile carrying the EFFECTIVE project (brief > static) for the Clone.* (which read spec.project).
         eff_cap = Fleet.CapProfile.with_project(state.cap_profile, project)
 
         with {:ok, workspace, branch} <-
@@ -159,11 +153,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   @doc """
-  Deliberate recall. If `opts[:recall_seed_jsonl]` is provided (by `Fleet.Spawner.recall/2`),
-  restores the seed to `projects/<slugify(cwd)>/<session_id>.jsonl` BEFORE the launch; claude
-  `--resume <session_id>` (resume:true via opts) finds it again. Gated: absent → no-op (normal spawn
-  intact). The seed is validated (`read_map`) on the `Spawner.recall` side; absent HERE = fail-loud
-  (`{:recall_seed_missing, _}` → `transition_failed`).
+  Restores an explicit recall seed under the resolved cwd and session ID before launch.
+
+  A missing seed or restore exception returns a tagged projection error.
   """
   @spec maybe_recall_restore(map()) ::
           :ok
@@ -175,10 +167,6 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
       jsonl when is_binary(jsonl) ->
         if File.exists?(jsonl) do
-          # `SeedStore.restore/4` is a BANG (raises on cp!/mkdir_p! failure or an escaping uuid). We FOLD
-          # that raise into a typed error so the `:projecting` `with` routes it to `transition_failed`
-          # (clean tombstone written), instead of the raise crossing the `with` and crashing the Pod
-          # gen_statem (abnormal exit → no phase=failed → reclaim/re-dispatch loop on the same bad seed).
           try do
             {:ok, _dest} =
               Fleet.Spawner.SeedStore.restore(

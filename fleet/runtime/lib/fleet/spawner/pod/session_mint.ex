@@ -70,10 +70,7 @@ defmodule Fleet.Spawner.Pod.SessionMint do
         )
 
       is_integer(repo) ->
-        # DR-020: repo id beyond the `<REPO4>` bound (0..9999). REFUSED loud, NOT folded by modulo —
-        # a silent `rem` would collide this repo with `rem(repo, 10_000)` and hand two projects the SAME
-        # deterministic identity (JSONL recall / Desktop slot / reconstructible id all confused). The
-        # 10000th project-bound repo is an explicit stop until the SessionId `<REPO4>` format is widened.
+        # DR-020
         raise ArgumentError,
               "SessionMint.mint: forge repo_id #{repo} exceeds the <REPO4> deterministic-id bound " <>
                 "(0..9999) for role #{Fleet.CapProfile.name(cap_profile)} — refused (no silent modulo " <>

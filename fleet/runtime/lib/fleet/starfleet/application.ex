@@ -66,8 +66,6 @@ defmodule Fleet.Starfleet.Application do
           else: []
         ) ++
         if boot_enabled?(:start_shutdown, true) do
-          # Coordinated graceful shutdown — must stay alive to serve the shutdown
-          # RPC issued by `bin/fleet_v2 stop` (cmd_stop → `Shutdown.begin` then `:init.stop()`).
           [Fleet.Starfleet.Shutdown]
         else
           []
@@ -81,7 +79,6 @@ defmodule Fleet.Starfleet.Application do
           else: []
         )
 
-    # Restart intensity 3/60 EXPLICIT (event_router/task_queue doctrine — the OTP default 3/5 is too tight for a blip; the window is a deliberate CHOICE).
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
@@ -92,12 +89,6 @@ defmodule Fleet.Starfleet.Application do
   end
 
   @doc false
-  # Boot-topology knob → STRICT boolean. A `:start_*` config governs the supervision tree; reading it with
-  # a bare `if Application.get_env(...)` (truthiness) means a malformed value silently changes the topology:
-  # a string `"false"` or `0` is TRUTHY → the child starts anyway; a stray `nil` is falsy → the child is
-  # skipped even when its default is `true`. So we PARSE at the boundary: a boolean is honoured, absence
-  # yields the (boolean) default, and any non-boolean value FAILS LOUD at boot (fail-closed — a containment/
-  # topology knob must never be interpreted, and a boot on a malformed config must crash visibly, not drift).
   @spec boot_enabled?(atom(), boolean()) :: boolean()
   def boot_enabled?(key, default) when is_atom(key) and is_boolean(default) do
     case Application.get_env(:fleet_starfleet, key, default) do

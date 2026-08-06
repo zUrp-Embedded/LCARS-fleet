@@ -1,36 +1,18 @@
 defmodule Fleet.Coord.Policies do
   @moduledoc """
-  Module of pure functions: a declarative routing table
-  `{verdict, reason} → {action, escalation_path}`.
+  Declarative routing table `{verdict, reason} → {action, escalation_path}`.
 
-  Lookup table loaded once at boot via `init_policies!/0`
-  from `priv/catalogue/coord/config/coord-policies.yaml` (or the configured path) and
-  persisted in `:persistent_term` (key
-  `{__MODULE__, :policies}`): O(1) read with no process, table frozen
-  at boot (same pattern as the read-only caches loaded once).
-
-  **No LLM reasoning logic** in this module: a pure declarative lookup
-  table (meta-axiom — all LLM judgment is consolidated on
-  the gatekeeper, spawned on the workflow side, never here).
-
-  ## `coord-policies.yaml` format
+  `init_policies!/0` validates the configured YAML and publishes it to
+  `:persistent_term`. The schema validates structure while leaving action and path
+  vocabularies open for generic dispatch.
 
       mappings:
         "halt.gatekeeper.refuse":
           action: notify_dashboard
           escalation_path: [dashboard, issue_comment]
-        "escalate.pod_drift":
-          action: escalate_human
-          escalation_path: [dashboard, starfleet_alert]
 
-  ## Emission (delegated)
-
-  A lookup that matches is translated into a canonical `%Fleet.Event{source: :coord}` and
-  broadcast by `Fleet.Coord.Emitter` (emission pass extracted — the table
-  lookup and the wire-event construction share no helper). The
-  actions → event-types table lives over there.
-
-  **Last revised**: 2026-08-01
+  Matching entries are emitted through `Fleet.Coord.Emitter`; this module performs
+  no inference.
   """
 
   alias Fleet.Coord.Emitter
@@ -41,21 +23,15 @@ defmodule Fleet.Coord.Policies do
   require Logger
 
   @doc """
-  Loads the YAML policies and persists them in `:persistent_term`.
-  Fail-fast at boot if the file is absent or the YAML is malformed.
+  Reloads and validates the configured YAML, then replaces the boot-time table.
+
+  Missing, unreadable, malformed, or schema-invalid input raises before the
+  existing table is replaced.
   """
   @spec init_policies!() :: :ok
   def init_policies! do
     path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
 
-    # FAIL-LOUD at boot: an absent/malformed policies file = a broken deploy artifact, not a
-    # runtime state to tolerate. We `raise` (propagated by `Application.start`) rather than degrade
-    # to an EMPTY routing table — that degradation would boot coord "green" while EVERY
-    # decision/escalation would then fall through to `:not_found` (a "wounded thing kept alive").
-    # Intended consequence: fleet_coord does not start → the BEAM exits non-zero → the launcher
-    # redeploys/escalates (dead-man's switch). The @doc's "Fail-fast at boot" contract is thereby
-    # held literally. General rule: an announced fail-loud load failure MUST crash the
-    # boot, never log-and-continue behind a green status.
     policies =
       case YamlElixir.read_from_file(path) do
         {:ok, %{} = data} ->
@@ -71,32 +47,16 @@ defmodule Fleet.Coord.Policies do
                   "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
       end
 
-    # Direct put (NOT `Fleet.SchemaCache.cached/2`): `init_policies!/0` must ALWAYS
-    # re-read the YAML — the tests call it again with different paths and rely on
-    # "the raise precedes the put" (boot table intact). The put stays boot-time-unique,
-    # `:persistent_term` profile respected; reads go through `resolved_policies/0`.
     :persistent_term.put(@policies_key, policies)
     :ok
   end
 
-  # STRUCTURAL validation of the parsed YAML against `priv/coord/schema/coord-policies-v1.json`
-  # (ExJsonSchema). Without it, a malformed coord-policies (mapping without `action`, non-array
-  # `escalation_path`, key outside the pattern, additional property…) would load silently and then
-  # break every lookup. FAIL-LOUD at boot, the SAME dead-man's-switch contract as an absent/unreadable
-  # file (the BEAM exits non-zero, the launcher escalates) — never a structurally broken routing table
-  # kept alive. The schema is STRUCTURAL-ONLY (cf. its `$id`): it does NOT validate action NAMES or
-  # escalation_path TARGETS — and nothing else does either. By DESIGN (`Fleet.Coord.Emitter`), any action
-  # string dispatches generically (`coord.action_dispatched`, extensible without recompile) and the
-  # escalation_path is relayed as-is into the payload. So a catalogue action typo becomes a generic
-  # dispatch, NOT a load error — the accepted trade-off for open extensibility, not a runtime check we
-  # promise. (No action/target registry: adding one would break the extensible-without-recompile design.)
   defp validate_against_schema!(data, path) do
     schema_path =
       :code.priv_dir(:lcars_fleet)
       |> to_string()
       |> Path.join("coord/schema/coord-policies-v1.json")
 
-    # IMMUTABLE priv schema, resolved ONCE via the foundation authority `Fleet.SchemaCache`.
     schema =
       Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, schema_path}, schema_path)
 
@@ -111,23 +71,10 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch of a validated Gatekeeper decision.
+  Dispatches a validated decision through the matching policy.
 
-  `correlation_id` is explicit and always passed: the task.id UUID v4 of the
-  work item that produced the verdict, nil outside a work item.
-
-  Lookup `{decision, reason}` → policies table → broadcast of the canonical schema
-  `%Fleet.Event{source: :coord, type, correlation_id, …}`.
-
-  Returns:
-    * `:ok` — policy matched and the decision was DISPATCHED. The emit itself is a LOSSY
-      fire-and-forget broadcast (`Emitter`, CI-09): a drop is logged by `safe_emit`, never
-      surfaced here — so `:ok` means the policy DECIDED, not that the event was delivered.
-    * `{:error, {:no_policy_match, {decision, reason}}}` — no policy match.
-      STRUCTURED tuple (pattern-matchable by consumers); the human message
-      lives in the consumers' logs (`DriftMonitor`), not in the tuple.
-    * `{:error, {:invalid_decision, term}}` — the input is NOT a validated
-      `%Fleet.Decision{}` (raw map refused at the boundary, BND-002).
+  `:ok` means a policy matched; emission is lossy. Raw maps are rejected with
+  `:invalid_decision`, and missing entries return `:no_policy_match`.
   """
   @spec handle_decision(
           Fleet.Decision.t(),
@@ -144,28 +91,12 @@ defmodule Fleet.Coord.Policies do
     end
   end
 
-  # The boundary accepts ONLY the VALIDATED verdict `%Fleet.Decision{}` (built solely by
-  # `Fleet.Starfleet.Gatekeeper.validate/1`). A raw `%{decision, reason}` map would let a caller
-  # short-circuit the Starfleet schema and route an unvalidated verdict → REFUSED, typed (the
-  # `DriftMonitor` caller logs the `{:error, _}`) — the invalid state is unrepresentable at the
-  # boundary, never normalized downstream. (`Fleet.Decision` lives at the foundation layer because
-  # Coord cannot name a Starfleet type — that edge would close a cycle.)
   def handle_decision(other, _correlation_id), do: {:error, {:invalid_decision, other}}
 
   @doc """
-  Dispatch of a Cat 5 escalation.
+  Dispatches a Cat-5 escalation through the policy for its string-normalized source.
 
-  `correlation_id` is explicit and always passed: extracted from the upstream
-  event that triggered the escalation, nil outside a work item.
-
-  Returns:
-    * `:ok` — policy matched and the escalation was DISPATCHED. The emit is a LOSSY fire-and-forget
-      broadcast (`Emitter`, CI-09): a drop is logged by `safe_emit`, never surfaced here — `:ok` means
-      the policy DECIDED, not that the event was delivered.
-    * `{:error, {:no_escalation_policy, source}}` — no policy for this
-      source (`source` normalized to a string = the lookup key). STRUCTURED tuple,
-      pattern-matchable; the human message lives in the consumers' logs
-      (`Cat5Escalator`), not in the tuple.
+  `:ok` means a policy matched; emission is lossy.
   """
   @spec handle_escalation(
           source :: atom() | String.t(),

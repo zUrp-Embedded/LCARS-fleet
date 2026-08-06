@@ -81,8 +81,7 @@ defmodule Fleet.Workflow.PayloadGuard do
     expanded_ws = Path.expand(workspace)
 
     Enum.reduce_while(files, :ok, fn
-      # `rel_path` non-empty — a path "" passes the checks (Path.expand → workspace,
-      # symlink_in_chain? on [] → false) then File.write on the dir = opaque :eisdir. Clean rejection.
+      # Empty path would otherwise become an opaque directory write error.
       %{"path" => rel_path, "content" => content}, :ok
       when is_binary(rel_path) and rel_path != "" and is_binary(content) ->
         full = Path.expand(Path.join(workspace, rel_path))
@@ -109,30 +108,22 @@ defmodule Fleet.Workflow.PayloadGuard do
     end)
   end
 
-  # True if ONE component of the relative path is exactly `.git` (`.git/config`, `a/.git/hooks/x`, …).
-  # Comparison on the COMPONENTS (not a substring): a file named `.gitignore` or `foo.git`
-  # is NOT a `.git` component and stays allowed. Closes rewriting the repo's git plumbing.
+  # Match `.git` as a path component, not `.gitignore` or `foo.git`.
   defp dotgit_component?(rel_path) do
     rel_path |> Path.split() |> Enum.any?(&(&1 == ".git"))
   end
 
-  # True if the BASENAME of the path is `.gitattributes` (at any level: `.gitattributes`,
-  # `sub/.gitattributes`). It is this file that maps a file pattern to a `filter`/`diff` driver.
+  # `.gitattributes` can arm Git filter or diff drivers at any depth.
   defp gitattributes_basename?(rel_path) do
     Path.basename(rel_path) == ".gitattributes"
   end
 
-  # True if the CONTENT of a `.gitattributes` arms a `filter=<x>` or `diff=<x>` attribute — these are the two
-  # attributes that divert `git add` (`clean`) or `git log -p`/`diff` (`textconv`) toward a configured
-  # external command. We stay broad (line containing `filter=`/`diff=`, non-empty), fail-closed: better
-  # to refuse a benign `.gitattributes` carrying `diff=python` than to let an arming through. The other
-  # attributes (`text`, `eol`, `binary`, `merge=`…) do not execute an external command → not blocked.
+  # Broad refusal of executable filter/diff attributes; other attributes remain allowed.
   defp arms_filter_or_diff?(content) do
     Regex.match?(~r/(^|\s)(filter|diff)=\S/m, content)
   end
 
-  # True if an EXISTING component of the path (from workspace to the file) is a symlink. `lstat` does
-  # not follow the link (stats the link itself) → we detect the escape vector before any write.
+  # `lstat` finds existing links without following them.
   defp symlink_in_chain?(workspace, rel_path) do
     rel_path
     |> Path.split()

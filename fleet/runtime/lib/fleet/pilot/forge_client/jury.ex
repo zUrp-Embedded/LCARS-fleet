@@ -118,11 +118,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end
   end
 
-  # Reviews of a PR, PAGINATED: a jury verdict/feedback must see EVERY review — a decisive
-  # APPROVED/REQUEST_CHANGES past the forge's default page would flip the outcome (merge on a jury
-  # that actually rejected, or a rework brief missing the change-request). Maps paginate's non-list
-  # fail-loud onto the review-specific `:unexpected_review_shape` (F-C069: NEVER `{:ok, []}` — an empty
-  # jury here → `dispatch_by_verdicts([], %{})` → the MERGE branch, i.e. merge on a lost/empty jury).
+  # F-C069
   defp paginated_reviews(config, repo, index) do
     path = "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews"
 
@@ -138,10 +134,6 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end
   end
 
-  # The jury SET = every login with a "jury" review-record: requested (`REQUEST_REVIEW`) OR
-  # having voted (`APPROVED`/`REQUEST_CHANGES`). Excludes `COMMENT`/`PENDING` (non-jury noise). STABLE source
-  # (the records persist) vs volatile `requested_reviewers` → a judge dropped from the field without voting stays
-  # in the jury → `pending` → spawned, never a merge on a half-jury.
   defp jury_reviewers(reviews) do
     reviews
     |> Enum.filter(&(&1["state"] in ["REQUEST_REVIEW", "APPROVED", "REQUEST_CHANGES"]))
@@ -200,20 +192,10 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested
 
   @doc """
-  Feedback from a PR's in-force REQUEST_CHANGES reviews (Gitea `GET .../pulls/{index}/reviews`),
-  to feed the producer's **rework**. Returns the LAST REQUEST_CHANGES review per reviewer
-  with its `body` — the structured verdict recorded by the judge (`reason`/`details`/`chain`, via
-  `StepRunConsumer.Verdict.judge_review_body`). Without this body, the `rework_brief` says "fix per the review"
-  WITHOUT the review's content → the engineer guesses blindly (info famine, DOUBLE:
-  twin of the judge's `outputs: {}`; without the body the eng returns `blocked_dep` rather than
-  guessing). No commit-scoping here: we want the LAST feedback per reviewer (`List.last`), not
-  a current decisive verdict (the rework runs BEFORE the next push, the REQUEST_CHANGES concerns
-  the current head). Reviews without a body (generic verdict) are discarded (nothing actionable).
+  Returns the last substantive objection still in force for each reviewer.
 
-  ## Returns
-    * `{:ok, [%{"login" => l, "body" => b}]}` — one entry per reviewer having a REQUEST_CHANGES with substance
-    * `{:ok, []}` — no REQUEST_CHANGES with an actionable body
-    * `{:error, term()}` — HTTP/transport/config
+  This historical feedback is not commit-scoped. A later approval supersedes an earlier objection;
+  empty bodies are omitted.
   """
   @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
           {:ok, [%{optional(String.t()) => String.t()}]} | {:error, term()}
@@ -226,16 +208,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   end
 
   @doc """
-  Counts the REWORK rounds already triggered on a PR = number of non-dismissed `REQUEST_CHANGES`
-  reviews (Gitea `GET .../pulls/{index}/reviews`). Each round (judge requests changes →
-  the eng re-pushes → re-review) adds a REQUEST_CHANGES review → the counter is **forge-native** and
-  MONOTONIC (the reviews persist), like `count_signed_step_runs` for the gate bounce. Serves the
-  anti-churn brake of the PR-review path (`StepDispatcher.dispatch_rework`): beyond budget → arch escalation.
-
-  No commit-scoping: we want the HISTORY of rounds (all commits), not the current verdict.
-
-  `{:error, _}` on HTTP/config failure — the caller does NOT re-spawn blindly if the budget is not
-  verifiable (an unbounded re-spawn could churn), symmetric to `count_signed_step_runs`.
+  Counts all non-dismissed change requests as the forge-native, cross-commit rework budget.
   """
   @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -253,35 +226,16 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   end
 
   @doc """
-  Judges RE-REQUESTED after having already judged (Gitea `GET .../issues/{index}/timeline`): logins whose
-  NET review requests (`review_request` additions − removals) exceed the number of reviews rendered.
-  This is the STRUCTURAL signal of a human gesture "re-request a judgment" (UI button) that neither the
+  Returns downcased judges with an unanswered re-request after a prior review.
+
   review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
-  (volatile) reveal. Without it, a re-request is INVISIBLE to the runtime: the judge is never
-  re-dispatched, and the merge attempt fails in a loop on `not enough approvals`.
-
-  **Counting, NOT temporal order**: Gitea timestamps are at SECOND granularity →
-  a review and its re-request within the same second make any `>`/`>=` ordering unreliable (missed or
-  false-positive). Counting is IMMUNE to it. Prod sequence = `request_review`(1 addition) → review(1) →
-  possible re-request(2nd addition). Net−reviews: 0 = up to date (not re-requested); >0 = an unanswered
-  request → re-judgment due. CANCELLATION is absorbed by the SAME read: a removal
-  (`removed_assignee: true`) decrements the net → the judge goes back to "up to date", the merge resumes. A single
-  read covers the gesture AND its removal.
-
-  Paginated timeline (fail-loud on a truncated page: a missed re-request = merge wedged silently). Downcased
-  logins (consistent with `jury_reviewers`/`verdicts_by_reviewer`).
-
-  ## Returns
-    * `{:ok, ["qualifier", ...]}` — judges to re-dispatch (may be empty)
-    * `{:error, term()}` — HTTP/transport/config
+  The paginated timeline is counted rather than timestamp-ordered because forge timestamps have
+  second granularity. Removals cancel requests; truncated or malformed timelines fail.
   """
   @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
           {:ok, [String.t()]} | {:error, term()}
   def pr_rerequested_reviewers(repo, index, opts \\ [])
       when is_binary(repo) and is_integer(index) do
-    # `paginate` ALWAYS returns `{:ok, list}` (accumulated) or `{:error, _}` (including
-    # `:unexpected_page_shape` on a non-list page — fail-loud, never an {:ok, non_list}): no
-    # `{:ok, non_list}` clause to cover here (all reads here paginate).
     with {:ok, config} <- resolve_config(opts),
          {:ok, events} <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{index}/timeline", "") do
@@ -289,25 +243,18 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end
   end
 
-  # A judge is awaiting re-judgment iff its NET requests (additions − removals of `review_request`)
-  # exceed its rendered reviews. Counting (immune to the second-granularity of timestamps), not
-  # temporal order. Key = requested login (assignee), downcased.
   defp rerequested_from_timeline(events) do
     adds = tally(events, fn e -> requested_login(e, false) end)
     removals = tally(events, fn e -> requested_login(e, true) end)
     reviews = tally(events, &review_author/1)
 
     for {login, n_add} <- adds,
-        # has ALREADY judged at least once (otherwise it's a 1st never-answered request = the standard jury,
-        # NOT a re-judgment; this case doesn't reach the policy branch anyway, which assumes everything judged).
         n_rev = Map.get(reviews, login, 0),
         n_rev > 0,
-        # NET requests > reviews → an unanswered review request remains (re-judgment due).
         n_add - Map.get(removals, login, 0) - n_rev > 0,
         do: login
   end
 
-  # Counts, per login (↓), the events from which `key_fun` extracts a non-nil login (the others ignored).
   defp tally(events, key_fun) do
     Enum.reduce(events, %{}, fn e, acc ->
       case key_fun.(e) do
@@ -317,8 +264,6 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end)
   end
 
-  # Login requested by a `review_request` (the `assignee`, not the actor), filtered addition (want_removal false)
-  # vs removal (true) via `removed_assignee`. Nil if the event is not a review_request of this type.
   defp requested_login(%{"type" => "review_request"} = e, want_removal) do
     if Map.get(e, "removed_assignee", false) == want_removal do
       e |> get_in(["assignee", "login"]) |> downcase_or_nil()
@@ -335,16 +280,10 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   defp downcase_or_nil(s) when is_binary(s) and s != "", do: String.downcase(s)
   defp downcase_or_nil(_), do: nil
 
-  # Last REQUEST_CHANGES PER reviewer (login → body). Same ordering as `verdicts_by_reviewer` (Gitea
-  # creation order → `List.last` = the in-force review), filtered to REQUEST_CHANGES with a non-empty body.
   defp change_requests_by_reviewer(reviews) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
-    # Keep BOTH decisive states, then take each reviewer's LAST review, THEN keep only those whose last
-    # state is REQUEST_CHANGES — same ordering as `verdicts_by_reviewer`. Filtering REQUEST_CHANGES FIRST
-    # (before the per-reviewer last) resurrected an objection a later APPROVED had already lifted: the
-    # rework brief then cited feedback the judge no longer stands behind. No commit-scoping (cf. @doc: we
-    # want the last feedback per reviewer, not the current-code verdict).
+    # Select each reviewer's last decisive state before filtering objections.
     |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
     |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
     |> Enum.map(fn {login, revs} -> {login, List.last(revs)} end)

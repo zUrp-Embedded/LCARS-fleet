@@ -2,26 +2,11 @@ defmodule Fleet.Decision do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  VALIDATED verdict of a gate evaluation — shared **foundation** value (`deps: []`).
+  Validated gate verdict shared below Starfleet and Coord.
 
-  The PRODUCER (`Fleet.Starfleet.Gatekeeper.validate/1`) lives in Starfleet, the CONSUMER
-  (`Fleet.Coord.Policies.handle_decision/2`) in Coord — and Starfleet DEPENDS on Coord (the
-  escalation relay). A shared type must therefore live BELOW both: hosted in either domain,
-  the other could not name it without closing a cycle and would fall back to a raw 2-key map
-  — "the contract says validated decision but accepts any map". As a foundation value both
-  can require, the Coord frontier accepts ONLY `%Fleet.Decision{}`: an unvalidated map is
-  refused at the frontier, never normalized downstream.
-
-  Fixed shape: the decision JSON `{decision, reason, details, chain}` — never an opaque atom.
-
-  ## Fields
-
-    * `decision` — enum `"allow" | "halt" | "escalate" | "retry"`
-    * `reason` — non-empty string
-    * `details` — map (arbitrary JSON object)
-    * `chain` — list of strings (audit trail, default `[]`)
-
-  **Last revised**: 2026-07-18
+  The fixed wire shape contains a decision (`allow`, `halt`, `escalate` or
+  `retry`), non-empty reason, detail map and audit chain. Domain frontiers
+  accept this struct rather than normalizing arbitrary maps.
   """
 
   @enforce_keys [:decision, :reason, :details]

@@ -1,29 +1,8 @@
 defmodule Fleet.Credentials.RoleToken do
   @moduledoc """
-  Forge token of a ROLE's account — so the system posts/comments IN ITS NAME (issue by
-  `Architect`, comment by `Engineer` → honest avatar, true traceability), via the role account's token.
-
-  ## Source (SYSTEM path, never a user home)
-
-  Read from `<role_tokens_dir>/<role>.gitea_token`. `role_tokens_dir` = config
-  `:fleet_credentials, :role_tokens_dir`, **default `/home/private`** (secrets directory, `700`).
-  The placement is mechanized: `etc/provision-role-tokens.sh` (idempotent mint per forge,
-  privileged run once; `--check` = validity probe, reused by the nuke-drill).
-  One set per forge (cf. env `FORGE_ROLE_TOKENS_DIR`, read by runtime.exs).
-  This is an **absolute system path** — NEVER `System.user_home()`: the fleet is launched BY a human
-  (the BEAM inherits their UID, there is no `fleet` system account), but role tokens are a
-  secret provisioned on the SYSTEM side, shared by all per-human fleets — so the path must NOT
-  depend on WHO launches (the override lives in the `role_tokens_dir` config, not in the home).
-
-  ## Agnosticity
-
-  The `role` is a **parameter** — never a role name hardcoded in the code. It comes from the identity
-  of the calling pod (`metadata.name` of the cap-profile = the business role), resolved SERVER-SIDE
-  from the pod's spawn (`Fleet.Spawner.pod_info` keyed by the channel `pod_id`, cf.
-  `Fleet.MCP.PodTools.Delegation.require_architect/1`) — NEVER from the wire `_lcars_role` a pod could
-  forge. `role` is validated **path-safe** (interpolated into a path).
-
-  **Last revised**: 2026-07-18
+  Reads path-safe role-account forge tokens from the system secret directory,
+  never a user home or wire-supplied identity. The role is resolved server-side;
+  this module returns token availability without deciding fallback policy.
   """
 
   require Logger

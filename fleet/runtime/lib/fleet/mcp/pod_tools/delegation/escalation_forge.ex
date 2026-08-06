@@ -1,25 +1,10 @@
 defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   @moduledoc """
-  Escalation-inbox behaviour — the CONTRACT of the forge ops the arch's escalation channel
-  (`list_escalations` / `comment_issue`) needs, DISTINCT from the DELEGATION `ForgeClient`
-  behaviour (create_issue/…). DR-012: a seam contract must be inspectable in ONE place —
-  an ad-hoc `function_exported?` list hidden inside `Delegation` would be a SECOND contract
-  next to the official behaviour. Declared here, `conforming_escalation_forge/0`
-  checks against `behaviour_info(:callbacks)`, the same mechanical guard as `conforming_forge/0`.
+  Inspectable forge seam for architect escalation inbox reads and replies.
 
-  Why a SEPARATE behaviour (not extending `ForgeClient`): adding these to `ForgeClient` would cascade
-  onto every DELEGATION stub (StubForge/RecordingForge) that adopts it — their create_issue-only tests
-  would break on missing callbacks. Two behaviours = each stub adopts only the surface it must satisfy.
-
-  Resolves to the SAME seam module as `ForgeClient` (`:fleet_mcp, :forge_client`): the real
-  `Fleet.Pilot.ForgeClient` implements BOTH surfaces; a stub used on the escalation path adopts THIS
-  behaviour. Runtime (upward mcp → pilot) seam, like `ForgeClient` — no compile dep.
-
-  **Last revised**: 2026-07-19
+  DR-012 keeps this surface separate from `ForgeClient`, so test stubs implement only the callbacks
+  they consume. Both behaviours resolve the same runtime forge module without an upward compile edge.
   """
-
-  # (`list_org_repos` callback removed — reorg 2026-07-19: the arch's escalation inbox is
-  # single-repo (its spawn binding), the org-wide scan is gone.)
 
   @doc "OPEN issues of `repo` (raw Gitea maps; `opts[:assigned_by]` scopes to the human)."
   @callback list_open_issues(repo :: String.t(), opts :: keyword()) ::
@@ -37,11 +22,7 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
               opts :: keyword()
             ) :: {:ok, :posted | :already} | {:error, term()}
 
-  @doc """
-  Resolved escalation forge — the SAME seam module as the delegation `ForgeClient`
-  (`:fleet_mcp, :forge_client`): the two contracts describe two surfaces of ONE forge client.
-  Single source of the default via `ForgeClient.resolved/0`.
-  """
+  @doc "Returns the same resolved forge module as `ForgeClient`."
   @spec resolved() :: module()
   def resolved, do: Fleet.MCP.PodTools.Delegation.ForgeClient.resolved()
 end

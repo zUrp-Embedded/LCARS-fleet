@@ -30,9 +30,7 @@ defmodule Fleet.CapProfile.Image do
   @key {__MODULE__, :image}
 
   @doc """
-  Builds, validates and publishes the image from the live catalogue roots. Raises on ANY
-  invalid artifact — a broken catalogue must not boot (proven-good or nothing). Idempotent
-  (re-publish replaces the snapshot). Gated by the caller (`:fleet_cap_profile, :publish_image`).
+  Validates and publishes the live catalogue, replacing any previous image.
   """
   @spec publish!() :: :ok
   def publish! do

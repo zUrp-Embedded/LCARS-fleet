@@ -1,48 +1,9 @@
 defmodule Fleet.Observation.ReadModel do
   @moduledoc """
-  Read-model frontier of observability.
-
-  **A single** process consumes the `%Fleet.Event{}` stream (subscribed to the
-  `Fleet.EventRouter.Bus` bus, topic `fleet.events`) and maintains a readable
-  **projection** in an ETS table it owns. The readers (the surface `Deck`)
-  read the projection via `projection/0` — a **direct ETS read** that *bypasses*
-  the GenServer (OTP Iron Law: writes serialize through the process, reads
-  don't touch it).
-
-  The ReadModel **never introspects** the internal state of a third-party GenServer: it
-  sees only the public events. This is the explicit read frontier of the core.
-
-  ## Projection (JSON-safe shape)
-
-      %{
-        total: n,                      # events seen since boot
-        counts: %{type => n},          # tally per type (BRIDGE + FLOW derive from here)
-        stream: [summary, ...],        # last 100 (the backbone)
-        workflow_runs: [summary, ...], # last 20 workflow_map.*
-        gatekeeper: [summary, ...],    # last 20 audit.verdict / coord.escalation_*
-        coordination: [summary, ...],  # last 20 coord.* / gitea.*
-        diagnostics: [summary, ...]    # last 20 boot/oauth/mcp/sdk/signal/git
-      }
-
-  `summary = %{type, source, pod_id, correlation_id, ts}` — only
-  encodable fields (never the raw `payload`, which can carry non-JSON
-  terms, cf. `Deck.pod_view/2`).
-
-  ## Snapshot at boot
-
-  The event-derived decks start empty (the bus is a stream, not a store);
-  the **pods** stay a *live* snapshot via `Spawner.list_pods/0` (endpoint
-  `/api/pods`), because `pod.*` emits only terminals (completed/failed/drift),
-  not a full lifecycle.
-
-  ## Configuration
-
-    * `:subscribe` (opt, default `true`) — subscribe to the bus. Tests pass
-      `false` and send events via `send/2` (hermetic, no real bus).
-    * `:fleet_observation, :start_readmodel` (app env, default `true`) —
-      `false` in `:test` (no parasitic subscriber, hermetic invariant).
-
-  **Last revised**: 2026-07-21
+  Single event-stream consumer maintaining a JSON-safe ETS projection. Writes
+  serialize through the GenServer; deck reads bypass it through protected ETS.
+  It observes public events only and reports subscription health separately from
+  an empty, healthy stream.
   """
 
   use GenServer
@@ -54,10 +15,7 @@ defmodule Fleet.Observation.ReadModel do
   @stream_max 100
   @deck_max 20
 
-  # Re-subscribe backoff (recovery): a failed Bus subscribe leaves the read-model DEAF; without a
-  # retry it stays deaf FOR LIFE (only a restart recovers). We retry with a bounded exponential backoff —
-  # base `@resubscribe_base_ms`, doubling, capped at `@resubscribe_max_ms` — so a transient/boot-race Bus
-  # unavailability heals itself while the status honestly reads :deaf until a retry lands.
+  # Subscription failure remains visible while bounded retries self-heal.
   @resubscribe_base_ms 1_000
   @resubscribe_max_ms 30_000
 

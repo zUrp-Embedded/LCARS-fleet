@@ -89,9 +89,6 @@ defmodule Fleet.Spawner.SeedStore do
         {:error, reason}
     end
   rescue
-    # The "never raises to the caller" contract must cover `root()` too: the default root derives
-    # from `Fleet.Layout.state_dir/0`, which raises on an unresolvable HOME. A raise here must not
-    # kill the dying pod — same downgrade as `do_checkpoint` (logged warning + `{:error, _}`).
     e ->
       Logger.warning(
         "SeedStore: checkpoint #{inspect(project)}/#{inspect(role)} FAILED (non-fatal): #{inspect(e)}"
@@ -161,8 +158,7 @@ defmodule Fleet.Spawner.SeedStore do
       {:error, e}
   end
 
-  # First round = the lines up to and INCLUDING the 1st `assistant` event (brief/setup + 1st reply).
-  # This is the minimal resumable seed; the rest of the session is dropped (forge re-derivable).
+  # Minimal resumable context: input through the first assistant event, inclusive.
   defp first_round(jsonl_path) do
     jsonl_path
     |> bounded_lines()
@@ -204,19 +200,13 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   @doc """
-  Restores a seed into the HOME of a recall pod: `cp`s the JSONl to
-  `<pod_dir>/.claude/projects/<slugify(cwd)>/<uuid>.jsonl`. The `cwd` is that of the recall pod
-  (slug recomputed) → `--resume <uuid>` (cwd = `cwd`) finds the session again. Returns `{:ok, dest}`.
+  Restores a seed to `<pod_dir>/.claude/projects/<slugify(cwd)>/<uuid>.jsonl`.
+
+  The destination is confined under the pod directory before copying. Returns `{:ok, dest}`.
   """
   @spec restore(Path.t(), Path.t(), Path.t(), String.t()) :: {:ok, Path.t()}
   def restore(seed_jsonl, pod_dir, cwd, uuid)
       when is_binary(seed_jsonl) and is_binary(pod_dir) and is_binary(cwd) and is_binary(uuid) do
-    # `cwd` is already confined by `slugify` (everything outside `[A-Za-z0-9-]` → `-`, so neither `/` nor `..`). The
-    # `uuid`, on the other hand, comes from the seed's `.json` (`read_map`): if that file carried a hostile `uuid`
-    # (`../../x`), it would interpolate into the LEAF and write outside the `projects/<slug>/` directory. So we
-    # confine the resolved `dest` under the pod_dir BEFORE the `cp!` — fail-loud (raise) on escape. The
-    # caller `maybe_recall_restore` RESCUES this raise into `{:error, {:recall_restore_failed, _}}` → the
-    # `:projecting` `with` routes it to `transition_failed` (clean tombstone), the pod does not launch.
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
     File.mkdir_p!(dir)
     dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))
@@ -227,61 +217,29 @@ defmodule Fleet.Spawner.SeedStore do
     end
 
     File.cp!(seed_jsonl, dest)
-    # v2 (2026-07-19): the base seed carries a baked `sessionId` (its capture-time uuid) that may
-    # DIFFER from the resume `uuid` (the arch's uuid is now COMPUTED per-human, not owned by the shared
-    # seed). Normalize the internal `sessionId` fields to the resume uuid so `--resume <uuid>` finds a
-    # self-consistent session. No-op for recall pods (their seed already carries the target uuid).
+    # Shared base seeds may carry another human's capture-time sessionId.
     normalize_session_id!(dest, uuid)
-    # Desktop-slot preservation: after the seed BODY lands, graft the captured `bridge_status`
-    # line (if any) so `--resume` RE-ATTACHES the same server slot instead of minting a new one
-    # (proven 2026-07-19, F1/F5: same uuid + own bridge_status → reattach; without it → new slot,
-    # the "12 archs" bug). Keyed by the deterministic `uuid` = the slot's identity. Best-effort:
-    # a missing/failed sidecar just means this boot re-mints + re-captures (self-healing).
     maybe_inject_slot_bridge(dest, uuid)
     {:ok, dest}
   end
 
   @doc """
-  Claude slug of a `cwd`: every character outside `[A-Za-z0-9-]` → `-` (NO collapsing of `-`).
-  E.g. `/home/x/pod_a-b` → `-home-x-pod-a-b`.
-
-  VENDOR COMPAT — reproduces BIT FOR BIT Claude Code's slugification algo (proven against v2.1.183, cf.
-  seed_store_test). This is what lets us find `~/.claude/projects/<slug>/<uuid>.jsonl` again at resume.
-  Do NOT replace with `Fleet.Slug` nor `PodId.component` (different charsets): a slug that does not match
-  Claude's points at the wrong directory -> resume breaks. Domain frozen by an external system.
+  Reproduces Claude Code v2.1.183 cwd slugification byte-for-byte: every character outside
+  `[A-Za-z0-9-]` becomes `-`, without collapse. This is vendor compatibility, not `Fleet.Slug`.
   """
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")
 
-  # ── Desktop-slot preservation (per-identity RC-identity sidecar) ─────────────
-  # A Desktop remote-control slot is bound server-side to the LOCAL session that minted it. It
-  # re-attaches ONLY via `--resume` on a jsonl carrying its RC-identity record(s) (proven live
-  # 2026-07-19; a create or a resume-without-them mints a NEW slot → the "12 archs" bug). So we
-  # capture the RC-identity line(s) at boot (once registered) into a per-identity sidecar, and graft
-  # them back onto the restored seed at the next boot. Keyed by the DETERMINISTIC uuid (the slot's
-  # identity); per-human via `seed_root`. Universal (arch/judge/eng), gated caller-side on
-  # `remote_control?` (a no-RC pod never registers → nothing to capture).
-  #
-  # ⚠ TWO record formats, both seen live (2026-07-19): `bridge-session` (`bridgeSessionId` = the
-  # slot; emitted by a RESUMED session — e.g. the arch, manual-mode) AND/OR `system`+`bridge_status`
-  # (`url` = session_01…; emitted by a FRESH `--remote-control` session). A session emits one or
-  # both — we preserve WHATEVER is present. Injecting the `bridge-session` line was proven to
-  # re-attach the arch's `cse_…` slot (control: no sidecar → a NEW random cse_ each boot).
-
   @doc """
-  Captures the pod's CURRENT Desktop slot into `<seed_root>/_slots/<uuid>.jsonl`, so the next boot
-  re-attaches it. Reads the live jsonl (`SessionFiles.latest_jsonl`, robust to `/clear`) and stores
-  the most recent SEED record of each type — `mode` / `permission-mode` / `bridge-session` /
-  `system/bridge_status` — the F5 minimal-seed set (proven 2026-07-19: those records alone resume
-  cleanly, re-attach the slot, and start on an EMPTY context). The sidecar therefore IS a resumable
-  seed, not just the identity lines. Captures only once RC-registered (identity lines present).
+  Captures the current Desktop slot as a resumable per-identity sidecar.
 
-  MERGE-BY-TYPE with the existing sidecar: a resumed session may not re-emit every record type
-  (e.g. `mode`) — a type absent from the live jsonl keeps its previously-captured line, so the
-  seed never thins across boots.
+  The F5 seed contains the latest `mode`, `permission-mode`, `bridge-session` and
+  `system/bridge_status` records, merged by type with the previous sidecar so resumed sessions
+  cannot thin it. Both RC identity formats were observed live on 2026-07-19 and either may be
+  emitted; capture starts only after at least one is present.
 
   `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
-  Best-effort: never raises to the caller (a miss = the slot is re-minted + re-captured next boot).
+  Capture is best-effort and never raises to the caller.
   """
   @spec capture_slot_bridge(Path.t(), String.t()) :: :ok | :none | {:error, term()}
   def capture_slot_bridge(pod_dir, uuid) when is_binary(pod_dir) and is_binary(uuid) do
@@ -302,10 +260,7 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   @doc """
-  The identity's slot seed, if one was captured: `{:ok, path}` (non-empty sidecar for this
-  deterministic `uuid`) | `:none`. THE probe of the unified seed decision (reorg 2026-07-19,
-  core Decision 1): an RC pod with no live jsonl but a seed resumes FROM it — slot back,
-  context empty — instead of minting a new Desktop slot.
+  Returns the non-empty slot seed for a deterministic UUID, or `:none`.
   """
   @spec slot_seed(String.t()) :: {:ok, Path.t()} | :none
   def slot_seed(uuid) when is_binary(uuid) do
@@ -318,10 +273,7 @@ defmodule Fleet.Spawner.SeedStore do
     end
   end
 
-  # Grafts the captured RC-identity line(s) (if the per-identity sidecar exists) onto a freshly-
-  # restored seed → `--resume` re-attaches the SAME server slot. Idempotent (skips if the dest
-  # already carries an RC-identity record; the base seed never does). Best-effort: any failure is
-  # swallowed (the restore already succeeded; slot preservation is a bonus).
+  # Slot preservation is best-effort after the seed body has already been restored.
   defp maybe_inject_slot_bridge(dest, uuid) do
     with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
          sidecar = slot_path(uuid),
@@ -339,9 +291,7 @@ defmodule Fleet.Spawner.SeedStore do
     _ -> :ok
   end
 
-  # Most recent SEED record of EACH type present, keyed by type — the F5 minimal-seed set:
-  # `mode` + `permission-mode` (session posture) and the RC-identity pair (`bridge-session` /
-  # `system/bridge_status`, both formats seen live 2026-07-19).
+  # Most recent F5 record of each type; both RC formats were observed live on 2026-07-19.
   defp seed_records(jsonl_path) do
     jsonl_path
     |> bounded_lines()
@@ -365,15 +315,12 @@ defmodule Fleet.Spawner.SeedStore do
     end)
   end
 
-  # The sidecar's previously-captured records (same keying) — `%{}` if absent/unreadable.
   defp existing_seed_records(path) do
     if File.exists?(path), do: seed_records(path), else: %{}
   rescue
     _ -> %{}
   end
 
-  # Captured only once the session is RC-REGISTERED (an identity line present): a pre-registration
-  # capture would store mode/permission alone — a seed that resumes but re-attaches NO slot.
   defp rc_registered?(records),
     do: Map.has_key?(records, :session) or Map.has_key?(records, :status)
 
@@ -391,18 +338,12 @@ defmodule Fleet.Spawner.SeedStore do
   defp slot_dir, do: Path.join(root(), "_slots")
   defp slot_path(uuid), do: Path.join(slot_dir(), "#{uuid}.jsonl")
 
-  # Rewrites every `"sessionId":"…"` in a restored jsonl to the resume `uuid` (only that field —
-  # `uuid`/`parentUuid`/`bridgeSessionId` are distinct things, untouched). Makes a body-only base seed
-  # self-consistent under a COMPUTED resume uuid (v2).
+  # Only sessionId is normalized; uuid, parentUuid and bridgeSessionId have distinct meanings.
   defp normalize_session_id!(path, uuid) do
     content = File.read!(path)
     File.write!(path, Regex.replace(~r/"sessionId":"[^"]*"/, content, ~s("sessionId":"#{uuid}")))
   end
 
-  # Default = per-human state (`~/.lcars/seeds`), the same value `runtime.exs` re-derives for the
-  # `LCARS_SEED_STORE_ROOT` env override. `Fleet.Layout.state_dir/0` raises on an unresolvable
-  # HOME: the no-raise path (`checkpoint/4`) rescues it; `read_map/2` (recall, a deliberate API
-  # call) inherits Layout's fail-loud doctrine.
   defp root,
     do:
       Application.get_env(

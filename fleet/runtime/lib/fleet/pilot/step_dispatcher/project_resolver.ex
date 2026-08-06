@@ -40,12 +40,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
             "(single-default-site doctrine, chantier face-projet)."
         )
 
-    # DECONFLATION clone-base / gate-base. `base_sha` would otherwise conflate two
-    # concerns: (1) the STARTING POINT of the clone (`pin_base_sha` resets HEAD onto it) and (2) the
-    # GATE base (HEAD must DESCEND from it). Forward (build/rework): they coincide. RESOLUTION
-    # by rebase: they DIVERGE — the pod starts from the feature (its work) but must descend from `main`.
-    # `:gate_base_branch` (set by the dispatch resolve) pins the gate base separately; absent → the
-    # gate falls back to the clone-base (`base_sha`), forward behavior UNCHANGED.
+    # Rebase resolution may need a distinct gate base from clone base.
     gate_base_branch = Keyword.get(opts, :gate_base_branch)
 
     case forge_base_url(forge_opts) do
@@ -105,18 +100,9 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
       get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
   end
 
-  # `git ls-remote <repo_url> <branch>` bounded via `Fleet.Credentials.Shell` (single source of the bound)
-  # + runtime auth → tip SHA (out-of-pod). Symmetric to the base pin on the pipeline side. The wrapper launches the
-  # ls-remote (NETWORK: can hang/prompt) in its own process-group and, at the WALL deadline, kills the
-  # whole GROUP (the ls-remote AND its transport helpers, holders of the forge token) + closes the port —
-  # whereas the `Task.async` + `shutdown(:brutal_kill)` pattern only killed the BEAM Task while letting the
-  # git process leak.
+  # Bounded, authenticated runtime-side remote read.
   defp ls_remote_sha(repo_url, branch) do
-    # Forge token via env (out of argv/cmdline). DR-024: a private ls-remote REQUIRES auth → fail-loud on a
-    # present-but-malformed credential (git_env_result) instead of running unauthenticated (a 403/404 masks it).
-    # The branch is GATED before it reaches the argv (Fleet.GitRef, the runtime's ref grammar): the
-    # sources are trusted-ish (card/config), but a ref beginning with `-` would read as a git OPTION —
-    # the belt makes that unrepresentable rather than relying on every upstream author.
+    # DR-024: credentials fail before remote read; GitRef rejects option-like branch input.
     with :ok <- validate_branch(branch),
          {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
       case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
@@ -147,10 +133,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
       else: {:error, {:invalid_branch, inspect(branch)}}
   end
 
-  # Pure parse of `git ls-remote` stdout → the pinned sha. The first column MUST be a full 40-hex
-  # object id: this sha becomes `base_sha` — the reset target, the provenance input, the gate base —
-  # so a malformed line (truncated output, an error string on stdout) must surface as a typed error,
-  # never flow downstream as a "sha" the workspace would then be reset onto.
+  # Require full SHA before using remote output as a base pin.
   @doc false
   @spec parse_ls_remote_out(String.t()) :: {:ok, String.t()} | {:error, term()}
   def parse_ls_remote_out(out) do

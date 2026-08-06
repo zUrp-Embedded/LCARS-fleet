@@ -38,24 +38,12 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   alias Fleet.Spawner.McpSocketProvisioner
   alias Fleet.Spawner.Pod.Fs
 
-  # RUNTIME SEAM of the per-pod MCP socket provisioner. The CONTRACT (typed callbacks, why
-  # no compile dep fleet_spawner → fleet_mcp, which impls) lives in the behaviour
-  # `Fleet.Spawner.McpSocketProvisioner`; `resolved/0` is there the SINGLE SOURCE of the default
-  # (`Fleet.MCP.PodSocketSupervisor` in prod, `Fleet.Spawner.MCPSocketStub` set by config/test.exs).
   defp mcp_socket_provisioner, do: McpSocketProvisioner.resolved()
 
-  # The seam is DUCK-TYPED and INJECTED: this is THE assumed
-  # upward runtime seam — mcp already declares Fleet.Spawner (boundary dep, Delegation), so
-  # spawner→mcp as a literal call would close a boundary CYCLE (forbidden by the compiler; and
-  # doctrinally the core must not compile-depend on its own substrate consumer). So a
-  # misconfigured `:mcp_socket_provisioner` (a module that does not export the callbacks) would make
-  # `apply/3` raise `UndefinedFunctionError` deep in `:projecting` → crash the pod gen_statem with an
-  # obscure error. Guard with `function_exported?` → a typed `{:error, {:mcp_provisioner_misconfigured,
-  # mod}}` the caller folds onto `transition_failed`, a CLEAR deploy-error message.
   defp conforming_provisioner do
     mod = mcp_socket_provisioner()
 
-    # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
+    # function_exported?/3 does not load the module.
     _ = Code.ensure_loaded(mod)
 
     if function_exported?(mod, :ensure_pod_socket, 2) and
@@ -67,26 +55,21 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   end
 
   @doc """
-  ENSURE (state `:projecting`, before the launch): creates the listener + the socket file of THIS pod
-  (idempotent on the central side) and returns `{:ok, socket_path}` (host path). The file MUST exist
-  before the bwrap bind — a failure is propagated to the `with` → `transition_failed`.
+  Creates the pod listener before launch and returns its host socket path.
+
+  The provisioner receives the role-gated MCP tool names served to this pod.
   """
   @spec ensure_pod_socket(String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, term()}
   def ensure_pod_socket(pod_id, tools \\ []) when is_binary(pod_id) and is_list(tools) do
     with {:ok, mod} <- conforming_provisioner() do
-      # F-C138 — `tools` = the pod's role-gated MCP tool names (from the cap-profile `allowedTools`),
-      # threaded to the central acceptor so it serves `tools/list` = base + these (single source).
-      # Dispatch via a runtime-resolved `mod` variable (seam spawner→mcp) — NOT a compile alias
-      # (an alias here = upward compile dep boundary would refuse). `mod.fun/…` ≡ `apply`, seam intact.
       mod.ensure_pod_socket(pod_id, tools)
     end
   end
 
   @doc """
-  RELEASE (`terminate/3` safety net, `after` clause): stops the listener AND removes the socket file
-  (idempotent on the central side). Self-protected (rescue/catch → log, returns `:ok`): it runs in
-  the `after` of `terminate`, a raise there would propagate and mask the stop reason. Clause
-  `_state` (pod_id absent) = no-op.
+  Releases the pod listener and socket without propagating failures from termination.
+
+  A state without a pod identifier is a no-op.
   """
   @spec release_pod_socket(map()) :: :ok
   def release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
@@ -114,47 +97,16 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   def release_pod_socket(_state), do: :ok
 
-  # fleet MCP server (SOLE pod↔fleet comm channel; never scraping).
-  # Config = pod-accessible path (outside /home,/tmp, like bwrap/claude_launch). A REAL
-  # pod speaks MCP, period — there is NO alternative file mode. `nil` is legitimate ONLY for
-  # launch-stub tests (claude not launched); a real backend (LauncherPortBackend) with no MCP spec is a
-  # config bug (the brief instructs submit_result, impossible without a server).
-  #
-  # ONE parameterized mechanism: the config supplies the server spec (`command`/`args`/`env`),
-  # we force `alwaysLoad` on it. The spec decides — PROD: stdio→central bridge via a per-pod AF_UNIX socket
-  # (path set per-pod in `LCARS_FLEET_MCP_SOCKET`), TESTS: file-backed fixture. Same mechanism, different spec.
   defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
 
-  @doc """
-  Is the MCP server spec configured (`:fleet_spawner, :mcp_server_spec`)? PUBLIC accessor =
-  SINGLE SOURCE of this read for cross-app probes (`Fleet.API.Readiness`): they delegate
-  to the key's owner instead of re-reading `Application.get_env(:fleet_spawner, …)` (implicit
-  coupling to the key name → silent `nil` if the key is renamed). Same pattern as
-  `Fleet.Spawner.LaunchBackend.resolved/0`.
-  """
+  @doc "Returns whether the Fleet MCP server specification is configured."
   @spec server_spec_present?() :: boolean()
   def server_spec_present?, do: not is_nil(mcp_server_spec())
 
   @doc """
-  MCP env vars to propagate to the pod. `LCARS_POD_ID` is set into the POD PROCESS env for the
-  agent's own introspection (cognitive only, symmetric to `LCARS_ROLE`) — it is NOT a channel: the
-  bridge (`fleet_mcp_bridge.py`) does not read it and injects NO identity into tool-call args, the
-  central derives the pod_id from the per-pod AF_UNIX socket on which it receives (identity = the
-  channel, cf. `Fleet.MCP.PodSocketAcceptor`), and `TaskQueue.get_for_pod/2` filters on that.
-  A forged `_lcars_pod_id` in the args is IGNORED.
+  Returns the pod process's `LCARS_POD_ID` and optional `LCARS_ROLE` introspection values.
 
-  `LCARS_ROLE` (= the cap-profile's `metadata.name` = business role): set HERE in the pod process's
-  env for the agent's own introspection (cognitive only). It is NOT injected on the wire (post-F-C138
-  the bridge forwards blind, it injects no identity) and NOT the source of the role-token decision:
-  `PodTools.create_issue` resolves the role from the SPAWN (`pod_id → role` engraved server-side,
-  `Fleet.Spawner.pod_info`, keyed by the channel), never from a wire field a pod could forge. Set
-  HERE covers host_launch AND bwrap (which re-`--setenv`s it in its sandbox).
-
-  The pod's identity is NOT a secret presented on the wire but
-  the CHANNEL itself — each pod has its AF_UNIX MCP socket (mounted in its sole sandbox) → "which
-  socket receives" = "which pod" (cf. `Fleet.MCP.PodSocketAcceptor`). The path of this socket
-  travels in `LCARS_FLEET_MCP_SOCKET` in the MCP SERVER's env (`build_fleet_mcp_entry`), not here
-  (the claude pod process's env).
+  These values do not authenticate MCP requests; the receiving socket identifies the pod.
   """
   @spec mcp_channel_env(String.t(), String.t() | nil) :: %{String.t() => String.t()}
   def mcp_channel_env(pod_id, role) when is_binary(pod_id) do
@@ -163,32 +115,22 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   end
 
   @doc """
-  Writes `<pod_dir>/.mcp-fleet.json` (+ copies the stdio bridge into the pod). `backend` is resolved
-  by the Pod (`Fleet.Spawner.LaunchBackend.resolved/0`) and passed here; the server spec is read from
-  config. `socket_path` = host path of the per-pod MCP socket (returned by `ensure_pod_socket/1`,
-  state `:projecting`); set as-is in the server's `LCARS_FLEET_MCP_SOCKET` (host == namespace,
-  cf. `build_fleet_mcp_entry`). Returns `:ok` (StubBackend with no spec, or a successful write) |
-  `{:error, {:mcp_server_spec_required, backend}}` (REAL backend with no spec, fail-loud) |
-  `{:error, reason}` FS — propagated to the `:projecting` `with` → `transition_failed`.
+  Writes `.mcp-fleet.json` and projects the configured stdio bridge into the pod.
+
+  The stub backend accepts an absent server spec. A real backend returns
+  `{:error, {:mcp_server_spec_required, backend}}`; filesystem failures are returned unchanged.
   """
   @spec maybe_provision_mcp_config(Path.t(), Path.t(), String.t(), Path.t(), module()) ::
           :ok | {:error, term()}
   def maybe_provision_mcp_config(pod_dir, sandbox_home, pod_id, socket_path, backend) do
     case {mcp_server_spec(), backend} do
-      # Explicit test seam: StubBackend does not launch claude → no MCP required.
       {nil, Fleet.Spawner.LaunchBackend.StubBackend} ->
         :ok
 
-      # A REAL backend with no MCP spec is a config bug — the real pod speaks MCP
-      # (the brief instructs submit_result, impossible without a server). A clean refusal
-      # (propagated to the :projecting state's with → transition_failed) that makes the faulty state
-      # unrepresentable, rather than a pod launched then wedged in a silent timeout.
       {nil, backend} ->
         {:error, {:mcp_server_spec_required, backend}}
 
       {spec, _backend} when is_map(spec) ->
-        # Non-bang + return {:ok|:error} propagated to the with chain of the `:projecting` state
-        # (where the error triggers transition_failed cleanly).
         with {:ok, fleet_entry} <-
                build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, socket_path) do
           config = %{"mcpServers" => %{"fleet" => fleet_entry}}
@@ -257,7 +199,6 @@ defmodule Fleet.Spawner.Pod.McpProvision do
         end)
 
       pod_env = %{
-        # Host path of the per-pod socket, set as-is (host == namespace, cf. the note above).
         "LCARS_FLEET_MCP_SOCKET" => socket_path
       }
 
@@ -272,8 +213,6 @@ defmodule Fleet.Spawner.Pod.McpProvision do
     end
   end
 
-  # nil = spec with no bridge to project (stub/legacy: the spec then carries a
-  # `command`/`args` already self-contained, no placeholder to resolve).
   defp copy_bridge_into_pod(nil, _dest), do: :ok
 
   defp copy_bridge_into_pod(source, dest) when is_binary(source) do

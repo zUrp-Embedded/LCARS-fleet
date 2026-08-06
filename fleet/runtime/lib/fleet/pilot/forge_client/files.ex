@@ -1,29 +1,21 @@
 defmodule Fleet.Pilot.ForgeClient.Files do
   @moduledoc """
-  Read/write of **files** in a repo via the Gitea contents API — sub-domain of
-  `Fleet.Pilot.ForgeClient`. Self-contained concern (neither seam nor coupling to the issues/PR core):
-  callers use it directly (`Fleet.Pilot.IncidentRegistry`, which injects them as seams
-  `:get_file_fun`/`:put_file_fun`). **The SYSTEM publishes** — forge-blind: the pod never pushes.
+  Reads and writes repository files through the forge contents API.
 
-  **Last revised**: 2026-07-18
+  The system performs the publication; pods remain forge-blind. Callers may attribute the worker
+  as author and the commissioning human as committer.
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
     only: [resolve_config: 1, http_get: 2, http_put: 3]
 
-  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_path: 1]
 
   @doc """
-  Writes a file `path` (text `content`) on `repo`/`branch` — Gitea
-  `PUT /repos/{repo}/contents/{path}`. **The SYSTEM publishes** (forge-blind: the pod never
-  pushes; this is the path that durably records an engineer's deliverable). Creation
-  (no sha update): target a fresh `path` (issue-namespaced). Existing branch required
-  (default `main`) — `opts[:new_branch]` to branch from `branch`.
+  Writes text at `path` on a branch, returning the commit SHA.
 
-  ## Returns
-    * `{:ok, commit_sha}` — file written
-    * `{:error, term()}` — HTTP/transport/config (422 = path already present on the branch)
+  Omitting `:sha` creates a file; supplying it updates one. `:new_branch` creates a branch from
+  `:branch`. Optional `:author` and `:committer` identities preserve two-level attribution.
   """
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, String.t()} | {:error, term()}
@@ -37,19 +29,12 @@ defmodule Fleet.Pilot.ForgeClient.Files do
           branch: Keyword.get(opts, :branch, "main")
         }
         |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
-        # Two-level attribution: `author` = the WORKER (who wrote it),
-        # `committer` = the commissioning HUMAN (who put the fleet to work; the system does the I/O,
-        # but the commit attributes both levels). forge-blind preserved (the pod never pushes).
         |> maybe_put_identity(:author, Keyword.get(opts, :author))
         |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
-        # `sha` present ⇒ UPDATE of the existing file (Gitea requires it); absent ⇒ CREATE.
         |> maybe_put_sha(Keyword.get(opts, :sha))
 
       case http_put(config, "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
-        # 2xx WITHOUT the commit envelope = unexpected shape → fail-loud, domain doctrine (same
-        # stance as paginate :unexpected_page_shape). An undeclared success type (outside
-        # @spec/@doc) would hide a shape drift as a hollow green.
         {:ok, other} -> {:error, {:unexpected_put_shape, other}}
         {:error, _} = err -> err
       end
@@ -57,13 +42,8 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   end
 
   @doc """
-  Reads a file from the repo (Gitea `GET /contents/{path}?ref=`). The returned `sha` feeds `put_file(.., sha:)`
-  for an UPDATE (read-modify-write). `opts[:ref]` = branch/ref (default `main`).
-
-  ## Returns
-    * `{:ok, %{content: String.t(), sha: String.t()}}` — file read (content decoded)
-    * `{:error, :not_found}` — 404 (file/branch absent)
-    * `{:error, term()}` — HTTP/transport/config/decode
+  Reads and decodes a file at `:ref` (default `main`). Returns its content and SHA for an update,
+  or `{:error, :not_found}` on a missing file or branch.
   """
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
           {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}

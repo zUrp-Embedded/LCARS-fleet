@@ -34,14 +34,7 @@ defmodule Fleet.TaskQueue.WorkItem do
           issue_id: String.t() | nil,
           role: String.t() | nil,
           brief: String.t() | nil,
-          # PHYSICAL brief: the brief committed into work/ops (version = introducing commit).
-          # `brief_ref` = work/ops-relative path (cf. `cast_brief_ref` scheme); `brief_sha` = the
-          # introducing GIT COMMIT sha (identity = commit, brief-identity chantier — NOT a content
-          # SHA256; the pod cites its 7-hex prefix, any third party verifies it on the forge).
-          # Provenance is BEST-EFFORT (DR-010): materialized → `brief` carries the SHORT pointer
-          # order (`BriefArtifact.pointer_brief`, the doc is the single source); degraded (no
-          # work/ops) → `brief` carries the FULL text (the pod stays autonomous). `brief_sha`
-          # present = verifiable provenance; absent = a VISIBLE degraded mode.
+          # DR-010
           brief_ref: String.t() | nil,
           brief_sha: String.t() | nil,
           deadline: DateTime.t() | nil,
@@ -114,23 +107,21 @@ defmodule Fleet.TaskQueue.WorkItem do
   end
 
   @doc """
-  Deserializes from the persisted map. `{:error, :invalid}` if a required field is absent OR `state` is unknown.
+  Deserializes a persisted work item.
 
-  SINGLE parser → `rich_from_map`, which reconstructs ALL the fields: no competing "minimal" clause
-  that would mask the recovery of `brief`/`role`/`issue_id`/`deadline`/`result`/`metadata`.
-  `state` via a closed list (not `to_existing_atom`, which RAISES on a corrupt `state.json` and bypasses `:corrupt`).
+  Missing required fields, invalid typed fields, and unknown states return
+  `{:error, :invalid}`. Invalid optional timestamps degrade to `nil`.
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
   def from_map(map) when is_map(map), do: rich_from_map(map)
   def from_map(_), do: {:error, :invalid}
 
   @doc """
-  Smart constructor for a FRESH work item (used by `enqueue`). Casts the caller `attrs` (atom OR
-  string keys) to the struct types — `deadline` (DateTime | ISO string → DateTime | nil), `metadata`
-  (a map), `issue_id`/`role`/`brief` (binary | nil) — so the queue never stores a semi-typed struct
-  (a string `deadline` would silently arm no watchdog; a non-map `metadata` would crash any JSON-event
-  consumer). `id` (UUID v4) + `enqueued_at` (now) + `state: :pending` are set here.
-  `{:error, {:bad_attr, {field, value}}}` on a malformed attr.
+  Builds a pending work item from atom- or string-keyed attributes.
+
+  Invalid typed attributes return `{:error, {:bad_attr, {field, value}}}`.
+  `brief_sha` accepts a 40-character lowercase commit SHA, and `brief_ref` must
+  satisfy `Fleet.Layout.valid_brief_ref?/1`.
   """
   @spec new(String.t(), map()) :: {:ok, t()} | {:error, {:bad_attr, term()}}
   def new(pod_id, attrs) when is_binary(pod_id) and is_map(attrs) do
@@ -158,20 +149,12 @@ defmodule Fleet.TaskQueue.WorkItem do
     end
   end
 
-  # attrs may carry atom OR string keys (enqueue callers use both).
   defp fetch(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
 
-  # Reconstructs ALL the fields (required + optional). State via a CLOSED list (not to_existing_atom).
   defp rich_from_map(
          %{"id" => id, "pod_id" => pod_id, "enqueued_at" => enq, "state" => state} = m
        )
        when is_binary(id) and is_binary(pod_id) and is_binary(enq) and is_binary(state) do
-    # `enqueued_at` is REQUIRED (@enforce_keys + find_active's DateTime sort key): an invalid ISO
-    # must FAIL-LOUD here, NOT silently become nil (otherwise boot OK then crash at sort time).
-    # The other DateTimes (deadline/assigned/completed) are optional → nil OK.
-    # Optional fields via the SAME casters as `new/2` (SSoT): a malformed one (non-map metadata/result,
-    # non-binary id/role/brief) is CORRUPTION → `:invalid` (→ the Server's
-    # `state.corrupt` path), NOT a silent coercion that would crash a downstream reader.
     with {:ok, st} <- parse_state(state),
          {:ok, eat} <- parse_required_dt(enq),
          {:ok, issue_id} <- cast_str_nil(m["issue_id"], :issue_id),
@@ -190,8 +173,6 @@ defmodule Fleet.TaskQueue.WorkItem do
          brief: brief,
          brief_ref: brief_ref,
          brief_sha: brief_sha,
-         # deadline/assigned/completed stay TOLERANT (parse → nil on a bad ISO): an optional timestamp
-         # that no longer parses just becomes nil on recovery (no re-arm), not a corrupt-the-whole-state.
          deadline: parse(m["deadline"]),
          enqueued_at: eat,
          assigned_at: parse(m["assigned_at"]),
@@ -226,7 +207,6 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp parse_state("cleared"), do: {:ok, :cleared}
   defp parse_state(_), do: :error
 
-  # `enqueued_at` required → `{:ok, dt} | :error` (vs `parse/1` which tolerates nil for optional fields).
   defp parse_required_dt(s) when is_binary(s) do
     case DateTime.from_iso8601(s) do
       {:ok, dt, _} -> {:ok, dt}
@@ -234,7 +214,6 @@ defmodule Fleet.TaskQueue.WorkItem do
     end
   end
 
-  # Shared casters (SSoT, used by BOTH `new/2` [strict → {:bad_attr}] and `rich_from_map` [→ :invalid]).
   defp cast_deadline(nil), do: {:ok, nil}
   defp cast_deadline(%DateTime{} = dt), do: {:ok, dt}
 
@@ -258,14 +237,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_str_nil(s, _field) when is_binary(s), do: {:ok, s}
   defp cast_str_nil(v, field), do: {:error, {:bad_attr, {field, v}}}
 
-  # BND-123: `brief_sha`/`brief_ref` are the ADDRESS of the physical brief, not free text. An
-  # arbitrary string would masquerade as verifiable provenance in the MCP envelope. Validate the
-  # SHAPE at construction: `brief_sha` = the introducing COMMIT sha (40 hex — the version's
-  # identity, homogeneous with the triplet's two other git anchors), `brief_ref` = the
-  # BriefArtifact scheme — `briefs/` (worker) or `gate-briefs/` (judge), one plain path-safe
-  # segment (no `/` in the name → no traversal; versions live in git history, not in the name).
-  # nil stays nil (the legit degraded/best-effort state, DR-010). SSoT for BOTH `new/2`
-  # (→ {:bad_attr}) and `rich_from_map` (→ :invalid via its `else`).
+  # DR-010
   defp cast_brief_sha(nil, _field), do: {:ok, nil}
 
   defp cast_brief_sha(s, field) when is_binary(s) do
@@ -279,9 +251,6 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp cast_brief_ref(nil, _field), do: {:ok, nil}
 
   defp cast_brief_ref(s, field) when is_binary(s) do
-    # Validate THROUGH `Fleet.Layout` (the single source of the work/ops object grammar), not a twin
-    # copy of its regex — Layout's own doc names this call-site as validating through it, so the
-    # grammar cannot drift between the two sides of the boundary.
     if Fleet.Layout.valid_brief_ref?(s),
       do: {:ok, s},
       else: {:error, {:bad_attr, {field, s}}}

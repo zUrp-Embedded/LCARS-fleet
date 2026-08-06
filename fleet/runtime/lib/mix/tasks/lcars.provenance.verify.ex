@@ -3,21 +3,13 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   use Boundary, classify_to: Fleet.Workflow
   @shortdoc "Verify every provenance statement of a project (deterministic, non-LLM)"
   @moduledoc """
-  Deterministic verification of a project's provenance triplets — the manual/CI face of
-  `Fleet.Workflow.Provenance.Verifier` (brief: `beyond_#6/BRIEF-provenance-verifier.md`).
+  Deterministic manual/CI face of `Fleet.Workflow.Provenance.Verifier`.
 
       mix lcars.provenance.verify <project-name>
       mix lcars.provenance.verify <project-name> --work-root /path --projects-root /path
 
-  Walks `provenance/*.json` in the project's work/ops repo (`<work_root>/<name>`),
-  verifies each statement against the CODE repo (`<projects_root>/<name>` — the
-  deliverable and base commits live there), prints one verdict per statement, and exits
-  non-zero on the first failing batch. No statement at all = a loud note, exit 0 (a
-  fresh project has nothing to attest yet — absence is not incoherence).
-
-  Phase 1 tool: NOT wired as a hard gate (Phase 2 = a separate user decision).
-
-  **Last revised**: 2026-07-21
+  It checks every work/ops provenance statement against code commits and exits
+  nonzero on incoherence. No statement is reported but remains valid.
   """
   use Mix.Task
 

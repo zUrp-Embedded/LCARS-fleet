@@ -1,57 +1,21 @@
 defmodule Fleet.Starfleet.BootOrchestrator do
   @moduledoc """
-  Post-readiness orchestrator — a fire-and-forget Task TRIGGERED by `Fleet.Application`
-  AFTER the root `Supervisor.start_link` returned `{:ok, _}`: "post-readiness"
-  is MECHANICAL (the whole fleet — pilot, api listener included — is provably up before the
-  first permanent pod spawns; an aborted boot spawns nothing). It is NOT a supervised child:
-  `run/1` never exits abnormally (rescue+catch below), and the resurrection rail for permanent
-  pods is `PermanentWarden`, not a restart of this Task.
+  One-shot permanent-pod orchestration invoked after root readiness. It optionally
+  runs `Fleet.Spawner.PermanentBoot`, then logs and broadcasts exactly one
+  `fleet.boot_complete`, `fleet.boot_partial`, or `fleet.boot_failed` outcome.
 
-  Sequence (consumers self-subscribe via their own supervision trees):
-
-  1. **Wire consumers** — handled by OTP (AuditConsumer/PublishConsumer
-     started via their app's supervision tree, subscribe at `init/1`).
-     No explicit action here — this is the "consumer self-subscribe"
-     pattern accepted by the architecture.
-  2. **boot_permanent_pods** — calls
-     `Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`.
-  3. **Emits `fleet.boot_complete`** (or `partial`/`failed`) on the Bus
-     with payload `{started_apps, permanent_pods, timestamp}`.
-
-  ## Failure modes
-
-  - boot_permanent_pods returns a partial list → emits
-    `fleet.boot_partial` with `failed_pods` listed.
-  - boot_permanent_pods raises → emits `fleet.boot_failed` with
-    `reason`, the daemon stays up (degraded mode).
-  - This Task NEVER crashes the daemon: rescue any exception,
-    log + signal fleet.boot_failed, exit normally.
-
-  ## Config-gated
-
-    * `:fleet_starfleet, :start_boot_orchestrator` — boolean (default `true`), read by the
-      ROOT trigger (`Fleet.Application`, via `Starfleet.Application.boot_enabled?/2`).
-      `false` in test (hermetic — no real spawn); tests call `run/1` directly with stubs.
-
-  **Last revised**: 2026-07-18
+  Exceptions, exits, and throws become a failed outcome; `run/1` always returns
+  `:ok`, which means the orchestration finished, not that every pod started. Event
+  delivery is observability-only and may be unavailable early in boot; the spawner
+  registry is the durable state, and `PermanentWarden` owns later recovery.
   """
 
   require Logger
   alias Fleet.EventRouter.Bus
 
   @doc """
-  Orchestration sequence. Spawner backend injectable (test).
-  Emits the `fleet.boot_complete|partial|failed` event depending on the outcome.
-
-  Returns `:ok` = "the orchestration Task ran to completion" (it NEVER crashes the daemon — a
-  crash would reboot the sequence into a permanent-respawn loop), NOT "the boot succeeded". The
-  real outcome lives in the emitted `fleet.boot_*` event (observability only — each outcome is ALSO
-  logged info/warning/error by `emit_*` before broadcasting, so a lost event never hides it); the durable
-  fact "which permanent pods run" is re-derivable via the spawner registry. This orchestrator is
-  ONE-SHOT at node boot; afterwards the automatic respawn belongs to `PermanentWarden`, on TWO rails:
-  `pod.failed` (event) AND a reconciliation tick (expected permanents vs live Registry — it is what
-  catches a permanent terminated CLEANLY, which emits no event), plus the partial net of
-  `WakeRecovery` at the next wake/kick. A caller must NOT read `:ok` as boot success.
+  Runs one orchestration with injectable boot seams. Returns `:ok` after recording
+  any complete, partial, or failed outcome.
   """
   @spec run(keyword()) :: :ok
   def run(opts \\ []) do
@@ -60,15 +24,9 @@ defmodule Fleet.Starfleet.BootOrchestrator do
         Fleet.Spawner.PermanentBoot.boot_permanent_pods()
       end)
 
-    # Canonical gate for booting permanent pods (default true;
-    # `LCARS_BOOT_PERMANENT_AT_START=false` disables it). Disabled →
-    # we wire the consumers + emit boot_complete, but 0 permanent pod spawned.
     enabled? =
       Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
 
-    # Single app (:lcars_fleet): a filter keyed on "fleet_" OTP apps would return [] forever
-    # and the `boot_complete.started_apps` payload would silently LIE (empty fleet at every
-    # boot). Filter on "lcars" = the honest single-app equivalent.
     started_apps =
       Application.started_applications()
       |> Enum.map(fn {a, _, _} -> a end)
@@ -79,10 +37,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
     boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
 
-    # Observability emissions (rescued inside `Bus.safe_emit`, cf. `emit_canon/2`) — returns
-    # discarded deliberately: boot does not depend on the broadcast succeeding. A lost event costs
-    # Bus visibility only — each outcome is logged by `emit_*` before broadcasting, and the durable
-    # fact "which permanent pods run" is re-derived from the spawner registry by `PermanentWarden`.
     _ =
       case boot_result do
         {:ok, pods} ->
@@ -98,8 +52,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     :ok
   end
 
-  # ---------------------------------------------------------------
-
   defp safe_boot(boot_fn) do
     case boot_fn.() do
       results when is_list(results) ->
@@ -107,8 +59,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           Enum.split_with(results, fn
             {:ok, _} -> true
             {:error, _} -> false
-            # A malformed element (neither :ok nor :error) counted OK (`_ -> true`) would make
-            # a false fleet.boot_complete → classed as a failure.
             _ -> false
           end)
 
@@ -117,8 +67,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           _ -> {:partial, oks, errs}
         end
 
-      # (No `{:ok, list}` clause: `PermanentBoot.boot_permanent_pods/0` yields a BARE list of
-      # per-pod results or `{:error, _}` — never a wrapped list; such a clause would be dead code.)
       {:error, reason} ->
         {:failed, reason}
 
@@ -128,9 +76,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   rescue
     e -> {:failed, {:exception, Exception.message(e)}}
   catch
-    # This is a `:transient` Task → an EXIT/THROW that escaped (a `boot_fn` that GenServer.call's a dead
-    # process = exit, or a throw) would exit the Task ABNORMALLY → the supervisor RESTARTS it → a boot
-    # reboot LOOP. The "NEVER crashes the daemon" contract must cover exit/throw, not just exceptions.
     kind, reason -> {:failed, {:caught, kind, reason}}
   end
 
@@ -164,14 +109,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     emit_canon(:"fleet.boot_failed", payload)
   end
 
-  # Canonical schema broadcast %Fleet.Event{source: :starfleet}, via the protected core
-  # `Bus.safe_emit/4` (the protected-emission policy has ONE
-  # substrate authority — never a duplicated local rescue). `:silent`: this Task emits DURING boot — an UnregisteredError
-  # (registry not yet populated) is the nominal case here, not an alarm. A MALFORMED event
-  # (construction bug) is logged ERROR by safe_emit then neutralized — otherwise it would mask a
-  # boot_failed/boot_partial silently, and this `:transient` Task must NEVER crash (a
-  # crash restarts the whole boot sequence, re-spawning the permanent pods, and would loop on a
-  # malformed event).
   defp emit_canon(type, payload) do
     Bus.safe_emit(:starfleet, type, [payload: payload],
       on_unregistered: :silent,

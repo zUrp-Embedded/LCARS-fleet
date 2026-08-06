@@ -1,33 +1,8 @@
 defmodule Fleet.Spawner.McpSocketProvisioner do
   @moduledoc """
-  Behaviour of the per-pod MCP socket provisioner — the CONTRACT of the runtime
-  seam `:mcp_socket_provisioner`, consumed by `Fleet.Spawner.Pod.McpProvision`
-  (`:projecting` states / the Pod's `terminate/3` safety net).
-
-  ## Why a RUNTIME seam (and not a compile dep)
-
-  `fleet_mcp` sits ABOVE `fleet_spawner` in the boundary ladder: a compile-time dep
-  (boundary edge) `fleet_spawner → fleet_mcp` would be an UPWARD dep,
-  FORBIDDEN by the layering. The module is therefore resolved at RUNTIME (`resolved/0`:
-  app-env + default as a literal atom → NO compile-time dep, hence no cycle).
-  `Fleet.Application` starts the whole domain → the real impl is live when a pod
-  runs. Assumed UPWARD runtime seam (spawner → mcp) — the contract lives HERE, at the CONSUMER.
-
-  ## Implementations
-
-    * `Fleet.MCP.PodSocketSupervisor` — REAL impl (canonical default). It lives in
-      `fleet_mcp`, which DOES declare `Fleet.Spawner` as a boundary dep (`Fleet.MCP`
-      `use Boundary`, for PodTools.Delegation → pod_info, a DOWNWARD call). It nonetheless
-      stays DUCK-TYPED rather than `@behaviour Fleet.Spawner.McpSocketProvisioner`: that
-      module is not in Spawner's `exports`, and the seam it implements is the UPWARD
-      `spawner → mcp` direction (a literal call the other way would close a boundary cycle),
-      with a cross-reference comment in its moduledoc. This module is the SOURCE OF TRUTH
-      of the contract — any evolution propagates to both sides by hand.
-    * `Fleet.Spawner.MCPSocketStub` — test stub (same app → adopts the behaviour,
-      the compiler checks conformance). Returns a path under tmp WITHOUT creating
-      a socket; set by `config/test.exs` (mirror of `launch_backend: StubBackend`).
-
-  **Last revised**: 2026-07-21
+  Consumer-owned behaviour for the runtime MCP socket seam. Runtime resolution
+  avoids an upward compile dependency from spawner to MCP; the real MCP provider
+  therefore implements this contract by duck typing.
   """
 
   @doc """

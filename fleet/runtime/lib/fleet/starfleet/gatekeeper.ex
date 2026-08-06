@@ -36,21 +36,11 @@ defmodule Fleet.Starfleet.Gatekeeper do
   @schema_key {__MODULE__, :decision_schema}
 
   @doc """
-  Validates a decision's JSON text.
+  Parses and validates a decision.
 
-  Returns:
-    * `{:ok, %Decision{}}` — JSON parsed + schema valid
-    * `{:error, {:decision_invalid, cause}}` — malformed JSON (`cause` =
-      `%Jason.DecodeError{}`) OR invalid schema (`cause` = ExJsonSchema errors).
-      STRUCTURED pattern-matchable tuple (a bare string would not be); the human rendering (`inspect(cause)`) is done by consumers
-      when logging/journaling, not here.
-
-  Raises `ArgumentError` if the schema was not loaded via
-  `init_schema!/0` (boot-time fail-fast).
+  Returns `{:ok, %Decision{}}` or `{:error, {:decision_invalid, cause}}`.
+  Raises if `init_schema!/0` has not loaded the schema.
   """
-  # A gate decision is a structured VERDICT (decision + reason + details) — KB-scale. Bound the input
-  # BEFORE `Jason.decode` (R2-12): a runaway/malicious pod could otherwise submit a giant JSON and force
-  # an unbounded parse (memory DoS). 256 KiB is generous for a decision with rich `details`.
   @max_decision_bytes 262_144
 
   @spec validate(String.t()) ::
@@ -79,13 +69,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
   end
 
   @doc """
-  Loads the decision JSON schema and persists it in `:persistent_term`
-  via `Fleet.SchemaCache` (foundation authority for the load-and-cache pattern).
-
-  Called at boot by `Fleet.Starfleet.Application.init/1`. Fail-fast:
-  raises if the schema file is absent or the JSON is malformed. Idempotent
-  by key: a second call does not re-read the file (the priv schema is
-  immutable across the BEAM's lifetime).
+  Loads and caches the decision schema. Raises if it is absent or malformed.
   """
   @spec init_schema!() :: :ok
   def init_schema! do

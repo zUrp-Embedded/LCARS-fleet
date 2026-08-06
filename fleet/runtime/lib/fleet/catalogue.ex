@@ -117,9 +117,8 @@ defmodule Fleet.Catalogue do
   def subagent_templates_root, do: Path.join(root(), @rel_subagent_templates)
 
   @doc """
-  Monk memory registries. Derived from the ROOT and not from `cap_profiles_root/0`, although it sits
-  under it: deriving it from the fine key would make `LCARS_CAPPROFILES_ROOT` silently move a second
-  tree, which is the widening this module exists to make explicit.
+  Returns the monk registry tree. It always follows the catalogue root, not a
+  cap-profile-specific override.
   """
   @spec monk_registry_root() :: Path.t()
   def monk_registry_root, do: Path.join(root(), @rel_monk_registry)
@@ -166,13 +165,9 @@ defmodule Fleet.Catalogue do
   def supported_api_versions, do: @supported_api_versions
 
   @doc """
-  Boot check: the root is a readable directory, it carries a manifest, and that manifest targets a
-  contract version this runtime supports. Returns the manifest map.
-
-  Raises on every failure, each named separately — "no such root" and "root from a foreign
-  generation" are different operator mistakes and a single message would send them to the wrong fix.
-  Called by `Fleet.Application.start/2` BEFORE the images publish: freezing a snapshot of a
-  catalogue that was never checked would carry the fault forward under a proven-good name.
+  Verifies that the root is readable and its manifest targets a supported
+  generation, then returns the manifest. Failures raise with operator-facing
+  diagnostics.
   """
   @spec verify!() :: map()
   def verify! do
@@ -190,8 +185,6 @@ defmodule Fleet.Catalogue do
 
     case Map.get(manifest, "api_version") do
       version when version in @supported_api_versions ->
-        # Logged HERE and not by the caller, same rule as the images logging inside `publish!`: the
-        # boot line names WHICH catalogue the fleet came up on, next to the versions frozen from it.
         Logger.info("Catalogue: verified (root=#{root}, api_version=#{version})")
         manifest
 

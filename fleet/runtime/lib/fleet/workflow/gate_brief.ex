@@ -100,20 +100,18 @@ defmodule Fleet.Workflow.GateBrief do
   defp gate_type(%{"type" => t}), do: t
   defp gate_type(_), do: "—"
 
-  # Origin request = judgment CONTEXT, never an instruction to execute (otherwise the judge
-  # redoes the previous step's task instead of judging). Blockquoted (defused) into the
-  # request-section template; absent → empty slot.
+  # Original request is defused judgement context, not an instruction.
   defp request_section(req) when is_binary(req) and req != "" do
     BriefTemplate.render("gate-brief-request-section", %{"request_quoted" => blockquote_tail(req)})
   end
 
   defp request_section(_), do: ""
 
-  # The template carries the leading `> `; continuation lines get theirs here.
+  # Template owns the leading quote marker.
   defp blockquote_tail(text), do: String.replace(text, "\n", "\n> ")
   defp blockquote(text), do: "> " <> blockquote_tail(text)
 
-  # Human-readable JSON rendering; fallback to inspect if non-encodable (defensive).
+  # Readable JSON with defensive fallback.
   defp render_json(nil), do: "(none)"
 
   defp render_json(term) do

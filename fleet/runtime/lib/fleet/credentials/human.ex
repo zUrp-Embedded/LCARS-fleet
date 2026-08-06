@@ -1,15 +1,7 @@
 defmodule Fleet.Credentials.Human do
   @moduledoc """
-  SINGLE source of "the fleet's human" = the OS user of the runtime process (`id -un`).
-
-  Runtime model: the ENTIRE fleet runs under the user of the human who launches it (the human runs
-  `bin/fleet_v2`; the BEAM inherits their UID — there is no systemd `User=` directive) → the current
-  user IS the human. SINGLE SOURCE of `id -un`: every consumer
-  comes through here, never an `id -un` shelled on its own. Otherwise two resolvers with a
-  divergent failure policy (`ForgeIdentity.resolve_human` → `{:error}`; `Fleet.Spawner.Pod.LaunchEnv.runtime_user` → raise);
-  if the rule evolves, spawn-ownership (pod_dir/UID) and commit-identity (git author) diverge.
-
-  **Last revised**: 2026-07-21
+  Single bounded resolver for the fleet human's OS login and UID. The runtime
+  inherits its launcher's user, which anchors both workspace ownership and commit identity.
   """
 
   @doc "The current human (`id -un`). `{:ok, login}` | `{:error, reason}`."

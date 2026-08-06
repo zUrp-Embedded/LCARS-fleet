@@ -137,8 +137,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
         e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
       end
 
-    # The auth step sits outside the pipe (sets LCARS_AUTH_MODE=bind, fail-loud on error). The
-    # login-validity gate follows, tagged {:credentials_invalid, _} for a refusal distinct from auth.
     case launch_env do
       {:ok, human, env} ->
         with {:ok, env} <- maybe_put_auth_token(env, human),
@@ -147,10 +145,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           {:ok, env}
         else
           {:error, {:credentials_invalid, _} = reason} -> {:error, reason}
-          # Honest tag: `maybe_put_auth_token` is unconditional (cannot fail) — the only error
-          # reaching this clause comes from `maybe_put_git_identity` (unresolved forge commit
-          # identity). Naming any other cause here would send an operator chasing a problem
-          # that can never be the real one.
           {:error, reason} -> {:error, {:git_identity_unresolved, reason}}
         end
 
@@ -159,46 +153,12 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # SINGLE source `Fleet.Credentials.Human` (no `id -un` shelled out twice — otherwise
-  # spawn-ownership and commit-identity could diverge, which would break the forge identity gate).
-  # Fail-loud (raise), caught by `build/4`'s try/rescue (converted to {:error, {:launch_env_unresolved, _}}).
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
-  # ════════════════════════════════════════════════════════════════════════════════════════
-  # CREDENTIAL MECHANISM — read the WHY before changing it (especially before "hardening" it).
-  #
-  # The pod authenticates by mounting the OAuth `.credentials.json` of ITS human (the `~/.claude`
-  # of the runtime user), bound RW by the launcher. This file is SHARED and WRITABLE across all
-  # the pods of the same human, and this is INTENDED: it is the ONLY multi-agent mechanism the vendor
-  # supports under subscription — N Claude Code processes coordinate to refresh the single token
-  # via a cross-process lock on `~/.claude/` (native refresh, designed "fleet-wide" on the vendor side).
-  #
-  # Known and ACCEPTED consequence: a pod with a shell can read the token of its OWN human,
-  # and can overwrite the shared file. This is NOT a hole to fix:
-  #   - overwriting/corrupting the creds = suicide (no creds, no agent) → nothing to defend;
-  #   - reading it = the pod ALREADY runs AS the human (it inherits their UID) → it is ITS own token,
-  #     within the boundary the OS grants it anyway.
-  # The only real vector — reading ANOTHER human's token — is made impossible HERE: the claudeDir
-  # is derived PER-HUMAN (`claude_dir_for/1`; never a global dir shared across humans).
-  #
-  # Any "fix" that would remove the RW bind, isolate a credential per-pod, or go through a
-  # broker necessarily BREAKS one of the three hard pillars:
-  #   - an inference-only token (`claude setup-token`) CANNOT sustain a Remote Control session
-  #     (= our interactive mode);
-  #   - injecting the live access-token = ~8h cliff with no refresh (already tried, already reverted);
-  #   - an apiKeyHelper / an API key = METERED billing = leaving the subscription (forbidden).
-  # So: per-human YES, shared-writable YES, broker NO. Not sacred code — code with a
-  # counter-intuitive WHY: "hardening"/"improving" it without the above BREAKS the auth.
-  # ════════════════════════════════════════════════════════════════════════════════════════
-  # Pod creds = the HUMAN's `~/.claude` (= the runtime user). Config override `:claude_dir` honored
-  # (tests / non-standard deployment); else derived from their passwd home. Per-human by construction
-  # (cf. the big block above) — NEVER a claudeDir shared across humans.
   defp claude_dir_for(human) do
     Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
   end
 
-  # Pod creds = `.claude` in the human's home, resolved via `getent passwd`. Passwd failure =
-  # a real error (the human's user MUST exist) → fail-loud, no guessed `/home/<x>`.
   defp claude_dir_from_passwd(human) do
     case passwd_home(human) do
       {:ok, home} -> Path.join(home, ".claude")
@@ -206,13 +166,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Pod git identity = the brief's HUMAN (author AND committer; the pod commits AS
-  # the human who runs it), resolved via the catalogue (`Fleet.Credentials.ForgeIdentity`). Replaces
-  # a role-based COOPERATIVE DEFAULT of `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE): the role no
-  # longer signs the identity — it goes into a `Co-authored-by` trailer. bwrap_launch.sh forwards these
-  # GIT_AUTHOR_*/GIT_COMMITTER_*. Catalogue absent → fail-loud {:forge_identity_unresolved,_}
-  # (no pod without a verifiable identity at push — the guarantee stays on the WORLD side, gate
-  # `allowed_emails=[human]`).
   defp maybe_put_git_identity(env, human, role) do
     case Fleet.Credentials.ForgeIdentity.for_role(role, human: human) do
       {:ok, id} ->
@@ -228,18 +181,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Auth = `bind` mode ONLY. bwrap mounts the human's `.credentials.json` RW → native OAuth
-  # refresh (proactive 5min + reactive 401 + lockfile), full scope, NO ~8h cliff. A token_arg
-  # mode would leak the token in argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) AND would not refresh
-  # (expiresAt:null) → a long eng (>8h) would lose auth mid-work. No toggle.
   defp maybe_put_auth_token(env, _human) do
     {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
   end
 
-  # Vendor binary set in LCARS_VENDOR_BIN (honors the bwrap_launch.sh contract) = the HUMAN's
-  # `~/.local/bin/claude` (= the runtime user), resolved via their passwd home. NO `lcars` fallback: the
-  # pod IS the human, it is THEIR binary. Not found → fail-loud (otherwise bwrap falls back on
-  # `command -v claude` = stale system binary, Monitor tool absent).
   defp maybe_put_vendor_bin(env, human) do
     case claude_bin_in_home(human) do
       bin when is_binary(bin) ->
@@ -250,9 +195,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Points the pod at its PROJECT work/ops (RO-mounted by `LaunchSpec.pod_mounts_env`). SAME authority as the
-  # mount (`LaunchSpec.project_ops_path`) → the projected world and the pointer never drift. Absent for a
-  # non-project pod → the SP block that reads `${LCARS_PROJECT_OPS}` simply has nothing to consult.
   defp maybe_put_project_ops(env, opts, cap_profile) do
     case LaunchSpec.project_ops_path(opts, cap_profile) do
       nil -> env
@@ -260,8 +202,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Looks for `~/.local/bin/claude` in `user`'s passwd home. Returns the real path
-  # (readlink -f) or `nil`. The home comes from `getent passwd` (NSS), not a guessed `/home/<x>`.
   defp claude_bin_in_home(user) when is_binary(user) do
     with {:ok, home} <- passwd_home(user),
          link = Path.join([home, ".local", "bin", "claude"]),
@@ -279,7 +219,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   defp claude_bin_in_home(_), do: nil
 
-  # `user`'s home via `getent passwd` (field 6, 0-indexed 5). `{:ok, home}` | `:error`.
   defp passwd_home(user) do
     case cmd_with_timeout("getent", ["passwd", user]) do
       {line, 0} ->
@@ -297,14 +236,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     _, _ -> :error
   end
 
-  # `System.cmd` has NO native timeout: a network-backed NSS (`getent passwd` over LDAP/SSSD) or a
-  # pathological `readlink` could HANG the whole pod spawn indefinitely. Bounded through
-  # `Fleet.Credentials.Shell.run/3`, the SINGLE bounded-exec primitive of the repo: `setsid` +
-  # `SIGKILL` to the whole process-GROUP at the wall deadline — the command AND its descendants really
-  # die. A Task+`:brutal_kill` pattern would only kill the BEAM side: the Port closes, but a
-  # hung `getent` (LDAP down) would SURVIVE as an OS orphan on every spawn.
-  # The `{output, exit_status}` shape is kept for the two call sites; any failure (timeout,
-  # missing binary) yields a non-zero status so their existing fallback fires.
   @cmd_timeout_ms 5_000
   defp cmd_with_timeout(cmd, args) do
     case Fleet.Credentials.Shell.run(cmd, args, timeout_ms: @cmd_timeout_ms) do

@@ -40,32 +40,8 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   end
 
   @doc """
-  PUSHes the deliverable (`payload`) to the broker, correlated by `work_item_id`.
-
-  The correlator is looked up at the top-level of `args` (canonical format) THEN in the
-  `payload` (a judge agent sometimes tucks it into its verdict payload). Absent from
-  BOTH → `{:error, :work_item_id_required}`. The broker then validates pod_id ↔
-  work_item_id and broadcasts `%Fleet.Event{work_item.completed}`.
-
-  Returns:
-
-    * `{:ok, message}` — deliverable accepted (or idempotent double submit: the 1st submit
-      IS recorded, the duplicate is ignored with a dedicated message).
-    * `{:error, :no_active_work_item}` — no active brief: the deliverable has NOWHERE
-      to go (never assigned, or closed/reassigned since) → DROP reported as an error,
-      never masked as a success (otherwise the pod believes its deliverable accepted).
-    * `{:error, :work_item_id_mismatch}` — the correlator does not name the pod's active
-      brief (the broker's anti-impersonation lock).
-    * `{:error, :broadcast_failed}` — the `work_item.completed` lifecycle broadcast
-      failed: the step_run will NOT finish (the StepRunConsumer received nothing). The pod
-      sees a failure instead of believing its deliverable accepted. Recovery (CI-03): the broker
-      commits `:completed` only AFTER a confirmed broadcast (broadcast-before-commit), so on
-      failure the item STAYS ACTIVE → a pod re-submit RE-PLAYS the delivery (re-broadcast) — the
-      intra-uptime backstop. A re-submit that DOES deliver returns `{:ok, "Result received"}`;
-      `{:ok, "already received"}` is now returned only for a genuinely-delivered item. The
-      across-restart backstop stays the poller/forge reconciliation (the still-active lock is
-      reclaimed if the pod dies before re-submitting). The pod is not left believing success
-      while the forge lock stays set for life.
+  Submits a deliverable with an explicit correlator. CI-03 keeps the item active
+  when completion broadcast fails, so resubmission replays delivery.
   """
   @spec submit_result(String.t(), map(), map()) :: {:ok, String.t()} | {:error, atom()}
   def submit_result(pod_id, args, payload)
@@ -94,13 +70,7 @@ defmodule Fleet.MCP.PodTools.WorkItems do
     end
   end
 
-  # The `work_item_id` (correlator) looked up at the wire top-level THEN in the payload: a judge agent
-  # sometimes tucks the correlator INTO its verdict payload rather than at the top-level parameter. Returns the
-  # non-empty work_item_id found (top-level takes priority), or nil if absent from both. The broker then correlates on
-  # `result["work_item_id"]` and rejects (`:work_item_id_mismatch`) if it does not match ITS active brief → a pod
-  # cannot close another pod's task (a lock orthogonal to the transport). The location (top-level vs
-  # payload) does NOT enter into the security: the work_item_id stays explicit and validated; only the
-  # implicit "last active" fallback was the hole.
+  # Accept the canonical top-level correlator or a judge payload's explicit copy.
   defp effective_work_item_id(args, payload) do
     present_work_item_id(Map.get(args, "work_item_id") || Map.get(args, :work_item_id)) ||
       present_work_item_id(Map.get(payload, "work_item_id") || Map.get(payload, :work_item_id))

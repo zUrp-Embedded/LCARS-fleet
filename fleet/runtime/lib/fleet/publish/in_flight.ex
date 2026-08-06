@@ -2,30 +2,9 @@ defmodule Fleet.Publish.InFlight do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Per-pod "a deliverable publish is running" fact — a foundation primitive (`deps: []`) so BOTH
-  the Pilot side that PERFORMS the publish and the Spawner side that owns the pod can reach it
-  without a cross-domain dependency (Spawner ∌ Pilot).
-
-  ## Why this exists
-
-  A producer pod freezes its slot (`:publishing`) at submit; the Pilot completion then commits +
-  pushes the pod's workspace. The pod's `:publish_deadline` fail-safe lifts that freeze after a
-  fixed delay and, on the next re-brief, RESETS the workspace (`reset --hard`) — destructive. The
-  delay was argued safe by an arithmetic on the git timeouts that does not hold (the composed
-  publish budget exceeds it), so the reset could land on a LIVE git process still reading the
-  workspace. The honest guard is not a bigger number: it is OBSERVING whether the publish is
-  actually in flight. The completion marks THIS pod while it publishes; the deadline reads that
-  mark and defers instead of resetting a running publish. The doubt becomes a fact.
-
-  ## Mechanism (Iron Law: no process)
-
-  A `:persistent_term` entry per pod (`{__MODULE__, pod_id}`). `mark/1` sets it, `clear/1` erases
-  it, `in_flight?/1` reads it. Written once per publish (start) and erased once (end) — the
-  `:persistent_term` profile (rare writes, hot reads), never a per-tick put. The completion MUST
-  wrap its publish so the clear runs in an `after` (crash-safe): a publish that crashes still
-  clears its mark, so a dead completion never keeps the pod frozen forever.
-
-  **Last revised**: 2026-07-21
+  Zero-dependency per-pod fact protecting a live publish from deadline recovery's
+  destructive workspace reset. `while_publishing/2` always clears its rare-write
+  persistent mark in an `after` block.
   """
 
   @doc "Marks `pod_id` as having a publish in flight. Idempotent."

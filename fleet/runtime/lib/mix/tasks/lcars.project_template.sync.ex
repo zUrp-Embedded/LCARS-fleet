@@ -5,22 +5,9 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   @shortdoc "Projects priv/catalogue/project_template onto the forge template repo (fleet/project-template)"
 
   @moduledoc """
-  Pushes `priv/catalogue/project_template/**` to the forge TEMPLATE repo, marks it `template: true`
-  and seeds the static protocol labels — the native-scaffolding source `ProjectOnboard`
-  generates new projects from (`generate_repo`).
-
-  The SSoT stays `priv/catalogue/project_template` in THIS repo; the forge template is its
-  PROJECTION (force-pushed: a diverging forge copy is overwritten, never merged).
-  Operator task — run at deploy when the template files change; a missing template only
-  degrades onboarding to the bare-create + local-scaffold fallback (LOUD, never a wall).
-
-  Reads the forge coordinates from the ENV (`FORGE_BASE_URL` + `FORGE_TOKEN_FILE`, the
-  same vars `bin/fleet_v2` sources) and passes them as explicit ForgeClient opts —
-  DELIBERATELY no `app.start`: booting :lcars_fleet here would start a SECOND fleet
-  (pollers, consumers, listener bind) next to the live one. Run on the deploy host:
-  `set -a; . ~/.lcars/fleet_v2.env; set +a; mix lcars.project_template.sync`.
-
-  **Last revised**: 2026-08-01
+  Force-projects the local project-template source onto its forge template repo,
+  marks it native-template, and seeds protocol labels. It uses explicit environment
+  credentials and never starts a second fleet.
   """
 
   use Mix.Task

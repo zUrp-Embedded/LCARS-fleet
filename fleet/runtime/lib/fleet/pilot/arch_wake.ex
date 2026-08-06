@@ -59,10 +59,7 @@ defmodule Fleet.Pilot.ArchWake do
           :offered | :woken_pending | :busy | :wake_unreached | {:error, {:enqueue, term()}}
 
   @doc """
-  Offer-then-wake the architect(s) for `awaits` (a `{repo, n}` tuple or a non-empty MapSet
-  of them, possibly spanning repos). `via` tags the calling rail in the logs
-  (`"immediate"` / `"net"`). `opts[:ensure]` — test seam for the on-demand arch ensure
-  (default `ProjectArchitect.ensure/2`, threaded with the caller's `spawner`).
+  Offers and wakes the architect for each repository represented in `awaits`.
   """
   @spec offer_then_wake(
           module(),
@@ -86,7 +83,6 @@ defmodule Fleet.Pilot.ArchWake do
   defp normalize({repo, n}) when is_binary(repo), do: [{repo, n}]
   defp normalize(%MapSet{} = awaits), do: MapSet.to_list(awaits)
 
-  # One repo, one architect. The pod-status check keys on THIS repo's arch — per-project queue.
   defp offer_one(task_queue, spawner, repo, {repo, n}, via, ensure) do
     pod_id = ProjectArchitect.pod_id_for(repo)
 
@@ -99,8 +95,6 @@ defmodule Fleet.Pilot.ArchWake do
 
         case wake(spawner, pod_id, via, "pending mandate never fetched → re-wake only") do
           :ok -> :woken_pending
-          # No signal left → do NOT report a sent wake (the caller would arm a cooldown on it).
-          # The mandate is already pending; the next tick re-wakes without re-enqueuing.
           {:error, _} -> :wake_unreached
         end
 
@@ -111,8 +105,6 @@ defmodule Fleet.Pilot.ArchWake do
 
             case wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)") do
               :ok -> :offered
-              # Mandate is durably enqueued but the wake never left → NOT a sent signal. Next tick
-              # finds the arch pending and re-wakes only (no duplicate mandate).
               {:error, _} -> :wake_unreached
             end
 

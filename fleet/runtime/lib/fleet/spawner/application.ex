@@ -32,16 +32,10 @@ defmodule Fleet.Spawner.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # Fleet-life epoch stamped BEFORE any pod starts (single init, no race) — the discriminator
-    # between a pod crash (same epoch → fresh-reroll) and a fleet restart (stale epoch → unified
-    # seed decision). Cf. Fleet.Spawner.BootEpoch.
+    # Stamp the fleet epoch before any pod starts.
     :ok = Fleet.Spawner.BootEpoch.init()
 
-    # CANON PROOF before readiness: every canon role must be spawn-ready (resolve + G24 +
-    # SP assets — the same functions the spawn calls) BEFORE this supervisor reports
-    # started, i.e. before the fleet can say ready. A broken catalogue or asset refuses
-    # the boot HERE, not at the first post-ready spawn. Gated for the hermetic test
-    # baseline only (tests call CanonProof.prove_all!/0 directly).
+    # Prove every canon role spawn-ready before readiness.
     if Application.get_env(:fleet_spawner, :prove_canon_at_boot, true) do
       :ok = Fleet.Spawner.CanonProof.prove_all!()
     end
@@ -51,9 +45,6 @@ defmodule Fleet.Spawner.Application do
       Fleet.Spawner.Supervisor
     ]
 
-    # PublishConsumer subscribes to the Bus topic
-    # admin.spawn.request → dispatches to Fleet.Spawner.spawn_pod. Gated
-    # `:start_publish_consumer` (default true prod, false test).
     publish =
       if Application.get_env(:fleet_spawner, :start_publish_consumer, true) do
         [Fleet.Spawner.PublishConsumer]
@@ -61,8 +52,6 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    # Periodic reaper of orphan pods (crash of the pod gen_statem process → bwrap/tmux survives). Gated
-    # `:start_pod_warden` (default true prod, false test — no real pods to reap in test).
     reaper =
       if Application.get_env(:fleet_spawner, :start_pod_warden, true) do
         [Fleet.Spawner.PodWarden]
@@ -70,11 +59,6 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    # Respawn of dead PERMANENT pods (cattle, not pets): TWO rails into one respawn path — a
-    # `pod.failed` consumer scoped to `permanent-*`, AND a reconciliation tick (expected permanents
-    # vs live Registry) that catches the deaths emitting NO event. Bounded backoff shared by both.
-    # Gated `:start_permanent_warden` (default true prod, false test — no real permanents to
-    # resurrect in test; the tests instantiate it with explicit seams).
     permanent_warden =
       if Application.get_env(:fleet_spawner, :start_permanent_warden, true) do
         [Fleet.Spawner.PermanentWarden]
@@ -82,44 +66,18 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    # (The architects' activity feed moved to the PILOT domain — `Fleet.Pilot.ArchFeed`, started by
-    # the step rail: its lines are pilot vocabulary and its per-project routing derives from
-    # `ProjectArchitect`, a pilot authority spawner cannot depend on. Reorg 2026-07-19.)
     children = base ++ publish ++ reaper ++ permanent_warden
 
-    # No boot of permanent pods here — sole authority =
-    # Fleet.Starfleet.BootOrchestrator (post-readiness). This app only
-    # starts its Registry + Supervisor + PublishConsumer.
-    #
-    # `rest_for_one` — a restart of the Registry (1st child) ALSO restarts everything
-    # that depends on it (including PodWarden). Under `one_for_one`, a Registry resurrected EMPTY while
-    # the :temporary pods survive (never re-registered) made ALL the sockets look orphaned
-    # → the PodWarden reaped the LIVE pods at +2 ticks. Restarting the warden re-arms its 2-tick
-    # grace (suspects state reset to zero); the pods themselves are not children of this app (their
-    # attachment to the Registry is lost — the reap will claim them as REAL orphans). Recovery after
-    # such a reap: the PermanentWarden's RECONCILIATION tick re-derives the expected permanents
-    # against the live Registry and respawns the missing ones (the event rail alone was blind here —
-    # a cleanly torn-down pod emits no `pod.failed`, and BootOrchestrator is one-shot at node boot).
-    # WakeRecovery remains the net for the non-permanent pods (re-spawn on the next wake/kick of a
-    # pod found dead).
+    # Registry loss restarts its consumers and resets orphan-reaping grace.
     Supervisor.init(children,
       strategy: :rest_for_one,
-      # 3/60 explicit (common doctrine).
       max_restarts: 3,
       max_seconds: 60
     )
   end
 
   @doc """
-  LIVE state of the admin-spawn dispatch rail, for readiness (anti-hollow-green). fleet_spawner
-  owns the write-path topology → it knows whether the UNIQUE subscriber of `admin.spawn.request`
-  (`Fleet.Spawner.PublishConsumer`) is alive AND subscribed. fleet_api only asks (no spawner
-  process name leaks into the surface).
-
-    * `{:operational, _}` — PublishConsumer alive AND subscribed to `fleet.events` → the
-      broadcast→consume→spawn_pod chain is wired.
-    * `{:degraded, _}`    — `start_publish_consumer` off, OR the process is dead, OR alive but NOT
-      subscribed → `POST /api/admin/spawn` still answers 202 into the void (Bus lossy) = 202 lies, 0 pod.
+  Reports whether the unique admin-spawn consumer is alive and subscribed.
   """
   @spec spawn_dispatch_status() :: {:operational | :degraded, map()}
   def spawn_dispatch_status do

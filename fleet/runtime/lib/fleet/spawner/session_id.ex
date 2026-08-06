@@ -99,13 +99,8 @@ defmodule Fleet.Spawner.SessionId do
   @doc """
   Encodes `(role_index, kill_class, uid, repo[, pool])` into a deterministic hexspeak UUID.
 
-  `role_index` (0..15) and `kill_class` (0..15 — the lifecycle/kill tier, `CapProfile.kill_class/1`)
-  come from the cap-profile. `uid` = the runtime human's OS UID, DECIMAL 0..9999 (distinguishes two
-  humans on ONE OAuth). `repo` = DECIMAL forge id (0..9999 ; `0` = fleet-level). `pool` = high nibble
-  of `<P><R>` (0 = sequential, default).
-
-  Total over valid inputs: no `{:error, _}` — an out-of-bounds input triggers a function-clause
-  (caller bug), not an error return.
+  Nibbles are in `0..15`; decimal UID and repo fields are in `0..9999`. Out-of-range
+  caller input raises by function-clause rather than being folded into a colliding identity.
   """
   @spec encode(0..15, 0..15, 0..9999, 0..9999, 0..0xF) :: String.t()
   def encode(role_index, kill_class, uid, repo, pool \\ 0)
@@ -115,13 +110,11 @@ defmodule Fleet.Spawner.SessionId do
              repo in 0..9999 and pool in 0..0xF do
     xx = bsl(pool, 4) ||| role_index
 
-    # uid + repo = DECIMAL (grep-direct, zero conversion) ; class + XX = HEX (native counter/tier).
     "#{hex(kill_class, 1)}badcafe-#{dec(uid, 4)}-4dad-babe-#{dec(repo, 4)}dec0de#{hex(xx, 2)}"
   end
 
   defp hex(n, width),
     do: n |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(width, "0")
 
-  # DECIMAL zero-padded (forge id as the forge creates it → grep direct). Digits `0-9` ⊂ hex.
   defp dec(n, width), do: n |> Integer.to_string() |> String.pad_leading(width, "0")
 end

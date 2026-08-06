@@ -1,25 +1,11 @@
 defmodule Fleet.Workflow.BriefTemplate do
   @moduledoc """
-  Loader of the brief-document templates (`priv/catalogue/workflow/brief_templates/*.md`) — the
-  engine side of F-23: the PROSE of the briefs (wording, tone, structure) is CALIBRATION
-  DATA, editable by the human without compiling; the code only fills mechanical slots.
-
-  **Token substitution WITHOUT evaluation** (`{{token}}` → value): a template is inert
-  data — a poisoned template cannot execute anything. FAIL-LOUD both ways: a missing
-  template file raises (`File.read!`), an unfilled token raises (`Map.fetch!` on the
-  assigns), a leftover `{{…}}` after rendering raises (belt: a typoed token never ships
-  silently inside an agent brief).
-
-  Read on EVERY render (no cache, deliberate): brief composition is low-frequency and a
-  calibration edit must take effect immediately — a cache would freeze the human's
-  adjustment until reboot, the exact opposite of the surface's purpose.
-
-  **Last revised**: 2026-08-01
+  F-23 template loader: inert token substitution for human-editable calibration prose.
+  Missing, unfilled, or leftover tokens fail loud; templates are read on every render.
   """
 
   @doc """
-  Renders template `name` (`<catalogue>/workflow/brief_templates/<name>.md`) with `assigns`
-  (string-keyed). Raises on: missing file, token absent from assigns, leftover braces.
+  Renders a string-keyed template and rejects unresolved tokens.
   """
   @spec render(String.t(), %{String.t() => String.t()}) :: String.t()
   def render(name, assigns) when is_binary(name) and is_map(assigns) do
@@ -42,8 +28,7 @@ defmodule Fleet.Workflow.BriefTemplate do
   defp priv_path(name),
     do: Path.join(Fleet.Catalogue.brief_templates_root(), name <> ".md")
 
-  # The file's lineage header (`<!-- Date: … -->` leading comment, GO-7) is FILE metadata,
-  # never brief content — stripped before render, same convention as the SP-block composer.
+  # GO-7 lineage header is file metadata, not rendered content.
   defp strip_header(content),
     do: String.replace(content, ~r/\A(?:<!--.*?-->\n)+/s, "")
 end

@@ -1,15 +1,7 @@
 defmodule Fleet.Workflow.Gate do
   @moduledoc """
-  Generic gate-evaluation behaviour. Vendor-extensible — MVP types:
-
-    * `:hard` — declarative pattern-match rule, no bypass
-    * `:soft` — LLM judgment delegated to the **gatekeeper**:
-      `{:dispatch_gatekeeper, info}`, spawn + re-eval on the forge-driven rail
-      (`Pilot.StepRunConsumer`)
-    * `:terminal` — declarative rules first, `:nontranchable` →
-      same `{:dispatch_gatekeeper, info}` (gatekeeper, sole judge)
-
-  **Last revised**: 2026-07-18
+  Gate-evaluation behaviour: hard, soft, and terminal implementations return a
+  typed pass, fail, human approval, or gatekeeper dispatch verdict.
   """
 
   @callback evaluate(step :: map(), outputs :: map(), ctx :: map()) ::

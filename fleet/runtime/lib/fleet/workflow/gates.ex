@@ -88,27 +88,15 @@ defmodule Fleet.Workflow.Gates do
     end
   end
 
-  # Soft gate = LLM judgment delegated to the **gatekeeper** (the fleet's sole
-  # judge: it runs the fleet, collects the problems). `Gates` stays PURE:
-  # it decides that the gatekeeper is needed (`{:dispatch_gatekeeper, info}`); the async
-  # spawn + the `pod.completed` correlation are done by the forge-driven rail
-  # (`Pilot.StepRunConsumer`, which owns the step name + the lifecycle). No coord
-  # spawn nor dedicated cap-profile: judgment is consolidated onto the single gatekeeper.
+  # Rail owns gatekeeper lifecycle; this module only returns dispatch.
   defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
     {:dispatch_gatekeeper, %{kind: :soft}}
   end
 
-  # Terminal: `rules` is OPTIONAL (the canon's `finish` gate is terminal +
-  # human_approval WITHOUT rules) → we default to `[]`. Only STRING rules are
-  # accepted (Predicate); any other shape is rejected fail-closed.
+  # Terminal rules are optional but malformed non-string shapes fail closed.
   defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate}, outputs, _ctx) do
     rules = Map.get(gate, "rules", [])
 
-    # `rules` must be a LIST of strings. A degenerate shape (`rules` =
-    # string/map/nil non-list, or a list with a non-string item) must NOT
-    # reach `eval_terminal_string` (Predicate assumes strings) — fail-closed.
-    # The `not is_list` also guards `Enum.all?` from a Protocol.UndefinedError on a
-    # non-enumerable (e.g. an integer).
     cond do
       not is_list(rules) ->
         {:fail, "malformed terminal gate: `rules` must be a list (shape rejected)"}
@@ -121,26 +109,12 @@ defmodule Fleet.Workflow.Gates do
     end
   end
 
-  # FAIL-CLOSED CATCH-ALL CLAUSE (the guard that dies = the absence of a guard).
-  # Without it, `eval_by_type` would be an OPEN sum: a malformed gate (`{type:hard}` WITHOUT
-  # `rules`; non-list `rules`; unknown `type`; non-map `gate`) would match NO
-  # clause → `FunctionClauseError` would bubble up to the unguarded `handle_info(pod.completed)` →
-  # CRASH of the StepRunConsumer (SINGLETON) → `gate_evals` lost, end-of-step-run never triggered.
-  # This clause CLOSES the sum: any gate that is not a known-valid shape is
-  # REJECTED fail-closed (`{:fail, …}`), NEVER a crash, NEVER a silent `:pass`.
-  # The eval is TOTAL. (Later ideal: a closed ADT parsed at LOAD would make these shapes
-  # UNCONSTRUCTIBLE upstream; here we close at the eval boundary, minimum viable.)
+  # Close malformed gate sum at the evaluation boundary.
   defp eval_by_type(%{"gate" => gate}, _outputs, _ctx) do
     {:fail, "malformed gate: unrecognized type/shape (#{inspect(gate)}) — fail-closed"}
   end
 
-  # terminal string rules. Order: (1) an unsatisfied rule → {:fail} (bounded rework on the rail side);
-  # (2) `human_approval_required` → `{:human_approval, _}`: a HUMAN sign-off is required — this is NOT a
-  # gate failure (the work may be good), it is an ESCALATION. Verdict DISTINCT from `{:fail}` so that
-  # the rail (`StepRunConsumer`) routes DIRECTLY to the arch (await_arch) instead of bouncing into rework
-  # (the mechanical engine CANNOT grant the sign-off → bouncing would waste `budget` spawns then
-  # escalate anyway). Fail-closed preserved: never a self-approval, never a silent `:pass`.
-  # (3) otherwise → :pass.
+  # Unsatisfied rules fail; approval is a distinct escalation, never self-approval.
   defp eval_terminal_string(rules, gate, outputs) do
     cond do
       not Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->

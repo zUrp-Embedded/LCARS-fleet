@@ -68,30 +68,14 @@ defmodule Fleet.Spawner.PodTmux do
   def session_name(pod_id) when is_binary(pod_id), do: "lcars-pod-#{pod_id}"
 
   @doc """
-  Kills a pod's **holder** (the bwrap/host_launch process that holds the namespace + tmux server), a
-  RECOVERY gesture shared (DRY) by `Pod.Backend.reap_orphan_pod`, `Pod.Backend.teardown_backend`
-  (tmux_session fallback, called by `terminate/3`) and `PodWarden.reap`. The PRIMARY kill remains the
-  holder's SIGTERM (`Pod.Backend.terminate_pod_port`, cf. § "The KILL is NOT here"); this is the
-  ORPHAN/fallback path where there is no live Port left.
+  Kills an orphan pod's tmux server and launcher holder when no owned Port remains.
 
-  `tmux kill-server` (on the per-pod sock) kills tmux+claude; `pkill -9 -f <pattern>` kills the holder
-  (which kill-server leaves alive — it carries the namespace).
-
-  The pattern must be escaped and anchored, never the raw `pod_id`: a raw `pkill -9 -f <pod_id>` would be UNESCAPED and UNANCHORED:
-    1. a metacharacter-laden `pod_id` would over-match;
-    2. a `pod_id` that is a prefix of another (`pr-8-engineer` vs `pr-8-engineer-v2`) would kill both;
-    3. an empty/abnormal `pod_id` → `pkill -f ""` would kill **the ENTIRE host, BEAM included** (self-kill).
-  Hence `pkill_pattern/1`: a validity guard (fail-safe refusal if the pod_id does not have the
-  expected shape) + `Regex.escape` + argv-token anchoring. The holder carries the pod_id as a standalone
-  arg (`bwrap_launch.sh <role> <pod_id> <pod_dir>`) → the anchoring `(^| )id( |$)` matches it without
-  missing it, while excluding substring over-matches.
+  Unsafe pod IDs skip `pkill`; its pattern is validated, escaped and token-anchored.
   """
   @spec kill_holder(String.t()) :: :ok
   def kill_holder(pod_id) when is_binary(pod_id) do
     sock = sock_path(pod_id)
 
-    # Bounded (Shell.run: process-group SIGKILL at the deadline) — a wedged tmux/pkill must NOT hang the
-    # teardown's owner. Return discarded (the death VERDICT is a separate liveness re-check, cf. CI-05).
     _ =
       Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock, "kill-server"],
         timeout_ms: @tmux_timeout_ms
@@ -117,31 +101,16 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  `pkill -f` pattern for a pod_id: token-anchored (`(^| )<escaped>( |$)`) and escaped, or `:unsafe`
-  if the pod_id is unsuitable. Public for test — pure function. `:unsafe` ⇒ we do NOT run pkill
-  (an empty/abnormal pod_id would produce a catastrophic pattern).
+  Builds an escaped holder pattern for bwrap and host launchers, or returns `:unsafe`.
 
-  Two guards, in this order:
-    1. path-safety delegated to the SINGLE AUTHORITY on the pod_id charset, `Fleet.Spawner.valid_pod_id?/1`
-       (charset `[A-Za-z0-9._-]`, no `..`) — no more competing charset regex that could diverge from the
-       spawn-time admission;
-    2. a STRICT delta specific to the pkill domain: alphanumeric head + length ≥4. This is local over-armoring
-       (a too-short/too-broad pattern would kill the BEAM — anti self-kill), not a second format: every real pod_id
-       (validated at spawn) passes guard 1 identically; only an abnormal `..`/short id is rejected here.
+  The shared pod-ID validator is tightened locally to an alphanumeric head and at least four
+  characters because an overly broad `pkill -f` pattern can kill the BEAM itself.
   """
   @spec pkill_pattern(String.t()) :: {:ok, String.t()} | :unsafe
   def pkill_pattern(pod_id) when is_binary(pod_id) do
     if Fleet.Spawner.valid_pod_id?(pod_id) and
          Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
       esc = Regex.escape(pod_id)
-      # TWO holder forms, merged into ONE anchored alternation:
-      #   - bwrap: the pod_id is a STANDALONE ARG of `bwrap_launch.sh` (`… <role> <pod_id> …`) →
-      #     prefix (start|space).
-      #   - host : `host_launch.sh` sets argv0 `lcars-hold:<role>:<pod_id>` — the pod_id there is
-      #     prefixed by `:`, NOT a space, so token anchoring alone MISSES it (the host holder
-      #     `sleep infinity` would leak on containment:none, never killed by this pkill) → we add the
-      #     prefix `lcars-hold:<role>:`. This prefix is ultra-specific (nothing else carries it) → zero
-      #     risk of self-killing the BEAM; the `:unsafe` guard remains the anti-too-broad-pattern barrier.
       {:ok, "(^| |lcars-hold:[^ ]*:)#{esc}( |$)"}
     else
       :unsafe
@@ -151,20 +120,10 @@ defmodule Fleet.Spawner.PodTmux do
   def pkill_pattern(_), do: :unsafe
 
   @doc """
-  Removes the per-pod sock-dir (`<base>/<pod_id>/`, the dirname of `sock_path/1`) — a POST-KILL gesture
-  shared by `Pod.Backend.teardown_backend` (graceful teardown) and `PodWarden.reap` (persistent-orphan
-  reap). Without this removal, the sock-dir would linger after the pod's death and `PodWarden` would
-  re-suspect it, logging a FALSE "persistent orphan" (noise that masks the real ones).
+  Removes the per-pod socket directory after confirmed death.
 
-  DELIBERATELY outside `kill_holder/1` (the rm is NOT folded into it): the two semantics diverge —
-  `Pod.Backend.reap_orphan_pod` (reap BEFORE a re-launch) calls `kill_holder` WITHOUT removing the
-  sock-dir (the `:projecting` state re-provisions it right after), and the graceful teardown removes the
-  sock-dir too when the kill went through the Port's SIGTERM (path without `kill_holder`). The rm is
-  therefore a gesture separate from the kill, not its systematic sequel. The `rm_rf` result is
-  discarded and `:ok` is always returned: an absent dir is a no-op (nothing to remove), and a genuine
-  rm failure has no handler here — its symptom is exactly the noise this removal prevents:
-  `PodWarden` re-suspects the lingering sock-dir and logs a false "persistent orphan" (visible there,
-  not here).
+  This stays separate from `kill_holder/1`: pre-launch orphan reaping keeps the directory for
+  immediate reprovisioning, while final teardown and the warden remove it.
   """
   @spec remove_sock_dir(String.t()) :: :ok
   def remove_sock_dir(pod_id) when is_binary(pod_id) do
@@ -173,10 +132,8 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Session state, TRI-STATE: `:alive` (has-session exit 0), `:absent` (exit 1 — tmux
-  answered "no such session", the one genuine death proof), `:unknown` (timeout /
-  exec failure — tmux itself was unreachable, which proves NOTHING about the holder).
-  Destructive consumers (`confirm_dead?`) must never read `:unknown` as death.
+  Returns `:alive`, `:absent` for an explicit no-session answer, or `:unknown` when
+  tmux itself is unreachable. Destructive consumers never treat `:unknown` as death.
   """
   @spec session_state(String.t()) :: :alive | :absent | :unknown
   def session_state(pod_id) when is_binary(pod_id) do
@@ -187,20 +144,10 @@ defmodule Fleet.Spawner.PodTmux do
     end
   end
 
-  @doc "Live session? Boolean convenience for the NON-destructive callers (kick/health): `:unknown` reads false (skip this round, retry next). Death verdicts go through `confirm_dead?/2`."
+  @doc "Returns true only for a confirmed live session; death verdicts use `confirm_dead?/2`."
   @spec alive?(String.t()) :: boolean()
   def alive?(pod_id) when is_binary(pod_id), do: session_state(pod_id) == :alive
 
-  # The teardown/warden must CONFIRM the holder is dead before erasing the sock-dir (the ONLY
-  # reconciliation proof the PodWarden enumerates). `kill_holder`/`terminate_pod_port` return `:ok`
-  # regardless of the OS kill outcome, so their return is not a death verdict — we verify LIVENESS
-  # instead. `kill_holder`'s SIGKILL (`pkill -9`, uncatchable) is near-instant (first check absent);
-  # a graceful SIGTERM needs a moment for the bwrap namespace to collapse, hence a SHORT bounded
-  # poll (~200 ms max). Still alive after the budget → the kill was refused/ineffective → KEEP the
-  # proof so the warden re-detects and retries. Death requires an EXPLICIT `:absent` from tmux
-  # ("no such session", exit 1): `:unknown` (tmux timeout/exec failure) proves nothing about the
-  # holder and NEVER counts — erasing the sock-dir on it would orphan a living holder. Only used on
-  # real (bwrap/host) pods; a StubBackend session is nil (the caller skips this whole path).
   @dead_confirm_attempts 5
   @dead_confirm_sleep_ms 40
   @spec confirm_dead?(String.t(), (String.t() -> :alive | :absent | :unknown)) :: boolean()
@@ -221,13 +168,10 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Sends `keys` then `Enter` to the pod's REPL (the KICK, e.g. "engage"/"wake"). send-keys is the universal
-  control-plane (it also reaches the slash-commands, unlike the MCP channels).
+  Sends literal text and then `Enter` to the pod REPL as two distinct tmux operations.
 
-  Robustness: the text and the `Enter` go out as TWO distinct send-keys (cf. `send_keys_args/2`). Merged
-  into one (`keys "Enter"`), claude's TUI misses the `Enter` intermittently (the "engage" is not submitted
-  until we re-send the Enter). send-keys is the ONLY out-of-band channel when the Monitor is dead → it
-  must be robust by construction, not only by the retry of the kick loop.
+  Claude's TUI has intermittently missed `Enter` when both were merged; the split ordering is
+  intentionally preserved and tested.
   """
   @spec send_keys(String.t(), String.t()) :: :ok | {:error, term()}
   def send_keys(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
@@ -244,20 +188,13 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc false
-  # tmux args sequence for send_keys: TWO sends — (1) the LITERAL text (`-l`: never interpreted as a
-  # key-name), (2) the `Enter` (key). Separated = 2 distinct input events → the TUI ingests the text before
-  # the newline. Pure + testable (locks the contract "literal text THEN Enter", anti-regression).
   def send_keys_args(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
     s = session_name(pod_id)
     [["send-keys", "-t", s, "-l", keys], ["send-keys", "-t", s, "Enter"]]
   end
 
   @doc """
-  Captures the visible content of the pod's pane (`tmux capture-pane -p`) = the REPL screen. An OFFLOADED
-  observation channel, fallback-ACK: when the agent does not ack, we attach the screen to the escalation
-  issue (starfleet sees what the agent was displaying/doing). Returns `""` if the capture fails
-  (tmux error / dead session) — LOGGED: no retry and no rail re-derives the screen, and without the
-  log an empty pane on the escalation issue was indistinguishable from a genuinely blank screen.
+  Captures the visible REPL pane for escalation. Failures are logged and return `""`.
   """
   @spec capture_pane(String.t()) :: String.t()
   def capture_pane(pod_id) when is_binary(pod_id) do
@@ -290,10 +227,6 @@ defmodule Fleet.Spawner.PodTmux do
     end
   end
 
-  # Bounded tmux (Shell.run: setsid + SIGKILL of the process-group at the deadline; stderr merged into
-  # stdout by construction). Maps back to the `{out, exit_code}` shape the callers expect. A timeout /
-  # exec failure yields a NON-ZERO code (124/125), so `alive?` reads it as "not alive" and the other
-  # callers see a failure — never a silent hang of the owner.
   defp tmux(pod_id, args) do
     case Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock_path(pod_id) | args],
            timeout_ms: @tmux_timeout_ms
@@ -301,7 +234,6 @@ defmodule Fleet.Spawner.PodTmux do
       {:ok, {out, code}} -> {out, code}
       {:error, {:timeout, ms}} -> {"tmux timeout (#{ms}ms)", 124}
       {:error, {:exit, reason}} -> {"tmux exec error: #{inspect(reason)}", 125}
-      # TOTAL over the Shell error union: an unmatched member crashed the pod owner.
       {:error, reason} -> {"tmux shell error: #{inspect(reason)}", 125}
     end
   end

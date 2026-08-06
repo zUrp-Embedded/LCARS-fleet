@@ -73,33 +73,15 @@ defmodule Fleet.TaskQueue.Server do
   alias Fleet.TaskQueue.Store
   alias Fleet.TaskQueue.WorkItem
 
-  # SINGLE AUTHORITY `WorkItem.active_states/0` (the owner of the `state` type) — NOT a 2nd copy of the
-  # vocabulary here. Shared with the poller's lock reconciliation (`pod_has_active_task?`, F-C050): both
-  # sides agree byte-for-byte on which states OWN a slot/lock. Resolved at compile time (literal list) →
-  # usable in the guards below (`s in @active_states`).
+  # F-C050
   @active_states WorkItem.active_states()
 
-  # Portable-safe ceiling for `Process.send_after/3` (2^32-1 ms ≈ 49.7 days): the historic ERTS timer
-  # max, valid on EVERY OTP. A deadline further out (up to the max Elixir DateTime, year 9999 ≈ 8000
-  # years, which alone EXCEEDS the ERTS ceiling and would raise `ArgumentError` → GenServer crash) is
-  # armed at this ceiling and RE-ARMED when the timer fires — see `maybe_schedule_deadline/1`.
   @max_timer 4_294_967_295
-  # Retention bound for terminal tasks (:completed/:failed/:cleared). Without it,
-  # `work_items` grows unbounded and `persist/1` rewrites an ever-larger `state.json` on EVERY
-  # mutation. We keep the N most recent; the active ones do not count (cf. prune_terminal/2).
   @default_retention_terminal 500
-
-  # Default last-poll TTL (24 h): a live pod polls FAR more often than this (get_for_pod on each work
-  # cycle) → this never drops a live pod, only bounds dead-pod-without-clear leakage to ~1 day of churn.
   @default_poll_retention_ms 86_400_000
-
-  # ============================================================
-  # Lifecycle
-  # ============================================================
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    # `name: nil` → anonymous server (test isolation). Absent → canonical name.
     case Keyword.fetch(opts, :name) do
       {:ok, nil} -> GenServer.start_link(__MODULE__, opts)
       {:ok, name} -> GenServer.start_link(__MODULE__, opts, name: name)
@@ -139,9 +121,6 @@ defmodule Fleet.TaskQueue.Server do
             :retention_terminal_max,
             @default_retention_terminal
           ),
-      # TTL of a per-pod last-poll (in-mem): a pod that has not polled within it is dead → its entry is
-      # pruned. Bounds `polls` (record_poll only ADDS, clear_for_pod is the only removal → a pod that
-      # crashes WITHOUT a clear would leak its entry forever, unbounded over uptime).
       poll_retention_ms:
         Keyword.get(opts, :poll_retention_ms) ||
           Application.get_env(:fleet_task_queue, :poll_retention_ms, @default_poll_retention_ms)
@@ -161,9 +140,6 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_continue(:reschedule_deadlines, state) do
-    # Recovery: deadlines are armed only at enqueue. After a restart, we re-arm
-    # the ACTIVE tasks; a deadline passed during the downtime → immediate check (→ :"work_item.failed" via
-    # handle_info), not active-forever.
     for {_id, %WorkItem{state: s} = t} <- state.work_items, s in @active_states do
       maybe_schedule_deadline(t)
     end
@@ -173,9 +149,6 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_continue({:corrupt, found}, state) do
-    # Non-blocking fallback: empty state + a boot-anomaly event post-init. `found` may carry
-    # the non-JSON-encodable {:work_item, id, reason} variant (Store decode) → stringify at
-    # the producer so the payload stays JSON-safe end-to-end (WS edge encodes it raw).
     lossy_broadcast(
       state,
       Fleet.Event.new(:task_queue, :"state.corrupt",
@@ -232,10 +205,6 @@ defmodule Fleet.TaskQueue.Server do
           )
         end
 
-        # payload = `%{work_item_id}` (consistent with every other work_item.* event), NOT the raw `%WorkItem{}` —
-        # WorkItem has no @derive Jason.Encoder, so a `%{work_item: work_item}` would crash `Jason.encode!`
-        # in any JSON-event consumer (Fleet.API.WS on every enqueue). No consumer
-        # needs the struct (deck = count, audit = pod_id/correlation_id).
         lossy_broadcast(
           new_state,
           event(:"work_item.enqueued", work_item, %{work_item_id: work_item.id})
@@ -247,8 +216,6 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   def handle_call({:get_for_pod, pod_id}, _from, state) do
-    # last-poll BEFORE the case: the agent reached out = in-band ACK, whether it receives a work item or not
-    # (the `:no_work_item` case is the bootstrap signal "the agent is up + armed").
     state = record_poll(state, pod_id)
 
     case find_active(state.work_items, pod_id) do
@@ -282,16 +249,9 @@ defmodule Fleet.TaskQueue.Server do
       %WorkItem{} = work_item ->
         case result["work_item_id"] || result[:work_item_id] do
           tid when tid != nil and tid != work_item.id ->
-            # correlation_id of the deliverable ≠ the pod's active work item → reject, no mutation. This is the 2nd
-            # anti-impersonation lock (the 1st = the capability on the MCP side): even a proven pod can only close
-            # EXACTLY its active work item, never "the last active one" of another. The MCP boundary makes the
-            # work_item_id MANDATORY on the pod side → this correlator is always present and verified.
             {:reply, {:error, :work_item_id_mismatch}, state}
 
           _ok ->
-            # `work_item_id` removed from the STORED deliverable: it is a transport correlator (proof "I'm closing THIS
-            # work item"), not business data of the result. The work item is already identified by `work_item.id`;
-            # keeping it in `result` would only duplicate/pollute the broadcast deliverable.
             clean_result = result |> Map.delete("work_item_id") |> Map.delete(:work_item_id)
 
             completed = %{
@@ -301,13 +261,6 @@ defmodule Fleet.TaskQueue.Server do
                 result: clean_result
             }
 
-            # additive role/issue_id: KEPT for consumers outside this tree — the Bus feeds the
-            # no-auth WS surface, whose external readers correlate on the origin agent's identity.
-            # No in-tree module reads these keys; existing consumers ignore the extra keys.
-            # additive `metadata`: the work_item.completed verdict carries the TASK's metadata (which
-            # survives in the broker across a crash of the StepRunConsumer alone). For a gatekeeper eval it carries the
-            # resumption context (`gate_eval`/`payload`/`pipeline`/…) → the restarted StepRunConsumer (gate_evals
-            # RAM empty) RECONSTRUCTS the eval_ctx from the metadata instead of a silent `{:noreply}` (wedge for life).
             ev =
               event(:"work_item.completed", completed, %{
                 work_item_id: completed.id,
@@ -384,19 +337,11 @@ defmodule Fleet.TaskQueue.Server do
     end
   end
 
-  # ============================================================
-  # Query Port (no side-effect, no broadcast)
-  # ============================================================
-
   def handle_call(:list_pending, _from, state) do
     pending = state.work_items |> Map.values() |> Enum.filter(&(&1.state == :pending))
     {:reply, pending, state}
   end
 
-  # Active = `@active_states` (the SAME authority as supersede/deadline — not a 2nd state
-  # vocabulary). Consumed by the poller's lock reconciliation: a brick under an ACTIVE
-  # gatekeeper eval is owned (metadata `gate_eval`); a `:cleared` (superseded) or
-  # `:completed` eval no longer is → orphan reclaim takes over.
   def handle_call(:list_active, _from, state) do
     active = state.work_items |> Map.values() |> Enum.filter(&(&1.state in @active_states))
     {:reply, active, state}
@@ -412,11 +357,6 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, status}, state}
   end
 
-  # SLOT-FREEZE: issue of the pod's LAST task, WHATEVER its state — this query does no state
-  # filtering. Its consumer (the poller's lock reconciliation) pre-filters pods on
-  # `pod_has_active_task?` (F-C050), so only a pod with an ACTIVE task reaches this query. The
-  # publication window (submit → :completed → push) is covered by the reconciliation's 2-tick
-  # grace + the idempotence of the completion sequence, NOT by this query returning terminal tasks.
   def handle_call({:pod_active_issue_id, pod_id}, _from, state) do
     issue =
       case latest_for_pod(state.work_items, pod_id) do
@@ -451,10 +391,6 @@ defmodule Fleet.TaskQueue.Server do
           failed = %{work_item | state: :failed}
           new_state = state |> put_work_item(failed) |> persist()
 
-          # `:"work_item.failed"` (deadline) = watchdog of the IRREDUCIBLE, not a caller-facing
-          # completion: lossy broadcast (a handle_info has no caller to propagate to). The :failed
-          # transition is already recorded + persisted above — a lost broadcast costs observability
-          # only, logged warning by `Broadcast`. The guard stays, honest.
           lossy_broadcast(
             new_state,
             event(:"work_item.failed", failed, %{
@@ -465,8 +401,6 @@ defmodule Fleet.TaskQueue.Server do
 
           {:noreply, new_state}
         else
-          # Timer fired EARLY: the deadline was beyond the send_after ceiling → armed at @max_timer, not
-          # actually reached yet. Re-arm for the remainder; NEVER fail a still-valid item on a clamped tick.
           maybe_schedule_deadline(work_item)
           {:noreply, state}
         end
@@ -477,10 +411,6 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
-
-  # ============================================================
-  # Helpers — selection
-  # ============================================================
 
   defp find_active(work_items, pod_id) do
     work_items
@@ -525,7 +455,6 @@ defmodule Fleet.TaskQueue.Server do
   defp record_poll(state, pod_id) when is_binary(pod_id) do
     now = now()
 
-    # Prune stale polls on each activity (bounds `polls` — see @default_poll_retention_ms), then record.
     polls = state.polls |> prune_stale_polls(now, state.poll_retention_ms) |> Map.put(pod_id, now)
     %{state | polls: polls}
   end
@@ -540,10 +469,6 @@ defmodule Fleet.TaskQueue.Server do
     %{state | work_items: prune_terminal(work_items, state.retention_terminal_max)}
   end
 
-  # Keeps at most `max` TERMINAL tasks (the most recent), prunes the oldest.
-  # No-op as long as we are under the cap. ACTIVE tasks do not count and are NEVER cut
-  # (in-flight work items). The recency order (≠ enqueue order) protects double-submit detection:
-  # a just-completed task is the most recent → never pruned first (has_completed?/1).
   defp prune_terminal(work_items, max) do
     terminal = for {_id, t} <- work_items, t.state not in @active_states, do: t
 
@@ -560,22 +485,15 @@ defmodule Fleet.TaskQueue.Server do
     end
   end
 
-  # Recency for the retention order: completed_at if completed, else assigned_at, else
-  # enqueued_at (always present — @enforce_keys). Always a %DateTime{}, never nil.
   defp recency(%WorkItem{} = t), do: t.completed_at || t.assigned_at || t.enqueued_at
 
   defp maybe_schedule_deadline(%WorkItem{deadline: %DateTime{} = dl, id: id}) do
     ms = DateTime.diff(dl, DateTime.utc_now(), :millisecond)
 
     cond do
-      # deadline ALREADY passed (e.g. at recovery): immediate check → fail via handle_info, instead of
-      # ignoring it silently (= task active forever).
       ms <= 0 ->
         send(self(), {:check_deadline, id})
 
-      # Beyond the ERTS `send_after` ceiling: arm at @max_timer; the handler re-checks the REAL deadline
-      # and re-arms for the remainder. Without this clamp, a far-future deadline raised `ArgumentError`
-      # here → crash of the TaskQueue GenServer (at enqueue AND at recovery re-arm on boot).
       ms > @max_timer ->
         Process.send_after(self(), {:check_deadline, id}, @max_timer)
 
@@ -588,21 +506,10 @@ defmodule Fleet.TaskQueue.Server do
 
   defp maybe_schedule_deadline(_), do: :ok
 
-  # now >= deadline. The check_deadline timer can fire EARLY (a far-future deadline is clamped to
-  # @max_timer), so the handler MUST re-verify the real deadline rather than assume expiry on tick.
   defp deadline_reached?(%WorkItem{deadline: %DateTime{} = dl}),
     do: DateTime.compare(DateTime.utc_now(), dl) != :lt
 
   defp deadline_reached?(_), do: false
-
-  # ============================================================
-  # Helpers — events (policy in Fleet.TaskQueue.Broadcast)
-  # ============================================================
-  #
-  # One-line adapters: the GenServer state does NOT traverse the policy module —
-  # here we unpack the per-instance seams (`state.bus`, `state.topic`) and pass
-  # explicit arguments. The load-bearing vs lossy-observability classification (the WHY
-  # of the two regimes) lives in the moduledoc of `Fleet.TaskQueue.Broadcast`.
 
   defp event(type, %WorkItem{} = work_item, payload),
     do: Broadcast.event(type, work_item, payload)
@@ -614,14 +521,6 @@ defmodule Fleet.TaskQueue.Server do
     do: Broadcast.required(state.bus, state.topic, ev)
 
   defp now, do: DateTime.utc_now()
-
-  # ============================================================
-  # Helpers — persistence (serialization + FS in Fleet.TaskQueue.Store)
-  # ============================================================
-  #
-  # The Server keeps the ORCHESTRATION (do we persist? do we reload?) — the decisions
-  # depend on its boot options (`persist: false` = ephemeral prod mode,
-  # `state_path: nil`). Store only knows the file format.
 
   defp persist(%{persist: false} = state), do: state
   defp persist(%{state_path: nil} = state), do: state

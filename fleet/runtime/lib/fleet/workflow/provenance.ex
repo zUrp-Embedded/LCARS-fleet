@@ -176,13 +176,11 @@ defmodule Fleet.Workflow.Provenance do
   defp config_source(a) do
     case Map.get(a, :brief_sha) do
       sha when is_binary(sha) and sha != "" ->
-        # `brief_sha` = the COMMIT that introduced the brief version (BriefArtifact) → honest
-        # in-toto algo label `gitCommit`, exactly like the subject digest. Three homogeneous
-        # git anchors in the triplet.
+        # Brief identity is also its introducing Git commit.
         drop_nil(%{"uri" => Map.get(a, :brief_ref), "digest" => %{"gitCommit" => sha}})
 
       _ ->
-        # Brief not materialized: record the uri when known, never an invented digest.
+        # Record known URI without inventing a digest.
         drop_nil(%{"uri" => Map.get(a, :brief_ref)})
     end
   end
@@ -193,10 +191,7 @@ defmodule Fleet.Workflow.Provenance do
     e -> {:error, {:provenance_encode_failed, Exception.message(e)}}
   end
 
-  # Human-first name (extension appended by `Layout.provenance_ref/1`): `issue-<n>-<sha7>`
-  # when the issue number is known (an auditor browses by issue); bare `<livrable_sha>`
-  # otherwise. The FULL digest lives INSIDE the statement — the file name is storage, never
-  # the proof.
+  # Issue-prefixed browse name; full digest remains inside the statement.
   defp statement_name(livrable_sha, attrs) do
     case Map.get(attrs, :issue) do
       n when is_integer(n) -> "issue-#{n}-#{String.slice(livrable_sha, 0, 7)}"

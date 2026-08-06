@@ -3,14 +3,11 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   use Boundary, classify_to: Fleet.SPBuilder
   @shortdoc "Compose per-role SPs: priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
   @moduledoc """
-  Generate the per-role system prompts by composing blocks (`Fleet.SPBuilder.Blocks`).
+  Generates committed per-role system prompts through `Fleet.SPBuilder.Blocks`.
 
       mix lcars.sp.gen
 
-  Reads `priv/sp_blocks/sp-map.yaml` + the blocks, writes `priv/sp_drafts/agent-<role>-base.md`. Fail-loud on
-  a missing block/role (no-fallback). The generated flats are committed; a test checks for drift.
-
-  **Last revised**: 2026-08-01
+  Missing roles or blocks fail hard; drift of generated flats is tested.
   """
   use Mix.Task
 

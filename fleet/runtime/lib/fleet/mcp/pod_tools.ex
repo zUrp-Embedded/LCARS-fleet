@@ -79,11 +79,7 @@ defmodule Fleet.MCP.PodTools do
   alias Fleet.MCP.PodTools.Delegation
   alias Fleet.MCP.PodTools.WorkItems
 
-  # F-C138 — the UNIVERSAL pod interface: every pod is a task-worker (pull `get_work_item` IN / push
-  # `submit_result` OUT). These two are exposed to EVERY role; the role-GATED extras (create_issue, …) are
-  # DERIVED from the cap-profile `allowedTools` (`Fleet.CapProfile.mcp_fleet_tools/1`) and threaded to the
-  # socket acceptor at spawn. The acceptor serves `tools/list` = base + threaded — the stdio bridge
-  # carries NO catalogue of its own (a second one would diverge). SINGLE co-located declaration of the pod base.
+  # F-C138
   @base_tool_names ["get_work_item", "submit_result"]
 
   @doc "The universal pod-interface tool names (task-worker base), exposed to every role."

@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   alias Fleet.EventRouter.Bus
 
-  # Spend bounds: 5 consecutive attempts max per role, exponential backoff capped at 10 min.
+  # Per-role spend bound.
   @max_attempts 5
   @max_delay_ms 600_000
 
@@ -92,15 +92,9 @@ defmodule Fleet.Spawner.PermanentWarden do
       live_roles_fun: Keyword.get(opts, :live_roles_fun, &default_live_roles/0),
       reconcile_enabled_fun:
         Keyword.get(opts, :reconcile_enabled_fun, &default_reconcile_enabled?/0),
-      # attempts: role => {count, last_respawn_mono_ms | nil} — count = consecutive attempts,
-      # stamp = last WARDEN respawn ({:ok, _} from respawn_fun; nil when the last attempt failed
-      # or none happened). Monotonic clock: wall-clock jumps must not fake a survival.
+      # role => {consecutive attempts, last successful warden launch monotonic time}
       attempts: %{},
-      # pending: roles with a respawn timer IN FLIGHT (scheduled, not yet fired). Codex audit F-01
-      # (2026-07-19): without it, a burst of `pod.failed` (or event + reconcile) for the same role
-      # each scheduled a fresh timer — the bound of #{@max_attempts} was bypassed, all logged
-      # `attempt 1/5` (the nil stamp reset the counter every event). One pending timer per role:
-      # a second signal while one is in flight is a DUPLICATE, deduped at the source.
+      # F-01: one in-flight timer per role.
       pending: MapSet.new()
     }
 
@@ -110,15 +104,11 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   @impl true
-  # Death of a PERMANENT pod → schedules the respawn (backoff per the role's counter). Non-permanent
-  # pods (issue-*, pr-*) do not match the prefix → catch-all no-op (their relaunch is the forge rail's
-  # job: reconciliation + re-dispatch).
   def handle_info(
         %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id}},
         state
       )
       when is_binary(pod_id) do
-    # Permanent prefix: AUTHORITY = PermanentBoot.parse_permanent/1 (the single source of the literal).
     case Fleet.Spawner.PermanentBoot.parse_permanent(pod_id) do
       :not_permanent ->
         {:noreply, state}
@@ -129,12 +119,9 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   def handle_info({:respawn, role}, state) do
-    # The in-flight timer FIRED → clear pending (F-01): from now a fresh death re-schedules
-    # normally. A retry (spawn failure below) re-arms pending on its own timer.
+    # F-01
     state = %{state | pending: MapSet.delete(state.pending, role)}
 
-    # respawn_fun is rescue-wrapped — a raise (cap-profile bug, FS) would kill the warden
-    # (loss of counters + pending timers → roles dead silently after an empty restart).
     result =
       try do
         state.respawn_fun.(role)
@@ -146,10 +133,7 @@ defmodule Fleet.Spawner.PermanentWarden do
       {:ok, pod_id} ->
         Logger.info("PermanentWarden: permanent #{role} respawned (#{pod_id})")
 
-        # NO counter reset here: `{:ok, pid}` = start_child accepted — the async allocate→launch
-        # chain has not run yet (a boot-then-die pod would loop forever on a reset-at-start).
-        # We STAMP the respawn instant; the reset happens at the NEXT death IF the pod lived
-        # past `min_uptime` (observed survival), lazily in `handle_permanent_death/2`.
+        # Launch acceptance stamps the attempt; only later survival resets it.
         now = System.monotonic_time(:millisecond)
 
         attempts =
@@ -158,8 +142,7 @@ defmodule Fleet.Spawner.PermanentWarden do
         {:noreply, %{state | attempts: attempts}}
 
       {:error, reason} ->
-        # Failure of the spawn ITSELF (not a pod death): no pod.failed emitted to re-arm the cycle →
-        # we re-schedule HERE, same counter/backoff as via the event (a single mechanism).
+        # Spawn failure emits no pod.failed, so re-arm the shared cycle here.
         {attempt, _stamp} = Map.get(state.attempts, role, {1, nil})
 
         if attempt < @max_attempts do
@@ -189,10 +172,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
-  # RECONCILIATION tick — re-derives the truth instead of waiting for an event that may never
-  # come (a cleanly-terminated pod emits no `pod.failed`; the Bus is lossy). Expected permanents
-  # vs live Registry: the missing ones go through the SAME respawn path (counter/backoff shared
-  # with the event rail → a reconciliation can never spend more than an event storm would).
+  # Reconciliation covers clean termination and lossy events through the same bound.
   def handle_info(:reconcile, state) do
     :ok = schedule_reconcile(state.reconcile_ms)
 
@@ -208,19 +188,13 @@ defmodule Fleet.Spawner.PermanentWarden do
 
       {:noreply, Enum.reduce(missing, state, &schedule_respawn/2)}
     else
-      # Permanent boot disabled (maintenance) or fleet quiescing (drain): re-deriving would fight
-      # the operator's own intent. The tick keeps ticking — the gate is a state, not a stop.
       {:noreply, state}
     end
   end
 
-  # Any other event / message → no-op (filtering consumer, like PublishConsumer).
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Expected − live, computed defensively: an enumeration that raises (Registry unavailable,
-  # catalogue unreadable) must never kill the warden nor — worse — report EVERY permanent as
-  # missing and respawn the whole fleet. A failed reconciliation yields NOTHING to respawn: the
-  # tick is a safety net, it never becomes a hazard of its own.
+  # Unknown desired/live state schedules nothing.
   defp expected_missing(state) do
     expected = MapSet.new(state.expected_roles_fun.())
     live = MapSet.new(state.live_roles_fun.())
@@ -237,20 +211,13 @@ defmodule Fleet.Spawner.PermanentWarden do
     _, _ -> []
   end
 
-  # Same counter/backoff/HALT as the event rail (single mechanism — `handle_permanent_death/2`):
-  # a role already exhausted stays HALTed, a reconciliation does not re-arm the spend.
   defp schedule_respawn(role, state) do
     {:noreply, new_state} = handle_permanent_death(role, state)
     new_state
   end
 
-  # Single authority for "who is permanent" — the SAME selection the boot uses (no fork of the
-  # `boot_at_start?` rule here).
   defp default_expected_roles, do: Fleet.Spawner.PermanentBoot.expected_permanent_roles()
 
-  # Arms the next tick. `nil` = reconciliation disabled (test seam). The timer ref is never
-  # cancelled (the tick re-schedules itself) → a meaningless value, discarded here rather than
-  # at the call site (strict dialyzer: unmatched_return).
   defp schedule_reconcile(ms) when is_integer(ms) do
     _ = Process.send_after(self(), :reconcile, ms)
     :ok
@@ -268,23 +235,13 @@ defmodule Fleet.Spawner.PermanentWarden do
     end)
   end
 
-  # Gate of the reconciliation tick, two conditions:
-  #  - `auto_boot_enabled?` : the maintenance mode (`LCARS_BOOT_PERMANENT_AT_START=false`) must not
-  #    be defeated by a warden re-deriving pods nobody asked for.
-  #  - `not quiescing?` : during a drain the fleet is being torn down — respawning a dead permanent
-  #    would fight the drain (the drain is a DEBUG path to inspect pods without killing them; a
-  #    real shutdown nukes the node and this tick dies with it). `Fleet.Shutdown.Quiesce` is a
-  #    foundation zero-dep primitive (a `:persistent_term` flag), reachable from any domain —
-  #    declared in this domain's boundary, no cycle. (A-13 for THIS tick: a fix, not a decision.)
+  # Maintenance and quiesce suppress desired-state reconciliation.
   defp default_reconcile_enabled? do
     Fleet.Spawner.PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()
   end
 
   defp handle_permanent_death(role, state) do
-    # F-01 DEDUP: a respawn is already scheduled for this role → this signal (burst pod.failed,
-    # or event racing the reconcile tick) is a DUPLICATE of the same incident. Drop it: no new
-    # timer, no counter touch. The in-flight timer will do the ONE respawn; if the pod dies again
-    # AFTER it fires (pending cleared), that death is a genuine new cycle iteration.
+    # F-01
     if MapSet.member?(state.pending, role) do
       Logger.debug("PermanentWarden: #{role} death while a respawn is already pending → deduped")
       {:noreply, state}
@@ -297,17 +254,11 @@ defmodule Fleet.Spawner.PermanentWarden do
     now = System.monotonic_time(:millisecond)
     {raw_count, last_respawn} = Map.get(state.attempts, role, {0, nil})
 
-    # Survival OBSERVED = the pod lived past min-uptime since the last WARDEN respawn — or no
-    # warden respawn stamp at all (nil / stale = an EXTERNAL actor booted the pod that just
-    # died: it had to live to die, and the warden wasn't the one paying). Only that resets the
-    # cycle; a death under min-uptime CONTINUES the counter (boot-then-die is one crash-loop,
-    # not five fresh incidents).
+    # No/stale warden stamp denotes external repair; short-lived launches stay one cycle.
     count = if survived?(last_respawn, now, state.min_uptime), do: 0, else: raw_count
 
     if count < @max_attempts do
       if raw_count >= @max_attempts do
-        # Post-HALT death with survival observed = external/manual repair (the warden no longer
-        # respawns after HALT). Cattle: new cycle — the resurrection spend was borne by the actor.
         Logger.warning(
           "PermanentWarden: permanent #{role} died AFTER HALT (external repair detected) → " <>
             "new respawn cycle"
@@ -330,9 +281,7 @@ defmodule Fleet.Spawner.PermanentWarden do
            pending: MapSet.put(state.pending, role)
        }}
     else
-      # Crash-loop CONFIRMED: died under min-uptime with the bound exhausted → REAL, durable
-      # HALT (no re-arm; the spend stops HERE). The stamp stays: a much later death (external
-      # resurrection that lived past min-uptime) passes `survived?/3` above → fresh cycle.
+      # Preserve the stamp so later observed external repair can open a fresh cycle.
       Logger.error(
         "PermanentWarden: permanent #{role} boots then dies under #{div(state.min_uptime, 1000)}s " <>
           "with #{@max_attempts} attempts exhausted — HALT (sysadmin issue already opened by " <>
@@ -343,9 +292,6 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
-  # nil stamp = the last warden attempt failed before launching anything (or never happened):
-  # the pod that just died was necessarily booted OUTSIDE the warden → counts as survival
-  # (external repair), never as a warden crash-loop iteration.
   defp survived?(nil, _now, _min_uptime), do: true
   defp survived?(last_ms, now, min_uptime), do: now - last_ms >= min_uptime
 
@@ -353,8 +299,6 @@ defmodule Fleet.Spawner.PermanentWarden do
   @spec backoff_delay(non_neg_integer(), pos_integer()) :: pos_integer()
   def backoff_delay(attempt, base_ms)
       when is_integer(attempt) and attempt >= 0 and is_integer(base_ms) and base_ms > 0 do
-    # TYPED guards (`> 0` alone let a float through → the whole computation became float,
-    # the spec lied) + shift `1 <<< n` (Integer.pow's type includes a float path).
     import Bitwise, only: [<<<: 2]
     min(base_ms * (1 <<< min(attempt, 20)), @max_delay_ms)
   end

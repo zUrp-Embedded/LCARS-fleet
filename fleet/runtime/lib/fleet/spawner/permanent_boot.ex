@@ -75,59 +75,19 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   def boot_at_start?(_), do: false
 
-  @doc """
-  Filters a list of cap-profiles → those eligible for Type 1 permanent
-  boot (`boot_at_start?/1` guard applied, host_native excluded).
-  """
+  @doc "Filters profiles through `boot_at_start?/1`."
   @spec select_permanent([Fleet.CapProfile.t()]) :: [Fleet.CapProfile.t()]
   def select_permanent(cap_profiles) when is_list(cap_profiles) do
     Enum.filter(cap_profiles, &boot_at_start?/1)
   end
 
   @doc """
-  Boot of the Type 1 permanent pods.
-  Invoked post-readiness by the **single authority**
-  `Fleet.Starfleet.BootOrchestrator` (`Fleet.Spawner.Application` boots no
-  permanent pod — one boot authority, no double-boot possible).
+  Loads the full catalogue, selects eligible profiles and attempts every spawn.
 
-  Enumerates the roles of the cap-profiles directory → delegates loading+
-  validation to the canonical loader `Fleet.CapProfile.load/1` (DRY — no
-  YAML re-parse) → `select_permanent/1` guard (host_native excluded) →
-  `spawn_pod/3`
-  (real signature `(%CapProfile{}, issue_id, opts)`).
-
-  ## LOAD failure vs SPAWN failure
-
-  **A cap-profile that does NOT LOAD** (missing / corrupt YAML / invalid schema) = broken
-  deploy artifact → **fail-loud**: `boot_permanent_pods/1` returns `{:error, {:cap_profile_load_failed,
-  role, reason}}` (BootOrchestrator → `fleet.boot_failed`, not an amputated-green `boot_complete`). Without
-  the fail-loud, these failures would be dropped silently — the "wounded thing kept
-  alive" that the doctrine rejects.
-
-  **A SPAWN failure** (bwrap/launch KO) does NOT stop the others (each one tries), but is NO LONGER
-  silently filtered: it is returned as `{:error, {role, reason}}` in the results list →
-  the BootOrchestrator emits `fleet.boot_partial` (the missing permanent is NAMED, no
-  amputated-green `boot_complete`). Jupiter-grade: nobody runs behind it with a checklist —
-  the boot tells the truth itself, and the `PermanentWarden` retries on `pod.failed`.
-
-  ## Single writer state.json
-
-  PermanentBoot **spawns** but **does NOT write** `state.json` — the write is
-  delegated to the `gen_statem` `Fleet.Spawner.Pod` (via `Pod.StateFs.write_state_fs/1`). A single
-  writer: no parallel `:state_writer` seam.
-
-  ## Seams (IO decoupling for tests)
-    * `:cap_profiles_dir` — scanned directory (config default
-      `:fleet_spawner, :cap_profiles_dir`)
-    * `:loader` — `(role :: String.t()) -> {:ok, cp} | {:error, term}`
-      (default `&Fleet.CapProfile.load/1`)
-    * `:spawner` — `(cp, issue_id, opts) -> {:ok, pid} | {:error, term}`
-      (default `&Fleet.Spawner.spawn_pod/3`)
+  A load failure returns `{:error, {:cap_profile_load_failed, role, reason}}` and stops
+  boot. Spawn results remain in the returned list as `{:ok, pod_id}` or
+  `{:error, {role, reason}}`. Options may inject the catalogue directory, loader and spawner.
   """
-  # Returns the RESULTS LIST `[{:ok, pod_id} | {:error, {role, reason}}]` — a failed spawn
-  # is NEVER filtered out (a filtered partial list would be a LYING boot).
-  # `safe_boot` (BootOrchestrator) classifies the list natively: all-ok → boot_complete, mixed →
-  # boot_partial. GLOBAL error (broken deploy) → `{:error, reason}` unchanged (→ boot_failed).
   @spec boot_permanent_pods(keyword()) ::
           [{:ok, String.t()} | {:error, {String.t(), term()}}] | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
@@ -141,8 +101,6 @@ defmodule Fleet.Spawner.PermanentBoot do
       |> select_permanent()
       |> Enum.map(&spawn_one(&1, spawner))
     else
-      # A failed load = broken deploy → we propagate it as-is (fail-loud). Distinct from the
-      # unreadable dir (`list_roles`), classified `:cap_profiles_dir_unreadable`.
       {:error, {:cap_profile_load_failed, _role, _reason}} = err ->
         err
 
@@ -152,16 +110,10 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Roles EXPECTED to run as permanents = the catalogue's `boot_at_start?` cap-profiles.
+  Returns eligible permanent roles for reconciliation.
 
-  The SAME selection as `boot_permanent_pods/1` (one authority for "who is permanent"), exposed so
-  the `PermanentWarden` can reconcile expectation against the live Registry — a permanent that dies
-  WITHOUT emitting `pod.failed` (clean sub-tree restart, lost lossy event) is invisible to the
-  event rail. A role whose profile no longer loads is NOT listed (the fail-loud belongs to boot;
-  a reconciliation tick must not respawn from a broken artefact — but it logs a warning per
-  tick so the exclusion is never silent: no permanent vanishes from reconciliation without a trace).
-
-  Seams `:cap_profiles_dir` / `:loader` — same as `boot_permanent_pods/1`.
+  An unloadable profile is excluded and logged rather than respawned from a broken artifact.
+  Options may inject the catalogue directory and loader.
   """
   @spec expected_permanent_roles(keyword()) :: [String.t()]
   def expected_permanent_roles(opts \\ []) when is_list(opts) do
@@ -176,10 +128,6 @@ defmodule Fleet.Spawner.PermanentBoot do
               if boot_at_start?(cp.spec), do: [role], else: []
 
             {:error, reason} ->
-              # The exclusion is DELIBERATE (never respawn from a broken artefact) but must not be
-              # SILENT: a permanent whose profile breaks AFTER boot would otherwise vanish from the
-              # reconciliation with no trace — dead and never respawned, and nobody told. The warden
-              # ticks, so this fires once per tick while the artefact stays broken: loud by design.
               Logger.warning(
                 "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
                   "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
@@ -196,16 +144,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Re-spawn ONE dead permanent pod (rebuildable cattle) — called by `Fleet.Spawner.PermanentWarden`
-  on `pod.failed` of a `permanent-<role>` pod. Reuses EXACTLY the boot path (`spawn_one`):
-  deterministic idempotent pod_id (`{:already_started}` = no-op if the pod came back in the meantime) +
-  a stable UUID + a FRESH context (recreated from scratch, no base seed — the respawn
-  NEVER resumes the dead pod's accumulated session, consistent with the fresh-reroll recovery).
-
-  Safeguard: the loaded cap-profile must be a PERMANENT (`boot_at_start?`) — fail-loud refusal otherwise
-  (a non-permanent role has no business here, even if a forged `permanent-*` pod_id asked for it).
-
-  Returns `{:ok, pod_id}` | `{:error, {role, reason}}`.
+  Respawns one eligible permanent through the normal boot path. Already-running pods are
+  idempotent successes; non-permanent and unloadable roles return named errors.
   """
   @spec respawn(String.t(), keyword()) :: {:ok, String.t()} | {:error, {String.t(), term()}}
   def respawn(role, opts \\ []) when is_binary(role) and is_list(opts) do
@@ -223,36 +163,16 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  @doc """
-  Is permanent-pod boot enabled? Config `:fleet_spawner,
-  :boot_permanent_at_start` — **default `true`** ("default true in prod, false in
-  test"; `false` disables). Pure,
-  testable (gate decoupled from spawn IO).
-
-  This predicate is the **single canon gate** for permanent-pod
-  boot, consulted by `Fleet.Starfleet.BootOrchestrator` (the single boot
-  authority). `LCARS_BOOT_PERMANENT_AT_START=false` (runtime.exs) sets it to
-  `false` → BootOrchestrator wires the consumers + emits `fleet.boot_complete` but
-  spawns NO permanent pod (explicit degraded/maintenance mode). The default
-  (env absent) = `true` = boots — nominal prod behavior.
-  """
+  @doc "Returns `:fleet_spawner, :boot_permanent_at_start`, defaulting to `true`."
   @spec auto_boot_enabled?() :: boolean()
   def auto_boot_enabled? do
     Application.get_env(:fleet_spawner, :boot_permanent_at_start, true) == true
   end
 
-  # --- private ---
-
   defp cap_profiles_dir do
-    # SINGLE source aligned on the LOADER (`Fleet.CapProfile.root_dir`) — otherwise PermanentBoot
-    # ENUMERATES one directory while `Fleet.CapProfile.load` LOADS from another, and a profile that
-    # `list/1` returns is not loadable (enum/load mismatched). The override `:fleet_spawner, :cap_profiles_dir` stays (tests/non-standard deployment).
     Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
-  # Enumerates via the SINGLE SOURCE `Fleet.CapProfile.list/1` — by the
-  # `metadata.name` prop, never by filename. Enum and `load` thus share the SAME key
-  # (the name) → no more enum↔load mismatch (a listed profile is always loadable).
   defp list_roles(dir) do
     case Fleet.CapProfile.list_from_published() do
       {:ok, roles} -> {:ok, roles}
@@ -260,9 +180,6 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  # Loads ALL roles, short-circuits on the FIRST load failure (fail-loud, no more silent
-  # skip). Thus validates the whole catalogue at boot — a corrupt profile is caught before it is
-  # even needed. (The permanent filtering comes AFTER, on the loaded cps.)
   defp load_all(roles, loader) do
     case Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
            case loader.(role) do
@@ -304,14 +221,8 @@ defmodule Fleet.Spawner.PermanentBoot do
         {:ok, pod_id}
 
       {:error, reason} ->
-        # The failure is RETURNED (no more nil silently filtered) → boot_partial visible / respawn retry.
         Logger.error("PermanentBoot: spawn of permanent #{name} failed (#{inspect(reason)})")
         {:error, {name, reason}}
     end
   end
-
-  # There is no boot-from-base branch here: the pod's unified seed decision (`Pod.maybe_slot_resume` —
-  # live jsonl / captured seed / fresh) is the ONLY resume authority, and the corrupt-seed rail died
-  # with the artifact it guarded (reorg 2026-07-19). The absence is LOCKED and explained where it is
-  # enforced — `permanent_boot_test.exs`, "the boot-from-base branch is GONE" — so read it there.
 end

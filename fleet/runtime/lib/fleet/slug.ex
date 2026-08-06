@@ -2,77 +2,19 @@ defmodule Fleet.Slug do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Smart-constructor for a CONFINED-BY-CONSTRUCTION name used as an FS path
-  component or a bounded URL segment.
+  Validates atomic path and URL names without transforming them.
 
-  ## The problem it closes
-
-  A name supplied by a client / a payload / a catalogue (a checkpoint name
-  `rc_name`, a modop name, a workflow_map name, a forge repo/branch name…)
-  often ends up interpolated into a `Path.join` (FS leaf) or a URL segment.
-  If it carries `..`, `/`, a NUL byte or a control character, it TRAVERSES
-  outside the expected root or breaks/injects the URL. Checking after the
-  fact is fragile; instead we make the forbidden state UNREPRESENTABLE: we
-  cast the name AS EARLY AS POSSIBLE, fail-closed, and a malformed name
-  NEVER reaches a `Path.join`.
-
-  ## The slug contract
-
-  A valid slug matches `^[a-z0-9][a-z0-9_-]*$`:
-
-    * lowercase / digits / `_` / `-` only;
-    * starts with `[a-z0-9]` (so NO leading `-`/`_` — no slug that looks
-      like a `-rf` flag, no "hidden" name);
-    * non-empty;
-    * no `/` (a single path component), no `.` (so neither `.` nor `..` —
-      no directory traversal), no NUL byte nor control character (excluded
-      by the charset), no misleading unicode (homoglyphs outside
-      `[a-z0-9_-]` are rejected).
-
-  Single authority for the path-safe charset — role/role_token/checkpoint
-  names all validate HERE, never through a local regex copy.
-
-  ## Confinement to the FS leaf
-
-  Casting the segment is not enough if the ROOT itself is computed: we add
-  `under_root?/2` (the resolved path stays `== root` or under `root <>
-  "/"`) and `confined_join/2` (cast + join + confine in one shot).
-  `Path.expand` is LEXICAL (it resolves `..`, not symlinks) — the slug has
-  already killed the `..`, the confinement is the belt on top of the
-  suspenders.
-
-  ## When NOT to use the slug (multi-segment URL case)
-
-  A legitimate forge `path` may contain `/` (`docs/sub/file.md`): that is
-  not a slug, it must be ENCODED (`URI.encode`/`URI.encode_www_form`)
-  segment by segment, not refused. The slug is for names that MUST be
-  atomic (repo, bounded branch, modop/workflow_map/checkpoint name).
-
-  ## Do NOT confuse with two other "slugs" (distinct domains, do not merge)
-
-  Two functions look like a slug but are NOT, and must NOT be folded in here:
-
-    * `Fleet.Pilot.PodId` — TRANSFORMS names into the pod_id charset
-      `[A-Za-z0-9._-]` (case and `.` preserved, contract `valid_pod_id?`);
-      `Fleet.Slug` VALIDATES/rejects, strict lowercase, no `.`.
-    * `Fleet.Spawner.SeedStore.slugify/1` — reproduces Claude Code's algo
-      BIT FOR BIT (vendor compat); replacing it with `Fleet.Slug` would
-      break resume. See the comment over there.
-
-  **Last revised**: 2026-07-21
+  A slug matches `\A[a-z0-9][a-z0-9_-]*\z`. `under_root?/2` and
+  `confined_join/2` add lexical path confinement. Multi-segment paths, Pilot
+  pod IDs, and the vendor-compatible SeedStore slug are distinct domains.
   """
 
-  # Canonical path-safe charset: lowercase/digit/`_`/`-`, first position never `-`/`_`.
-  # `\A..\z` (not `^..$`) → STRICT whole-string anchoring: `^`/`$` also match a line
-  # boundary, so a multi-line name `"ok\n../evil"` would pass `^[a-z0-9...]$`.
   @slug_rx ~r/\A[a-z0-9][a-z0-9_-]*\z/
 
   @type t :: String.t()
 
   @doc """
-  Casts a name into a confined slug. `{:ok, slug}` if the name matches the
-  contract, otherwise `{:error, {:invalid_slug, raw}}` (fail-closed — a
-  malformed name never comes back out as a usable slug).
+  Validates a slug or returns `{:error, {:invalid_slug, raw}}`.
 
   ## Examples
 
@@ -90,8 +32,7 @@ defmodule Fleet.Slug do
   def cast(name), do: {:error, {:invalid_slug, name}}
 
   @doc """
-  Fail-loud variant of `cast/1` for sites where an invalid slug is a
-  programming bug (never a client input): raises `ArgumentError`.
+  Returns a valid slug or raises `ArgumentError`.
 
   ## Examples
 
@@ -107,7 +48,7 @@ defmodule Fleet.Slug do
   end
 
   @doc """
-  Predicate: is `name` a valid slug?
+  Returns whether `name` is a valid slug.
 
   ## Examples
 
@@ -122,10 +63,7 @@ defmodule Fleet.Slug do
   def valid?(_), do: false
 
   @doc """
-  Confinement guard: does the resolved `dest` path stay UNDER `root`
-  (`== root` or starting with `root <> "/"`)? `Path.expand` resolves `..`
-  lexically → a `dest` that climbs above the root is rejected. Both sides
-  are expanded (a relative `root` does not skew the comparison).
+  Returns whether expanded `dest` equals expanded `root` or lies below it.
 
   ## Examples
 
@@ -140,10 +78,6 @@ defmodule Fleet.Slug do
     expanded_root = Path.expand(root)
     expanded_dest = Path.expand(dest)
 
-    # Separator appended ONLY when the root does not already end with one: a bare `/` root
-    # would otherwise become the `//` prefix that no expanded path starts with — the guard
-    # would refuse its own legal case (`under_root?("/x", "/")` false, `confined_join("/", _)`
-    # unusable) while promising "== root or under root".
     prefix =
       if String.ends_with?(expanded_root, "/"), do: expanded_root, else: expanded_root <> "/"
 
@@ -151,13 +85,7 @@ defmodule Fleet.Slug do
   end
 
   @doc """
-  Casts `name` into a slug UNDER `root` and VERIFIES the confinement. This is
-  the complete gesture expected at an FS leaf whose component comes from an
-  input: `{:ok, abs}` (valid slug AND path confined under the root), otherwise
-  `{:error, {:invalid_slug, name}}` (malformed name) or
-  `{:error, {:path_escape, abs}}` (confinement fails — belt-and-suspenders
-  guard: with a slug the `..` is already impossible, but if the root itself
-  is suspect we refuse rather than write out-of-zone).
+  Validates `name`, joins it below `root`, and verifies lexical confinement.
 
   ## Examples
 

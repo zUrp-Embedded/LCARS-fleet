@@ -1,30 +1,11 @@
 defmodule Fleet.Credentials.Gate do
   @moduledoc """
-  Login-validity authority: is the human logged in to Claude Code?
-
-  Reads the human's native `<claude_dir>/.credentials.json` (`claudeAiOauth` block) — THE single
-  Elixir-side reader of that block (BL-6-09: one authority, never re-fragmented). Two entries over
-  one read:
-
-    * `status/1` — the structured, dashboard-safe login status (queryable OUTSIDE the spawn:
-      probe, deck, sonde). Carries categorized facts only, never token material.
-    * `validate/1` — the spawn-boundary gate (`Fleet.Spawner.Pod` via `LaunchEnv.build`), derived
-      from `status/1`. The result is tagged `{:credentials_invalid, _}` so the call-site
-      distinguishes a login problem from other failures.
-
-  NUKED 2026-07-20 (user decision): the former scope-coverage + paid-plan gates
-  (`ScopeValidator`/`PlanValidator`) DUPLICATED the claude binary's own enforcement (401 on
-  insufficient scope/plan) for a marginal early-error. In practice a valid `claude /login` always
-  carries the standard scope bundle — the scope check verified a condition that never occurs, and
-  the plan check was literally "did you pay", already enforced by the binary. Only the honest
-  "is there a login?" survives.
-
-  Pure transformer: file read + decode, no state, no process. The claudeDir is resolved by the
-  caller (per-human) and passed as an argument.
-
-  **Last revised**: 2026-08-02
+  Single reader of the human Claude login file. `status/1` returns categorized,
+  dashboard-safe facts without token material; `validate/1` derives the spawn gate.
+  Scope and plan validity remain vendor-enforced.
   """
 
+  # BL-6-09
   @doc """
   Structured login status of `<claude_dir>/.credentials.json` — dashboard-safe (categorized
   facts + path, NEVER the decoded JSON: it carries accessToken/refreshToken).

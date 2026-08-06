@@ -1,67 +1,32 @@
 defmodule Fleet.Spawner.Pod.Paths do
   @moduledoc """
-  Resolution of the pod substrate's PATHS — a PURE-computation island extracted from `Fleet.Spawner.Pod`.
-
-  A single role: derive, from a `pod_id` (+ the cap-profile scope + `opts`/config overrides), a pod's
-  two disk footprints and their scannable root:
+  Resolves a pod's two disk footprints and their scannable roots:
 
   - the **pod_dir** (`<pod_dir_root>/pod_<pod_id>` — git clone + `.lcars`/`.claude`/`issues`),
   - the recovery **state.json** (`<state_fs_root>/<scope>/<pod_id>/state.json`) and its root.
 
-  Every value descends from the HOME of the human who launches the fleet (`runtime_home/0` =
-  `System.user_home!()`, fleet-under-the-human) except an explicit override (`opts[:pod_dir_root]` /
-  `opts[:state_fs_root]` or the `:fleet_spawner` config). No state, no Port, no timer, no FS write:
-  deterministic resolution only. The module does NOT read the Pod's `state` nor call back into a Pod
-  private — the Pod passes it `pod_id`/`cap_profile`/`opts` as arguments. Depends on
-  `Fleet.CapProfile.lifetime_scope/2` (single source of the scope) and the `:fleet_spawner` config,
-  already deps of the app (no cycle).
-
-  ## Contract (called by `Pod`)
-
-  - `pod_dir/2` (PUBLIC, also called by `PodWarden`) — a pod_dir reconstructible from the pod_id ALONE,
-    which makes scan-based GC possible (the warden derives the pod_dir to erase from the tombstone, without the cap_profile).
-  - `state_fs_root/0` (PUBLIC, also swept by `PodWarden`) — scannable root of the `state.json` files.
-  - `pod_dir_for/2`, `state_fs_path_for/3`, `runtime_home/0` — resolutions called by `Pod`
-    (`initial_state`, `clear_terminal_snapshot`) and `Pod.LaunchEnv` (`claude_dir` → `runtime_home/0`);
-    public because they are crossed from those modules.
-
-  **Last revised**: 2026-07-21
+  Explicit options override application config, which overrides the runtime human's
+  home. `pod_dir` depends only on `pod_id`, allowing the warden to reconstruct it
+  from a state tombstone.
   """
 
   require Logger
 
-  # A pod's deliverable workspace = `<pod_dir>/workspace` (under `$POD_DIR`, bwrap-bound RW).
-  # The literal lives in the FOUNDATION (`Fleet.Layout.pod_workspace_path/1`), not here: its other
-  # user is `ProjectBootstrap.Phase`, which cannot depend on Spawner (Spawner already deps
-  # ProjectBootstrap — the reverse edge closes a cycle). Both depend DOWN onto Layout instead, so the
-  # producer and the recomputers read one source rather than two literals kept in sync by hand.
-
   @doc """
-  Deliverable workspace from a known `pod_dir`: `<pod_dir>/workspace`. Spawner-side name for
-  `Fleet.Layout.pod_workspace_path/1`, which holds the convention.
-  Called by the facade (`Fleet.Spawner.pod_workspace_path/1`),
-  `Pod.LaunchSpec` (cwd bind) and `Pod.CompletedPayload` (payload's `workspace` key).
+  Returns the deliverable workspace under a known pod directory.
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
     do: Fleet.Layout.pod_workspace_path(pod_dir)
 
   @doc """
-  A pod's pod_dir: `<pod_dir_root>/pod_<pod_id>` (full git clone + `.lcars`/`.claude`/`issues`).
-  The cap_profile does NOT enter the computation — the pod_dir depends only on the pod_id and the base —
-  so it is reconstructible from the pod_id ALONE. This is what makes scan-based GC possible: the `PodWarden`
-  finds a tombstone (state.json) by its pod_id and derives from it the pod_dir to erase, without ever
-  having the cap_profile out of context. Config `:fleet_spawner, :pod_dir_root`, default `~/pods`.
+  Returns `<pod_dir_root>/pod_<pod_id>`, reconstructible without a cap profile.
   """
   @spec pod_dir(String.t(), keyword()) :: String.t()
   def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: pod_dir_for(pod_id, opts)
 
   @doc """
-  pod_dir with an explicit override: `opts[:pod_dir_root]` wins over the
-  `:fleet_spawner, :pod_dir_root` config, otherwise default `~/pods` (the pod lives UNDER THE HUMAN'S
-  HOME, `0700`, OS-isolated for free — the home already ENCODES the human). `pod_<id>` = stable name
-  (pod_id = recovery key, stable for `--resume`). Called by `Pod` (`initial_state`) and
-  `StateFs.clear_terminal_snapshot/3`.
+  Returns the pod directory, honoring the per-spawn root override.
   """
   @spec pod_dir_for(String.t(), keyword()) :: String.t()
   def pod_dir_for(pod_id, opts) do
@@ -69,10 +34,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   end
 
   @doc """
-  Base under which EVERY pod_dir lives (`opts[:pod_dir_root]` > `:fleet_spawner, :pod_dir_root` config >
-  `~/pods`). Exposed as the SINGLE root authority so `StateFs.rm_terminal_artifacts` can verify a
-  pod_dir is strictly UNDER it before an `rm_rf` (path-escape guard) — resolved the SAME way the pod_dir
-  was built, so the check honours the same opts/config override.
+  Returns the pod root using option, application config, then `~/pods` precedence.
   """
   @spec pod_dir_root(keyword()) :: String.t()
   def pod_dir_root(opts \\ []) do
@@ -82,10 +44,9 @@ defmodule Fleet.Spawner.Pod.Paths do
   end
 
   @doc """
-  Path of a pod's recovery `state.json`: `<state_fs_root>/<scope>/<pod_id>/state.json`,
-  scope derived from the cap-profile's `lifetime_scope` (`pipe` → `pipes`, `run` → `runs`, otherwise
-  `pods`). `opts[:state_fs_root]` (per-spawn override, tests) wins over the global root.
-  Called by `Pod` (`initial_state`) and `StateFs.clear_terminal_snapshot/3`.
+  Returns `<state_fs_root>/<scope>/<pod_id>/state.json`.
+
+  `pipe` and `run` use dedicated buckets; `one-shot` and `forever` use `pods`.
   """
   @spec state_fs_path_for(String.t(), Fleet.CapProfile.t(), keyword()) :: String.t()
   def state_fs_path_for(pod_id, cap_profile, opts) do
@@ -94,45 +55,26 @@ defmodule Fleet.Spawner.Pod.Paths do
   end
 
   @doc """
-  State root HONOURING an `opts[:state_fs_root]` override (per-spawn/tests), else the global
-  `state_fs_root/0`. The root authority used by `state_fs_path_for/3` AND by
-  `StateFs.rm_terminal_artifacts` for its path-escape guard (same resolution as the built path).
+  Returns the state root, honoring the per-spawn override.
   """
   @spec state_fs_root_for(keyword()) :: String.t()
   def state_fs_root_for(opts), do: Keyword.get(opts, :state_fs_root, state_fs_root())
 
   @doc """
-  FS root of the `state.json` snapshots (each pod: `<root>/<scope>/<pod_id>/state.json`, scope ∈
-  {pipes,runs,pods}). This is the SCANNABLE base for enumerating the tombstones — the state-side
-  counterpart of `PodTmux.sock_base/0` on the sockets side. Config `:fleet_spawner, :state_fs_root`,
-  default `~/.lcars/state`. Public because the `PodWarden` sweeps it to GC orphan pod_dirs. An
-  `opts[:state_fs_root]` (per-spawn override) wins at the `state_fs_path_for` call-site, but the warden
-  sweeps the GLOBAL root (config) — spawns with a custom root (tests) are out of its reach by construction.
+  Returns the globally scannable state root, configured or `~/.lcars/state`.
   """
   @spec state_fs_root() :: String.t()
   def state_fs_root,
     do: Application.get_env(:fleet_spawner, :state_fs_root, default_state_fs_root())
 
-  # Fleet under the human: the pods' FS state follows the human's HOME (= the runtime user),
-  # like `~/pods` (pod_dir) and `~/.lcars/workspaces`, NOT `/var/lib/lcars`.
-  # Override via env `LCARS_STATE_FS_ROOT` (→ `config :fleet_spawner, :state_fs_root`).
-  # Unresolvable HOME = broken runtime → fail-loud via `runtime_home()` (the single local source,
-  # `System.user_home!()`), never a fabricated path: the .lcars state must not scatter silently.
   defp default_state_fs_root,
     do: Path.join(Fleet.Layout.state_dir(), "state")
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
-  # `one-shot` and `forever` share the FS scope `pods/` (both = pods with their own lifetime).
-  # Enum values enumerated EXPLICITLY (schema v2.5 enum = one-shot|pipe|run|forever) so the
-  # common `one-shot` never falls into the anomaly branch below.
   defp scope_for("one-shot"), do: "pods"
   defp scope_for("forever"), do: "pods"
 
-  # BND-106: a value outside the enum. DR-019 refuses an ABSENT lifetime_scope at spawn; a
-  # present-but-non-enum value is the residual (a struct that bypassed the schema). We still bucket
-  # to `pods/` (safe default), but LOUD — never a silent "looks-correct" default around a malformed
-  # profile (a mis-bucketed state.json is a recovery/GC footgun the warden would then mis-scan).
   defp scope_for(other) do
     Logger.warning(
       "Pod.Paths: non-enum lifetime_scope #{inspect(other)} → pods/ bucket " <>
@@ -143,13 +85,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   end
 
   @doc """
-  Runtime human's HOME. The human running the fleet = the user of the runtime process itself:
-  the ONLY users of the instance are the fleet users → the current user IS the human. No config,
-  no literal default (a default would mask a wiring hole instead of making it fail). The pod, a child
-  of the runtime (Port/tmux), INHERITS that UID → runs in the human's home, binds their creds. If
-  someone else installs LCARS tomorrow, it is THEIR user that launches, THEIR home — nothing to
-  hardcode. Fail-loud if HOME/user is unresolvable (`System.user_home!()` raises — impossible in
-  practice, but never silently caught).
+  Returns the runtime user's home, raising when it cannot be resolved.
   """
   @spec runtime_home() :: String.t()
   def runtime_home, do: System.user_home!()

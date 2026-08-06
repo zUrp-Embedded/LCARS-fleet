@@ -1,47 +1,7 @@
 defmodule Fleet.Workflow.GraphValidator do
   @moduledoc """
-  **Pure** GRAPH linter for a workflow_map. Checks the inter-step invariants the JSON
-  Schema CANNOT express: the draft-07 schema validates each step in ISOLATION (its shape,
-  its fields), never the relation between steps. A misspelled `needs` therefore passes the
-  schema but lays a phantom edge — a step waits on a predecessor that does not exist, and
-  the workflow freezes SILENTLY.
-
-  `validate/1` takes the `steps` map (the Loader's normalized shape,
-  `%{name => %{"needs" => [...], "role" => ..., ...}}`) and returns `:ok` or
-  `{:error, {kind, detail}}`. No I/O: the decision is pure DATA, testable without a file.
-  The Loader calls this after normalization and raises on error (same fail-loud contract
-  as the schema).
-
-  ## The graph
-
-  A step B with `needs: [A]` lays the edge A → B (A precedes B, B is a successor of A). A
-  workflow_map with no `needs` (or `needs: []`) is a root.
-
-  ## Invariants (one `kind` per invariant)
-
-    * `:phantom_edge` — every name in a `needs` refers to a DECLARED step. This is the
-      most insidious hole: a typo (`needs: [implment]`) is silent at the schema.
-    * `:no_root` / `:multiple_roots` — exactly 1 root step (`needs == []`);
-      0 = no entry point, ≥2 = parallel entry (out of scope for the sequential runtime).
-    * `:unreachable` — every step is reachable from the root (an orphan would never run).
-    * `:cycle` — the graph is a DAG (Kahn topological sort). A cycle freezes the workflow.
-      For this sequential runtime (single root + no fan-out), "cycle" and "no reachable
-      terminal" are the SAME condition: a chain that loops has no step without a successor.
-      The "≥1 reachable terminal" invariant is therefore guaranteed by the conjunction
-      single-root + acyclicity — a workflow_map with no terminal is rejected here as
-      `:cycle` (no dedicated branch that could never fire).
-    * `:fan_out` — no step has ≥2 successors. The runtime is SEQUENTIAL:
-      `Fleet.Pilot.WorkflowMapNav.next_step/2` already rejects a parallel branch at
-      navigation (`:dag_not_supported`); we fail here at LOAD, earlier and consistent.
-
-  ## Order of the checks
-
-  Each check assumes the previous invariants hold, which yields the most precise
-  diagnostic: a disconnected blob (technically also a cycle) is diagnosed `:unreachable`
-  ("these steps are not wired to the entry", an actionable message) because reachability is
-  checked BEFORE acyclicity; a loop ON the chain stays diagnosed `:cycle`.
-
-  **Last revised**: 2026-07-18
+  Pure workflow graph linter after schema validation. It rejects phantom edges,
+  non-single roots, unreachable steps, cycles, and fan-out for the sequential runtime.
   """
 
   @type steps :: %{optional(String.t()) => map()}
@@ -52,9 +12,7 @@ defmodule Fleet.Workflow.GraphValidator do
 
   @spec validate(steps()) :: :ok | {:error, error()}
   def validate(steps) when is_map(steps) do
-    # Successors built once (dep → [steps that `needs` it]). Computed before the checks:
-    # its only consumers (reachability / acyclicity / fan-out) run AFTER the phantom-edge
-    # check, so on a graph already proven free of phantom edges.
+    # Shared adjacency for reachability, acyclicity, and fan-out checks.
     successors = successors(steps)
 
     with :ok <- check_no_phantom_edges(steps),
@@ -65,7 +23,7 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  @doc "Human-readable message per invariant — composed by the Loader in its `raise`."
+  @doc "Human-readable invariant diagnostics for Loader errors."
   @spec describe(error()) :: String.t()
   def describe({:phantom_edge, %{step: step, needs: dep}}),
     do:
@@ -92,8 +50,6 @@ defmodule Fleet.Workflow.GraphValidator do
     do:
       "step #{inspect(step)} has #{length(succs)} successors #{inspect(succs)} — the runtime is sequential " <>
         "(a single successor per step; cf. Fleet.Pilot.WorkflowMapNav, which rejects fan-out at navigation)"
-
-  # ── checks (each pure: data → :ok | {:error, {kind, detail}}) ──
 
   defp check_no_phantom_edges(steps) do
     declared = steps |> Map.keys() |> MapSet.new()
@@ -123,9 +79,7 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  # Acyclicity via Kahn topological sort: iteratively remove the steps whose predecessors
-  # (`needs`) have all already come out. If all come out → DAG; those that stay blocked
-  # (in-degree never dropping back to 0) form the cycle(s).
+  # Kahn sort leaves cyclic nodes unvisited.
   defp check_acyclic(steps, successors) do
     in_degree = Map.new(steps, fn {name, spec} -> {name, length(needs(spec))} end)
     ready = for {name, 0} <- in_degree, do: name
@@ -144,8 +98,6 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  # ── graph primitives ──
-
   defp successors(steps) do
     Enum.reduce(steps, %{}, fn {name, spec}, acc ->
       Enum.reduce(needs(spec), acc, fn dep, acc ->
@@ -156,8 +108,7 @@ defmodule Fleet.Workflow.GraphValidator do
 
   defp needs(spec), do: Map.get(spec, "needs", [])
 
-  # Iterative DFS (stack = list) with a seen set: robust even if the region contains a
-  # cycle (reachability is deliberately checked before acyclicity).
+  # Iterative DFS remains safe before cycle validation.
   defp reach([], _successors, seen), do: seen
 
   defp reach([node | rest], successors, seen) do

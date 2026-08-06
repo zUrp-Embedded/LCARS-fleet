@@ -22,19 +22,12 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       paginate: 3
     ]
 
-  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   @doc """
-  Creates a repo on the forge. `opts[:org]` → `POST /orgs/<org>/repos` (org repo); otherwise
-  `POST /user/repos` (the token's account). `auto_init: true` by default (initial commit + README
-  → clonable right away). Idempotent: repo already present (HTTP 409) → `{:ok, :already_exists}` —
-  provisioning converges on a re-run instead of erroring; any other failure IS returned as an error.
+  Creates an organization or token-owned repository, initialized on `main` by default.
 
-  ## Returns
-    * `{:ok, full_name}` — repo created (e.g. `"fleet/poc-helloworld"`)
-    * `{:ok, :already_exists}` — already present (409)
-    * `{:error, term()}` — HTTP/transport/config
+  Returns `{:ok, :already_exists}` on conflict so provisioning is replayable.
   """
   @spec create_repo(String.t(), Keyword.t()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
@@ -63,16 +56,9 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Generates a NEW repo from a forge TEMPLATE repo — Gitea `POST /repos/{template}/generate`
+  Generates a fresh repository from a native forge template, copying content, labels, and topics
   (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with
-  `${VAR}` expansion (files listed in the template's `.gitea/template`; REPO_NAME,
-  REPO_DESCRIPTION, dates…), labels copied WITH their descriptions, own FRESH history
-  (not a fork — no link back). `webhooks`/`protected_branch` deliberately NOT copied:
-  `protect_branch` stays the single branch-protection writer (per-card sizing at onboard).
-
-  `{:ok, full_name}` | `{:ok, :already_exists}` (409) | `{:error, :template_missing}`
-  (404 — the template repo is not on the forge: run `mix lcars.project_template.sync`) |
-  `{:error, term}`.
+  but not branch protection. Returns `:template_missing` on 404 and `:already_exists` on 409.
   """
   @spec generate_repo(String.t(), String.t(), keyword()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
@@ -99,8 +85,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Marks (or unmarks) a repo as a TEMPLATE — Gitea `PATCH /repos/{repo}` `{template: bool}`.
-  Used by `mix lcars.project_template.sync` (the priv → forge projection); idempotent.
+  Marks or unmarks a repository as a native forge template.
   """
   @spec set_template(String.t(), boolean(), keyword()) :: :ok | {:error, term()}
   def set_template(repo, template?, opts \\ []) when is_binary(repo) and is_boolean(template?) do
@@ -111,19 +96,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`, **PAGINATED**. **THE poller's
-  discovery (WS3)**: org membership IS the admission (the org = the trust group, managed UPSTREAM by the
-  human admin) — no mutable topic nor server-side seal. The per-human scoping stays `assigned_by`
-  (issue-level, anti-theft guard: the fleet processes ONLY its issues, even if it sees the group's other
-  repos). Returns the `full_name`s (`"owner/name"`).
+  Returns every repository full name in an organization, using fail-loud pagination.
   """
   @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []) when is_binary(org) do
-    # PAGINATED (DR-016/BND-057): THE poller's discovery is a source-of-truth collection consumed as "every
-    # repo of the fleet org". A single `?limit=50` page silently HID repos 51+ (beyond 50 repos = invisible
-    # projects: no dispatch, no reconciliation, no re-kick, no event nor error — the forge+poll backstop
-    # broken in a zone the poll never re-reads). We loop like every other SSOT read (`paginate/3`: fail-loud
-    # on an unexpected page shape via `:unexpected_page_shape`) — no "small-team org < 50" assumption.
+    # DR-016
     with {:ok, config} <- resolve_config(opts),
          {:ok, body} <- paginate(config, "/orgs/#{encode_seg(org)}/repos", "") do
       {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
@@ -131,10 +108,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Default branch of `repo` — Gitea `GET /repos/{repo}` → `.default_branch`. Serves WS4 (import):
-  the runtime's protection/clone assumes `main` EVERYWHERE (same convention as `create_repo`, `protect_main`);
-  importing a repo whose default is NOT `main` is an explicit refusal (`Fleet.Pilot.ProjectOnboard.import/2`),
-  not a generalization of the branch name — out-of-scope as long as no real repo needs it.
+  Returns the repository's default branch. Import callers currently require it to be `main`.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def default_branch(repo, opts \\ []) when is_binary(repo) do
@@ -149,8 +123,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Tip commit sha of `branch` on `repo` (Gitea `GET /repos/{repo}/branches/{branch}` →
-  `commit.id`). Read by the seal's provenance wall (the deliverable head at merge time).
+  Returns a branch tip SHA for the seal's provenance check.
   """
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def branch_head(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -165,10 +138,8 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Does the branch `branch` exist on `repo`? Gitea `GET /repos/{repo}/branches/{branch}` (200 = yes,
-  404 = no). Serves WS4 (import): idempotence of `work/ops` — a re-imported (or already onboarded) repo
-  must not have its orphan branch overwritten. `false` on any error (fail-safe: unconfirmed absence
-  ⇒ we attempt creation, Gitea will refuse cleanly if it already exists).
+  Reports whether a branch can be read. Any error returns `false`; subsequent creation remains the
+  forge's authority and cannot overwrite an existing branch.
   """
   @spec branch_exists?(String.t(), String.t(), Keyword.t()) :: boolean()
   def branch_exists?(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -182,10 +153,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Does the forge account `username` exist? (`GET /users/<u>`). Distinguishes PROVEN absence
-  (`{:ok, false}`, http 404) from a forge outage (`{:error, _}`) — F2:
-  the onboarding preflight says "create the account" ONLY on proven absence, never
-  on an outage (otherwise it would send the operator to create an account that exists).
+  Distinguishes a proven missing account (`{:ok, false}`) from a forge failure.
   """
   @spec user_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
   def user_exists?(username, opts \\ []) when is_binary(username) do
@@ -199,19 +167,14 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Is `username` a member of the org's `team`? (2 GETs: the org's team list
-  → membership). Same tri-state contract as `user_exists?/2`: `{:ok, false}` = PROVEN
-  absence (team found, member 404 — or nonexistent team: a human cannot be a
-  member of an absent team, the SAME admin gesture creates both), `{:error, _}`
-  = forge outage. F2 — the `humans` team is the admission gate of the
-  humans (tofu-teams model, cf. ProjectOnboard).
+  Checks team membership with the same proven-absence/error distinction as `user_exists?/2`.
+
+  A missing team is a proven negative membership result. Team discovery is fully paginated.
   """
   @spec team_member?(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
   def team_member?(org, team, username, opts \\ [])
       when is_binary(org) and is_binary(team) and is_binary(username) do
-    # PAGINATED: the org's teams — a single page HID team 51+, so the membership check for a team past
-    # the first page (onboarding's "humans" gate, project_onboard) would falsely read "not a member".
     with {:ok, config} <- resolve_config(opts),
          {:ok, teams} <- paginated_teams(config, org) do
       case Enum.find(teams, &(is_map(&1) and &1["name"] == team)) do
@@ -228,8 +191,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     end
   end
 
-  # `paginate` fail-louds a non-list page as `:unexpected_page_shape`; map it to the team-specific
-  # `:unexpected_teams_shape` (never `{:ok, []}` — an empty team view here would wrongly deny membership).
   defp paginated_teams(config, org) do
     case paginate(config, "/orgs/#{encode_seg(org)}/teams", "") do
       {:ok, teams} ->
@@ -244,12 +205,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  The repo's **numeric forge id** (`GET /repos/<repo>` → `.id`). It's the project's identity for the
-  deterministic `session_id` (`Fleet.Spawner.SessionId`, `<REPO4>` segment): the FORGE is the
-  source of truth, we do NOT derive an id from nothing. Gitea id = stable sequential integer (e.g.
-  `fleet/lcars` = 145). `{:error, _}` if the repo doesn't exist / forge down → propagated to spawn identity:
-  the caller puts NO `:repo_id` (nil), and a project-bound role spawned without a repo is an ANOMALY that
-  fails loud in the mint (`Fleet.Spawner.Pod.SessionMint`) — never a random-UUID fallback.
+  Returns the repository's numeric forge identity; it is never synthesized on failure.
   """
   @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
   def repo_id(repo, opts \\ []) when is_binary(repo) do
@@ -264,22 +220,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Places a **branch-protection** rule on `repo` — Gitea `POST /repos/{repo}/branch_protections`.
-  `rule` = map of Gitea options (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
-  `block_on_rejected_reviews`, `enable_push`, …). It's the **forge-enforced gate**: on the sandbox
-  repo, the forge refuses the merge as long as the guards (N approvals, no REQUEST_CHANGES) are
-  not green → the arbiter is the forge, not the runtime. Requires repo-admin.
-  Idempotent: an already-placed rule → `{:ok, :unchanged}` or `{:ok, :updated}`. Gitea signals it
-  with the precise message `"Branch protection already exist"` — carried across **403 / 409 / 422**
-  depending on the version. We match on that MESSAGE, NEVER on the code alone: a 422 for an INVALID
-  rule (bad payload) or a 403 for a real permission refusal must NOT be announced as a protection
-  that never took — those return a precise error and `lock_main` fails loud.
+  Converges a forge-enforced branch-protection rule and reports `:created`, `:updated`, or
+  `:unchanged`.
 
-  The outcome is REPORTED, never collapsed to a bare `:ok`: `:created` / `:updated` moved the forge,
-  `:unchanged` did not. A caller that runs on a timer (the periodic pass) can then speak only when
-  something actually moved — a rule placed or resized is a lifecycle event, whereas "still
-  conformant" is a nominal tick, and a projection that cannot tell them apart must either stay
-  silent through a real change or drown it in per-tick noise.
+  Existing-rule detection requires the forge's precise message across status variants. Readback and
+  patch compare only caller-projected fields; permission and invalid-rule errors remain failures.
   """
   @type protection_outcome :: :created | :updated | :unchanged
 
@@ -291,13 +236,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
         {:ok, _} ->
           {:ok, :created}
 
-        # "already exist" (403/409/422 across versions, matched on the MESSAGE never the code
-        # alone) used to read as a bare :ok with NO readback: an imported repo's stale rule —
-        # or a card whose jury changed since onboarding — silently kept a main protection
-        # weaker or stronger than the CURRENT projection. Desired-state instead: read the
-        # existing rule back, compare ONLY the fields we project (a hand-enriched rule keeps
-        # its extra fields), PATCH on divergence, fail loud when the readback/patch fails —
-        # never claim a protection whose actual shape was not seen.
         {:error, {:http, code, %{"message" => msg}}}
         when code in [403, 409, 422] and is_binary(msg) ->
           if String.contains?(msg, "already exist"),
@@ -316,7 +254,6 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
     projected = projected_protection_fields(rule)
 
     if projected == %{} do
-      # Nothing projected beyond the rule's existence — nothing to reconcile.
       {:ok, :unchanged}
     else
       case http_get(config, path) do
@@ -358,10 +295,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Deletes the repo `repo` (`"owner/name"`) on the forge — `DELETE /repos/{owner}/{repo}` (the
-  branch-protection falls with it). Idempotent: a 404 (already gone) → `:ok`. Used by
-  `Fleet.Pilot.ProjectOnboard.delete_project/2` (the general project teardown) — this is the raw
-  primitive; the caller owns the `force`/confirmation gate.
+  Deletes a repository. A missing repository succeeds; callers own confirmation policy.
   """
   @spec delete_repo(String.t(), keyword()) :: :ok | {:error, term()}
   def delete_repo(repo, opts \\ []) when is_binary(repo) do

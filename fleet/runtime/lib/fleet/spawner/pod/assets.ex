@@ -65,13 +65,10 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Role-aware SP draft: a role's draft is `agent-<role>-base.md`, resolved by `metadata.name`. Pod drafts are
-  composed by blocks (`Fleet.SPBuilder.Blocks` + `mix lcars.sp.gen`).
+  Reads `agent-<role>-base.md` for the profile's validated role.
 
-  **NO-FALLBACK** (cf. memory no-sp-no-pod-no-fleet): a role without its dedicated draft → `{:error,
-  {:agent_draft_missing, …}}` → hard spawn death (`:projecting` state). No more silent degradation to a
-  generic draft — a role without an SP is a rejected half-role. `role` is interpolated into a path →
-  validated via the slug smart-constructor (a malformed `role` → `{:error, {:agent_draft_invalid_role, role}}`).
+  Missing image or disk content and invalid role slugs return tagged errors; there
+  is no generic fallback.
   """
   @spec read_agent_draft(Fleet.CapProfile.t()) ::
           {:ok, String.t()}
@@ -81,18 +78,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   def read_agent_draft(%Fleet.CapProfile{} = cap) do
     role = Fleet.CapProfile.name(cap)
 
-    # NO-FALLBACK (cf. memory no-sp-no-pod-no-fleet): EACH role MUST have its dedicated SP
-    # `agent-<role>-base.md`. Missing → `{:error, {:agent_draft_missing, …}}` → `:projecting` state failure
-    # → HARD spawn death. No SP → no pod → no fleet. No silent degradation to a generic draft (a role without
-    # an SP = a dirty half-role → the system refuses). A vanilla agent = `claude` launched by hand outside the
-    # fleet, never through the forge. `role` is interpolated into a path → a malformed slug is a broken
-    # cap-profile (fail-loud), not a fallback.
     if Fleet.Slug.valid?(role) do
-      # IMAGE-FIRST (proven-good image at boot): a published SP image carries every role draft —
-      # the epoch is closed at the deployment scale (a draft edited mid-life changes nothing until
-      # a restart republishes). Closed world: image published + draft absent = the same hard spawn
-      # death as a missing file (a role without an SP is a half-role, the system refuses). No
-      # image → the live-disk read below, unchanged.
       case Fleet.SPBuilder.image_draft(role) do
         {:ok, content} ->
           {:ok, content}
@@ -103,10 +89,6 @@ defmodule Fleet.Spawner.Pod.Assets do
             :enoent}}
 
         :unpublished ->
-          # THE SAME root the image freezes from (`Fleet.SPBuilder.sp_drafts_root/0`, single
-          # authority). An `app_dir` literal here would read the bundled tree while the image was
-          # frozen from a repointed one: the published and unpublished paths would serve two
-          # different drafts for one role.
           read_tagged(
             Path.join(Fleet.SPBuilder.sp_drafts_root(), "agent-#{role}-base.md"),
             :agent_draft_missing
@@ -118,25 +100,11 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  The pod's `protocole-user.md` — the contract its REPL answers to, selected by the cap-profile's
-  `interlocutor` (schema-REQUIRED, gated at the spawn choke point, so it is present here).
+  Selects `protocole-user.md` from the profile's `interlocutor`.
 
-    * `"fleet"` — the MACHINE contract alone (`protocole-user-worker.md`): `engage` opens a
-      work-item cycle, `SeeU` is a no-op, there is no handoff and nobody to answer.
-    * `"both"` — machine contract THEN the human conversation contract
-      (`protocole-user-human.md`), in that order. The two ADD instead of replacing because they
-      answer different questions: one is the rail the fleet drives this pod on, the other is how to
-      talk to the person also sitting at that terminal. Neither defines a keyword the other
-      defines, which is why concatenation is honest here and not a merge.
-    * `"human"` — the conversation contract alone: no work-item rail, no `engage`.
-
-  Before `interlocutor` existed this function took no argument and always returned the worker
-  contract, so an interactive architect was provisioned with a contract stating it has no handoff
-  and closes nothing — true of an engineer, false of it.
-
-  `:fleet_spawner, :protocole_user_path` still overrides the MACHINE half (a deployment may re-cut
-  the work-item contract). It does not reach the human half: replacing what an agent is told about
-  its operator is a deploy-time decision about that operator's own file, not a runtime config path.
+  `fleet` receives the machine protocol, `human` the conversation protocol, and
+  `both` receives machine then human. The configured protocol path overrides only
+  the machine half.
   """
   @spec read_protocole_user(Fleet.CapProfile.t()) ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
@@ -151,18 +119,11 @@ defmodule Fleet.Spawner.Pod.Assets do
           {:ok, machine <> "\n---\n\n" <> human}
         end
 
-      # "fleet", and the hand-forged struct the spawn gate refuses: the machine contract is the
-      # floor of every pod, so the safe read is also the correct one for the only value left.
       _ ->
         read_worker_protocol()
     end
   end
 
-  # Image FIRST — a protocole-user is prompt material: it defines the pod's trigger keywords, so a
-  # mid-life edit used to change what `engage` MEANS for the next pod while the image version
-  # claimed a closed epoch. The image froze both halves at boot through this same override
-  # resolution, so a deployment override still applies and a live edit no longer does.
-  # `:unpublished` (tests, tooling) reads disk.
   defp read_worker_protocol do
     case Fleet.SPBuilder.image_worker_protocol() do
       {:ok, content} -> {:ok, content}
@@ -176,8 +137,6 @@ defmodule Fleet.Spawner.Pod.Assets do
         {:ok, content}
 
       :unpublished ->
-        # SAME root the image freezes from, like the agent draft above: an `app_dir` literal here
-        # would read the bundled tree while the image was frozen from a repointed catalogue.
         Fleet.SPBuilder.sp_drafts_root()
         |> Path.join("protocole-user-human.md")
         |> read_tagged(:protocole_user_human_missing)
@@ -196,10 +155,6 @@ defmodule Fleet.Spawner.Pod.Assets do
     end
   end
 
-  # TAGGED read of a provisioned asset (SP draft, protocole-user): `{:ok, content}` or
-  # `{:error, {<tag>, path, reason}}` — the tag stays SPECIFIC to each asset (it identifies the failing
-  # step in the `transition_failed` of the `:projecting` state), only the read→tuple mechanics are
-  # shared.
   defp read_tagged(path, error_tag) do
     case File.read(path) do
       {:ok, content} -> {:ok, content}
@@ -208,8 +163,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  `path` if it exists on disk, otherwise `nil`. Optional-asset resolution (e.g. the
-  `CLAUDE.md.repo-source` passed to `SPBuilder.compose_claude_md` by the `:projecting` state).
+  Returns an optional asset path when it exists.
   """
   @spec maybe_path(Path.t()) :: Path.t() | nil
   def maybe_path(path) do
@@ -217,8 +171,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Filters the cap-profile's skills under `root` (delegated to `Fleet.SPBuilder.filter_skills/2`).
-  No `skills_root` configured (`nil`) → `{:ok, []}` (nothing to filter).
+  Filters the profile's skills under `root`; a nil root yields an empty selection.
   """
   @spec maybe_filter_skills(Fleet.CapProfile.t(), Path.t() | nil) ::
           {:ok, [Path.t()]} | {:error, term()}
@@ -229,12 +182,10 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Provisions the in-pod monitor (`watch.sh`) into the pod_dir (= bwrap HOME). The agent arms it via
-  the native `Monitor` tool (cf. the role's SP, `core/runtime-contract` block) → wake-by-flag
-  (`turn.flag` touched by the fleet), zero CONTENT send-keys. The asset lives in the bundled
-  `priv/spawner/` (resolved via `app_dir`, like the SP draft). The `File.chmod` return is discarded
-  (`_ =`): the exec bit carries nothing here — the agent runs `bash ~/watch.sh`, never `./watch.sh`;
-  the op whose error matters is the `safe_write`, which does propagate.
+  Copies the bundled `watch.sh` monitor into the pod directory.
+
+  Read and write failures propagate; chmod remains best-effort because the script is
+  invoked through `bash`.
   """
   @spec provision_monitor_watch(map()) :: :ok | {:error, term()}
   def provision_monitor_watch(state) do

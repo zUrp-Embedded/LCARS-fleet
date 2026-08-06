@@ -33,10 +33,6 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
           req_options: Keyword.t()
         }
 
-  # ============================================================
-  # Config resolution
-  # ============================================================
-
   @doc false
   def resolve_config(opts) do
     env = Application.get_env(:fleet_pilot, :forge, [])
@@ -73,9 +69,6 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
           path ->
             case File.read(path) do
               {:ok, content} ->
-                # An EMPTY token file (or whitespace-only) trims to "" → header
-                # `authorization: token ` sent as-is → LATE 401 on the forge side (opaque failure,
-                # diagnosed far from the source). We cut it HERE, at config time, explicit fail-loud.
                 case String.trim(content) do
                   "" -> {:error, {:config, {:token_file_empty, path}}}
                   token -> {:ok, token}
@@ -95,21 +88,11 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     end
   end
 
-  # ============================================================
-  # Forge identity — login of the system account (bearer of FORGE_TOKEN).
-  # ============================================================
-
   @doc false
-  # Login of the system account (the owner of FORGE_TOKEN). Config `:forge_bot_login` (deployment)
-  # OR derived once via `GET /user` (the token's authenticated user), cached. Unresolvable → `{:error}`:
-  # callers then refuse to trust unverifiable markers (fail-closed).
   def forge_bot_login(config, opts) do
-    # opts (test seam) > config (deployment) > derived /user (cached).
     case Keyword.get(opts, :forge_bot_login) ||
            Application.get_env(:fleet_pilot, :forge_bot_login) do
       login when is_binary(login) and login != "" -> {:ok, login}
-      # Explicit error seam: a deployment misconfig surfaced as `{:error, _}`, or a test injecting an
-      # unresolvable bot → propagated as-is (callers fail-closed on an unverifiable bot).
       {:error, _} = err -> err
       _ -> derive_bot_login(config)
     end
@@ -135,30 +118,10 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     end
   end
 
-  # ============================================================
-  # HTTP plumbing — (URL-segment safety lives in `Fleet.Pilot.ForgeClient.UrlSafe`,
-  # the single authority; the domain modules import it directly.)
-  # ============================================================
-
   @page_limit 50
-  # Total-page budget: @page_limit * @max_pages items before we refuse. A real fleet collection
-  # (open issues/PRs of one repo, comments of one issue) never approaches this; a forge bug that
-  # returns a full page forever (a broken cursor, a repeating page) would otherwise loop and grow
-  # memory holding the Poller/MCP. Exceeding it is fail-LOUD (a truncated view is never passed as
-  # complete), never a silent cap.
   @max_pages 200
 
   @doc false
-  # PAGINATED read of a source-of-truth collection (issues / pulls / comments). Gitea
-  # caps `limit` at 50/page — a single page misses items 51+ (issues/PR ignored, step_run
-  # markers under-counted). We loop `page=1,2,...` (`@page_limit` items/page) accumulating until the
-  # LAST page: a page returning < @page_limit items (or empty) is the last (Gitea invariant:
-  # a full page implies "maybe a continuation"). Behavior identical to the old ≤50 items:
-  # a collection ≤50 fits in page 1 (< 50 → stop), a single round-trip. `query` = query-string WITHOUT
-  # pagination (e.g. `"state=open&type=issues"` or `""`). Any page with an HTTP/transport error bubbles up
-  # (fail-loud: a source-of-truth caller must NEVER work on a silently truncated view). Accumulation is
-  # O(n) (prepend the page lists, concat once at the end — never `acc ++ page` per round, quadratic on a
-  # large collection), and the total pages are BUDGETED (@max_pages) against a runaway forge cursor.
   def paginate(config, path_base, query) do
     do_paginate(config, path_base, query, 1, [])
   end
@@ -173,25 +136,14 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
     case http_get(config, path) do
       {:ok, items} when is_list(items) ->
-        # Prepend the page (a list) — O(1); the flattening concat happens once, at the stop.
         acc = [items | acc]
 
-        # Full page → there MAY be a continuation; partial/empty page → last page, we stop.
         if length(items) < @page_limit do
           {:ok, acc |> Enum.reverse() |> Enum.concat()}
         else
           do_paginate(config, path_base, query, page + 1, acc)
         end
 
-      # 2xx response of UNEXPECTED shape (non-list) on a collection endpoint. Returning
-      # `{:ok, acc}` would pass an EMPTY view for an empty collection: page 1 non-list →
-      # `{:ok, []}` indistinguable from a truly empty collection → the poller would believe "nothing to
-      # dispatch" (route → :none, rework budget under-counted), a source-of-truth caller
-      # would work on a silently EMPTY view — the false-success that the HTTP fail-loud
-      # already prevents for network errors, the unexpected shape being its gap. Hence a
-      # TYPED ERROR: the collection is NOT derivable from this page →
-      # `{:error, {:unexpected_page_shape, …}}`. The callers (`list_scoped_issues`, `get_route`,
-      # `count_signed_step_runs`, `get_predecessor_result`, `comment_signed?`) already propagate `{:error, _}`.
       {:ok, non_list} ->
         {:error, {:unexpected_page_shape, path, page, non_list}}
 
@@ -221,12 +173,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   defp request(config, method, path, body) do
     url = config.base_url <> "/api/v1" <> path
 
-    # `retry: false` — HTTP retry is delegated to the caller:
-    # `Fleet.Pilot.Poller` has its own exponential backoff + jitter
-    # (5min cap, anti-thundering-herd) and serializes the processing of one
-    # event at a time. Req's built-in retry (1s/2s/4s on
-    # 5xx) would duplicate this logic + slow the error tests
-    # by 7s per case.
+    # Callers own retry policy; Req retries would stack another backoff.
     req_opts =
       [
         method: method,
@@ -237,13 +184,6 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
         ],
         receive_timeout: 10_000,
         retry: false,
-        # Pool dedicated with a short `conn_max_idle_time` (cf. `Fleet.Pilot.Application.forge_finch_spec`): prevents
-        # an idle connection from going stale and hanging the 1st call until receive_timeout. In
-        # the BASE list (before the merge) → a test injecting `plug:` via `req_options` takes precedence (the plug
-        # short-circuits the Finch adapter), test hermeticity stays intact.
-        # `[name: …]`, not the bare pool name: req 0.7 deprecated the bare form and warns on EVERY
-        # request. Caught only against the live forge — the suite injects `plug:`, which short-circuits
-        # the Finch adapter entirely, so no test can reach this line.
         finch: [name: Fleet.Pilot.ForgeFinch]
       ]
       |> Opts.maybe_put(:json, body)
@@ -253,10 +193,6 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     result = Req.request(req_opts)
     elapsed = System.monotonic_time(:millisecond) - started
 
-    # INSTRUMENTATION: a call to the LOCAL forge exceeding 1s is abnormal → we trace it (method,
-    # path, duration, issue). This is the instrument that shows WHY a slow sequence accumulates
-    # (e.g. create_issue = 3 forge calls: create_issue + add_label[GET+PUT]) — stale connection?
-    # hanging endpoint?
     if elapsed > 1_000 do
       Logger.warning(
         "Transport: #{method} #{path} SLOW #{elapsed}ms → #{forge_result_tag(result)}"
@@ -275,7 +211,6 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     end
   end
 
-  # Compact summary of a Req result for the instrumentation log (HTTP status or transport error).
   defp forge_result_tag({:ok, %Req.Response{status: status}}), do: "http #{status}"
   defp forge_result_tag({:error, exception}), do: "transport #{inspect(exception)}"
 end

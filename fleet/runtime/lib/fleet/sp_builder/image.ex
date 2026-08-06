@@ -1,48 +1,8 @@
 defmodule Fleet.SPBuilder.Image do
   @moduledoc """
-  The PROVEN-GOOD SP-artifact image — EVERY piece of sp_builder-side prompt material frozen at boot
-  into one versioned snapshot (the cap-profile half lives in `Fleet.CapProfile.Image`). The full
-  content, because a snapshot that under-describes itself is the drift it exists to prevent:
-
-    * `modop_sp` — modop SP fragments (`<modop>/sp.md`)
-    * `subagent` — subagent templates
-    * `drafts` — per-role SP drafts (`agent-<role>-base.md`)
-    * `worker_protocol` — the pod's machine `protocole-user.md`, resolved through the consumer's own
-      `:protocole_user_path` override so a deployment override cannot escape the epoch
-    * `human_protocol` — the conversation contract added for a pod whose cap-profile declares a
-      human interlocutor (`both`/`human`). Frozen for the same reason as its machine twin: it is
-      the material an interactive agent is judged on, and two pods of one deployment must not be
-      holding different versions of it under one image version
-    * `sp_role_bases` — role SP bases a profile's `spec.systemPrompt` names, keyed by path
-      RELATIVE to the SP root (the only OPTIONAL section: a dormant extension point, cf. `publish!/0`)
-    * `templates` — the EEx template SOURCES, rendered with `eval_string`
-
-  Same contract: `publish!/0` enumerates + reads every artifact at boot (an unreadable or empty one
-  raises — proven-good or do not boot) and publishes to `:persistent_term`; the composer
-  (`Fleet.SPBuilder`) and the spawner's Assets rail consume the image when published — a disk
-  mutation mid-life no longer changes the prompts pods receive, spawn by spawn.
-
-  Under a PUBLISHED image a missing entry is a CLOSED-WORLD error, never a silent re-read of the
-  live file: that fallback is what reopened the epoch exactly where a deployment had extended the
-  fleet. Only the absence of an image (tests' hermetic default, tooling) falls back to disk.
-
-  ## Why a frozen COPY and not just a validation pass (the reason was written nowhere)
-
-  Three of the four things this buys need no copy — do-not-boot on a truncated artifact, a closed
-  world, a version to correlate "what was this pod built from". The fourth does, and it is the one
-  that makes the copy load-bearing: **the deployed program is the trust boundary**. The material in
-  the release `priv/` was read and validated at boot; serving from that snapshot means bytes that
-  appear on disk AFTERWARDS never reach an agent. For a fleet whose whole claim is that its agents
-  receive exactly the instructions they were meant to receive, that is a defence, not a cache.
-
-  What does NOT justify it — and used to be the headline argument — is "immunity to live edits" as
-  a feature. Nothing legitimately edits a deployed program's prompt material mid-life; such an edit
-  is a mistake or tampering. Absorbing it in SILENCE was the defect, and it is closed by `drift/0`
-  (fingerprints recorded at publish, checked on the spawn path): the pods keep receiving the
-  proven-good content, and the divergence is said out loud instead of vanishing into the mechanism
-  that was supposed to guard against it.
-
-  **Last revised**: 2026-08-01
+  Versioned closed-world snapshot of all SP-builder prompt material. Boot reads and
+  fingerprints required artifacts into persistent storage; published images never
+  fall back to live disk. Drift is reported while pods keep receiving proven bytes.
   """
 
   require Logger

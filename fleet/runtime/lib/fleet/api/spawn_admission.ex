@@ -63,22 +63,11 @@ defmodule Fleet.API.SpawnAdmission do
           | {:host_native_forbidden, String.t()}
           | :brief_required
 
-  # Public fields admitted at the top-level of the `/api/admin/spawn` DTO. Everything else is REFUSED.
-  #   * `cap_profile_name` / `role` — the capability profile (one of the two, required; validated below)
-  #   * `issue_id` — forge/event correlation (free string)
-  #   * `brief` — the pod's work (string); placed back into the internal `opts` built by the API
-  #   * `pod_id` — imposed pod id (rare, admin); accepted ONLY if it is path-safe
-  #     (same rule as `Fleet.Spawner`: `[A-Za-z0-9._-]`, no `..`), otherwise refused
   @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id)
 
   @doc """
-  Full admission of a `POST /api/admin/spawn` body (the 5 steps of the
-  moduledoc, fixed order, first refusal returned). `{:ok, payload}` = the
-  CANONICAL payload ready to broadcast (the only thing that will reach the consumer/spawner);
-  `{:error, refusal}` = nothing leaves, `Fleet.API.ControlRouter` translates to HTTP.
-
-  A non-map body (JSON parser returning something else) is treated as an empty
-  DTO → `{:error, :missing_cap_profile}` (the required field is missing).
+  Validates a request body and returns its canonical broadcast payload or the
+  first refusal. Non-map bodies are treated as empty DTOs.
   """
   @spec admit(term()) :: {:ok, map()} | {:error, refusal()}
   def admit(raw) do
@@ -90,13 +79,8 @@ defmodule Fleet.API.SpawnAdmission do
   end
 
   @doc """
-  Broadcast of the ADMITTED payload: canonical schema `%Fleet.Event{source: :api}`
-  built + broadcast via `Bus.emit` (source validated against the enum,
-  DateTime timestamp guaranteed). The construction AND the broadcast are INSIDE the
-  rescue: the API's POLICY is to surface as HTTP — an out-of-registry event
-  (`UnregisteredError`) or a malformed one (`ArgumentError`/
-  `FunctionClauseError` from the constructor) becomes `{:error, _}` (→ 400 on the
-  ControlRouter side), never a handler crash.
+  Emits an admitted payload as `admin.spawn.request`, translating event
+  construction and registry errors into error tuples.
   """
   @spec broadcast(map()) :: :ok | {:error, term()}
   def broadcast(payload) do
@@ -106,9 +90,6 @@ defmodule Fleet.API.SpawnAdmission do
     e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}
   end
 
-  # Parses the incoming payload into an allowlisted public DTO. The spawner's internal `opts` is NEVER taken
-  # from the client: the API (re)builds it from the public fields only (`brief`, `pod_id`). Any unknown
-  # or forbidden top-level key (including a raw `opts`) → `{:error, {:forbidden_fields, ...}}`.
   defp parse_admin_spawn_dto(raw) when is_map(raw) do
     extraneous = Map.keys(raw) -- @admin_spawn_public_fields
 
@@ -117,11 +98,6 @@ defmodule Fleet.API.SpawnAdmission do
     else
       with {:ok, opts} <- build_admin_opts(raw),
            :ok <- validate_issue_id(raw) do
-        # The broadcast payload carries the PARSED form, not the raw DTO: a blank
-        # `cap_profile_name: ""` admitted here (presence/1 resolved the role instead) must NOT
-        # travel to the Bus — PublishConsumer's `name || role` fallback would short-circuit on
-        # the truthy "" → load("") → drop AFTER the 202 was ACKed (a lying 202, the exact class
-        # this module exists to close). Parse once at this boundary; the Bus receives truth.
         payload =
           raw
           |> Map.take(["cap_profile_name", "role", "issue_id"])
@@ -137,13 +113,6 @@ defmodule Fleet.API.SpawnAdmission do
 
   defp parse_admin_spawn_dto(_), do: {:ok, %{}}
 
-  # `issue_id` is an OPTIONAL forge/event correlation string (allowlisted but not required). Present → it
-  # MUST be a binary, mirroring the `pod_id` guard in `build_admin_opts`: a raw JSON number/bool/list would
-  # be `to_string`-d downstream (`PublishConsumer`) into the pod's issue correlation + spawn logs (e.g.
-  # `to_string([1, 2, 3]) = <<1, 2, 3>>` control bytes) — a no-auth ingress must not admit an untyped
-  # correlation key. Absent → OK (`PublishConsumer` defaults it to `""` — no envelope fallback, the
-  # canonical %Fleet.Event{} carries issue_id in the payload). NOT path-bound (the FS path derives
-  # from `pod_id`), so `is_binary` suffices — no `valid_pod_id?` needed.
   defp validate_issue_id(raw) do
     case Map.fetch(raw, "issue_id") do
       :error -> :ok
@@ -152,13 +121,8 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  # Builds the spawn `opts` from the public fields only. `pod_id` is kept only if path-safe.
   defp build_admin_opts(raw) do
-    # `self_enqueue_brief`: the admin spawn has NO dispatcher/orchestrator to enqueue its brief, so the
-    # POD self-enqueues it (`Pod.Brief.maybe_enqueue_brief`). This flag is what AUTHORIZES that: a Fleet
-    # dispatch/gatekeeper spawn ALSO carries `brief` in its opts
-    # (for the pod's data), but the DISPATCHER owns the enqueue there — the flag is ABSENT, so the pod
-    # never self-enqueues on those paths, killing the spawn→enqueue race structurally (not by slot-timing).
+    # Admin spawns self-enqueue; dispatched spawns leave enqueue ownership to the dispatcher.
     opts =
       if is_binary(raw["brief"]),
         do: %{"brief" => raw["brief"], "self_enqueue_brief" => true},
@@ -181,34 +145,15 @@ defmodule Fleet.API.SpawnAdmission do
   defp maybe_put_opts(payload, opts) when map_size(opts) == 0, do: payload
   defp maybe_put_opts(payload, opts), do: Map.put(payload, "opts", opts)
 
-  # Same contract as `Fleet.Spawner`: a pod_id is interpolated into FS paths (`~/pods/pod_<id>`),
-  # so only a path-safe charset without `..` traversal is admitted. The authority of this rule lives on
-  # the spawner side, which owns the paths and sockets derived from the pod_id; the API does not copy the regex.
   defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
 
-  # A usable name is a non-empty string; anything else (nil, "", non-string) counts as ABSENT
-  # so the `||` fallback chain can reach the next candidate instead of short-circuiting on "".
   defp presence(v) when is_binary(v) and v != "", do: v
   defp presence(_), do: nil
 
-  # Resolves the requested cap-profile (`cap_profile_name` or `role`, same keys as
-  # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing_cap_profile}`; load KO →
-  # `{:error, {:cap_profile, name, reason}}`; HOST-NATIVE (`containment != bwrap`) →
-  # `{:error, {:host_native_forbidden, name}}`; loaded + sandboxed → `{:ok, cap}` (admission
-  # continues; the loaded cap feeds the one-shot brief guard (`Fleet.Spawner.brief_guard`), without a re-load). Same loader +
-  # same containment read as the spawner (single source `Fleet.CapProfile`) → no
-  # verdict divergence between the API and the real launch.
   defp validate_cap_profile(payload) do
-    # `presence/1` normalizes "" (and any non-string) to nil BEFORE the fallback: in Elixir ""
-    # is TRUTHY, so `Map.get(p, "cap_profile_name") || Map.get(p, "role")` returned "" for
-    # `{cap_profile_name: "", role: "reviewer"}` — silently IGNORING the valid role and answering
-    # `:missing_cap_profile`. Fail-closed by luck, wrong verdict by construction.
     case Fleet.CapProfile.name_from_request(payload) do
       name when is_binary(name) ->
-        # validate the EFFECTIVE profile (`resolve` = base + default
-        # modops), the SAME one `PublishConsumer` spawns — not the bare `load`. A structural modop overlay
-        # that flipped `containment` to host-native would otherwise pass admission (base is bwrap) then
-        # launch out-of-sandbox: admission must gate on what actually runs.
+        # Admission gates the effective profile, including default modops.
         case Fleet.CapProfile.resolve(Fleet.CapProfile, name) do
           {:ok, cap} ->
             if Fleet.CapProfile.bwrap?(cap),
@@ -230,13 +175,6 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  # MIRROR of the one-shot brief guard (Fleet.Spawner.brief_guard) at ADMISSION: a one-shot cap-profile
-  # (reviewer/qualifier/scoper) launched WITHOUT `brief` would leave without work → the spawner
-  # refuses it (`brief_required`, ZERO pod). Without this guard, the "queued" 202 would be a
-  # lying 202 (exact twin of the lying cap-profile). `Fleet.Spawner.brief_required?/1` IS
-  # the shared authority (same nil-aware `get_in` read as `brief_guard`) → we did NOT copy
-  # the rule (no possible divergence). A LEGITIMATE one-shot carries its `brief` in the DTO
-  # (allowlist) → `has_brief?` true → it passes.
   defp check_brief_required(payload, cap) do
     brief = get_in(payload, ["opts", "brief"])
     has_brief? = is_binary(brief) and brief != ""

@@ -80,16 +80,11 @@ defmodule Fleet.Pilot.StepDispatcher do
       @in_flight_label in labels ->
         {:skip, :in_flight}
 
-      # F-C066 — a MERGED brick is TERMINAL: never re-engaged, EVEN if its explicit close failed (issue
-      # stuck OPEN). Without this durable guard, a merged-but-open issue (close failure inside
-      # GatekeeperSeal) re-appears in `list_open_issues` → `decide/1` → re-dispatch → DOUBLE-DELIVERY. The
-      # `stage/merged` label is the WS1 "done" marker (set before the close); a compromised-role fake is a
-      # nuke&redeploy threat (same trust model as the other stage/* reads), not this rail's concern.
+      # F-C066: durable merged marker prevents redispatch after close failure.
       @merged_label in labels ->
         {:skip, :merged}
 
-      # HUMAN lock (gatekeeper verdict escalate/halt/redirect, or anomaly). The issue awaits
-      # an action via the arch; the poller does NOT re-dispatch (else a judgment loop after the unlock).
+      # Architect lock suppresses judgement-loop redispatch.
       @awaits_arch_label in labels ->
         {:skip, :awaits_arch}
 
@@ -99,26 +94,14 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   @doc """
-  Actual dispatch of an issue: `decide/1` then, on `:engage`, resolves project+route and either ONBOARDS
-  (routeless → writes the default workflow_map → skip), or derives the role from the workflow_map (`workflow_map_role`) and
-  applies the canonical spawn order (lock → pod → enqueue → wake, `spawn_step`). Idempotent.
-
-  `opts`: `:repo` (mandatory), `:forge_opts` (passed to the ForgeClient), + seams
-  `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` / `:task_queue` (defaults = real modules).
+  Dispatches or onboards an issue from its engraved workflow route.
   """
   @spec dispatch_issue(map(), keyword()) ::
           {:ok, {:spawned, pod_id :: String.t(), role :: String.t()}}
           | {:skipped, atom()}
           | {:error, term()}
   def dispatch_issue(payload, opts) do
-    # CI-01 — drain gate. `dispatch_issue` is the SINGLE spawn point of every PRODUCER — a fresh issue
-    # AND the step 2..N boundary of an already-engaged run (Lease's ENGAGED path routes here too). During a
-    # graceful drain (`Fleet.Shutdown.Quiesce`, the foundation new-work flag) we open NO new producer: skip
-    # BEFORE any spawn/lock → the issue stays assigned+unlocked on the forge → re-dispatched at the next
-    # boot, ZERO orphan lock. Finalization is NOT here (merge = dispatch_review→promote_pr; terminal producer
-    # → :review) → in-flight bricks still finish. This gate PAUSES multi-step pipelines at their producer
-    # boundary (safe: state on the forge) — it does not "let the engaged run finish", it stops opening work.
-    # Seam `:quiescing?` (default = the real foundation flag) for test isolation (no global persistent_term).
+    # CI-01: drain refuses new producer work before lock or spawn.
     quiescing? = Keyword.get(opts, :quiescing?, &Fleet.Shutdown.Quiesce.quiescing?/0)
 
     if quiescing?.() do
@@ -135,7 +118,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
-    # Injectable workflow_map loader (seam, like the others) — makes `workflow_map_role` testable without disk.
+    # Loader seam keeps route resolution hermetic in tests.
     workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
 
     case decide(payload) do
@@ -148,20 +131,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         repo = Keyword.fetch!(opts, :repo)
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
-        # Read-only pre-lock phase, CHEAP GATES FIRST: route/role read from the
-        # poller's prefetch (local), then the LOCAL scope gate — the project resolver (the only
-        # NETWORK call of the path, 1-2× `git ls-remote` ~15s worst case) runs LAST, on the
-        # passing path only. With the resolver first, a recurring `:role_busy` tick would re-pay
-        # it every 30s for nothing and, under a degraded forge, stall the whole sequential poll
-        # tick. The forge LOCK (add_label in spawn_step) still comes after EVERYTHING here — a
-        # transient failure anywhere in this phase leaves no orphan lock (invariant unchanged).
-        # ROUTELESS = not yet onboarded (create_issue does not write it) → `ensure_workflow_map_or_onboard`
-        # writes the default workflow_map + returns `{:onboarded, _}` → we DEFER (skip; the next tick sees it
-        # routed). Routed → `workflow_map_role` derives the role from the workflow_map POSITION (NO hardcoded producer;
-        # route absent at this point = post-onboard anomaly → fail-loud, NEVER the eng silently).
-        # Route + workflow_map pre-read by the poller (lease classification) → reused via opts
-        # (`resolve_route` / `:prefetched_workflow_map`) instead of a 2nd get_route + 2nd workflow_map load. Absent (tests,
-        # other callers) → normal read/load (fallback).
+        # Cheap local gates precede network resolution and every forge lock.
         with {:ok, route} <-
                Opts.tag_err(
                  resolve_route(opts, forge, repo, number, forge_opts),
@@ -181,19 +151,14 @@ defmodule Fleet.Pilot.StepDispatcher do
                Opts.tag_err(
                  workflow_map_role(
                    route,
-                   # `loader` (module) — `workflow_map_role` reads the step's `modops` (B-01) and
-                   # resolves the role WITH them (composed like every launch site, catalogue L1a).
+                   # B-01: resolve the role with step modops.
                    loader,
                    workflow_map_loader,
                    Keyword.get(opts, :prefetched_workflow_map)
                  ),
                  :role_resolution
                ),
-             # Pod identity + serialization READ from the catalogue, never guessed. `pod_id_for_scope/4`
-             # takes the slot granularity (`slot_scope`, itself DERIVED from `lifetime_scope`: instance →
-             # for_issue fan-out | project → for_repo, ONE identity/project). The scope DECISION keys on the
-             # ROOT axis `lifetime_scope` DIRECTLY (not via the derived slot); it
-             # gates BEFORE the resolver, its reprovision ACTION (needs project["base_sha"]) runs after.
+             # Catalogue lifetime owns pod identity and serialization.
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
              slug = Spawn.feature_slug(issue),
@@ -272,7 +237,6 @@ defmodule Fleet.Pilot.StepDispatcher do
                   task_queue: task_queue,
                   repo: repo,
                   forge_opts: forge_opts,
-                  # Wake recovery seam (default = the real fn) threaded from opts.
                   wake_recovery:
                     Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
                 },
@@ -286,11 +250,7 @@ defmodule Fleet.Pilot.StepDispatcher do
                 log_ctx
               )
 
-            # A DELIVERABLE-judge STEP (multi-step workflow_map) whose criterion (issue body)
-            # can't be READ from the forge → we REFUSE a criterion-less judge (the diff without a criterion
-            # → blind approval = false GREEN) and DEFER; the lock lives in `BriefBuilder`. A judge step
-            # is instance-scoped (the scope gate returned `:proceed` WITHOUT a lock) → nothing to release;
-            # the poller re-dispatches next tick (read-error ≠ absence).
+            # Refuse criterion-less judge; retry without taking a lock.
             {:error, {:criterion_unavailable, reason}} ->
               Logger.warning(
                 "StepDispatcher: judge criterion unavailable issue=#{repo}##{number} role=#{role} → " <>
@@ -301,14 +261,11 @@ defmodule Fleet.Pilot.StepDispatcher do
           end
         else
           {:skipped, :role_busy} ->
-            # Project-scoped role already occupied by another issue of the repo → DEFERRED without lock or
-            # enqueue; the poller re-dispatches at the next tick (per-(repo,role) serialization via the
-            # poll loop; the one-shot pod dies at the end of its task → fresh spawn for the next one).
+            # Occupied project role defers without lock.
             {:skipped, :role_busy}
 
           {:onboarded, _step} ->
-            # Routeless issue onboarded onto the default workflow_map → we DEFER (skip; the next tick
-            # sees it routed → dispatch). System entry: create_issue creates, the poller routes.
+            # Newly engraved route is consumed on the next tick.
             {:skipped, :onboarded}
 
           {:error, {phase, reason}} ->
@@ -370,7 +327,6 @@ defmodule Fleet.Pilot.StepDispatcher do
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
       repo: Keyword.fetch!(opts, :repo),
       forge_opts: Keyword.get(opts, :forge_opts, []),
-      # Wake recovery seam (default = the real fn) threaded from opts.
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       opts: opts
     }
@@ -380,58 +336,29 @@ defmodule Fleet.Pilot.StepDispatcher do
     head_sha = get_in(pr, ["head", "sha"])
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
 
-    # The SET of judges is NOT read from `requested_reviewers` alone: Gitea alters that field
-    # UNRELIABLY (a judge can DISAPPEAR from it without having voted → merge on a half-jury). STABLE
-    # source = the review-records (`pr_review_state.reviewers`, REQUEST_REVIEW included). We keep
-    # `requested_reviewers` in a UNION (defensive: a freshly-requested one not yet in the records). Logins↓.
+    # Stable review records are unioned with volatile requested reviewers.
     requested_field = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
-    # No ownership check here: the PR scoping is FORGE-SIDE upstream (list_open_pulls returns
-    # ONLY my PRs via /issues?type=pulls&assigned_by). dispatch_review only does judgment dispatch.
+    # Forge listing owns PR human scoping.
     cond do
       @in_flight_label in labels ->
         {:skipped, :in_flight}
 
-      # PR put back to DRAFT by a human = parked: it is NOT ready for review
-      # (Gitea also refuses its merge, "Work in progress PRs cannot be merged"). We do NOT dispatch
-      # a judge on it — else we would judge/merge work that the human explicitly paused. The `draft`
-      # field is ALREADY in the PR shape (get_pull) — free read, complete decision guard
-      # (the machine reads the complete gating forge-state).
+      # Draft PR is explicitly parked by the human.
       Map.get(pr, "draft") == true ->
         {:skipped, :draft}
 
-      # The parent ISSUE carries `lcars-awaits-arch` (escalation: gatekeeper verdict
-      # escalate/halt/redirect, or a conflict not auto-resolved) → we do NOT re-dispatch the judge (else churn:
-      # re-spawn per tick). SYMMETRIC to `decide/1` on the issue side. The SET comes from the POLLER (issues already
-      # listed at the tick → `:awaits_arch_ids`, ZERO added I/O); absent (other callers/tests) → `MapSet.new()`
-      # → unchanged behavior (back-compat). We read the label on the ISSUE, not on the PR: it is the issue that
-      # freezes (the escalation sets the human lock on it), the PR knows nothing of it — hence the blindness otherwise.
+      # Parent issue architect lock suppresses PR redispatch.
       awaits_arch_issue?(head, opts) ->
         {:skipped, :awaits_arch}
 
       true ->
-        # head_sha → COMMIT-SCOPED verdicts: a review on an earlier commit (REQUEST_CHANGES never
-        # dismissed by Gitea on push) is STALE → its judge goes back to `pending` → re-dispatched on the
-        # current code (else infinite rework).
+        # Verdicts are scoped to current head SHA.
         verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
         case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
           {:ok, %{verdicts: verdicts, reviewers: jury}} ->
-            # SET of judges = union(VOLATILE requested_reviewers, STABLE review-records). A judge
-            # dropped from `requested_reviewers` without voting stays in the jury → `pending` → spawned, never a
-            # merge on a half-jury (cf. ForgeClient.pr_review_state).
-            #
-            # F-C061 — the jury is RESTRICTED to the configured judge roles (`reviewer_roles`, the SSOT the
-            # WRITE side lays via `request_reviews_step`). A reviewer login that is NOT a configured judge —
-            # a HUMAN (verified live: humans keep ≥read on fleet repos, the forge does NOT prevent a human
-            # review) or a non-jury role — is NOT a spawn target and does NOT count in the merge decision.
-            # Otherwise it STARVES the jury (`hd(pending)` = human → silent `{:skipped, :no_role}`) or skews
-            # the verdict tally. `brief_kind: judge` was NOT used here: it is a SECURITY axis (defused brief)
-            # that also tags the gatekeeper (a verdict-reader/sealer, not a jury member) — the jury axis is
-            # `reviewer_roles`. A foreign reviewer is surfaced LOUD (not swallowed), never a crash (a benign
-            # human review must not DoS the pipe).
-            # Jury source = THE CARD (the project's declared card, `Roles.project_jury`);
-            # `:reviewer_roles` opt = test seam.
+            # F-C061: only configured jury roles can dispatch or affect the verdict.
             jury_roles =
               MapSet.new(Fleet.Pilot.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
 
@@ -447,9 +374,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # Does the PR's parent issue (deduced from `head.ref` = `lcars/issue-<n>-<role>`) await
-  # the arch? The `:awaits_arch_ids` SET is computed by the poller (issues of the tick, zero I/O) and threaded via
-  # opts; default `MapSet.new()` (back-compat, other callers). Non-fleet PR (`:error`) → false (nothing to skip).
+  # Poller threads the already-listed set of architect-locked parent issues.
   defp awaits_arch_issue?(head, opts) do
     ids = Keyword.get(opts, :awaits_arch_ids, MapSet.new())
 
@@ -461,11 +386,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp login_of(r), do: r |> Map.get("login", "") |> to_string() |> String.downcase()
 
-  # A reviewer login that is NOT a configured judge role is IGNORED from the jury (not a spawn
-  # target, not counted) but SURFACED loud: a human (or non-jury role) posting/being-requested a review on
-  # a fleet PR is a real, forge-permitted anomaly (the write side only ever lays `reviewer_roles`). Warning,
-  # not a crash: a benign human review must NOT turn into a pipeline DoS. (The F-C061 tag in the
-  # log below is pinned by a test assert.)
+  # F-C061 foreign reviewers are visible but cannot DoS or skew the jury.
   defp warn_foreign_reviewers([], _repo, _pr_number, _jury_roles), do: :ok
 
   defp warn_foreign_reviewers(foreign, repo, pr_number, jury_roles) do

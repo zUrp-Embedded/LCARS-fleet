@@ -1,41 +1,10 @@
 defmodule Fleet.Coord.Emitter do
   @moduledoc """
-  EMISSION pass of fleet_coord: translates a policy MATCH
-  (`{action, escalation_path}` returned by the `Fleet.Coord.Policies` table)
-  into a canonical `%Fleet.Event{source: :coord}` and broadcasts it on
-  `fleet.events`.
+  Converts coordination actions into canonical `%Fleet.Event{source: :coord}` events.
 
-  Split out of `Policies`: the table lookup
-  (load/validate/query the YAML) and the build+broadcast of a wire event are
-  two distinct passes that share NO helper — the table knows nothing of the
-  event schema, the emission never reads the table. `Policies` stays the
-  public entry (`handle_decision`/`handle_escalation`) and calls
-  `dispatch_action/4` with the match it found.
-
-  ## Actions → events (payload = the original decision/escalation, normalized)
-
-    * `"notify_dashboard"` → `coord.notification_routed` (target `"dashboard"`)
-    * `"escalate_human"` → `coord.escalation_triggered` (target `"operator"`)
-    * any other action string → `coord.action_dispatched` (action in the
-      payload — extensible without recompile; the `coord.` prefix is
-      mandatory: a bare type would be outside the registry → broadcast
-      rejected → silent drop)
-
-  ## Broadcast policy (fire-and-forget, never blocking)
-
-  Via the protected core `Bus.safe_emit/4` (the substrate authority of this
-  policy): `UnregisteredError` (registry not yet populated at boot order)
-  tolerated in SILENCE so as not to break the boot — fire-and-forget; a
-  MALFORMED event (build bug) AND a `{:error, _}` PubSub delivery failure are
-  BOTH logged by `safe_emit` (CI-09 — the single lossy publisher), with this
-  emitter's context passed via `:context`: nothing re-derives the lost
-  notification — the escalation's durable trace, when there is one, is the
-  upstream starfleet audit log (`Cat5Escalator` writes it BEFORE dispatching
-  here), not this event. The `correlation_id`
-  (task.id UUID of the original work item, nil outside a work item) is
-  propagated on every broadcast to tie the event back to its work item.
-
-  **Last revised**: 2026-07-20
+  `notify_dashboard` and `escalate_human` have dedicated event types; other
+  action strings use `coord.action_dispatched`. Emission is lossy and always
+  returns `:ok`; `Bus.safe_emit/4` logs malformed or undeliverable events.
   """
 
   require Logger
@@ -43,16 +12,9 @@ defmodule Fleet.Coord.Emitter do
   alias Fleet.EventRouter.Bus
 
   @doc """
-  Emits the canonical event corresponding to `action` (cf. moduledoc
-  § Actions). `path` = the policy's `escalation_path` (relayed as-is into the
-  payload); `payload` = the decision (`%Fleet.Decision{}`/map) or the
-  original escalation payload — normalized into a map, from which we extract
-  `pod_id`/`verdict`/`reason` (atom OR string keys); `correlation_id`
-  propagated on the broadcast.
+  Emits the event for an action, relaying its path, payload, and correlation ID.
 
-  ALWAYS returns `:ok` (fire-and-forget broadcast — cf. moduledoc § Policy): the
-  dispatch's success is the LOOKUP's success (returned by `Policies`), not the
-  observability's.
+  Returns `:ok` regardless of delivery because this channel is fire-and-forget.
   """
   @spec dispatch_action(String.t(), term(), term(), String.t() | nil) :: :ok
   def dispatch_action("notify_dashboard", path, payload, correlation_id) do
@@ -83,9 +45,6 @@ defmodule Fleet.Coord.Emitter do
   end
 
   defp canon_action(action, path, payload, correlation_id) do
-    # Registry key = `coord.action_dispatched` (coord prefix, consistent with
-    # coord.notification_routed/escalation_triggered). A bare `:action_dispatched`
-    # would be outside the registry → broadcast rejected (UnregisteredError) → silent drop.
     safe_canon_broadcast(:"coord.action_dispatched",
       pod_id: extract_pod_id(payload),
       correlation_id: correlation_id,
@@ -105,11 +64,7 @@ defmodule Fleet.Coord.Emitter do
   defp canon_type(:escalation_triggered),
     do: :"coord.escalation_triggered"
 
-  # Strict canonical broadcast (source :coord) via the protected core `Bus.safe_emit/4` — the
-  # protected-emission policy has ONE substrate authority. `:silent`: UnregisteredError tolerated without
-  # noise (boot order); a malformed event AND a PubSub `{:error, _}` delivery failure are both logged by
-  # safe_emit (CI-09 — it is THE single lossy publisher). The emitter's context (no re-derive rail,
-  # durable trace = Cat5 audit log) travels via `:context` instead of a duplicated local rescue.
+  # CI-09
   defp safe_canon_broadcast(type, opts) do
     _ =
       Bus.safe_emit(:coord, type, opts,

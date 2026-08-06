@@ -52,10 +52,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
   alias Fleet.Starfleet.PeriodicCheck
 
   @default_interval_ms 60_000
-  # We monitor the pod-facing substrate (the DynamicSupervisor of per-pod socket
-  # acceptors) via the supervision tree (`which_children`): child
-  # `Fleet.MCP.PodSocketSupervisor` alive under `Fleet.MCP.Supervisor` → :ok.
-  # Cf. moduledoc §Target + `check_target/1`.
   @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -80,7 +76,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Test hook: triggers an immediate sync check (equivalent to the timer).
   @impl GenServer
   def handle_call(:check_now, _from, state),
     do: PeriodicCheck.check_now(state, &do_check/1, &{:ok, &1.status})
@@ -99,8 +94,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
         {:crashed, :ok} ->
           Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")
 
-        # `{same, same}`: repeating a variable in a pattern already enforces equality — a
-        # `^new_status` pin + redundant guard would obscure the intent ("status unchanged").
         {same, same} ->
           :ok
 
@@ -113,8 +106,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
     new_state
   end
 
-  # Supervised target: we read the supervision tree (pure OTP). The child
-  # `child_id` alive (pid) → :ok; absent / :restarting / :undefined → :crashed.
   defp check_target({:supervised, sup, child_id}) do
     case List.keyfind(Supervisor.which_children(sup), child_id, 0) do
       {^child_id, pid, _type, _modules} when is_pid(pid) -> :ok
@@ -123,9 +114,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
   rescue
     _ -> :crashed
   catch
-    # `which_children` on a supervisor that is not started (fleet_mcp absent from the node)
-    # does an `exit :noproc` (not an exception) → silent :crashed (from
-    # :unknown = no broadcast, nothing to monitor).
     :exit, _ -> :crashed
   end
 
@@ -136,13 +124,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
     end
   end
 
-  # Emission via the protected core `Bus.safe_emit/4` (the protected-emission policy has ONE
-  # substrate authority — never a duplicated local rescue). `:silent`: UnregisteredError = boot-order tolerated
-  # (registry not yet populated), not an alarm. A MALFORMED event (construction bug) is
-  # logged ERROR by safe_emit then neutralized — otherwise it would mask the "MCP crashed" alert,
-  # and this broadcast runs INSIDE the GenServer itself: letting it crash would restart the
-  # monitor with status reset to :unknown, losing the :ok → :crashed transition detection
-  # (its whole purpose), and would loop on every tick.
   defp broadcast_crashed(target, previous, new) do
     Bus.safe_emit(
       :starfleet,

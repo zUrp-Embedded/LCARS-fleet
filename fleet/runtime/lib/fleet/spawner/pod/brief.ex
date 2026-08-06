@@ -30,12 +30,9 @@ defmodule Fleet.Spawner.Pod.Brief do
   alias Fleet.Spawner.Pod.TaskProbe
 
   @doc """
-  Converts an `issue_id` (untrusted — spawn args / Gitea event; may legitimately carry `/`, `#`, etc.,
-  e.g. `fleet/lcars#600`) into a safe filename. Replaces ANYTHING outside a filename-safe charset
-  (`[A-Za-z0-9._#-]`) with `_` (R1-35): the old `replace("/", "_")` left NUL (which RAISES in `File.write`
-  → crashes `:projecting` = DoS), control chars and `\\` intact. `/` is still neutralized, so the result
-  is ALWAYS a leaf under `issues/` (no traversal). `#` and `-` are kept (human-readable). Consistent for
-  write AND any read (both derive the name through this one function).
+  Converts an untrusted issue ID to a leaf filename.
+
+  Characters outside `[A-Za-z0-9._#-]`, including separators and controls, become `_`.
   """
   @spec issue_id_to_filename(String.t()) :: String.t()
   def issue_id_to_filename(issue_id) when is_binary(issue_id) do
@@ -110,21 +107,9 @@ defmodule Fleet.Spawner.Pod.Brief do
   end
 
   @doc """
-  Self-enqueues the pod's OWN brief into the TaskQueue (the CANONICAL channel `get_work_item`) — but
-  ONLY on the admin rail, gated by the `self_enqueue_brief` opt (`SpawnAdmission.build_admin_opts`).
-  Idempotent:
+  Self-enqueues a non-empty brief only when `self_enqueue_brief` authorizes the admin rail.
 
-  - no `self_enqueue_brief` flag (a Fleet DISPATCH or gatekeeper spawn: the ORCHESTRATOR owns the
-    enqueue — it enqueues via TaskQueue itself; or a resident pod with no brief) → skip. The
-    dispatcher enqueues AFTER the spawn (canonical order
-    lock→pod→enqueue→wake), so gating self-enqueue on the SLOT was RACY — the pod could self-enqueue in
-    the window BEFORE the dispatcher's enqueue, double-enqueuing / clearing the active item mid-run. The
-    explicit flag removes that race structurally (never slot-timing-dependent on a dispatch spawn);
-  - flag set, brief ALREADY in the queue (`:occupied` — an admin retry) → no double-enqueue (skip);
-  - flag set, slot free (`admin.spawn` / `lcars spawn --brief`: NO dispatcher owns the enqueue) → we
-    enqueue here, else `get_work_item` returns `{done:true}` and the pod stays idle.
-
-  Mirror of StepDispatcher's `attrs` (`issue_id`/`role`/`brief`/`metadata`).
+  Occupied slots are idempotent; an unverifiable slot fails closed before launch.
   """
   @spec maybe_enqueue_brief(map()) ::
           :ok | {:error, {:brief_enqueue_failed, term()} | {:brief_slot_unknown, String.t()}}
@@ -140,25 +125,16 @@ defmodule Fleet.Spawner.Pod.Brief do
     end
   end
 
-  # Slot → action. Extracted so the three branches are testable WITHOUT a live-vs-unreachable TaskQueue
-  # (`:unknown` = broker down, otherwise unreproducible in a test where the queue is up).
   @doc false
   @spec enqueue_by_slot(map(), String.t(), :free | :occupied | :unknown) ::
           :ok | {:error, {:brief_enqueue_failed, term()} | {:brief_slot_unknown, String.t()}}
   def enqueue_by_slot(state, brief, slot) do
     case slot do
       :occupied ->
-        # A brief is genuinely already pending (an admin retry: only the flagged admin rail reaches
-        # here since the self-enqueue flag became the gate) → skip, silent.
         :ok
 
       :unknown ->
-        # F-C035 — broker unreachable → the slot is UNVERIFIABLE. We never double-enqueue (so we do NOT
-        # enqueue), but returning `:ok` made the caller believe it succeeded → the pod launches IDLE with no
-        # brief (`get_work_item` returns done:true) and NO reconciliation re-enqueues an admin.spawn brief.
-        # Fail-CLOSED: surface `{:error}` → the `:projecting` `with` (pod.ex) fails BEFORE the launch →
-        # `transition_failed` → pod.failed → retry (broker back → :free → real enqueue). No launched pod ⇒
-        # zero double-enqueue on retry. (Same 3-state fail-closed doctrine as the `:free`/`:occupied` branches.)
+        # F-C035
         Logger.warning(
           "Brief: could not verify pod #{state.pod_id} brief slot (broker unreachable) — FAILING the " <>
             "admin.spawn brief enqueue (fail-closed): the pod would sit idle with no brief. The spawn retries."

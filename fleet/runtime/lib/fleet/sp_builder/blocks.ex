@@ -1,20 +1,8 @@
 defmodule Fleet.SPBuilder.Blocks do
   @moduledoc """
-  Block-based composition of per-role system prompts. Source: `priv/sp_builder/sp_blocks/` (`core/*`, `method/*`,
-  `role/*`) + the `sp-map.yaml` map (role → ORDERED block list; `role/*` last). The generator
-  (`mix lcars.sp.gen`) writes `priv/catalogue/sp_builder/sp_drafts/agent-<role>-base.md` — the flat draft that
-  `Fleet.Spawner.Pod.Assets` reads and injects (N2). Split = debuggable + a single source of truth.
-
-  Layer boundary: the SP is an APPLICATIVE primitive (it consumes the cap-profile and lives just
-  above it, here). It carries ONLY substrate-level invariants. Anything owned by higher domains (the `gate-decision-v1` vocabulary,
-  the contract schema, the forge model) is NOT in the SP: it reaches the pod through the BRIEF (assembled
-  higher up, `fleet_pilot`/`GateBrief`), single source. An SP block never duplicates the authority of a
-  higher domain.
-
-  HARD RULE (no-fallback, cf. memory `no-sp-no-pod-no-fleet`): a role with no blocks, or a listed block
-  absent from disk → `compose!/3` RAISES. No SP → no pod → no fleet; never a silent degradation.
-
-  **Last revised**: 2026-08-01
+  Deterministic per-role system-prompt composition from an ordered block map.
+  Blocks carry substrate contracts only; higher-domain contracts arrive through
+  briefs. Missing roles or blocks fail hard.
   """
 
   # `Date:` up front → satisfies the GO-7 hook (`<!--\s*Date\s*:`) without polluting the SP with a visible

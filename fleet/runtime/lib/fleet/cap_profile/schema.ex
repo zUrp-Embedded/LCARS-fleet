@@ -73,11 +73,7 @@ defmodule Fleet.CapProfile.Schema do
   end
 
   @doc """
-  Refuses a modop fragment carrying a top-level reserved key (`kind`).
-  Fast-path guard BEFORE the JSON-schema validation: a modop cannot override the
-  base profile's `kind`.
-
-  `:ok` if no reserved key, otherwise `{:error, :invalid_modop}`.
+  Returns `{:error, :invalid_modop}` when a fragment carries a reserved key.
   """
   @spec validate_modop_keys(map()) :: :ok | {:error, :invalid_modop}
   def validate_modop_keys(map) when is_map(map) do

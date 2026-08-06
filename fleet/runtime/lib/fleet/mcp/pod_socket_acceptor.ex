@@ -40,15 +40,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   alias Fleet.MCP.PodTools
 
-  # AF_UNIX stream socket options, passive (we `recv` explicitly), one line per
-  # message. `reuseaddr` is harmless here (a residual socket file is removed at
-  # startup anyway — cf. `rm_stale/1`).
-  # `buffer` MUST exceed the longest possible JSON-RPC line: with `packet: :line`,
-  # a line longer than the buffer (inet default ~1460 B) is delivered TRUNCATED into
-  # fragments, each fragment is invalid JSON, and the server then waits for a
-  # complete line that never arrives -> silent hang, 30 s timeout on the bridge side,
-  # tool payload > ~1.4 KB LOST. 1 MiB covers every realistic payload; beyond that,
-  # handle_line answers -32700.
+  # Line buffer must contain a complete JSON-RPC frame; fragmented lines are invalid JSON.
   @socket_opts [
     :binary,
     {:packet, :line},
@@ -57,20 +49,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     {:buffer, 1_048_576}
   ]
 
-  # Idle deadline on the wait for the NEXT line of an accepted connection (cf. `serve/3`).
-  # 5 min ≫ any legitimate inter-line pause of the bridge (request → response, then it either
-  # chains or closes), yet finite: a mute connection frees its Task instead of pinning one of
-  # the pool's `max_children` slots for the lifetime of the pod. Overridable (`:fleet_mcp,
-  # :socket_idle_timeout_ms`) — the atom `:fleet_mcp` is legacy-valid (D-07).
+  # Mute connections eventually release shared Task capacity (D-07 config namespace).
   @idle_timeout_ms Application.compile_env(:fleet_mcp, :socket_idle_timeout_ms, 300_000)
 
-  # Task.Supervisor (tree `Fleet.MCP.Supervisor`) where each accepted connection is served in its
-  # own Task. Separates the SERVICE of a connection (potentially slow) from the accept LOOP.
+  # Connection service is isolated from the accept loop.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
-  # PER-POD ceiling on concurrently served connections (cf. handle_continue/2). The bridge is
-  # request/response over one connection at a time; 8 leaves ample room for a chained burst
-  # while keeping the FLEET-WIDE `max_children` pool out of any single pod's reach.
+  # Per-pod ceiling protects the fleet-wide connection pool.
   @max_conns_per_pod Application.compile_env(:fleet_mcp, :max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -85,16 +70,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def init(opts) do
     pod_id = Keyword.fetch!(opts, :pod_id)
     path = Keyword.fetch!(opts, :socket_path)
-    # F-C138 — role-GATED MCP tool names, threaded by the spawner (derived from the cap-profile
-    # `allowedTools`). `tools/list` = base (universal) + these. `[]` = base-only (e.g. a judge role).
+    # F-C138: spawner threads the role-gated tool surface.
     tools = Keyword.get(opts, :tools, [])
 
     with :ok <- ensure_parent_dir(path),
          :ok <- rm_stale(path),
          {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]) do
-      # `conns` = the connection Tasks of THIS pod currently being served (monitored: a Task that
-      # ends — close, error, idle timeout — frees its slot via the :DOWN below). It is the state
-      # backing the per-pod ceiling; without it the acceptor could only see the FLEET-WIDE pool.
+      # Monitored live Tasks back the per-pod ceiling.
       {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools, conns: %{}},
        {:continue, :accept}}
     else
@@ -102,12 +84,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Recovery after FD exhaustion — re-enters the accept loop.
   @impl GenServer
   def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
 
-  # A served connection ended (peer closed, error, or idle timeout) → its slot is freed. Any
-  # exit reason frees it: the ceiling counts LIVE connections, it is not a spend budget.
+  # Any connection termination frees its live slot.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
     {:noreply, %{state | conns: Map.delete(state.conns, ref)}}
   end
@@ -118,20 +98,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
-        # The {:continue, :accept} loop + BLOCKING accept NEVER yields to the mailbox
-        # (a {:continue} runs before messages) → handle_info({:DOWN}), which frees the slot of
-        # a finished connection, never runs while connections keep arriving → the count only
-        # RISES → after @max_conns_per_pod CUMULATIVE connections over the pod's life, a
-        # permanent pod would be refused FOR LIFE (0 real connections, 8 counted).
-        # So we drain the pending {:DOWN}s HERE, right before the ceiling: we count LIVE
-        # connections and empty the mailbox (otherwise the {:DOWN}s leak in memory).
+        # Blocking continue loop drains pending DOWNs before enforcing live capacity.
         state = reap_down(state)
 
-        # PER-POD CEILING, checked BEFORE reaching for the shared pool: the Task.Supervisor's
-        # `max_children` is FLEET-WIDE — one pod opening enough connections would starve every
-        # OTHER pod's tools (get_work_item/submit_result dead fleet-wide). A pod's misbehaviour
-        # must cost that pod alone, never the fleet: we cap the connections served for THIS
-        # socket and refuse the excess here, so the shared pool keeps slots for the others.
+        # Refuse per-pod excess before consuming shared pool capacity.
         if live_conns(state) >= @max_conns_per_pod do
           Logger.warning(
             "PodSocketAcceptor: pod=#{pod_id} connection REFUSED — #{@max_conns_per_pod} " <>
@@ -145,15 +115,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           {:noreply, spawn_conn(sock, state), {:continue, :accept}}
         end
 
-      # Listen socket closed = we were stopped (release) → clean stop, not an error.
       {:error, :closed} ->
         {:stop, :normal, state}
 
-      # FD exhaustion (emfile/enfile) = often TRANSIENT (a burst, a leak being reaped). Stopping
-      # cascaded: acceptor → PodSocketSupervisor (3/5) → DEAD-EMPTY sup → all pods with no MCP
-      # socket, nothing recreates them. Spaced retry bounded by the mailbox (a single :retry_accept
-      # message in flight), VISIBLE; if the exhaustion persists, the pod will surface through its
-      # own timeout (incident rail), not through a silent cascade.
+      # FD exhaustion retries instead of cascading acceptor loss.
       {:error, reason} when reason in [:emfile, :enfile] ->
         Logger.error(
           "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (FD exhaustion) — retry in 1s"
@@ -169,11 +134,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp live_conns(%{conns: conns}), do: map_size(conns)
 
-  # Drains (non-blocking, `after 0`) the {:DOWN}s of finished connection Tasks and applies the
-  # slot releases NOW — cf. the comment in handle_continue(:accept): the accept loop starves the
-  # mailbox, so handle_info({:DOWN}) cannot be relied on to decrement the ceiling in time.
-  # Fishes ONLY the {:DOWN}s (the acceptor's only monitors = the connection Tasks, cf. spawn_conn);
-  # the rest of the mailbox is left intact.
+  # Non-blocking drain of monitored connection exits only.
   defp reap_down(state) do
     receive do
       {:DOWN, ref, :process, _pid, _reason} ->
@@ -183,26 +144,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # CONCURRENT: each connection is served in its OWN Task, never inline in the accept loop.
-  # Serving inline blocked the loop while ONE handler was pending (e.g. a slow ~30 s forge call):
-  # we never came back to `accept`, so every following connection from the pod stayed in the
-  # kernel backlog unserved → `readline` timeout on the bridge side (the whole pod froze). One
-  # Task per connection → we re-`accept` right away; a slow handler affects only its connection.
-  # `controlling_process` gives the socket to the worker (the acceptor can re-accept / die
-  # without killing the in-flight connections); transfer failed (worker already dead) → we close
-  # the socket rather than leak it. The Task is MONITORED: its end frees the pod's slot.
-  #
-  # :go HANDSHAKE (ordering, not an option): the worker must NOT `recv` before it OWNS the socket, or
-  # the recv races `controlling_process` and fails `:einval`/`:not_owner` depending on scheduling (green
-  # in sequential tests, flaky under load). So the worker starts PARKED (waits for `:go`); the acceptor
-  # transfers ownership FIRST, then sends `:go` — recv is now provably after the transfer. Canonical
-  # Ranch pattern.
+  # The monitored worker waits for `:go`, so recv cannot race socket ownership transfer.
   defp spawn_conn(sock, %{pod_id: pod_id, tools: tools} = state) do
     case Task.Supervisor.start_child(@conn_sup, fn -> await_go_then_serve(sock, pod_id, tools) end) do
       {:ok, pid} ->
         case :gen_tcp.controlling_process(sock, pid) do
           :ok ->
-            # Ownership is the worker's → release it to recv.
             send(pid, :go)
             ref = Process.monitor(pid)
             %{state | conns: Map.put(state.conns, ref, pid)}
@@ -213,9 +160,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
         end
 
       {:error, reason} ->
-        # Notably :max_children — the FLEET-WIDE pool is saturated (by the other pods: this pod's
-        # own excess is refused upstream by the per-pod ceiling). VISIBLE: otherwise the pod just
-        # sees an inexplicable readline timeout.
+        # Per-pod excess was already refused; this is fleet-wide saturation.
         Logger.warning(
           "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — " <>
             "fleet-wide connection pool saturated"
@@ -226,14 +171,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Bound on the wait for the acceptor's `:go` (ownership handed over). It arrives in microseconds
-  # (right after `controlling_process`); a wait this long only fires if the acceptor DIED between
-  # `start_child` and the transfer — then we free the Task slot rather than park forever.
+  # Frees a parked Task if its acceptor dies before transferring ownership.
   @go_timeout_ms 5_000
 
-  # PARKED worker: waits for the acceptor's `:go` before touching the socket — recv only AFTER ownership
-  # was transferred (cf. spawn_conn's :go handshake). No `:go` (acceptor gone before the transfer) → the
-  # socket, still owned by the dead acceptor, is reaped by OTP; we just release the slot.
   defp await_go_then_serve(sock, pod_id, tools) do
     receive do
       :go -> serve(sock, pod_id, tools)
@@ -245,18 +185,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Serves a connection line by line until the peer closes (the bridge does one
-  # call = one line, then reads the response; it may chain several over the same
-  # connection). On close / error / IDLE TIMEOUT, we hand control back to the accept loop.
-  #
-  # The idle timeout is what makes a MUTE connection reapable. Without it, a `recv` with no
-  # deadline held its Task forever: a pod that OPENS but never speaks on its connections (a
-  # leaking bridge, or a misbehaving/compromised agent) could open `max_children` mute
-  # connections on ITS socket and exhaust the Task pool SHARED by the whole fleet →
-  # get_work_item/submit_result dead fleet-wide until that pod died. The bridge is
-  # request/response (a line, then the answer): a connection silent for `@idle_timeout_ms` is
-  # abandoned by construction, never a legitimate slow call (the SERVICE of a line has no
-  # deadline here — only the wait for the NEXT line does).
+  # The deadline applies between frames, not while a tool call is executing.
   defp serve(sock, pod_id, tools) do
     case :gen_tcp.recv(sock, 0, @idle_timeout_ms) do
       {:ok, line} ->
@@ -342,12 +271,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # `pod_id` comes from the acceptor's STATE (the channel), NEVER from `tool_args`: we
-  # do not read an identity off the wire. The result format follows the MCP convention.
-  # A slow tools/call must be VISIBLE on the server side: without this trace a 30 s
-  # hang leaves NO BEAM trace (the bridge logs on its side, but the server
-  # stays blind -> forensics impossible). Threshold deliberately high: we trace
-  # the anomaly, not the noise.
+  # Slow-call trace uses channel-owned identity, never a wire argument.
   @slow_tool_warn_ms 5_000
 
   defp call_tool(params, pod_id) do
@@ -372,30 +296,14 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # The MUTATION surface (creates/onboards/comments on the forge). A response the stdio bridge times
-  # out at 30s while central's effect completes makes the agent re-emit the SAME call — and the forge
-  # enforces no uniqueness, so a bare re-run would DUPLICATE. Two layers answer, and only together:
-  # each mutation CONVERGES on the world (durable op markers read back on issues/comments, proven end
-  # state on create/import, forge 404 + ownership proofs on delete), and this core-owned SINGLE-FLIGHT
-  # (`Fleet.MCP.Idempotency`) keeps a retry STORM from becoming N concurrent effects. Nothing is
-  # cached past the flight: a late retry re-runs and converges, rather than replaying a success the
-  # world may have moved on from (that memoize once returned the first `create` of a
-  # create/delete/recreate sequence). Reads are not wrapped (idempotent by nature); `submit_result`
-  # is already idempotent central-side (double-submit ignored).
+  # Forge mutations converge durably; single-flight only collapses concurrent retries.
   @mutation_tools ~w(create_issue create_project import_project delete_project comment_issue)
 
-  # `PodTools.handle_tool_call` is EXPECTED total (`{:ok}|{:error}`), but a bug/edge in a tool could RAISE
-  # — an uncaught raise here KILLS the connection Task WITHOUT sending any response → the pod HANGS to its
-  # own timeout (SOC-RES-001). Rescue into an `{:error, ...}` 3-tuple → the caller renders it as an MCP
-  # `isError` result, so the pod ALWAYS gets an answer (MCP convention: a failure is a result, not a
-  # dropped connection).
+  # SOC-RES-001: tool crashes become MCP error results instead of dropped connections.
   defp safe_handle_tool_call(tool, tool_args, pod_id) do
     handle = fn -> tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end
 
     if tool in @mutation_tools do
-      # Key = the LOGICAL identity of the call (deterministic function of who/what — no client id): a
-      # re-emit carries the same args → the same key. Only a SUCCESS is memoized/replayed; a failed
-      # mutation (`{:error, _, _}`) releases the key so a genuine retry re-runs (the effect did not land).
       key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
       Fleet.MCP.Idempotency.run(key, handle, succeeded?: &match?({:ok, _, _}, &1))
     else
@@ -407,31 +315,18 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     kind, reason -> {:error, {:tool_crashed, tool, {kind, reason}}, %{pod_id: pod_id}}
   end
 
-  # Tool dispatcher: the real `PodTools` in prod. Injectable (`:fleet_mcp, :tool_handler`) so a test can
-  # supply a RAISING handler and prove the SOC-RES-001 rescue (a crashing tool → isError result, not a
-  # dropped connection). Same seam pattern as `LaunchBackend`/`McpSocketProvisioner` elsewhere.
+  # Injectable seam exercises the SOC-RES-001 crash boundary.
   defp tool_handler, do: Application.get_env(:fleet_mcp, :tool_handler, PodTools)
 
-  # `PodTools.handle_tool_call` only returns error atoms/tuples (never a binary) → one clause
-  # suffices; `inspect/1` renders any reason readable in the text field of the MCP error response.
   defp error_text(reason), do: inspect(reason)
 
-  # F-C138 — the pod's tool SURFACE for `tools/list`: the deftool schemas (single source,
-  # `PodTools.get_tools/0` = %{name => schema}) filtered to base (universal pod interface) + the role-gated
-  # names threaded at spawn. `Map.take` silently drops a threaded name absent from the deftools (a stale
-  # cap-profile entry can't invent a tool); the base is always present. We use `PodTools` directly (the
-  # static catalogue authority), NOT the injectable `tool_handler` seam (which only swaps the CALL path).
+  # F-C138: static schemas filtered to the universal and role-gated surface.
   defp list_tools(threaded) do
     allowed = PodTools.base_tool_names() ++ threaded
     PodTools.get_tools() |> Map.take(allowed) |> Map.values() |> Enum.map(&to_mcp_wire/1)
   end
 
-  # `get_tools/0` (ExMCP) returns its INTERNAL form: `input_schema` (snake) + `display_name`/`meta`. But
-  # THIS `tools/list` IS the MCP wire (the stdio bridge forwards it VERBATIM to claude), and the MCP
-  # protocol requires `inputSchema` (camel). A snake `input_schema` = claude cannot parse the schema →
-  # tool REJECTED ("No such tool available", claude loops on `tools/list` without ever registering).
-  # We project HERE, at the socket=wire boundary, onto the 3 standard MCP fields: MCP-compliant
-  # central, pure pass-through bridge.
+  # Project ExMCP's internal schema onto the MCP wire shape at the socket boundary.
   defp to_mcp_wire(tool) do
     t = Map.new(tool, fn {k, v} -> {to_string(k), v} end)
     %{"name" => t["name"], "description" => t["description"], "inputSchema" => t["input_schema"]}
@@ -446,8 +341,6 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # A residual socket file (earlier crash) would make the bind fail
-  # (`:eaddrinuse`). We remove it before re-listening; absent = nothing to do.
   defp rm_stale(path) do
     case File.rm(path) do
       :ok -> :ok

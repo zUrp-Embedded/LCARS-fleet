@@ -1,19 +1,8 @@
 defmodule Fleet.Conflict.Patterns.Utils do
   @moduledoc """
-  Shared helpers for the heuristic patterns: whitespace normalization, quote-aware tokenization,
-  volatile-value detection, and semver/datetime ordering.
-
-  Two scars carried over from the ported engine:
-
-    * whitespace-inside-a-string is DATA, not layout -- `extract_quoted_segments/1` lets
-      `whitespace_only` refuse a hunk whose quoted contents differ, even if the code around them
-      normalizes equal.
-    * the value-only tokenizer is quote-aware (`tokenize_line_quote_aware/1`) so a multi-word
-      volatile like `'2026-07-06 11:42:00'` stays ONE token and still matches the datetime pattern;
-      but the diff-ratio denominator keeps the OLD `tokenize_line/1` granularity the thresholds were
-      calibrated against.
-
-  **Last revised**: 2026-07-30
+  Shared whitespace, quote-aware tokenization, volatile detection, and ordering
+  helpers. Quoted whitespace remains data; quote-aware value tokens coexist with
+  the legacy token granularity used to calibrate diff thresholds.
   """
   alias Fleet.Conflict.Score
 

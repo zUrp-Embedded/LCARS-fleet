@@ -95,11 +95,8 @@ defmodule Fleet.Credentials.ForgeIdentity do
         }
 
   @doc """
-  Complete git identity for a `role` (author=human + role trailer). `opts`:
-  `:human` (override, default `id -un`), `:identity` (injected `%{name, email}` map —
-  tests, short-circuits the OS derivation).
-
-  `{:ok, identity}` | `{:error, reason}` (fail-loud only if `id -un` is unresolvable).
+  Resolves the complete human identity and role trailer. `:human` overrides the runtime
+  user and `:identity` injects a name/email pair without OS lookup.
   """
   @spec for_role(String.t(), keyword()) :: {:ok, identity()} | {:error, term()}
   def for_role(role, opts \\ []) when is_binary(role) and role != "" do
@@ -118,10 +115,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
-  Git identity of the HUMAN who runs the fleet (robust name + email: git config → GECOS → login; NEVER
-  fails on an OS user). Serves as `committer` for SYSTEM commits (e.g. project onboard, author=`lcars-system`)
-  → traces who initiated, WITHOUT depending on the human's `~/.gitconfig` (without this, an unconfigured
-  human → committer "empty ident name" → commit rejected). `opts` identical to `for_role/2`.
+  Resolves the runtime human's name, email and login. Options match `for_role/2`.
   """
   @spec human_identity(keyword()) ::
           {:ok, %{name: String.t(), email: String.t(), human: String.t()}} | {:error, term()}
@@ -205,20 +199,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   end
 
-  # OS identity of the human. `opts[:identity]` (test) short-circuits. Otherwise derives:
-  # git config (the human's commit identity) → GECOS → login; email → <login>@<host>.
-  # NEVER fails: an OS user ⇒ always an identity ("we do not over-filter").
   defp os_identity(human, opts) do
     case Keyword.get(opts, :identity) do
       %{name: name, email: email} when is_binary(name) and is_binary(email) ->
-        # A caller-supplied identity is hygiened too (defense in depth): strip control chars so it can
-        # never carry a newline into the git identity.
         {:ok, %{name: strip_control(name), email: strip_control(email)}}
 
       _ ->
-        # Each human-editable source (~/.gitconfig, GECOS) is HYGIENED before it enters the identity — a
-        # newline/control char would inject a `git config` line or a commit-header line. A source
-        # that strips to blank → nil, so the chain falls through to the safe OS-derived fallback.
         name =
           sanitize_identity(git_config("user.name")) || sanitize_identity(gecos_name(human)) ||
             human
@@ -228,11 +214,6 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   end
 
-  # git identity (name/email) is fed to GIT_AUTHOR_*/GIT_COMMITTER_* and possibly `git config`: a value
-  # from a hand-edited ~/.gitconfig / GECOS carrying a newline or control char would inject a config line
-  # or a commit-header line (R1-14). `strip_control/1` removes ASCII control chars (incl. \n \r \t) →
-  # always a binary. `sanitize_identity/1` additionally trims + blanks-to-nil so the OS-derivation chain
-  # falls through to the safe fallback (login/hostname) when a source is empty after stripping.
   defp strip_control(s) when is_binary(s), do: String.replace(s, ~r/[\x00-\x1F\x7F]/, "")
 
   defp sanitize_identity(nil), do: nil
@@ -240,11 +221,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   defp sanitize_identity(s) when is_binary(s),
     do: s |> strip_control() |> String.trim() |> blank_to_nil()
 
-  # `git config --global --get <key>` of the human (daemon runs *as* them → ~/.gitconfig).
-  # git absent / key not set → nil (→ fallback).
   defp git_config(key) do
-    # Bounded (Shell authority): a home on a hung mount would hold the resolution
-    # indefinitely on the unbounded form; every non-zero/typed failure reads nil (fallback).
     case Fleet.Credentials.Shell.run("git", ["config", "--global", "--get", key],
            timeout_ms: 5_000
          ) do
@@ -253,9 +230,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   end
 
-  # GECOS (field 5 of `getent passwd`, before the 1st comma) = full name, or nil.
   defp gecos_name(human) do
-    # Bounded (Shell authority): `getent` IS the NSS call — the canonical hang.
     case Fleet.Credentials.Shell.run("getent", ["passwd", human], timeout_ms: 5_000) do
       {:ok, {line, 0}} ->
         line
@@ -274,9 +249,6 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   defp hostname do
-    # :inet.gethostname/0 is spec'd {:ok, _} (local kernel read, no network) → direct match.
-    # Fail-loud: if it ever deviates, we want a clean MatchError, not a misleading silent "localhost"
-    # (the old `_ -> "localhost"` fallback was dead per the OTP spec).
     {:ok, h} = :inet.gethostname()
     List.to_string(h)
   end

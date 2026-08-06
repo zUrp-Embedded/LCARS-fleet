@@ -195,9 +195,7 @@ defmodule Fleet.Layout do
     do: Path.join(@provenance_subdir, sanitize_artifact_name(name) <> ".json")
 
   @doc """
-  Validates a brief ref SHAPE (BND-123 defensive twin of `brief_ref/2` — same truth, one
-  source): `briefs/` or `gate-briefs/`, one flat path-safe `.md` segment. Free text, traversal
-  (`..`, `/` in the name) and foreign subdirs are refused.
+  Validates a flat `.md` reference below `briefs/` or `gate-briefs/`.
   """
   @spec valid_brief_ref?(term()) :: boolean()
   def valid_brief_ref?(ref) when is_binary(ref), do: Regex.match?(@brief_ref_re, ref)

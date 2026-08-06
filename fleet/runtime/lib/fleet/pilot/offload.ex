@@ -1,23 +1,8 @@
 defmodule Fleet.Pilot.Offload do
   @moduledoc """
-  SINGLE source of the **supervised offload** idiom of the pilot's Bus consumers
-  (`Fleet.Pilot.StepRunConsumer`, `Fleet.Pilot.IncidentConsumer`): run I/O work
-  (git push, forge writes) in a `Task.Supervisor` so as NOT to block the singleton's
-  mailbox, with a fail-loud spawn failure (never silent).
-
-  Without this module each consumer would carry its own copy of `offload_async/1` (same sequence
-  `Task.Supervisor.start_child` → `{:ok, :offloaded}` | log error + `{:error, {:offload_failed, _}}`).
-  The skeleton is factored here; each consumer KEEPS:
-
-    * **its supervisor** (`task_supervisor/0`, started by `application.ex` BEFORE the consumer —
-      separate blast-radius: a burst of one concern does not saturate the other's tasks);
-    * **its failure message** (the consequence of a failed offload differs: "completion lost"
-      on the step_run side vs "incident NOT recorded" on the incidents side) — carried by `error_label`.
-
-  The real outcome of the offloaded work is logged IN the task by the caller (the return
-  `{:ok, :offloaded}` only says "the task was launched").
-
-  **Last revised**: 2026-08-02
+  Shared supervised offload primitive for pilot Bus consumers. Each consumer owns
+  its pool and consequence label; monitored task death is routed back to the caller.
+  `async_or_inline/3` preserves work when a pool refuses admission.
   """
 
   require Logger

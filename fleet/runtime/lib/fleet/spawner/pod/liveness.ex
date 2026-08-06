@@ -61,8 +61,6 @@ defmodule Fleet.Spawner.Pod.Liveness do
       Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
   end
 
-  # Reads a per-pod option from `state.opts` (keyword passed at spawn) → `nil` if absent/unreadable. Allows
-  # injecting in test WITHOUT global config (async-safe): `:liveness_probe_fun`, `:liveness_tick_ms`.
   defp keyword_opt(state, key) do
     case Map.get(state, :opts) do
       opts when is_list(opts) -> Keyword.get(opts, key)
@@ -71,14 +69,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   end
 
   @doc """
-  Liveness probe: `{jsonl_size, cpu_jiffies}`. The jsonl covers "produced output"; the cpu is the
-  HOLDER's `/proc/stat` (see `proc_cpu_jiffies/1` — the Port's os_pid is the `sleep infinity` holder,
-  not claude), a weak second signal. Injectable (test) via the
-  per-pod opt `:liveness_probe_fun` (fun/1) or the config. `nil` on a signal = unavailable (no file /
-  no port) → does not count as movement (anti-kill bias: we do not kill on a nil). Default shape
-  `{size | nil, jiffies | nil}`; an injected probe returns its own opaque shape (compared by
-  `liveness_moved?/2` only) — hence the `term()` return. Called by the tick handler
-  (`handle_event({:timeout, :liveness}, :tick, …)`).
+  Samples `{jsonl_size, holder_cpu_jiffies}` or delegates to the injected probe.
   """
   @spec liveness_sample(map()) :: term()
   def liveness_sample(state) do
@@ -167,20 +158,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # utime+stime (jiffies) at `/proc/<os_pid>/stat`, where os_pid is the Port's process. Robust to
-  # `comm` (field 2, in parentheses, may contain spaces/`)`): we cut after the LAST `)` (field 3 =
-  # index 0 of the rest → utime = index 11, stime = index 12). `nil` if no port / process gone / proc
-  # unreadable. WARNING: this os_pid is the HOLDER (the `sleep infinity` that holds the namespace, cf.
-  # PodTmux), NOT claude — claude runs under tmux, a separate process, and `/proc/stat` counts only the
-  # pid's OWN cpu (descendants excluded). The holder is near-idle, so this signal is a weak second to
-  # the jsonl-OR.
-  #
-  # Before "cleaning this up", note the RISK ASYMMETRY that makes the weak term the safe side: `moved?`
-  # ORs the two signals, so a term that almost never fires can only make the pod look MORE alive —
-  # its cost is a late kill, never an early one. DROPPING the column makes the deadline strictly more
-  # trigger-happy, and the failure it buys is killing a pod that was working: the expensive direction.
-  # Probing claude's real pid under tmux is the improvement, not the removal — and it must be proven
-  # against a live pod, since guessing the pid is how this measured the wrong process to begin with.
+  # This is the Port holder's CPU, not Claude's. As an OR term it can delay a kill, never hasten one.
   defp proc_cpu_jiffies(state) do
     with port when is_port(port) <- Map.get(state, :port),
          {:os_pid, pid} <- Port.info(port, :os_pid),
@@ -206,20 +184,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # ============================================================
-  # Role 2 — RESPONSE-timeout computation (the deadline that role 1 re-arms)
-  # ============================================================
-
   @doc """
-  Delay (ms) of the `:result_deadline` watchdog — RESPONSE timeout (not a lifetime budget) at the
-  submit_result MCP tool. If no response within the delay → `:result_deadline` →
-  `transition_failed` → the pod DIES (all `:temporary`): NO OTP relaunch. Consequence (coupling):
-  the active task must be freed (`TaskQueue.clear_for_pod`) otherwise it stays orphaned
-  (assigned/pending with no pod), and the re-dispatch is deliberate (boot-orchestrator recovery).
-
-  Optional cap-profile override: `spec.timeouts.response_sec`. Otherwise a scope-coded default
-  (one-shot = 300 s; `forever` = 60 s, inert — `arm_result_deadline_actions` does not arm for a
-  permanent). Called by `arm_result_deadline_actions` (`Pod`).
+  Returns the response deadline in milliseconds from the cap-profile override or lifetime default.
   """
   @spec monitor_timeout_ms(map()) :: non_neg_integer()
   def monitor_timeout_ms(state) do
@@ -232,19 +198,10 @@ defmodule Fleet.Spawner.Pod.Liveness do
         default_response_timeout_sec(state.cap_profile)
       end
 
-    # The native `:result_deadline` state_timeout requires a non-negative integer (ms). `is_number(override)`
-    # accepts FLOATS (a cap-profile `timeouts.response_sec: 1.5` passes validation) → `sec * 1000` =
-    # float → ArgumentError in `arm_result_deadline_actions`, which would CRASH the Pod without transition_failed.
-    # `round/1` coerces → integer (ms), whatever the override.
     round(sec * 1000)
   end
 
   defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
-    # No band-aid `forever -> 60_000`: arm_result_deadline_actions does NOT arm for `forever`
-    # (a permanent has no response timeout), and the fire only kills if a task is really
-    # active. The `forever` value below is therefore inert (forever never arms); kept for
-    # consistency in case an override `spec.timeouts.response_sec` were to reactivate it one
-    # day.
     case get_in(spec, ["invocation", "lifetime_scope"]) do
       "forever" -> 60
       _other -> 300

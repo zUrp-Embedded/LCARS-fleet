@@ -1,30 +1,8 @@
 defmodule Fleet.Pilot.IncidentRegistry do
   @moduledoc """
-  PERSISTENT cross-session memory of system incidents — **resilient owner**.
-
-  An error handler must be MORE reliable than what it watches: its memory cannot depend
-  (synchronous, single copy, race-prone) on the substrate it watches. Hence this GenServer — the Iron Law is
-  SATISFIED here (mutable state to buffer + serialized access + isolation of forge failure):
-
-    - **recurrence check** (`seen_before?`) = MEMORY lookup → 0 I/O per fail → withstands a **burst** (N pods
-      falling together = the very signature of an error-handler's job);
-    - **write** (`note`) = serialized upsert + **local WAL** (JSON, atomic write tmp+rename →
-      crash-survivable) THEN triggers an **ASYNC forge sync** → the dispatcher NEVER blocks on the forge.
-      A FAILED WAL write is SURFACED, never swallowed: the WAL is the only durability of a
-      1st occurrence (no escalation), so `note/3` returns `{:error, {:wal_write_failed,_}}` and
-      `record_or_escalate/4` returns `{:recorded_volatile,_}` — never a lying `:ok`/`:recorded`;
-    - **forge = durable cross-machine backing-store** (branch `work/ops`), debounced + retried async sync,
-      **bidirectional merge** (incidents from other machines absorbed); forge unreachable = **fail-LOUD** log,
-      never a loss (the WAL holds, re-sync on return) nor a silent re-roll.
-
-  At boot: `merge(local WAL, forge)`. `signature/3` stays a pure function. The git history of the forge
-  file = the incident timeline.
-
-  The sysadmin ESCALATION (opening the `error_system` issue) lives in the sub-module
-  `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
-  facade (defdelegate) for WakeRecovery and the failure consumers.
-
-  **Last revised**: 2026-08-01
+  Cross-session incident memory with serialized in-memory recurrence lookup,
+  atomic local WAL, and asynchronous bidirectional forge backing. WAL failure is
+  surfaced as volatile state. Sysadmin issue creation lives in `Escalation`.
   """
   use GenServer
   require Logger
@@ -34,10 +12,6 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @forge_fail_threshold 3
   @sync_debounce_ms 2_000
   @retry_ms 30_000
-
-  # ============================================================
-  # API (signature unchanged for WakeRecovery)
-  # ============================================================
 
   @spec signature(String.t(), String.t(), term()) :: String.t()
   def signature(op, subject, reason) when is_binary(op) and is_binary(subject) do
@@ -68,31 +42,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Records a failure, OR escalates it if recurrent (already seen). For the paths WITHOUT re-roll (e.g.
-  `pod.failed` / `result_timeout`): 1st = `note` (tolerated, possibly random); recurrence = escalation
-  (pattern → root-cause). EVERY occurrence updates the memory (count/last_seen — the timeline stays
-  true even under cooldown).
-
-  The registry HAS the escalation memory it is named for: an escalation stamps
-  `last_escalated_at`/`escalated_issue` in the signature entry, and a recurrence under
-  `:incident_escalation_cooldown_ms` (config `:fleet_pilot`, default 1 h) is SUPPRESSED instead of
-  opening a new forge issue. Without this, a durable failure (workflow_map unreadable on a routed
-  issue) would open ONE ISSUE PER TICK — ~2 880/day, self-amplified by the webhook kick.
-
-  HONEST return — it carries what ACTUALLY happened, never an optimistic success:
-
-    - `:recorded` — first time, incident recorded in memory + local WAL.
-    - `{:recorded_volatile, reason}` — first time, incident in MEMORY but the WAL write FAILED:
-      NOT durable cross-session until the async forge sync absorbs it. The caller
-      must DISTINGUISH it from `:recorded` (LOUD log/telemetry), never reassure about an absent durability.
-    - `{:escalated, issue_number}` — recurrence, sysadmin issue ACTUALLY opened (the number PROVES it).
-    - `{:escalation_suppressed, issue_number | nil}` — recurrence NOTED (count/last_seen updated) but
-      under cooldown of the previous escalation: NO new issue (the existing one carries the alarm).
-    - `{:escalation_failed, reason}` — recurrence detected but opening the issue failed (forge down?):
-      NO issue exists. The incident stays in memory/local WAL, but the sysadmin
-      alarm did NOT go out → the caller must SHOUT it, not reassure.
-    - `{:record_failed, reason}` — the owner (GenServer) is unavailable: the incident was NOT
-      recorded at all (neither memory nor WAL) → a recurrence cannot be detected.
+  Records a first occurrence or escalates a recurrence, updating the timeline in
+  either case. Cooldown suppresses duplicate issues; return values distinguish
+  durable, volatile, suppressed, and failed outcomes.
   """
   @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
           :recorded

@@ -1,34 +1,10 @@
 defmodule Fleet.Pilot.WorkflowMapNav do
   @moduledoc """
-  **Pure** navigation within a workflow_map (pipeline) — the forge-driven chaining of steps.
-  A **stateless** resolution: given the
-  workflow_map (`Fleet.Workflow.Loader` output) + the **current step name**, computes the
-  next step (or terminal).
+  Navigates a loaded workflow map by step name, never by role.
 
-  ## Why keyed by step NAME, not by role
-
-  Naive key "the step whose `role` = assignee": **insufficient** —
-  a workflow_map can have the same role on several steps (e.g. `standard-qa`:
-  `architect` is on `brainstorm` AND `plan`). The assignee (= role) alone
-  **does not identify** the step. The canonical position is therefore the **step name**, which
-  the runtime engraves on the forge (scoped label `stage/*` via `ForgeClient.post_route`) and
-  re-reads to navigate. `WorkflowMapNav` is keyed by step name; where
-  the name comes from (forge) is the caller's concern.
-
-  ## Cardinality (linear MVP)
-
-  The MVP chain is **linear**: each step has 0 or 1 successor (the step that
-  `needs` it). A DAG with parallel branches (≥2 successors) is **out-of-scope** →
-  explicit `{:error, :dag_not_supported}` (no silent choice). Same for entry:
-  exactly 1 root (`needs: []`).
-
-  ## Consumed workflow_map format
-
-  `Loader` output: `%{"name" => ..., "steps" => %{name => %{"role", "needs", "gate"?, ...}}}`.
-  String keys (the Loader normalizes v1/v2.5 to this form). `WorkflowMapNav` does not load —
-  the caller passes the already-loaded workflow_map.
-
-  **Last revised**: 2026-07-20
+  The supported graph is linear: exactly one root and at most one successor per step. Parallel entry
+  or successors fail explicitly. A soft gate on a business step is valid and does not imply a
+  gatekeeper-named step.
   """
 
   @type workflow_map :: %{required(String.t()) => any()}
@@ -95,22 +71,13 @@ defmodule Fleet.Pilot.WorkflowMapNav do
     end
   end
 
-  # No "explicit-step" guardrail (soft⟺gatekeeper biconditional): a `soft` gate
-  # on a business step is legitimate — it dispatches the gatekeeper (exception judge), it does
-  # NOT designate a `role: gatekeeper` step. There is no gatekeeper step, so nothing to
-  # validate. cf. `StepRunConsumer.gate_decide`.
-
-  # ── internals ──
   defp steps(workflow_map), do: Map.get(workflow_map, "steps", %{})
   defp needs(spec), do: Map.get(spec, "needs", [])
   defp role(spec), do: Map.get(spec, "role")
 
   @doc """
-  PROTECTED loading of a workflow_map — SINGLE authority for the rescue of `load!` (shared by
-  StepDispatcher/Poller/StepRunConsumer: one tag, never divergent per-caller
-  wrappers). `loader` = module (`load!/1`) or 1-arity function (test seams for both forms).
-  `{:ok, map}` | `{:error, {:workflow_map_load_failed, name, message}}` — unified tag; the WHY
-  of the failure (map removed from catalogue, broken schema) is in `message`.
+  Loads through a module or unary function and normalizes exceptions into
+  `{:error, {:workflow_map_load_failed, name, message}}`.
   """
   @spec safe_load(module() | (String.t() -> map()), String.t()) ::
           {:ok, map()} | {:error, {:workflow_map_load_failed, String.t(), String.t()}}

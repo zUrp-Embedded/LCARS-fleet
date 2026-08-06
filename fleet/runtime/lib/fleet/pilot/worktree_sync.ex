@@ -1,37 +1,8 @@
 defmodule Fleet.Pilot.WorktreeSync do
   @moduledoc """
-  Projection of the deliverable onto the local clone after merge — dedicated serializer.
-
-  On the terminal merge of a PR (`Fleet.Pilot.GatekeeperSeal.seal_and_merge`), `origin/main` advances on the
-  forge, but the local clone `/home/projects/<name>` (the `main` worktree, designated "the deliverable" by
-  `Fleet.Pilot.ProjectOnboard`) does not follow on its own: it stays frozen at onboarding. This module aligns it
-  — `git fetch origin main` then `git reset --hard origin/main`.
-
-  ## Why a process (Iron Law): the SERIALIZATION
-
-  The merge has TWO triggers that can run at the same time:
-
-    * the poller (`Fleet.Pilot.StepDispatcher.promote_pr`), mono-process;
-    * the StepRunConsumer (`Fleet.Pilot.StepRunCompleter.promote`), **offloaded into a `Task`**.
-
-  Two simultaneous `reset --hard` on the SAME worktree corrupt the index (`index.lock`). Resting
-  safety on the "1 active pipeline/repo" lease would be praying against the race: that lease is a
-  LOGICAL invariant of the poller (the code itself says "no lock, mono-process poller"), not a physical lock
-  on disk. This GenServer closes the race by construction: it handles one message at a time → one `git`
-  at a time, whatever the number of triggers.
-
-  ## Fast-path mirror — the truth lives on the forge
-
-  `sync/2` is a **cast**: the merge does not wait for it (hot-path intact) and the deliverable is already on the
-  forge — the local clone is a MIRROR; a failed alignment is only a disk behind, never a loss, and is
-  logged warning by `log_result`. The alignment is **convergent and idempotent**: `reset --hard origin/main`
-  re-derives the FULL state (absolute, not incremental) — the next sync (every later merge casts one, or a
-  manual `sync_now/2`) brings back the LATEST `main`, no matter how many merges happened between the cast
-  and its handling, and heals any previously missed alignment. We don't try to match a precise merge: we
-  want "clone == latest `main`". The timing with the merges therefore has no functional importance —
-  that's what makes the non-coalescence inconsequential (the lease already spaces out the merges of a same repo).
-
-  **Last revised**: 2026-08-02
+  Serializes post-merge projection onto local worktrees. Code-face mirrors reset
+  to forge `main`; writer-owned ops faces rebase with autostash. Async requests
+  converge on the latest remote state and failures remain retryable.
   """
 
   use GenServer
@@ -40,7 +11,6 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   alias Fleet.Pilot.GitOps
 
-  # Derives from the single authority of the container layout (Fleet.Layout).
   @projects_root Fleet.Layout.projects_root()
 
   def start_link(opts \\ []) do
@@ -48,23 +18,7 @@ defmodule Fleet.Pilot.WorktreeSync do
   end
 
   @doc """
-  Requests (async cast, serialized) the alignment of the worktree of `branch`'s FACE for `repo`.
-  The branch names the face (chantier face-projet), and the face names BOTH the worktree and the
-  alignment semantics — they are not symmetric (inventory §C):
-
-    * code face (`main`) → `<projects_root>/<name>`, `fetch` + `reset --hard`: that worktree is a
-      read-only showcase, nothing local to preserve;
-    * ops face (`work/ops`) → `<work_root>/<name>`, `fetch` + `rebase --autostash FETCH_HEAD`: the
-      host ops worktree is a WRITER (OpsObject commits briefs there, the arch writes its docs, a
-      human their journals) — a `reset --hard` would DESTROY local commits not yet pushed. The
-      rebase replays them on top of the merged deliverable; `--autostash` carries uncommitted
-      edits across; a conflicted rebase is aborted (worktree left usable) and logged LOUD — that
-      divergence needs a human, not a guess.
-
-  A failure is logged warning and heals at the next sync; the truth stays on the forge.
-  The `branch` is REQUIRED — the caller (the seal) knows what the PR merged into; a default here
-  would re-decide the face downstream (single-default-site doctrine). A branch that is neither
-  face is refused loud: a fleet PR only ever merges into a face.
+  Requests serialized alignment of the repository worktree selected by `branch`.
   """
   @spec sync(GenServer.server(), String.t(), String.t()) :: :ok
   def sync(server \\ __MODULE__, repo, branch), do: GenServer.cast(server, {:sync, repo, branch})
@@ -83,8 +37,6 @@ defmodule Fleet.Pilot.WorktreeSync do
      }}
   end
 
-  # cast (prod) and call (blocking / tests) share `do_sync`. The GenServer handles one message at a time
-  # → the alignments are serialized, never two concurrent `git` on the same worktree.
   @impl GenServer
   def handle_cast({:sync, repo, branch}, state) do
     _ = do_sync(repo, branch, state)
@@ -97,7 +49,6 @@ defmodule Fleet.Pilot.WorktreeSync do
   end
 
   defp do_sync(repo, branch, state) do
-    # The forge repo is `<org>/<name>`; the face worktree lives under `<face root>/<name>`.
     name = Fleet.Layout.project_name(repo)
 
     {dir, aligner} =

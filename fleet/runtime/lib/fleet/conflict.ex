@@ -114,8 +114,7 @@ defmodule Fleet.Conflict do
 
   defp rank(label), do: Map.fetch!(@confidence_rank, label)
 
-  # Restores the conflict block verbatim (diff3 shape when a base is present) so an unresolved hunk
-  # goes back to the working tree exactly as git would leave it.
+  # Restore unresolved hunks in git's diff2/diff3 marker shape.
   defp restore_markers(hunk) do
     base = if hunk.base_lines != [], do: ["||||||| base" | hunk.base_lines], else: []
 
@@ -123,14 +122,7 @@ defmodule Fleet.Conflict do
       base ++ ["=======" | hunk.theirs_lines] ++ [">>>>>>> theirs"]
   end
 
-  # `trivial` = hunks classified as a resolvable type; `complex` = the residual that needs a human
-  # or the producer. Classification-based, not resolution-based: a resolvable type kept below the
-  # confidence floor still counts trivial (it is recoverable, just not at this threshold).
-  #
-  # `writable` is the STRICTER count: hunks the machine may resolve on its own (cf. `@writable_types`).
-  # Reported separately because the two answer different questions -- "is this shallow?" routes the
-  # tier, "may we write it?" authorizes the disk. Collapsing them is what let a format assumption
-  # reach a worktree.
+  # Trivial routes work; writable separately authorizes disk mutation.
   defp stats(hunks) do
     complex = Enum.count(hunks, &(&1.type == :complex))
     total = length(hunks)

@@ -1,29 +1,8 @@
 defmodule Fleet.Pilot.ConflictProbe do
   @moduledoc """
-  Produces the conflict-marked content of a would-be merge and runs it through the deterministic
-  classifier (`Fleet.Conflict`) -- the impure half of the tier-0 diagnosis. The runtime holds the
-  forge token and a local clone; the pod does not, so the probe lives here, not in the pod.
-
-  ## Two audit scars, avoided by construction
-
-    * `git show <ref>:<path>` is read via `Credentials.Shell.git` (NOT `GitOps.read`, which TRIMS):
-      a trimmed blob loses its trailing newline and turns an end-of-file conflict into a phantom
-      clean merge.
-    * `git merge-file` exits non-zero (exit = conflict count) WITH the marked content on stdout;
-      `Shell.git` returns `{out, code}` so we keep the content regardless of the code.
-
-  ## Non-intrusive
-
-  Everything runs against the object store (`fetch` into a throwaway ref, `merge-base`, `show`,
-  `merge-file` on temp files) -- the local clone's working tree is never touched, so there is no
-  race with `WorktreeSync`'s `reset --hard`. The probe ref is deleted afterwards.
-
-  ## Fail-safe
-
-  `probe/3` returns `{:error, reason}` on any git failure; the caller (`Remediation`) falls back to
-  the current behaviour. The probe only ever SHORTENS a path, never breaks one.
-
-  **Last revised**: 2026-08-02
+  Impure tier-0 conflict probe. It preserves raw blob bytes and nonzero
+  `merge-file` output, operates only on object-store refs and temporary files,
+  and returns an error on any uncertainty so remediation can fall back safely.
   """
 
   alias Fleet.Conflict

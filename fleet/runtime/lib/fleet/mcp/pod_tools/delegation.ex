@@ -168,10 +168,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       end
     else
       {:error, :role_token_unavailable} = err ->
-        # Pod proven but role token not found on disk = provisioning hole (the role account has no
-        # token). We REFUSE rather than post under the system account (fail-closed): posting as system
-        # would mask traceability (who delegated?) and bypass least-privilege. SHARED policy with pilot
-        # (`ForgeClient.as_role`) via the `Fleet.Credentials.RoleIdentity` smart-constructor (single source).
         Logger.warning(
           "Delegation: create_issue REFUSED: calling role's token not found (incomplete provisioning) — " <>
             "no system-account fallback"
@@ -180,39 +176,23 @@ defmodule Fleet.MCP.PodTools.Delegation do
         err
 
       {:error, reason} ->
-        # Non-architect role, or pod unknown to the registry → we create NOTHING.
         {:error, reason}
     end
   end
 
   @doc """
-  Starts a fresh project (forge repo + dual-worktree `main`/`work/ops` + scaffold +
-  push) — onboarder gate (starfleet/architect) applied BEFORE any repo creation or disk write.
-
-  The SYSTEM runs the mechanics via the `:project_onboard` seam (default
-  `Fleet.Pilot.ProjectOnboard`, runtime dispatch). The created repo is RETURNED in the
-  result (`repo`/`delegation_target`): the arch retrieves it and passes it explicitly
-  to `create_issue`/`issue_status`. No global memory of a "current project" — the
-  repo travels by argument.
+  Creates a project through the onboarding seam after the server-side gate.
   """
   @spec create_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def create_project(name, args, state) when is_binary(name) and is_map(args) do
-    # Fail-closed: no onboarder (starfleet/architect) = no project.
     case require_onboarder(state) do
       {:error, reason} -> {:error, reason}
-      # B-03: the ACTUAL onboarder role is threaded to `declared_by` (honest — was hardcoded
-      # "architect" even when starfleet onboarded).
       {:ok, role} -> do_create_project(name, args, role)
     end
   end
 
   @doc """
-  Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — dual-worktree
-  `main`/`work/ops` + forge-enforced gate, WITHOUT creating nor scaffolding `main` (the repo
-  content stays intact — that is the whole point). Onboarder gate (starfleet/architect) BEFORE
-  any disk write, same mechanics as `create_project`. Preconditions (repo already in the org, default branch `main`)
-  are checked by `ProjectOnboard.import/2` — a precondition failure returns an explicit
-  `{:error, ...}`.
+  Imports an existing project through the onboarding seam without scaffolding its main content.
   """
   @spec import_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def import_project(full_name, state) when is_binary(full_name) do
@@ -333,23 +313,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # `outcome` — the ONE tracking verdict; every value is PROVABLE from the forge reads:
-  #   "merged"               — closed BY A MERGE. F-C047: `closed` ALONE would conflate a real
-  #                            delivery with a NON-delivery closure (onboarding marker
-  #                            `[lcars-onboarded]` / manual close) → the arch chains N+1 on an
-  #                            ABANDONED brick. We prove the merge via the `stage/merged` label
-  #                            (WS1, set by the gatekeeper seal AT MERGE) OR — CI-06, audit integrite
-  #                            2026-07-20 — the AUTHORITATIVE merged PR itself: a closed issue with a
-  #                            MERGED fleet PR is a delivery even if the label was lost (the seal's
-  #                            projection can fail; it is now retried too). Never a false-positive (a
-  #                            merged fleet PR IS a delivery), and the arch no longer waits forever on a
-  #                            merged brick whose label slipped.
-  #   "closed_without_merge" — closed WITHOUT the merge proof: abandon/rejection/manual close.
-  #   "in_review"            — open with a LIVE fleet PR (a matched-but-closed PR — cancelled
-  #                            attempt — is NOT a review in progress: back to "open").
-  #   "open"                 — open, no live PR. Also the honest FLOOR when the PR read failed
-  #                            (the `pr` error object carries the degradation): both mean "wait".
-  #   "unknown"              — the issue read itself failed (a mute forge is not a state).
+  # F-C047 / CI-06: merged requires the seal label or an explicitly merged fleet PR.
   defp outcome("unknown", _labels, _pr), do: "unknown"
 
   defp outcome("closed", labels, pr),
@@ -358,18 +322,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp outcome(_open, _labels, {:ok, %{"state" => "open"}}), do: "in_review"
   defp outcome(_open, _labels, _none_error_or_closed_pr), do: "open"
 
-  # CI-06 — the authoritative delivery proof: a MERGED fleet PR. `pr` = `issue_pr_status/3`'s result
-  # (`{:ok, render_pr}` | `:none` | `{:error, _}`); only an explicit `"merged" => true` counts (never a
-  # merely-closed PR → no false-positive on an abandoned brick).
   defp pr_merged?({:ok, %{"merged" => true}}), do: true
   defp pr_merged?(_), do: false
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
 
-  # One JSON shape per meaning: a real PR → object; nothing to say (no fleet PR) → NO key;
-  # a mute forge → {"error": "forge_unreachable"} — "we do not know" must never read as
-  # "there is none" (two agents burned an investigation each on the old polysemous null).
+  # Absence and forge uncertainty retain distinct JSON shapes.
   defp put_pr(map, {:ok, pr}), do: Map.put(map, "pr", pr)
   defp put_pr(map, :none), do: map
 
@@ -416,10 +375,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {cards, unreadable} =
         Enum.reduce(names, {[], []}, fn name, {ok, bad} ->
           case read_card(name) do
-            # Framing catalogue = CANON cards only. A smoke/demo card (status resolved by the
-            # Loader, absent = canon) is technical machinery — presenting it here made the arch
-            # able to frame a real project onto a chain-validation card; the "Carte TECHNIQUE"
-            # prose was the only rampart. It stays loadable by NAME (dispatch/tests unaffected).
             {:ok, %{"status" => "canon"} = card} -> {[card | ok], bad}
             {:ok, _technical} -> {ok, bad}
             :error -> {ok, ["#{name}.yaml" | bad]}
@@ -435,8 +390,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The Loader's guard enumeration raises (boot-guard contract, missing root vs empty catalogue
-  # distinguished); this frontier converts it to a tool error the architect SEES and escalates.
   defp catalogue_names do
     {:ok, Fleet.Workflow.Loader.canon_names!()}
   rescue
@@ -457,8 +410,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
        "steps" => card["steps"] |> Map.keys() |> Enum.sort()
      }}
   rescue
-    # Per-card rescue: one broken card must not kill the listing — skipped LOUD, and the
-    # name lands in `unreadable` so the catalogue never lies silently.
     e ->
       Logger.warning(
         "Delegation: workflow card #{name} does not load (#{Exception.message(e)}) — " <>
@@ -469,17 +420,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Lists the escalations awaiting the architect's arbitration: the issues carrying `lcars-awaits-arch`
-  (a worker hit `escalate_user` and handed the decision back). For each: `repo`, `number`, `title`,
-  and `verdict` (the escalation comment — the WHY). Read-only, architect gate. The wake ("ton tour")
-  only signals THAT there is work; THIS reads WHAT. Scans the delegation org, scoped to the fleet's
-  human; a single unreadable repo is logged LOUD and SKIPPED (partial inbox), never blinding the list.
+  Lists the current project's `lcars-awaits-arch` issues for architect arbitration.
   """
   @spec list_escalations(map()) :: {:ok, map()} | {:error, term()}
   def list_escalations(state) do
-    # PER-PROJECT inbox (reorg 2026-07-19): the arch reads ITS project's awaits-arch issues only —
-    # the repo comes from the gate (spawn binding), and the old org-wide scan is GONE (an arch that
-    # scanned every repo was the fleet-level head; a single-repo read is all that remains).
     with {:ok, %{repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_escalation_forge(),
          {:ok, escalations} <- collect_awaits_arch(forge, repo, escalation_human()) do
@@ -488,11 +432,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Lists the OPEN issues of the architect's project — the situation board (BL-6-28: the arch had a
-  full forge WRITE channel and no way to enumerate its own tickets — a human opening an issue was
-  invisible to it). Read-only, architect gate; the repo comes from the CHANNEL BINDING, never a
-  wire argument. Same loud-or-nothing stance as `list_escalations`: an unreadable repo is an
-  ERROR, never a silent empty board (empty and broken must stay distinguishable).
+  Lists the current project's open issue board. An unreadable forge is an error, not an empty board.
   """
   @spec list_issues(map()) :: {:ok, map()} | {:error, term()}
   def list_issues(state) do
@@ -514,8 +454,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Axiom (reorg 2026-07-19): no "repo" in the entry — the arch has "the project". Labels are
-  # NAMES only (the `stage/*` / `genre/*` markers carry the pipeline state the arch reads).
   defp issue_entry(issue) do
     %{
       "number" => Map.get(issue, "number"),
@@ -532,12 +470,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Reads ONE issue of the architect's project in FULL — body + comment thread, oldest first
-  (BL-6-28: the arch could WRITE into conversations it could not READ; `issue_status` renders a
-  tracking VERDICT, this renders the CONVERSATION). Read-only, architect gate, repo from the
-  binding. The ISSUE read failing is a typed ERROR (a mute forge is not an empty ticket); the
-  THREAD read failing degrades LOUD — body still returned, `comments` key ABSENT and
-  `comments_error` set (an unreadable thread must never render as an empty one).
+  Reads one issue body and thread. A thread outage omits `comments` and sets `comments_error`.
   """
   @spec get_issue(integer(), map()) :: {:ok, map()} | {:error, term()}
   def get_issue(number, state) when is_integer(number) do
@@ -567,9 +500,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # One meaning per shape (same doctrine as put_pr/2): a READ thread is a list (possibly empty),
-  # an UNREADABLE thread is NO `comments` key + `comments_error` — the arch must never read an
-  # outage as "nobody answered".
   defp put_thread(base, forge, repo, number) do
     case forge.list_comments(repo, number, []) do
       {:ok, comments} when is_list(comments) ->
@@ -585,7 +515,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # `author`/`created_at` via put_present: absent when the forge map lacks them, never null.
   defp comment_entry(c) when is_map(c) do
     %{"body" => Map.get(c, "body")}
     |> put_present("author", get_in(c, ["user", "login"]))
@@ -595,31 +524,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp comment_entry(_), do: %{"body" => nil}
 
   @doc """
-  Posts a comment on issue `number` of `repo` IN THE ARCHITECT'S OWN NAME (the role account's token,
-  like `create_issue`) — the arch's reply on a ticket in flight (typically an escalation). Architect
-  gate; `:role_token_unavailable` REFUSES rather than posting under the system account (traceability +
-  least-privilege, same policy as `create_issue`).
+  Posts an architect-owned issue comment; unavailable role credentials refuse without system fallback.
   """
   @spec comment_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def comment_issue(number, body, state)
       when is_integer(number) and is_binary(body) do
-    # Gate (identity) FIRST, before validating the seam or touching the forge — an unauthorized caller
-    # must be refused on identity, not leak a seam/mechanics error (and the gate test relies on this
-    # order). The repo comes from the gate (spawn binding) — no wire param, no repo in the result.
     with {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, forge} <- conforming_escalation_forge(),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
-      # Convergent by READBACK, the same shape `create_issue` uses — and for the same reason: the
-      # stdio bridge times a mutation out at 30s while the forge POST completes, the agent re-emits,
-      # and the forge enforces no uniqueness on comments, so a bare re-post DUPLICATES. Dedup cannot
-      # live in the in-memory memoize alone: that one is volatile (a runner that dies after the POST
-      # and before publishing releases its key) and time-boxed, so it lets the duplicate through on
-      # exactly the crash it exists to cover. The marker is DURABLE — it lives in the artifact, so
-      # the readback answers the only question that matters: did THIS act already land?
-      # KNOWN COST, deliberate and identical to create_issue's: identity is content-derived, so two
-      # INTENTIONALLY identical comments on the same issue collapse into one. Indistinguishable from
-      # a retry by construction without client cooperation, which this layer refuses on doctrine
-      # (a critical property is never a prompt instruction to "resend the same id").
+      # Durable marker readback converges bridge retries; intentionally identical comments collapse.
       marker = comment_op_marker(number, body)
 
       case find_comment_with_marker(forge, repo, number, marker) do
@@ -648,16 +561,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The forge/onboard seams are DUCK-TYPED: fleet_mcp cannot adopt the `@behaviour` (an
-  # fleet_mcp→fleet_pilot compile edge would be UPWARD-forbidden), so the compiler cannot check that the
-  # resolved module conforms. A misconfigured seam (a module missing a callback) would `apply/3`-crash
-  # with an obscure UndefinedFunctionError deep in the delegation. Guard at resolution → a CLEAR
-  # `{:error, {:seam_misconfigured, mod, missing}}` (R2-05, same shape as the spawner's R1-23 guard).
+  # Runtime seams are duck-typed; resolve missing callbacks as a typed error before dispatch.
   defp conforming_forge, do: conforming(ForgeClient, ForgeClient.resolved())
   defp conforming_onboard, do: conforming(ProjectOnboard, ProjectOnboard.resolved())
 
   defp conforming(behaviour, impl) do
-    # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
     _ = Code.ensure_loaded(impl)
 
     missing =
@@ -668,21 +576,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
     if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
   end
 
-  # Escalation-inbox seam (arch's read/reply path): its 4 forge ops are NOT in the delegation ForgeClient
-  # behaviour, and adding them there would cascade onto every DELEGATION stub (StubForge/RecordingForge)
-  # → their create_issue-only tests would break. DR-012: rather than a hidden ad-hoc `function_exported?`
-  # list (a SECOND contract next to the official behaviour), the escalation contract is a DECLARED
-  # behaviour `EscalationForge` — checked by the SAME `conforming/2` guard (single inspectable surface).
   defp conforming_escalation_forge,
     do: conforming(EscalationForge, EscalationForge.resolved())
 
-  # SSOT `Fleet.Labels.awaits_arch/0` (foundation, both domains depend on it) — no drifting literal.
   @awaits_arch_label Fleet.Labels.awaits_arch()
 
-  # The awaits-arch issues of the arch's ONE repo (scoped to the human), mapped to escalation entries.
-  # The inbox is single-repo: an unreadable repo IS an unreadable inbox → surfaced as
-  # `{:error, {:inbox_unreadable, ...}}`, NEVER a silent `[]` the arch would read as "nothing to do"
-  # (that indistinguishability between empty and broken is the bug this returns an error to close).
   @spec collect_awaits_arch(module(), String.t(), String.t()) ::
           {:ok, [map()]} | {:error, {:inbox_unreadable, String.t(), term()}}
   defp collect_awaits_arch(forge, repo, human) do
@@ -713,7 +611,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp escalation_entry(forge, repo, issue) do
     number = Map.get(issue, "number")
 
-    # Axiom (reorg 2026-07-19): no "repo" in the entry — the arch's inbox is ITS project's.
     %{
       "number" => number,
       "title" => Map.get(issue, "title"),
@@ -721,8 +618,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     }
   end
 
-  # The escalation VERDICT = the most recent comment (the worker's escalate_user body, posted LAST by
-  # StepRunCompleter). Return its body; nil if unreadable (LOUD) — the arch still sees the ticket + ID.
   defp latest_verdict(_forge, _repo, number) when not is_integer(number), do: nil
 
   defp latest_verdict(forge, repo, number) do
@@ -741,11 +636,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # SAME org authority as `do_create_project` / the poller's discovery (`:fleet_pilot, :fleet_org`) —
-  # an inbox scanning an org the fleet never onboards into would be a dead read. `:delegation_org` is
-  # the explicit override, both default `fleet`.
-  # (escalation_org/0 removed with the org-wide scan — reorg 2026-07-19: the arch's inbox is
-  # single-repo, resolved from its spawn binding.)
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 
   # ============================================================
@@ -860,9 +750,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
              }
            }}
 
-        # Preserve the TYPED reason (do NOT flatten): the caller must distinguish
-        # `{:force_required, _}` (pass `force: true` to confirm the destruction) from
-        # `{:forge_check_failed, _}` (forge down, retry) — a destructive op's most useful signal.
+        # Preserve typed destructive-operation errors (`:force_required` versus forge outage).
         {:error, _reason} = err ->
           err
       end
@@ -870,11 +758,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  ADOPTS a disk-only project (BL-6-32) — onboarder gate (portfolio head). The mechanics live
-  pilot-side (`adopt_project` seam callback); the criticality declaration is RELAYED like
-  `create_project`'s (nil entries = undeclared → honest C0 default, never fabricated). Typed
-  errors pass through unflattened (`{:not_adoptable, _}`, `{:origin_conflict, _}`,
-  `{:repo_already_exists, _}` — the caller must tell "wrong verb" from "broken state").
+  Adopts a disk-only project through the onboarder seam (BL-6-32).
+
+  Criticality is relayed unchanged; typed adoption errors pass through.
   """
   @spec adopt_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def adopt_project(name, args, state) when is_binary(name) and is_map(args) do
@@ -961,10 +847,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  CLOSES a project (BL-6-30) — onboarder gate (portfolio head, like open/delete). The mechanics
-  live pilot-side (`close_project` seam callback): parked marker issue posted (the forge object
-  the poller respects), then the architect stops best-effort. Typed errors pass through
-  unflattened (`{:not_on_machine, _}`, `{:identity_unproven, _}`, `{:close_failed, _}`).
+  Closes a project through the onboarder seam (BL-6-30).
+
+  The pilot posts the marker respected by the poller, then stops the architect best-effort.
   """
   @spec close_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def close_project(full_name, state) when is_binary(full_name) do
@@ -1004,13 +889,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  REVISES an EXISTING project's validation card (BL-6-29: the card was engraved at onboarding
-  with no revision path) — onboarder gate (the card is a PORTFOLIO declaration, same head as
-  create/import; the human chooses from the catalogue, the agent advises). The mechanics live
-  pilot-side (`revise_card` seam callback): committed `intensity.json` on `main` via a scoped
-  protection lift, protection re-sized on the new card's jury. Typed errors pass through
-  UNFLATTENED (`{:unknown_card, _}`, `:justification_required`, `{:card_push_failed, _}` — the
-  caller must distinguish a typo from a forge outage).
+  Revises an existing project's validation card through the onboarder seam (BL-6-29).
+
+  Typed card errors pass through unchanged.
   """
   @spec revise_project_card(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def revise_project_card(full_name, args, state)
@@ -1062,10 +943,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
-  2026-07-19: create / import / **open**), onboarding gate applied. No forge/disk write: the
-  seam verifies the dual-dir exists and ensures the project's per-project architect
-  (idempotent — THE human-driven path back to a project after a fleet restart).
+  Reopens an existing local project and ensures its per-project architect.
   """
   @spec open_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def open_project(full_name, state) when is_binary(full_name) do
@@ -1095,9 +973,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # HONEST reporting of the per-project architect ensure (reorg 2026-07-19): the caller (starfleet)
-  # must be able to tell the human whether the project's arch is up — never silently dropped.
-  # `Map.get` tolerant: a test stub returning only the 3 contract keys stays valid.
+  # Report a present architect without requiring test seams to return it.
   defp put_architect(rendered, result) do
     case Map.get(result, :architect) do
       %{status: status} = arch ->
@@ -1118,15 +994,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # summary + pointer line, or the inline brief untouched (both channels honest, same downstream).
-  # Pointer resolution for the ticket body. Manual path (the arch authored+committed the
-  # doc itself): `brief` IS the human summary, unchanged. Inline path: the brief is
-  # materialized into work/ops (`briefs/<sanitized-title>.md` — same doc re-titled =
-  # same ref, git history IS the version ledger) and the ticket carries the dedicated
-  # `summary` (or an honest excerpt) + the pinned pointer. Degraded materialization
-  # (no work/ops yet, git failure — physicalize logged LOUD) → full inline body, the
-  # exact legacy behavior: absence recorded, never a wall.
-  # `:brief_work_root` app-env = test seam (threads physicalize's `:work_root`).
+  # A supplied pointer keeps its summary; failed materialization keeps the inline brief.
   defp ensure_pointer(_repo, _title, brief, {_ref, _sha} = pointer, summary),
     do: {summary || brief, pointer}
 
@@ -1151,8 +1019,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Fallback when no dedicated summary was given: the first lines, honestly marked as an
-  # excerpt (FR: rendered to the human on the forge).
+  # Forge-facing excerpt when no dedicated summary was supplied.
   defp excerpt(brief) do
     lines = String.split(brief, "\n")
     head = lines |> Enum.take(6) |> Enum.join("\n") |> String.trim_trailing()
@@ -1167,19 +1034,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp with_pointer(brief, {ref, sha}),
     do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
-  # Filiation trailer — written INTO the source of truth (the issue body on the forge), never a
-  # side-channel: "#9 refait #5" must survive every session (arch doctrine: protocol-carried
-  # correlation, not memory). FR: forge content rendered to the human.
+  # Forge body carries supersession correlation across sessions.
   defp with_supersedes(body, nil), do: body
 
   defp with_supersedes(body, n),
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
-  # Idempotency marker — content-derived signature of the delegation ACT (the inputs a retry
-  # repeats verbatim: title, brief, summary, supersedes, pointer). Deterministic on this VM (same
-  # term → same binary → same digest), so a re-emitted tool call yields the SAME marker. An HTML
-  # comment: invisible in the rendered issue but present in the raw body the readback greps. Mirror
-  # of the incident marker (`lcars-incident:<sig>`), same wire idiom.
+  # Retry-stable marker in the raw, non-rendered issue body.
   defp op_marker(title, brief, summary, supersedes, brief_pointer) do
     sig =
       :crypto.hash(
@@ -1194,8 +1055,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp with_op_marker(body, marker), do: body <> "\n" <> marker
 
-  # The comment act's logical identity: which issue, which text. Same `<!-- lcars-op:… -->` shape as
-  # the issue marker (one vocabulary for one mechanism), keyed on what a re-emit reproduces exactly.
+  # Retry-stable marker for a comment's issue and body.
   defp comment_op_marker(number, body) do
     sig =
       :crypto.hash(:sha256, :erlang.term_to_binary({:comment, number, body}))
@@ -1205,9 +1065,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     "<!-- lcars-op:#{sig} -->"
   end
 
-  # Readback for the comment marker. FAIL-SAFE like its issue twin, and for the same reason: a
-  # transient forge blip must not swallow the arch's reply on a ticket in flight. A rare duplicate
-  # comment beats an answer that never lands — so an unreadable list logs and falls through to post.
+  # A failed readback falls through: posting beats silently dropping a reply.
   defp find_comment_with_marker(forge, repo, number, marker) do
     case forge.list_comments(repo, number, []) do
       {:ok, comments} ->
@@ -1226,10 +1084,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Readback for the idempotency marker: an OPEN issue of the repo whose raw body carries `marker`.
-  # A failed list is FAIL-SAFE — we do NOT block a legitimate first delegation on a transient forge
-  # blip; the dedup is best-effort over today's bare-create baseline, so we log and fall through to
-  # create (a rare duplicate beats a delegation the arch cannot place at all).
+  # Best-effort idempotency: a failed readback falls through to creation.
   defp find_open_issue_with_marker(forge, repo, marker) do
     case forge.list_open_issues(repo, []) do
       {:ok, issues} ->
@@ -1250,9 +1105,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Same shape as `do_create_issue`'s success (the arch chains on issue+title), tagged `idempotent`
-  # so the reuse is honest on the wire. Assignee is echoed from the found issue (defensive extraction
-  # across Gitea's `assignees`/`assignee` shapes), not re-resolved.
+  # Reused issues expose their stored assignee and an explicit idempotency flag.
   defp idempotent_result(issue) do
     %{
       "status" => "issue_created",
@@ -1830,21 +1683,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Places the issue (author = role account via `author_opts`, assignee = human owner) and its visual label.
+  # Creates as the role and assigns the human owner.
   defp do_create_issue(forge, repo, title, brief, author_opts, genre) do
-    # assignee = the HUMAN owner (fixed point: routing + ownership, never the role). Forge login
-    # = OS login of the human who launches the fleet (doctrine: everything derives from the OS, no catalogue;
-    # Gitea matches the assignee case-insensitively → `starfleet` resolves `Starfleet`). No label:
-    # the producer role is an invariant on the poller side, not a per-issue sticker.
+    # Human ownership is distinct from the producing role.
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        # GENRE (chantier face-projet): "ops" = a documentary ticket — the burn routes it to the
-        # ops card off the `genre/ops` label. The label rides the CREATE call (resolved to its id
-        # here), never a post-create add: a poller tick between the two would burn the PROJECT
-        # card and send an ops brief down the code path. An unseeded label is SURFACED (the repo
-        # missed ensure_protocol_labels), never a silently code-routed ops ticket.
+        # Put the ops label on create so polling cannot route an unlabeled ops issue as project work.
         issue_opts_result =
           case genre do
             "ops" ->
@@ -1892,11 +1738,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The fleet PR of issue #n across ALL states (open + merged/closed): the review trail must
-  # SURVIVE the merge (before this, the `state=open` read made the PR vanish from the result at
-  # delivery — and two agents each burned an investigation on that polysemous null). Returns
-  # `{:ok, map}`, `:none` (no fleet PR), or `{:error, :forge_unreachable}` (the read failed —
-  # distinct from :none by design, cf. put_pr/2).
+  # Reads the issue PR across open, closed, and merged states.
   defp issue_pr_status(forge, repo, number) do
     case find_issue_pr(forge, repo, number) do
       {:ok, pr} -> {:ok, render_pr(forge, repo, pr)}
@@ -1904,24 +1746,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # The fleet PR of issue #n (raw Gitea map) — SHARED by the status read (then rendered) and the
-  # supersede pre-flight (then state-checked). The PR of issue #n = the one whose head is the
-  # feature-branch `lcars/issue-<n>-<role>`. Parsing this format is delegated to the SINGLE
-  # AUTHORITY `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1` (co-located with its builder
-  # `feature_branch/2`) instead of rebuilding the prefix by hand: a format change happens in
-  # ForgeProtocol alone. We reach it via the INJECTED `forge` (resolved runtime, default
-  # `Fleet.Pilot.ForgeClient`, which re-exports `parse_feature_branch` to ForgeProtocol) — so no
-  # compile-time dep from fleet_mcp to fleet_pilot (that is why we keep the call via the seam
-  # rather than a direct call to ForgeProtocol, which would create that dependency).
+  # Uses the injected forge seam's single-authority feature-branch parser.
   defp find_issue_pr(forge, repo, number) do
     case forge.list_pulls(repo, []) do
       {:ok, pulls} ->
-        # C-05: the parse of the Fleet feature-branch already goes through the SINGLE AUTHORITY
-        # (`forge.parse_feature_branch` seam → ForgeProtocol) — so the correlation is NOT duplicated
-        # logic, only a 3-line loop shape. We keep it LOCAL rather than extend the forge seam with the
-        # selector (that would force EVERY forge stub, present and future, to implement it). The two
-        # in-Pilot correlations converge on `ForgeProtocol.fleet_prs_by_issue`; this MCP-side one keeps
-        # its own state/merged-fallback policy over the single-authority parse.
+        # C-05: parsing remains delegated; this seam owns only selection and merged fallback.
         pulls
         |> Enum.filter(fn pr ->
           head = get_in(pr, ["head", "ref"]) || ""
@@ -1933,8 +1762,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           pr -> {:ok, pr}
         end
 
-      # LOUD + typed: the callers must never read a swallowed outage as "no fleet PR for this
-      # issue" (status renders {"error": "forge_unreachable"}, the preflight REFUSES).
+      # Preserve forge outage as distinct from no PR.
       err ->
         Logger.warning(
           "Delegation: find_issue_pr #{repo}##{number} forge unreachable (list_pulls → " <>
@@ -1945,11 +1773,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Post-merge fallback (live 2026-07-19, Gitea 1.26.4): a merged PR whose head branch was
-  # deleted gets its `head.ref` REWRITTEN to `refs/pull/N/head` — the branch scan above cannot
-  # match it ("Gitea keeps head.ref like GitHub" was plausible-and-false; the real forge
-  # decided). The PROTOCOL carries the correlation instead: the gatekeeper seal posts a signed
-  # `[merge:pr-N]` marker on the issue at merge — read it, fetch the PR directly.
+  # Gitea 1.26.4 (live 2026-07-19) rewrites a deleted merged head to `refs/pull/N/head`;
+  # use the issue's `[merge:pr-N]` marker to recover that PR.
   defp merged_pr_fallback(forge, repo, number) do
     case forge.merged_pr_of_issue(repo, number, []) do
       {:ok, pr} ->
@@ -1958,8 +1783,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       :none ->
         :none
 
-      # LOUD + typed (same stance as the scan): an outage on the marker read must never render
-      # as "no fleet PR" — the arch would read a delivered brick as never-built.
+      # Preserve marker-read outage as distinct from no PR.
       err ->
         Logger.warning(
           "Delegation: find_issue_pr #{repo}##{number} forge unreachable (merged_pr_of_issue → " <>
@@ -2031,22 +1855,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp review_string(:changes_requested), do: "changes_requested"
   defp review_string(:approved), do: "approved"
 
-  # ============================================================
-  # Architect gate + role resolution
-  # ============================================================
-
-  # Common gate of the four tools: resolves the role from the channel identity (`state.pod_id`)
-  # THEN requires `architect`. State without pod_id = acceptor anomaly → :pod_id_required
-  # (fail-closed, never anonymous access).
-  # DELEGATION gate — returns the arch's full channel identity `%{role, repo}`: since the 2026-07-19
-  # reorg the architect is PROJECT-BOUND and its repo comes from the SPAWN binding (pod_info `repo`,
-  # set by `ProjectArchitect.ensure`), NEVER from a wire argument — the arch has "the project", it
-  # never names it. A bound-less architect (`repo` nil — stale spawn path, forged state) is REFUSED
-  # fail-closed (`:repo_unbound`): no default, no fallback routing.
+  # Channel identity supplies role and project binding; missing or unbound identity is refused.
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
     case resolve_identity(pod_id) do
       {:ok, %{role: role} = identity} ->
-        # B-03: the DELEGATE capability (declared by the cap-profile), never `role == "architect"`.
+        # B-03: authorize the capability, never a role name.
         if role_has_capability?(role, :project_delegate) do
           case Map.get(identity, :repo) do
             repo when is_binary(repo) and repo != "" -> {:ok, %{role: role, repo: repo}}
@@ -2063,14 +1876,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp require_architect(_state), do: {:error, :pod_id_required}
 
-  # ONBOARDING gate (create_project/import_project/list_workflow_cards) — the PORTFOLIO head. Since the
-  # 2026-07-19 role reorg (cf. DESIGN-carte-des-roles §9), onboarding belongs to the `starfleet`
-  # fleet-master; the `architect` keeps it TRANSITIONALLY (it still onboards until it goes per-project,
-  # at which point it loses these tools). Same channel-identity resolution as `require_architect` — the
-  # role is read from `state.pod_id`, never the wire. A worker / nil / unknown pod → REFUSAL, fail-closed.
+  # Onboarding also resolves its capability from channel identity, never the wire.
   defp require_onboarder(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
     case resolve_identity(pod_id) do
-      # B-03: the ONBOARDER capability (declared by the cap-profile), never a magic role list.
+      # B-03: authorize the capability, never a role list.
       {:ok, %{role: role}} ->
         if role_has_capability?(role, :onboarder),
           do: {:ok, role},
@@ -2083,23 +1892,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp require_onboarder(_state), do: {:error, :pod_id_required}
 
-  # B-03 capability resolution — delegated to `Fleet.Spawner` (the domain that can load cap-profiles;
-  # `Fleet.MCP → Fleet.CapProfile` is a FORBIDDEN boundary edge, `Fleet.MCP → Fleet.Spawner` is the
-  # declared one, same as `pod_info`). A gate resolves a CAPABILITY, never a magic role name —
-  # renaming/substituting a role is a cap-profile edit, not Elixir. Fail-closed (nil/unknown → false).
+  # B-03: Spawner owns cap-profile lookup; unknown identities have no capability.
   defp role_has_capability?(role, cap) when is_binary(role) and role != "",
     do: Fleet.Spawner.role_has_capability?(role, cap)
 
   defp role_has_capability?(_role, _cap), do: false
 
-  # The CHANNEL IDENTITY (role + repo binding) is burned in at SPAWN and read from the Spawner
-  # registry (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test
-  # seam `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role, ...}}` |
-  # `{:error, _}` — `repo` optional in the map (the delegation gate refuses its absence; the
-  # onboarding gate ignores it). Default = DIRECT call to `Fleet.Spawner.pod_info/1` — the dep is
-  # DECLARED (boundary Fleet.MCP → Fleet.Spawner, downward): the boundary compiler carries this
-  # edge, no `apply` indirection needed. Unknown pod / Spawner unavailable → `:pod_unknown`
-  # (fail-closed).
+  # Spawn-bound identity comes from Spawner; unknown identity fails closed.
   defp resolve_identity(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 

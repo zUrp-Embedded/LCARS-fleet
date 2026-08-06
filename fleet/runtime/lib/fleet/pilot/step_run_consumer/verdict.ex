@@ -63,20 +63,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def gate_result(_), do: nil
 
   @doc false
-  # Fail-closed: nil/unknown decision OR missing/empty `reason` → "halt_invalid" (never "continue" on an
-  # absent/malformed verdict → routes to await_arch). `halt_invalid` is NOT in the canon list (internal fallback).
-  #
-  # F-C161 — `reason` is ENFORCED here, not only in the schema. gate-decision-v1.json declares
-  # `required: [decision, reason]` (reason minLength 1); validating ONLY the decision enum would let
-  # a `continue` with NO reason cross the gate = an approval with no durable justification (the
-  # verdict trace is what sank v1 by its absence). We require BOTH: a valid decision AND a non-empty
-  # reason, else fail-closed `halt_invalid` (→ human escalation). A judge is instructed to justify (GateBrief
-  # `gate-decision-v1` contract); a decision without a reason is a malformed verdict, not a silent approval.
-  #
-  # Beyond enum+reason, the FULL `gate-decision-v1` envelope validates here: `details` must be an
-  # object, `chain` an array of strings. A schema-invalid verdict used to cross (and its rich trace
-  # was silently dropped at rendering) — now it fail-closes like every other malformation, with the
-  # refusal logged so the operator sees WHY the verdict reads "illisible".
+  # F-C161
   def gate_decision(result) when is_map(result) do
     reason = result["reason"]
 
@@ -101,16 +88,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def gate_decision(_), do: "halt_invalid"
 
   @doc false
-  # Rail boot hook: resolves the wire schema once, fail-loud. A broken/absent schema file is a
-  # broken deploy artifact — it must refuse at rail boot, not crash the StepRunConsumer singleton
-  # on the first verdict ingest.
   def load_schema! do
     _ = resolved_schema()
     :ok
   end
 
-  # Resolved via the foundation authority `Fleet.SchemaCache` (cached in :persistent_term),
-  # keyed by the resolved path.
   defp resolved_schema do
     path =
       :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{@schema_file}")
@@ -211,26 +193,12 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
-  # SINGLE TABLE token → forge review-event (`:approve` | `:request_changes`), fail-closed. TWO
-  # DISJOINT vocabularies converge here (no collision: decisions are STRINGS, intents are ATOMS):
-  #   * gate-decision (no-workflow_map judge, caller `StepRunConsumer`): `"continue"`→approve;
-  #     everything else (`abandon`/redirect/escalate/halt/unreadable)→**request_changes** (DECISIVE
-  #     fail-closed: a non-`continue` verdict = not green → we block the merge, never a merge on
-  #     a dubious verdict).
-  #   * gate intent (workflow_map judge, caller `StepRunCompleter`): ONLY the gate-PASS
-  #     intents approve, each one EXPLICITLY — `:advance` (a step follows) and `:promote`
-  #     (terminal) = APPROVED; `:rework` (gate fail) = REQUEST_CHANGES.
-  # Shared FAIL-CLOSED default: any other token (a future `:reject`/`:abandon`, a step_run that
-  # lost its `:review_event`) NEVER auto-approves — approving by OMISSION is the worst
-  # default for a verdict. The catch-all blocks; approving stays an engraved choice, token by token.
   def review_event("continue"), do: :approve
   def review_event(:advance), do: :approve
   def review_event(:promote), do: :approve
   def review_event(_other), do: :request_changes
 
   @doc false
-  # Composes the review body from the judge's gate-decision. `nil` if no substance (→ the
-  # generic default of `record_review`, which carries at least the rework instruction).
   def judge_review_body(event, result) when is_map(result) do
     reason = result |> Map.get("reason") |> safe_str() |> String.trim()
     details = format_review_details(Map.get(result, "details"))
@@ -251,10 +219,6 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def judge_review_body(_event, _), do: nil
 
   @doc false
-  # ENG VOICE (OUTGOING info): the PRODUCER can return a markdown `summary` in submit_result
-  # (what it did / response to the review / blocked reason). We extract it from the result (unwrapped from
-  # the worker envelope) → `StepRunCompleter` posts it as a PR comment (`as_role` engineer). Coerced by
-  # `safe_str` (the eng may return a non-binary → don't crash the singleton). Absent/empty → "".
   def eng_summary(payload) do
     case unwrap_worker_envelope(payload["result"] || %{}) do
       m when is_map(m) -> m |> Map.get("summary") |> safe_str() |> String.trim()
@@ -262,10 +226,6 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     end
   end
 
-  # Safe coercion of LLM outputs: a judge may return `reason`/`details`/`chain` as nested objects or
-  # lists → raw interpolation/`to_string` crashes (String.Chars not implemented for Map/List). Every
-  # non-binary is `inspect`ed. CRITICAL: building the body MUST NOT crash the StepRunConsumer
-  # (SINGLETON) — otherwise the step-run completion is lost, the lock never released, the pipe wedged.
   defp safe_str(nil), do: ""
   defp safe_str(s) when is_binary(s), do: s
   defp safe_str(other), do: inspect(other)

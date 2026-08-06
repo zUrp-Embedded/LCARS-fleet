@@ -148,24 +148,17 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
               {:ok, term()} | {:error, term()}
 
   @doc """
-  The MERGED PR of an issue, resolved by the `[merge:pr-N]` seal marker on the issue (raw
-  Gitea PR map). Delegation call site: the post-merge fallback of `get_issue_status`'s PR
-  resolution — Gitea rewrites a merged PR's `head.ref` once its branch is deleted, so the
-  branch scan cannot find it (live 2026-07-19). `:none` = no marker; an outage must stay
-  `{:error, _}`, never `:none`.
+  Resolves a merged PR through its `[merge:pr-N]` seal marker.
+
+  Gitea rewrites deleted merged-branch `head.ref` values (observed live 2026-07-19), so branch
+  scanning alone cannot recover them. `:none` means no marker; outages remain errors.
   """
   @callback merged_pr_of_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
               {:ok, map()} | :none | {:error, term()}
 
-  # Canonical default: the real forge client on the fleet_pilot side. Literal atom (not a
-  # literal remote call) → no compile-time dep. Set HERE once.
   @default_client Fleet.Pilot.ForgeClient
 
-  @doc """
-  Resolved forge client: config `:fleet_mcp, :forge_client` otherwise the canonical
-  default `Fleet.Pilot.ForgeClient`. SINGLE SOURCE of the default (same pattern as
-  `Fleet.Spawner.LaunchBackend.resolved/0`).
-  """
+  @doc "Returns the configured forge client or the canonical Pilot implementation."
   @spec resolved() :: module()
   def resolved, do: Application.get_env(:fleet_mcp, :forge_client, @default_client)
 end

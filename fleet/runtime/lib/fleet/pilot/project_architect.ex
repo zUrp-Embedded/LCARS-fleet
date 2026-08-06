@@ -70,23 +70,13 @@ defmodule Fleet.Pilot.ProjectArchitect do
     name = Fleet.Layout.project_name(repo)
     proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
-    # The EXPLAINED shape (`Spawn.repo_id/3`), not the `nil`-flattening `resolve_repo_id/3` its
-    # optional callers use: here an unresolved id is a REFUSAL, and a refusal owes its reason.
     repo_id_result = Spawn.repo_id(forge, repo, forge_opts)
 
     cond do
       not File.dir?(proj_dir) ->
-        # Never spawn an architect for a project that is not on the machine: its whole world is the
-        # mounts below — an absent project dir would launch an EMPTY box. open/import first.
         {:error, {:not_onboarded, proj_dir}}
 
       match?({:error, _}, repo_id_result) ->
-        # The numeric id IS the arch's identity (`<REPO4>` of the deterministic UUID). Refused early
-        # and clearly rather than letting SessionMint raise inside the pod init (same fact, worse trace).
-        # The reason is CARRIED, never inferred: this log used to end in "(forge down?)" over a forge
-        # that was answering — the guess was the only thing an operator could read, and it pointed
-        # away from the fault. What we know is what the forge said; if that is not enough, the fix is
-        # upstream of here.
         {:error, reason} = repo_id_result
 
         Logger.error(
