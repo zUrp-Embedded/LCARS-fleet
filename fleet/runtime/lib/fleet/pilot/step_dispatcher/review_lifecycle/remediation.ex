@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
 
-  **Last revised**: 2026-08-05
+  **Last revised**: 2026-08-06
   """
 
   require Logger
@@ -208,8 +208,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are injectable seams
   # (`:conflict_diagnoser` / `:conflict_applier`).
   #
-  # The ladder in one line: L1 engine → L2 producer → L3 chief → L4 arch. Tier-0 may skip L2 on
-  # evidence; it has none about L3, and it used to skip it anyway — straight to a human.
+  # The ladder in one line: tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch (the
+  # @moduledoc defines it, `tier0_*` anchors it). Tier 0 may skip the PRODUCER on evidence; it has
+  # none about the CHIEF, and it used to skip it anyway — straight to a human.
+  # ONE numbering, and rungs are also named where the number alone would be read against another
+  # scale: an `L1..L4` variant offset by one used to sit in these comments, and a rung counted off
+  # by one routes to the wrong actor.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     if diagnosis_enabled?() do
       case tier0_conflict_route(pr_number, head, reason, ctx) do
@@ -287,14 +291,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
   #
   # `:chief`, NOT `:escalate` (2026-08-05). An all-semantic conflict used to go STRAIGHT to the arch
-  # — "rounds skipped" — jumping tiers 2 AND 3 to immobilize a human. Skipping the PRODUCER is right
-  # and is the whole point of the deterministic pre-filter: the engine has just proven there is
-  # nothing shallow to fix, so a producer round would burn a full run to rediscover it.
+  # — "rounds skipped" — jumping tiers 1 AND 2, the PRODUCER and the CHIEF, to immobilize a human.
+  # Skipping the producer is right and is the whole point of the deterministic pre-filter: the
+  # engine has just proven there is nothing shallow to fix, so a producer round would burn a full
+  # run to rediscover it.
   #
   # Skipping the CHIEF was not. Composing two intentions that both passed their jury, on a branch
   # the outsider did not write, IS the chief's case — it is what the exception pass exists for. The
-  # ladder is L1 engine → L2 producer → L3 chief → L4 arch, and tier-0 may skip L2 on evidence; it
-  # has no evidence about L3. The atom is renamed with the routing so the name cannot outlive the
+  # ladder is tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch, and tier 0 may skip the
+  # PRODUCER on evidence; it has none about the CHIEF. The atom is renamed with the routing so the name cannot outlive the
   # behaviour (`:escalate` would now describe a hand-off that escalates nothing).
   @spec tier0_decision(map()) :: :chief | :apply | :fall_through
   def tier0_decision(%{totals: %{none_trivial?: true}}), do: :chief
