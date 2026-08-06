@@ -36,6 +36,8 @@ defmodule Fleet.Application.CatalogueVerify do
   Publishing the images writes process-global `:persistent_term`. This is written for a `mix` task
   or a release `eval` — an ephemeral VM that exits right after — never the live node, whose running
   images it would replace. A TEST driving it restores image state on exit, like `Fleet.CatalogueTest`.
+
+  **Last revised**: 2026-08-01
   """
 
   require Logger

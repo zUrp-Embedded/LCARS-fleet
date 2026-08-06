@@ -8,6 +8,8 @@ defmodule Fleet.Conflict.Diff do
   base->theirs, and merges only when no edit of one side overlaps an edit of the other -- otherwise
   it returns `nil` and the hunk stays a conflict. The tie-break mirrors the ported DP backtrack
   (`>` : on a tie, advance the branch index) so the pairs are stable.
+
+  **Last revised**: 2026-07-30
   """
 
   @type op :: %{type: :keep | :add | :remove, line: String.t(), index: non_neg_integer()}

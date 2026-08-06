@@ -67,6 +67,8 @@ defmodule Fleet.Spawner.SessionId do
   UUID to be distinguishable. PURE module (zero process, zero IO, zero catalogue): a TOTAL encoder over
   valid inputs — no role refusal (those decisions live at the spawn level, not here), no `{:error, _}`.
   An out-of-bounds input = caller bug → function-clause/raise.
+
+  **Last revised**: 2026-08-02
   """
   import Bitwise
 

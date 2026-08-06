@@ -24,6 +24,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `remote_control?/1` — EFFECTIVE Desktop visibility, the ONE authority. Public because its three
     consumers sit in three places (slot capture, slot resume, and the vendor launcher through
     `LCARS_POD_REMOTE_CONTROL`); a second derivation is what it exists to prevent.
+
+  **Last revised**: 2026-08-06
   """
 
   @doc """

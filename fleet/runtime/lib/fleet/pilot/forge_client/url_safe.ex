@@ -29,6 +29,8 @@ defmodule Fleet.Pilot.ForgeClient.UrlSafe do
   `encode_repo/1`/`encode_path/1` = multi-component (`owner/name`, `dir/sub/file`), structural `/`
   preserved, each component passed through the same lock. For a QUERY (`?ref=…`),
   `URI.encode_www_form` directly (cf. `ForgeClient.get_file`).
+
+  **Last revised**: 2026-07-18
   """
 
   @doc "Encodes an atomic URL component (renders `/`, `..`, space, `?`, `#` inert)."

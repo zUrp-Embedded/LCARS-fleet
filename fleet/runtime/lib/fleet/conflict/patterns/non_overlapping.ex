@@ -3,6 +3,8 @@ defmodule Fleet.Conflict.Patterns.NonOverlapping do
   Both branches changed DIFFERENT regions of the same block -> automatic 3-way LCS merge. diff3 only.
   `detect?/1` runs the actual merge (detection IS the resolution attempted): it matches iff the merge
   succeeds without overlap.
+
+  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.{Diff, Score}

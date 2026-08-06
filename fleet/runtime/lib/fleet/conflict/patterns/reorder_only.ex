@@ -2,6 +2,8 @@ defmodule Fleet.Conflict.Patterns.ReorderOnly do
   @moduledoc """
   Same lines, different order (a pure permutation) -> take theirs order (or ours if base already
   matches theirs). Duplicated lines make the order ambiguous and cost confidence.
+
+  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

@@ -35,6 +35,8 @@ defmodule Fleet.SchemaCache do
   skeleton: its soft `{:error, :schema_unavailable}` tuple must stay retryable, and
   `cached/2` would cache that tuple like any value (see the gotcha on `cached/2`).
   That is the only sanctioned local copy — every other consumer calls this module.
+
+  **Last revised**: 2026-07-18
   """
 
   # Namespaced miss sentinel: a bare `nil` or `:miss` would be legitimate cacheable

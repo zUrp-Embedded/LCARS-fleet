@@ -6,6 +6,8 @@ defmodule Fleet.Conflict.Classifier do
 
   Adding a pattern = implement `Fleet.Conflict.Pattern` + one entry in `@registry` (a visible,
   reviewable gesture -- the priority ordering is the contract).
+
+  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.{DecisionTrace, Hunk, Parser}
 

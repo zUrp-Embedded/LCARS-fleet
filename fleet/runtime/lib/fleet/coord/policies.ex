@@ -29,6 +29,8 @@ defmodule Fleet.Coord.Policies do
   broadcast by `Fleet.Coord.Emitter` (emission pass extracted — the table
   lookup and the wire-event construction share no helper). The
   actions → event-types table lives over there.
+
+  **Last revised**: 2026-08-01
   """
 
   alias Fleet.Coord.Emitter

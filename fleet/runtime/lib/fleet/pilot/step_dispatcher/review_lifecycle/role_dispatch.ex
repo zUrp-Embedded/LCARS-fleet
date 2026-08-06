@@ -27,6 +27,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   Receives the review flow's `%Ctx{}` (built at the single site
   `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
   the global leaf (narrow boundary preserved).
+
+  **Last revised**: 2026-08-04
   """
 
   require Logger

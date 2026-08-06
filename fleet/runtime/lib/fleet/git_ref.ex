@@ -13,6 +13,8 @@ defmodule Fleet.GitRef do
   and the project bootstrap (`Phase.Clone`) validate refs at their OWN boundary without an upward
   compile edge. Each caller keeps ITS typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`);
   only the `valid?` decision is centralized.
+
+  **Last revised**: 2026-07-18
   """
 
   # `\A…\z`, NOT `^…$`: in PCRE `$` also matches just BEFORE a trailing newline, so `^…$` declares

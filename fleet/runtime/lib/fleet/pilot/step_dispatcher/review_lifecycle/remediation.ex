@@ -25,6 +25,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   The DECISION lives here; the EXECUTION of the re-spawn descends to `RoleDispatch` (leaf shared with the
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
   `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
+
+  **Last revised**: 2026-08-06
   """
 
   require Logger

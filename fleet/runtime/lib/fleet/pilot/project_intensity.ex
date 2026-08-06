@@ -25,6 +25,8 @@ defmodule Fleet.Pilot.ProjectIntensity do
   Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
   the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
   default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

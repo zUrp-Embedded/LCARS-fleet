@@ -23,6 +23,8 @@ defmodule Fleet.Workflow.Pinning do
   It keeps the first lines and says so. Anything cleverer — first paragraph, extracted headline —
   would let the summary misrepresent the body it points at, and the summary is the part a human
   reads and stops at. A truncation cannot claim something the text does not say.
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

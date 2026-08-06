@@ -29,6 +29,8 @@ defmodule Fleet.EventRouter.Catalog do
       `false` in `:test` (hermeticity: empty registry → escape-hatch
       `assert_authorized!` `MapSet.size == 0` → broadcast not validated in test).
     * `:fleet_event_router, :events_yaml_path` — path override (default `priv/event_router/events.yaml`).
+
+  **Last revised**: 2026-07-23
   """
 
   require Logger

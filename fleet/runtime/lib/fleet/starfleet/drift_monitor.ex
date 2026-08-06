@@ -37,6 +37,8 @@ defmodule Fleet.Starfleet.DriftMonitor do
   GenServer = subscribe to asynchronous cross-process PubSub events. Pure
   functions are impossible. No state = minimal Iron Law (1 process, no local
   ETS).
+
+  **Last revised**: 2026-07-22
   """
 
   use GenServer

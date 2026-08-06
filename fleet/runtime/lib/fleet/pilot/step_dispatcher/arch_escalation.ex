@@ -50,6 +50,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   parameterized by signatory/text/weight/return would relocate the divergence into a parameter soup, not
   remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
   rails — not a physical merge.
+
+  **Last revised**: 2026-08-03
   """
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in

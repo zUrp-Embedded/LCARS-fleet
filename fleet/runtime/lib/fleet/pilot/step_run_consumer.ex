@@ -92,6 +92,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
       (and a `.complete` that crashes is isolated by the supervised task). An arity-1 runner stays a
       valid seam shape (legacy tests) — it simply carries no death-witness meta (BL-6-03 S2).
+
+  **Last revised**: 2026-08-05
   """
 
   use GenServer

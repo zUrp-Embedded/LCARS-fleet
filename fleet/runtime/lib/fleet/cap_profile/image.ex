@@ -19,6 +19,8 @@ defmodule Fleet.CapProfile.Image do
   exactly the doctrine.
 
   The truly-dynamic calibration assets stay OUT of the image by design (cf. the SP split).
+
+  **Last revised**: 2026-08-03
   """
 
   require Logger

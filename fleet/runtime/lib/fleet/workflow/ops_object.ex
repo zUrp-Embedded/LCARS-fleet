@@ -15,6 +15,8 @@ defmodule Fleet.Workflow.OpsObject do
   single owner of the `{"origin", "work/ops"}` target) or an explicit `{remote, refspec}`;
   a push failure logs LOUD and keeps the local success — the branch catches up whole at the
   next successful push. Local commit failure remains a real failure.
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

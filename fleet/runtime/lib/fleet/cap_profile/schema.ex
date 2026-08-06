@@ -24,6 +24,8 @@ defmodule Fleet.CapProfile.Schema do
   default = the bundled `priv/cap_profile/schema`). The read+decode+resolve is cached in
   `:persistent_term` (keyed by the RESOLVED path → test overrides get their own entry),
   lazy, errors not cached.
+
+  **Last revised**: 2026-08-02
   """
 
   require Logger

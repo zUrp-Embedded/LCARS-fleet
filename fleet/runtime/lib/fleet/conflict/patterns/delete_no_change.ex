@@ -5,6 +5,8 @@ defmodule Fleet.Conflict.Patterns.DeleteNoChange do
   diff3 is CERTAIN (the untouched side equals base). diff2 (no base) can only GUESS from emptiness,
   so it scores medium with an explicit penalty -- the fail-safe direction is to under-resolve, never
   to delete on a hunch.
+
+  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

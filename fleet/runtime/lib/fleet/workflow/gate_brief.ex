@@ -22,6 +22,8 @@ defmodule Fleet.Workflow.GateBrief do
 
   Pure function over its inputs + the template files (fail-loud on a missing/miswired
   template — a judge never receives a half-rendered order).
+
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Workflow.BriefTemplate

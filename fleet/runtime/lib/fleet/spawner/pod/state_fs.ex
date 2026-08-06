@@ -32,6 +32,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
     (default value `opts \\ []`) by `Fleet.Spawner.spawn_pod/3` AND the `pod_test.exs` test.
   - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
     by the `PodWarden`.
+
+  **Last revised**: 2026-07-21
   """
 
   require Logger

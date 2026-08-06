@@ -35,6 +35,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   floor: the module list is the compile-time authority, the schema its wire mirror
   (equality pinned by `GateDecisionTest`). The only side effect in this module is that
   refusal warning — no state is carried.
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

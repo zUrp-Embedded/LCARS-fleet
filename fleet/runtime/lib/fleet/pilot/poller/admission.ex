@@ -28,6 +28,8 @@ defmodule Fleet.Pilot.Poller.Admission do
   narrower and mechanical: `Fleet.Pilot.Poller.AdmissionTest` MEASURES `lib/` and refuses a second
   site that maps a dispatch result to a tally. A rail that starts accounting on its own reddens,
   which is the moment a rule is about to be duplicated.
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

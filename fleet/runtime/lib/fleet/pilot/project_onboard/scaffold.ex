@@ -21,6 +21,8 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
       face itself, from the same source).
 
   The only effect is `write_all` (mkdir_p + write, fail-loud per file).
+
+  **Last revised**: 2026-08-01
   """
 
   @doc """

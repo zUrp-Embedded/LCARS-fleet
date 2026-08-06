@@ -18,6 +18,8 @@ defmodule Fleet.Pilot.PodId do
   collision) → NOT scoped. pod_id and branch are built independently from `(n, role)`.
 
   Path-safe (contract `Fleet.Spawner.valid_pod_id?/1`) because interpolated into FS paths / tmux names.
+
+  **Last revised**: 2026-07-18
   """
 
   # Instance phase markers — single LITERAL-SOURCE: `for_issue`/`for_pr` SET them,

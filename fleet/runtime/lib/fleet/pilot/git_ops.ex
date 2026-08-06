@@ -10,6 +10,8 @@ defmodule Fleet.Pilot.GitOps do
 
   Shared by `Fleet.Pilot.ProjectOnboard` (clone/scaffold/commit/push) and `Fleet.Pilot.WorktreeSync`
   (fetch/reset): a single place where a pilot `git` runs — not two wrappers to keep in sync.
+
+  **Last revised**: 2026-07-21
   """
 
   alias Fleet.Credentials.ForgeAuth

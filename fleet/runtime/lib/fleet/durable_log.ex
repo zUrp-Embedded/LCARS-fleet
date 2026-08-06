@@ -42,6 +42,8 @@ defmodule Fleet.DurableLog do
 
   Absent config = disabled, and it stays disabled in `:test`. A suite that appends to the human's
   real log would both pollute it and make the tests depend on a writable home.
+
+  **Last revised**: 2026-08-03
   """
 
   @handler_id :lcars_durable_log

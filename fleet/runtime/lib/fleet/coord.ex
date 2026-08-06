@@ -56,6 +56,8 @@ defmodule Fleet.Coord do
   ## Vendor boundary
 
   N0 (vendor-agnostic, no inference — pure declarative rule).
+
+  **Last revised**: 2026-08-01
   """
 
   # Strict canonical arities — the correlation_id is always explicit.

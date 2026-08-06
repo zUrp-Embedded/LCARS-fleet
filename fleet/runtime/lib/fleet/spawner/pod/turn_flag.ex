@@ -20,6 +20,8 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   - `touch/1` — touches the flag from a `pod_info` (the `_info` clause without pod_dir = no-op).
   - `write/1` — writes a UNIQUE token into `pod_dir/turn.flag`; tested directly (the "proceed" path
     of `wake_pod` is never reached by StubBackend).
+
+  **Last revised**: 2026-07-21
   """
 
   require Logger

@@ -21,6 +21,8 @@ defmodule Fleet.Credentials.Gate do
 
   Pure transformer: file read + decode, no state, no process. The claudeDir is resolved by the
   caller (per-human) and passed as an argument.
+
+  **Last revised**: 2026-08-02
   """
 
   @doc """

@@ -13,6 +13,8 @@ defmodule Fleet.Workflow.GateDecision do
 
   `halt_invalid` (the StepRunConsumer's internal fail-closed fallback when the verdict is absent
   or malformed) is NOT a rendered decision → it is not part of this list.
+
+  **Last revised**: 2026-07-18
   """
 
   @decisions ~w(continue abandon redirect escalate_user halt_wait_input)

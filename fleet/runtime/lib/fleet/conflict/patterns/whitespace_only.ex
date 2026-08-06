@@ -3,6 +3,8 @@ defmodule Fleet.Conflict.Patterns.WhitespaceOnly do
   Same code, whitespace-only difference -> resolve. Guarded by a string-literal check: whitespace
   INSIDE a string is data, not layout, so a hunk whose quoted contents differ is NOT purely cosmetic
   and must not be silently collapsed to one side.
+
+  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

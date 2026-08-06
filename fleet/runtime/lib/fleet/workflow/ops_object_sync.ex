@@ -58,6 +58,8 @@ defmodule Fleet.Workflow.OpsObjectSync do
   every async test's write through one shared process would serialize + relocate those logs and worsen
   `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
   starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
+
+  **Last revised**: 2026-08-05
   """
 
   use GenServer

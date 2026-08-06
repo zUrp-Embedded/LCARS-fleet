@@ -47,6 +47,8 @@ defmodule Fleet.Pilot.ArchWake do
   if any, else the first outcome — so the poller stamps its cooldown ONLY on a signal that
   actually left (`:offered`/`:woken_pending`), never on `:busy` / `:wake_unreached` / an
   enqueue error.
+
+  **Last revised**: 2026-08-03
   """
 
   require Logger

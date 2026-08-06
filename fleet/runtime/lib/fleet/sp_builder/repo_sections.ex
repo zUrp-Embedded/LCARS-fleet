@@ -16,6 +16,8 @@ defmodule Fleet.SPBuilder.RepoSections do
   so a target repo is free to name its sections otherwise and then contributes nothing. That outcome is
   legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching with zero repo context
   used to be indistinguishable from a pod that was given no repo file at all.
+
+  **Last revised**: 2026-08-02
   """
 
   require Logger

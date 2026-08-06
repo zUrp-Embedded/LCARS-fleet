@@ -23,6 +23,8 @@ defmodule Fleet.Pilot.Roles do
   catalogue, not a choice to arbitrate at random. `Fleet.Pilot.Application.validate_structural_roles!/0`
   runs it at boot, so a catalogue that cannot name its producer refuses readiness instead of dying at
   the first dispatch.
+
+  **Last revised**: 2026-08-03
   """
 
   require Logger

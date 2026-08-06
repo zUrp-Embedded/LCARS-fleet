@@ -25,6 +25,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   session jsonl), `Fleet.CapProfile` (single source of the `name` + `with_project/2`),
   `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
   (recall restore). No dependency toward `Fleet.Spawner.Pod`.
+
+  **Last revised**: 2026-08-03
   """
 
   require Logger

@@ -14,6 +14,8 @@ defmodule Fleet.Pilot.PodFeed do
   Returns `{:error, term()}` rather than logging: the log PREFIX is the operator's rail, and it
   belongs to the facade that owns the feed, not to a shared helper (a `PodFeed:` line would appear
   in no rail anyone follows).
+
+  **Last revised**: 2026-08-05
   """
 
   @feed_file "fleet.feed"

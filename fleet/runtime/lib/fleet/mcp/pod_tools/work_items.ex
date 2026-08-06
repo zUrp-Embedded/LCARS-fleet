@@ -18,6 +18,8 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   Identity (which pod) DOES NOT ARRIVE here: it is resolved upstream by the socket
   acceptor (identity IS the channel) and verified by `PodTools`'s clauses — this module
   receives an already-established `pod_id`, never read off the wire.
+
+  **Last revised**: 2026-08-03
   """
 
   alias Fleet.TaskQueue

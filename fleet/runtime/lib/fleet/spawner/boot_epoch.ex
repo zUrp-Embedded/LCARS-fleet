@@ -16,6 +16,8 @@ defmodule Fleet.Spawner.BootEpoch do
   Initialized ONCE by `Fleet.Spawner.Application.init/1` (before any pod starts — no init race);
   `id/0` is a cheap `:persistent_term` read. Old snapshots without the field compare `nil` ≠
   current → stale epoch (correct: they predate this fleet life by construction).
+
+  **Last revised**: 2026-07-21
   """
 
   @key {__MODULE__, :id}

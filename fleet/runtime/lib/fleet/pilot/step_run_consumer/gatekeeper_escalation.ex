@@ -55,6 +55,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   The cluster reads ONLY the seams below from the consumer's `state` — never the whole `state`
   (hardened boundary: `@enforce_keys` forces the fields, an access `seams.<other>` does not
   compile).
+
+  **Last revised**: 2026-07-21
   """
 
   require Logger

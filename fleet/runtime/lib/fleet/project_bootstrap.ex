@@ -6,6 +6,8 @@ defmodule Fleet.ProjectBootstrap do
   Boundary anchor; the contract lives in the @moduledoc of
   `Fleet.ProjectBootstrap.Phase` (+ `Phase.Clone`: `clone_or_skip`,
   fail-closed `reset_in_place`).
+
+  **Last revised**: 2026-08-05
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the

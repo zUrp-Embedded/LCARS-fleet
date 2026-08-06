@@ -22,6 +22,8 @@ defmodule Fleet.Pilot.MergeOutcome do
     * `:policy`   — git mergeable (`mergeable: true`) but the forge refuses: branch-protection
                     (approvals removed by a re-request, CI required…) → re-converge, NOT a conflict.
     * `:unknown`  — `mergeable` indeterminate (null, forge computation in progress) → invent nothing, escalate honestly.
+
+  **Last revised**: 2026-07-18
   """
 
   @type class :: :merged | :closed | :draft | :conflict | :policy | :unknown

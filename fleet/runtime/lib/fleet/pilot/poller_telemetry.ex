@@ -69,6 +69,8 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   ## Config
     * `:fleet_pilot, :poller_slow_tick_ms` — warn threshold (default `10_000`).
+
+  **Last revised**: 2026-08-03
   """
 
   @window 100

@@ -50,6 +50,8 @@ defmodule Fleet.Spawner.PodWarden do
   > The wake-failure memory (re-roll/escalation) does NOT live here: a session counter would be
   > ephemeral. It is anchored in the PROJECT via `Fleet.Pilot.IncidentRegistry` (`work/ops` registry,
   > cross-session). PodWarden remains the guardian of the SUBSTRATE (reaping orphans).
+
+  **Last revised**: 2026-07-21
   """
 
   use GenServer

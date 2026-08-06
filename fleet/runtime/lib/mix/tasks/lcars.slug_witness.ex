@@ -33,6 +33,8 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
   vert ici ne dit donc pas « l'algo est identique », il dit « il ne diverge pas sur ce qu'on a vu
   tourner ». La tache le compte et le dit ; c'est la difference entre une preuve et un sondage, et
   la taire ferait de ce vert la meme promesse creuse que la sonde des drapeaux a failli devenir.
+
+  **Last revised**: 2026-08-03
   """
 
   @impl Mix.Task

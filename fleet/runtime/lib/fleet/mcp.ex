@@ -9,6 +9,8 @@ defmodule Fleet.MCP do
   boundary — MCP-wire `inputSchema` projection), `Fleet.MCP.PodTools`.
   NB: the dep onto Fleet.Spawner covers PodTools.Delegation's RUNTIME call
   (pod_info — a downward call, declared).
+
+  **Last revised**: 2026-07-18
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the

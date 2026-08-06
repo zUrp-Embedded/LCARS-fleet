@@ -27,6 +27,8 @@ defmodule Fleet.Conflict do
 
   Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
   resolution is caught downstream -- the guard the standalone engine lacked.
+
+  **Last revised**: 2026-08-05
   """
   alias Fleet.Conflict.{Assemble, Classifier, Parser, Report}
 

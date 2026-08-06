@@ -20,6 +20,8 @@ defmodule Fleet.Spawner.PodTmux do
   The socket dies with the namespace when the holder falls. **RECOVERY exception**: when there is no
   Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
   the rescue gesture (tmux kill-server + anchored `pkill -f`).
+
+  **Last revised**: 2026-08-02
   """
 
   require Logger

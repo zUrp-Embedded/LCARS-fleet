@@ -12,6 +12,8 @@ defmodule Fleet.Pilot.Poller.Backoff do
       forge that is down floods neither the logs nor the API. The streak comes from the
       poller's state (incremented when the org-repo discovery `list_org_repos` fails;
       per-item DISPATCH errors do NOT feed it — they surface via `last_tally_errors`/telemetry).
+
+  **Last revised**: 2026-07-18
   """
 
   # Backoff cap: a forge that is down never pushes the wait beyond 5 min

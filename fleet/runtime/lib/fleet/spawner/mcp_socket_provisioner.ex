@@ -26,6 +26,8 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
     * `Fleet.Spawner.MCPSocketStub` — test stub (same app → adopts the behaviour,
       the compiler checks conformance). Returns a path under tmp WITHOUT creating
       a socket; set by `config/test.exs` (mirror of `launch_backend: StubBackend`).
+
+  **Last revised**: 2026-07-21
   """
 
   @doc """

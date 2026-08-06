@@ -12,6 +12,8 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
   `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
+
+  **Last revised**: 2026-08-05
   """
 
   require Logger

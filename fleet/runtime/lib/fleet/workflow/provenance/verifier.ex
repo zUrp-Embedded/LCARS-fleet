@@ -22,6 +22,8 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   Phase 1 (this module): standalone and callable — `verify/2` on a parsed ref, plus
   `mix lcars.provenance.verify` for manual/CI use. NOT wired as a hard gate (Phase 2 =
   a separate user decision at the seal).
+
+  **Last revised**: 2026-07-31
   """
 
   alias Fleet.Workflow.Git

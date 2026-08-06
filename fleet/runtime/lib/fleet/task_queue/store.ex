@@ -25,6 +25,8 @@ defmodule Fleet.TaskQueue.Store do
   The decision NOT to persist (`persist: false`, ephemeral prod mode) or to load
   empty stays in the Server: it depends on its boot options, not on the file
   format.
+
+  **Last revised**: 2026-07-18
   """
 
   require Logger

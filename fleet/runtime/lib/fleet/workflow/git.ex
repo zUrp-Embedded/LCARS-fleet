@@ -25,6 +25,8 @@ defmodule Fleet.Workflow.Git do
   `author_*` is the HUMAN of the brief — never the role, which rides the `Co-authored-by:` trailer;
   `committer_*` is the human (git_native: author=committer) or the system (payload commits, e.g.
   onboard). Native git honours `GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`.
+
+  **Last revised**: 2026-07-30
   """
 
   require Logger

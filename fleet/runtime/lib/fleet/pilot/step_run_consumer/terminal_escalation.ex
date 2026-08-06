@@ -43,6 +43,8 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   consumer calls it on the `{:error, reason}` path of the gate decision. The
   transient / self-healing errors (`:no_gatekeeper` → the one-shot gatekeeper is
   (re)spawned on the next tick; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
+
+  **Last revised**: 2026-08-03
   """
 
   require Logger

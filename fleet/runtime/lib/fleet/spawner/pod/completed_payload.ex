@@ -29,6 +29,8 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   - `Fleet.Spawner.Pod.LaunchSpec.effective_project/2` (EFFECTIVE project, single source),
   - `Fleet.Spawner.Pod.Paths.pod_workspace_path/1` (single authority over the workspace subfolder),
   - `Fleet.CapProfile.name/1` (single source of the role carved at spawn).
+
+  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec

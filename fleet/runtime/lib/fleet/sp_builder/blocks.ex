@@ -13,6 +13,8 @@ defmodule Fleet.SPBuilder.Blocks do
 
   HARD RULE (no-fallback, cf. memory `no-sp-no-pod-no-fleet`): a role with no blocks, or a listed block
   absent from disk → `compose!/3` RAISES. No SP → no pod → no fleet; never a silent degradation.
+
+  **Last revised**: 2026-08-01
   """
 
   # `Date:` up front → satisfies the GO-7 hook (`<!--\s*Date\s*:`) without polluting the SP with a visible

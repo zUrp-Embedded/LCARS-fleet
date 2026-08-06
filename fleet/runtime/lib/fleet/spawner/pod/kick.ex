@@ -37,6 +37,8 @@ defmodule Fleet.Spawner.Pod.Kick do
   - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
+
+  **Last revised**: 2026-08-04
   """
 
   require Logger

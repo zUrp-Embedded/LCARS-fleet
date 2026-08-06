@@ -5,6 +5,8 @@ defmodule Fleet.Conflict.ConfidenceScore do
   The score and its label are derived in ONE place (`Fleet.Conflict.Score`). The engine this was
   ported from carried THREE divergent copies of the formula; a hunk silently lost a penalty the
   first time a secondary path re-scored it. Callers pass dimensions, never a pre-rolled score.
+
+  **Last revised**: 2026-07-30
   """
   @type label :: :certain | :high | :medium | :low
   @type t :: %__MODULE__{
@@ -23,6 +25,8 @@ defmodule Fleet.Conflict.DecisionTrace do
   Structured trace of a hunk classification. Every evaluated pattern is recorded -- the REFUSAL is
   documented as much as the acceptance. This trace is the durable audit artifact (doctrine D1: the
   trace precedes the routing action), never a debug afterthought.
+
+  **Last revised**: 2026-07-30
   """
   @type step :: %{type: atom(), passed: boolean(), reason: String.t()}
   @type t :: %__MODULE__{
@@ -40,6 +44,8 @@ defmodule Fleet.Conflict.Hunk do
   One classified conflict block: the three sides, the detected type, the composite confidence, and
   the decision trace. Pure data -- produced by the classifier, consumed by the assembler and by the
   router upstream (`Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation`).
+
+  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.{ConfidenceScore, DecisionTrace}
 
@@ -84,6 +90,8 @@ defmodule Fleet.Conflict.Report do
   `merged` is non-nil ONLY when every hunk was auto-resolved above the confidence threshold -- the
   contract for "the runtime may write this back". Any residual (a `:complex` hunk, or a resolvable
   hunk below threshold) leaves `merged: nil` and the caller routes to the producer / gatekeeper.
+
+  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.Hunk
 

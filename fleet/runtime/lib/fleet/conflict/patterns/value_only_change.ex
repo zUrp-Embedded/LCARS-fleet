@@ -4,6 +4,8 @@ defmodule Fleet.Conflict.Patterns.ValueOnlyChange do
   ported engine's v2.7: with a base, a UNILATERAL value change is already `one_side_change` (priority
   30), so this pattern only ever sees the both-sides-changed case. Delegates to
   `Fleet.Conflict.Patterns.Utils.detect_value_only_change/3`.
+
+  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

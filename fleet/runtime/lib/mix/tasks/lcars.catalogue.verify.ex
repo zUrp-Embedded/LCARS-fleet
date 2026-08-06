@@ -25,6 +25,8 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
   The image face lives in the release, not here (`mix` does not ship in the image): the entrypoint
   calls the SAME `Fleet.Application.CatalogueVerify.verify/1` via a release `eval`. One truth, two
   doors.
+
+  **Last revised**: 2026-08-01
   """
 
   use Mix.Task

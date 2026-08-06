@@ -21,6 +21,8 @@ defmodule Fleet.Spawner.SeedStore do
 
   NB git: the `cp` drops the seed; putting the work repo under git is a SEPARATE gesture (outside the
   teardown hot-path — no `git` in a pod's death).
+
+  **Last revised**: 2026-08-03
   """
   require Logger
 

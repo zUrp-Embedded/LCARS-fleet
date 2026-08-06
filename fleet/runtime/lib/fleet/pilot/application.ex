@@ -23,6 +23,8 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:fleet_pilot, :poller, :poll]`. First child
       of the rail because it measures the rail: the poller emitted those three sites since it was
       written and nothing ever attached, so every duration was computed and dropped (BL-6-40 Ph. 0).
+
+  **Last revised**: 2026-08-05
   """
 
   use Supervisor

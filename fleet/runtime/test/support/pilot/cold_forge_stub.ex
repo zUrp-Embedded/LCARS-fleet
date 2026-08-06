@@ -6,6 +6,8 @@ defmodule Fleet.Pilot.ColdForgeStub do
   at test time — because the test deletes and purges it to make `module_loaded?` false, and only a
   module the code server can find again is reloadable. That is the whole point: the resolution must
   survive a module that exists but is not loaded yet.
+
+  **Last revised**: 2026-08-02
   """
 
   @repo_id 4242

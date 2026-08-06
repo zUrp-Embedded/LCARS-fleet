@@ -58,6 +58,8 @@ defmodule Fleet.Slug do
     * `Fleet.Spawner.SeedStore.slugify/1` — reproduces Claude Code's algo
       BIT FOR BIT (vendor compat); replacing it with `Fleet.Slug` would
       break resume. See the comment over there.
+
+  **Last revised**: 2026-07-21
   """
 
   # Canonical path-safe charset: lowercase/digit/`_`/`-`, first position never `-`/`_`.
