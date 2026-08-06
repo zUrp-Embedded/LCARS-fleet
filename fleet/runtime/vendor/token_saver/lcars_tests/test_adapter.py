@@ -349,3 +349,53 @@ class TestBoutEnBout:
 
     def test_code_retour_propage(self):
         assert self._run("exit 42").returncode == 42
+
+
+# ── Le switch : vocabulaire FERME des deux cotes ────────────────────────────────────────────────
+#
+# Ajoute le 2026-08-06. Le vocabulaire « off » etait ferme et tout le reste valait ON en SILENCE :
+# `LCARS_TOKEN_SAVER=disabled` compressait, et l'operateur qui l'avait ecrit croyait avoir coupe.
+# Sur un outil dont la doctrine assumee est « toute perte est silencieuse par construction »,
+# c'etait la pire valeur par defaut possible.
+
+
+def _enabled(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("LCARS_TOKEN_SAVER", raising=False)
+    else:
+        monkeypatch.setenv("LCARS_TOKEN_SAVER", value)
+    import adapter
+
+    return adapter.is_enabled()
+
+
+def test_switch_absent_compresse(monkeypatch):
+    # La posture nominale : absent = on compresse.
+    assert _enabled(monkeypatch, None) is True
+
+
+def test_switch_off_reconnu_insensible_a_la_casse(monkeypatch):
+    for value in ("off", "OFF", "Off", "0", "false", "FALSE", "no", "No"):
+        assert _enabled(monkeypatch, value) is False, value
+
+
+def test_switch_on_reconnu_insensible_a_la_casse(monkeypatch):
+    for value in ("on", "ON", "On", "1", "true", "TRUE", "yes", "Yes"):
+        assert _enabled(monkeypatch, value) is True, value
+
+
+def test_un_mot_INCONNU_coupe_au_lieu_de_compresser(monkeypatch):
+    # Le sens du repli n'est pas arbitraire : la compression PERD de l'information, donc le doute va
+    # vers MOINS de compression. Meme monotonie que `LaunchSpec.output_compression?/1` cote Elixir,
+    # ou la molette fleet ne peut que couper.
+    for value in ("disabled", "nope", "vrai", "1 ", "onn"):
+        assert _enabled(monkeypatch, value.strip()) is False or value.strip() in ("1",), value
+
+
+def test_un_mot_inconnu_le_DIT_sur_stderr(monkeypatch, capsys):
+    # Un repli SILENCIEUX serait le defaut jumeau : l'operateur qui fait une faute de frappe doit
+    # l'apprendre, pas heriter d'un comportement qu'il n'a pas demande.
+    assert _enabled(monkeypatch, "disabled") is False
+    err = capsys.readouterr().err
+    assert "disabled" in err
+    assert "COUPEE" in err

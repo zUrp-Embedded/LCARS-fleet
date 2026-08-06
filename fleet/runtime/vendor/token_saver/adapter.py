@@ -339,6 +339,13 @@ def compress(command: str, output: str, **kw) -> CompressResult:
     return _upstream_compress(command, output, **kw)
 
 
+# LE VOCABULAIRE DU SWITCH, declare UNE fois et lu par les deux etages (ici et le shim shell).
+# Ferme des DEUX cotes : tout mot hors de ces deux ensembles est une faute de frappe, pas une
+# intention, et il coupe en le disant (cf. is_enabled).
+_OFF_VALUES = frozenset(("0", "off", "false", "no"))
+_ON_VALUES = frozenset(("1", "on", "true", "yes"))
+
+
 def is_enabled() -> bool:
     """Le switch, à interroger AVANT toute réécriture de commande.
 
@@ -355,8 +362,31 @@ def is_enabled() -> bool:
 
     Aucun redéploiement d'image n'est requis : la variable suffit.
     """
-    if os.environ.get("LCARS_TOKEN_SAVER", "").strip().lower() in ("0", "off", "false", "no"):
+    raw = os.environ.get("LCARS_TOKEN_SAVER", "").strip()
+    value = raw.lower()
+
+    if value in _OFF_VALUES:
         return False
+
+    if value and value not in _ON_VALUES:
+        # UN MOT INCONNU COUPE, ET LE DIT. Le vocabulaire « off » etait ferme et tout le reste
+        # valait ON en silence : `LCARS_TOKEN_SAVER=disabled` compressait, et l'operateur qui
+        # l'avait ecrit croyait avoir coupe. Sur un outil dont la doctrine assumee est « toute perte
+        # est silencieuse par construction », c'est la pire valeur par defaut possible.
+        #
+        # Le sens du repli n'est pas arbitraire : la compression PERD de l'information, donc le
+        # doute va vers MOINS de compression — la meme monotonie que
+        # `LaunchSpec.output_compression?/1` cote Elixir, ou la molette fleet ne peut que couper.
+        # Et il crie, parce qu'un repli silencieux serait le defaut jumeau : l'operateur qui a fait
+        # une faute de frappe doit l'apprendre, pas herite d'un comportement qu'il n'a pas demande.
+        print(
+            "token-saver: LCARS_TOKEN_SAVER=%r n'est ni un ON ni un OFF reconnu — compression "
+            "COUPEE par prudence. Valeurs acceptees : %s (on) / %s (off)."
+            % (raw, "|".join(sorted(_ON_VALUES)), "|".join(sorted(_OFF_VALUES))),
+            file=sys.stderr,
+        )
+        return False
+
     from src import config  # noqa: PLC0415
 
     return bool(config.get("enabled"))

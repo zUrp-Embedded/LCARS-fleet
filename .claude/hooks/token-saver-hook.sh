@@ -35,8 +35,19 @@
 set -u
 
 # Coupe franche, avant meme de chercher la brique.
-case "${LCARS_TOKEN_SAVER:-}" in
-    0|off|false|no|OFF|FALSE|NO) exit 0 ;;
+#
+# Insensible a la CASSE, et ce n'etait pas le cas : la liste exacte `off|OFF` laissait passer `Off`,
+# qui traversait le shim, lancait python3, et se faisait couper par `adapter.is_enabled()` dont le
+# `.lower()`, lui, le reconnaissait. Bon resultat, un interpreteur gaspille par commande — soit
+# exactement le cout que ce shim existe pour eviter.
+#
+# Le vocabulaire est ferme des deux cotes (cf. `_OFF_VALUES` / `_ON_VALUES` dans adapter.py) : un
+# mot inconnu n'est PAS un ON silencieux, il coupe et le dit. Ce shim ne peut pas crier (il tourne
+# avant tout, dans un hook) : il laisse donc passer l'inconnu jusqu'a l'adapter, qui coupera ET
+# parlera. Le seul cout est un processus, sur une valeur qui est de toute facon une faute de frappe.
+_ts_switch=$(printf '%s' "${LCARS_TOKEN_SAVER:-}" | tr '[:upper:]' '[:lower:]')
+case "$_ts_switch" in
+    0|off|false|no) exit 0 ;;
 esac
 
 command -v python3 >/dev/null 2>&1 || exit 0
