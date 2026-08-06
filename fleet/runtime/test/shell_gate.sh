@@ -77,6 +77,84 @@ elif [[ "$FAIL_N" -gt 0 || "$PY_RC" -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 1ter) GO-7 sur l'arbre du RUNTIME — le mur que seul un hook tenait.
+#
+# GO-7 exige un en-tete declaratif sur tout fichier versionne. Il n'etait tenu que par
+# `fleet/git-hooks/pre-commit`, et un hook a trois modes de defaillance silencieuse, tous mesures :
+# il est OPT-IN par clone (un lot entier est arrive avec 74 fichiers non conformes parce que le
+# symlink n'existait pas la-bas) ; `--no-verify` le saute pour TOUS les fichiers du commit, pas
+# seulement le fautif ; et un symlink casse fait sauter le hook a git SANS un mot. Il ne voit par
+# ailleurs que les fichiers STAGES : ce qui a atterri autrement lui est invisible pour toujours.
+#
+# ON SOURCE SES PREDICATS, ON NE LES REECRIT PAS. Une version Elixir de cette regle aurait ete un
+# second instrument mesurant son souvenir du premier — le defaut exact qu'une sonde de ce depot a
+# commis trois fois de suite le 2026-08-06 (marqueur oublie, liste d'exemptions perimee, deux des
+# trois formes d'en-tete acceptees). Le hook reste l'autorite ; ce pas le REJOUE sur tout l'arbre.
+#
+# PERIMETRE : `fleet/runtime/` seulement, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
+# fichiers non conformes, tous dans `.claude/` (les artefacts de Claude Code lui-meme),
+# `docs_OBSOLETE/` (que le demenagement archive) ou v1 (que l'excommunion supprime) — gater ces
+# trois zones ferait rougir le gate sur du sursis. Le runtime, lui, est a ZERO aujourd'hui : le mur
+# se pose sans dette.
+# ---------------------------------------------------------------------------
+# `REPO_ROOT` est (re)defini ICI et pas plus bas : la premiere version de ce pas le lisait avant sa
+# definition, donc `$GO7_HOOK` valait "/fleet/git-hooks/pre-commit", le `-f` echouait, et le pas
+# entier se sautait EN SILENCE — un mur pose le matin meme ou j'en fermais six de cette forme.
+REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+GO7_HOOK="$REPO_ROOT/fleet/git-hooks/pre-commit"
+
+# ABSENCE = ECHEC, jamais un saut. Le hook vit DANS le depot : s'il manque, l'arbre est casse, ce
+# n'est pas une fonctionnalite optionnelle. Un `if [[ -f ]]` qui saute rendrait ce pas invisible le
+# jour ou il sert le plus.
+if [[ ! -f "$GO7_HOOK" ]]; then
+  echo "ECHEC: GO-7 — $GO7_HOOK introuvable (le mur ne peut pas etre rejoue)." >&2
+  exit 1
+fi
+
+if true; then
+  echo "--- GO-7 : en-tetes declaratifs sous fleet/runtime/ ---"
+  eval "$(sed -n '/^is_ipc_exception()/,/^}/p' "$GO7_HOOK")"
+  eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
+  eval "$(sed -n '/^check_md_header()/,/^}/p' "$GO7_HOOK")"
+  eval "$(sed -n '/^check_source_header()/,/^}/p' "$GO7_HOOK")"
+  eval "$(sed -n '/^check_ex_stamp()/,/^}/p' "$GO7_HOOK")"
+
+  # GARDE D'INSTRUMENT : une extraction vide ferait passer ce pas en mesurant RIEN, et le silence
+  # ressemblerait a la conformite. Les cinq predicats doivent exister, sinon on echoue ici.
+  for _fn in is_ipc_exception is_evidence_dir check_md_header check_source_header check_ex_stamp; do
+    if ! type "$_fn" >/dev/null 2>&1; then
+      echo "ECHEC: GO-7 — predicat '$_fn' non extrait de $GO7_HOOK (le hook a change de forme)." >&2
+      exit 1
+    fi
+  done
+
+  GO7_BAD=()
+  while IFS= read -r _f; do
+    [[ -f "$REPO_ROOT/$_f" ]] || continue
+    is_ipc_exception "$_f" && continue
+    is_evidence_dir "$REPO_ROOT/$_f" && continue
+    case "${_f##*.}" in
+      md) check_md_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
+      sh|py) check_source_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
+      ex)
+        case "$_f" in
+          fleet/runtime/lib/*) check_ex_stamp "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
+        esac
+        ;;
+    esac
+  done < <(git -C "$REPO_ROOT" ls-files fleet/runtime)
+
+  if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
+    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/runtime/ :" >&2
+    printf '   %s
+' "${GO7_BAD[@]}" >&2
+    echo "   (le hook pre-commit dit la forme attendue par extension)" >&2
+    exit 1
+  fi
+  echo "--- GO-7 : OK ---"
+fi
+
+# ---------------------------------------------------------------------------
 # 1bis) Suite LCARS de la brique vendoree token-saver.
 #
 # C'est le MUR DE L'ANCRAGE AMONT, et il est la seule raison pour laquelle il est gate. La couche
