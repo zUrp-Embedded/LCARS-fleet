@@ -14,7 +14,7 @@
 #
 #     install.sh — entrée publique, bootstrap SEULEMENT.
 #     S'assure qu'un checkout source existe, puis délègue TOUT à
-#     fleet/provisioning_v2/provision (apply idempotent, doctor = sonde).
+#     fleet/deploy/provision (apply idempotent, doctor = sonde).
 #     Modèle 3 zones : SOURCE (ce checkout) → INSTALL (/local/LCARS_v2, RO)
 #     → STATE (~/.lcars per-humain). Le re-run est TOUJOURS sûr : pas de
 #     sentinelle, l'état c'est le système, re-sondé à chaque passage.
@@ -46,7 +46,7 @@ Usage: sudo bash install.sh [OPTIONS]
   --repo URL           repo source (défaut : lordzurp/LCARS-fleet) — mode standalone
   --branch NAME        branche (défaut : main)
   --env FILE | --human USER | --only MODULE | --substrate S
-                       passés tels quels à `provision` (voir fleet/provisioning_v2/README.md)
+                       passés tels quels à `provision` (voir fleet/deploy/README.md)
 
 Install : wget -O /tmp/install.sh https://raw.githubusercontent.com/lordzurp/LCARS-fleet/main/install.sh
           sudo bash /tmp/install.sh
@@ -126,7 +126,7 @@ fi
 
 # ─── Trouver (ou poser) la SOURCE ───────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROVISION="$SCRIPT_DIR/fleet/provisioning_v2/provision"
+PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
 
 if [[ ! -x "$PROVISION" ]]; then
   # Mode standalone (script téléchargé seul) : cloner la source CHEZ L'HUMAIN — c'est SON
@@ -143,7 +143,7 @@ if [[ ! -x "$PROVISION" ]]; then
     echo "[install] clone $REPO_URL (branche $BRANCH) → $SRC_DIR"
     runuser -u "$HUMAN" -- git clone --branch "$BRANCH" "$REPO_URL" "$SRC_DIR"
   fi
-  PROVISION="$SRC_DIR/fleet/provisioning_v2/provision"
+  PROVISION="$SRC_DIR/fleet/deploy/provision"
   [[ -x "$PROVISION" ]] || { echo "[install] provision introuvable après clone : $PROVISION" >&2; exit 1; }
 fi
 

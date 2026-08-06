@@ -1068,7 +1068,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
   # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
-  # etc/provision-role-tokens.sh `ROLES` (token mint default), and provisioning_v2's
+  # etc/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
   # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
   # a fresh deploy; measured: eng_doc missing there while present in the three others = the
   # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
@@ -1095,11 +1095,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
-    # `provisioning_v2/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
+    # `deploy/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
     # the gesture that touched it.
-    tf_path = Path.expand("../provisioning_v2/deps/forge.tf", root)
-    lib_path = Path.expand("../provisioning_v2/lib/provision-lib.sh", root)
+    tf_path = Path.expand("../deploy/deps/forge.tf", root)
+    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
 
     # The two SIBLING-TREE lists are outside `fleet/runtime`, and one legitimate context does not
     # carry them: the image BUILD stage copies `fleet/runtime` ALONE (Dockerfile), then runs this
@@ -1113,11 +1113,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        {"forge.tf local.roles", tree_scope(Path.expand("../provisioning_v2", root)),
+        {"forge.tf local.roles", tree_scope(Path.expand("../deploy", root)),
          read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
          "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
            "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../provisioning_v2", root)),
+        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
          "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
            "absent here gets no token on a fresh fleet)"}
@@ -1279,7 +1279,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `root` IS fleet/runtime (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
     # run, which is the worst of the three outcomes: a green that checked nothing.
-    dir = Path.expand("../provisioning_v2", root)
+    dir = Path.expand("../deploy", root)
 
     case tree_scope(dir) do
       :out_of_scope ->
@@ -1288,8 +1288,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           remediation: "—",
           status: :pass,
           evidence: [],
-          note:
-            "NOT CHECKED here (provisioning_v2 absent from this artifact — runtime-only context)"
+          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
         }
 
       :required ->
@@ -1644,7 +1643,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
   # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
-  # answered "which test corpora exist, and which ones do we run". `fleet/provisioning_v2/tests`
+  # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
   # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
@@ -1653,7 +1652,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @test_corpora [
     {"fleet/runtime/test", :gated},
     {".claude/skills", :gated},
-    {"fleet/provisioning_v2/tests", :gated},
+    {"fleet/deploy/tests", :gated},
     {"fleet/git-hooks/tests", :gated},
     {"fleet/runtime/vendor/token_saver/lcars_tests", :gated},
     {"fleet/runtime/vendor/token_saver/tests",

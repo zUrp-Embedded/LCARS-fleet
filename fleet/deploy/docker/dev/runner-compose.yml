@@ -1,0 +1,83 @@
+# SOURCE: fleet/deploy/docker/dev/runner-compose.yml
+# AUTHOR: DrDree
+# STARDATE: 2026-08-01
+# STATUS: runner CI — ne fait PAS partie de LCARS, comme la forge
+#
+# ┌──────────────────────────────────────────────────────────────────────────────────────────┐
+# │ CE FICHIER N'EST PAS UN COMPOSANT DE LCARS.                                              │
+# │ Le runner CI, comme la forge, appartient à l'OPÉRATEUR et se pose AVANT l'install.       │
+# │ LCARS ne fabrique ni l'un ni l'autre : il consomme une forge (URL + token) et suppose    │
+# │ qu'un runner répond aux labels que ses workflows demandent. Ceci est la recette qui      │
+# │ marche, pas une dépendance de la boîte.                                                  │
+# └──────────────────────────────────────────────────────────────────────────────────────────┘
+#
+# POURQUOI SÉPARÉ DE L'INSTANCE — la raison est un mode de défaillance, pas du rangement :
+# un job CI exécute du code arbitraire (une dep vérolée, un tag poussé par n'importe qui). S'il
+# tourne DANS l'instance, le compromettre compromet la fleet. Dans son propre projet compose, on
+# le nuke et on le repose sans toucher au reste. C'est la même règle qui a sorti la forge de
+# `docker-compose.yml` le 2026-07-31.
+#
+# CE QU'IL COÛTE, ET IL FAUT LE SAVOIR AVANT DE LE POSER : le mount du socket docker donne au
+# runner le POUVOIR DAEMON — root-équivalent sur la machine hôte. C'est le trade standard d'act_runner
+# et il est inhérent : construire une image depuis la CI exige de parler au daemon. La frontière de
+# confiance du CI est donc le DAEMON, jamais le job. Un job hostile ne casse pas le runner : il a la
+# machine. Ne pose ce fichier que sur une machine dont tu acceptes ce modèle.
+#
+# LANCER :   docker compose -f fleet/deploy/docker/dev/runner-compose.yml -p lcars-runner up -d
+# DÉTRUIRE : docker compose -f fleet/deploy/docker/dev/runner-compose.yml -p lcars-runner down -v
+#
+# PREMIER BOOT — un token d'enregistrement est requis, minté PAR la forge (site-admin) :
+#   POST /api/v1/admin/actions/runners/registration-token
+#   LCARS_RUNNER_TOKEN=<token> docker compose … up -d
+# Une fois enregistré, l'identité vit dans le volume `runner-data` (`.runner`) et le token n'est
+# plus lu aux boots suivants. Sans token au premier boot, le service boucle EN LE DISANT — bruyant
+# et honnête, jamais silencieusement inactif.
+
+name: lcars-runner
+
+services:
+  runner:
+    # PIN par digest — act_runner officiel (jamais d'image custom pour l'infra CI).
+    image: gitea/act_runner:0.6.1@sha256:b5c35d6bdbb9bb25e531230bfc7cc663cb751406cbec90a2a891b85fea54de86
+    hostname: lcars-runner
+    environment:
+      # La forge de l'opérateur. Pas de défaut : une URL fausse fait un runner qui tourne et ne
+      # sert rien, exactement le silence que ce fichier refuse.
+      GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'URL de TA forge (ex http://10.42.0.118)}"
+      GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
+      GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
+      # TROIS labels, trois besoins, un seul runner :
+      #   `shell` — le rail CI de TOUT projet créé par la fleet (le scaffold pose un workflow qui
+      #     demande ce label). Générique EXPRÈS : un projet neuf n'a ni langage ni toolchain, et
+      #     nommer ici `elixir` ferait hériter chaque projet d'une dépendance à celle de LCARS.
+      #     C'est le contrat minimal que doit servir l'opérateur qui pose son runner.
+      #     ⚠ `alpine` n'a pas bash — les workflows qui visent ce label écrivent du POSIX.
+      #   `elixir` — le gate (.gitea/workflows/gate.yml). Le job tourne dans LA MÊME image que le
+      #     stage build du Dockerfile : une seule vérité toolchain, trois rendus (15-toolchain WSL,
+      #     stage build, CI). Bump = les DEUX pins ensemble.
+      #     ⚠ C'est aussi ce qui rend le gate REPRODUCTIBLE : le runner hôte actuel exécute les jobs
+      #     sous son propre compte système, donc la suite mesure l'environnement de ce compte et pas
+      #     celui du dépôt — trois tests de sondes tombent pour cette seule raison.
+      #   `dood` — la publication (.gitea/workflows/publish.yml). Le job tourne dans `docker:cli` et
+      #     parle au daemon de l'HÔTE par le socket monté ci-dessous. Docker-out-of-docker : le cache
+      #     de layers de la machine est réutilisé, et l'image nommée doit être résoluble par CE daemon.
+      #
+      # ⚠ CE DEFAUT NE SAIT PAS JOUER `mix gate`. L'image nommee pour `elixir` est l'image de BASE
+      # du stage build, pas le stage CONSTRUIT : elle porte Elixir et rien d'autre — ni git, ni
+      # tmux, ni bwrap, ni bats, ni python3, que le gate exige et que le Dockerfile installe
+      # justement dans ce stage (mesure du 2026-08-04 : `command -v git` vide dans l'image). Une
+      # couche trop tot, et c'est celle qui porte tout l'outillage. Le defaut reste celui-ci parce
+      # qu'un operateur quelconque ne peut pas resoudre une image locale de LCARS ; qui veut faire
+      # tourner LE gate sert le stage build de SON build :
+      #   docker build --target build -t lcars-build:<tag> -f .../Dockerfile .
+      #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
+    volumes:
+      - runner-data:/data
+      # Le socket du daemon TEL QU'IL EXISTE DANS LA VM du moteur — pas un chemin de la distro WSL
+      # (un bind depuis WSL rendrait un répertoire VIDE côté conteneur, en silence).
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  runner-data:

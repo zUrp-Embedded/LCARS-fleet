@@ -1,10 +1,10 @@
-# .dockerignore — contexte de build = la racine du repo (cf. fleet/provisioning_v2/docker/).
+# .dockerignore — contexte de build = la racine du repo (cf. fleet/deploy/docker/).
 # WHITELIST : tout est exclu, on n'embarque QUE ce que le Dockerfile consomme. Un contexte
 # minimal = build rapide, zéro fuite (pas de work/, pas de credentials, pas de PoC) et un cache
 # qui ne s'invalide pas pour un fichier sans rapport.
 *
 !fleet/runtime
-!fleet/provisioning_v2
+!fleet/deploy
 !LICENSE
 
 # Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et

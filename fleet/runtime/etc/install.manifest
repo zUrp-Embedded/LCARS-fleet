@@ -3,7 +3,7 @@
 # STATUS: data, not code — WHAT ships from bin/ into $PREFIX/bin, one entry per line.
 #
 # Consumed by etc/install.sh (copy + chmod + PATH symlinks) and by the provisioning doctor
-# (fleet/provisioning_v2/modules.d/60-deploy.sh check). The installer and the doctor are BLIND
+# (fleet/deploy/modules.d/60-deploy.sh check). The installer and the doctor are BLIND
 # to content: add or remove a shipped file HERE, never in code. Before this file the list
 # existed twice (install.sh code + etc/README.md procedure) and the copies had started to drift.
 #

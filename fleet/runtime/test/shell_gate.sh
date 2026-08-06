@@ -201,7 +201,7 @@ fi
 #    tout le depot, y compris a lui-meme, et il n'avait aucun test — un mur non teste ne se
 #    distingue d'un mur absent que le jour ou on le contourne.
 #
-#    `fleet/provisioning_v2/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
+#    `fleet/deploy/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
 #    2026-07-30 et AUCUN gate ne les jouait — un test que personne ne lance est un test qui
 #    pourrit, et il donne la couverture sans la donner. Meme raison que les skills : le
 #    provisioning est ce qui fabrique la machine sur laquelle tout le reste tourne. Absence du
@@ -209,7 +209,7 @@ fi
 # ---------------------------------------------------------------------------
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
-PROVISION_TESTS="$REPO_ROOT/fleet/provisioning_v2/tests"
+PROVISION_TESTS="$REPO_ROOT/fleet/deploy/tests"
 HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"
 mapfile -t BATS_FILES < <(
   find "$HERE" -type f -name '*.bats'

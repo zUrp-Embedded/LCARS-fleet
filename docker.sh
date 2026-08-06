@@ -6,7 +6,7 @@
 #
 # LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
 # comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
-# Le fichier compose vit dans fleet/provisioning_v2/docker/ — l'humain ne le touche pas.
+# Le fichier compose vit dans fleet/deploy/docker/ — l'humain ne le touche pas.
 #
 # USAGE : ./docker.sh <commande>
 #   build            construit l'image (labels OCI : sha git + date stampés ici)
@@ -38,7 +38,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/fleet/provisioning_v2/docker/docker-compose.yml"
+COMPOSE_FILE="$SCRIPT_DIR/fleet/deploy/docker/docker-compose.yml"
 PROJECT=lcars
 
 # ─── Préflight (sauté pour help : l'aide doit marcher SANS docker) ────────────────────────────────
@@ -82,7 +82,7 @@ cmd_up() {
 cmd_doctor() {
   # -T (B8) : pas d'allocation TTY — le doctor doit tourner depuis un script/CI/cron, pas
   # seulement depuis un terminal interactif.
-  compose exec -T lcars /opt/lcars/fleet/provisioning_v2/provision doctor --substrate docker \
+  compose exec -T lcars /opt/lcars/fleet/deploy/provision doctor --substrate docker \
     --human "${LCARS_HUMAN:-lcars}" "$@"
 }
 
@@ -165,7 +165,7 @@ CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
      Dans Gitea : Settings → Applications → Generate New Token, scope « all ».
      Il sert à deux choses, une fois :
        a) poser la STRUCTURE (comptes de rôle, org, teams, hardening) :
-            cd fleet/provisioning_v2/deps && tofu init && \\
+            cd fleet/deploy/deps && tofu init && \\
             TF_VAR_gitea_url=<url> TF_VAR_gitea_token=<token-master> \\
             TF_VAR_seed_password=<seed> TF_VAR_human_username=<ton-login-DANS-la-boite> \\
             TF_VAR_human_email=<ton-email> tofu apply
@@ -187,7 +187,7 @@ CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
                                 dit avec le geste exact pour le combler.
 
 BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
-      docker compose -f fleet/provisioning_v2/docker/dev/forge-compose.yml -p lcars-devforge up -d
+      docker compose -f fleet/deploy/docker/dev/forge-compose.yml -p lcars-devforge up -d
       → projet SÉPARÉ, volumes à lui, détruit uniquement par TA commande explicite.
       Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} ./docker.sh up
 EOF

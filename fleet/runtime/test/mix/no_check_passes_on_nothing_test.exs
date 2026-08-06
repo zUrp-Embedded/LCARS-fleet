@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   alias Mix.Tasks.Lcars.Contracts.Check
 
   # The ONLY admissible `:pass` on nothing, and it is admissible because it SAYS so: its note reads
-  # "NOT CHECKED here (provisioning_v2 absent from this artifact — runtime-only context)". A pass
+  # "NOT CHECKED here (deploy absent from this artifact — runtime-only context)". A pass
   # that declares it looked at nothing is an answer; a pass that stays silent about it is the defect.
   @declares_it_did_not_measure ["shell.sourcers_set_strict"]
 

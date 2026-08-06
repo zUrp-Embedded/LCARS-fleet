@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/deploy/provision
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: PROTO-V2 — LE point d'entrée provisioning : apply (converge), doctor (sonde nuke-drill), list
+#
+# Machine nue → `fleet_v2 start` fonctionnel, en UN geste rejouable à l'infini :
+#     sudo fleet/deploy/provision apply
+#     fleet/deploy/provision doctor        # sonde read-only — LA sonde du nuke-drill
+#
+# Modèle (inversion délibérée de la v1) :
+#   - les modules `modules.d/NN-*.sh` sont des PROCESSUS exécutés, pas des scripts sourcés dans un
+#     namespace commun : un module qui meurt rend SON verdict, il n'avorte pas le durcissement des
+#     autres à moitié fait. L'ordre est le préfixe numérique, lisible dans un `ls`.
+#   - chaque module expose `check` (sonde read-only) et `apply` (check → fix → re-check) ;
+#     le doctor N'EST PAS un autre code : c'est le même check que l'apply utilise. Une seule vérité.
+#   - chaque module DÉCLARE son terrain en tête (greppable, pas de registre à maintenir), sur
+#     DEUX axes (D6 de l'ADR install/compile/release — les confondre rendait le doctor Docker
+#     muet sur le verrou RO, le câblage bin et la sonde bwrap) :
+#         # APPLY-ON: wsl linux   où les MUTATIONS tournent (en Docker le stage image a déjà
+#                                 appliqué → l'apply de ce module est remplacé par son check)
+#         # CHECK-ON: any         où l'ÉTAT-CIBLE doit être VRAI (le doctor sonde tout ça)
+#         # NEEDS: root|human     droit d'exécution de l'apply
+#   - AUCUNE sentinelle d'état : l'état, c'est le système, re-sondé à chaque run. (La machine à
+#     états v1 — .install_ok/.fleet_ready/.deploy_ok/.offline-bootstrap éparpillées sur 2 dossiers —
+#     pouvait rester coincée « ni-vierge-ni-provisionnée » sans un message pour l'humain.)
+#   - pas de reprise-par-bashrc-trigger : après le reboot WSL (lockdown C:), l'humain RELANCE le
+#     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
+#
+# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde · apply 0=convergé 1=échec.
+# Codes retour runner : apply 0=tout convergé 1=au moins un échec · doctor 0=conforme 1=drift 2=erreur.
+#
+# USAGE :
+#   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
+#   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain]
+#   provision update [--substrate S] [--human USER] [--env FILE]
+#   provision list   [--substrate S]
+#
+# `update` = la jambe runtime du triangle (source→forge→runtime) : pull --ff-only du checkout,
+# APRÈS vérification d'autorité (le remote DOIT matcher PROV_EXPECTED_REPO — déclaré, jamais
+# deviné), puis re-exec du runner FRAÎCHEMENT PULLÉ en `apply` (le provisioning qui vient
+# d'arriver s'applique lui-même — pas de vieux code qui déroule du neuf). Toujours un converge
+# COMPLET : pas de --only sur update (un update partiel est un état qu'on ne veut pas pouvoir
+# représenter). Héritier direct de fleet-update.sh v1 (F-E1 : autorité-avant-pull ; « already
+# up to date — reconverging anyway »).
+# Options :
+#   --substrate S   force le substrat (auto par défaut : docker si /.dockerenv, wsl si kernel
+#                   Microsoft, linux sinon)
+#   --only M        n'exécute que ce module (répétable ; nom complet ou préfixe numérique)
+#   --human USER    humain cible des modules per-humain (défaut : SUDO_USER, sinon l'appelant)
+#   --env FILE      fichier KEY=VALUE sourcé avant tout (surcharge les défauts de la lib)
+#   --porcelain     (doctor) sortie machine `MODULE=OK|DRIFT|ERROR`, une ligne par module
+
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+PROV_ROOT="$(dirname "$SELF")"                      # LA racine, résolue UNE fois puis propagée par
+MODULES_DIR="$PROV_ROOT/modules.d"                  # env — jamais d'heuristique ../.. par module
+export PROVISION_LIB="$PROV_ROOT/lib/provision-lib.sh"
+
+usage() { sed -n '6,52p' "$SELF" | sed 's/^# \{0,1\}//'; }
+die()   { echo "provision: $*" >&2; exit 1; }
+
+[[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
+[[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
+
+# ─── Args ─────────────────────────────────────────────────────────────────────────────────────────
+CMD="${1:-}"; shift || true
+SUBSTRATE="auto"
+PORCELAIN=0
+ENV_FILE=""
+declare -a ONLY=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
+    --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
+    --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
+    --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
+    --porcelain) PORCELAIN=1; shift ;;
+    -h|--help)   usage; exit 0 ;;
+    *) die "option inconnue: $1 (--help)" ;;
+  esac
+done
+case "$CMD" in apply|doctor|update|list) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+[[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
+
+if [[ -n "$ENV_FILE" ]]; then
+  [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
+  set -a
+  # shellcheck source=/dev/null
+  . "$ENV_FILE"
+  set +a
+fi
+
+# shellcheck source=lib/provision-lib.sh
+. "$PROVISION_LIB"
+
+[[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
+case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
+export PROV_SUBSTRATE="$SUBSTRATE"
+
+# ─── update : pull VÉRIFIÉ du checkout, puis re-exec du runner pullé en apply ─────────────────────
+if [[ "$CMD" == "update" ]]; then
+  [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relance : sudo $SELF update"
+  ROOT="$(repo_root)"
+  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
+
+  # 1. AUTORITÉ AVANT PULL (F-E1) : le remote doit matcher le repo déclaré. Pas de défaut :
+  #    on refuse de deviner à qui on fait confiance.
+  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare le repo attendu (ex: PROV_EXPECTED_REPO=fleet/lcars) via --env ou l'environnement ; SANS lui, aucun pull"
+  REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
+  [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
+  case "$REMOTE_URL" in
+    *"$PROV_EXPECTED_REPO"*) ;;
+    *) die "update: remote « $REMOTE_URL » ne matche pas le repo attendu « $PROV_EXPECTED_REPO » — pull REFUSÉ (autorité)" ;;
+  esac
+
+  # 2. Le pull s'exécute comme l'OWNER du checkout (jamais root : des objets .git root dans le
+  #    checkout d'un humain = le clobber qu'on a fui). Identité validée avant usage (IEC, v1:84).
+  OWNER="$(stat -c '%U' "$ROOT")"
+  [[ "$OWNER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "update: owner du checkout invalide: « $OWNER »"
+  BEFORE="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
+
+  # Lock apply pris AVANT le pull (un converge concurrent pendant qu'on change le code sous lui
+  # est exactement ce que le lock interdit) ; relâché avant le re-exec — le nouveau runner le reprend.
+  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  exec 9>"$LOCK"
+  flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
+  runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
+    || die "update: pull --ff-only en échec (divergence ? réseau ?) — rien n'a été appliqué"
+  AFTER="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
+  if [[ "$BEFORE" == "$AFTER" ]]; then
+    echo "provision update: déjà à jour ($AFTER) — re-converge quand même (idempotent)"
+  else
+    echo "provision update: $BEFORE → $AFTER"
+    git -C "$ROOT" --no-pager log --oneline "$BEFORE..$AFTER" | sed 's/^/  /'
+  fi
+  flock -u 9
+
+  # 3. Re-exec du runner FRAÎCHEMENT PULLÉ : c'est le code qui vient d'arriver qui s'applique,
+  #    pas celui chargé avant le pull (sinon un update du provisioning lui-même ne prend
+  #    effet qu'à l'update SUIVANT — la faille self-update classique).
+  REEXEC=(--substrate "$SUBSTRATE" --human "$PROV_HUMAN")
+  [[ -n "$ENV_FILE" ]] && REEXEC+=(--env "$ENV_FILE")
+  exec "$SELF" apply "${REEXEC[@]}"
+fi
+
+# ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
+# Deux headers, deux axes (D6). La sélection se fait sur CHECK-ON : partout où l'état-cible doit
+# être vrai, le module est retenu. En apply, un module retenu dont APPLY-ON ne couvre pas le
+# substrat courant tourne en CHECK (l'état est bâti ailleurs — stage image, build — mais il DOIT
+# tenir ici ; un drift est alors un ÉCHEC d'apply : rien ne peut le converger sur place).
+# Un module sans les DEUX headers est une ERREUR de construction (fail-loud).
+module_field() { # $1=file $2=FIELD → valeur (vide si absent)
+  sed -n "s/^# ${2}: *//p" "$1" | head -1
+}
+
+substrate_in() { # $1=liste (`any` ou mots séparés par des espaces) → 0 si $SUBSTRATE dedans
+  [[ "$1" == "any" ]] && return 0
+  case " $1 " in *" $SUBSTRATE "*) return 0 ;; *) return 1 ;; esac
+}
+
+declare -a SELECTED=() EFFECTIVE=()
+for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
+  [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
+  name="$(basename "$mod" .sh)"
+  apply_on="$(module_field "$mod" APPLY-ON)"
+  check_on="$(module_field "$mod" CHECK-ON)"
+  needs="$(module_field "$mod" NEEDS)"
+  [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
+  [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
+  [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
+  # Cohérence : appliquer là où on ne vérifie pas est irreprésentable — tout terrain d'APPLY-ON
+  # doit être couvert par CHECK-ON.
+  if [[ "$check_on" != "any" ]]; then
+    for s in $apply_on; do
+      [[ "$s" == "any" ]] && die "$name: APPLY-ON any exige CHECK-ON any"
+      case " $check_on " in *" $s "*) ;; *) die "$name: APPLY-ON contient « $s » hors de CHECK-ON ($check_on)" ;; esac
+    done
+  fi
+  # Filtre --only (nom complet `10-packages` ou préfixe `10`).
+  if [[ "${#ONLY[@]}" -gt 0 ]]; then
+    keep=0
+    for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
+    [[ "$keep" -eq 1 ]] || continue
+  fi
+  substrate_in "$check_on" || continue
+  SELECTED+=("$mod")
+  if [[ "$CMD" == "apply" ]] && substrate_in "$apply_on"; then
+    EFFECTIVE+=("apply")
+  else
+    EFFECTIVE+=("check")
+  fi
+done
+[[ "${#SELECTED[@]}" -gt 0 ]] || die "aucun module ne matche (substrat=$SUBSTRATE${ONLY[0]:+, only=${ONLY[*]}})"
+
+if [[ "$CMD" == "list" ]]; then
+  for mod in "${SELECTED[@]}"; do
+    printf '%-28s APPLY-ON=%-12s CHECK-ON=%-10s NEEDS=%s\n' "$(basename "$mod" .sh)" \
+      "$(module_field "$mod" APPLY-ON)" "$(module_field "$mod" CHECK-ON)" "$(module_field "$mod" NEEDS)"
+  done
+  exit 0
+fi
+
+# ─── Garde de privilège (apply) ───────────────────────────────────────────────────────────────────
+# Le runner N'ESCALADE JAMAIS lui-même (pas de exec sudo caché — l'entrée racine install.sh porte
+# le consentement + l'escalade). Il dit exactement ce qui manque. Les modules NEEDS:human sont
+# ramenés à PROV_HUMAN via as_human par le module lui-même — root peut donc tout appliquer.
+if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
+  for i in "${!SELECTED[@]}"; do
+    # Seuls les modules qui vont réellement MUTER exigent root (un check-only reste read-only).
+    if [[ "${EFFECTIVE[$i]}" == "apply" && "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
+      die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
+    fi
+  done
+fi
+
+# ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
+if [[ "$CMD" == "apply" ]]; then
+  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  exec 9>"$LOCK"
+  flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
+fi
+
+# ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
+total=0 ok=0 drift=0 failed=0
+declare -a REPORT=()
+
+for i in "${!SELECTED[@]}"; do
+  mod="${SELECTED[$i]}"
+  name="$(basename "$mod" .sh)"
+  eff="${EFFECTIVE[$i]}"
+  total=$((total + 1))
+  if [[ "$CMD" == "apply" && "$eff" == "check" ]]; then
+    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ==="
+  else
+    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($eff) ==="
+  fi
+  rc=0
+  PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
+  case "$CMD:$eff:$rc" in
+    doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    doctor:check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
+    apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    apply:apply:*)  failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+    apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    apply:check:*)
+      # État-cible absent ET inapplicable ici : rien sur CE substrat ne peut le converger — le
+      # fournisseur est ailleurs (stage image, build). Un apply qui le tairait serait vert-menteur.
+      failed=$((failed + 1)); REPORT+=("$name=FAIL")
+      echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebuild l'image/le build qui le fournit" >&2 ;;
+  esac
+done
+
+# ─── Verdict ──────────────────────────────────────────────────────────────────────────────────────
+if [[ "$PORCELAIN" -eq 1 ]]; then
+  printf '%s\n' "${REPORT[@]}"
+else
+  echo ""
+  echo "=== provision $CMD — substrat $SUBSTRATE ==="
+  printf '  modules: %d · conformes/convergés: %d · drift: %d · échecs: %d\n' "$total" "$ok" "$drift" "$failed"
+  if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
+    echo "  → converger : sudo $SELF apply"
+  fi
+fi
+[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
+[[ "$CMD" == "doctor" && "$drift" -gt 0 ]] && exit 1
+exit 0

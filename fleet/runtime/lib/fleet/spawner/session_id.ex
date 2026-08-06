@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.SessionId do
                       account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999
                       — a DEPLOYMENT assumption, not a property: desktop UIDs fit; container
                       userns/subuid ranges live at 100000+. Today bwrap pods run under the human's
-                      UID so the bound holds; the provisioning_v2/docker work is exactly where it
+                      UID so the bound holds; the deploy/docker work is exactly where it
                       can stop holding. The refusal is LOUD (function-clause — the right failure),
                       and that collision is a NAMED dossier (BACKLOG, provisioning list), not a
                       surprise to rediscover.
