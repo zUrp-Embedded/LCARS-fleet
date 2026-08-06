@@ -16,7 +16,14 @@ defmodule Fleet.MCP.PublishDocTest do
 
   Real `git init` temp repos — `OpsObject` commits for real, and the commit identity is the point.
   """
-  use ExUnit.Case, async: true
+  # `async: false`, and it is the SEAM that decides it, not a preference. `:pod_resolver` is a
+  # GLOBAL app-env key: this file and `list_projects_test` both set it, to different roles, and
+  # `put_env_restoring` RESTORES it when a test ends — so one suite's teardown blanks the other's
+  # seam mid-flight and `resolve_identity` answers `:pod_unknown`, which is neither role but the
+  # absence of one. Observed once on 2026-08-05 as a lone red in an otherwise green suite; proven by
+  # construction on 2026-08-06 rather than by catching it again. The six other suites touching this
+  # key were already `async: false` — these two were the outliers.
+  use ExUnit.Case, async: false
 
   alias Fleet.Layout
   alias Fleet.MCP.PodTools.Delegation

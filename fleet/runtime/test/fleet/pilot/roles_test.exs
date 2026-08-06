@@ -3,7 +3,13 @@ defmodule Fleet.Pilot.RolesTest do
   Locks the single AUTHORITY for workshop roles (`Fleet.Pilot.Roles`): capability RESOLUTION +
   opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
   """
-  use ExUnit.Case, async: true
+  # `async: false` : ce fichier tient `:fleet_pilot, :producer_role` — une clé GLOBALE que le code de
+  # production lit — pendant la durée d'un test. Il la nettoie bien (`on_exit` + `delete_env`), donc
+  # il ne fuit pas ; mais tant qu'il la tient, `Roles.producer_role()` REND « engineer » au lieu de
+  # LEVER, et n'importe quel test async concurrent qui traverse ce chemin voit l'autre réponse.
+  # Même famille que la course `:pod_resolver` prouvée le 2026-08-06 : un app-env global ne se mute
+  # pas depuis la phase concurrente.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

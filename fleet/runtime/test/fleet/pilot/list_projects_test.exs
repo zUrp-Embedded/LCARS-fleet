@@ -10,7 +10,14 @@ defmodule Fleet.Pilot.ListProjectsTest do
   it were a declaration, and report an unreadable state as if it were a known one. Both turn
   "we do not know" into a confident answer, in front of the actor that can delete the subject.
   """
-  use ExUnit.Case, async: true
+  # `async: false`, and it is the SEAM that decides it, not a preference. `:pod_resolver` is a
+  # GLOBAL app-env key: this file and `list_projects_test` both set it, to different roles, and
+  # `put_env_restoring` RESTORES it when a test ends — so one suite's teardown blanks the other's
+  # seam mid-flight and `resolve_identity` answers `:pod_unknown`, which is neither role but the
+  # absence of one. Observed once on 2026-08-05 as a lone red in an otherwise green suite; proven by
+  # construction on 2026-08-06 rather than by catching it again. The six other suites touching this
+  # key were already `async: false` — these two were the outliers.
+  use ExUnit.Case, async: false
 
   alias Fleet.Pilot.ProjectOnboard
 
