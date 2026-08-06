@@ -1681,6 +1681,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "about whether v1 is maintained, not a repair"}}
   ]
 
+  # `test_*.py` is a PYTEST NAMING CONVENTION, and it only means "this is a test" INSIDE a test
+  # directory. A source tree is free to call a module `test_output.py` because it PROCESSES test
+  # output — the vendored token-saver does exactly that, in `src/processors/`. Counting it as an
+  # undeclared corpus would force a record saying "this test suite is deliberately ungated", which
+  # would be a lie about a production file: the wall would be satisfied and the sentence false.
+  #
+  # The discriminant is the PATH, not the name: a file under a source root (`src/`, `lib/`) is not a
+  # test unless a test directory appears in its path too. `.bats` needs no such care — that
+  # extension has one meaning wherever it sits.
+  defp test_corpus_member?(path) do
+    parts = Path.split(path)
+
+    cond do
+      Path.extname(path) == ".bats" -> true
+      Enum.any?(parts, &Regex.match?(~r/^tests?$|_tests?$/, &1)) -> true
+      Enum.any?(parts, &(&1 in ["src", "lib"])) -> false
+      true -> true
+    end
+  end
+
   @doc false
   def check_test_corpora_on_record(root) do
     repo = Path.expand("../..", root)
@@ -1729,8 +1749,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
              ],
              stderr_to_stdout: true
            ) do
-        {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&Path.relative_to(&1, repo))
-        _ -> []
+        {out, 0} ->
+          out
+          |> String.split("\n", trim: true)
+          |> Enum.map(&Path.relative_to(&1, repo))
+          |> Enum.filter(&test_corpus_member?/1)
+
+        _ ->
+          []
       end
 
     unknown =

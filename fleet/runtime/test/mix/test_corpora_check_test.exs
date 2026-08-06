@@ -84,6 +84,41 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     end
   end
 
+  describe "`test_*.py` is a pytest convention, not a universal meaning" do
+    test "a source file named test_*.py under src/ is NOT a corpus" do
+      # The vendored token-saver ships `src/processors/test_output.py` — a PRODUCTION module that
+      # processes test output. Counting it would force a record reading "this suite is deliberately
+      # ungated", a sentence that is false about a production file: the wall satisfied, the
+      # statement a lie.
+      runtime =
+        tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/processors/test_output.py"])
+
+      assert Check.check_test_corpora_on_record(runtime).status == :pass
+    end
+
+    test "but a real suite under src/tests/ IS one" do
+      # The exclusion is on the source root, not on the word: a test directory deeper in the path
+      # wins. Otherwise the rule would hide real suites to avoid one false positive.
+      result =
+        Check.check_test_corpora_on_record(
+          tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/tests/test_engine.py"])
+        )
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "src/tests"
+    end
+
+    test "a `.bats` file needs no such care — the extension has one meaning anywhere" do
+      result =
+        Check.check_test_corpora_on_record(
+          tree(["fleet/runtime/test/x/a.bats", "fleet/vendor/tk/src/b.bats"])
+        )
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "vendor/tk/src"
+    end
+  end
+
   describe "an undeclared corpus is a FAILURE, not a note" do
     test "a suite in a directory no record mentions is named" do
       result =
