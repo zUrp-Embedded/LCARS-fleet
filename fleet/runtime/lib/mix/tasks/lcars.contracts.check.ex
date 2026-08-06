@@ -131,7 +131,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # removal) does not count as a violation (otherwise the gate would flag its own documentation).
   # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
   # what the name claims (it long scanned only api/ws.ex, the last migrant).
-  defp check_event_consumers_canon(root) do
+  @doc false
+  def check_event_consumers_canon(root) do
     # The check's NAME claims the canon for ALL consumers; it long grepped ws.ex alone (the last
     # migrant), leaving the guarantee narrower than its label. The residue scan now covers
     # every source under lib/ — a legacy `"event_type"` tuple REINTRODUCED anywhere fails the gate,
@@ -153,7 +154,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # FLAT form. There is NO v1: a flat/envelope-less YAML fails the v2.5 schema before `normalize`.
   # "v1/v2.5" = external envelope vs internal flat (same version, two shapes), NOT two versions.
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
-  defp check_pipeline_v25_normalized(root) do
+  @doc false
+  def check_pipeline_v25_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
 
@@ -198,7 +200,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Every handler referenced in events.yaml must exist, otherwise the route is a
   # phantom handler tolerated silently.
-  defp check_events_handlers_exist(root) do
+  @doc false
+  def check_events_handlers_exist(root) do
     yaml = Path.join(root, "priv/event_router/events.yaml")
 
     missing =
@@ -238,7 +241,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (a) no residual `HookSpawner.NotWiredYet` in the coord lib, (b) `Gates`
   # is pure — no `coord_backend()`/`CoordBackend` delegation (the dead
   # seam must not come back).
-  defp check_coord_backend_wired(root) do
+  @doc false
+  def check_coord_backend_wired(root) do
     # `soft_gate.ex` does not exist (gates consolidated onto the gatekeeper). Since
     # `grep_lines/2` returns `[]` on an absent file, grepping a dead file
     # would ALWAYS pass empty = hollow-green (the failure class this checker exists
@@ -287,7 +291,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The pattern covers get_in (list form `spec, ["lifetime_scope"]`) AND Map.get
   # (string form `spec, "lifetime_scope"`) — future-proof against a regression that
   # would reintroduce the wrong path under another form.
-  defp check_capprofile_lifetime_scope_path(root) do
+  @doc false
+  def check_capprofile_lifetime_scope_path(root) do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
       remediation:
@@ -305,7 +310,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # a list → otherwise the invariant never fires. Post-strip confirmation looser
   # than the grep: any CODE mention of `modop_incompatible` on a
   # `Map.get(spec, …)` line counts, even reformatted.
-  defp check_capprofile_modop_incompatible_path(root) do
+  @doc false
+  def check_capprofile_modop_incompatible_path(root) do
     residue_check(root, %{
       id: "capprofile.modop_incompatible_path",
       remediation:
@@ -332,7 +338,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # NB the runtime.exs side matches the RAW source (no strip_comment):
   # even a comment mention of TmuxBackend in the runtime config is
   # a resurrection signal to flag.
-  defp check_launch_backend_containment(root) do
+  @doc false
+  def check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "lib/fleet/spawner/launch_backend/tmux_backend.ex"
 
@@ -371,7 +378,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # the token on a CODE LINE that IS the error tuple (`^\s*{:error,` after strip_comment);
   # the doc line (prose prefixed by a backtick, not `{:error,`) does not count. Unwiring the
   # real clause turns it RED again, whatever the doc says.
-  defp check_mcp_required_real_backend(root) do
+  @doc false
+  def check_mcp_required_real_backend(root) do
     pod = "lib/fleet/spawner/pod.ex"
     mcp = "lib/fleet/spawner/pod/mcp_provision.ex"
 
@@ -409,7 +417,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #      silence the field exists to end — the pod boots and looks healthy while holding a contract
   #      nobody chose for it, which is undetectable from the outside.
   # Unwiring any clause turns this RED, whatever the docs say.
-  defp check_spawn_has_brief(root) do
+  @doc false
+  def check_spawn_has_brief(root) do
     spawner = "lib/fleet/spawner.ex"
 
     evidence_check(
@@ -448,7 +457,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # EXECUTABLE tuple `{:error, {:skills_missing, ...}}` on its line (the @doc/@comment name the same tuple
   # in prose; `code_match?` excludes doc blocks, and the tuple-shape confirm excludes an inline mention).
   # Red if absent.
-  defp check_skills_declared_present(root) do
+  @doc false
+  def check_skills_declared_present(root) do
     presence_check(root, %{
       id: "skills.declared_present",
       remediation:
@@ -470,7 +480,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # that cannot be broadcast without `UnregisteredError`). The emitters, for their part, are
   # covered by the fail-loud validation of the broadcast at runtime (an unregistered type
   # crashes its emitter), so this check covers only the consumption side.
-  defp check_events_registry_keys_aligned(root) do
+  @doc false
+  def check_events_registry_keys_aligned(root) do
     registry = registry_event_keys(root)
 
     consumed =
@@ -536,7 +547,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `{Plug.Cowboy,` (comma), NOT `Plug.Cowboy.Handler` (a dispatch clause) nor comments (strip_comment).
   # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
   # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
-  defp check_no_cowboy_bypass(root) do
+  @doc false
+  def check_no_cowboy_bypass(root) do
     builder = "lib/fleet/event_router/listener.ex"
 
     lib_sources = Path.wildcard(Path.join(root, "lib/**/*.ex"))
@@ -592,7 +604,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #   (b) the cancelling transition `{:next_state, :extracting, …}` exists (otherwise the result
   #       would arrive without ever leaving `:monitoring` → deadline not cancelled → kill at cycle 2).
   # Red if one is missing, OR if the band-aid `"forever" -> 60_000` (a HACK) reappears.
-  defp check_result_deadline_cancelled(root) do
+  @doc false
+  def check_result_deadline_cancelled(root) do
     pod = "lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
 
@@ -650,7 +663,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
   #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the login-validity gate.
   # Red if one is missing. A gate that runs only in test guards nothing in prod.
-  defp check_spawn_gates_wired(root) do
+  @doc false
+  def check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
     # The env construction + the credentials gate live in Pod.LaunchEnv (the env/creds cluster extracted
@@ -691,7 +705,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # NB the outer parentheses around `(… || [])` are load-bearing: without them
   # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
-  defp check_gatekeeper_not_a_step(root) do
+  @doc false
+  def check_gatekeeper_not_a_step(root) do
     dir = "priv/catalogue/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
 
@@ -737,7 +752,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # StepRunConsumer must unwrap the worker envelope `%{status, result}` before reading the
   # decision (resume_gate/gate_result) OR evaluating the gate (gate_decide) — otherwise
   # decision/outputs stay buried → false escalation / wrongful hard-gate.
-  defp check_verdict_envelope_unwrapped(root) do
+  @doc false
+  def check_verdict_envelope_unwrapped(root) do
     step_run = "lib/fleet/pilot/step_run_consumer.ex"
     abs = Path.join(root, step_run)
 
@@ -779,7 +795,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # runtime.exs (:prod block); this check guards its presence. Post-strip confirmation
   # looser than the grep (`root` alone): the long marker may live partly
   # in a comment on the line, only `root` needs to survive in the code.
-  defp check_no_root_runtime_guard(root) do
+  @doc false
+  def check_no_root_runtime_guard(root) do
     presence_check(root, %{
       id: "runtime.no_root_boot_guard",
       remediation: "R-no-root-runtime",
@@ -1011,7 +1028,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # SOLE carrier of F8 (event_router first; mcp before spawner — no starfleet constraint,
   # cf. A-08 comment in the function) — reordering it breaks the boot WITHOUT a compile
   # error. Hence the honest check id: `boot.order_f8`.
-  defp check_boot_order_f8(root) do
+  @doc false
+  def check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
     # A-08: there is NO `mcp < starfleet` / `spawner < starfleet` constraint — their only
@@ -1072,7 +1090,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # control: starfleet declares `forge_identity: false` (its forge writes go through the
   # system), a ReservedSeat (vulcan) counts as a seat = an account + a token, both inert.
   # Boundary can NEVER see any of this: three of the four lists are outside the BEAM.
-  defp check_roles_provisioning_locked(root) do
+  @doc false
+  def check_roles_provisioning_locked(root) do
     # Decoded reads (kind/forge_identity are yaml fields, not greppable shapes) — the task
     # context does not start :yaml_elixir by itself; same explicit start as lcars.sp.gen.
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
@@ -1171,7 +1190,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
-  defp check_roles_role_index_unique(root) do
+  @doc false
+  def check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
     indexed =
@@ -1220,7 +1240,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     lib/mix/tasks/lcars.contracts.check.ex
   )
 
-  defp check_sanctuary_contained(root) do
+  @doc false
+  def check_sanctuary_contained(root) do
     scanned =
       ["lib", "bin", "etc"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs,sh}"])) end)
@@ -1264,7 +1285,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Measured 2026-08-03: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
   # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
-  defp check_sourcers_set_strict(root) do
+  @doc false
+  def check_sourcers_set_strict(root) do
     # `root` IS fleet/runtime (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
     # run, which is the worst of the three outcomes: a green that checked nothing.
@@ -1367,7 +1389,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # check locks the CONTRACT at the gate: the projection exists in the code AND the
   # anti-regression test exists (deleting the test is visible to the gate — belt over
   # the ExUnit net).
-  defp check_mcp_wire_inputschema(root) do
+  @doc false
+  def check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
     test = "test/pod_socket_test.exs"
 
