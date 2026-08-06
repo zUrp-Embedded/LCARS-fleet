@@ -63,8 +63,6 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id),
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

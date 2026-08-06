@@ -10,8 +10,6 @@ defmodule Fleet.Spawner.Pod.Publishing do
   actions. A deadline is re-armed while `Fleet.Publish.InFlight` reports an active publish; otherwise
   it is the fail-safe that releases a lost confirmation. The delay is configured by
   `:fleet_spawner, :publish_deadline_ms` and defaults to 120 seconds.
-
-  **Last revised**: 2026-08-02
   """
 
   @doc """

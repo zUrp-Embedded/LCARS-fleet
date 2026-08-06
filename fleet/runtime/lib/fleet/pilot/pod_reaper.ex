@@ -35,8 +35,6 @@ defmodule Fleet.Pilot.PodReaper do
   Best-effort by construction: the retirement/merge that precedes it is authoritative and never
   rolls back for a failed reaping; `{:error, :not_found}` is the NOMINAL case (already dead, or
   replay), hence no error path and idempotence.
-
-  **Last revised**: 2026-08-04
   """
 
   require Logger

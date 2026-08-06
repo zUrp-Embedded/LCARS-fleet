@@ -34,8 +34,6 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
     * `:projects_root` / `:work_root` — FS roots (defaults `Fleet.Layout`), same keys as
       `ProjectOnboard` (the onboard opts thread through unchanged).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

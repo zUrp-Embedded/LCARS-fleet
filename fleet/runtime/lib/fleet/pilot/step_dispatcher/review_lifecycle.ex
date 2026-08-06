@@ -41,8 +41,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   tag) serve BOTH flows (issue at the core + review here) from their authority modules —
   no captures in the `Ctx`: taking them at the source keeps the
   core→ReviewLifecycle→Spawn uni-directionality without a fn in a struct, without a fork.
-
-  **Last revised**: 2026-08-04
   """
 
   require Logger

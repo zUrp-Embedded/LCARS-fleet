@@ -24,8 +24,6 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
   Checked against the module the caller was ALREADY HANDED (`conforming(DependencyForge, forge)`),
   not against a fresh resolution: the question is whether THIS module carries the surface, and
   re-resolving could answer about a different one.
-
-  **Last revised**: 2026-08-06
   """
 
   @doc "The issues BLOCKING `number` — what it waits on (raw Gitea maps)."

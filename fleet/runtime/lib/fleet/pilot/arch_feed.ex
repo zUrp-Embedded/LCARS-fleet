@@ -27,8 +27,6 @@ defmodule Fleet.Pilot.ArchFeed do
 
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
   `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
-
-  **Last revised**: 2026-08-05
   """
 
   use GenServer

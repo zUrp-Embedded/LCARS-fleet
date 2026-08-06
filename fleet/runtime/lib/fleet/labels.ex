@@ -39,8 +39,6 @@ defmodule Fleet.Labels do
   label does not exist" — while `genre/ops` had been shipping for a chantier and `type:feature` was
   posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
   is the first thing a reader trusts and the last thing anyone updates.
-
-  **Last revised**: 2026-08-04
   """
 
   @in_flight "lcars-in-flight"

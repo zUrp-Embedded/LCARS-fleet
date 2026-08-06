@@ -22,8 +22,6 @@ defmodule Fleet.TaskQueue.WorkItem do
   (ordinary-brief vs gate-eval-resume) stay deferred as disproportionate — same trade-off as
   `Fleet.CapProfile`: a data value read across the whole pilot/taskqueue domain, an `@opaque`
   would bark at every legitimate reader.
-
-  **Last revised**: 2026-08-03
   """
 
   @type state :: :pending | :assigned | :completed | :failed | :cleared

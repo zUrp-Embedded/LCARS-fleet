@@ -39,8 +39,6 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
   both dispatch-side callers pass `push: :work_ops`).
-
-  **Last revised**: 2026-08-05
   """
 
   require Logger

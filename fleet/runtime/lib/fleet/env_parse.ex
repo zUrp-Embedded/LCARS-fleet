@@ -13,8 +13,6 @@ defmodule Fleet.EnvParse do
   `raise` a clear message = boot REFUSED (a typo must not boot a broken daemon, but with a readable error,
   not an opaque `String.to_integer` stacktrace). A boolean feature-flag typo → the documented default +
   a LOUD warning (a flag typo should be visible, but must not kill the boot).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

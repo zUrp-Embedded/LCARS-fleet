@@ -21,8 +21,6 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     * `:fleet_event_router, :webhook_secret_path` — secret path
       (default `/etc/fleet/webhook-secret`)
     * `:fleet_event_router, :webhook_port` — HTTP port (default 8081)
-
-  **Last revised**: 2026-08-03
   """
 
   use Plug.Router

@@ -20,8 +20,6 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
       `{:escalation_failed, _}`, never a lying `{:escalated}`).
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
       SP suspect / Cat-5 max severity) — the diagnosis guides the sysadmin toward the root-cause.
-
-  **Last revised**: 2026-08-05
   """
 
   require Logger

@@ -31,8 +31,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   commit's own date to now, so nothing has to be remembered between ticks and a new push (new sha,
   new date) restarts the clock by construction. Past the deadline the gate ESCALATES LOUD instead
   of waiting one more tick forever.
-
-  **Last revised**: 2026-08-04
   """
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx

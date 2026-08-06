@@ -16,8 +16,6 @@ defmodule Fleet.Pilot.ForgeProtocol do
   functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `ForgeClient`
   (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
   dependency on fleet_pilot.
-
-  **Last revised**: 2026-08-02
   """
 
   # ============================================================

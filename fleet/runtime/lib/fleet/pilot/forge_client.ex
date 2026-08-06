@@ -34,8 +34,6 @@ defmodule Fleet.Pilot.ForgeClient do
   `GET issue labels` to short-circuit, else `POST issue/labels` by NAME (Gitea resolves repo+org
   server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
   re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
-
-  **Last revised**: 2026-08-04
   """
 
   require Logger

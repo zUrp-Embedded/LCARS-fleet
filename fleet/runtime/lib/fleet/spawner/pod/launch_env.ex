@@ -27,8 +27,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, full qualif) and
   `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
   (no cycle).
-
-  **Last revised**: 2026-08-03
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec

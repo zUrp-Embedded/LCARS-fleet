@@ -26,8 +26,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   least one check is `fail`. Every check is IMPLEMENTED and grounded in the real
   code (grep/introspection) — there is no "pending/declared-only" tier: a contract
   either has an executable check or it is not listed.
-
-  **Last revised**: 2026-08-06
   """
 
   use Mix.Task

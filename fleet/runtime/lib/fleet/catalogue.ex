@@ -63,8 +63,6 @@ defmodule Fleet.Catalogue do
   from a foreign generation fails at its first load without ever saying why.
 
   Foundation (`deps: []`, next to `Fleet.Layout` and `Fleet.Slug`): anything may depend down onto it.
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

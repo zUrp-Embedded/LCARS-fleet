@@ -14,8 +14,6 @@ defmodule Fleet.Spawner.Supervisor do
   only relaunch path. Two callers drive it, both through `PermanentBoot`'s desired-state respawn (never
   the supervisor): the boot-orchestrator (initial boot of the permanents) and the `PermanentWarden`
   (recovery respawn of a DEAD permanent, on `pod.failed` + reconciliation).
-
-  **Last revised**: 2026-08-03
   """
 
   use DynamicSupervisor

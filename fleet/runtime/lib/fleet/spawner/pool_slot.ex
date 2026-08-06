@@ -38,8 +38,6 @@ defmodule Fleet.Spawner.PoolSlot do
   start-up, so the allocation reads live state without talking to a single pod — a hung pod can
   no longer block the spawn of another. It is also why the pool is decided at the SPAWN site and
   passed in: the value must be known before the process registers.
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

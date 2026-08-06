@@ -36,8 +36,6 @@ defmodule Fleet.CapProfile.Invariants do
   Single dependency direction (no cycle): this module depends on the
   `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile.validate/1`
   calls `violations/1` (runtime-dep).
-
-  **Last revised**: 2026-08-03
   """
 
   alias Fleet.CapProfile

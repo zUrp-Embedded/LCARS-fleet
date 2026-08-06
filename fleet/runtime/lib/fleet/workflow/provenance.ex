@@ -23,8 +23,6 @@ defmodule Fleet.Workflow.Provenance do
   **Degraded-tolerant**: if `brief_sha` is missing (brief not materialized, cf. `BriefArtifact`), the
   Statement omits the configSource digest but still records input→output (2/3 beats 0). Idempotent by
   content-address (same `livrable_sha` = same file = no-op).
-
-  **Last revised**: 2026-08-05
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance

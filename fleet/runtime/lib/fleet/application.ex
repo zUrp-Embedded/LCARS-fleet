@@ -70,8 +70,6 @@ defmodule Fleet.Application do
   resurrected alone (state lost, Bus subscriptions dead) would be a
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.
-
-  **Last revised**: 2026-08-03
   """
 
   use Application

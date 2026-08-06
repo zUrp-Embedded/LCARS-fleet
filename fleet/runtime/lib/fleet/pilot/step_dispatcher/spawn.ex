@@ -37,8 +37,6 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
   `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

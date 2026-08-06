@@ -4,8 +4,6 @@ defmodule Fleet.Spawner.Pod.Fs do
 
   Failures retain the operation, path and filesystem reason so callers can enter their normal
   failed transition instead of crashing the pod process.
-
-  **Last revised**: 2026-08-02
   """
 
   @doc "Creates a directory tree and returns a contextual `:mkdir_failed` error."

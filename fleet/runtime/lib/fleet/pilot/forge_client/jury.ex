@@ -8,8 +8,6 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   The domain subtlety — why this is NOT trivial — is the **commit-scoping** and the fact that
   Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
   not the requested field. Details in each `@doc`.
-
-  **Last revised**: 2026-08-04
   """
 
   import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, paginate: 3]

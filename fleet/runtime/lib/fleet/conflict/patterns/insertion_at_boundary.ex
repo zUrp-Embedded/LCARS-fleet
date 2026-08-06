@@ -3,8 +3,6 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   Both branches ONLY added lines relative to base (no removals), at the same boundary where a plain
   LCS 3-way merge fails. Complements `non_overlapping` (priority 40, checked first): this is the case
   where the insertions land at the same point. diff3 = high confidence; diff2 = a subset heuristic.
-
-  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.{Diff, Score}

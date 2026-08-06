@@ -8,8 +8,6 @@ defmodule Fleet.Spawner.Pod.Events do
 
   The `:fleet_spawner, :event_bus` seam applies only to the required path. Both paths correlate the
   lifecycle event with the issue identifier in the payload.
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

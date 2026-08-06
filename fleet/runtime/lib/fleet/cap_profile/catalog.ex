@@ -39,8 +39,6 @@ defmodule Fleet.CapProfile.Catalog do
   `Fleet.Catalogue.cap_profiles_root/0`: the bundled canon unless `LCARS_CATALOGUE_ROOT` brings
   another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
   without env).
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

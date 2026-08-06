@@ -21,8 +21,6 @@ defmodule Fleet.ReceptionFilter do
   This defends V1-V3 of the doctrine's threat model (drift, pipeline bug, project-content
   injection). V4 (a sophisticated attacker paraphrasing around the patterns) is explicitly
   OUT of scope, as in the doctrine — the filter is a floor, never the whole defense.
-
-  **Last revised**: 2026-08-02
   """
 
   # The canonical V1 list, verbatim semantics, TWO corrections carried with their why:
