@@ -1,7 +1,7 @@
 # token_saver — brique vendorée
 
 **Date** : 2026-08-04
-**Dernière révision** : 2026-08-06
+**Dernière révision** : 2026-08-07
 **Statut** : actif — contrat de vendoring de la brique token_saver
 **Référencé par** : `THIRD_PARTY_NOTICES.md`, `update_vendor.sh`
 
@@ -33,7 +33,7 @@ Compression d'output de commandes CLI **avant** son entrée dans le contexte de 
 
 Le précédent GitWand (`recode` en Elixir pur, décision « ni fork, ni dep npm — pas de pile Node ») ne s'applique pas : GitWand devait tourner **dans le BEAM**. token-saver s'exécute **dans le pod**, en sous-processus du hook Claude Code, exactement comme le bridge MCP stdio. Aucune pile nouvelle n'entre dans le runtime Elixir.
 
-Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, dont le véhicule est `fleet/v1/hooks.yaml`.
+Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, dont le véhicule **n'est plus tranché** : `fleet/v1/hooks.yaml` le portait et est parti avec la v1 (excommunion 2026-08-06).
 
 ## Découpage retenu
 
@@ -99,7 +99,8 @@ Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter
 ## Câblage
 
 ```
-fleet/v1/hooks.yaml           → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
+<vehicule a trancher>         → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
+(fleet/v1/hooks.yaml jouait ce role et est parti avec la v1)
 .claude/hooks/token-saver-hook.sh   shim : coupe, résout la brique, passe stdin
     └→ lcars_hook.py          switch, décision de routage, réécriture de commande
          └→ lcars_wrap.py     importe `adapter` (bootstrap) puis délègue à scripts/wrap.py

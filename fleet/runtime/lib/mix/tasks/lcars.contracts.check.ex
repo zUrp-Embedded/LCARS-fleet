@@ -1660,20 +1660,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
      {:out,
       "upstream suites of the vendored engine (7 884 l). They arbitrate UPSTREAM merges — " <>
         "update_vendor.sh plays them at the moment they serve — and gating them would make every " <>
-        "commit here pay for a question nobody is asking"}},
-    {"fleet/tests/python/v1",
-     {:out, "v1 python smoke, frozen with the rest of v1 — same decision as the v1 bats corpus"}},
-    {"PoC",
-     {:out,
-      "prototypes kept as EVIDENCE of an experiment. A PoC owes a reader its result, never a green " <>
-        "suite, and gating one would make the product answer for a question already answered"}},
-    {"fleet/tests/.bats",
-     {:out, "vendored bats-core + its helper libraries: upstream's own suites, not ours to run"}},
-    {"fleet/tests/unit/v1",
-     {:out,
-      "v1 frozen since 2026-04-18; 246 of 447 cases still red after the BL-6-68 repair. Gating it " <>
-        "would turn the gate red on code nobody changes, and the remaining failures are a decision " <>
-        "about whether v1 is maintained, not a repair"}}
+        "commit here pay for a question nobody is asking"}}
   ]
 
   # `test_*.py` is a PYTEST NAMING CONVENTION, and it only means "this is a test" INSIDE a test
@@ -1786,7 +1773,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   def check_test_corpora_on_record(root) do
     repo = Path.expand("../..", root)
 
-    # `-type f` is load-bearing: `fleet/tests/.bats` is a DIRECTORY whose name matches `*.bats`, and
+    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (the vendored bats-core lived in
+    # one until the v1 excommunication), and
     # without it the scan reports a corpus that is a folder.
     found =
       case System.cmd(

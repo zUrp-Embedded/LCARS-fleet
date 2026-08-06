@@ -1,6 +1,0 @@
-# config.local.ps1 — local provisioning config, NOT versioned (gitignored)
-#
-# Copy this file to config.local.ps1 and set your WSL root path.
-# Created automatically by Instanciator.ps1 on first run.
-
-$WSL_ROOT = "C:\Users\YourUsername\WSL"

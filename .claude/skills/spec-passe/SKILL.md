@@ -123,7 +123,7 @@ From the taxonomy, not from the preset list. Then match against registry:
 
 For each derived agent, provision via:
 ```
-bash fleet/provisioning/provision-users.sh <username>
+bash fleet/provisioning_v2/provision <username>   # v1 provision-users.sh retire 2026-08-06 (excommunion) ; le point d entree v2 est `provision`
 ```
 
 Produce the agent list:

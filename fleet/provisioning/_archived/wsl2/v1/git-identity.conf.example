@@ -1,9 +1,0 @@
-# git-identity.conf — identité git locale, non versionnée
-#
-# Copier ce fichier dans C:\Users\<vous>\WSL\#4_Private\git-identity.conf
-# et renseigner les valeurs. Ce fichier ne doit PAS être versionné.
-#
-# Sourcé par post-install.sh au premier boot de chaque instance.
-
-GIT_USER_NAME=yourname
-GIT_USER_EMAIL=yourname@example.com

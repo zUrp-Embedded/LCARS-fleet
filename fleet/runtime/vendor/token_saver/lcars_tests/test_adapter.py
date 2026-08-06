@@ -254,7 +254,8 @@ class TestOverridesEnvironnement:
 
 
 class TestHook:
-    """Le point d'entrée : lcars_hook.py, câblé depuis fleet/v1/hooks.yaml."""
+    """Le point d'entrée : lcars_hook.py. Son véhicule de déploiement n'est plus tranché depuis que
+    fleet/v1/hooks.yaml est parti avec la v1 (2026-08-06)."""
 
     HOOK = os.path.join(_ROOT, "lcars_hook.py")
 

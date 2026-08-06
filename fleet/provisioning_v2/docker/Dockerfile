@@ -203,7 +203,7 @@ COPY fleet/provisioning_v2/docker/skel.bashrc      /etc/skel/.bashrc
 # ─── A FAIRE — token-saver n'est PAS embarque, et le hook s'efface donc ─────────────────────────
 #
 # La brique de compression d'output (fleet/runtime/vendor/token_saver/, Apache-2.0 + glue LCARS)
-# est cablee cote hooks — fleet/v1/hooks.yaml → ~/.claude/hooks/token-saver-hook.sh — mais AUCUN
+# est cablee cote hooks — vehicule NON TRANCHE depuis que fleet/v1/hooks.yaml est parti — mais AUCUN
 # COPY ne l'amene ici. Le shim la cherche parmi une liste de candidats, ne la trouve pas, et passe
 # la commande intacte : fail-open. Rien ne casse, rien ne compresse. AUCUN SYMPTOME VISIBLE —
 # c'est precisement pourquoi cette note est dans ce fichier et pas seulement dans un plan.

@@ -7,7 +7,9 @@
 
 Fichier LCARS, hors sous-arbre vendoré.
 
-Câblé depuis `fleet/v1/hooks.yaml` (event `PreToolUse`, matcher `Bash`). Lit le
+Véhicule de déploiement NON TRANCHÉ depuis l'excommunion v1 (2026-08-06) : `fleet/v1/hooks.yaml`
+(event `PreToolUse`, matcher `Bash`) le câblait et a été retiré. Le hook ne se déploie donc
+nulle part aujourd'hui — il échoue ouvert, sans symptôme. Lit le
 JSON de l'appel d'outil sur stdin, décide si la commande est compressible, et
 si oui la réécrit pour qu'elle passe par `lcars_wrap.py`.
 
