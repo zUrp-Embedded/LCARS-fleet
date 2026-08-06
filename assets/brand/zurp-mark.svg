@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 100" role="img" aria-label="zUrp">
+  <!-- Marque zUrp redessinee au trait depuis logo_zUrp-industry.png (bitmap 4167x1667).
+       LA FORME : un Z en barre oblique, un U en CONTOUR qui le TRAVERSE (il passe par-dessus
+       la barre du Z et descend sous la ligne de base), puis RP pleins. Le U evide au milieu de
+       lettres pleines est la signature — c'est lui qu'on reconnait, pas la police. -->
+  <g fill="currentColor">
+    <!-- Z : barre haute, diagonale, barre basse -->
+    <path d="M8 34 h74 v13 H31 l51 -0 v13 H8 l0 -13 51 -13 H8 z"/>
+    <path d="M8 34 h74 L20 73 h62 v13 H4 v-12 L66 47 H8 z"/>
+    <!-- R -->
+    <path d="M132 34 h34 a16 16 0 0 1 0 32 h-6 l16 20 h-16 l-16 -20 h-6 v20 h-14 V34 z
+             m14 12 v12 h18 a6 6 0 0 0 0 -12 z"/>
+    <!-- P -->
+    <path d="M186 34 h34 a16 16 0 0 1 0 32 h-20 v20 h-14 V34 z
+             m14 12 v12 h18 a6 6 0 0 0 0 -12 z"/>
+  </g>
+  <!-- U en contour, PAR-DESSUS : il traverse le Z et depasse en haut comme en bas -->
+  <path d="M62 6 v66 a20 20 0 0 0 20 20 h14 a20 20 0 0 0 20 -20 V6"
+        fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"/>
+</svg>
