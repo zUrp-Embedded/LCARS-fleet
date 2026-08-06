@@ -1,5 +1,10 @@
 # token_saver — brique vendorée
 
+**Date** : 2026-08-04
+**Dernière révision** : 2026-08-06
+**Statut** : actif — contrat de vendoring de la brique token_saver
+**Référencé par** : `THIRD_PARTY_NOTICES.md`, `update_vendor.sh`
+
 **Dérivé de** : [`ppgranger/token-saver`](https://github.com/ppgranger/token-saver) @ `098873e04c6c49cbdc25c1c5f795986f5f170f16` (v2.6.3, 2026-06-02) — **Apache-2.0**
 **Forme d'emprunt** : `import` (vendoring de `src/` + `scripts/` + `tests/`)
 **Analyse** : reverse complet → `#3_ponce-reverse/token-saver/` (specs, architecture, harnais de mesure)

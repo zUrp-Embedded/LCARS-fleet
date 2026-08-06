@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# SOURCE: fleet/runtime/vendor/token_saver/tools/probe_loss.py
+# AUTHOR: starfleet (reverse ppgranger/token-saver, 2026-08-03)
+# STARDATE: 2026-08-03
+# STATUS: harnais de mesure de PERTE — critere de recette de la brique (14/24 amont natif,
+#         23/24 sous adapter). Hors sous-arbre vendore : il est a nous.
 """Harnais de mesure de perte — brique vendorée token_saver (LCARS).
 
 Copie du harnais du reverse (#3_ponce-reverse/token-saver/tools/), câblée

@@ -1,5 +1,10 @@
 # Third-Party Notices
 
+**Date** : 2026-08-04
+**Dernière révision** : 2026-08-06
+**Statut** : actif — recensement des emprunts externes (Apache-2.0 §4)
+**Référencé par** : `fleet/runtime/vendor/*/VENDOR.md`
+
 LCARS-fleet est distribué sous **AGPL-3.0** (voir [`LICENSE`](LICENSE)). Ce document recense les travaux tiers dont le projet dérive, sous quelque forme que ce soit — code copié, code réimplémenté, ou méthode reprise.
 
 Il couvre volontairement plus que ce que les licences exigent. Une réimplémentation propre n'oblige à rien juridiquement ; nous la déclarons quand même, parce qu'une dette intellectuelle non dite reste une dette.
