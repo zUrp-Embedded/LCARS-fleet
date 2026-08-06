@@ -2,7 +2,11 @@ defmodule Fleet.SPBuilderTest do
   use ExUnit.Case, async: false
   use ExUnitProperties
 
-  doctest Fleet.SPBuilder
+  # `doctest Fleet.SPBuilder` RETIRE le 2026-08-06 : le module n'a JAMAIS porte d'exemple `iex>`
+  # (`git log -S` sur ce fichier ne rend rien). La ligne declarait une couverture qui n'a jamais
+  # existe — zero cas execute, et un lecteur qui voit `doctest` croit le contraire. Retirer une
+  # ligne qui n'execute rien ne retire aucun test : le compte de la suite est identique avant et
+  # apres. Trouve par le check `tests.doctest_declarations_have_examples`, ecrit le jour meme.
 
   @moduletag :tmp_dir
 

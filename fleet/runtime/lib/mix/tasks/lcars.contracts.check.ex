@@ -108,7 +108,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
         check_intensity_max_fan_ceiling(root),
-        check_test_corpora_on_record(root)
+        check_test_corpora_on_record(root),
+        check_doctest_declarations_have_examples(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1705,6 +1706,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Enum.any?(parts, &(&1 in ["src", "lib"])) -> false
       true -> true
     end
+  end
+
+  @doc false
+  # A SUITE DOES NOT GO RED OVER A TEST THAT WAS REMOVED — it goes green over one fewer.
+  #
+  # Measured 2026-08-06 while replaying the GC-prose transplant: `forge_protocol.ex` went from 13
+  # `iex>` lines to zero, `mix test` reported "0 failures" on both sides, and the count moved from
+  # 13 doctests to 10 with nothing to see. The examples were round-trip assertions — the predicate
+  # recognises what the builder records — and `test/…/forge_protocol_test.exs` still carries
+  # `doctest Fleet.Pilot.ForgeProtocol`. The file LOOKS covered and executes nothing.
+  #
+  # This wall answers the DECIDABLE half of that: a declaration whose module holds no example runs
+  # no test. It does NOT claim to notice a deleted test file or a shrunk suite — those need a
+  # recorded floor, which is state that rots. One decidable question, answered without state.
+  def check_doctest_declarations_have_examples(root) do
+    declarations =
+      Path.wildcard(Path.join(root, "test/**/*.exs"))
+      |> Enum.flat_map(fn f ->
+        case File.read(f) do
+          {:ok, src} ->
+            Regex.scan(~r/^\s*doctest\s+([A-Za-z0-9_.]+)/m, src, capture: :all_but_first)
+
+          _ ->
+            []
+        end
+      end)
+      |> List.flatten()
+      |> Enum.uniq()
+
+    empty =
+      Enum.filter(declarations, fn mod ->
+        path = Path.join([root, "lib", Macro.underscore(mod) <> ".ex"])
+
+        case File.read(path) do
+          {:ok, src} -> not String.contains?(src, "iex>")
+          # An unresolvable module is NOT reported as empty: the derivation may simply be wrong for
+          # a module whose file does not follow the convention, and accusing it would be the wall
+          # crying about its own blind spot.
+          _ -> false
+        end
+      end)
+
+    unresolved =
+      Enum.reject(declarations, fn mod ->
+        File.exists?(Path.join([root, "lib", Macro.underscore(mod) <> ".ex"]))
+      end)
+
+    broken =
+      cond do
+        declarations == [] ->
+          "no `doctest` declaration found under test/; this check measured nothing"
+
+        length(unresolved) == length(declarations) ->
+          "no declared module resolved to a source file"
+
+        true ->
+          nil
+      end
+
+    %{
+      id: "tests.doctest_declarations_have_examples",
+      remediation:
+        "restore the `iex>` examples in the module, or drop the `doctest` line — a declaration " <>
+          "over a module with no example is a test file that looks covered and runs nothing",
+      status: if(is_nil(broken) and empty == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["INSTRUMENT BROKEN — #{broken}"]
+
+          empty != [] ->
+            ["doctest declared over a module with NO `iex>` example: #{inspect(empty)}"]
+
+          true ->
+            []
+        end,
+      # Le compte, pas l'affirmation : « all backed » se lit encore quand l'evidence juste au-dessus
+      # nomme un module qui ne l'est pas. Une note qui contredit son propre verdict apprend a son
+      # lecteur a ne plus la lire.
+      note:
+        "#{length(declarations)} doctest declarations, #{length(declarations) - length(empty)} backed by examples" <>
+          if(unresolved == [],
+            do: "",
+            else: " (#{length(unresolved)} module(s) unresolved, not judged)"
+          )
+    }
   end
 
   @doc false
