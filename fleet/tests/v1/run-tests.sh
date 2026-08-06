@@ -30,10 +30,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BATS="$SCRIPT_DIR/.bats/bats-core/bin/bats"
+# `..` : ce script vit dans tests/v1/, le sous-module bats vit dans tests/.bats/. Le chemin d'avant
+# le rangement du 2026-07-31 (`chore: isolate v1 files into v1/ subdirectories at every level`)
+# pointait un niveau trop bas et ce lanceur n'a plus jamais demarre — meme casse que celle qui a tue
+# les 447 cas du corpus lui-meme, dans le meme commit et jamais vue parce que personne ne le lance.
+TESTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BATS="$TESTS_DIR/.bats/bats-core/bin/bats"
 
-if [[ ! -x "$BATS" ]]; then
-    echo "ERROR: bats not found at $BATS" >&2
+# Repli sur le bats du systeme : le sous-module est PINE (reproductibilite) mais il n'est pas
+# toujours recupere, et refuser de tourner quand un bats parfaitement valide est dans le PATH est un
+# refus qui ne protege rien. On DIT lequel on prend — deux bats de versions differentes ne rendent
+# pas les memes verdicts, et un lanceur qui tait sa toolchain rend un resultat inattribuable.
+if [[ -x "$BATS" ]]; then
+    echo "bats: sous-module pine ($BATS)"
+elif command -v bats >/dev/null 2>&1; then
+    BATS="$(command -v bats)"
+    echo "bats: SYSTEME ($BATS, $("$BATS" --version 2>/dev/null)) — sous-module absent" >&2
+    echo "  pour le pin : git submodule update --init fleet/tests/.bats/bats-core" >&2
+else
+    echo "ERROR: aucun bats — ni $BATS ni dans le PATH" >&2
     echo "  Run: git submodule update --init --recursive" >&2
     exit 1
 fi
@@ -41,8 +56,10 @@ fi
 LEVEL="${1:-all}"
 FAILED=0
 
+# Les suites vivent en tests/<niveau>/v1/, pas en tests/v1/<niveau>/ : le meme rangement a separe le
+# LANCEUR (parti dans v1/) de ce qu'il lance (reste sous unit/, puis descendu d'un cran dans v1/).
 run_level() {
-    local dir="$SCRIPT_DIR/$1"
+    local dir="$TESTS_DIR/$1/v1"
     if [[ -d "$dir" ]] && compgen -G "$dir/*.bats" > /dev/null; then
         echo "=== $1 ==="
         "$BATS" --tap "$dir" || FAILED=1
