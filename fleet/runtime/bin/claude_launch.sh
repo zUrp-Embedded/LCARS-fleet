@@ -2,10 +2,10 @@
 # SOURCE: bin/claude_launch.sh
 # AUTHOR: engineer
 # STARDATE: 2026-06-01
-# STATUS: PROD-V2 — INTERACTIVE claude vendor launcher, PTY-puppet (Ring 1, N1 frontier, subscription)
+# STATUS: PROD-V2 — INTERACTIVE claude vendor launcher, PTY-puppet (N1 vendor frontier, subscription)
 #
 # Vendor-specific launcher for the interactive `claude` REPL of LCARS v2 under ADR-G
-# (Ring 1 pod primitive, level-1 vendor frontier, `claude_*` prefix).
+# (pod primitive, N1 vendor frontier, `claude_*` prefix).
 # RC-at-startup goes through the `--remote-control` flag, PROVEN under a PTY. The one-shot
 # `script(1)`-PTY model (brief = CLI prompt) is FORBIDDEN by ADR-G IV.1/IV.2.
 #

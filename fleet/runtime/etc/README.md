@@ -1,11 +1,11 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date**: 2026-05-10
-**Last revised**: 2026-07-31
+**Last revised**: 2026-08-06
 **Status**: human-launched model (systemd removed 2026-06-16)
 **Referenced by**: `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
-Substrat de lancement Ring 0. **systemd est retiré** : la fleet ne tourne plus comme un service
+Substrat de lancement. **systemd est retiré** : la fleet ne tourne plus comme un service
 système `User=lcars`. Modèle (ADR-E, doctrine 2026-06-11) : **chaque humain lance SA fleet sous son
 propre UID** → la BEAM tourne *as* l'humain → les pods héritent son UID (ownership/creds/isolation OS
 gratis, pas de drop, pas de `/var/lib/lcars`). L'état va sous `~/.lcars/*` de chaque humain.
