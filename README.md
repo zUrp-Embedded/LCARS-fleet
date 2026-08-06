@@ -13,6 +13,7 @@
 [![Platform](https://img.shields.io/badge/platform-WSL2%20%7C%20Docker-informational?style=flat-square)]()
 [![Runtime](https://img.shields.io/badge/runtime-self--hosted-informational?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-AGPL--v3-blue?style=flat-square)](LICENSE)
+[![Third-party](https://img.shields.io/badge/third--party-notices-lightgrey?style=flat-square)](THIRD_PARTY_NOTICES.md)
 
 **Jump to** — [Quick Start](#quick-start) · [Why LCARS](#why-lcars) · [In Numbers](#in-numbers) · [What You Get](#what-you-get) · [Architecture](#architecture) · [Who It's For](#who-its-for)
 
@@ -257,8 +258,11 @@ LCARS-fleet/
 ├── knowledge/        # reusable domain knowledge
 ├── install.sh        # WSL bootstrap entrypoint
 ├── docker.sh         # Docker bootstrap entrypoint
-└── ONBOARDING.md     # day-1 operating guide
+├── ONBOARDING.md     # day-1 operating guide
+└── THIRD_PARTY_NOTICES.md   # what we borrowed, from whom, under which licence
 ```
+
+LCARS stands on other people's work. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists every borrowing — copied code, reimplemented code, and borrowed method alike — with its licence and its place in the tree. It deliberately covers more than the licences require.
 
 ---
 

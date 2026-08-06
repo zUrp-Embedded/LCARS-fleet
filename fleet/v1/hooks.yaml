@@ -67,3 +67,13 @@ hooks:
   - event: PostToolUse
     matcher: "Edit|Write"
     command: "bash $HOME/.claude/hooks/post-directional-handoff-reminder.sh"
+
+  # token-saver — compression d'output CLI avant entrée dans le contexte.
+  # Brique vendorée (fleet/runtime/vendor/token_saver/, Apache-2.0) + couche LCARS.
+  # Le hook interroge son switch EN PREMIER : LCARS_TOKEN_SAVER=off le coupe
+  # sans redéploiement. Fail-open sur toute anomalie — une compression manquée
+  # coûte des tokens, une commande bloquée coûte un pod.
+  # Intersection avec pre-scope-check.sh / work-guard.sh : vide (vérifiée par test).
+  - event: PreToolUse
+    matcher: "Bash"
+    command: "bash $HOME/.claude/hooks/token-saver-hook.sh"

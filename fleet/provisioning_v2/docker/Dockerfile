@@ -200,6 +200,27 @@ COPY fleet/provisioning_v2/docker/console.tmux.conf  /opt/lcars/console.tmux.con
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 COPY fleet/provisioning_v2/docker/skel.bashrc      /etc/skel/.bashrc
 
+# ─── A FAIRE — token-saver n'est PAS embarque, et le hook s'efface donc ─────────────────────────
+#
+# La brique de compression d'output (fleet/runtime/vendor/token_saver/, Apache-2.0 + glue LCARS)
+# est cablee cote hooks — fleet/v1/hooks.yaml → ~/.claude/hooks/token-saver-hook.sh — mais AUCUN
+# COPY ne l'amene ici. Le shim la cherche parmi une liste de candidats, ne la trouve pas, et passe
+# la commande intacte : fail-open. Rien ne casse, rien ne compresse. AUCUN SYMPTOME VISIBLE —
+# c'est precisement pourquoi cette note est dans ce fichier et pas seulement dans un plan.
+#
+# A ajouter quand ce fichier sera rouvert (demenagement d'arborescence) :
+#
+#     COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
+#
+# Le chemin de destination doit figurer dans les candidats de .claude/hooks/token-saver-hook.sh
+# (/opt/lcars/fleet/vendor/token_saver y est deja) ou etre passe par LCARS_TOKEN_SAVER_HOME.
+# python3 est deja installe plus haut — la brique est stdlib pure, aucune dependance a ajouter.
+# Le switch reste LCARS_TOKEN_SAVER=off, sans rebuild.
+#
+# Ref : fleet/runtime/vendor/token_saver/VENDOR.md
+#       work/beyond_#6/chantier-demenagement-arbo-2026-08-04/02-PLAN.md
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
 # `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la
 # boite a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console web en
