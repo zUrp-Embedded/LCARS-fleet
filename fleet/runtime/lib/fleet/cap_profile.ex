@@ -45,7 +45,7 @@ defmodule Fleet.CapProfile do
   pure G24 semantic invariants live in `Fleet.CapProfile.Invariants`
   (`validate/1` delegates).
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-06
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -596,6 +596,31 @@ defmodule Fleet.CapProfile do
   end
 
   def remote_control?(_), do: true
+
+  @doc """
+  Does this role COMPRESS its Bash output before it enters the agent's context?
+  (`spec.invocation.output_compression`, absent = `true`.)
+
+  Absent means yes, and that asymmetry is deliberate: compression is the nominal posture — a role
+  that saturates its context on a build log helps nobody — and the exception is the role for which
+  the FULL output IS the work. A judge reading a diff, a debug run: there, a summary is not a
+  cheaper answer, it is a different one.
+
+  This is the FLOOR, not the effective value. `Fleet.Spawner.Pod.LaunchSpec.output_compression?/1`
+  is the authority, and it composes this with the fleet knob by an **AND** — the mirror of the `or`
+  that governs `remote_control?/1`, and the mirror is forced by the risk: visibility ADDS a window,
+  compression REMOVES information. So the fleet-wide knob may only CUT compression, never impose it
+  on a role that declared `false` and would lose exactly what it was spawned to read.
+  """
+  @spec output_compression?(t() | nil | term()) :: boolean()
+  def output_compression?(%__MODULE__{spec: spec}) when is_map(spec) do
+    case get_in(spec, ["invocation", "output_compression"]) do
+      declared when is_boolean(declared) -> declared
+      _absent_or_invalid -> true
+    end
+  end
+
+  def output_compression?(_), do: true
 
   @doc """
   Does this role hold a FORGE IDENTITY — its own account and role token? (`metadata.forge_identity`,

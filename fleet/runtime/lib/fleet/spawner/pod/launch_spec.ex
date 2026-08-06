@@ -25,7 +25,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     consumers sit in three places (slot capture, slot resume, and the vendor launcher through
     `LCARS_POD_REMOTE_CONTROL`); a second derivation is what it exists to prevent.
 
-  **Last revised**: 2026-08-03
+  **Last revised**: 2026-08-06
   """
 
   @doc """
@@ -238,6 +238,28 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @spec remote_control?(Fleet.CapProfile.t() | term()) :: boolean()
   def remote_control?(cap_profile) do
     Fleet.CapProfile.remote_control?(cap_profile) or Fleet.Spawner.debug_visibility?()
+  end
+
+  @doc """
+  Does this pod compress its Bash output before it enters the agent's context? THE authority.
+
+  Composed by an **AND**, and the contrast with `remote_control?/1` one function above is the whole
+  design: that one is an `or` because debug may only ADD a window, this one is an `and` because the
+  fleet may only REMOVE compression. Both are monotone, in opposite directions, and the direction is
+  forced by what is at stake rather than chosen — visibility that fails closed costs an operator a
+  pane they had; compression that fails open costs an agent an error line it never saw, on a defect
+  the agent then reports as absent.
+
+  So a role that declared `false` keeps it whatever the fleet says, and a fleet knob set to `false`
+  cuts every pod whatever the profiles say. Neither can force the lossy direction on the other.
+
+  Read at LAUNCH, like its neighbour: a pod's compression is a property of its own launch, not a
+  fleet-wide state that shifts under a pod already running.
+  """
+  @spec output_compression?(Fleet.CapProfile.t() | term()) :: boolean()
+  def output_compression?(cap_profile) do
+    Fleet.CapProfile.output_compression?(cap_profile) and
+      Fleet.Spawner.output_compression_allowed?()
   end
 
   defp bound_permission_mode(mode) when mode in @permission_modes, do: mode

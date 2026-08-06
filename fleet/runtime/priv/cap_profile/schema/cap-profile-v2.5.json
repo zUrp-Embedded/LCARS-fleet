@@ -205,6 +205,10 @@
                 "project"
               ],
               "description": "POD IDENTITY GRANULARITY — optional. Absent => DERIVED from lifetime_scope (one-shot => instance, context-long => project), the historical rule. Explicit => wins. Exists because the derivation makes ONE combination inexpressible: context-long AND one pod per ticket (an engineer that survives its rework rounds but does not outlive its ticket)."
+            },
+            "output_compression": {
+              "type": "boolean",
+              "description": "Compress this role's Bash output before it enters the agent's context (token-saver hook). Default (absent) = true. Set false where the FULL output is the work: a judge reading a diff, a debug run. Composed with the fleet knob by an AND — see LaunchSpec.output_compression?/1: the fleet may only CUT compression, never force it on a role that declared false, because compression LOSES information and the safe direction is toward less of it."
             }
           }
         },

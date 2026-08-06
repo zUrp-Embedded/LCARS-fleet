@@ -79,7 +79,7 @@ defmodule Fleet.Spawner do
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
     * `{:error, :brief_required}` — one-shot pod without a brief
 
-  **Last revised**: 2026-08-05
+  **Last revised**: 2026-08-06
   """
 
   alias Fleet.Spawner.Pod
@@ -545,6 +545,23 @@ defmodule Fleet.Spawner do
   @spec debug_visibility?() :: boolean()
   def debug_visibility? do
     Application.get_env(:fleet_spawner, :debug_visibility, false) == true
+  end
+
+  @doc """
+  Is output compression allowed FLEET-WIDE? (`:fleet_spawner, :output_compression`, absent = `true`.)
+
+  Same shape as `debug_visibility?/0` — one value for a whole fleet life, fixed at start, read on
+  the facade so no second site derives it — and the OPPOSITE polarity. Debug can only OPEN a window;
+  this can only CLOSE one. `false` here cuts compression for every pod, whatever the profiles say;
+  `true` changes nothing by itself, because a role that declared `false` keeps its declaration.
+
+  The knob exists for the operator who is debugging the fleet itself and wants every pod's output
+  whole, without editing seven cap-profiles to get it — and who must be able to trust that the
+  switch cannot go the other way.
+  """
+  @spec output_compression_allowed?() :: boolean()
+  def output_compression_allowed? do
+    Application.get_env(:fleet_spawner, :output_compression, true) == true
   end
 
   @doc """
