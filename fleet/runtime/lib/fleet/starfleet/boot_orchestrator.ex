@@ -32,8 +32,6 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     * `:fleet_starfleet, :start_boot_orchestrator` — boolean (default `true`), read by the
       ROOT trigger (`Fleet.Application`, via `Starfleet.Application.boot_enabled?/2`).
       `false` in test (hermetic — no real spawn); tests call `run/1` directly with stubs.
-
-  **Last revised**: 2026-07-18
   """
 
   require Logger

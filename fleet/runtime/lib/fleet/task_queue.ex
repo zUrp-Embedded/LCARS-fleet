@@ -23,8 +23,6 @@ defmodule Fleet.TaskQueue do
 
   Every function has a test-seam variant (explicit `server`, e.g. `enqueue/3`,
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
-
-  **Last revised**: 2026-08-04
   """
 
   alias Fleet.TaskQueue.Server

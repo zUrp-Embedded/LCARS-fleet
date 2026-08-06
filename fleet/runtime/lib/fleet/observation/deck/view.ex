@@ -20,8 +20,6 @@ defmodule Fleet.Observation.Deck.View do
   (which roles, which pods) stays in `Deck`; here we decide only
   HOW to show it. Every value interpolated server-side goes through
   the `h/1` escaping (client-side, through `esc()` in the embedded JS).
-
-  **Last revised**: 2026-07-21
   """
 
   @doc """

@@ -41,8 +41,6 @@ defmodule Fleet.SPBuilder.Image do
   (fingerprints recorded at publish, checked on the spawn path): the pods keep receiving the
   proven-good content, and the divergence is said out loud instead of vanishing into the mechanism
   that was supposed to guard against it.
-
-  **Last revised**: 2026-08-01
   """
 
   require Logger

@@ -9,8 +9,6 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
 
   Reads `priv/sp_blocks/sp-map.yaml` + the blocks, writes `priv/sp_drafts/agent-<role>-base.md`. Fail-loud on
   a missing block/role (no-fallback). The generated flats are committed; a test checks for drift.
-
-  **Last revised**: 2026-08-01
   """
   use Mix.Task
 

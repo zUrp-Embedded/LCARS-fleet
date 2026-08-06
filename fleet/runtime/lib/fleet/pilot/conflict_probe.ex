@@ -22,8 +22,6 @@ defmodule Fleet.Pilot.ConflictProbe do
 
   `probe/3` returns `{:error, reason}` on any git failure; the caller (`Remediation`) falls back to
   the current behaviour. The probe only ever SHORTENS a path, never breaks one.
-
-  **Last revised**: 2026-08-02
   """
 
   alias Fleet.Conflict

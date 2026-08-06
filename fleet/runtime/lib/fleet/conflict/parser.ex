@@ -8,8 +8,6 @@ defmodule Fleet.Conflict.Parser do
   ported from anchored the separator with `^={7}$`, which on a CRLF file never matched `=======\r`;
   the parser then never switched into the theirs section and mis-parsed the whole hunk. The head/tail
   markers use `(\s|$)`, which already tolerates the `\r` that `String.split(_, "\n")` leaves behind.
-
-  **Last revised**: 2026-07-30
   """
 
   @marker_ours ~r/^<{7}(\s|$)/

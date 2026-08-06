@@ -35,8 +35,6 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   This module also owns the **tally** vocabulary (`zero_tally/0`, `merge_tally/2`)
   — the observability currency of the tick, produced here and aggregated by the poller.
-
-  **Last revised**: 2026-08-05
   """
 
   require Logger

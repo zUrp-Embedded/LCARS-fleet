@@ -3,8 +3,6 @@ defmodule Fleet.Conflict.Patterns.Complex do
   Fallback pattern: always matches, never resolves. The total-function guard at the tail of the
   registry -- its `detect?/1` is `true`, so classification is total, but its confidence floors the
   score so it is never auto-resolved.
-
-  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

@@ -16,8 +16,6 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   fresh project has nothing to attest yet — absence is not incoherence).
 
   Phase 1 tool: NOT wired as a hard gate (Phase 2 = a separate user decision).
-
-  **Last revised**: 2026-07-21
   """
   use Mix.Task
 

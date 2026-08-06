@@ -34,8 +34,6 @@ defmodule Fleet.Workflow.Gates do
 
   Any unknown/malformed gate shape falls onto the fail-closed catch-all
   (`{:fail, …}`) — the eval is TOTAL, never a crash, never a silent `:pass`.
-
-  **Last revised**: 2026-08-05
   """
 
   @behaviour Fleet.Workflow.Gate

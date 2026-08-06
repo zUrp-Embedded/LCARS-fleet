@@ -19,8 +19,6 @@ defmodule Fleet.EventRouter.Listener do
 
   Lives in this domain because event_router owns the `plug_cowboy` wire dep (lib fencing)
   and both consumer surfaces already depend on it.
-
-  **Last revised**: 2026-07-18
   """
 
   @doc """

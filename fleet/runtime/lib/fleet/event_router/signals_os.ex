@@ -17,8 +17,6 @@ defmodule Fleet.EventRouter.SignalsOS do
   now RAISES immediately (before any `:os.set_signal`). Enabling `:start_signals` therefore fails the boot
   LOUDLY rather than silently capturing SIGTERM/SIGHUP into a dead handler. The fix, when this capability
   is needed, is a gen_event handler on `:erl_signal_server`, not this GenServer.
-
-  **Last revised**: 2026-07-18
   """
 
   use GenServer

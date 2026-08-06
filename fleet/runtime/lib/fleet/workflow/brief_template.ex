@@ -13,8 +13,6 @@ defmodule Fleet.Workflow.BriefTemplate do
   Read on EVERY render (no cache, deliberate): brief composition is low-frequency and a
   calibration edit must take effect immediately — a cache would freeze the human's
   adjustment until reboot, the exact opposite of the surface's purpose.
-
-  **Last revised**: 2026-08-01
   """
 
   @doc """

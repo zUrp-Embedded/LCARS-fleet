@@ -12,8 +12,6 @@ defmodule Fleet.Conflict.Patterns.Utils do
       volatile like `'2026-07-06 11:42:00'` stays ONE token and still matches the datetime pattern;
       but the diff-ratio denominator keeps the OLD `tokenize_line/1` granularity the thresholds were
       calibrated against.
-
-  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.Score
 

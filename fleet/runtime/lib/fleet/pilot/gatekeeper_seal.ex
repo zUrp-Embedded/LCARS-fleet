@@ -18,8 +18,6 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   the single source of the credential→wire adapter (`Fleet.Pilot.ForgeClient.as_role/2` — not
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
-
-  **Last revised**: 2026-08-04
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."

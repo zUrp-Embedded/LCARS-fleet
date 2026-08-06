@@ -21,8 +21,6 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
 
   Same keyword seams as the completer (`:forge_client` / `:forge_opts`) — no
   dedicated struct: the module lives in the completer's orbit and reads the same opts.
-
-  **Last revised**: 2026-08-01
   """
 
   require Logger

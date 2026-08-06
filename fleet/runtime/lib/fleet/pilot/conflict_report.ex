@@ -21,8 +21,6 @@ defmodule Fleet.Pilot.ConflictReport do
 
   Pure: `render/2` takes the diagnosis and returns a string. No forge, no I/O — the posting is the
   caller's, and this stays testable without a git repo.
-
-  **Last revised**: 2026-08-05
   """
 
   @doc """

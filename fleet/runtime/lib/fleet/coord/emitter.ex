@@ -34,8 +34,6 @@ defmodule Fleet.Coord.Emitter do
   here), not this event. The `correlation_id`
   (task.id UUID of the original work item, nil outside a work item) is
   propagated on every broadcast to tie the event back to its work item.
-
-  **Last revised**: 2026-07-20
   """
 
   require Logger

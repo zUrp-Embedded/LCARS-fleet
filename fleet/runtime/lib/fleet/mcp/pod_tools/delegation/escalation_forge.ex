@@ -14,8 +14,6 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   Resolves to the SAME seam module as `ForgeClient` (`:fleet_mcp, :forge_client`): the real
   `Fleet.Pilot.ForgeClient` implements BOTH surfaces; a stub used on the escalation path adopts THIS
   behaviour. Runtime (upward mcp → pilot) seam, like `ForgeClient` — no compile dep.
-
-  **Last revised**: 2026-07-19
   """
 
   # (`list_org_repos` callback removed — reorg 2026-07-19: the arch's escalation inbox is

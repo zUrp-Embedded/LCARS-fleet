@@ -23,8 +23,6 @@ defmodule Fleet.CapProfile.CanonicalJson do
   already observed (determinism assertions, composition comparisons).
   Deliberately NOT a custom `Jason.Encoder` protocol: off the standard Jason
   path, no global encoding option can make the hashes drift.
-
-  **Last revised**: 2026-07-18
   """
 
   @doc """

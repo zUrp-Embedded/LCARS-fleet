@@ -24,8 +24,6 @@ defmodule Fleet.Credentials.ForgeAuth do
   The secret then lives in the environ of the **child git process** (short-lived), never in the
   BEAM's (`System.cmd env:` touches only the child). Not configured (local repo `file://`, mirror) →
   just `[@git_no_prompt]` (the unconditional anti-prompt bound), no forge auth header added.
-
-  **Last revised**: 2026-07-18
   """
 
   # `GIT_TERMINAL_PROMPT=0` set UNCONDITIONALLY in the single source of the git env. Without it,

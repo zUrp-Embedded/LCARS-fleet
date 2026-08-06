@@ -30,8 +30,6 @@ defmodule Fleet.Starfleet.PeriodicCheck do
     then re-arms → `{:noreply, new_state}`.
   - `check_now(state, do_check, reply)` — body of `handle_call(:check_now, ...)`: same check as
     the timer, reply built by `reply.(new_state)` → `{:reply, _, new_state}`.
-
-  **Last revised**: 2026-08-03
   """
 
   @spec start_link(module(), keyword()) :: GenServer.on_start()

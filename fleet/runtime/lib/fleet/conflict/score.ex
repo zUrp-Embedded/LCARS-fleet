@@ -16,8 +16,6 @@ defmodule Fleet.Conflict.Score do
               - post_merge_risk     * 0.20
 
   Labels by threshold: >= 92 certain, >= 68 high, >= 44 medium, else low.
-
-  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.ConfidenceScore
 

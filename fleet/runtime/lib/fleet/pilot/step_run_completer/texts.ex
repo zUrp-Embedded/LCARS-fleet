@@ -13,8 +13,6 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
   already-closed ticket — incoherent chronology, comment posted after the fact on a closed one). The close is
   EXPLICIT, set by `GatekeeperSeal.seal_and_merge` AFTER the comment (last act
   visible on the issue) — see its doc for the full sequence.
-
-  **Last revised**: 2026-07-18
   """
 
   @doc """

@@ -20,8 +20,6 @@ defmodule Fleet.CapProfile.DisallowedTools do
   contract, so an operator's catalogue cannot lower it, and a copy of the file inside a catalogue
   is read by nobody. Read+parse cached once via `Fleet.SchemaCache.cached/2` (lazy-init; errors not
   cached — the bang re-raises on the next call).
-
-  **Last revised**: 2026-08-01
   """
 
   # Source struct (compile-dep): the fns pattern-match `%CapProfile{}` and the

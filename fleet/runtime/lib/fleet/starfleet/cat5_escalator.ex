@@ -36,8 +36,6 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         "chain" => [..., "starfleet.cat5.<source>"],
         ...original payload (pod_id, drift_count, reason, etc.)
       }
-
-  **Last revised**: 2026-07-22
   """
 
   require Logger

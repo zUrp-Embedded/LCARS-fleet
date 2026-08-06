@@ -24,8 +24,6 @@ defmodule Fleet.Publish.InFlight do
   `:persistent_term` profile (rare writes, hot reads), never a per-tick put. The completion MUST
   wrap its publish so the clear runs in an `after` (crash-safe): a publish that crashes still
   clears its mark, so a dead completion never keeps the pod frozen forever.
-
-  **Last revised**: 2026-07-21
   """
 
   @doc "Marks `pod_id` as having a publish in flight. Idempotent."

@@ -21,8 +21,6 @@ defmodule Fleet.Starfleet.AuditLog do
 
   Distinct from the `fleet-audit.jsonl` audit log: specific Cat 5 forensics.
   (The real audit = the multi-author forge; this local file is a forensics convenience.)
-
-  **Last revised**: 2026-07-18
   """
 
   require Logger

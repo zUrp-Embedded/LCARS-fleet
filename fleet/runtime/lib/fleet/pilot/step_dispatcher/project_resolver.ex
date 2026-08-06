@@ -10,8 +10,6 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   `default_project_resolver/2` is the PUBLIC API: it is the default of `StepDispatcher`'s
   `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
   the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
-
-  **Last revised**: 2026-08-03
   """
 
   # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.

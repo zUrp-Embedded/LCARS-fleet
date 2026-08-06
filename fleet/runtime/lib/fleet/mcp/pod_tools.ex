@@ -70,8 +70,6 @@ defmodule Fleet.MCP.PodTools do
   The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
-
-  **Last revised**: 2026-08-05
   """
 
   use ExMCP.Server

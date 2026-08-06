@@ -43,8 +43,6 @@ defmodule Fleet.API.SpawnAdmission do
   `broadcast/1` (the post-admission step) emits the canonical schema
   `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
-
-  **Last revised**: 2026-08-02
   """
 
   alias Fleet.EventRouter.Bus

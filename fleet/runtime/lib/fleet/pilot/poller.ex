@@ -49,8 +49,6 @@ defmodule Fleet.Pilot.Poller do
     * `:forge_opts` — ForgeClient keyword (base_url, token, req_options).
     * test seams: `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injected if non-nil).
     * `:start_tick?` — default `true`; `false` = no auto first tick (tests drive via `force_poll/1`).
-
-  **Last revised**: 2026-08-03
   """
 
   use GenServer

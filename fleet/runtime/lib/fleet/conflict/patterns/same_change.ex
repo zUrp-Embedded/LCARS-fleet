@@ -1,8 +1,6 @@
 defmodule Fleet.Conflict.Patterns.SameChange do
   @moduledoc """
   Both branches made the exact same edit -> trivial (ours == theirs).
-
-  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

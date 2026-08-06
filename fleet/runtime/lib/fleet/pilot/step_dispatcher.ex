@@ -24,8 +24,6 @@ defmodule Fleet.Pilot.StepDispatcher do
   read of `pr_review_state` stay here, all the routing (verdicts / rework / conflict / promotion) is
   delegated to `Fleet.Pilot.StepDispatcher.ReviewLifecycle`. The modules
   `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` are **seams** (defaults = real modules).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

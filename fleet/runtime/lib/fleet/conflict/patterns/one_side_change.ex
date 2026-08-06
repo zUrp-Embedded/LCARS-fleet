@@ -1,8 +1,6 @@
 defmodule Fleet.Conflict.Patterns.OneSideChange do
   @moduledoc """
   Exactly one side changed relative to base (XOR) -> take the changed side. diff3 only.
-
-  **Last revised**: 2026-07-30
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

@@ -30,8 +30,6 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   state. The producer/judge classification delegates to the single authority
   `GateEngine.producer?/3` (same criterion as the gate decision), preferring the payload's effective
   `deliverable_mode` and falling back to the base-role seam.
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

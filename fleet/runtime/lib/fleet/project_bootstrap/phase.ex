@@ -18,8 +18,6 @@ defmodule Fleet.ProjectBootstrap.Phase do
   Clone is the ONLY bootstrap phase: the other pod-provisioning concerns live
   elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
-
-  **Last revised**: 2026-08-05
   """
 
   defmodule Clone do

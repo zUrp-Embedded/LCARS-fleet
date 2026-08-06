@@ -56,8 +56,6 @@ defmodule Fleet.Workflow.Gates.Predicate do
   is NOT carried by this evaluator — it does ONLY `rule_string → bool`.
   The mapping to `:pass`/`:fail`/`:human_approval`/`:dispatch_gatekeeper` (including the
   refusal to auto-approve a `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
-
-  **Last revised**: 2026-08-05
   """
 
   require Logger

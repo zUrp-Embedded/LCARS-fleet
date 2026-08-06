@@ -21,8 +21,6 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
       type is aligned on its `@spec onboard/2` (`result()`).
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
-
-  **Last revised**: 2026-08-04
   """
 
   @doc """

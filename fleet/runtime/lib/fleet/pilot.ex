@@ -69,8 +69,6 @@ defmodule Fleet.Pilot do
   6th, so the threshold can never trigger. A rule with a number and no place to read the number is
   a rule that will not fire (BL-6-42.4, count taken 2026-08-03: **4 modules, 2 overlapping**).
   Whoever adds a 5th updates this table FIRST — that update is what makes the threshold real.
-
-  **Last revised**: 2026-08-03
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the

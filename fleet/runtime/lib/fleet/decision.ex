@@ -20,8 +20,6 @@ defmodule Fleet.Decision do
     * `reason` — non-empty string
     * `details` — map (arbitrary JSON object)
     * `chain` — list of strings (audit trail, default `[]`)
-
-  **Last revised**: 2026-07-18
   """
 
   @enforce_keys [:decision, :reason, :details]

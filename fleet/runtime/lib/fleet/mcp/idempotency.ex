@@ -55,8 +55,6 @@ defmodule Fleet.MCP.Idempotency do
 
   Iron rule: the coordinator NEVER runs `fun` itself (a forge call would serialize every mutation
   behind one process) — it only arbitrates claim/publish; `fun` runs in the caller's connection Task.
-
-  **Last revised**: 2026-07-30
   """
 
   # A retry that arrives while the first run is in flight blocks at most this long for its result.

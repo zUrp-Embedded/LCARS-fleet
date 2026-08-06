@@ -19,8 +19,6 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   DELIBERATELY no `app.start`: booting :lcars_fleet here would start a SECOND fleet
   (pollers, consumers, listener bind) next to the live one. Run on the deploy host:
   `set -a; . ~/.lcars/fleet_v2.env; set +a; mix lcars.project_template.sync`.
-
-  **Last revised**: 2026-08-01
   """
 
   use Mix.Task

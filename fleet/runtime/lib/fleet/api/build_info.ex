@@ -38,8 +38,6 @@ defmodule Fleet.API.BuildInfo do
   Module of **data + pure functions**: no process (no runtime state carried,
   no concurrency, no fault isolation). `:persistent_term` is a table cache,
   not a process.
-
-  **Last revised**: 2026-07-21
   """
 
   @persistent_key {__MODULE__, :info}

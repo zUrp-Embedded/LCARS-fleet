@@ -41,8 +41,6 @@ defmodule Fleet.Observation.ReadModel do
       `false` and send events via `send/2` (hermetic, no real bus).
     * `:fleet_observation, :start_readmodel` (app env, default `true`) —
       `false` in `:test` (no parasitic subscriber, hermetic invariant).
-
-  **Last revised**: 2026-07-21
   """
 
   use GenServer

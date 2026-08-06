@@ -27,8 +27,6 @@ defmodule Fleet.API.WS do
 
   Simple pattern: exact match OR `*` suffix wildcard (e.g.
   `"workflow_map.*"` matches `"workflow_map.failed"`).
-
-  **Last revised**: 2026-07-18
   """
 
   @behaviour :cowboy_websocket

@@ -3,8 +3,6 @@ defmodule Fleet.Conflict.Assemble do
   Textual merge per conflict type -- turns a resolvable `Hunk` into merged lines. `:complex` (and any
   not-yet-ported type) returns `:skip`, so the caller restores the conflict markers and routes
   upstream. Never guesses.
-
-  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.{Diff, Hunk}
   alias Fleet.Conflict.Patterns.Utils

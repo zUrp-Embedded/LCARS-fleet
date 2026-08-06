@@ -16,8 +16,6 @@ defmodule Fleet.Pilot.Offload do
 
   The real outcome of the offloaded work is logged IN the task by the caller (the return
   `{:ok, :offloaded}` only says "the task was launched").
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

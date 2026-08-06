@@ -20,8 +20,6 @@ defmodule Fleet.Spawner.Application do
   Two distinct knobs: `:start_boot_orchestrator` (is the orchestrator running?)
   + `:boot_permanent_at_start` (does it boot the permanent pods?). This app, for its
   part, never boots a permanent pod (no boot hook here).
-
-  **Last revised**: 2026-08-03
   """
 
   use Supervisor

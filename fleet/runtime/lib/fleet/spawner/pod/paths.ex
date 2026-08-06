@@ -24,8 +24,6 @@ defmodule Fleet.Spawner.Pod.Paths do
   - `pod_dir_for/2`, `state_fs_path_for/3`, `runtime_home/0` — resolutions called by `Pod`
     (`initial_state`, `clear_terminal_snapshot`) and `Pod.LaunchEnv` (`claude_dir` → `runtime_home/0`);
     public because they are crossed from those modules.
-
-  **Last revised**: 2026-07-21
   """
 
   require Logger

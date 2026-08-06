@@ -57,8 +57,6 @@ defmodule Fleet.Spawner.Pod do
   release, fail). At the next `init/1`, `recover_or_init` reads the file → `Pod.Recovery`
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
-
-  **Last revised**: 2026-08-04
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come

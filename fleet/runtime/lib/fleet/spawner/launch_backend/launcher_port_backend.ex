@@ -20,8 +20,6 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
 
   Return: `{:ok, %{port: port, tmux_session: name}}` | `{:error, reason}`.
   Tests: `build_spawn/1` pure (order/content of the args vector) + fake-exe smoke (Port opened / exe missing).
-
-  **Last revised**: 2026-07-18
   """
 
   @behaviour Fleet.Spawner.LaunchBackend

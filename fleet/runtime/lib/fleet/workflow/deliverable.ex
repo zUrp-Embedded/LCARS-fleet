@@ -27,8 +27,6 @@ defmodule Fleet.Workflow.Deliverable do
   Unification guardrail: the ONLY mode divergence is stage 1 (who commits). Stages 2 and 3
   are strictly shared. If one day the `case mode` metastasizes (an `if` that splits 80% of the trunk),
   the unification must be reconsidered.
-
-  **Last revised**: 2026-07-18
   """
 
   require Logger

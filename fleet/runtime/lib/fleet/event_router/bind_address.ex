@@ -35,8 +35,6 @@ defmodule Fleet.EventRouter.BindAddress do
   An env value is a host: either a literal IP (`0.0.0.0`, `192.168.1.10`,
   `::`, …) or a name resolved via DNS. We stay on TCP (no Unix socket) — this
   is only the listening socket's `ip`.
-
-  **Last revised**: 2026-07-18
   """
 
   @loopback {127, 0, 0, 1}

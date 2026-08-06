@@ -6,8 +6,6 @@ defmodule Fleet.Observation do
   The boundary ANCHOR of the domain; the contracts live in the `@moduledoc`s:
   `Fleet.Observation.Deck` (HTTP), `Fleet.Observation.ReadModel` (Bus projection,
   off by default in test).
-
-  **Last revised**: 2026-07-21
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the

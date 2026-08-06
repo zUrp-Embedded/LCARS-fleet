@@ -32,8 +32,6 @@ defmodule Fleet.Observation.Application do
   also carries `Fleet.Observation.ReadModel` (GenServer + ETS, subscribed to the bus):
   the PODS deck reads `Spawner.list_pods/0` live, the event-derived decks
   read the ReadModel's projection.
-
-  **Last revised**: 2026-07-18
   """
 
   use Supervisor

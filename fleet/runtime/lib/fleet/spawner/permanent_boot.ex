@@ -26,8 +26,6 @@ defmodule Fleet.Spawner.PermanentBoot do
   Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
   0 pod booted silently. Hence the string-keyed access here.
 
-  **Last revised**: 2026-08-05
-
   """
 
   require Logger

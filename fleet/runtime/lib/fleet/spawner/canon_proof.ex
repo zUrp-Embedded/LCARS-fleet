@@ -20,8 +20,6 @@ defmodule Fleet.Spawner.CanonProof do
   on the same definitions. `config :fleet_spawner, :prove_canon_at_boot` (default
   true) exists ONLY for the hermetic test baseline; tests call `prove_all!/0`
   directly.
-
-  **Last revised**: 2026-07-30
   """
 
   require Logger

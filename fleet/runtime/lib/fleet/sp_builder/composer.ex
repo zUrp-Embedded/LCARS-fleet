@@ -5,8 +5,6 @@ defmodule Fleet.SPBuilder.Composer do
   Exposed to allow mock implementations in tests and a future second
   vendor (alternate role/modop bundle layout). The default implementation
   is `Fleet.SPBuilder`.
-
-  **Last revised**: 2026-07-18
   """
 
   @callback compose(

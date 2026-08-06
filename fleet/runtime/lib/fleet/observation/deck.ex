@@ -28,8 +28,6 @@ defmodule Fleet.Observation.Deck do
   (pure rendering): this module remains the CONTROLLER
   (routing + role-catalogue derivation + live snapshots) and passes the
   data to the view as an argument. The view reads no source itself.
-
-  **Last revised**: 2026-07-21
   """
 
   use Plug.Router

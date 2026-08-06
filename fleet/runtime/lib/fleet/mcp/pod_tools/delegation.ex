@@ -56,8 +56,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `:delegation_org` — forge org of onboarded projects. OPTIONAL override: by default the org
       is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
-
-  **Last revised**: 2026-08-05
   """
 
   require Logger

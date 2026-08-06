@@ -117,11 +117,10 @@ if true; then
   eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^check_md_header()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^check_source_header()/,/^}/p' "$GO7_HOOK")"
-  eval "$(sed -n '/^check_ex_stamp()/,/^}/p' "$GO7_HOOK")"
 
   # GARDE D'INSTRUMENT : une extraction vide ferait passer ce pas en mesurant RIEN, et le silence
-  # ressemblerait a la conformite. Les cinq predicats doivent exister, sinon on echoue ici.
-  for _fn in is_ipc_exception is_evidence_dir check_md_header check_source_header check_ex_stamp; do
+  # ressemblerait a la conformite. Les quatre predicats doivent exister, sinon on echoue ici.
+  for _fn in is_ipc_exception is_evidence_dir check_md_header check_source_header; do
     if ! type "$_fn" >/dev/null 2>&1; then
       echo "ECHEC: GO-7 — predicat '$_fn' non extrait de $GO7_HOOK (le hook a change de forme)." >&2
       exit 1
@@ -136,11 +135,11 @@ if true; then
     case "${_f##*.}" in
       md) check_md_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
       sh|py) check_source_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
-      ex)
-        case "$_f" in
-          fleet/runtime/lib/*) check_ex_stamp "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
-        esac
-        ;;
+      # Pas de branche `ex)` : la clause GO-7 sur les .ex est retiree (2026-08-06). Elle exigeait
+      # un tampon `**Last revised**` que la passe 1 du hook ECRIVAIT elle-meme — un mur qui
+      # verifiait sa propre peinture. Rien ne la remplace : 238 .ex sur 238 portent un @moduledoc,
+      # donc tout marqueur de presence serait vert par construction. Le motif complet est dans
+      # l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
   done < <(git -C "$REPO_ROOT" ls-files fleet/runtime)
 

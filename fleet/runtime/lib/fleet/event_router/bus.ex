@@ -41,8 +41,6 @@ defmodule Fleet.EventRouter.Bus do
   the boot-time `Catalog.load!`) is **explicit** via `:fleet_event_router, :permit_when_registry_empty`:
   `true` (default) = let through (intended init safety-net); `false` = fail-closed
   (raise while the registry is not loaded). See `assert_authorized!/1`.
-
-  **Last revised**: 2026-07-22
   """
 
   require Logger

@@ -8,8 +8,6 @@ defmodule Fleet.Credentials do
   `Fleet.Credentials.ForgeAuth` (system-side git auth env), `Fleet.Credentials.Gate`
   (login-validity check at spawn — the scope/plan gates were nuked 2026-07-20 as vendor-redundant),
   `Fleet.Credentials.Shell` (bounded external commands).
-
-  **Last revised**: 2026-07-20
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the

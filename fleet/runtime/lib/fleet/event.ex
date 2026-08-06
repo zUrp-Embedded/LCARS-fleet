@@ -23,8 +23,6 @@ defmodule Fleet.Event do
   Event naming convention = `<source>.<type>` (e.g. `:spawner.pod_degraded`,
   `:task_queue."work_item.completed"`). Consumer matching:
   `handle_info(%Fleet.Event{source: :task_queue, type: :"work_item.completed"} = ev, state)`.
-
-  **Last revised**: 2026-07-18
   """
 
   @type source ::

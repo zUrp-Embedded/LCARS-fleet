@@ -29,8 +29,6 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   The MCP server spec is read from config (`:fleet_spawner, :mcp_server_spec`); the resolved backend
   is passed by the Pod (single source `Fleet.Spawner.LaunchBackend.resolved/0`).
-
-  **Last revised**: 2026-08-03
   """
 
   require Logger

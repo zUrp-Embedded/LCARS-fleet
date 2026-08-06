@@ -22,8 +22,6 @@ defmodule Fleet.Credentials.RoleToken do
   from the pod's spawn (`Fleet.Spawner.pod_info` keyed by the channel `pod_id`, cf.
   `Fleet.MCP.PodTools.Delegation.require_architect/1`) — NEVER from the wire `_lcars_role` a pod could
   forge. `role` is validated **path-safe** (interpolated into a path).
-
-  **Last revised**: 2026-07-18
   """
 
   require Logger

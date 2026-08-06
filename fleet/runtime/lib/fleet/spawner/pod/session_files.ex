@@ -21,8 +21,6 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
     `Pod.Scaffold.gc_stale_session_jsonl` (GC) and `Pod.Liveness` (cumulative size).
   - `latest_jsonl(pod_dir)` — the ACTIVE jsonl (most recent mtime) → `{:ok, path}` | `:none`.
     Called by `Fleet.Spawner.SeedStore` (seed checkpoint).
-
-  **Last revised**: 2026-07-18
   """
 
   @doc """

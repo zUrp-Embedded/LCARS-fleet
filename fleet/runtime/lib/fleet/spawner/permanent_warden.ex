@@ -56,8 +56,6 @@ defmodule Fleet.Spawner.PermanentWarden do
     * `:live_roles_fun` — `() -> [role]` (default = the `permanent-*` pods live in the Registry).
     * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
   Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
-
-  **Last revised**: 2026-08-05
   """
 
   use GenServer

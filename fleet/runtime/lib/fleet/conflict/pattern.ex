@@ -9,8 +9,6 @@ defmodule Fleet.Conflict.Pattern do
 
   The refusal path is part of the contract: `fail_reason/1` feeds the decision trace so a pattern
   that did NOT match is documented as clearly as the one that did.
-
-  **Last revised**: 2026-07-30
   """
   alias Fleet.Conflict.ConfidenceScore
 

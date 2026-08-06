@@ -54,8 +54,6 @@ defmodule Fleet.Pilot.IncidentConsumer do
       (default `&Fleet.Pilot.IncidentRegistry.escalate_gated/5`). Cat-5 path: 1st occurrence
       immediate, repeats under the registry cooldown suppressed.
     * `:runner` — offload seam (see above). Default `nil` → sync.
-
-  **Last revised**: 2026-08-03
   """
 
   use GenServer

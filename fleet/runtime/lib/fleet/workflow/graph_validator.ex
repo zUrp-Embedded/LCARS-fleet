@@ -40,8 +40,6 @@ defmodule Fleet.Workflow.GraphValidator do
   diagnostic: a disconnected blob (technically also a cycle) is diagnosed `:unreachable`
   ("these steps are not wired to the entry", an actionable message) because reachability is
   checked BEFORE acyclicity; a loop ON the chain stays diagnosed `:cycle`.
-
-  **Last revised**: 2026-07-18
   """
 
   @type steps :: %{optional(String.t()) => map()}

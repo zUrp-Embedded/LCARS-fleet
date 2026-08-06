@@ -34,8 +34,6 @@ defmodule Fleet.Spawner.Pod.Backend do
   `require Logger` (reap/teardown log). Alias `Fleet.Spawner.PodTmux` (`kill_holder`,
   `sock_path`, `alive?`); fully qualified `Fleet.Spawner.LaunchBackend` and `Application`. No
   dependency on `Fleet.Spawner.Pod` (no cycle).
-
-  **Last revised**: 2026-07-21
   """
 
   require Logger

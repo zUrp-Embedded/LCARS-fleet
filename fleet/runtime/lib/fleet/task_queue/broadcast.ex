@@ -49,8 +49,6 @@ defmodule Fleet.TaskQueue.Broadcast do
   `safe_emit` (cf. its moduledoc: it flattens every failure into a logged `:ok` — CI-09 logs the drop
   loud, but the caller still gets `:ok` and cannot branch on it, which `required` must) — same
   exclusion as `Fleet.Spawner.Pod.Events.required_broadcast/2`.
-
-  **Last revised**: 2026-07-21
   """
 
   require Logger

@@ -32,8 +32,6 @@ defmodule Fleet.MCP.Supervisor do
   Phoenix.PubSub `Fleet.PubSub` is started by the event_router domain
   (`Fleet.EventRouter.Application`, substrate, launched by `Fleet.Application`), not started
   here (no double-start).
-
-  **Last revised**: 2026-07-22
   """
 
   use Supervisor

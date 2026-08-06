@@ -20,8 +20,6 @@ defmodule Fleet.API.Application do
 
   `:one_for_one` — Cowboy listener restart `:permanent`.
   Pre-registration of event atoms (created at compile-time, not derived from external input → no atom-exhaustion DoS leak).
-
-  **Last revised**: 2026-07-20
   """
 
   use Supervisor

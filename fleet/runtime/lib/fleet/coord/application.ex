@@ -23,8 +23,6 @@ defmodule Fleet.Coord.Application do
   `:"coord.*"` literals in `emitter.ex` and registered in `events.yaml` — no
   `String.to_existing_atom` needed at boot. An atom list placed here would be
   a SECOND copy of the vocabulary, free to drift from what is emitted.
-
-  **Last revised**: 2026-07-18
   """
 
   use Supervisor

@@ -11,8 +11,6 @@ defmodule Fleet.Workflow do
   (The resident-singleton `Fleet.Workflow.Gatekeeper` was REMOVED by the 2026-07-19 reorg:
   the gatekeeper is a one-shot per-project judge, spawned per gate eval by the pilot's
   `GatekeeperEscalation` — the module was the documented MVP awaiting the project model.)
-
-  **Last revised**: 2026-08-04
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the

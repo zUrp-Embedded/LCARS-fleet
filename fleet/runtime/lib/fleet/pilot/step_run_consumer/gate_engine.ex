@@ -37,8 +37,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       blind bounce (an infinite rework loop must not be representable).
     * a workflow_map error (DAG, unknown step) BUBBLES UP (the system does not advance
       blindly) — no silent misroute.
-
-  **Last revised**: 2026-08-02
   """
 
   require Logger

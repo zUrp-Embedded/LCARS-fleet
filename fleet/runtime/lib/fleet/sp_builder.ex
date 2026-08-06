@@ -64,8 +64,6 @@ defmodule Fleet.SPBuilder do
   Path resolution (`sp_role_root`/`modop_root`) is NOT extracted: these are the
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
-
-  **Last revised**: 2026-08-02
   """
 
   @behaviour Fleet.SPBuilder.Composer

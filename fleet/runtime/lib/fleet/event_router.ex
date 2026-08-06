@@ -31,7 +31,5 @@ defmodule Fleet.EventRouter do
     * `Fleet.EventRouter.BindAddress` — listener bind-address resolution
     * `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)
     * `Fleet.EventRouter.Application` — domain supervisor
-
-  **Last revised**: 2026-07-18
   """
 end

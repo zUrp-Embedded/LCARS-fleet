@@ -29,8 +29,6 @@ defmodule Fleet.Spawner.Pod.Publishing do
 
   Depends on `Fleet.CapProfile.deliverable_mode/1` (single source of the deliverable mode); no
   dependency toward `Fleet.Spawner.Pod` (no cycle).
-
-  **Last revised**: 2026-07-21
   """
 
   @doc """

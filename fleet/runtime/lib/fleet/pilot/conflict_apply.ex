@@ -12,8 +12,6 @@ defmodule Fleet.Pilot.ConflictApply do
 
   Never destructive to the shared clone: a worktree in a temp dir, removed afterwards, so
   `WorktreeSync`'s working tree is never touched.
-
-  **Last revised**: 2026-08-02
   """
   alias Fleet.Conflict
   alias Fleet.Pilot.GitOps
