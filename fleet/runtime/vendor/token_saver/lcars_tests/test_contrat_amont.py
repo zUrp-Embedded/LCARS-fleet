@@ -1,3 +1,7 @@
+# SOURCE: fleet/runtime/vendor/token_saver/lcars_tests/test_contrat_amont.py
+# AUTHOR: starfleet
+# STARDATE: 2026-08-04
+# STATUS: MUR D'ANCRAGE AMONT — verifie un a un les symboles internes auxquels l'adapter s'accroche
 """Contrat d'ancrage avec l'amont — garde-fou de mise à jour.
 
 La couche LCARS ne modifie aucun fichier vendoré : elle **s'accroche** à des

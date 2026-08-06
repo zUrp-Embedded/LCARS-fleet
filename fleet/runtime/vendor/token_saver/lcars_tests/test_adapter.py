@@ -1,3 +1,7 @@
+# SOURCE: fleet/runtime/vendor/token_saver/lcars_tests/test_adapter.py
+# AUTHOR: starfleet
+# STARDATE: 2026-08-04
+# STATUS: suite LCARS de l'adapter
 """Tests de la couche LCARS — adapter et processeurs.
 
 Ne teste PAS le moteur vendoré (couvert par `tests/`, 797 verts) mais les

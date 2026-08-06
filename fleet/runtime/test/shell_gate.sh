@@ -77,6 +77,40 @@ elif [[ "$FAIL_N" -gt 0 || "$PY_RC" -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 1bis) Suite LCARS de la brique vendoree token-saver.
+#
+# C'est le MUR DE L'ANCRAGE AMONT, et il est la seule raison pour laquelle il est gate. La couche
+# LCARS ne modifie aucun fichier du sous-arbre vendore (Apache-2.0 §4(b), et la re-copie
+# d'update_vendor.sh reste triviale) : elle s'ACCROCHE a des symboles INTERNES du moteur —
+# utils._DEFAULT_ERROR_RE, config._load_config, BuildOutputProcessor.process. Aucun ne fait partie
+# d'une API publique, donc l'amont peut les renommer sans que ce soit une rupture de son point de
+# vue. Sans ce mur, un update romprait les ancrages EN SILENCE : adapter.py continuerait de tourner,
+# ses correctifs ne s'appliqueraient plus, et `OOMKilled` redisparaitrait des logs sans qu'un seul
+# test ne rougisse.
+#
+# La suite AMONT (vendor/token_saver/tests/, 7 884 l) n'est deliberement PAS jouee ici : elle
+# arbitre les merges amont, update_vendor.sh la joue au moment ou elle sert. Elle est declaree
+# {:out, …} au registre des corpus.
+# ---------------------------------------------------------------------------
+TS_TESTS="$HERE/../vendor/token_saver/lcars_tests"
+if [[ -d "$TS_TESTS" ]]; then
+  if ! python3 -c "import pytest" >/dev/null 2>&1; then
+    echo "ECHEC: pytest absent — les lcars_tests de token-saver ne peuvent pas tourner (pas de skip silencieux)." >&2
+    exit 1
+  fi
+  echo "--- token-saver : suite LCARS (ancrage amont) ---"
+  set +e
+  TS_OUT="$(cd "$HERE/../vendor/token_saver" && python3 -m pytest lcars_tests -q -p no:cacheprovider -o addopts="" 2>&1)"
+  TS_RC=$?
+  set -e
+  echo "$TS_OUT"
+  if [[ "$TS_RC" -ne 0 ]]; then
+    echo "ECHEC: la suite LCARS de token-saver est ROUGE (exit $TS_RC) — un ancrage amont a lache." >&2
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 2) Tests bats : les launchers (bwrap_launch, claude_launch) ET les skills du depot. Ranges en
 #    sous-dossiers → recherche recursive (pas un simple glob test/*.bats). LE test bats de
 #    bwrap_launch ne se contourne pas : s'il est joignable (bats present) il DOIT etre vert.

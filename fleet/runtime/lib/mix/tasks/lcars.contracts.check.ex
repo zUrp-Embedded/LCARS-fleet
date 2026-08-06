@@ -1666,6 +1666,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     {".claude/skills", :gated},
     {"fleet/provisioning_v2/tests", :gated},
     {"fleet/git-hooks/tests", :gated},
+    {"fleet/runtime/vendor/token_saver/lcars_tests", :gated},
+    {"fleet/runtime/vendor/token_saver/tests",
+     {:out,
+      "upstream suites of the vendored engine (7 884 l). They arbitrate UPSTREAM merges — " <>
+        "update_vendor.sh plays them at the moment they serve — and gating them would make every " <>
+        "commit here pay for a question nobody is asking"}},
     {"fleet/tests/python/v1",
      {:out, "v1 python smoke, frozen with the rest of v1 — same decision as the v1 bats corpus"}},
     {"PoC",
