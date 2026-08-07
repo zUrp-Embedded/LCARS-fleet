@@ -1,0 +1,62 @@
+# SOURCE: .github/workflows/site.yml
+# STATUS: PROTO — construit et publie le site vitrine (assets/github.io) sur GitHub Pages.
+#
+# POURQUOI ICI ET PAS DANS assets/github.io/ : Actions ne lit les workflows QU'a la racine du
+# depot. Le projet du site vit sous assets/github.io/, le workflow pointe dedans par
+# working-directory.
+#
+# POURQUOI LE SITE EST DANS LE DEPOT DU PRODUIT : son build LIT le catalogue
+# (fleet/priv/catalogue) pour en tirer les cartes, les sieges et les verdicts. Meme arbre,
+# meme commit : le site ne peut pas decrire une autre version que celle qui est la — donc aucune
+# question d'epinglage, aucune peremption possible, aucun mecanisme de fraicheur a maintenir.
+# Corollaire assume : deplacer le catalogue CASSE ce build. C'est le comportement voulu — une
+# plaquette qui ne trouve plus ce qu'elle decrit doit echouer, pas servir la version d'avant.
+name: Site vitrine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'assets/**'
+      - 'fleet/priv/catalogue/**'
+      - 'fleet/priv/workflow/schema/gate-decision-v1.json'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: assets/github.io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: assets/github.io/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: assets/github.io/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

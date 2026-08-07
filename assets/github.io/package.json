@@ -1,0 +1,16 @@
+{
+  "name": "lcars-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "node scripts/collect-assets.mjs",
+    "predev": "node scripts/collect-assets.mjs",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "js-yaml": "^4.3.1"
+  }
+}

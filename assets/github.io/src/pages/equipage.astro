@@ -1,0 +1,104 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Seat from '../components/Seat.astro';
+import { seats } from '../lib/catalogue.js';
+
+// La LISTE et les faits structurels viennent du catalogue ; la phrase de presentation est de la
+// prose, elle vit ici. Un siege ajoute au canon apparait donc TOUT DE SUITE sur le site, decrit
+// par ses faits, meme avant que quelqu'un lui ecrive une phrase. C'est voulu : mieux vaut un
+// siege visible et sec qu'un siege absent parce que personne n'a redige.
+const COLORS = { architect:'var(--amber)', starfleet:'var(--amber-soft)', engineer:'var(--salmon)',
+  scribe:'var(--yellow)', scoper:'var(--blue)', qualifier:'var(--green)', reviewer:'var(--mauve)',
+  gatekeeper:'var(--violet)', vulcan:'var(--faint)' };
+const PROSE = {
+  architect:  ['Il vous parle', 'Le seul agent avec qui vous échangez. Il traduit votre intention en brief versionné, ouvre les tickets, et vous rend la main quand la flotte bloque.'],
+  starfleet:  ['Le standard', 'Permanent. Il démarre la flotte, tient l’audit et sert de guichet quand aucun projet n’est en cause.'],
+  engineer:   ['Il produit le code', 'Reçoit un brief, implémente, livre. Un pod par ticket : son contexte suit la mission du début à la fin.'],
+  scribe:     ['Il produit la doctrine', 'Même métier, autre face : il rédige les documents du projet, avec le code en référence lecture seule.'],
+  scoper:     ['Il juge le brief', 'Avant que quiconque code. Un brief qu’on ne peut pas exécuter lui revient, avec la raison — c’est l’étape la moins chère du parcours.'],
+  qualifier:  ['Il juge la conformité', 'Le livrable fait-il ce que le brief demandait, et est-ce que ça tient debout ? C’est le juge du plancher mécanique.'],
+  reviewer:   ['Il juge la qualité', 'Pas la conformité : la facture. Ce que vous auriez dit en relecture si vous aviez eu le temps de la faire.'],
+  gatekeeper: ['Il scelle', 'Il vérifie que l’arbre fusionné est bien celui qui a été jugé, puis merge. C’est aussi lui qu’on appelle quand un jugement ne tranche pas.'],
+  vulcan:     ['Le siège réservé', 'Vide aujourd’hui. Il attend un auditeur externe, tournant sous un autre modèle que le reste de la flotte — un regard qui ne partage pas nos angles morts.']
+};
+const SEATS = seats();
+const sections = [
+  { id: 'sieges', label: 'Les sièges' },
+  { id: 'sas',    label: 'Un seul vous parle' },
+  { id: 'juge',   label: 'Un juge ne code pas' }
+];
+const judges = SEATS.filter((s) => s.judge).length;
+---
+<Site title="LCARS — L’équipage" current="/equipage/" sections={sections}>
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">L’équipage</p>
+      <h1>Ce ne sont pas des rôles.<br /><em>Ce sont des pouvoirs différents.</em></h1>
+      <p class="lede">Chaque siège reçoit un mandat, des outils, et un monde projeté qui s’arrête là
+      où son travail s’arrête. Un juge n’a pas les moyens d’écrire du code ; un producteur n’a pas
+      les moyens de valider le sien. <b>La séparation n’est pas une consigne de politesse, c’est une
+      différence de droits</b> — et c’est ce qui rend le jugement crédible.</p>
+      <p class="sig">{SEATS.length} sièges au catalogue, dont <b>{judges} juges</b> · chacun avec son
+      identité propre sur <b>votre</b> forge : les commits et les avis sont signés, pas anonymes</p>
+    </div>
+  </header>
+
+  <section>
+    <SectionHead id="sieges" title="Les sièges" cap="lus dans les cap-profiles du canon" />
+    <p class="intro">Deux vous parlent, deux produisent, {judges} jugent, un scelle. Et un siège
+    reste vide, exprès.</p>
+    <div class="seats">
+      {SEATS.map((s) => {
+        const [role, txt] = PROSE[s.name] ?? [s.judge ? 'Juge' : 'Producteur', ''];
+        return (
+          <Seat name={s.name} role={role} color={COLORS[s.name] ?? 'var(--faint)'} ghost={s.name === 'vulcan'}>
+            {txt}
+            {!txt && <em>Siège déclaré au catalogue, pas encore décrit ici.</em>}
+          </Seat>
+        );
+      })}
+    </div>
+    <p class="note">Cette grille est <b>construite depuis le canon</b> : ajouter un siège le fait
+    apparaître ici, avec sa qualité de juge dérivée de son cap-profile — pas d’une liste tenue à la main.</p>
+  </section>
+
+  <section>
+    <SectionHead id="sas" title="Un seul vous parle" cap="le sas, et pourquoi il est unique" />
+    <p class="intro">Vous n’avez pas neuf interlocuteurs à suivre. Vous en avez un, et il porte la
+    responsabilité de traduire ce que vous voulez en quelque chose d’exécutable. Les autres ne
+    s’adressent jamais à vous directement — ils déposent leur travail sur la forge.</p>
+    <div class="two">
+      <div class="tile"><b>Une seule porte, dans les deux sens</b><span>Vos instructions entrent par
+      lui. Les demandes de la flotte ressortent par lui. Rien ne vous parvient d’un agent qui aurait
+      décidé tout seul de vous interrompre.</span></div>
+      <div class="tile m"><b>Il ne code pas</b><span>Il découpe, écrit les briefs, suit ses projets
+      et vous rend la main. Le jour où il se mettrait à produire, il jugerait son propre travail.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <SectionHead id="juge" title="Un juge ne code pas" cap="et il ne peut pas le devenir en route" />
+    <p class="intro">C’est la propriété de sécurité la plus importante du système, et elle est
+    mécanique. Un agent ne « devient » pas juge parce qu’on le lui a demandé gentiment : son siège
+    lui donne un jeu d’outils, un contrat, et un ordre de mission d’une nature différente. Un juge
+    qui recevrait par erreur un brief exécutable <b>ferait le travail au lieu de le juger</b> — donc
+    le système refuse bruyamment plutôt que de laisser le doute s’installer.</p>
+    <div class="two">
+      <div class="tile g"><b>Le producteur ne se relit pas</b><span>Celui qui a écrit le code n’est
+      jamais dans le jury de sa propre livraison. Ce n’est pas configurable : c’est structurel.</span></div>
+      <div class="tile b"><b>Le juge ne pousse pas</b><span>Il n’a ni accès à la forge, ni droit de
+      fusion. Son seul pouvoir est de rendre un avis — que le système publiera sous son nom.</span></div>
+      <div class="tile s"><b>Aucune qualité ne s’infère</b><span>Un siège mal déclaré ne retombe pas
+      silencieusement sur « producteur ». Le système s’arrête et le dit.</span></div>
+    </div>
+    <blockquote style="margin-top:18px">
+      <p class="q">« Le bac à sable ne protège pas le monde de l’agent. Il protège l’agent du monde.&nbsp;»</p>
+      <p class="a">Chaque siège ne voit que son projet, son ordre de mission et la doctrine qui le
+      concerne. Pas par méfiance : parce qu’un agent affamé de contexte <b>devine</b>, et qu’une
+      supposition qui compile est le défaut le plus cher à trouver.</p>
+    </blockquote>
+  </section>
+</Site>

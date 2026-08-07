@@ -1,0 +1,90 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+const sections = [{ id: 'poser', label: 'Poser la boîte' }, { id: 'projet', label: 'Faire entrer un projet' }, { id: 'etendre', label: 'Étendre le catalogue' }];
+---
+<Site title="LCARS — Mettre en route" current="/mettre-en-route/" sections={sections}>
+
+    <header class="head">
+      <div class="elbow" aria-hidden="true"></div>
+      <div>
+        <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="eyebrow">Mettre en route</p>
+        <h1>Une boîte, votre forge,<br>et <em>rien à confier à personne</em>.</h1>
+        <p class="lede">LCARS tourne chez vous, dans un conteneur, contre une forge qui vous
+        appartient. Il n'y a pas de service à souscrire, pas de dépôt à téléverser, pas de compte à
+        créer ailleurs. Ce qui sort de votre machine, c'est ce que <b>vous</b> décidez de publier —
+        et cette page se termine sur la manière d'ajouter vos propres règles au système.</p>
+        <p class="sig">le conteneur ne fabrique pas la forge, il la <b>consomme</b> · la vôtre reste
+        la vôtre, avec vos comptes et vos droits</p>
+      </div>
+    </header>
+
+    <section id="poser">
+      <SectionHead id="poser" title="Poser la boîte" cap="deux choses, dans cet ordre" />
+      <p class="intro">L'installation est un conteneur à construire et à démarrer. Le vrai geste,
+      c'est le second : lui donner l'adresse de votre forge et un jeton. Sans forge, LCARS démarre
+      et vous le dit franchement — il ne simule rien.</p>
+      <div class="ladder">
+        <div class="step"><div class="k" style="background:var(--amber)"><b>1</b><i>la boîte</i></div>
+          <div class="t"><b>Vous construisez et vous démarrez</b>
+            <span>Un conteneur, deux commandes. Dedans : le moteur, les consoles, et les
+            outils dont les agents ont besoin. Vous y entrez en SSH <b>en tant que vous</b> — les
+            agents travaillent avec vos droits, jamais avec plus.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--blue)"><b>2</b><i>la forge</i></div>
+          <div class="t"><b>Vous branchez la vôtre</b>
+            <span>Une URL et un jeton. LCARS n'installe pas de forge et n'en héberge pas : il se
+            connecte à celle que vous faites déjà tourner. C'est ce qui garantit qu'aucun de vos
+            dépôts ne quitte votre réseau.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--green)"><b>3</b><i>la preuve</i></div>
+          <div class="t"><b>Vous demandez un diagnostic</b>
+            <span>Une commande sonde l'installation et rend un état par point. Elle ne dit jamais
+            « tout va bien » globalement : elle nomme ce qu'elle a mesuré, et ce qu'elle n'a
+            <b>pas pu</b> mesurer.</span></div></div>
+      </div>
+      <p class="note">Rien n'est irréversible : la boîte se détruit et se reconstruit sans toucher
+      à votre forge, qui vit à côté et garde tout.</p>
+    </section>
+
+    <section id="projet">
+      <SectionHead id="projet" title="Faire entrer un projet" cap="neuf ou existant, même porte" />
+      <p class="intro">Vous demandez à l'architecte de prendre un projet en charge. Il crée ce qu'il
+      faut sur la forge, prépare les deux branches — celle du code, celle de la doctrine — et pose
+      les protections qui empêchent un agent de fusionner tout seul. Un dépôt qui existe déjà entre
+      par la même porte, sans réécriture de son histoire.</p>
+      <div class="two">
+        <div class="tile"><b>Vous déclarez ce que coûte une erreur</b>
+          <span>C'est le seul choix vraiment structurant, et il vous revient : de « je jette et je
+          recommence » à « dommages irréversibles ». Il décide de la sévérité du pipeline pour
+          toute la vie du projet.</span></div>
+        <div class="tile b"><b>Le reste est posé pour vous</b>
+          <span>Branches, protections, identités des agents sur la forge, structure de travail.
+          Vous n'avez pas de gabarit à recopier ni de fichier de configuration à écrire.</span></div>
+      </div>
+      <p class="note">Le niveau se déclare une fois, pour le projet. Un ticket exceptionnel peut
+      prendre une politique différente, mais c'est un geste explicite — pas une dérive silencieuse.</p>
+    </section>
+
+    <section id="etendre">
+      <SectionHead id="etendre" title="Étendre le catalogue" cap="de la donnée, pas du code" />
+      <p class="intro">Les politiques et les sièges livrés couvrent le cas courant. Le jour où ils
+      ne suffisent plus, vous n'avez pas à modifier le moteur — parce qu'il ne connaît ni les uns ni
+      les autres. Tout vit dans un catalogue de fichiers lisibles, que vous pouvez lire avant de
+      faire confiance et modifier sans recompiler.</p>
+      <div class="two">
+        <div class="tile m"><b>Votre politique</b>
+          <span>Combien de juges, lesquels, dans quel ordre, combien de reprises avant escalade.
+          Un fichier. Le moteur l'applique tel quel, sans rien y ajouter de son cru.</span></div>
+        <div class="tile g"><b>Votre siège</b>
+          <span>Un mandat, des outils, un monde projeté. Ajouter un juge spécialisé — sécurité,
+          performance, conformité métier — c'est déclarer un siège, pas écrire un plugin.</span></div>
+      </div>
+      <blockquote style="margin-top:18px">
+        <p class="q">« Le moteur ne connaît aucune politique en dur. »</p>
+        <p class="a">C'est la même propriété vue de deux côtés. Pour nous : impossible de faire une
+        faveur à un projet sans que ça se voie dans un fichier. Pour vous : la garantie que ce que
+        vous avez écrit sera appliqué à la lettre — un système qui interprétait vos règles ne
+        serait pas extensible, il serait imprévisible.</p>
+      </blockquote>
+    </section>
+</Site>

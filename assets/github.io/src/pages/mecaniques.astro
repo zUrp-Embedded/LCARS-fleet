@@ -1,0 +1,125 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import { cards, verdicts } from '../lib/catalogue.js';
+const CARDS = cards();
+const V = verdicts();
+const sections = [
+  { id: 'chaine',  label: 'Du brief au livrable' },
+  { id: 'carte',   label: 'Choisir sa politique' },
+  { id: 'memoire', label: 'Rien ne vit en mémoire' },
+  { id: 'faces',   label: 'Les deux faces' }
+];
+---
+<Site title="LCARS — Comment ça marche" current="/mecaniques/" sections={sections}>
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">Les mécaniques</p>
+      <h1>Ce qui tient les agents<br /><em>n’est pas dans leur prompt.</em></h1>
+      <p class="lede">Quatre mécanismes, et aucun ne repose sur la bonne volonté d’un modèle.
+      Une chaîne d’étapes que personne ne peut sauter, une politique qui vit en donnée, un état
+      qui survit à l’extinction, et une séparation entre ce qui s’écrit et ce qui se raconte.</p>
+      <p class="sig">tout ce qui suit est vérifiable dans <b>votre</b> forge, avec les outils que
+      vous utilisez déjà — les {CARDS.length} politiques et les {V.length} verdicts ci-dessous sont
+      <b>lus dans le catalogue</b>, pas recopiés</p>
+    </div>
+  </header>
+
+  <section>
+    <SectionHead id="chaine" title="Du brief au livrable" cap="qui agit, et ce qui se dépose" />
+    <p class="intro">Cinq mouvements. La couleur dit qui agit : vous en mauve, la machine en ambre,
+    un agent en bleu. Chaque étape dépose son résultat sur la forge — et c’est ce dépôt, pas une
+    variable en mémoire, qui autorise le mouvement suivant.</p>
+    <div class="ladder">
+      <div class="step"><div class="k" style="background:var(--mauve)"><b>1</b><i>vous</i></div>
+        <div class="t"><b>Vous dictez l’intention</b><span>À l’agent qui vous parle. Il en fait un
+        document versionné, commité, et ouvre le ticket en citant ce document à une version précise.</span></div></div>
+      <div class="step"><div class="k" style="background:var(--blue)"><b>2</b><i>agent</i></div>
+        <div class="t"><b>Le brief est jugé avant que quiconque code</b><span>Un juge le lit à la
+        version citée. Trop flou pour être exécuté : il ne devine pas, il vous le renvoie.</span></div></div>
+      <div class="step"><div class="k" style="background:var(--blue)"><b>3</b><i>agent</i></div>
+        <div class="t"><b>Le producteur travaille, et commite en local</b><span>Dans un bac à sable
+        qui ne contient que son projet. Il ne pousse pas, il ne voit pas la forge.</span></div></div>
+      <div class="step"><div class="k" style="background:var(--amber)"><b>4</b><i>machine</i></div>
+        <div class="t"><b>Le système publie et convoque le jury</b><span>Un agent qui ne peut pas
+        pousser ne peut pas contourner ce qui vient après — ce n’est pas une consigne, c’est un
+        pouvoir qu’il n’a pas.</span></div></div>
+      <div class="step"><div class="k" style="background:var(--amber)"><b>5</b><i>machine</i></div>
+        <div class="t"><b>Les juges votent, le sceau tombe</b><span>Chaque juge rend son avis en
+        review native, sous son propre nom. Unanimité requise. Puis la provenance est vérifiée et
+        le merge se fait.</span></div></div>
+    </div>
+  </section>
+
+  <section>
+    <SectionHead id="carte" title="Choisir sa politique" cap={`${CARDS.length} cartes, lues dans le catalogue`} />
+    <p class="intro">Un PoC jetable et un système qui pilote du 230 V ne méritent pas la même
+    cérémonie. Vous déclarez ce que coûte une erreur ; ce niveau ouvre les politiques qui lui
+    conviennent ; la politique décide qui juge et combien de fois on repasse. Changer de sévérité
+    ne modifie <b>jamais</b> le moteur : on prend une autre carte. Voici celles du catalogue, avec
+    leur propre description.</p>
+    <div class="bands">
+      {CARDS.map((c) => (
+        <div class="band">
+          <div class="lab" style={`background:${c.levels.includes('C4') ? 'var(--salmon)' : c.levels.includes('C2') ? 'var(--amber)' : c.levels.length ? 'var(--blue)' : 'var(--faint)'}`}>
+            <b>{c.name}</b>
+            <i>{c.levels.length ? c.levels.join(' ') : 'technique'}</i>
+          </div>
+          <div class="body">
+            {c.presentation}
+            <p class="note" style="margin-top:8px">
+              jury : <b>{c.jury.length ? c.jury.join(', ') : 'aucun'}</b>
+              {c.rounds !== null && <> · reprises max : <b>{c.rounds}</b></>}
+              {c.steps.length > 0 && <> · étapes : <b>{c.steps.join(' → ')}</b></>}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+    <p class="note">Le niveau n’est jamais auto-évalué. Un agent qui rationalise « ce n’est pas si
+    grave » est exactement le comportement que cette séparation existe pour empêcher.</p>
+  </section>
+
+  <section>
+    <SectionHead id="memoire" title="Rien ne vit en mémoire" cap="le principe qui rend le reste possible" />
+    <p class="intro">C’est la règle dont tout découle. Un fait qui compte n’est jamais porté par la
+    mémoire d’un agent ni par une variable du runtime : il est déposé sur la forge avant d’avoir le
+    droit d’exister. Coupez tout au milieu d’une mission, rallumez : la flotte reprend où elle en
+    était, parce qu’elle relit au lieu de se souvenir.</p>
+    <div class="bands">
+      <div class="band"><div class="lab" style="background:var(--amber)"><b>L’état est un label</b><i>lisible sans outil</i></div>
+        <div class="body">La position d’un ticket, le verrou qui empêche deux agents de partir
+        dessus, l’appel à l’humain : tout est en étiquettes sur l’issue. <b>Vous suivez la course
+        dans l’onglet Issues</b>, sans rien installer.</div></div>
+      <div class="band"><div class="lab" style="background:var(--blue)"><b>Le brief est un commit</b><i>épinglé à une version</i></div>
+        <div class="body">Pas un message qu’on peut réécrire : un document versionné, cité à une
+        version <b>précise</b>. Ce qui est jugé est cette version-là.</div></div>
+      <div class="band"><div class="lab" style="background:var(--green)"><b>Le verdict est une review</b><i>signée, datée</i></div>
+        <div class="body">Chaque juge vote sous sa propre identité. Un avis porte le code qu’il a
+        vu : un nouveau push le périme automatiquement.</div></div>
+    </div>
+    <blockquote style="margin-top:18px">
+      <p class="q">« Un fait n’est jamais porté par la RAM seule. »</p>
+      <p class="a">Cette phrase a un coût — il faut écrire sur la forge avant d’agir. Elle achète en
+      retour la seule chose qui compte quand des agents travaillent sans surveillance : un système
+      qu’on peut éteindre.</p>
+    </blockquote>
+  </section>
+
+  <section>
+    <SectionHead id="faces" title="Les deux faces" cap="le code et ce qu’on en dit" />
+    <p class="intro">Un projet a deux productions qui n’ont pas les mêmes règles. Le code, qui doit
+    compiler et passer un jury. Et la doctrine — décisions, comptes rendus, briefs — qui doit être
+    exacte et datée, mais qu’aucun test ne peut valider.</p>
+    <div class="two">
+      <div class="tile"><b>La face code</b><span>Branche principale, pipeline complet, jury et
+      sceau. C’est le chemin par défaut.</span></div>
+      <div class="tile m"><b>La face doctrine</b><span>Une branche dédiée, un rédacteur, pas de
+      jury — parce qu’il n’y a rien à faire compiler. La vérification est humaine.</span></div>
+    </div>
+    <p class="note">Le choix se fait <b>par ticket</b>, pas par projet : un même dépôt produit du
+    code et de la doctrine dans la même journée.</p>
+  </section>
+</Site>

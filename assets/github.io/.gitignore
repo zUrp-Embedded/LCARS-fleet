@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.astro/
+# `public/` est ENTIEREMENT genere par scripts/collect-assets.mjs depuis assets/ du depot.
+# Il n'est jamais commite : une copie versionnee ferait un second exemplaire des avatars,
+# et c'est exactement la divergence silencieuse que ce site raconte.
+public/
