@@ -37,7 +37,10 @@
 #    brule un telechargement rate. La source est resolue par `readlink -f` : l'installeur vendor
 #    pose un SYMLINK, et copier le lien donne une cible morte dans la boite.
 # 4. UN BANC NE DOIT JAMAIS COGNER LE BANC D'A COTE. Projet compose, port de forge et adresse de
-#    bind sont TOUS parametres et defaultent sur des valeurs libres. Le geste destructeur (`down -v`)
+#    bind sont TOUS parametres et defaultent sur des valeurs libres. `--bind` couvre la boite ET la
+#    forge depuis le 2026-08-07 : jusque-la il n'etait passe qu'a la boite, la forge retombait sur
+#    le defaut `127.0.0.1` du compose, et cet en-tete l'affirmait deja couverte. La separation
+#    tenait quand meme — par unicite du PORT — mais un `--bind 127.0.0.7` rendait une forge sur .1. Le geste destructeur (`down -v`)
 #    n'est pas ici : il est dans `bench-down.sh`, separement, pour qu'aucune faute de frappe sur ce
 #    script-ci ne detruise un banc qui travaille.
 #
@@ -87,7 +90,9 @@ FORGE_PROJECT="${PROJECT}forge"
 FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
 BOX="${PROJECT}-lcars-1"
 FORGE_NET="${FORGE_PROJECT}_default"
-FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
+# L'URL suit le BIND, pas un 127.0.0.1 fige : sinon un banc bind sur .7 amorce une forge joignable
+# a une autre adresse que celle qu'il annonce, et le premier lecteur du recap se trompe de fenetre.
+FORGE_URL="http://${BIND}:${FORGE_PORT}"
 
 say() { printf '[bench-up] %s\n' "$*"; }
 die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
@@ -145,7 +150,7 @@ fi
 
 # ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
-LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_ROOT_URL="http://forge:3000/" \
+LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="http://forge:3000/" \
   "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
   || die "la forge ne monte pas" 2
 
