@@ -23,8 +23,13 @@ const readYaml = (p) => yaml.load(readFileSync(p, 'utf8'));
 /** Les cartes, avec la `presentation:` que le catalogue ecrit DEJA pour un humain. */
 export function cards() {
   const dir = join(CANON, 'workflow', 'canon', 'workflow_maps');
-  return readdirSync(dir).filter((f) => f.endsWith('.yaml')).map((f) => {
-    const d = readYaml(join(dir, f));
+  return readdirSync(dir).filter((f) => f.endsWith('.yaml'))
+    .map((f) => ({ f, d: readYaml(join(dir, f)) }))
+    // MEME filtre que l'autorite interne (`status == "canon"` apres normalisation, ou le loader
+    // pose "canon" quand la cle est absente) : une carte de fumee ou de demo n'est pas une carte
+    // qu'un projet peut choisir, et une vitrine qui la publie promet plus que le produit n'offre.
+    .filter(({ d }) => (d.metadata?.status ?? 'canon') === 'canon')
+    .map(({ f, d }) => {
     return {
       name: d.metadata?.name ?? f.replace(/\.yaml$/, ''),
       presentation: d.metadata?.presentation ?? d.metadata?.description ?? '',
@@ -39,8 +44,13 @@ export function cards() {
 /** Les sieges — champs STRUCTURELS uniquement, jamais le prompt. */
 export function seats() {
   const dir = join(CANON, 'cap_profile', 'canon', 'cap-profiles');
-  return readdirSync(dir).filter((f) => f.endsWith('.yaml')).map((f) => {
-    const d = readYaml(join(dir, f));
+  return readdirSync(dir).filter((f) => f.endsWith('.yaml'))
+    .map((f) => ({ f, d: readYaml(join(dir, f)) }))
+    // Un `ReservedSeat` est une place TENUE, pas un siege qu'on peut occuper : il ne recoit ni
+    // mandat ni outils, et le spawn le refuse. La page dit « chaque siege recoit un mandat » —
+    // publier une place reservee rendrait cette phrase fausse pour l'une d'elles.
+    .filter(({ d }) => d.kind === 'CapabilityProfile')
+    .map(({ f, d }) => {
     const inv = d.spec?.invocation ?? {};
     return {
       name: d.metadata?.name ?? f.replace(/\.yaml$/, ''),
