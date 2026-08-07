@@ -104,15 +104,31 @@ fi
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 GO7_HOOK="$REPO_ROOT/fleet/git-hooks/pre-commit"
 
-# ABSENCE = ECHEC, jamais un saut. Le hook vit DANS le depot : s'il manque, l'arbre est casse, ce
-# n'est pas une fonctionnalite optionnelle. Un `if [[ -f ]]` qui saute rendrait ce pas invisible le
-# jour ou il sert le plus.
+# ABSENCE = ECHEC DANS UN DEPOT, jamais un saut. Le hook vit DANS le depot : s'il manque la, l'arbre
+# est casse, ce n'est pas une fonctionnalite optionnelle. Un `if [[ -f ]]` qui saute rendrait ce pas
+# invisible le jour ou il sert le plus.
+#
+# MAIS UN ARTEFACT N'EST PAS UN DEPOT CASSE. Mesure du 2026-08-07, premier build clean-room apres le
+# demenagement : l'etage `build` de l'image copie le perimetre ex-runtime (mix/lib/priv/config/test/
+# bin/etc/vendor) et n'embarque ni `fleet/git-hooks/` ni `.git` — deliberement, il n'a pas de hooks a
+# installer. Ce pas y refusait donc un arbre SAIN, et il cassait le build de l'image entiere.
+#
+# LE DISCRIMINANT EST UN FAIT, PAS UNE DEVINETTE : `git rev-parse --git-dir` reussit dans un depot et
+# echoue dans l'artefact. Et l'absence se DECLARE au lieu de se taire — meme forme que
+# `shell.sourcers_set_strict` du contracts.check, qui imprime « NOT CHECKED here (… absent from this
+# artifact — runtime-only context) ». Un pas qui saute en silence est le defaut ; un pas qui dit ce
+# qu'il n'a pas mesure est une reponse.
 if [[ ! -f "$GO7_HOOK" ]]; then
-  echo "ECHEC: GO-7 — $GO7_HOOK introuvable (le mur ne peut pas etre rejoue)." >&2
-  exit 1
+  if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "ECHEC: GO-7 — $GO7_HOOK introuvable dans un DEPOT git (le mur ne peut pas etre rejoue)." >&2
+    exit 1
+  fi
+  echo "--- GO-7 : NON VERIFIE ici (fleet/git-hooks absent de cet artefact — contexte hors-depot) ---"
+  GO7_SKIPPED=1
 fi
 
-if true; then
+if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
+
   echo "--- GO-7 : en-tetes declaratifs sous fleet/ ---"
   eval "$(sed -n '/^is_ipc_exception()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
