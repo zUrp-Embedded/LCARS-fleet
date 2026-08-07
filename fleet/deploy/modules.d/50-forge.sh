@@ -12,7 +12,8 @@
 # comptes/org/teams/hardening sont le territoire EXCLUSIF d'OpenTofu (forge.tf, arbitrage WS1 :
 # « TF fait toute la STRUCTURE, bash SEULEMENT les tokens »). Ce module :
 #   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il
-#      INSTRUIT le geste bootstrap (« ./docker.sh forge-bootstrap ») et n'exécute RIEN : même
+#      INSTRUIT le geste bootstrap (« ./docker.sh forge-check », qui énonce le contrat et les
+#      commandes exactes) et n'exécute RIEN : même
 #      famille de gestes d'identité que « claude /login », sondés et instruits, jamais faits ;
 #   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
@@ -74,7 +75,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$PROV_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — pose le seed (geste 2 de « forge-bootstrap ») ou complète $PROV_PASSWORDS_FILE, puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — pose le seed (geste décrit par « ./docker.sh forge-check ») ou complète $PROV_PASSWORDS_FILE, puis relance"
     return 1
   fi
   local seed tmp rc=0
@@ -165,7 +166,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu, bootstrap requis : « ./docker.sh forge-bootstrap »"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu, bootstrap requis : « ./docker.sh forge-check » donne les commandes"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -226,7 +227,7 @@ apply() {
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
     # Territoire tofu : rien n'est exécutable ICI (geste d'identité bootstrap — instruit).
-    p_drift "structure absente (comptes : $miss) — bootstrap requis : « ./docker.sh forge-bootstrap » (admin + tofu apply + seed)"
+    p_drift "structure absente (comptes : $miss) — bootstrap requis (admin + tofu apply + seed) : « ./docker.sh forge-check » les énonce"
     verdict_apply
   fi
 

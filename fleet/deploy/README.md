@@ -1,7 +1,7 @@
 # fleet/deploy — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-07
+**Dernière révision** : 2026-08-08
 **Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
 tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
 corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
@@ -90,7 +90,8 @@ côtés.
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
   le profil `forge` : act_runner officiel pinné, label `elixir` = la même image que le stage
-  build). Son enregistrement est un geste bootstrap (`docker.sh forge-bootstrap`), hors du
+  build). Son enregistrement est un geste bootstrap (`fleet/deploy/docker/dev/bench-runner.sh`
+  sur un banc ; sur une forge d'opérateur, le jeton de runner est minté à la main), hors du
   chemin machine-nue→fleet.
 - **Pas de gestion GitHub** (`gh`, branch-protection…) : la forge du triangle est Gitea.
 
