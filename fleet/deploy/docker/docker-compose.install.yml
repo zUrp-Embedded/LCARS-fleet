@@ -77,12 +77,6 @@ services:
       # d'une install docker n'est pas le bind mais la PUBLICATION compose ci-dessous, qui n'expose
       # que sur la loopback de l'hote. Meme raisonnement que ttyd (cf. console.sh).
       LCARS_BIND_HOST: "${LCARS_BIND_HOST:-0.0.0.0}"
-      # L'URL de la forge TELLE QUE LE NAVIGATEUR L'ATTEINT — distincte de FORGE_BASE_URL, qui est
-      # celle que le CONTENEUR joint. Les deux different des qu'on passe par un reseau docker
-      # (`http://forge:3000` cote conteneur, `http://127.0.0.1:3600` cote navigateur) : un lien de
-      # page ou une redirection OAuth batie sur la premiere mene dans le vide. Vide = le deck
-      # n'affiche aucun lien forge et ne propose pas de connexion deleguee.
-      LCARS_FORGE_WEB_URL: "${LCARS_FORGE_WEB_URL:-}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
       # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci

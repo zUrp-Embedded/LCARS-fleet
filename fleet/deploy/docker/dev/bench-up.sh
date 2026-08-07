@@ -188,7 +188,6 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_HUMAN="$HUMAN" \
     LCARS_HUMAN_EMAIL="${HUMAN}@lcars.local" \
     FORGE_BASE_URL="http://forge:3000" \
-    LCARS_FORGE_WEB_URL="$FORGE_URL" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \

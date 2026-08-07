@@ -20,8 +20,9 @@
 # 2. Les JOBS ne heritent PAS du reseau du runner : act_runner cree les conteneurs de job sur son
 #    propre reseau par defaut, d'ou un clone qui echoue sur `forge:3000` introuvable — un runner
 #    vert qui rate tous ses jobs, le pire des etats. La config `container.network` force les jobs
-#    sur le meme reseau que la forge. C'est le meme piege des deux points de vue reseau que
-#    LCARS_FORGE_WEB_URL vs FORGE_BASE_URL, troisieme incarnation.
+#    sur le meme reseau que la forge. C'est la troisieme incarnation du meme piege : une URL n'est
+#    jamais absolue, elle est relative au reseau d'ou on la joint — `http://forge:3000` resout
+#    depuis un conteneur du reseau de la forge, jamais depuis un navigateur de l'hote.
 #
 # IDEMPOTENT : re-jouable apres chaque nuke. L'identite du runner vit dans le volume du projet
 # compose ; un runner deja enregistre sur une forge MORTE est un zombie — d'ou le `down -v`
