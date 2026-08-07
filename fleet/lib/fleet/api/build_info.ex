@@ -94,10 +94,33 @@ defmodule Fleet.API.BuildInfo do
     end
   end
 
+  # GIT FIRST, ENV SECOND — and the order is the point. A working tree has the truth and can also
+  # tell whether it is dirty; an env var carries only what someone chose to pass. But a container
+  # build stage has NO `.git` (deliberately: a worktree pointer is dead once the context is copied),
+  # so git alone made every image report `sha: "unknown"` — measured 2026-08-07 from inside a bench
+  # box, where `fleet_v2 status` said "build unknown ref= (source=release)".
+  #
+  # The env fallback is NOT a second source of truth competing with the first: it is what the build
+  # passes when the first is unavailable BY CONSTRUCTION. `dirty` stays false there, because a build
+  # context carries no way to know — and claiming clean would be worse than saying nothing, so the
+  # ref is left nil rather than invented.
   defp git_facts do
     case git(["rev-parse", "--short", "HEAD"]) do
       {:ok, sha} -> {:ok, %{sha: sha, dirty: dirty?(), ref: working_tree_ref()}}
-      :error -> :error
+      :error -> env_facts()
+    end
+  end
+
+  @doc false
+  # Expose pour le test : c'est le SEUL chemin par lequel une image obtient sa revision, et il n'a
+  # pas de git pour le corroborer. Un repli non teste est un repli qu'on decouvre casse en lisant
+  # « unknown » dans un banc, six semaines apres.
+  def env_facts do
+    case System.get_env("LCARS_GIT_SHA") do
+      nil -> :error
+      "" -> :error
+      "unknown" -> :error
+      sha -> {:ok, %{sha: sha, dirty: false, ref: nil}}
     end
   end
 

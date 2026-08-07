@@ -1,41 +1,65 @@
 defmodule Fleet.API.BuildInfoTest do
-  use ExUnit.Case, async: true
+  @moduledoc """
+  The env fallback, and the three values it must REFUSE.
+
+  A container build stage has no `.git` by construction, so `git rev-parse` fails there and the
+  release used to be stamped `sha: "unknown"` — measured 2026-08-07 from inside a bench box, whose
+  `fleet_v2 status` reported "build unknown ref= (source=release)". The fallback exists for that one
+  path, and it is the ONLY way an image learns which code it runs.
+
+  What these cases pin is the refusal side. `LCARS_GIT_SHA` is passed by a build ARG that DEFAULTS
+  to the string "unknown", so an operator who builds without `docker.sh` hands the fallback a
+  sentinel rather than a revision. Accepting it would stamp the release with a plausible-looking
+  fact that means the opposite of one — worse than the empty answer it replaces.
+  """
+  use ExUnit.Case, async: false
 
   alias Fleet.API.BuildInfo
 
-  describe "current/0" do
-    # SHAPE only (not a literal SHA — non-hermetic). Whatever the context
-    # (release / working_tree / unknown), the shape contract holds.
-    test "returns a stable SHAPE (non-empty binary sha, source in the enum, dirty bool, binary|nil ref)" do
-      assert %{sha: sha, dirty: dirty, ref: ref, source: source} = BuildInfo.current()
-      assert is_binary(sha) and sha != ""
-      assert source in [:release, :working_tree, :unknown]
-      assert is_boolean(dirty)
-      assert is_nil(ref) or is_binary(ref)
+  setup do
+    previous = System.get_env("LCARS_GIT_SHA")
+
+    on_exit(fn ->
+      case previous do
+        nil -> System.delete_env("LCARS_GIT_SHA")
+        v -> System.put_env("LCARS_GIT_SHA", v)
+      end
+    end)
+
+    :ok
+  end
+
+  describe "a revision passed by the build is carried through" do
+    test "a real sha becomes the stamped fact" do
+      System.put_env("LCARS_GIT_SHA", "deadbee")
+      assert {:ok, %{sha: "deadbee", dirty: false, ref: nil}} = BuildInfo.env_facts()
+    end
+
+    test "dirty is false and ref is nil — NOT invented" do
+      # A build context cannot know whether the tree was dirty, and it has no branch. Claiming
+      # clean would be a statement; nil is the absence of one. The distinction matters the day
+      # someone asks whether a shipped image came from a dirty tree.
+      System.put_env("LCARS_GIT_SHA", "cafe123")
+      {:ok, facts} = BuildInfo.env_facts()
+      refute facts.dirty
+      assert facts.ref == nil
     end
   end
 
-  describe "read_release_file/1 (:release parse seam)" do
-    @tag :tmp_dir
-    test "parses a controlled build_info file → source: :release", %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "build_info.txt")
-      File.write!(path, "sha=deadbee\ndirty=true\nref=feature/x\n")
-
-      assert {:ok, %{sha: "deadbee", dirty: true, ref: "feature/x", source: :release}} =
-               BuildInfo.read_release_file(path)
+  describe "the three refusals — a sentinel is not a revision" do
+    test "unset falls through to :error" do
+      System.delete_env("LCARS_GIT_SHA")
+      assert BuildInfo.env_facts() == :error
     end
 
-    @tag :tmp_dir
-    test "empty ref → nil ; dirty != 'true' → false", %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "build_info.txt")
-      File.write!(path, "sha=abc1234\ndirty=false\nref=\n")
-
-      assert {:ok, %{sha: "abc1234", dirty: false, ref: nil, source: :release}} =
-               BuildInfo.read_release_file(path)
+    test "empty falls through to :error" do
+      System.put_env("LCARS_GIT_SHA", "")
+      assert BuildInfo.env_facts() == :error
     end
 
-    test "missing file → :error (current/0 then falls back to working_tree)" do
-      assert :error = BuildInfo.read_release_file("/nonexistent/lcars/build_info.txt")
+    test "the literal \"unknown\" falls through — it is the ARG default, not a fact" do
+      System.put_env("LCARS_GIT_SHA", "unknown")
+      assert BuildInfo.env_facts() == :error
     end
   end
 end

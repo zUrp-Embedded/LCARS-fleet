@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7-labs
 # SOURCE: fleet/deploy/docker/Dockerfile
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
@@ -116,8 +116,14 @@ WORKDIR /src/fleet
 # ne les voyait pas — ils sont frere, pas enfant. `deploy/` est copie tel quel dans le stage runtime
 # plus bas ; `git-hooks/` n'a pas de hooks a installer dans une image ; `system-prompt/` porte le
 # protocole d'interaction, qui ne compile rien.
-COPY --chown=builder:fleet fleet /src/fleet
-RUN rm -rf /src/fleet/deploy /src/fleet/git-hooks /src/fleet/system-prompt
+# `--exclude` (syntaxe `1.7-labs`) plutot qu'un COPY suivi d'un `rm -rf` : meme resultat dans
+# l'image, mais les arbres exclus ne sont PAS dans le layer — donc editer un compose, ce Dockerfile
+# ou un hook N'INVALIDE PAS le cache et ne relance pas le gate. Mesure du 2026-08-07 : un build vert
+# coute ~10 min, domine par le gate joue ici ; avec le `rm -rf`, toucher un fichier de `deploy/`
+# les payait en entier pour rien. La correction (inclure par defaut) est conservee, son cout
+# d'iteration ne l'est pas.
+COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
+     fleet /src/fleet
 
 # hex/rebar + build + pose sous /local/LCARS_v2 — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
@@ -132,6 +138,18 @@ RUN rm -rf /src/fleet/deploy /src/fleet/git-hooks /src/fleet/system-prompt
 # un `:gen_server.call` dont le destinataire était un pid SÉRIALISÉ (`<<131, 88, …>>`) — un terme
 # écrit par l'autre arch. L'erreur ne parle ni d'arch ni de cache : elle accuse une dépendance
 # tierce, et on la cherche pendant une heure du mauvais côté.
+# LA REVISION DOIT TRAVERSER JUSQU'A LA RELEASE, PAS SEULEMENT JUSQU'AUX LABELS OCI.
+# Mesure du 2026-08-07, depuis l'interieur d'une boite de banc : `fleet_v2 status` rendait
+# « build unknown ref= (source=release) ». La chaine etait complete a un maillon pres — docker.sh
+# exporte LCARS_GIT_SHA, le compose le passe en `args`, et le Dockerfile le declarait UNIQUEMENT
+# dans le stage runtime, pour le LABEL. Or c'est ICI que la release est estampillee, et
+# `BuildInfo.write_release_file` interrogeait `git` — que ce stage n'a pas, deliberement (pas de
+# .git dans le contexte). Le SHA existait, voyageait, et s'arretait a l'etage d'a cote.
+# Un label OCI se lit du dehors ; l'operateur, lui, regarde depuis DEDANS.
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ENV LCARS_GIT_SHA=${GIT_SHA} LCARS_BUILD_DATE=${BUILD_DATE}
+
 RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
