@@ -8,7 +8,7 @@
 # comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
 # Le fichier compose vit dans fleet/deploy/docker/ — l'humain ne le touche pas.
 #
-# USAGE : ./docker.sh <commande>
+# USAGE : ./docker.sh [-p <projet>] <commande>
 #   build            construit l'image (labels OCI : sha git + date stampés ici)
 #   up               démarre le conteneur fleet (détaché). La forge est à TOI : LCARS ne la
 #                    fabrique pas, il la consomme (FORGE_BASE_URL + un token master)
@@ -23,7 +23,13 @@
 #   forge-check      le contrat que TA forge doit tenir + les gestes pour l'y amener
 #   help             cette aide
 #
+# -p <projet> (ou LCARS_PROJECT) : QUEL déploiement on vise. Défaut « lcars ». Un poste de dev en
+#   porte plusieurs à la fois (un banc de validation, une boîte de travail, un rail) et le nom du
+#   projet est la SEULE chose qui les distingue. Les commandes qui créent ou détruisent refusent
+#   d'agir sur un projet que ce compose n'a pas créé — cf. la garde plus bas, elle mesure.
+#
 # ENV (tous optionnels) :
+#   LCARS_PROJECT              projet compose visé (défaut lcars) — équivalent de -p
 #   LCARS_HUMAN                login de l'humain dans le conteneur (défaut lcars)
 #   LCARS_UID                  uid de l'humain (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
@@ -39,11 +45,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/fleet/deploy/docker/docker-compose.yml"
-PROJECT=lcars
+PROJECT="${LCARS_PROJECT:-lcars}"
+
+# L'aide se DELIMITE par son contenu, pas par des numeros de ligne : la forme `sed -n '6,35p'`
+# tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
+# jamais. Ancrage sur la premiere et la derniere ligne du bloc.
+usage() {
+  sed -n '/^# LCARS fleet v2 en conteneur/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# ─── Le projet visé est un ARGUMENT (cf. assert_project_ours) ─────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--project)
+      [[ -n "${2:-}" ]] || { echo "docker.sh: -p attend un nom de projet" >&2; exit 1; }
+      PROJECT="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
 
 # ─── Préflight (sauté pour help : l'aide doit marcher SANS docker) ────────────────────────────────
 case "${1:-help}" in
-  help|-h|--help) sed -n '6,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
 esac
 command -v docker >/dev/null || { echo "docker.sh: docker introuvable — installe Docker d'abord" >&2; exit 1; }
 if docker compose version >/dev/null 2>&1; then
@@ -57,6 +80,52 @@ fi
 
 compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
 
+# ─── LE PROJET VISÉ EXISTE-T-IL, ET EST-CE LE NÔTRE ? ─────────────────────────────────────────────
+# Un nom de projet compose N'EST PAS une adresse sûre. Compose applique volontiers un fichier à un
+# projet qu'il n'a pas créé : il calcule l'état désiré depuis CE fichier et recrée, republie les
+# ports, supprime ce qui n'y figure pas — sans une seule erreur, parce que de son point de vue rien
+# n'est anormal. Le nom suffit à le désigner, il ne suffit pas à prouver qu'on parle du même objet.
+#
+# Mesuré ici le 2026-08-07 : ce script visait « lcars » en dur, et sur ce poste « lcars » était une
+# boîte de travail vivante depuis 47 h, créée depuis `fleet/provisioning_v2/docker/…` — un chemin
+# SUPPRIMÉ par le déménagement du 2026-08-04. `down` l'arrêtait, `reset` emportait son volume /home.
+#
+# La preuve est dans le conteneur, pas dans une convention : compose y stampe le label
+# `com.docker.compose.project.config_files`, la liste des fichiers qui l'ont réellement créé. On la
+# lit. Un projet SANS conteneur ne se garde pas — il n'y a rien à confondre, et `up` a le droit de
+# le créer.
+project_config_files() {
+  local ids
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
+  [[ -n "$ids" ]] || return 0
+  # shellcheck disable=SC2086 -- liste d'ids séparés par des blancs, à éclater
+  docker inspect $ids \
+    --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
+}
+
+assert_project_ours() {
+  local files line
+  files="$(project_config_files)"
+  [[ -n "$files" ]] || return 0
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    # Le label est une liste séparée par des virgules : on encadre pour ne matcher qu'un élément
+    # entier (sans quoi `…/docker-compose.yml` matcherait un `…/docker-compose.yml.bak`).
+    case ",$line," in *",$COMPOSE_FILE,"*) return 0 ;; esac
+  done <<< "$files"
+  {
+    echo "docker.sh: REFUS — le projet compose « $PROJECT » existe, et ce n'est pas celui de ce fichier."
+    echo "  il a été créé depuis : ${files//$'\n'/ ; }"
+    echo "  ce script appliquerait : $COMPOSE_FILE"
+    echo ""
+    echo "  Appliquer un compose à un projet qu'il n'a pas créé recrée et republie SANS erreur."
+    echo "  Vise le bon projet    : ./docker.sh -p <projet> $*"
+    echo "  Ou agis sur celui-ci avec SA recette (un banc se descend par dev/bench-down.sh)."
+    echo "  Projets visibles      : docker compose ls"
+  } >&2
+  exit 1
+}
+
 # La vérité de révision : stampée au build dans les labels OCI (le worktree/clone HÔTE a git ;
 # le contexte, lui, n'embarque pas .git — cf. Dockerfile).
 build_env() {
@@ -68,13 +137,14 @@ build_env() {
 cmd_build() { build_env; compose build "$@"; }
 
 cmd_up() {
+  assert_project_ours up
   build_env
   # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
   # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
   # « ./docker.sh build », et son verdict est le sien ; image absente → up échoue en le disant.
   compose up -d --no-build "$@"
   echo ""
-  echo "LCARS fleet up. Accès :"
+  echo "LCARS fleet up (projet $PROJECT). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
   echo "  ./docker.sh doctor                                   # état provisionné ?"
 }
@@ -89,6 +159,7 @@ cmd_doctor() {
 cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 cmd_logs()  { compose logs -f "$@"; }
 cmd_down() {
+  assert_project_ours down
   # LCARS seul, et il n'y a plus rien d'autre à descendre : la forge est à l'opérateur, dans
   # son propre déploiement. Aucune commande d'ici ne peut l'atteindre — c'est la frontière.
   compose down "$@"
@@ -99,8 +170,12 @@ cmd_reset() {
   # seule copie durable du travail — n'est pas dans ce projet compose et ne peut donc PAS être
   # emportée par un reset. La frontière est structurelle (projet compose séparé) : un drapeau de
   # sécurité dans un projet commun ne l'est pas, il se contourne d'une commande.
-  echo "docker.sh: RESET — conteneur lcars + image + volume /home. La forge n'est pas concernée"
-  echo "           (elle est à toi, dans son propre déploiement). Ton travail poussé y survit."
+  assert_project_ours reset
+  # Le projet est NOMMÉ dans la question. Un poste de dev en porte plusieurs, et « conteneur lcars »
+  # ne dit pas LEQUEL : on ne fait pas confirmer une destruction sans dire ce qu'elle vise.
+  echo "docker.sh: RESET du projet « $PROJECT » — conteneur + image + volume ${PROJECT}_lcars-home."
+  echo "           La forge n'est pas concernée (elle est à toi, dans son propre déploiement)."
+  echo "           Ton travail poussé y survit."
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "docker.sh: annulé."; exit 1; }
   compose down --rmi local
