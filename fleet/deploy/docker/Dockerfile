@@ -51,10 +51,15 @@ ARG TARGETARCH
 # lui-même. Sous `builder`, `/home` appartient à root : `mkdir_p` échoue et le test rougit sans
 # rien dire du code (mesuré 2026-08-04, premier build après le commit qui pose ce test). Même
 # règle que les paquets ci-dessus : on outille le stage, on n'affaiblit pas le gate.
+# `python3-pytest` A ÉTÉ AJOUTÉ POUR LA MÊME RAISON, et il a coûté un build entier pour être vu
+# (2026-08-07, premier clean-room après le déménagement) : shell_gate joue les `lcars_tests` de
+# token-saver — LE mur d'ancrage amont, celui qui dit ce qui se rouvre à chaque update du vendor —
+# et il REFUSE de les sauter en silence si pytest manque. La boîte de dev l'a, l'image ne l'avait
+# pas : le gate en image était donc vert sur une suite de moins, jusqu'à ce que ce refus le dise.
 RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/backports.list \
     && apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       tmux bubblewrap curl jq unzip ca-certificates python3 bats procps \
+       tmux bubblewrap curl jq unzip ca-certificates python3 python3-pytest bats procps \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -t bookworm-backports git \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
@@ -94,15 +99,25 @@ WORKDIR /src/fleet
 # suite et `test/shell_gate.sh`, `vendor/` porte la brique token-saver dont le gate joue la suite
 # d'ancrage amont, et les quatre dotfiles portent format/credo/dialyzer. Retirer l'un d'eux ne
 # casse pas le COPY : il rend le gate vert sur moins, ce qui ne se voit pas.
-COPY --chown=builder:fleet fleet/mix.exs fleet/mix.lock /src/fleet/
-COPY --chown=builder:fleet fleet/.formatter.exs fleet/.credo.exs fleet/.dialyzer_ignore.exs /src/fleet/
-COPY --chown=builder:fleet fleet/lib    /src/fleet/lib
-COPY --chown=builder:fleet fleet/priv   /src/fleet/priv
-COPY --chown=builder:fleet fleet/config /src/fleet/config
-COPY --chown=builder:fleet fleet/test   /src/fleet/test
-COPY --chown=builder:fleet fleet/bin    /src/fleet/bin
-COPY --chown=builder:fleet fleet/etc    /src/fleet/etc
-COPY --chown=builder:fleet fleet/vendor /src/fleet/vendor
+# INCLURE PAR DEFAUT, EXCLURE PAR NOM — et pas l'inverse. Une liste de COPY explicites est un
+# INVENTAIRE du perimetre de build, et un inventaire derive : la premiere version de ce bloc
+# nommait nine chemins et oubliait `README.md`, que `mix lcars.topology` LIT (il y projette le
+# diagramme mermaid et refuse toute divergence). Le gate est mort dessus au troisieme build
+# clean-room, apres avoir passe compile, 2371 tests et 30 contrats — trois minutes pour apprendre
+# qu'il manquait un fichier de 4 Ko.
+#
+# Les deux formes echouent, mais PAS de la meme facon : un inventaire incomplet retire une entree
+# du build (defaut de CORRECTION, et le meilleur cas est un gate rouge — le pire, une suite qui ne
+# tourne plus sans le dire) ; un `rm -rf` qui oublie une exclusion laisse un arbre en trop (defaut
+# de TAILLE, visible et sans consequence sur ce qui est atteste). On choisit la forme dont le mode
+# de defaillance est benin.
+#
+# Les trois exclus n'ont jamais fait partie du perimetre : avant le demenagement, `COPY fleet/runtime`
+# ne les voyait pas — ils sont frere, pas enfant. `deploy/` est copie tel quel dans le stage runtime
+# plus bas ; `git-hooks/` n'a pas de hooks a installer dans une image ; `system-prompt/` porte le
+# protocole d'interaction, qui ne compile rien.
+COPY --chown=builder:fleet fleet /src/fleet
+RUN rm -rf /src/fleet/deploy /src/fleet/git-hooks /src/fleet/system-prompt
 
 # hex/rebar + build + pose sous /local/LCARS_v2 — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
