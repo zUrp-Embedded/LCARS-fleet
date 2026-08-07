@@ -20,6 +20,91 @@ setup() {
 
 teardown() { rm -rf "$TMP"; }
 
+# ── Reading a probe out of the report, WITHOUT `jq -e` ────────────────────────────────────────────
+#
+# `jq -e` sets its exit status from the LAST value it produced, and `select` produces NOTHING for
+# the lines it rejects. So `jq -e 'select(.probe=="X") | .verdict=="Y"'` over a JSONL report asks a
+# question whose answer depends on WHERE X sits in the stream — and jq changed that behaviour
+# between releases.
+#
+# Measured 2026-08-07, same corpus, two jq builds:
+#
+#     jq 1.7 (workstation)    a match anywhere      -> rc 0
+#     jq 1.6 (build image)    a match NOT last      -> rc 4 ("no output"), whatever the verdict
+#
+# 28 tests were green here and red in the container, every one of them a correct assertion about a
+# correct probe. The NEGATED forms were worse and failed the other way: `! … jq -e 'select(P)'`
+# passed as "probe P is absent" whenever P was merely not the last line — a false GREEN about the
+# exact thing the test existed to forbid.
+#
+# The fix is not a jq version floor. It is to stop asking jq for a verdict: we ask it for a VALUE
+# and compare in bash, where "absent" and "present but wrong" are two different strings and both are
+# printed when the assertion fails.
+#
+# The `grep '^{'` is load-bearing: several specimens deliberately mix a text marker into the run's
+# output, and jq would abort on that line, reddening the test for the wrong reason.
+
+probe_field() {  # $1 = probe name, $2 = field — empty when the probe emitted nothing
+  printf '%s\n' "$output" | grep '^{' | jq -r --arg p "$1" --arg f "$2" 'select(.probe==$p) | .[$f]'
+}
+
+probe_names() {  # every probe name in the report, one per line
+  printf '%s\n' "$output" | grep '^{' | jq -r '.probe'
+}
+
+assert_verdict() {  # $1 = probe, $2 = expected verdict
+  local got; got="$(probe_field "$1" verdict)"
+  [ "$got" = "$2" ] && return 0
+  echo "probe $1 : verdict '$got', attendu '$2'" >&2
+  return 1
+}
+
+assert_field_contains() {  # $1 = probe, $2 = field, $3 = needle
+  local got; got="$(probe_field "$1" "$2")"
+  case "$got" in *"$3"*) return 0 ;; esac
+  echo "probe $1 : .$2 ne contient pas '$3' — vu : '$got'" >&2
+  return 1
+}
+
+refute_field_contains() {
+  local got; got="$(probe_field "$1" "$2")"
+  case "$got" in *"$3"*) echo "probe $1 : .$2 contient '$3' alors qu'il ne devrait pas — vu : '$got'" >&2; return 1 ;; esac
+  return 0
+}
+
+assert_field_starts() {  # $1 = probe, $2 = field, $3 = prefix
+  local got; got="$(probe_field "$1" "$2")"
+  case "$got" in "$3"*) return 0 ;; esac
+  echo "probe $1 : .$2 ne commence pas par '$3' — vu : '$got'" >&2
+  return 1
+}
+
+refute_field_starts() {
+  local got; got="$(probe_field "$1" "$2")"
+  case "$got" in "$3"*) echo "probe $1 : .$2 commence par '$3' alors qu'il ne devrait pas — vu : '$got'" >&2; return 1 ;; esac
+  return 0
+}
+
+assert_probe() {  # the probe emitted a line at all
+  probe_names | grep -qxF "$1" && return 0
+  echo "probe $1 : absente du rapport — sondes vues : $(probe_names | tr '\n' ' ')" >&2
+  return 1
+}
+
+refute_probe() {
+  probe_names | grep -qxF "$1" || return 0
+  echo "probe $1 : presente alors qu'elle ne devrait pas l'etre" >&2
+  return 1
+}
+
+refute_probe_prefix() {  # no probe name may START with $1 (prefix, not substring)
+  local hit
+  hit="$(probe_names | while IFS= read -r n; do case "$n" in "$1"*) echo "$n" ;; esac; done)"
+  [ -z "$hit" ] && return 0
+  echo "prefixe '$1' : sonde(s) presente(s) alors qu'aucune ne devrait l'etre — $(echo "$hit" | tr '\n' ' ')" >&2
+  return 1
+}
+
 # ── The output contract ───────────────────────────────────────────────────────────────────────────
 
 @test "emit produit un JSON valide portant les 8 champs du contrat" {
@@ -114,9 +199,7 @@ puis rien — 404' "limite"
   run env LCARS_RUN_DIR="$TMP/vide" bash -c \
     '. '"$PROBES"'/lib.sh; sotf_init; sotf_skip_no_fleet x.y fleet "sans objet" && echo "SKIP=oui"'
   echo "$output" | grep -q "SKIP=oui"
-  # La sortie melange la ligne JSON et le marqueur du test : on isole la ligne JSON avant jq,
-  # sinon jq echoue sur la ligne de texte et le test rougit pour la mauvaise raison.
-  echo "$output" | grep '^{' | jq -e 'select(.probe=="x.y") | .verdict=="inactive"' >/dev/null
+  assert_verdict x.y inactive
 
   mkdir -p "$TMP/run2"
   run env LCARS_RUN_DIR="$TMP/run2" bash -c \
@@ -184,8 +267,8 @@ SH
 
 @test "hors pod, les sondes de pod disent inactive — pas degraded (zero fausse alarme)" {
   run bash -c 'unset LCARS_POD_ID; '"$PROBES"'/10-instruments.sh 2>/dev/null'
-  echo "$output" | jq -e 'select(.probe=="instruments.mcp_socket") | .verdict=="inactive"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="instruments.mcp_bridge") | .verdict=="inactive"' >/dev/null
+  assert_verdict instruments.mcp_socket inactive
+  assert_verdict instruments.mcp_bridge inactive
 }
 
 @test "un outil requis absent : degraded sur l'inventaire, unreachable sur ce qui en dependait" {
@@ -195,10 +278,15 @@ SH
   for t in bash dirname basename date id tr grep head cat jq git; do
     for d in /usr/bin /bin; do [ -x "$d/$t" ] && { ln -sf "$d/$t" "$fake/$t"; break; }; done
   done
-  run env PATH="$fake" "$PROBES/10-instruments.sh"
+  # LCARS_RUN_DIR EXPLICITE, et il doit EXISTER : sans lui la sonde d'endpoint dit « aucune fleet
+  # demarree » et sort en 1, pas en 2. Le test passait alors sur le poste du developpeur — dont le
+  # ~/.lcars/run existe — et rougissait dans toute boite neuve, ce que le corpus interdit deux tests
+  # plus haut : « sinon le test mesure ce que la machine du DEVELOPPEUR a ».
+  mkdir -p "$TMP/run"
+  run env PATH="$fake" LCARS_RUN_DIR="$TMP/run" "$PROBES/10-instruments.sh"
   [ "$status" -eq 2 ]
-  echo "$output" | jq -e 'select(.probe=="instruments.shell_tools") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="instruments.endpoint_api") | .verdict=="unreachable"' >/dev/null
+  assert_verdict instruments.shell_tools degraded
+  assert_verdict instruments.endpoint_api unreachable
 }
 
 @test "bridge MCP : un interpreteur declare mais absent est nomme (le cas A-1)" {
@@ -208,15 +296,15 @@ SH
 {"mcpServers":{"fleet":{"command":"bash","args":["-c","exec pythonXX /x/bridge.py"]}}}
 JSON
   run env LCARS_POD_ID=p1 LCARS_ROLE=starfleet LCARS_POD_HOME="$home" "$PROBES/10-instruments.sh"
-  echo "$output" | jq -e 'select(.probe=="instruments.mcp_bridge") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="instruments.mcp_bridge") | .evidence | contains("pythonXX")' >/dev/null
+  assert_verdict instruments.mcp_bridge degraded
+  assert_field_contains instruments.mcp_bridge evidence 'pythonXX'
 }
 
 @test "bridge MCP : une declaration illisible rend unknown, jamais un faux vert" {
   local home="$TMP/pod2"; mkdir -p "$home"
   echo '{"mcpServers":{}}' > "$home/.mcp-fleet.json"
   run env LCARS_POD_ID=p1 LCARS_POD_HOME="$home" "$PROBES/10-instruments.sh"
-  echo "$output" | jq -e 'select(.probe=="instruments.mcp_bridge") | .verdict=="unknown"' >/dev/null
+  assert_verdict instruments.mcp_bridge unknown
 }
 
 # ── render.sh : le rendu ne doit jamais inventer ni masquer ───────────────────────────────────────
@@ -328,10 +416,12 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   printf '501\nnot implemented' > "$d/api_pods"
   printf '200\n{"pods":[]}'     > "$d/api_pods_obs"
   stub_server "$d"
-  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
+  mkdir -p "$TMP/run"
+  run env LCARS_RUN_DIR="$TMP/run" \
+    LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
     "$PROBES/30-pods.sh"
   stub_stop
-  echo "$output" | jq -e 'select(.probe=="pods.port_guard") | .verdict=="operational"' >/dev/null
+  assert_verdict pods.port_guard operational
 }
 
 @test "30-pods : si le port API se met a SERVIR des pods, le changement de contrat est signale" {
@@ -340,10 +430,12 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   local d="$TMP/stub2"; mkdir -p "$d"
   printf '200\n{"pods":[]}' > "$d/api_pods"
   stub_server "$d"
-  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
+  mkdir -p "$TMP/run"
+  run env LCARS_RUN_DIR="$TMP/run" \
+    LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
     "$PROBES/30-pods.sh"
   stub_stop
-  echo "$output" | jq -e 'select(.probe=="pods.port_guard") | .verdict=="degraded"' >/dev/null
+  assert_verdict pods.port_guard degraded
 }
 
 @test "30-pods : zero pod est un etat legitime, jamais un drift" {
@@ -356,7 +448,7 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
     "$PROBES/30-pods.sh"
   stub_stop
   # `/api/pods` on the obs side is absent from the stub → 404 → degraded, never a silent "0 pod".
-  ! echo "$output" | jq -e 'select(.probe=="pods.live") | .evidence | contains("0 pod")' >/dev/null
+  refute_field_contains pods.live evidence '0 pod'
 }
 
 @test "40-forge : sans FORGE_BASE_URL c'est inactive — rien de declare n'est pas un angle mort" {
@@ -365,8 +457,8 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   # simplement rien a atteindre. Et `degraded` serait pire : une affirmation sur une forge jamais
   # contactee.
   run env -u FORGE_BASE_URL "$PROBES/40-forge.sh"
-  echo "$output" | jq -e 'select(.probe=="forge.configured") | .verdict=="inactive"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
+  assert_verdict forge.configured inactive
+  assert_verdict forge.org inactive
   # et le run ne doit PAS etre rouge pour ca
   [ "$status" -eq 0 ]
 }
@@ -384,8 +476,8 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   stub_server "$d"
   run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" FORGE_ORG=fleet LCARS_HUMAN=someone "$PROBES/40-forge.sh"
   stub_stop
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="unknown"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .cannot_conclude | contains("invisible")' >/dev/null
+  assert_verdict forge.org unknown
+  assert_field_contains forge.org cannot_conclude 'invisible'
 }
 
 @test "40-forge : un service qui repond sans etre une forge est degraded, pas operational" {
@@ -393,12 +485,12 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
   stub_server "$d"   # rien de servi → 404 partout, y compris /api/v1/version
   run env FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" "$PROBES/40-forge.sh"
   stub_stop
-  echo "$output" | jq -e 'select(.probe=="forge.reachable") | .verdict=="degraded"' >/dev/null
+  assert_verdict forge.reachable degraded
 }
 
 @test "40-forge : aucun credential dans un pod est ATTENDU (inactive), pas une faute" {
   run env -u FORGE_TOKEN_FILE -u FORGE_ROLE_TOKENS_DIR HOME="$TMP" "$PROBES/40-forge.sh"
-  echo "$output" | jq -e 'select(.probe=="forge.credentials") | .verdict=="inactive"' >/dev/null
+  assert_verdict forge.credentials inactive
 }
 
 # ── 60-self : les liaisons declare↔observe ───────────────────────────────────────────────────────
@@ -406,7 +498,7 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
 @test "60-self : sans cap-profile, inactive — rien a confronter n'est pas une faute" {
   run env -u LCARS_POD_ID LCARS_POD_HOME="$TMP/vide" "$PROBES/60-self.sh"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'select(.probe=="self.cap_profile") | .verdict=="inactive"' >/dev/null
+  assert_verdict self.cap_profile inactive
 }
 
 @test "60-self : une divergence cap-profile ↔ launcher est NOMMEE des deux cotes" {
@@ -420,8 +512,8 @@ stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STU
 JSON
   echo "[00:00:00] step jq tools OK allowed='Read,Bash,mcp__fleet__submit_result' disallowed='x'" > "$h/claude_launch.dbg"
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="self.tools") | .evidence | contains("submit_result")' >/dev/null
+  assert_verdict self.tools degraded
+  assert_field_contains self.tools evidence 'submit_result'
 }
 
 @test "60-self : listes identiques → operational, sans reparer quoi que ce soit" {
@@ -432,7 +524,7 @@ JSON
 JSON
   echo "step jq tools OK allowed='Read,Bash' disallowed='x'" > "$h/claude_launch.dbg"
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  echo "$output" | jq -e 'select(.probe=="self.tools") | .verdict=="operational"' >/dev/null
+  assert_verdict self.tools operational
 }
 
 @test "60-self : un champ tableau est APLATI, pas rendu en JSON brut" {
@@ -444,8 +536,8 @@ JSON
  "spec":{"knowledge":{"skills":["alpha","beta"]}}}
 JSON
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("alpha beta")' >/dev/null
-  ! echo "$output" | jq -e 'select(.probe=="self.skills") | .evidence | contains("[")' >/dev/null
+  assert_field_contains self.skills evidence 'alpha beta'
+  refute_field_contains self.skills evidence '['
 }
 
 @test "60-self : ce qui n'est observable QUE de l'interieur dit unreachable, jamais operational" {
@@ -458,7 +550,7 @@ JSON
 JSON
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
   for p in self.mounts self.containment self.effort; do
-    echo "$output" | jq -e "select(.probe==\"$p\") | .verdict==\"unreachable\"" >/dev/null
+    assert_verdict "$p" unreachable
   done
 }
 
@@ -471,11 +563,11 @@ JSON
  "spec":{"brief_kind":"worker","scope":{"allowedTools":["Read"]}}}
 JSON
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  echo "$output" | jq -e 'select(.probe=="self.coverage") | .verdict=="unknown"' >/dev/null
+  assert_verdict self.coverage unknown
   # les champs sans liaison sont NOMMES
-  echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | contains("spec.brief_kind")' >/dev/null
+  assert_field_contains self.coverage evidence 'spec.brief_kind'
   # et le compteur n'est pas 1
-  ! echo "$output" | jq -e 'select(.probe=="self.coverage") | .evidence | startswith("1/")' >/dev/null
+  refute_field_starts self.coverage evidence '1/'
 }
 
 @test "40-forge : sans nom d'org declare, on ne DEVINE pas — et le compte humain reste teste" {
@@ -489,8 +581,8 @@ JSON
   stub_server "$d"
   run env -u FORGE_ORG FORGE_BASE_URL="http://127.0.0.1:$STUB_PORT" LCARS_HUMAN=bob "$PROBES/40-forge.sh"
   stub_stop
-  echo "$output" | jq -e 'select(.probe=="forge.org") | .verdict=="inactive"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="forge.human_account") | .verdict=="operational"' >/dev/null
+  assert_verdict forge.org inactive
+  assert_verdict forge.human_account operational
 }
 
 # ── 50-projects : les liaisons par construction ───────────────────────────────────────────────────
@@ -527,16 +619,16 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mkdir -p "$TMP/p" "$TMP/w"
   run sotf50
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="inactive"' >/dev/null
+  assert_verdict projects.declaration inactive
 }
 
 @test "50-projects : des projets SANS declaration lisible, c'est un vrai angle mort" {
   mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" main
   run sotf50
   [ "$status" -eq 2 ]
-  echo "$output" | jq -e 'select(.probe=="projects.declaration") | .verdict=="unreachable"' >/dev/null
+  assert_verdict projects.declaration unreachable
   # et l'observable est rapporte SANS attente : jamais vert, jamais rouge
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.etat") | .verdict=="unknown"' >/dev/null
+  assert_verdict projects.alpha.etat unknown
 }
 
 @test "50-projects : l'attente est LUE dans la source — la deplacer deplace le verdict" {
@@ -545,10 +637,10 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mkdir -p "$TMP/p" "$TMP/w"; mk_repo "$TMP/p/alpha" trunk
   mk_decl "$TMP/p" src main work/ops
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="degraded"' >/dev/null
+  assert_verdict projects.alpha.branch degraded
   mk_decl "$TMP/p" src trunk work/ops
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.branch") | .verdict=="operational"' >/dev/null
+  assert_verdict projects.alpha.branch operational
 }
 
 @test "50-projects : un sous-dossier d'un depot n'est pas un projet" {
@@ -572,7 +664,7 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
 @test "50-projects : un dossier a point n'est pas un projet (Layout refuse le point initial)" {
   mkdir -p "$TMP/p/.claude" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
   run sotf50
-  ! echo "$output" | jq -e 'select(.probe|startswith("projects..claude"))' >/dev/null
+  refute_probe_prefix projects..claude
 }
 
 @test "50-projects : sale cote livrable = drift, sale cote work = etat de travail normal" {
@@ -584,9 +676,9 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mk_tracking "$TMP/p/alpha" main; mk_tracking "$TMP/w/alpha" work/ops
   touch "$TMP/p/alpha/sale" "$TMP/w/alpha/sale"
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.clean") | .evidence | contains("ecrase")' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="operational"' >/dev/null
+  assert_verdict projects.alpha.clean degraded
+  assert_field_contains projects.alpha.clean evidence 'ecrase'
+  assert_verdict projects.alpha.work_unpushed operational
 }
 
 @test "50-projects : du work/ops non pousse est LE seul etat ou une perte est possible" {
@@ -594,8 +686,8 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mk_repo "$TMP/w/alpha" work/ops; mk_tracking "$TMP/w/alpha" work/ops
   git -C "$TMP/w/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m inedit
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.work_unpushed") | .evidence | contains("que sur ce disque")' >/dev/null
+  assert_verdict projects.alpha.work_unpushed degraded
+  assert_field_contains projects.alpha.work_unpushed evidence 'que sur ce disque'
 }
 
 @test "50-projects : EN AVANCE sur le miroir = commits condamnes, pas un disque en retard" {
@@ -607,10 +699,10 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mk_repo "$TMP/p/alpha" main; mk_tracking "$TMP/p/alpha" main
   git -C "$TMP/p/alpha" -c user.email=t@t -c user.name=t commit -q --allow-empty -m devant
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("AUCUNE ref distante")' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
-  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .cannot_conclude | contains("jamais une perte")' >/dev/null
+  assert_verdict projects.alpha.mirror degraded
+  assert_field_contains projects.alpha.mirror evidence 'AUCUNE ref distante'
+  assert_field_contains projects.alpha.mirror evidence 'DETRUIT'
+  refute_field_contains projects.alpha.mirror cannot_conclude 'jamais une perte'
 }
 
 @test "50-projects : en avance MAIS presents sur une autre ref distante = ecart, pas perte" {
@@ -623,9 +715,9 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   # le meme commit vit aussi sur une ref distante : c'est ce qui change la lecture
   mk_tracking "$TMP/p/alpha" chantier/x
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("SANS les perdre")' >/dev/null
-  ! echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("DETRUIT")' >/dev/null
+  assert_verdict projects.alpha.mirror degraded
+  assert_field_contains projects.alpha.mirror evidence 'SANS les perdre'
+  refute_field_contains projects.alpha.mirror evidence 'DETRUIT'
 }
 
 @test "50-projects : EN RETARD sur le miroir = benin, et c'est dit comme tel" {
@@ -636,22 +728,22 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mk_tracking "$TMP/p/alpha" main
   git -C "$TMP/p/alpha" reset -q --hard HEAD~1
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="degraded"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .evidence | contains("le prochain sync les rattrape")' >/dev/null
+  assert_verdict projects.alpha.mirror degraded
+  assert_field_contains projects.alpha.mirror evidence 'le prochain sync les rattrape'
 }
 
 @test "50-projects : sans ref de suivi, unknown — jamais 'aligne' par defaut" {
   # Un depot jamais fetch n'a rien a comparer. Rendre `operational` la ferait passer pour a jour.
   mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops; mk_repo "$TMP/p/alpha" main
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.mirror") | .verdict=="unknown"' >/dev/null
+  assert_verdict projects.alpha.mirror unknown
 }
 
 @test "50-projects : l'identite compare a la CASSE — Layout.project_name ne replie rien" {
   mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
   mk_repo "$TMP/p/Alpha" main "http://forge.test/fleet/alpha.git"
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.Alpha.identity") | .verdict=="degraded"' >/dev/null
+  assert_verdict projects.Alpha.identity degraded
 }
 
 @test "50-projects : un identifiant dans l'origin ne sort NI dans l'evidence NI dans la methode" {
@@ -663,7 +755,7 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mk_repo "$TMP/p/alpha" main "http://bob:s3cr3t@127.0.0.1:1/fleet/alpha.git"
   run sotf50
   ! echo "$output" | grep -q "s3cr3t"
-  echo "$output" | jq -e 'select(.probe=="projects.alpha.identity") | .evidence | contains("***@")' >/dev/null
+  assert_field_contains projects.alpha.identity evidence '***@'
 }
 
 @test "50-projects : une racine non montee est un cloisonnement, pas une panne" {
@@ -672,20 +764,20 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mkdir -p "$TMP/p" "$TMP/pod"
   printf '{"metadata":{"mounts":[{"path":"/home/projects"}]}}' > "$TMP/pod/.cap-profile.json"
   run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
-  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="inactive"' >/dev/null
+  assert_verdict projects.root_work inactive
 }
 
 @test "50-projects : une racine DECLAREE au cap-profile et illisible est un drift" {
   mkdir -p "$TMP/p" "$TMP/pod"
   printf '{"metadata":{"mounts":[{"path":"%s"}]}}' "$TMP/absente" > "$TMP/pod/.cap-profile.json"
   run env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/absente" LCARS_POD_HOME="$TMP/pod" "$PROBES/50-projects.sh"
-  echo "$output" | jq -e 'select(.probe=="projects.root_work") | .verdict=="degraded"' >/dev/null
+  assert_verdict projects.root_work degraded
 }
 
 @test "50-projects : sonder une autre racine que celle de Fleet.Layout invalide tout le reste" {
   mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops "/ailleurs"
   run sotf50
-  echo "$output" | jq -e 'select(.probe=="projects.roots_agree") | .verdict=="degraded"' >/dev/null
+  assert_verdict projects.roots_agree degraded
 }
 
 @test "50-projects : sans git, l'angle mort est TOTAL et il le dit — pas 'aucun projet'" {
@@ -703,8 +795,8 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   run env -i PATH="$bin" HOME="$TMP" SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" \
     "$bin/bash" "$PROBES/50-projects.sh"
   [ "$status" -eq 2 ]
-  echo "$output" | jq -e 'select(.probe=="projects.instrument") | .verdict=="unreachable"' >/dev/null
-  ! echo "$output" | jq -e 'select(.probe=="projects.inventory")' >/dev/null
+  assert_verdict projects.instrument unreachable
+  refute_probe projects.inventory
 }
 
 # ── sotf.sh : le raisonnement de capacite ─────────────────────────────────────────────────────────
@@ -818,7 +910,7 @@ $(jl c.d unreachable)"
   # Hors du JSONL elles echapperaient au rendu, au comptage et au code de sortie — les trois choses
   # qui font qu'un rapport engage quelqu'un. C'est arrive : elles sortaient sur stdout, au-dessus.
   run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag --raw
-  echo "$output" | jq -e 'select(.probe=="capacites.create_project")' >/dev/null
+  assert_probe capacites.create_project
   # aucune ligne non-JSON ne traine
   while read -r l; do [[ -z "$l" ]] || echo "$l" | jq -e . >/dev/null; done <<< "$output"
 }
@@ -828,14 +920,14 @@ $(jl c.d unreachable)"
   printf '{"spec":{"scope":{"allowedTools":["Read","mcp__fleet__create_project","mcp__fleet__truc_inconnu"]}}}' \
     > "$TMP/pod/.cap-profile.json"
   run env LCARS_POD_HOME="$TMP/pod" "$SKILL_DIR/sotf.sh" diag --raw
-  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .verdict=="unknown"' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("truc_inconnu")' >/dev/null
-  echo "$output" | jq -e 'select(.probe=="capacites.perimetre") | .evidence | contains("open_project")' >/dev/null
+  assert_verdict capacites.perimetre unknown
+  assert_field_contains capacites.perimetre evidence 'truc_inconnu'
+  assert_field_contains capacites.perimetre evidence 'open_project'
 }
 
 @test "sotf : une capacite inconnue est nommee comme telle, jamais evaluee en silence" {
   run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag pas_une_capacite --raw
-  echo "$output" | jq -e 'select(.probe=="capacites.pas_une_capacite") | .verdict=="unreachable"' >/dev/null
+  assert_verdict capacites.pas_une_capacite unreachable
 }
 
 @test "sotf : report refuse une cible, et une commande inconnue ne fait pas semblant" {

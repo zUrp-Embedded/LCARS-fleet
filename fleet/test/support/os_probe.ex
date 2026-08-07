@@ -37,8 +37,9 @@ defmodule Fleet.Test.OsProbe do
   everything that uses it — the process-group bound in `Fleet.Credentials.Shell` reads `/proc` for
   the same reason.
 
-  The state letter sits after the LAST `)` because `comm` may itself contain spaces and
-  parentheses — parsing by field index from the left breaks on a process named `(evil name)`.
+  The state letter is taken after the LAST `)`, not the first: `comm` may itself contain spaces and
+  parentheses, so a process named `evil) name` writes `(evil) name)` and a cut at the first `)`
+  reads a letter of the NAME as the state.
   """
 
   @doc """
@@ -74,22 +75,34 @@ defmodule Fleet.Test.OsProbe do
   def eventually_dead?(_pid, _tries), do: false
 
   @doc """
-  The raw state letter from `/proc/<pid>/stat`, or `nil` if there is no such pid entry.
+  The raw state letter from `/proc/<pid>/stat`, `nil` if there is no such pid entry, `"?"` if the
+  entry exists but does not parse.
 
   Exposed so a failing assertion can SAY what it saw: "still R" and "still Z" are two different
   defects, and a message that reports only "alive" sends the reader after the wrong one.
+
+  `"?"` counts as ALIVE, deliberately. "I could not establish that it is dead" must never be
+  reported as "it is dead" — that direction turns an unmeasured thing into a green assertion, which
+  is the failure this whole module exists to remove.
   """
   @spec state(integer() | binary()) :: binary() | nil
   def state(pid) do
     case File.read("/proc/#{pid}/stat") do
-      {:ok, stat} ->
-        case String.split(stat, ") ", parts: 2) do
-          [_before, rest] -> rest |> String.first()
-          _ -> nil
-        end
+      {:ok, stat} -> parse_state(stat)
+      {:error, _} -> nil
+    end
+  end
 
-      {:error, _} ->
-        nil
+  # Split on `)` and keep the LAST piece: `comm` may itself contain `)`, so cutting at the FIRST one
+  # lands inside the process name and reads a letter of it as the state. Same parse as the
+  # process-group discovery in `Fleet.Credentials.Shell` — one format, one way to read it.
+  defp parse_state(stat) do
+    case String.split(stat, ")") do
+      [_no_paren_at_all] ->
+        "?"
+
+      pieces ->
+        pieces |> List.last() |> String.trim() |> String.first() || "?"
     end
   end
 end

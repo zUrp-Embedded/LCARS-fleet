@@ -66,6 +66,30 @@ defmodule Fleet.Test.OsProbeTest do
     assert OsProbe.eventually_dead?(child, 1)
   end
 
+  @tag :tmp_dir
+  test "a `)` in the process NAME is not read as the state", %{tmp_dir: tmp} do
+    # `comm` in /proc/<pid>/stat is the executable's filename, and the kernel does not escape it.
+    # A binary called `ev) il` writes `1234 (ev) il) S …`: cutting at the FIRST `)` returns `il) S`
+    # and reads `i` as the state — a running process reported with a state that means nothing.
+    weird = Path.join(tmp, "ev) il")
+    File.cp!(System.find_executable("sleep"), weird)
+    File.chmod!(weird, 0o755)
+
+    port = Port.open({:spawn_executable, weird}, [:binary, args: ["30"]])
+    {:os_pid, pid} = Port.info(port, :os_pid)
+    on_exit(fn -> System.cmd("kill", ["-KILL", to_string(pid)], stderr_to_stdout: true) end)
+
+    # `Port.open` returns as soon as the BEAM has FORKED; comm only becomes `ev) il` at the exec
+    # that follows. Reading /proc immediately catches the parent's name and the fixture then proves
+    # nothing — bounded wait, and the fixture SAYS so if it never gets there.
+    assert eventually_comm?(pid, "(ev) il)", 100),
+           "the fixture never produced a `)` inside comm — it proves nothing " <>
+             "(stat: #{inspect(File.read("/proc/#{pid}/stat"))})"
+
+    assert OsProbe.state(pid) in ["R", "S"]
+    assert OsProbe.alive?(pid)
+  end
+
   test "eventually_dead?/2 gives up rather than reporting a death it did not see" do
     # A budget of zero must not be read as "dead": a probe that fails open turns every timeout into
     # a green assertion.
@@ -91,6 +115,24 @@ defmodule Fleet.Test.OsProbeTest do
       {:error, _} ->
         Process.sleep(20)
         read_pid_eventually(path, tries - 1)
+    end
+  end
+
+  defp eventually_comm?(_pid, _needle, 0), do: false
+
+  defp eventually_comm?(pid, needle, tries) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, stat} ->
+        if String.contains?(stat, needle) do
+          true
+        else
+          Process.sleep(20)
+          eventually_comm?(pid, needle, tries - 1)
+        end
+
+      {:error, _} ->
+        Process.sleep(20)
+        eventually_comm?(pid, needle, tries - 1)
     end
   end
 
