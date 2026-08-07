@@ -60,6 +60,14 @@ PROJECT="lcars-nuit"
 FORGE_PORT="3700"
 BIND="127.0.0.5"
 IMAGE="lcars-fleet:2"
+# Le runner du banc sert TROIS labels, et celui qui compte est `elixir` : il doit porter l'image du
+# stage `build`, pas celle de BASE — sinon `mix gate` y meurt sur `git` introuvable et le runner a
+# l'air vert. `bench-runner.sh` REFUSE de deviner et il a raison. On ne devine pas non plus : le
+# defaut se DERIVE du tag de l'image de banc (`lcars-fleet:v4` -> `lcars-build:v4`, jumeaux du meme
+# build) et n'est retenu QUE si cette image existe. Sinon on le dit et on saute — jamais un runner
+# qui tourne sans pouvoir servir.
+RUNNER_LABELS=""
+WITH_RUNNER=1
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
 CLAUDE_FROM="$HOME/.local/bin/claude"
@@ -78,6 +86,8 @@ while [[ $# -gt 0 ]]; do
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
+    --runner-labels) RUNNER_LABELS="${2:?}"; shift 2 ;;
+    --no-runner)  WITH_RUNNER=0; shift ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
     --claude-from) CLAUDE_FROM="${2:?}"; shift 2 ;;
@@ -288,7 +298,21 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/us
 RUNNER_STATE="non demarre"
 MASTER_TOKEN_FILE="$TOFU_DIR/.master-token"
 
-if [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
+# Derivation MESUREE du label `elixir` : le stage `build` du meme tag, s'il existe sur ce daemon.
+if [[ -z "$RUNNER_LABELS" ]]; then
+  BUILD_IMG="lcars-build:${IMAGE##*:}"
+  if "$DOCKER_BIN" image inspect "$BUILD_IMG" >/dev/null 2>&1; then
+    RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://$BUILD_IMG,dood:docker://docker:cli"
+  fi
+fi
+
+if [[ "$WITH_RUNNER" -eq 0 ]]; then
+  RUNNER_STATE="NON demarre (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
+elif [[ -z "$RUNNER_LABELS" ]]; then
+  RUNNER_STATE="ABSENT — pas d'image lcars-build:${IMAGE##*:} pour le label elixir (CI indisponible).
+              Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f fleet/deploy/docker/Dockerfile .
+              puis rejouer bench-runner.sh, ou --runner-labels pour choisir soi-meme"
+elif [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste (CI indisponible sur ce banc)"
 else
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
@@ -296,7 +320,8 @@ else
        --admin-token "$(cat "$MASTER_TOKEN_FILE")" \
        --instance-url "http://forge:3000" \
        --network "$FORGE_NET" \
-       --project "${PROJECT}-runner" >/dev/null 2>&1; then
+       --project "${PROJECT}-runner" \
+       --labels "$RUNNER_LABELS" >/dev/null 2>&1; then
     # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
     # silence que ce banc doit refuser.
     RUNNERS="$(curl -s -m 5 -H "Authorization: token $(cat "$MASTER_TOKEN_FILE")" \
