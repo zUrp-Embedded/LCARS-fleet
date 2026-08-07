@@ -128,27 +128,51 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     {:error, {:pagination_budget_exceeded, path_base, @max_pages}}
   end
 
+  # LA CONDITION D'ARRET EST UN FAIT QUAND LA FORGE LE DONNE, UNE HEURISTIQUE SINON.
+  #
+  # `X-Total-Count` est annonce sur les endpoints de liste, y compris sur celui dont `page` et
+  # `limit` sont IGNORES (mesure 1.26.1 : 7 commentaires -> `X-Total-Count: 7`). Sans lui, le seul
+  # signal disponible etait `length(items) < @page_limit`, et cette heuristique ment de deux facons :
+  #
+  #   * un endpoint qui ignore `page` rend TOUT a chaque tour — sous le plafond elle conclut juste
+  #     par accident, au-dessus elle boucle jusqu'au budget sur des pages identiques ;
+  #   * `@page_limit` egale le `max_response_items` du serveur par VALEUR, pas par derivation : un
+  #     plafond serveur abaisse ferait ecreter la premiere page et la troncature serait muette.
+  #
+  # Le total supprime les deux : on s'arrete quand on tient ce qui a ete annonce. `nil` veut dire
+  # « non annonce », jamais zero — dans ce cas seulement on retombe sur l'heuristique.
   defp do_paginate(config, path_base, query, page, acc) do
     sep = if query == "", do: "?", else: "?#{query}&"
     path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
 
-    case http_get(config, path) do
-      {:ok, items} when is_list(items) ->
+    case request_raw(config, :get, path, nil) do
+      {:ok, %Req.Response{status: status, body: items} = resp}
+      when status in 200..299 and is_list(items) ->
         acc = [items | acc]
+        got = Enum.reduce(acc, 0, fn page_items, n -> n + length(page_items) end)
+        total = total_count(resp)
 
-        if length(items) < @page_limit do
-          {:ok, acc |> Enum.reverse() |> Enum.concat()}
-        else
-          do_paginate(config, path_base, query, page + 1, acc)
+        cond do
+          # Une page vide est la fin, quoi qu'annonce le total : elle borne le cas ou le serveur
+          # rend moins que ce qu'il compte (filtrage de droits) sans nous laisser tourner.
+          items == [] -> {:ok, collect(acc)}
+          is_integer(total) and got >= total -> {:ok, collect(acc)}
+          is_nil(total) and length(items) < @page_limit -> {:ok, collect(acc)}
+          true -> do_paginate(config, path_base, query, page + 1, acc)
         end
 
-      {:ok, non_list} ->
-        {:error, {:unexpected_page_shape, path, page, non_list}}
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        {:error, {:unexpected_page_shape, path, page, body}}
 
-      {:error, _} = err ->
-        err
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, {:http, status, body}}
+
+      {:error, exception} ->
+        {:error, {:transport, exception}}
     end
   end
+
+  defp collect(acc), do: acc |> Enum.reverse() |> Enum.concat()
 
   @doc false
   def http_get(config, path), do: request(config, :get, path, nil)
@@ -168,7 +192,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   @doc false
   def http_delete_body(config, path, body), do: request(config, :delete, path, body)
 
-  defp request(config, method, path, body) do
+  defp request_raw(config, method, path, body) do
     url = config.base_url <> "/api/v1" <> path
 
     # Callers own retry policy; Req retries would stack another backoff.
@@ -197,15 +221,33 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
       )
     end
 
-    case result do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-        {:ok, body}
+    result
+  end
 
-      {:ok, %Req.Response{status: status, body: body}} ->
-        {:error, {:http, status, body}}
+  # `request/4` rend ce qu'il a toujours rendu ; `request_raw/4` garde la REPONSE, en-tetes compris.
+  # Le decoupage existe pour une seule raison : la forge annonce le total d'une liste dans
+  # `X-Total-Count`, et ce total est la difference entre une condition d'arret exacte et une
+  # heuristique (cf. `do_paginate/5`).
+  defp request(config, method, path, body) do
+    case request_raw(config, method, path, body) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 -> {:ok, body}
+      {:ok, %Req.Response{status: status, body: body}} -> {:error, {:http, status, body}}
+      {:error, exception} -> {:error, {:transport, exception}}
+    end
+  end
 
-      {:error, exception} ->
-        {:error, {:transport, exception}}
+  # Le total annonce, ou `nil` s'il ne l'est pas. `nil` n'est PAS zero : il veut dire « non dit »,
+  # et la pagination retombe alors sur son heuristique en le sachant.
+  defp total_count(%Req.Response{} = resp) do
+    case Req.Response.get_header(resp, "x-total-count") do
+      [v | _] ->
+        case Integer.parse(v) do
+          {n, _} when n >= 0 -> n
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 
