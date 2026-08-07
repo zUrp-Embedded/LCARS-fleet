@@ -12,10 +12,10 @@ defmodule Fleet.Workflow.Gates do
       the forge-driven rail (`Pilot.StepRunConsumer`) spawns the gatekeeper + collects
       its decision. Judgment delegation is consolidated onto the gatekeeper.
     * **terminal** — `rules` = list of STRING predicates (Predicate), but
-      OPTIONAL (the canon's `finish` gate is terminal + `human_approval`
-      WITHOUT rules). An unsatisfied rule → `{:fail}`;
-      `human_approval_required: true` → **HALT fail-closed** (no human-in-loop
-      wired: the mechanical engine never self-approves); otherwise → `:pass`.
+      OPTIONAL: a terminal gate may carry none and still be a gate. An
+      unsatisfied rule → `{:fail}`; `human_approval_required: true` → **HALT
+      fail-closed** (no human-in-loop wired: the mechanical engine never
+      self-approves); otherwise → `:pass`.
     * **nil / absent** — direct `:pass`.
 
   The `rules` (hard AND terminal) are STRING predicates — `"all_tests_pass"`,

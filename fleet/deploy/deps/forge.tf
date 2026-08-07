@@ -121,8 +121,9 @@ resource "gitea_org" "fleet" {
 }
 
 # system : SEUL à créer des repos d'org (création réservée au système) + write dessus
-# (push, topics de découverte, labels via le token système). PAS admin/owner : la
-# branch-protection est posée ICI en provisioning, pas au runtime.
+# (push, topics de découverte, labels via le token système). PAS admin/owner : le moindre
+# privilège suffit à ce que cette recette doit faire. La branch-protection n'est PAS de son
+# ressort — elle se pose PAR DÉPÔT, au moment où le dépôt existe, donc hors provisioning.
 resource "gitea_team" "system" {
   name                     = "system"
   organisation             = gitea_org.fleet.name

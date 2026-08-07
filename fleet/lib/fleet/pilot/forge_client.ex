@@ -821,7 +821,10 @@ defmodule Fleet.Pilot.ForgeClient do
       latest =
         statuses
         |> Enum.reduce(%{}, fn st, acc ->
-          Map.put_new(acc, st["context"], st["status"] || st["state"])
+          # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat),
+          # `status` sur CommitStatus (l'element), et cet appel liste des CommitStatus. Un repli
+          # sur `state` ici ne pourrait jamais tirer et se lirait comme une couverture.
+          Map.put_new(acc, st["context"], st["status"])
         end)
         |> Map.values()
 
