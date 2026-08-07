@@ -45,7 +45,7 @@ defmodule Fleet.Pilot do
 
   ## The escalation FAMILY — the register, because the posture has a threshold
 
-  Four modules escalate, with four DISTINCT exits, and that is why none of them was merged:
+  Five modules escalate, with five DISTINCT exits, and that is why none of them was merged:
 
   | Module | Exit | Object |
   |---|---|---|
@@ -53,6 +53,7 @@ defmodule Fleet.Pilot do
   | `StepDispatcher.ArchEscalation` | deduplicated comment + `lcars-awaits-arch` | issue (PR-originated) |
   | `StepRunConsumer.GatekeeperEscalation` | summons the gatekeeper | PR |
   | `IncidentRegistry.Escalation` | sysadmin issue | separate repo |
+  | `IncidentConsumer.default_brake/3` | recurrence brake: `lcars-awaits-arch`, out of dispatch | issue |
 
   **The overlap under watch, and its COUNT: 2 of the 4 aim at the same target with neighbouring
   gestures** — `ArchEscalation` and `TerminalEscalation` both end at "the arch decides", both write
@@ -60,15 +61,22 @@ defmodule Fleet.Pilot do
   cannot advance vs a step_run that cannot conclude) and by one effect (only the terminal one
   unlocks `lcars-in-flight`).
 
-  The standing decision is to WATCH, not to merge — the two origins are genuinely different and a
+  The standing decision was to WATCH, not to merge — the two origins are genuinely different and a
   premature merge would fuse two lifecycles. The threshold: **merge when a 5th escalation appears.**
+
+  ⚠ **THE THRESHOLD IS MET, and the merge is NOT decided.** The 5th exists and had been escalating
+  outside this table. Meeting the threshold is a measured fact; merging is a decision, and it is not
+  this moduledoc's to take. Until it is taken, the state is: five exits, three of which land on
+  `lcars-awaits-arch` on an ISSUE (`TerminalEscalation`, `ArchEscalation`, `default_brake`), and
+  nothing prevents a fourth from being added to that same landing.
 
   **This register exists because that threshold had no counter.** The posture was written in an
   audit as "to merge at the 5th appearance" while nothing anywhere counted, which makes the rule
   unfalsifiable: the next reader adding an escalation cannot know whether they are the 4th or the
   6th, so the threshold can never trigger. A rule with a number and no place to read the number is
-  a rule that will not fire (BL-6-42.4, count taken 2026-08-03: **4 modules, 2 overlapping**).
-  Whoever adds a 5th updates this table FIRST — that update is what makes the threshold real.
+  a rule that will not fire (BL-6-42.4). And a register kept BY HAND is a counter that drifts in
+  silence: this one said four while a fifth was live, so the threshold it exists to arm could not
+  arm. Whoever adds one updates this table FIRST — that update is what makes the threshold real.
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
