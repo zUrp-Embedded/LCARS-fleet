@@ -121,5 +121,46 @@ defmodule Fleet.Starfleet.AuditLogTest do
 
       assert ns == written
     end
+
+    test "a SECOND rotation destroys the previous .1 — and SAYS so, with what it took",
+         %{log_path: log_path} do
+      # The test above stops at the first rotation and records the gap in its own words: it "never
+      # hits the (accepted) case where a 2nd cycle overwrites the .1". That case is the whole
+      # defect. `File.rename/2` overwrites its destination without a word, so the FAILURE to rotate
+      # was loud (an `error`) while the SUCCESS — which is what actually destroys a generation —
+      # was mute. Retention stays at one generation; what is pinned here is that losing it speaks.
+      Application.put_env(:fleet_starfleet, :audit_log_max_bytes, 300)
+      on_exit(fn -> Application.delete_env(:fleet_starfleet, :audit_log_max_bytes) end)
+
+      rotate_until = fn stop? ->
+        Enum.reduce_while(1..2000, :never, fn n, _ ->
+          :ok = AuditLog.write(%{"n" => n, "pad" => String.duplicate("x", 40)})
+          if stop?.(), do: {:halt, :ok}, else: {:cont, :never}
+        end)
+      end
+
+      first_log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = rotate_until.(fn -> File.exists?(log_path <> ".1") end)
+        end)
+
+      # First rotation destroys nothing: there was no previous generation to take.
+      refute first_log =~ "rotation dropped"
+
+      gen1 = File.read!(log_path <> ".1")
+      assert byte_size(gen1) > 0
+
+      second_log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = rotate_until.(fn -> File.read!(log_path <> ".1") != gen1 end)
+        end)
+
+      # The generation is really gone, and the line names its size — an operator who reads it knows
+      # how much history just left, not merely that something did.
+      assert second_log =~ "rotation dropped"
+      assert second_log =~ "#{byte_size(gen1)} bytes"
+      assert second_log =~ "retention is ONE generation"
+      refute File.read!(log_path <> ".1") == gen1
+    end
   end
 end

@@ -214,7 +214,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec start_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def start_stopwatch(repo, number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/start", %{}) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/start", nil) do
         {:ok, _} -> :ok
         {:error, {:http, 409, _}} -> :ok
         {:error, _} = err -> err
@@ -228,7 +228,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec stop_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def stop_stopwatch(repo, number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/stop", %{}) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/stop", nil) do
         {:ok, _} -> :ok
         {:error, {:http, 409, _}} -> :ok
         {:error, _} = err -> err
@@ -593,8 +593,10 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   defp do_merge(config, repo, index, method, delay, attempts_left) do
+    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` marchait par tolerance du
+    # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
-           "Do" => method
+           "do" => method
          }) do
       {:ok, _} ->
         delete_head_branch_spaced(config, repo, index)

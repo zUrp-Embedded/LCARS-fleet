@@ -60,8 +60,21 @@ defmodule Fleet.Starfleet.AuditLog do
 
     case File.stat(path) do
       {:ok, %File.Stat{size: size}} when size >= max ->
+        # `File.rename/2` ECRASE la destination sans un mot. L'echec de rotation, lui, est un
+        # `error` : la perte ratee etait bruyante et la perte reussie muette, exactement a
+        # l'envers. On ne change pas la retention (un seul cran, decision de retention) — on rend
+        # la destruction AUDIBLE, avec ce qu'elle emporte.
+        dropped = previous_size(path <> ".1")
+
         case File.rename(path, path <> ".1") do
           :ok ->
+            if dropped,
+              do:
+                Logger.warning(
+                  "AuditLog: rotation dropped the previous #{path}.1 (#{dropped} bytes) — " <>
+                    "retention is ONE generation; take a copy before the next rotation to keep it"
+                )
+
             :ok
 
           {:error, reason} ->
@@ -75,6 +88,15 @@ defmodule Fleet.Starfleet.AuditLog do
 
       _ ->
         :ok
+    end
+  end
+
+  # `nil` quand il n'y a rien a ecraser : l'absence de generation precedente n'est pas un
+  # evenement, seule sa destruction en est un.
+  defp previous_size(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} -> size
+      _ -> nil
     end
   end
 
