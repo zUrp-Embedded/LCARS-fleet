@@ -269,6 +269,7 @@ LCARS-fleet/
 │   ├── vendor/       # vendored bricks (token-saver) + our integration layer
 │   ├── git-hooks/    # the GO-7 wall, force-push block, hook installer
 │   └── system-prompt/sources/user/   # the interactive protocol's two personalisation files
+├── docs/#_Archived/  # the pre-v2 documentation, kept READABLE rather than only reachable by git
 ├── knowledge/        # reusable domain knowledge
 ├── install.sh        # WSL bootstrap entrypoint
 ├── docker.sh         # Docker bootstrap entrypoint

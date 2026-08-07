@@ -93,7 +93,8 @@ fi
 #
 # PERIMETRE : `fleet/` seulement, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
 # fichiers non conformes, tous dans `.claude/` (les artefacts de Claude Code lui-meme),
-# `docs_OBSOLETE/` (que le demenagement archive) ou v1 (que l'excommunion supprime) — gater ces
+# `docs/#_Archived/` (l'ancien `docs_OBSOLETE/`, deplace au demenagement) ou v1 (supprime par
+# l'excommunion, recuperable au tag `v1-excommunication-base`) — gater ces
 # trois zones ferait rougir le gate sur du sursis. Le runtime, lui, est a ZERO aujourd'hui : le mur
 # se pose sans dette.
 # ---------------------------------------------------------------------------
