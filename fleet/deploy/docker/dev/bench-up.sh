@@ -89,13 +89,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# UN SEUL PROJET COMPOSE depuis le 2026-08-07 : la forge, la boite et le runner y vivent ensemble,
-# donc sur le MEME reseau. Le nom de service EST le nom d'hote — `http://forge:3000` resout sans
-# qu'on branche quoi que ce soit. Le piege 1 de l'en-tete (create → network connect → start) n'a
-# plus d'objet : il n'est pas contourne, il a disparu avec le decoupage qui le causait.
-FORGE_CONTAINER="${PROJECT}-forge-1"
+# TROIS CYCLES DE VIE, ET C'EST VOULU. La forge garde SON projet : elle coute deux passes
+# d'amorcage quand la boite ne coute qu'un build, et `bench-swap-image.sh` existe pour exploiter
+# cette asymetrie. Une fusion des projets rendait un `down -v` capable d'emporter la forge semee
+# avec la boite — mesure et corrigee le 2026-08-07.
+# Le piege 1 (resoudre `forge` AVANT le premier boot) ne se paie plus par un `network connect`
+# manuel : la surcouche declare le reseau de la forge en `external` et compose branche la boite a la
+# CREATION. Meme recette que `bench-runner.sh` pour le runner depuis le 2026-08-02.
+FORGE_PROJECT="${PROJECT}forge"
+FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
+FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
-RUNNER="${PROJECT}-runner-1"
 COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$PROJECT")
 # L'URL suit le BIND, pas un 127.0.0.1 fige : sinon un banc bind sur .7 amorce une forge joignable
 # a une autre adresse que celle qu'il annonce, et le premier lecteur du recap se trompe de fenetre.
@@ -156,9 +160,9 @@ if "$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX"; then
 fi
 
 # ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
-say "forge jetable : service 'forge' du projet $PROJECT sur $FORGE_URL"
+say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
 LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="http://forge:3000/" \
-  "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" --profile bench up -d forge \
+  "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
   || die "la forge ne monte pas" 2
 
 for _ in $(seq 1 60); do
@@ -179,8 +183,9 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
+    LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
-  || die "la boite ne se cree pas" 3
+  || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3
 
 # La graine du binaire vendor (piege 3bis) — dans la fenetre create→start, sur un conteneur qui
 # existe et n'a pas demarre. Le chemin cible est lu dans provision-lib : le module qui le consomme
@@ -203,10 +208,10 @@ else
   say "graine claude NON posee (--no-claude-bin) — la boite telechargera au boot, par choix"
 fi
 
-# PAS DE `network connect` : projet unique, reseau unique. La boite nait deja capable de resoudre
-# `forge`, ce qui etait toute la raison d'etre de la fenetre create→connect→start. Le `create` reste,
-# lui, pour une AUTRE raison intacte : la graine du binaire vendor doit se poser sur un conteneur
-# qui existe et n'a pas demarre (piege 3bis).
+# PAS DE `network connect` : la surcouche a declare le reseau de la forge en `external`, donc le
+# `create` ci-dessus a DEJA branche la boite. `forge` resout avant le premier boot, ce qui etait
+# toute la raison d'etre de la fenetre. Le `create` reste, lui, pour une AUTRE raison intacte : la
+# graine du binaire vendor doit se poser sur un conteneur qui existe et n'a pas demarre (piege 3bis).
 "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" start lcars || die "la boite ne demarre pas" 3
 
 for _ in $(seq 1 90); do
@@ -290,7 +295,7 @@ else
        --forge-api "$FORGE_URL/api/v1" \
        --admin-token "$(cat "$MASTER_TOKEN_FILE")" \
        --instance-url "http://forge:3000" \
-       --network "${PROJECT}_lcars" \
+       --network "$FORGE_NET" \
        --project "${PROJECT}-runner" >/dev/null 2>&1; then
     # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
     # silence que ce banc doit refuser.

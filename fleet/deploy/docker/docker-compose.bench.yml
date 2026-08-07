@@ -1,108 +1,61 @@
 # SOURCE: fleet/deploy/docker/docker-compose.bench.yml
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
-# STATUS: SURCOUCHE de banc — la forge jetable et son runner, dans le projet de la boite
+# STATUS: SURCOUCHE de banc — la boite parle a une forge JETABLE, qui vit sa vie a cote
 #
-# ─── CE QUE CE FICHIER EST, ET POURQUOI IL N'EST PAS UN TROISIEME COMPOSE ───────────────────────
-# Une SURCOUCHE, pas un compose autonome : il se combine a l'un des deux qui existent.
+# ─── CE QUE CE FICHIER EST ─────────────────────────────────────────────────────────────────────
+# Un SELECTEUR DE TOPOLOGIE, et rien d'autre : « cette boite s'adresse a une forge de banc ».
 #
 #   prod / install   docker compose -f docker-compose.install.yml -p <projet> up -d
-#   banc (image)     docker compose -f docker-compose.install.yml -f docker-compose.bench.yml \
-#                                   -p <projet> --profile bench up -d
-#   banc (sources)   idem avec docker-compose.yml a la place de l'install
+#   banc             docker compose -f docker-compose.install.yml -f docker-compose.bench.yml \
+#                                   -p <projet> up -d
 #
-# POURQUOI PAS DANS L'UN DES DEUX. `docker-compose.yml` porte `build:`, `docker-compose.install.yml`
-# ne le porte PAS — et cette separation est deliberee, son en-tete le dit : compose n'a pas de
-# conditionnel, donc on ne peut pas rendre `build:` inerte selon un mode. Poser les services de banc
-# dans l'un des deux les rendrait invisibles a l'autre, ou les dupliquerait. Une surcouche se
-# combine aux DEUX et n'existe qu'une fois.
+# Il ne DECLARE pas la forge, et c'est le sujet de ce fichier.
 #
-# ─── LE PROFIL, EN PLUS DU FICHIER — DEUX VERROUS, ET CE N'EST PAS DE LA CEINTURE-BRETELLE ──────
-# Inclure ce fichier est deja un choix explicite. Le profil ajoute la garantie qu'un `-f` laisse
-# par erreur dans un script ne demarre PAS une forge jetable a cote d'une prod : sans
-# `--profile bench`, ces services n'existent tout simplement pas pour compose. Une consigne se
-# respecte ou s'oublie ; ceci ne s'oublie pas.
+# ─── POURQUOI LA FORGE RESTE DEHORS — CORRECTION DU 2026-08-07 ─────────────────────────────────
+# Une premiere version mettait `forge` et `runner` ICI, en `profiles: [bench]`, dans le projet de la
+# boite. Un objet, un flag, un reseau : le piege du `network connect` disparaissait. Le design note
+# affirmait meme que le couplage des cycles de vie etait « exactement ce qu'on veut sur un banc ».
+# C'ETAIT FAUX, ET MESURE : `docker compose -p <projet> down -v` emportait `forge-data` et
+# `forge-config` avec la boite.
 #
-# ─── CE QUE CE FICHIER NE FAIT PAS, ET NE FERA JAMAIS ──────────────────────────────────────────
+# Or `bench-swap-image.sh` existe depuis le 2026-08-03 pour UNE raison, ecrite dans son en-tete :
+# « un banc coute deux choses tres inegales — une IMAGE (un build) et une FORGE SEMEE (deux passes
+# d'amorcage) ». Coupler leurs cycles detruit exactement l'asymetrie qui rend l'iteration viable :
+# on repaierait l'amorcage a chaque changement de code. Et en PRODUCTION la forge est dehors, chez
+# l'operateur — un banc qui imite la prod la garde dehors.
+#
+# ─── ET LE PIEGE RESEAU ALORS ? IL SE PAIE AUTREMENT, ET LA RECETTE EXISTAIT ───────────────────
+# Le piege etait : la boite doit resoudre `forge` AVANT son premier boot, sinon tout le provisioning
+# forge part en drift. La fusion le reglait en supprimant la frontiere ; ce fichier le regle en la
+# TRAVERSANT — le reseau de la forge est declare `external`, et compose branche la boite dessus a la
+# creation. Pas de `docker network connect` a la main, donc rien que le prochain nuke puisse oublier.
+#
+# CE N'EST PAS UNE INVENTION : `dev/bench-runner.sh` fait exactement ca depuis le 2026-08-02, et son
+# en-tete le dit — « l'override branche donc le projet runner sur CE reseau (network externe), au
+# lieu d'un `docker network connect` a la main que le prochain nuke oublierait ». Trois cycles de
+# vie independants, une seule facon de les joindre.
+#
+# ─── CE QUE CE FICHIER NE FAIT PAS ─────────────────────────────────────────────────────────────
 # AMORCER. Creer un admin, minter un token, promouvoir un site-admin, semer deux depots sont des
-# gestes contre un service QUI TOURNE — aucun compose ne les exprime, dans aucun mode. Ils restent
-# dans `dev/bench-forge-bootstrap.sh`, et le nombre d'etapes y depend d'un FAIT, pas d'un mode :
+# gestes contre un service QUI TOURNE — aucun compose ne les exprime, dans aucun mode. Ils vivent
+# dans `dev/bench-forge-bootstrap.sh`, et le nombre d'etapes y depend d'un FAIT et non d'un mode :
 # la forge arrive-t-elle avec son admin (`--admin-token`) ou vierge ?
-#
-# ─── CE QUE LE PROJET UNIQUE SUPPRIME ──────────────────────────────────────────────────────────
-# La forge vivait dans un projet a elle (`<projet>forge`), donc sur un AUTRE reseau. La boite devait
-# le rejoindre AVANT son premier boot — d'ou `create` → `network connect` → `start` au lieu d'un
-# `up`, dans cet ordre, sous peine de voir `FORGE_BASE_URL=http://forge:3000` ne pas resoudre et
-# tout le provisioning forge partir en drift au premier boot. Meme projet, meme reseau : ce piege
-# n'existe plus. Il ne se contourne plus, il a disparu.
+# DEMARRER LA FORGE ni LE RUNNER. `dev/forge-compose.yml` et `dev/bench-runner.sh` sont leurs
+# recettes, et `dev/bench-up.sh` les enchaine.
 
 services:
-  forge:
-    profiles: [bench]
-    # PIN par digest — 1.26.1 = la version validee avec le runtime (marqueurs, tokens, webhooks).
-    image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
-    # Le nom de service EST le nom d'hote : `http://forge:3000` resout depuis la boite, sans rien
-    # brancher. C'est tout l'interet du projet unique.
-    hostname: forge
-    environment:
-      # ROOT_URL sert aux liens que Gitea FABRIQUE (clone_url, redirections). Le consommateur
-      # principal est la fleet, qui atteint la forge par le reseau docker sous le nom de service —
-      # pas l'humain depuis son navigateur. Le defaut vise donc l'interieur.
-      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://forge:3000/}"
-      GITEA__server__HTTP_PORT: "3000"
-      # Demarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le wizard
-      # /install — `/` repond 200, l'API 404, le healthcheck reste rouge A VIE et il n'y a RIEN a
-      # automatiser. Mesure au premier drill.
-      GITEA__security__INSTALL_LOCK: "true"
-      GITEA__actions__ENABLED: "true"
-    ports:
-      - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
-    volumes:
-      - forge-data:/var/lib/gitea
-      - forge-config:/etc/gitea
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/version"]
-      interval: 10s
-      timeout: 5s
-      start_period: 20s
-      retries: 6
-    restart: unless-stopped
-    networks: [lcars]
+  lcars:
+    # La boite garde son reseau de projet ET rejoint celui de la forge. Le nom de service `forge`
+    # resout des la creation, donc AVANT le premier boot — ce qui etait toute la contrainte.
+    networks:
+      - lcars
+      - devforge
 
-  # LE RUNNER DU BANC, ET IL N'EST PAS LE RUNNER DE PROD. Celui de l'operateur vit dans
-  # `dev/runner-compose.yml`, se pose a cote de SA forge, et exige `LCARS_FORGE_URL` SANS DEFAUT
-  # parce qu'une URL fausse y ferait un runner qui tourne et ne sert rien. Ici l'URL n'est pas une
-  # devinette : la forge est dans le meme projet, donc `http://forge:3000` est un fait de topologie.
-  # `dev/runner-compose.yml` reste l'AUTORITE du contrat des labels — le detail de chacun y vit.
-  #
-  # LE JETON D'ENREGISTREMENT RESTE UN GESTE, et c'est la meme frontiere que l'amorcage : il se
-  # minte contre une forge VIVANTE. Sans lui le runner demarre et ne s'enregistre pas — il est donc
-  # demarre APRES la forge, explicitement, par bench-up.sh.
-  runner:
-    profiles: [bench]
-    image: gitea/act_runner:0.6.1@sha256:b5c35d6bdbb9bb25e531230bfc7cc663cb751406cbec90a2a891b85fea54de86
-    hostname: lcars-runner
-    environment:
-      GITEA_INSTANCE_URL: "${LCARS_RUNNER_INSTANCE_URL:-http://forge:3000}"
-      GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
-      GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-bench-runner}"
-      # ⚠ LE DEFAUT `elixir` NE SAIT PAS JOUER `mix gate` : il pointe l'image de BASE du stage
-      # build, qui porte Elixir et rien d'autre — ni git, ni tmux, ni bwrap, ni bats, ni python3,
-      # que le gate exige et que le Dockerfile installe dans ce stage. Qui veut jouer LE gate sert
-      # le stage `build` de son propre build. Detail complet dans dev/runner-compose.yml.
-      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
-    volumes:
-      - runner-data:/data
-      # Le socket du daemon TEL QU'IL EXISTE DANS LA VM du moteur — pas un chemin de la distro WSL
-      # (un bind depuis WSL rendrait un repertoire VIDE cote conteneur, en silence).
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      forge:
-        condition: service_healthy
-    restart: unless-stopped
-    networks: [lcars]
-
-volumes:
-  forge-data:
-  forge-config:
-  runner-data:
+networks:
+  # `external: true` = compose ne la cree pas et ne la detruit pas. Elle appartient au projet de la
+  # forge, elle lui survit et elle survit a la boite. C'est la frontiere qu'on voulait garder.
+  # Le nom par defaut suit la convention compose `<projet-forge>_default` ; bench-up.sh le passe.
+  devforge:
+    external: true
+    name: "${LCARS_DEVFORGE_NETWORK:-lcars-devforge_default}"
