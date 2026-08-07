@@ -65,8 +65,11 @@ WITH_CREDS=1
 CLAUDE_FROM="$HOME/.local/bin/claude"
 WITH_CLAUDE_BIN=1
 HUMAN="lcars"
-# Le banc promeut l'humain site-admin par defaut (raison + cout : etape 6-bis du bootstrap).
-BOOTSTRAP_EXTRA=()
+# LE BANC PROMEUT L'HUMAIN SITE-ADMIN, ET IL LE DEMANDE — il ne l'herite plus. Depuis le
+# 2026-08-07 le bootstrap defaute au modele de prod (non-admin) : la propriete de banc est donc
+# posee ICI, visible au point d'appel, et `--no-human-admin` la retire. Raison + cout : etape
+# 6-bis du bootstrap.
+BOOTSTRAP_EXTRA=(--human-admin)
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
@@ -79,7 +82,7 @@ while [[ $# -gt 0 ]]; do
     --no-creds)   WITH_CREDS=0; shift ;;
     --claude-from) CLAUDE_FROM="${2:?}"; shift 2 ;;
     --no-claude-bin) WITH_CLAUDE_BIN=0; shift ;;
-    --no-human-admin) BOOTSTRAP_EXTRA+=(--no-human-admin); shift ;;
+    --no-human-admin) BOOTSTRAP_EXTRA=("${BOOTSTRAP_EXTRA[@]/--human-admin/}"); shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
     -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-up: option inconnue: $1" >&2; exit 1 ;;

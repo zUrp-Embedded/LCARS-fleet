@@ -26,7 +26,7 @@
 #   4. joue `tofu apply` sur la recette de prod INCHANGEE (org, teams, 8 roles, systeme, humain) ;
 #   5. pose le seed dans la boite pour que le mint A4 des role-tokens converge au prochain boot ;
 #   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
-#      6-bis, --no-human-admin pour s'en passer), pose son TOKEN operateur, et cable le token
+#      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
 #      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
 #   7. pose les avatars de charte (le scribe en a un depuis le 2026-08-02) ;
 #   8. SEME la forge : `fleet/lcars` (la source que la boite clone) + `fleet/project-template`
@@ -62,7 +62,7 @@
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <copie de fleet/deploy/deps>] [--no-box] [--no-seed-repos]
-#                                  [--no-human-admin]
+#                                  [--human-admin] [--admin-token TOK]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 bootstrap admin/token
 #         4 tofu · 5 la boite (seed) · 6 le verdict final ne passe pas · 7 semis des repos
 
@@ -73,6 +73,12 @@ REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 
 FORGE_URL="http://127.0.0.1:3600"
 CONTAINER="lcars-ticketforge-forge-1"
+# `--admin-token` DIT UNE SEULE CHOSE, et elle commande tout le reste : « la forge preexiste et je
+# n'en suis pas l'administrateur, je suis un client qui detient un jeton » — le cas de la PRODUCTION.
+# Sans lui, la forge est a moi et je la fabrique : le cas du BANC.
+# Ce n'est PAS un `--mode prod|test`. Une etiquette de mode peut etre FAUSSE (un `--mode prod` sur
+# une forge vierge echoue tard, et accuse la forge) ; un jeton existe ou n'existe pas. On mesure.
+ADMIN_TOKEN=""
 BOX="lcars-ticket-lcars-1"
 HUMAN="lcars"
 HUMAN_EMAIL="lcars@lcars.local"
@@ -82,7 +88,7 @@ TOFU_DIR=""
 WITH_BOX=1
 SEED_REPOS=1
 # Propriete de BANC, jamais de prod — la raison, son cout et sa sortie sont a l'etape 6-bis.
-HUMAN_ADMIN=1
+HUMAN_ADMIN=0
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 ADMIN="bootstrap"
 
@@ -90,6 +96,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-url)      FORGE_URL="${2:?}"; shift 2 ;;
     --container)      CONTAINER="${2:?}"; shift 2 ;;
+    --admin-token)    ADMIN_TOKEN="${2:?}"; shift 2 ;;
     --box)            BOX="${2:?}"; shift 2 ;;
     --human)          HUMAN="${2:?}"; shift 2 ;;
     --human-email)    HUMAN_EMAIL="${2:?}"; shift 2 ;;
@@ -97,6 +104,9 @@ while [[ $# -gt 0 ]]; do
     --tofu-dir)       TOFU_DIR="${2:?}"; shift 2 ;;
     --no-box)         WITH_BOX=0; shift ;;
     --no-seed-repos)  SEED_REPOS=0; shift ;;
+    --human-admin)    HUMAN_ADMIN=1; shift ;;
+    # Accepte et SANS EFFET : c'etait le defaut avant l'inversion du 2026-08-07. Le refuser ferait
+    # echouer un appelant qui demande deja le comportement devenu defaut.
     --no-human-admin) HUMAN_ADMIN=0; shift ;;
     -h|--help)        sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-forge-bootstrap: option inconnue: $1" >&2; exit 1 ;;
@@ -125,7 +135,15 @@ curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $
 # serait la seule faiblesse reelle que ce script pourrait introduire.
 ADMIN_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
 
-if ! curl -sf -m 5 "$(api)/users/$ADMIN" >/dev/null 2>&1; then
+# LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES
+# etapes qui exigent un `docker exec` DANS la forge. Contre une forge de production — ailleurs, pas
+# a nous, peut-etre meme pas en conteneur — elles ne sont pas inutiles, elles sont IMPOSSIBLES.
+if [[ -n "$ADMIN_TOKEN" ]]; then
+  MASTER_TOKEN="$ADMIN_TOKEN"
+  curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/user" >/dev/null \
+    || die "le jeton d'admin fourni ne s'authentifie pas sur $FORGE_URL" 3
+  say "admin fourni (--admin-token) — creation et mint SAUTES, la forge preexiste"
+elif ! curl -sf -m 5 "$(api)/users/$ADMIN" >/dev/null 2>&1; then
   say "creation du compte admin de bootstrap ($ADMIN)"
   "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user create \
       --username "$ADMIN" --password "$ADMIN_PW" --email "b@local.test" \
@@ -140,13 +158,15 @@ fi
 
 # Un token du meme nom peut survivre a une passe precedente : on en minte un HORODATE plutot que
 # de gerer une revocation (le compte entier meurt au prochain nuke).
-TOKEN_NAME="bench-tofu-$(date +%s)"
-MASTER_TOKEN="$("$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user generate-access-token \
-                  --username "$ADMIN" --token-name "$TOKEN_NAME" --scopes all --raw 2>/dev/null | tail -1)"
-[[ -n "$MASTER_TOKEN" ]] || die "la forge n'a pas rendu de master token" 3
-curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/user" >/dev/null \
-  || die "le master token ne s'authentifie pas" 3
-say "master token minte ($TOKEN_NAME)"
+if [[ -z "$ADMIN_TOKEN" ]]; then
+  TOKEN_NAME="bench-tofu-$(date +%s)"
+  MASTER_TOKEN="$("$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user generate-access-token \
+                    --username "$ADMIN" --token-name "$TOKEN_NAME" --scopes all --raw 2>/dev/null | tail -1)"
+  [[ -n "$MASTER_TOKEN" ]] || die "la forge n'a pas rendu de master token" 3
+  curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/user" >/dev/null \
+    || die "le master token ne s'authentifie pas" 3
+  say "master token minte ($TOKEN_NAME)"
+fi
 
 # ─── 4. tofu apply — la recette de PROD, inchangee ───────────────────────────────────────────────
 # Copie de travail par defaut : la recette est jouee hors de l'arbre suivi pour que son tfstate (qui
@@ -188,12 +208,25 @@ fi
 
 # ─── 6. le mot de passe de banc de l'humain ──────────────────────────────────────────────────────
 # APRES l'apply (tofu vient de (re)poser le seed + must_change_password=true sur ce compte).
+#
+# MEME PRECONDITION QUE 2-3, et pour la meme raison : fabriquer l'identite d'un humain suppose
+# ADMINISTRER la forge. En production Gitea la regle a son propre onboarding, et `70-human` la SONDE
+# sans jamais la poser — c'est ecrit en tete de ce fichier. Avec `--admin-token`, on est client :
+# on ne touche pas au compte, et on le DIT plutot que de le sauter en silence.
+if [[ -n "$ADMIN_TOKEN" ]]; then
+  say "humain $HUMAN : identite NON fabriquee (--admin-token) — Gitea la regle a son onboarding"
+else
 "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user change-password \
     --username "$HUMAN" --password "$HUMAN_PASSWORD" --must-change-password=false >/dev/null 2>&1 \
   || die "mot de passe de banc non pose pour $HUMAN" 6
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
+fi
 
-# ─── 6-bis. l'humain de banc est SITE-ADMIN (defaut du banc, jamais de la prod) ──────────────────
+# ─── 6-bis. SITE-ADMIN — OPT-IN depuis le 2026-08-07, et la polarite EST le sujet ────────────────
+# C'etait un opt-out (`--no-human-admin`) : on obtenait donc un site-admin EN OUBLIANT UN FLAG. Une
+# propriete qu'on obtient par omission n'est pas une propriete, c'est un accident — et celle-ci
+# court-circuite la team `humans`. Le defaut est desormais le modele de PRODUCTION ; le banc demande
+# explicitement (bench-up.sh passe --human-admin). Le pourquoi du banc reste entier, ci-dessous.
 # Meme nature que le mot de passe ci-dessus, et meme frontiere. La recette de PRODUCTION ne rend
 # JAMAIS le quotidien site-admin : `20-DECISION-premier-admin-prerequis-lcars-demo.md` le mesure —
 # un daily-admin rend la team `humans` decorative, donc les droits qu'on croit tester ne sont plus
@@ -214,7 +247,7 @@ if [[ "$HUMAN_ADMIN" -eq 1 ]]; then
   [[ "$IS_ADMIN" == "True" ]] || die "promotion posee mais la forge repond is_admin=$IS_ADMIN" 6
   say "humain $HUMAN : SITE-ADMIN (propriete de banc, verifiee is_admin=True)"
 else
-  say "humain $HUMAN : non-admin (--no-human-admin) — modele de prod respecte"
+  say "humain $HUMAN : non-admin (defaut) — modele de prod ; --human-admin pour un banc"
 fi
 
 # Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
