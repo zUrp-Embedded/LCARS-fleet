@@ -221,9 +221,10 @@ defmodule Fleet.Spawner.PodTest do
     Path.join([root, scope_dir, pod_id, "state.json"])
   end
 
-  defp os_alive?(os_pid) do
-    match?({_, 0}, System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true))
-  end
+  # NOT `kill -0`: it succeeds on a ZOMBIE, so it would report a killed-but-unreaped process as
+  # alive. Here the pod is a direct Port child that the BEAM reaps, so the two probes agree TODAY —
+  # which is exactly why this must not stay on the fragile one. Cf. `Fleet.Test.OsProbe`.
+  defp os_alive?(os_pid), do: Fleet.Test.OsProbe.alive?(os_pid)
 
   setup do
     case Registry.start_link(keys: :unique, name: Fleet.Spawner.Registry) do
