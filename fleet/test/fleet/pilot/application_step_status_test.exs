@@ -10,10 +10,31 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     :ok
   end
 
+  # LE NETTOYAGE ATTEND LA MORT, il ne la demande pas. `Process.exit/2` est asynchrone : le NOM
+  # n'est libere que lorsque le processus meurt REELLEMENT. Un `on_exit` qui rend la main aussitot
+  # laisse le test suivant appeler `Process.register` sur un nom encore pris — et l'erreur accuse
+  # trois causes a la fois (« not alive, name already taken, or already given another name »), dont
+  # aucune n'est le vrai probleme.
+  # Mesure du 2026-08-07 : rouge intermittent sur ce fichier, un run sur plusieurs, `async: false`
+  # deja pose — parce que la course n'etait pas entre fichiers mais entre DEUX TESTS DU MEME, et
+  # que rien ne les separait qu'un ordonnancement. Un monitor rend l'attente deterministe.
   defp spawn_named(name) do
     pid = spawn(fn -> Process.sleep(:infinity) end)
     Process.register(pid, name)
-    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :ok
+        after
+          1_000 -> flunk("le processus #{inspect(name)} n'est pas mort — le nom reste pris")
+        end
+      end
+    end)
+
     pid
   end
 

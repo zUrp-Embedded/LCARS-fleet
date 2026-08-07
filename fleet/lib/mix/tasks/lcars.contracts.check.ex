@@ -1780,6 +1780,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
              "find",
              [
                repo,
+               # ELAGUAGE D'ABORD, filtre ensuite. Les quatre arbres ci-dessous ne sont jamais
+               # PARCOURUS : `.git` et `_build` par volume, `fleet/tmp` parce qu'il bouge sous les
+               # pieds de find (cf. la course decrite au-dessus), les virtualenvs parce qu'ils
+               # portent des centaines de suites amont qui ne sont ni a nous ni a declarer —
+               # les exclure EST la declaration.
+               "(",
+               "-name",
+               ".git",
+               "-o",
+               "-name",
+               "_build",
+               "-o",
+               "-name",
+               ".venv",
+               "-o",
+               "-name",
+               "site-packages",
+               "-o",
+               "-path",
+               "*/fleet/tmp",
+               ")",
+               "-prune",
+               "-o",
                "-type",
                "f",
                "(",
@@ -1792,28 +1815,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                "-name",
                "*_test.py",
                ")",
-               "-not",
-               "-path",
-               "*/.git/*",
-               "-not",
-               "-path",
-               "*/_build/*",
-               "-not",
-               "-path",
-               # `*/fleet/tmp/*`, NOT `*/tmp/*`: the second excludes any path containing
-               # "tmp" ANYWHERE, which silently blanks the scan on a tree living under /tmp — a
-               # filter broad enough to make the instrument measure nothing and report a pass. Its
-               # own test caught it, by building its fixtures exactly there.
-               "*/fleet/tmp/*",
-               # VENDORED python, the twin of the `.bats` submodules: a virtualenv's site-packages
-               # carries hundreds of upstream suites. They are not ours to run and not ours to
-               # declare — excluding them is the declaration.
-               "-not",
-               "-path",
-               "*/.venv/*",
-               "-not",
-               "-path",
-               "*/site-packages/*"
+               "-print"
              ],
              stderr_to_stdout: true
            ) do
