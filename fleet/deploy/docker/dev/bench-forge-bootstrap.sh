@@ -168,6 +168,16 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
   say "master token minte ($TOKEN_NAME)"
 fi
 
+# LE MASTER TOKEN SURVIT A CE SCRIPT, et il n'a nulle part d'autre ou vivre. `bench-up.sh` en a
+# besoin APRES nous, pour minter le jeton d'enregistrement du runner — un geste qui exige un
+# site-admin et qui ne peut pas se faire avant que la forge existe. Il est ecrit dans le tofu-dir
+# parce que c'est deja le seul endroit hors de l'arbre suivi ou l'etat de cette passe survit (le
+# tfstate y vit pour la meme raison), et en 0600 parce que c'en est un.
+if [[ -n "$TOFU_DIR" ]]; then
+  printf '%s\n' "$MASTER_TOKEN" > "$TOFU_DIR/.master-token"
+  chmod 600 "$TOFU_DIR/.master-token"
+fi
+
 # ─── 4. tofu apply — la recette de PROD, inchangee ───────────────────────────────────────────────
 # Copie de travail par defaut : la recette est jouee hors de l'arbre suivi pour que son tfstate (qui
 # porte des valeurs sensibles) ne se retrouve jamais dans un `git status`.

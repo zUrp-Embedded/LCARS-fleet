@@ -82,7 +82,11 @@ refute_line_matches() {
   local create cp_ start
   create="$(idx_of 'compose .* create')"
   cp_="$(idx_of '^cp ')"
-  start="$(idx_of 'compose -p bt start')"
+  # Le motif suit la COMMANDE, pas sa forme d'appel : depuis le projet unique (2026-08-07) le
+  # `start` porte le service (`start lcars`) et les `-f`/`-p` vivent dans un tableau. Epingler
+  # `compose -p bt start` epinglait la syntaxe d'un jour, pas le contrat — et c'est le contrat que
+  # ce test existe pour tenir : la graine tombe APRES create et AVANT start.
+  start="$(idx_of 'compose .* start')"
 
   [ -n "$create" ] && [ -n "$cp_" ] && [ -n "$start" ]
   [ "$create" -lt "$cp_" ]

@@ -89,10 +89,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-FORGE_PROJECT="${PROJECT}forge"
-FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
+# UN SEUL PROJET COMPOSE depuis le 2026-08-07 : la forge, la boite et le runner y vivent ensemble,
+# donc sur le MEME reseau. Le nom de service EST le nom d'hote — `http://forge:3000` resout sans
+# qu'on branche quoi que ce soit. Le piege 1 de l'en-tete (create → network connect → start) n'a
+# plus d'objet : il n'est pas contourne, il a disparu avec le decoupage qui le causait.
+FORGE_CONTAINER="${PROJECT}-forge-1"
 BOX="${PROJECT}-lcars-1"
-FORGE_NET="${FORGE_PROJECT}_default"
+RUNNER="${PROJECT}-runner-1"
+COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$PROJECT")
 # L'URL suit le BIND, pas un 127.0.0.1 fige : sinon un banc bind sur .7 amorce une forge joignable
 # a une autre adresse que celle qu'il annonce, et le premier lecteur du recap se trompe de fenetre.
 FORGE_URL="http://${BIND}:${FORGE_PORT}"
@@ -152,9 +156,9 @@ if "$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX"; then
 fi
 
 # ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
-say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
+say "forge jetable : service 'forge' du projet $PROJECT sur $FORGE_URL"
 LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="http://forge:3000/" \
-  "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
+  "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" --profile bench up -d forge \
   || die "la forge ne monte pas" 2
 
 for _ in $(seq 1 60); do
@@ -175,7 +179,7 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
-    "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
+    "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas" 3
 
 # La graine du binaire vendor (piege 3bis) — dans la fenetre create→start, sur un conteneur qui
@@ -199,11 +203,11 @@ else
   say "graine claude NON posee (--no-claude-bin) — la boite telechargera au boot, par choix"
 fi
 
-"$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
-  || die "la boite ne se branche pas sur le reseau de la forge ($FORGE_NET)" 3
-say "boite branchee sur $FORGE_NET — le nom 'forge' resout AVANT le premier boot"
-
-"$DOCKER_BIN" compose -p "$PROJECT" start || die "la boite ne demarre pas" 3
+# PAS DE `network connect` : projet unique, reseau unique. La boite nait deja capable de resoudre
+# `forge`, ce qui etait toute la raison d'etre de la fenetre create→connect→start. Le `create` reste,
+# lui, pour une AUTRE raison intacte : la graine du binaire vendor doit se poser sur un conteneur
+# qui existe et n'a pas demarre (piege 3bis).
+"$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" start lcars || die "la boite ne demarre pas" 3
 
 for _ in $(seq 1 90); do
   [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] && break
@@ -267,10 +271,52 @@ CREDS_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.claude/.crede
 HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/user" \
   | python3 -c 'import json,sys; print("site-admin" if json.load(sys.stdin).get("is_admin") else "non-admin")' 2>/dev/null || echo "?")"
 
+# ─── 7. LE RUNNER — on APPELLE la recette, on ne la refait pas ───────────────────────────────────
+# `bench-runner.sh` (2026-08-02) EST le geste, et il porte deux pieges reseau qu'un appel naif
+# reprendrait de plein fouet. Le projet unique en desamorce UN : le runner joint la forge parce
+# qu'ils partagent le reseau. Le SECOND reste entier et n'a rien a voir avec le notre — les
+# conteneurs de JOB n'heritent pas du reseau du runner, act_runner les cree sur son reseau par
+# defaut, et le clone echoue sur `forge:3000` introuvable. Son en-tete le nomme : « un runner vert
+# qui rate tous ses jobs, le pire des etats ». Il pose la config `container.network` pour ca, et il
+# la copie par `docker cp` parce qu'un bind depuis cette distro WSL est invisible au daemon.
+# Reecrire tout ca ici aurait produit un runner qui s'enregistre et ne sert rien.
+RUNNER_STATE="non demarre"
+MASTER_TOKEN_FILE="$TOFU_DIR/.master-token"
+
+if [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
+  RUNNER_STATE="ABSENT — pas de master token persiste (CI indisponible sur ce banc)"
+else
+  if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
+       --forge-api "$FORGE_URL/api/v1" \
+       --admin-token "$(cat "$MASTER_TOKEN_FILE")" \
+       --instance-url "http://forge:3000" \
+       --network "${PROJECT}_lcars" \
+       --project "${PROJECT}-runner" >/dev/null 2>&1; then
+    # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
+    # silence que ce banc doit refuser.
+    RUNNERS="$(curl -s -m 5 -H "Authorization: token $(cat "$MASTER_TOKEN_FILE")" \
+        "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null \
+      | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    rs = d.get("runners", d if isinstance(d, list) else [])
+    print(len(rs))
+except Exception: print(0)' 2>/dev/null || echo 0)"
+    if [[ "${RUNNERS:-0}" -gt 0 ]]; then
+      RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)"
+    else
+      RUNNER_STATE="demarre mais AUCUN runner vu par la forge — enregistrement rate"
+    fi
+  else
+    RUNNER_STATE="ABSENT — bench-runner.sh en echec (rejouable : bench-runner.sh --help)"
+  fi
+fi
+
 say "─────────────────────────────────────────────────────────"
 say "banc PRET"
 say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
 say "  boite     : $BOX   ssh ${BIND}:2222   deck ${BIND}:20999"
+say "  runner    : $RUNNER_STATE"
 say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
 say "  creds     : $CREDS_OK"
 say "  admin     : $HUMAN_ADMIN_STATE"
