@@ -36,7 +36,19 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     {status, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
     lock = Enum.find(checks, &(&1.id == "roles.provisioning_locked"))
 
-    assert status == :pass
+    # NOMMER CE QUI TOMBE, pas seulement constater que quelque chose tombe. Mesure du 2026-08-07 :
+    # ce test a rougi DANS l'image et pas ici, et son message ne disait que « :fail au lieu de
+    # :pass » — donc il a fallu reproduire l'arbre, rejouer la graine et lire la liste d'exclusions
+    # a la main pour ne rien trouver. Un assert qui constate sans nommer coute une heure la premiere
+    # fois qu'il mord dans un environnement qu'on ne peut pas ouvrir.
+    failed = Enum.filter(checks, &(&1.status != :pass))
+
+    assert status == :pass,
+           "run_checks a rendu #{status}. Checks non-pass : " <>
+             Enum.map_join(failed, " · ", fn c ->
+               "#{c.id}=#{c.status} (#{String.slice(to_string(c.note || "—"), 0, 120)})"
+             end)
+
     assert lock.status == :pass
 
     # The assertion follows the ARTIFACT: a full checkout must check all four lists; a
