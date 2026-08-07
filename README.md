@@ -121,11 +121,15 @@ LCARS does not rely on repeated prompt rituals. Behavior is shaped through versi
 
 The core coordination layer stays intentionally plain:
 
-- `/var/spool/fleet/inbox/<role>/`
-- `$FLEET_HANDOFFS/*.md`
-- shell-based wake, dispatch, and replay utilities
+- one AF_UNIX MCP socket **per pod**, under the human's own `~/.lcars/run/`
+- a git forge as the durable substrate: issues, PRs, labels — the truth outlives every process
+- shell launchers for the sandbox, and a tmux session you can attach to
 
 This makes the fleet readable with ordinary Linux reflexes. No hidden broker. No mystery service. If something drifts, there is a file, a path, a process, a user, or a permission behind it.
+
+*(Until 2026-08-07 this section named `/var/spool/fleet/inbox/<role>/` and `$FLEET_HANDOFFS` — the
+v1 file spool. It is gone: measured at zero references before removal. A README that describes a
+coordination layer the product no longer has is worse than one that describes none.)*
 
 ### ♻️ A disposable runtime
 
@@ -251,16 +255,29 @@ The standard is:
 ```text
 LCARS-fleet/
 ├── .claude/          # hooks, CLAUDE surfaces, settings
-├── docs/             # architecture and operating documentation
-├── fleet/            # runtime, provisioning, monitor, blueprint
-│   └── system-prompt/
-│       └── sources/  # directive corpus
+├── .gitea/           # the live CI
+├── .github/          # Pages publication of the showcase site only
+├── assets/           # brand marks, charter, and the showcase site (github.io)
+├── fleet/            # THE product — fleet/ is the Mix root
+│   ├── lib/          # the single OTP app, domains under lib/fleet/<domain>/
+│   ├── priv/         # runtime assets, and priv/catalogue/ = the business data
+│   ├── test/         # the suite, plus test/shell_gate.sh for the out-of-mix nets
+│   ├── bin/          # the launchers: bwrap (sanctuary), host, vendor
+│   ├── config/       # compile-time, per-env, and boot config
+│   ├── etc/          # deploy and run procedure
+│   ├── deploy/       # provisioning: bare machine -> working fleet, one idempotent gesture
+│   ├── vendor/       # vendored bricks (token-saver) + our integration layer
+│   ├── git-hooks/    # the GO-7 wall, force-push block, hook installer
+│   └── system-prompt/sources/user/   # the interactive protocol's two personalisation files
 ├── knowledge/        # reusable domain knowledge
 ├── install.sh        # WSL bootstrap entrypoint
 ├── docker.sh         # Docker bootstrap entrypoint
-├── ONBOARDING.md     # day-1 operating guide
 └── THIRD_PARTY_NOTICES.md   # what we borrowed, from whom, under which licence
 ```
+
+The v1 tree (`fleet/v1/`, `fleet/provisioning/`, `fleet/tests/`, the 24-file directive corpus and
+six more directories) left this map on 2026-08-07. It is archived, not deleted: the tag
+`v1-excommunication-base` holds it, and `git show v1-excommunication-base:<path>` returns any file.
 
 LCARS stands on other people's work. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists every borrowing — copied code, reimplemented code, and borrowed method alike — with its licence and its place in the tree. It deliberately covers more than the licences require.
 
