@@ -256,20 +256,34 @@ fi
 # prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Mesure
 # le 2026-08-02 : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
 # que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
+# ON GARDE CE QUE LA FORGE A DIT, ET ON MEURT AVEC. La version d'avant jetait la reponse
+# (`2>/dev/null || true`) puis affichait une cause DEVINEE — « un token du meme nom existe deja ? » —
+# en `say`, pas en `die`. Mesure du 2026-08-07 : ce message est sorti sur une forge NEUVE, ou cette
+# cause est impossible, et le banc a continue en s'annoncant pret. Deux defauts qui se composent :
+# une hypothese presentee comme un diagnostic, et un maillon LOAD-BEARING dont l'absence ne stoppe
+# rien. L'en-tete de ce bloc dit pourquoi il est load-bearing : sans `read:organization`, la sonde
+# d'appartenance humaine echoue en « NON VERIFIABLE » et un create_project meurt UNE MARCHE plus
+# loin, avec un message qui accuse la forge.
+# Un nom horodate, comme le master token, pour la meme raison : un token survivant d'une passe
+# precedente n'est plus une hypothese a formuler, c'est un cas qu'on ne peut plus rencontrer.
 if [[ "$WITH_BOX" -eq 1 ]]; then
-  HUMAN_TOKEN="$(curl -s -m 10 -u "$HUMAN:$HUMAN_PASSWORD" -H "Content-Type: application/json" \
-      -X POST -d '{"name":"bench-operateur","scopes":["write:repository","write:issue","read:organization","read:user"]}' \
-      "$(api)/users/$HUMAN/tokens" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha1",""))' 2>/dev/null || true)"
+  OP_TOKEN_NAME="bench-operateur-$(date +%s)"
+  OP_RESP="$(curl -s -m 10 -u "$HUMAN:$HUMAN_PASSWORD" -H "Content-Type: application/json" \
+      -X POST -d "{\"name\":\"$OP_TOKEN_NAME\",\"scopes\":[\"write:repository\",\"write:issue\",\"read:organization\",\"read:user\"]}" \
+      -w $'\n%{http_code}' "$(api)/users/$HUMAN/tokens" 2>&1 || true)"
+  OP_CODE="$(printf '%s' "$OP_RESP" | tail -1)"
+  OP_BODY="$(printf '%s' "$OP_RESP" | sed '$d')"
+  HUMAN_TOKEN="$(printf '%s' "$OP_BODY" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("sha1",""))
+except Exception: print("")' 2>/dev/null || true)"
 
-  if [[ -n "$HUMAN_TOKEN" ]]; then
-    printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
-        'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
-      && say "token operateur pose dans $BOX:~$HUMAN/.gitea_token" \
-      || say "token operateur NON pose dans la boite"
-  else
-    say "la forge n'a pas rendu de token operateur (un token du meme nom existe deja ?)"
-  fi
+  [[ -n "$HUMAN_TOKEN" ]] \
+    || die "la forge a refuse le token operateur ($OP_TOKEN_NAME) — HTTP $OP_CODE : ${OP_BODY:-<corps vide>}" 6
+
+  printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+      'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
+    || die "token operateur minte mais NON pose dans $BOX — la boite ne pourra pas parler a la forge" 6
+  say "token operateur pose dans $BOX:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
 
   # Les DEUX lignes que 70-human instruit (cas D4) : le runtime doit ecrire sur la forge avec le
   # compte SYSTEME, jamais avec celui de l'humain. Ajoutees seulement si absentes — apres le seed,
