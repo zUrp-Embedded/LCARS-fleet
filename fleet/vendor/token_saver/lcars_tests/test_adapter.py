@@ -254,8 +254,9 @@ class TestOverridesEnvironnement:
 
 
 class TestHook:
-    """Le point d'entrée : lcars_hook.py. Son véhicule de déploiement n'est plus tranché depuis que
-    fleet/v1/hooks.yaml est parti avec la v1 (2026-08-06)."""
+    """Le point d'entrée : lcars_hook.py. Il ne s'exécute nulle part aujourd'hui — un pod ne peut pas
+    exécuter de hook (le sanctuaire ne monte ni hooks/ ni la clé `hooks` des settings), et aucun des
+    trois tiers de settings de l'hôte n'en câble. Mesuré le 2026-08-07."""
 
     HOOK = os.path.join(_ROOT, "lcars_hook.py")
 

@@ -33,7 +33,7 @@ Compression d'output de commandes CLI **avant** son entrée dans le contexte de 
 
 Le précédent GitWand (`recode` en Elixir pur, décision « ni fork, ni dep npm — pas de pile Node ») ne s'applique pas : GitWand devait tourner **dans le BEAM**. token-saver s'exécute **dans le pod**, en sous-processus du hook Claude Code, exactement comme le bridge MCP stdio. Aucune pile nouvelle n'entre dans le runtime Elixir.
 
-Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, dont le véhicule **n'est plus tranché** : `fleet/v1/hooks.yaml` le portait et est parti avec la v1 (excommunion 2026-08-06).
+Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, et **un pod ne peut pas exécuter de hook** : le sanctuaire ne monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le `.claude` humain est délibérément exclu *à cause* de ses hooks. `fleet/v1/hooks.yaml` visait `~/.claude/hooks/`, le tier `user` que `--setting-sources` exclut sans condition — il n'aurait jamais tiré dans un pod (mesuré 2026-08-07).
 
 ## Découpage retenu
 
@@ -99,7 +99,8 @@ Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter
 ## Câblage
 
 ```
-<vehicule a trancher>         → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
+<aucun vehicule ne peut>      → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
+(un pod ne charge ni hooks/ ni le tier user ; l'hote n'en cable aucun dans ses trois tiers)
 (fleet/v1/hooks.yaml jouait ce role et est parti avec la v1)
 .claude/hooks/token-saver-hook.sh   shim : coupe, résout la brique, passe stdin
     └→ lcars_hook.py          switch, décision de routage, réécriture de commande

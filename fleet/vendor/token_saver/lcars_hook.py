@@ -7,9 +7,13 @@
 
 Fichier LCARS, hors sous-arbre vendoré.
 
-Véhicule de déploiement NON TRANCHÉ depuis l'excommunion v1 (2026-08-06) : `fleet/v1/hooks.yaml`
-(event `PreToolUse`, matcher `Bash`) le câblait et a été retiré. Le hook ne se déploie donc
-nulle part aujourd'hui — il échoue ouvert, sans symptôme. Lit le
+UN POD NE PEUT PAS EXECUTER DE HOOK, et ce n'est pas un manque de cablage : c'est le sanctuaire.
+Mesure du 2026-08-07 — `bwrap_launch.sh` ne monte que `plugins/` et `skills/` sous le `.claude/` du
+pod, aucun `hooks/` ; `pod_settings_json/1` n'ecrit aucune cle `hooks` ; et le `.claude` de l'humain
+est deliberement NON monte, avec les hooks pour motif nomme dans le launcher. `fleet/v1/hooks.yaml`
+deployait dans `~/.claude/hooks/`, le tier `user` que `--setting-sources` exclut inconditionnellement
+— il n'aurait donc jamais tire dans un pod non plus. Ce fichier est un hook `PreToolUse` : il ne
+s'execute aujourd'hui NULLE PART, ni pod ni hote. Lit le
 JSON de l'appel d'outil sur stdin, décide si la commande est compressible, et
 si oui la réécrit pour qu'elle passe par `lcars_wrap.py`.
 
