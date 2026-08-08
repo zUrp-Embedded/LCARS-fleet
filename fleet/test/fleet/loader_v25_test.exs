@@ -120,6 +120,35 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
+  test "a step key that means NOTHING is REFUSED, not silently accepted", %{tmp_dir: dir} do
+    # `decisions` was declared by the schema and had neither a producer nor a consumer: no canon
+    # card posed it, no line of `lib/` read it. A schema property that connects nothing to nothing
+    # invites a card author to declare something that does nothing, and the card validates — which
+    # is the most expensive kind of silence, because it looks like it worked.
+    #
+    # Removed. `additionalProperties: false` then does the rest: the key is now REFUSED with the
+    # schema's own reason instead of being carried into a void.
+    yaml = """
+    kind: WorkflowMap
+    metadata:
+      name: inert-key
+    spec:
+      max_rework_rounds: 1
+      jury: []
+      steps:
+        a:
+          role: engineer
+          decisions: ["continue", "abandon"]
+    """
+
+    File.write!(Path.join(dir, "inert-key.yaml"), yaml)
+
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+      Loader.load!("inert-key", workflow_maps_root: dir)
+    end
+  end
+
+  @tag :tmp_dir
   test "V2.5 needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
   } do

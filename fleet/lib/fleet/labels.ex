@@ -18,9 +18,16 @@ defmodule Fleet.Labels do
 
   or runtime direct (`Fleet.Labels.awaits_arch()`).
 
-  FOUR families, and the split that matters is scoped-vs-flat, because Gitea reads it: a name
-  containing `/` is created `exclusive:true` (setting one removes the others of its scope), a flat
-  name accumulates.
+  FOUR families, and the split that matters is scoped-vs-flat. The MUTEX is Gitea's — a label
+  carrying `exclusive: true` removes the others of its scope when set — but the RULE that a `/` in
+  the name means exclusive is OURS: `ForgeClient` derives the field from the name at creation
+  (`exclusive: String.contains?(name, "/")`). Gitea reads the FIELD, never the name.
+
+  The distinction is not pedantic. Written as "because Gitea reads it", the convention looks like a
+  server behaviour one can rely on anywhere; it is a house heuristic applied by ONE call site, so a
+  label created by any other route — a human, a script, a forge that is not Gitea — carries no
+  mutex at all, and nothing reconciles it afterwards (`EditLabelOption` exposes the field; we never
+  re-read it).
 
     * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` — concurrency / escalation.
     * SCOPED POSITION `wfmap/<map>` + `stage/<step>` — the workflow_map position; the state lives
