@@ -59,10 +59,22 @@ defmodule Fleet.Workflow.Loader do
   end
 
   # Keep only normalized fields with current consumers.
+  #
+  # UN CHAMP QUI A UN CONSOMMATEUR ET QUI NE PASSE PAS ICI EST UNE GARANTIE MORTE. `spec.ci` etait
+  # declare par le schema (enum `required|ignore`), pose par trois cartes canon, et lu par
+  # `ReviewLifecycle.issue_card_ci/2` — sur la carte NORMALISEE. Absent de cette map, `Map.get` y
+  # rendait toujours `nil`, donc `:ignore` : la porte CI etait desarmee sur les trois cartes qui la
+  # reclamaient, et aucune carte n'etait distinguable d'une carte qui ne declare rien. Le mecanisme
+  # entier (`CiGate`, l'attente bornee, l'escalade, le fait qui voyage dans le brief) existait et
+  # etait injoignable.
+  #
+  # La regle, puisque cette map est un filtre : on n'ajoute rien ici sans consommateur, et on ne
+  # RETIRE rien tant qu'il en reste un.
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{
       "name" => get_in(yaml, ["metadata", "name"]),
       "steps" => steps,
+      "ci" => Map.get(spec, "ci"),
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds"),
       "jury" => Map.fetch!(spec, "jury"),
       "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],

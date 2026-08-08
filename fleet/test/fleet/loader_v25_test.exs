@@ -83,6 +83,42 @@ defmodule Fleet.Workflow.LoaderV25Test do
     assert pipe["steps"]["build"]["role"] == "engineer"
   end
 
+  test "spec.ci SURVIVES normalisation — a declared gate that does not cross is a dead guarantee" do
+    # THE SEAM WHERE THE DEFECT LIVED. `CiGate` was tested, the schema validated `spec.ci`
+    # (enum required|ignore), three canon cards declared `required` — and the WIRE between them was
+    # tested by nobody. `normalize/1` built a map without the key, so `Map.get(map, "ci")` in
+    # `ReviewLifecycle.issue_card_ci/2` always answered nil, hence `:ignore`. The gate, its bounded
+    # wait, its escalation and the fact it hands to the judge all existed and were unreachable, and
+    # no card was distinguishable from a card declaring nothing.
+    for name <- ~w(standard-qa brief-gate c1-light) do
+      map = Loader.load!(name, workflow_maps_root: @canon_pipelines)
+
+      assert Map.get(map, "ci") == "required",
+             "#{name} declares `ci: required`; if it does not survive the loader the CI gate is " <>
+               "disarmed on it, silently"
+    end
+
+    # And the default stays the default: a card that declares nothing keeps the pre-gate rail
+    # rather than inheriting a wall it never asked for.
+    audit = Loader.load!("audit-only", workflow_maps_root: @canon_pipelines)
+    assert Map.get(audit, "ci") == nil
+  end
+
+  test "EVERY canon card's declared spec.ci reaches the normalized map" do
+    # Generic twin of the test above: it does not name the three cards, so a FOURTH card declaring
+    # `ci` is covered the day it lands rather than the day someone remembers to add it here.
+    for path <- Path.wildcard(Path.join(@canon_pipelines, "*.yaml")) do
+      name = Path.basename(path, ".yaml")
+      raw = YamlElixir.read_from_file!(path)
+      declared = get_in(raw, ["spec", "ci"])
+      normalized = Loader.load!(name, workflow_maps_root: @canon_pipelines) |> Map.get("ci")
+
+      assert normalized == declared,
+             "#{name}: spec.ci declared #{inspect(declared)} but the loader yields " <>
+               "#{inspect(normalized)} — the card and the engine disagree"
+    end
+  end
+
   @tag :tmp_dir
   test "V2.5 needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
