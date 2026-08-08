@@ -121,6 +121,94 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
            "the arch's unpushed commit was ERASED — this face is a writer, it rebases, it never resets"
   end
 
+  test "fetch_issue_refs: the ticket's branches become READABLE under a named ref per role", %{
+    seed: seed,
+    proj: proj,
+    sync: sync
+  } do
+    # WHY THIS EXISTS. The architect's code face is a read-only bind, so its own `git fetch` dies on
+    # `.git/FETCH_HEAD` — and what that cost was NOT the missing diff: it arbitrated anyway and
+    # invented an explanation for code it could not see. The fetch runs host-side, here, in the
+    # worktree this GenServer already serializes; the pod only reads the result.
+    git_in!(seed, ["checkout", "-q", "-b", "lcars/issue-7-engineer"])
+    File.write!(Path.join(seed, "delivered.ex"), "def hello, do: :world\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "feat: the deliverable"])
+    git_in!(seed, ["push", "-q", "origin", "lcars/issue-7-engineer"])
+    git_in!(seed, ["checkout", "-q", "main"])
+
+    assert {:ok, ["refs/lcars/pr/7/engineer"]} =
+             WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 7)
+
+    # NAMED, not `FETCH_HEAD`: the next fetch overwrites that file and it never says what it is the
+    # head OF. This ref is stable, self-describing, and readable by the pod through its RO bind.
+    assert {_sha, 0} =
+             System.cmd("git", ["-C", proj, "rev-parse", "--verify", "refs/lcars/pr/7/engineer"])
+
+    # And the CONTENT is there — a ref that resolves to nothing would satisfy the assertion above
+    # while leaving the arch exactly as blind.
+    {show, 0} = System.cmd("git", ["-C", proj, "show", "refs/lcars/pr/7/engineer:delivered.ex"])
+    assert show =~ "def hello"
+  end
+
+  test "fetch_issue_refs: a REWRITTEN branch moves the ref — the arch never re-reads the old one",
+       %{
+         seed: seed,
+         proj: proj,
+         sync: sync
+       } do
+    # THE `--force`, and nothing held it: dropping it left the whole suite green (measured
+    # 2026-08-08), because the other fixture pushes its branch exactly once.
+    #
+    # A producer that REWORKS force-pushes: amend, rebase, squash — the branch moves
+    # non-fast-forward. Without `--force` the local ref REFUSES the update, and the fetch reports
+    # nothing wrong. The arch then reads the PREVIOUS deliverable under a ref that names the
+    # current ticket, and arbitrates on code that no longer exists — the exact failure this whole
+    # gesture exists to end, re-created one layer down.
+    git_in!(seed, ["checkout", "-q", "-b", "lcars/issue-8-engineer"])
+    File.write!(Path.join(seed, "d.ex"), "first attempt\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "feat: v1"])
+    git_in!(seed, ["push", "-q", "origin", "lcars/issue-8-engineer"])
+
+    assert {:ok, ["refs/lcars/pr/8/engineer"]} =
+             WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 8)
+
+    {v1, 0} = System.cmd("git", ["-C", proj, "show", "refs/lcars/pr/8/engineer:d.ex"])
+    assert v1 =~ "first attempt"
+
+    # The rework: history REWRITTEN, not appended.
+    File.write!(Path.join(seed, "d.ex"), "reworked after review\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-q", "--amend", "-m", "feat: v2"])
+    git_in!(seed, ["push", "-qf", "origin", "lcars/issue-8-engineer"])
+    git_in!(seed, ["checkout", "-q", "main"])
+
+    assert {:ok, ["refs/lcars/pr/8/engineer"]} =
+             WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 8)
+
+    {v2, 0} = System.cmd("git", ["-C", proj, "show", "refs/lcars/pr/8/engineer:d.ex"])
+
+    assert v2 =~ "reworked after review",
+           "the ref still points at the pre-rework deliverable — the arch would judge dead code"
+  end
+
+  test "fetch_issue_refs: a ticket with NO branch answers an empty list, never an error", %{
+    sync: sync
+  } do
+    # The distinction the mandate renders differently: "nothing to read, the escalation is about
+    # something else" is not "the deliverable could not be made readable". Collapsing the two would
+    # make the arch defer on a ticket that never had code.
+    assert {:ok, []} = WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 99)
+  end
+
+  test "fetch_issue_refs: no local clone → a NAMED error, so the mandate can say so", %{
+    sync: sync
+  } do
+    assert {:error, {:no_local_clone, _}} =
+             WorktreeSync.fetch_issue_refs(sync, "fleet/jamais-clone", 7)
+  end
+
   test "a branch that is NOT a face aligns NOTHING and says so — never the code worktree by default",
        %{proj: proj, sync: sync} do
     # THE FALL-THROUGH IS THE DANGEROUS CLAUSE, and nothing held it: replacing the explicit

@@ -30,6 +30,30 @@ defmodule Fleet.Pilot.WorktreeSync do
   def sync_now(server \\ __MODULE__, repo, branch),
     do: GenServer.call(server, {:sync, repo, branch}, 60_000)
 
+  @doc """
+  Makes the feature branches of issue `n` READABLE in the project's code worktree, under
+  `refs/lcars/pr/<n>/<role>`. Returns the refs that landed.
+
+  WHY THE RUNTIME DOES THIS AND NOT THE POD. The architect arbitrates on deliverables and its code
+  face is a read-only bind, so its own `git fetch` dies on `.git/FETCH_HEAD` — measured from inside
+  the pod, and the cost was not the missing diff: it arbitrated ANYWAY and invented an explanation
+  for what it could not see. The fetch happens host-side, in the worktree this GenServer already
+  serializes, and the pod only READS the result through its bind.
+
+  A NAMED ref per role, not `FETCH_HEAD`. `FETCH_HEAD` is overwritten by the next fetch and does not
+  say what it is the head OF — the same pod declared its code face "frozen" while that file was two
+  minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next fetch.
+
+  A WILDCARD refspec, so no forge read is needed to learn the producer's role: every branch of the
+  ticket lands, whichever role opened it, and an escalation covering several of them gets all of
+  them. `--force` because a re-push moves the branch and the local ref would refuse a non-fast-
+  forward — this mirror has no history worth protecting.
+  """
+  @spec fetch_issue_refs(GenServer.server(), String.t(), pos_integer()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  def fetch_issue_refs(server \\ __MODULE__, repo, issue_n),
+    do: GenServer.call(server, {:fetch_issue_refs, repo, issue_n}, 60_000)
+
   @impl GenServer
   def init(opts) do
     {:ok,
@@ -49,6 +73,11 @@ defmodule Fleet.Pilot.WorktreeSync do
   @impl GenServer
   def handle_call({:sync, repo, branch}, _from, state) do
     {:reply, do_sync(repo, branch, state), state}
+  end
+
+  @impl GenServer
+  def handle_call({:fetch_issue_refs, repo, issue_n}, _from, state) do
+    {:reply, do_fetch_issue_refs(repo, issue_n, state), state}
   end
 
   defp do_sync(repo, branch, state) do
@@ -119,6 +148,39 @@ defmodule Fleet.Pilot.WorktreeSync do
           _ = GitOps.run(["-C", dir, "rebase", "--abort"], auth: false)
           {:error, {:rebase_conflict, branch, reason}}
       end
+    end
+  end
+
+  defp do_fetch_issue_refs(repo, issue_n, state) do
+    dir = Path.join(state.root, Fleet.Layout.project_name(repo))
+
+    cond do
+      not File.dir?(Path.join(dir, ".git")) ->
+        {:error, {:no_local_clone, dir}}
+
+      true ->
+        spec = "refs/heads/lcars/issue-#{issue_n}-*:refs/lcars/pr/#{issue_n}/*"
+
+        with :ok <- GitOps.run(["-C", dir, "fetch", "--force", "origin", spec], auth: true),
+             {:ok, out} <-
+               GitOps.read(
+                 [
+                   "-C",
+                   dir,
+                   "for-each-ref",
+                   "--format=%(refname)",
+                   "refs/lcars/pr/#{issue_n}/"
+                 ],
+                 auth: false
+               ) do
+          refs = out |> String.split("\n", trim: true)
+
+          Logger.info(
+            "WorktreeSync: #{repo}##{issue_n} → #{length(refs)} ref(s) readable in #{dir}"
+          )
+
+          {:ok, refs}
+        end
     end
   end
 

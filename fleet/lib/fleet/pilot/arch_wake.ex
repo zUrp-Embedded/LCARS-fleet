@@ -117,6 +117,60 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
+  # THE DELIVERABLE, MADE READABLE — or its absence, SAID. The architect's code face is a read-only
+  # bind, so its own `git fetch` dies on `.git/FETCH_HEAD`; measured from inside the pod, and what
+  # it cost was not the missing diff. It arbitrated anyway and invented an explanation for what it
+  # could not see ("an agent confabulated an authority"), because nothing in its mandate told it the
+  # deliverable was out of reach. A pod that does not know what it is missing fills the gap.
+  #
+  # So the fetch is host-side (serialized by `WorktreeSync`, which already owns one-git-at-a-time on
+  # that worktree) and the mandate states the OUTCOME either way. Best-effort by construction: an
+  # unreachable forge must not hold an escalation, and the arch can still arbitrate on the judges'
+  # reports — knowingly.
+  defp deliverable_section(repo, n) do
+    case fetch_refs().(repo, n) do
+      {:ok, []} ->
+        "\n\nLe livrable n'a AUCUNE branche sur la forge pour ce ticket : il n'y a rien à lire, " <>
+          "l'escalade porte sur autre chose que du code livré."
+
+      {:ok, refs} ->
+        dir = Path.join(Fleet.Layout.face_root("code"), Fleet.Layout.project_name(repo))
+
+        "\n\nLE LIVRABLE EST LISIBLE, va le voir avant d'arbitrer : les branches du ticket sont " <>
+          "dans ta face code (`#{dir}`) sous #{Enum.map_join(refs, ", ", &"`#{&1}`")}. " <>
+          "`git -C #{dir} diff main...<ref>` te donne le diff complet, `log --oneline` l'historique. " <>
+          "Les rapports des juges DÉCRIVENT le livrable ; ils ne sont pas le livrable."
+
+      {:error, reason} ->
+        Logger.warning(
+          "ArchWake: deliverable refs for #{repo}##{n} NOT fetched (#{inspect(reason)}) — " <>
+            "the mandate says so; the arch arbitrates knowing it, or defers"
+        )
+
+        "\n\n⚠ LE LIVRABLE N'A PAS PU ÊTRE RENDU LISIBLE (#{inspect(reason)}). Tu n'as donc que " <>
+          "les rapports des juges, qui décrivent un code que tu ne vois pas. DIS-LE dans ta réponse " <>
+          "plutôt que d'arbitrer comme si tu l'avais lu — un verdict rendu sur une description " <>
+          "présentée comme une lecture est le défaut que cette ligne existe pour éviter."
+    end
+  end
+
+  # Seam: the sync GenServer is a named singleton in prod, injectable in test.
+  #
+  # TOTAL BY OBLIGATION, like the readiness probes: this runs on the escalation path, which is the
+  # rail a human is waiting on. A dead or unstarted `WorktreeSync` must degrade into "the
+  # deliverable could not be made readable" — a sentence the mandate already knows how to carry —
+  # never into an exit that takes the escalation down with it. The rail that reports a problem is
+  # the last one allowed to fail because of its own instrument.
+  defp fetch_refs do
+    Application.get_env(:fleet_pilot, :arch_deliverable_fetch, &total_fetch/2)
+  end
+
+  defp total_fetch(repo, n) do
+    Fleet.Pilot.WorktreeSync.fetch_issue_refs(repo, n)
+  catch
+    :exit, reason -> {:error, {:sync_unavailable, reason}}
+  end
+
   # Aggregate multi-repo outcomes onto the historical single-atom contract (the poller's net
   # stamps its cooldown on any SENT signal).
   defp aggregate([outcome]), do: outcome
@@ -157,7 +211,8 @@ defmodule Fleet.Pilot.ArchWake do
           "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou " <>
           "corrige+re-délègue (`create_issue` avec `supersedes: #{n}` — la fleet retire l'ancien " <>
           "ticket elle-même ; sans ça il repart en dispatch après ton submit_result). " <>
-          "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente.",
+          "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente." <>
+          deliverable_section(repo, n),
       metadata: %{"awaits_arch" => true, "repo" => repo, "number" => n}
     }
 
