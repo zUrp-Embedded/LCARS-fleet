@@ -18,7 +18,13 @@ setup() {
   export FORGE_BASE_URL="http://forge.test"
 }
 
-teardown() { rm -rf "$TMP_BASE"; }
+teardown() {
+  # Les faux BEAM sont de VRAIS processus : sans ce reaping ils survivent au test (`sleep 300`)
+  # et le poste garde une trainee d'orphelins a chaque passage du gate.
+  [[ -n "${STUB_HARNESS_PID:-}" ]] && kill -9 -- "-$STUB_HARNESS_PID" 2>/dev/null
+  rm -rf "$TMP_BASE"
+  return 0
+}
 
 @test "maintenance override SURVIVES setup_env (LCARS_BOOT_PERMANENT_AT_START=false)" {
   run bash -c "export LCARS_BOOT_PERMANENT_AT_START=false; source '$SCRIPT'; setup_env; echo \"flag=\$LCARS_BOOT_PERMANENT_AT_START\""
@@ -206,7 +212,14 @@ make_tmux_stub() {
 # tmux stand-in for cmd_stop: -S <sock> <command> ...
 shift 2
 case "$1" in
-  has-session)      kill -0 "$(cat "$STUB_STATE/beam.pid" 2>/dev/null)" 2>/dev/null ;;
+  has-session)      # `kill -0` REUSSIT sur un zombie : entre la mort du faux beam et son reaping
+                    # par le `wait` du wrapper, il repondrait « session vivante » sur un processus
+                    # deja mort. L'etat dans /proc/<pid>/stat discrimine ; le champ est le premier
+                    # caractere apres la DERNIERE parenthese (un comm peut en contenir).
+                    _p="$(cat "$STUB_STATE/beam.pid" 2>/dev/null)"
+                    [[ -n "$_p" && -r "/proc/$_p/stat" ]] || exit 1
+                    _st="$(sed 's/.*) //' "/proc/$_p/stat" | cut -c1)"
+                    [[ "$_st" != "Z" ]] ;;
   display-message)  cat "$STUB_STATE/pane.pid" ;;
   kill-server)      touch "$STUB_STATE/kill-server-called"
                     kill -9 "$(cat "$STUB_STATE/beam.pid" 2>/dev/null)" 2>/dev/null || true ;;
@@ -216,12 +229,29 @@ STUB
   chmod +x "$TMP_BASE/stubs/tmux-stub"
 }
 
+# LE FAUX BEAM SE LANCE PAR ICI, ET IL Y A DEUX RAISONS A CA.
+#
+# (1) Les descripteurs. Un job d'arriere-plan HERITE la sortie du test, et bats lit cette sortie
+#     jusqu'a EOF : tant que le `sleep 300` vit, le harnais attend. Mesure : ce fichier prenait
+#     4 min 32 pour 2,7 s de test reel, et le temps ne s'imputait a AUCUN test — bats les
+#     chronometre, l'attente etait entre eux. `>/dev/null 2>&1` la supprime.
+# (2) La trainee, et elle est plus profonde qu'un pid. Le test du fallback lance un beam qui
+#     IGNORE TERM (`bash -c 'trap "" TERM; sleep 300'`) : le `kill -9` du stub tue ce bash et
+#     ORPHELINE son `sleep`, qu'aucun pid enregistre ne designe plus. D'ou `setsid` : le faux beam
+#     et toute sa descendance vivent dans leur propre groupe, et le teardown tue le GROUPE. Tuer
+#     des pid nommes ne ferme que les cas dont on a devine la forme.
+start_fake_beam() {
+  setsid bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; $1 & echo \$! > '$STUB_STATE/beam.pid'; wait" \
+    >/dev/null 2>&1 &
+  STUB_HARNESS_PID=$!
+  sleep 0.3
+}
+
 @test "nominal stop is GRACEFUL: SIGTERM reaches the beam, kill-server never fires" {
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
-  sleep 0.3
+  start_fake_beam "sleep 300"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=5; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
@@ -233,8 +263,7 @@ STUB
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; bash -c 'trap \"\" TERM; sleep 300' & echo \$! > '$STUB_STATE/beam.pid'; wait" &
-  sleep 0.3
+  start_fake_beam "bash -c 'trap \\\"\\\" TERM; sleep 300'"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=1; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
@@ -251,8 +280,7 @@ STUB
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; env -i LCARS_DEBUG_VISIBILITY=1 sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
-  sleep 0.3
+  start_fake_beam "env -i LCARS_DEBUG_VISIBILITY=1 sleep 300"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
   [ "$status" -eq 0 ]
@@ -263,8 +291,7 @@ STUB
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; env -i sleep 300 & echo \$! > '$STUB_STATE/beam.pid'; wait" &
-  sleep 0.3
+  start_fake_beam "env -i sleep 300"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
   [ "$status" -eq 0 ]
