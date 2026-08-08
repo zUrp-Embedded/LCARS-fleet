@@ -73,12 +73,36 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
     with :ok <- ensure_parent_dir(path),
          :ok <- rm_stale(path),
-         {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]) do
+         {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]),
+         :ok <- restrict(path, lsock) do
       # Monitored live Tasks back the per-pod ceiling.
       {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools, conns: %{}},
        {:continue, :accept}}
     else
       {:error, reason} -> {:stop, {:socket_init_failed, reason}}
+    end
+  end
+
+  # LA SOCKET EST UNE PORTE, SES PERMISSIONS EN SONT LA SERRURE.
+  #
+  # `:gen_tcp.listen` cree le noeud AF_UNIX au UMASK du processus : rien ne garantit qu'il soit
+  # ferme. C'etait la seule porte de la famille sans serrure posee ici — le socket de controle fait
+  # du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est en 0700, celle-ci s'en
+  # remettait aux permissions du home. Un home lisible par le groupe suffit alors a rendre la
+  # socket MCP d'un pod joignable par un autre humain de la boite, et cette socket EST le canal
+  # d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le fil).
+  #
+  # Fail-closed, comme son jumeau : une socket ouverte dont on n'a pas pu poser la serrure ne
+  # demarre pas, et on la referme au lieu de laisser une porte sans verrou derriere soi.
+  defp restrict(path, lsock) do
+    case File.chmod(path, 0o600) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        _ = :gen_tcp.close(lsock)
+        _ = File.rm(path)
+        {:error, {:chmod_failed, path, reason}}
     end
   end
 

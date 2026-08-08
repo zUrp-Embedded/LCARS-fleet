@@ -28,6 +28,8 @@ defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
 end
 
 defmodule Fleet.MCP.PodSocketTest do
+  import Bitwise
+
   @moduledoc """
   Pod-facing per-pod AF_UNIX transport (`Fleet.MCP.PodSocketAcceptor` /
   `Fleet.MCP.PodSocketSupervisor`) round-trip against the **real broker**
@@ -150,6 +152,24 @@ defmodule Fleet.MCP.PodSocketTest do
 
     assert :ok = PodSocketSupervisor.release_pod_socket(evil_pod)
     assert File.exists?(victim), "release must NOT erase a file outside base via `..`"
+  end
+
+  test "the socket is created 0600 — the door carries its own lock, whatever the umask" do
+    # `:gen_tcp.listen` creates the AF_UNIX node at the process UMASK, so nothing guarantees it is
+    # closed. This was the only door of its family with no lock set here: the control socket makes
+    # `chmod 0600` a readiness condition, the tmux sock-dir is 0700, this one leaned on the home's
+    # permissions. A group-readable home is then enough for one human's pod channel to be reachable
+    # by another — and that socket IS the pod's identity channel (`pod_id` is acceptor state, never
+    # read off the wire).
+    pod = uniq("perms")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    %File.Stat{mode: mode} = File.stat!(path)
+    perms = Bitwise.band(mode, 0o777)
+
+    assert perms == 0o600,
+           "socket mode 0#{Integer.to_string(perms, 8)} — group and other must not reach a pod's MCP channel"
   end
 
   test "release surfaces a socket-file removal failure (structured verdict, not a silent :ok)" do
