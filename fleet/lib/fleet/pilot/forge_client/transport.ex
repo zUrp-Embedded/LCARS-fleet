@@ -146,8 +146,9 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   #   par requete   `receive_timeout: 10_000` (cf. `request_raw/4`) — une reponse qui ne vient pas
   #                 coupe a 10 s, jamais plus.
   #   par boucle    le TOTAL annonce (`X-Total-Count`) : on s'arrete des qu'on le tient. Le nombre de
-  #                 tours est donc `ceil(total / @page_limit)`, pas `@max_pages`. Sur les 642 issues
-  #                 mesurees en prod : 13 tours, soit ~130 s sur une forge maximalement lente.
+  #                 tours est donc `ceil(total / @page_limit)`, pas `@max_pages` : un depot de 600
+  #                 issues fait 12 tours, soit ~120 s au pire (borne ARITHMETIQUE, pas une mesure —
+  #                 la taille reelle d'un depot varie et ce commentaire ne pretend pas la connaitre).
   #   deux gardes   une page VIDE termine quoi qu'annonce le total (une forge qui compte plus qu'elle
   #                 ne sert ne nous fait pas marcher) ; sans en-tete, l'heuristique `< @page_limit`
   #                 reprend la main.
