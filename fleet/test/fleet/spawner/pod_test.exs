@@ -2459,4 +2459,92 @@ defmodule Fleet.Spawner.PodTest do
     File.write!(Path.join(dir, "workspace_marker"), "stale")
     dir
   end
+
+  describe ":kill checkpoints the seed (the operator/watchdog path)" do
+    # RIEN N'AFFIRMAIT CA, ET LA DOCTRINE S'APPUIE DESSUS. Mesure du 2026-08-08 : retirer
+    # `maybe_checkpoint_seed/1` de la clause `:kill` laissait les 2426 tests VERTS. Or c'est
+    # precisement le fait qui distingue un kill d'une perte de travail — le watchdog de liveness
+    # passe par `kill_pod` → `:kill`, donc un pod tue pour silence garde sa graine et peut
+    # reprendre. Un commentaire de `pod.ex` a d'ailleurs affirme le contraire cette nuit, et c'est
+    # ce site-la qui l'a dementi : une ligne sur laquelle un raisonnement s'appuie et qu'aucun test
+    # ne tient est une ligne qu'une refonte supprime en toute bonne foi, sans un seul rouge.
+    @tag :tmp_dir
+    test "un pod TUE grave sa graine avant le teardown", %{tmp_dir: tmp} do
+      root = Path.join(tmp, "seedroot")
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-kill-seed-#{System.unique_integer([:positive])}"
+
+      # `:project_slug` EST la condition du checkpoint (`LaunchSpec.rc_project/2`), et c'est la
+      # raison exacte du trou : aucun test de ce corpus ne le passait, donc `maybe_checkpoint_seed/1`
+      # rendait `:ok` sans rien ecrire partout, et le retirer ne changeait rien nulle part.
+      args =
+        pod_id
+        |> build_args("issue-kill-seed")
+        |> Map.update!(:opts, &Keyword.put(&1, :project_slug, "kill-seed"))
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      info = GenServer.call(pid, :info)
+
+      # Un transcript VIVANT : sans jsonl le store rend `:none` sans rien ecrire, et le test
+      # passerait sur l'absence de fichier des deux cotes de la mutation — vert par vacuite.
+      jsonl_dir = Path.join([info.pod_dir, ".claude", "projects", "-home-x-kill-seed"])
+      File.mkdir_p!(jsonl_dir)
+
+      File.write!(
+        Path.join(jsonl_dir, "live-uuid.jsonl"),
+        ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n)
+      )
+
+      assert Path.wildcard(Path.join([root, "**", "*.jsonl"])) == [],
+             "aucune graine avant le kill — sinon l'assertion d'apres ne prouve rien"
+
+      assert :ok = GenServer.call(pid, :kill)
+
+      assert Path.wildcard(Path.join([root, "**", "*.jsonl"])) != [],
+             "le kill doit graver la graine : sans elle, un pod tue pour silence perd son travail"
+    end
+
+    # Le JUMEAU nominal, decouvert par la meme mesure : retirer le checkpoint de `:releasing` — la
+    # mort DELIBEREE, celle d'un pod qui a fini son travail — laissait le corpus vert lui aussi.
+    # Les trois morts sont maintenant tenues : subie (exit du Port), imposee (`:kill`), accomplie
+    # (`:releasing`).
+    @tag :tmp_dir
+    test "un pod qui TERMINE grave sa graine avant le teardown", %{tmp_dir: tmp} do
+      Process.flag(:trap_exit, true)
+      root = Path.join(tmp, "seedroot-release")
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-release-seed-#{System.unique_integer([:positive])}"
+
+      args =
+        pod_id
+        |> build_args("issue-release-seed")
+        |> Map.update!(:opts, &Keyword.put(&1, :project_slug, "release-seed"))
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      info = GenServer.call(pid, :info)
+      jsonl_dir = Path.join([info.pod_dir, ".claude", "projects", "-home-x-release-seed"])
+      File.mkdir_p!(jsonl_dir)
+
+      File.write!(
+        Path.join(jsonl_dir, "live-uuid.jsonl"),
+        ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n)
+      )
+
+      assert Path.wildcard(Path.join([root, "**", "*.jsonl"])) == []
+
+      submit_result_event(pod_id, %{"answer" => "fini"})
+      assert_receive {:EXIT, ^pid, :normal}, 2_000
+
+      assert Path.wildcard(Path.join([root, "**", "*.jsonl"])) != [],
+             "une fin nominale doit graver la graine : c'est elle qui porte le setup du pod"
+    end
+  end
 end
