@@ -119,6 +119,30 @@ defmodule Fleet.Workflow.LoaderV25Test do
     end
   end
 
+  test "every step field WITHOUT a runtime reader says so in the schema" do
+    # Le mur, et il tient en une phrase : un champ que personne ne lit doit le DIRE la ou un auteur
+    # de carte le rencontre. `outputs` portait la note depuis 2026-08-05, `inputs` ne l'avait pas —
+    # et une declaration sans lecteur qui ne dit pas qu'elle n'en a pas se lit comme un contrat.
+    #
+    # Ce test verrouille la paire mesuree ce jour-la. Il ne pretend pas decouvrir les futurs : c'est
+    # le RATISSAGE (lecteur/producteur par champ) qui trouve, ce test qui empeche de perdre.
+    schema =
+      Path.join([:code.priv_dir(:lcars_fleet), "workflow", "schema", "workflow-map-v2.5.json"])
+      |> File.read!()
+      |> JSON.decode!()
+
+    step =
+      schema["properties"]["spec"]["properties"]["steps"]["patternProperties"][
+        "^[a-zA-Z0-9_-]+$"
+      ]["properties"]
+
+    for field <- ~w(inputs outputs) do
+      assert step[field]["description"] =~ "DOCUMENTAIRE",
+             "#{field} n'a aucun lecteur runtime et le schema ne le dit pas — un auteur de carte " <>
+               "le lira comme un contrat"
+    end
+  end
+
   @tag :tmp_dir
   test "a step key that means NOTHING is REFUSED, not silently accepted", %{tmp_dir: dir} do
     # `decisions` was declared by the schema and had neither a producer nor a consumer: no canon

@@ -117,7 +117,8 @@
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
+                  },
+                  "description": "DOCUMENTAIRE — aucun lecteur runtime (mesure 2026-08-08 : zero occurrence de step[\"inputs\"] dans lib/ et test/). Declare a un humain d'ou l'etape tire sa matiere (ticket.body, un livrable precedent, un chemin). Le systeme ne verifie PAS ces sources et n'en resout aucune : ce qu'une etape recoit vient de son work-item et de son brief, jamais de ce champ. Son jumeau `outputs` porte la meme note depuis 2026-08-05 ; celui-ci ne l'avait pas, et une declaration sans lecteur qui ne dit pas qu'elle n'en a pas se lit comme un contrat."
                 },
                 "outputs": {
                   "description": "DOCUMENTAIRE — aucun lecteur runtime (mesure 2026-08-05 : zero occurrence de step[\"outputs\"] dans lib/). Declare ce que l'etape doit produire, a l'usage d'un humain qui lit la carte. Le systeme ne verifie PAS ces chemins, et ne resout aucun gabarit ({date} et consorts ne sont interpretes par rien). Une porte qui veut attester une production lit aujourd'hui un fait AUTO-DECLARE par le pod (cf. audit-only.yaml, 'audit_doc_exists') — la declaration et la verification sont deconnectees.",
