@@ -77,6 +77,22 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     %{monitor: monitor}
   end
 
+  # Attente BORNEE d'un fichier non vide. Pas de `:sys.get_state` ici : le test qui s'en sert fait
+  # exploser le consommateur a dessein, et interroger un process mort n'est pas une mesure.
+  defp wait_for_file(path, budget_ms, waited \\ 0) do
+    cond do
+      File.exists?(path) and File.read!(path) != "" ->
+        true
+
+      waited >= budget_ms ->
+        false
+
+      true ->
+        Process.sleep(25)
+        wait_for_file(path, budget_ms, waited + 25)
+    end
+  end
+
   defp wait_drift_monitor_drain do
     # Sync GenServer flush — ensures all previous handle_info messages
     # are consumed before the assertion.
@@ -258,6 +274,45 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "audit.verdict event" do
+    test "un verdict ACCEPTE laisse une trace DURABLE, et elle est ecrite AVANT le routage",
+         %{tmp_dir: tmp_dir} do
+      log_path = Path.join(tmp_dir, "drift-monitor-test.jsonl")
+      # SEULS LES VERDICTS REFUSES ETAIENT TRACES. La branche `{:error, reason}` de
+      # `dispatch_audit_verdict/2` ecrit dans l'audit log depuis toujours ; la branche `{:ok, _}`
+      # routait sans rien graver. Un verdict accepte ne laissait donc qu'un broadcast sur le Bus —
+      # le fast-path LOSSY par doctrine — et le backend peut ne rien faire sans le dire
+      # (`NotWiredYet` rend `:ok` en silence). L'audit ne gardait que les refus.
+      #
+      # Le backend LEVE ici, comme dans le test d'ordre de `Cat5Escalator` : c'est le seul montage
+      # qui distingue « ecrit » de « ecrit AVANT ». Avec un stub qui rend `:ok`, l'ordre est
+      # inobservable et le test passerait dans les deux sens.
+      Application.put_env(:fleet_starfleet, :coord_backend, Fleet.Starfleet.CoordBackendRaising)
+      json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
+
+      # Le DriftMonitor est un GenServer : le backend qui leve le TUE. C'est le mode de panne
+      # lui-meme, pas un artefact du test — et il interdit `wait_drift_monitor_drain/0`, qui
+      # interroge un process mort. On attend donc la TRACE, bornee, ce qui est de toute facon la
+      # seule chose que ce test affirme.
+      Process.flag(:trap_exit, true)
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => json}, source: :workflow)
+
+      assert wait_for_file(log_path, 2_000),
+             "le routage a explose et la trace a disparu avec lui — c'est exactement ce que " <>
+               "l'ordre existe pour empecher"
+
+      entry =
+        log_path
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> List.last()
+        |> JSON.decode!()
+
+      assert entry["source"] == "audit_verdict"
+      assert entry["action"] == "coord_decision"
+      assert entry["decision"] == "halt"
+      assert entry["reason"] == "gatekeeper-said"
+    end
+
     test "source :workflow + valid decision_json → CoordBackend.handle_decision invoked" do
       json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
 

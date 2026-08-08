@@ -1,17 +1,3 @@
-defmodule Fleet.Starfleet.CoordBackendRaising do
-  @moduledoc false
-  # Un backend de coordination qui EXPLOSE. Il n'existe que pour tenir l'ORDRE : c'est le seul
-  # moyen de distinguer « l'audit est ecrit » de « l'audit est ecrit AVANT le routage », et
-  # l'inversion des deux laissait 2438 tests verts.
-  @behaviour Fleet.Starfleet.CoordBackend
-
-  @impl true
-  def handle_decision(_decision, _correlation_id), do: raise("coord backend down")
-
-  @impl true
-  def handle_escalation(_source, _payload, _correlation_id), do: raise("coord backend down")
-end
-
 defmodule Fleet.Starfleet.Cat5EscalatorTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir

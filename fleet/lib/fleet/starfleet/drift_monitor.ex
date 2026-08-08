@@ -55,6 +55,27 @@ defmodule Fleet.Starfleet.DriftMonitor do
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
+        # LA MEME REGLE QUE POUR L'ESCALADE, ET ELLE MANQUAIT ICI. Doctrine D1 : la trace durable
+        # est l'audit log, ecrit AVANT le routage. `Cat5Escalator` le fait ; ce chemin-ci ne
+        # l'ecrivait que sur un verdict REFUSE (voir la branche `{:error, reason}` plus bas), donc
+        # les seules decisions durablement tracees etaient celles qu'on avait rejetees.
+        #
+        # Ce qu'un verdict ACCEPTE laissait : un broadcast sur le Bus, qui est le fast-path LOSSY
+        # par doctrine. Et le backend peut ne rien faire du tout sans le dire — `NotWiredYet` rend
+        # `:ok` en silence. Un verdict route n'etait donc pas « visible en aval » : il pouvait
+        # n'etre visible nulle part.
+        #
+        # AVANT le routage, pas apres : un backend qui leve emporterait la trace avec lui, ce qui
+        # est exactement le trou ferme du cote escalade.
+        _ =
+          AuditLog.write(%{
+            "source" => "audit_verdict",
+            "decision" => decision.decision,
+            "reason" => decision.reason,
+            "action" => "coord_decision",
+            "correlation_id" => correlation_id
+          })
+
         case CoordBackend.resolved().handle_decision(decision, correlation_id) do
           :ok -> :ok
           {:error, why} -> Logger.warning("DriftMonitor: verdict NOT routed (#{inspect(why)})")
