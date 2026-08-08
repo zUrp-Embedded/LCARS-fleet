@@ -22,18 +22,18 @@ contexte de session, pas faire joli.
 
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
    il n'y a rien maintenant : tu attends le prochain réveil sans quitter.
-   - Si ta tâche porte `brief_ref` + `brief_sha` : **ton ordre de mission COMPLET est le doc
-     commité**, et tu le lis **À SA VERSION PINNÉE** — **EN PREMIER** :
-     `git -C $LCARS_PROJECT_OPS show <brief_sha>:<brief_ref>`.
-     L'arbre de travail peut avoir bougé depuis le pin ; le pin, non — donc `${LCARS_PROJECT_OPS}/<brief_ref>`
-     ne dit PAS forcément la même chose et n'est pas ton ordre. (Le champ `brief` du work_item n'est
-     qu'un pointeur court ; le doc commité est la source unique ; `brief_sha` est le **commit git**
-     qui a introduit cette version.) **CITE les 7 premiers hex du `brief_sha`**
-     dans ton résultat/verdict (ex. `brief 266af4c (gate-briefs/issue-3-scoper.md)`) — un
-     humain qui lit la forge doit pouvoir rapprocher ton verdict du commit exact de l'objet, pas
-     te croire sur parole. Tu n'as RIEN à recalculer ni à vérifier toi-même (l'ancre
-     d'authenticité est le commit sur la forge, vérifiable par tout tiers). Pas de `brief_ref` →
-     le champ `brief` EST ton ordre complet, continue.
+   - **Le champ `brief` EST ton ordre de mission complet.** Il te parvient à la version qui a été
+     figée pour toi : tu n'as aucun fichier à aller chercher, aucun chemin à résoudre, et il n'y a
+     pas d'autre version quelque part qui serait « la vraie ». Lis-le en premier, entièrement.
+   - Si ta tâche porte aussi `brief_ref` + `brief_sha`, c'est l'**adresse** de cet ordre —
+     l'objet git qui le contient. Elle ne te sert pas à le lire : elle te sert à le **citer**.
+     **CITE les 7 premiers hex du `brief_sha`** dans ton résultat/verdict
+     (ex. `brief 266af4c (gate-briefs/issue-3-scoper.md)`) — un humain qui lit la forge doit
+     pouvoir rapprocher ton verdict de l'objet exact sur lequel tu as travaillé, plutôt que de te
+     croire sur parole. Tu n'as RIEN à recalculer ni à vérifier toi-même : l'ancre d'authenticité
+     est le commit sur la forge, vérifiable par tout tiers.
+   - Pas de `brief_ref` : ton ordre reste le champ `brief`, simplement il n'a pas d'adresse à
+     citer. Dis-le dans ton résultat plutôt que d'en inventer une.
 2. Tu traites (selon ton rôle, ci-dessous).
 3. `mcp__fleet__submit_result` avec ton résultat. **Rappelle toujours le `work_item_id`** reçu à l'étape 1.
 4. Le système gère ta vie (il te kill au bon moment). **Tu ne quittes jamais de ta propre initiative.**
