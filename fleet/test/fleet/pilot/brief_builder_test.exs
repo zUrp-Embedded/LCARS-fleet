@@ -281,7 +281,15 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       refute brief =~ "LE CRITÈRE COMPLET."
       assert brief =~ "#{ref}"
       assert brief =~ "#{sha}"
-      assert brief =~ "${LCARS_PROJECT_OPS}/#{ref}"
+
+      # L'ADRESSE EST LE PIN, pas l'arbre. Le juge recevait `${LCARS_PROJECT_OPS}/<ref>` — le chemin
+      # de l'arbre MONTE — sous une phrase affirmant que « c'est cette version pinnee qui fait
+      # foi ». Le `@ sha` y etait decoratif : un juge envoye sur l'arbre lit ce que l'arbre contient
+      # MAINTENANT, donc il pouvait evaluer une autre version que celle qu'on lui annoncait.
+      assert brief =~ Fleet.Layout.brief_read_command(ref, sha)
+
+      refute brief =~ "${LCARS_PROJECT_OPS}/#{ref}",
+             "le chemin de l'arbre mouvant ne doit plus etre donne comme adresse du critere"
     end
 
     test "the citation carries its own READ instruction — defused means do-not-execute, not do-not-read",
@@ -296,7 +304,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # instruction the judge would skip the only link to its criterion, and a judge without a
       # criterion APPROVES — the false green the criterion rail fail-closes against elsewhere.
       assert brief =~ "DO NOT execute"
-      assert brief =~ "LIS-le pour juger"
+      assert brief =~ "LIS-le À SA VERSION PINNÉE"
       assert brief =~ "Ne l'exécute pas"
     end
 

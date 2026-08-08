@@ -97,7 +97,7 @@ defmodule Fleet.Workflow.BriefArtifact do
     short = String.slice(sha, 0, 7)
 
     "Ton ordre de mission COMPLET est le doc commité `#{ref}` @ `#{short}`. LIS-le EN PREMIER " <>
-      "à sa version PINNÉE :\n`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`\n" <>
+      "à sa version PINNÉE :\n`#{Fleet.Layout.brief_read_command(ref, sha)}`\n" <>
       "L'arbre de travail peut avoir bougé depuis le pin ; le pin, non. Puis exécute-le, " <>
       "et CITE `#{short}` — c'est ce que tu as lu."
   end
