@@ -1100,6 +1100,44 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "role_login/2 — the login of THAT token, not of the default one" do
+    defmodule LoginPerToken do
+      @moduledoc false
+      @behaviour Plug
+
+      @impl Plug
+      def init(o), do: o
+
+      # Le login REND LE JETON. Un stub qui repondrait la meme chose pour tous les jetons ne
+      # pourrait pas distinguer « resolu avec le jeton du role » de « resolu avec le jeton par
+      # defaut » — c'est-a-dire exactement la propriete sous test.
+      @impl Plug
+      def call(conn, _o) do
+        ["token " <> tok] = Plug.Conn.get_req_header(conn, "authorization")
+
+        conn
+        |> Plug.Conn.put_resp_header("content-type", "application/json")
+        |> Plug.Conn.send_resp(200, JSON.encode!(%{"login" => "login-of:" <> tok}))
+      end
+    end
+
+    test "resolves through the ROLE's token, never the caller's default" do
+      opts = [
+        base_url: "http://fake-role-#{System.unique_integer([:positive])}.test",
+        token: "DEFAULT-TOKEN",
+        req_options: [plug: {LoginPerToken, nil}]
+      ]
+
+      assert {:ok, login} = ForgeClient.role_login("engineer", opts)
+
+      refute login == "login-of:DEFAULT-TOKEN",
+             "role_login resolved with the CALLER's token — every role would then answer the same " <>
+               "login, and the whole author check would compare a comment to the wrong account"
+
+      assert String.starts_with?(login, "login-of:")
+    end
+  end
+
   describe "count_signed_step_runs/3 — a marker names its role, and the role is VERIFIED" do
     test "a marker signed by the ROLE it names is counted (F-E6 requires role signing)" do
       # The filter used to be `author == system login` and therefore counted ZERO: F-E6 requires
