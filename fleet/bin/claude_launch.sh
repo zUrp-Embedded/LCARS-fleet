@@ -112,6 +112,9 @@ esac
 # =============================================================
 dbg() { echo "[$(date -u +%H:%M:%S.%3N)] $*" >> "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true; }
 : > "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true
+# Entries in a comma-joined list, 0 on empty — so a trace can report a SIZE where printing the
+# content would tell the agent what it is allowed and denied.
+_count_csv() { [[ -z "$1" ]] && echo 0 || { local IFS=','; local -a a=($1); echo "${#a[@]}"; }; }
 dbg "start ROLE=$ROLE POD_ID=$POD_ID POD_DIR=$POD_DIR session=$SESSION_ID resume=$POD_RESUME prefix=$SESSION_NAME_PREFIX PWD=$(pwd) HOME=${HOME:-} USER=$(id -un 2>/dev/null||echo ?)"
 dbg "auth claudeDir bind: $([ -f "$HOME/.claude/.credentials.json" ] && echo 'creds present' || echo 'MISSING')"
 
@@ -223,7 +226,14 @@ DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_
 # proceed?") → headless hang. Role-specific MCP tools (the arch's create_*/get_issue_status) stay in the
 # cap-profile.
 ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}mcp__fleet__get_work_item,mcp__fleet__submit_result"
-dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
+# COUNTS, NEVER THE LISTS. This trace lives inside the sandbox — `claude_launch.sh` is exec'd by
+# bwrap, so every path it can write is a path the agent can read, and there is no "somewhere else"
+# to move the file to. What the file may NOT do is hand the confined agent the enumeration of its
+# own confinement: an agent that reads its allow/deny table stops guessing what it may do and
+# starts reading what it may not, which is the one thing nobody asked it to think about.
+# The diagnostic value is preserved — "did jq read them, are they non-empty" is what a silent-exit
+# post-mortem asks, and a count answers it.
+dbg "step jq tools OK ($(_count_csv "$ALLOWED_TOOLS") allowed, $(_count_csv "$DISALLOWED_TOOLS") disallowed)"
 
 # Permission mode (#kill-yolo): env override (host), else `cap-profile.spec.invocation.permission_mode`,
 # default "default" (→ `--permission-mode default`, lists ENFORCED; no more --dangerously-skip bypassing
