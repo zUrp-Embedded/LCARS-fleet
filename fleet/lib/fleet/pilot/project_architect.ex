@@ -18,12 +18,12 @@ defmodule Fleet.Pilot.ProjectArchitect do
       here, with the human, at the terminal — which is the bulk of what actually happens — and a
       scribe enriches it through the ordinary pipeline.
 
-      ⚠ NOTHING PUSHES THIS FACE TODAY, and the arch's SP says so in those words. Every push in the
-      runtime targets a producer's feature branch, `work/ops`, or the one-time creation at onboard;
-      the pod has neither a forge write tool nor a git identity of its own. So a commit here stays
-      in the box. That is a state under arbitration, not a rail that catches up — and until it is
-      settled, the honest thing is that the pod is told, because a pod that believes it published
-      is the failure this whole evening was spent closing;
+      A DRAFT SPACE, AND DELIBERATELY SO (user arbitration): nothing pushes this face on its own,
+      and nothing written here enters the project as-is. What the human and the arch produce
+      together is MATTER, not a deliverable — a scribe ticket carries it through the ordinary
+      pipeline, judged and sealed like any other, even when the pass is only an eval. The pod is
+      told this in its own words, because a pod that believes it published fills the gap the same
+      way one that cannot see its deliverable does;
     * `/home/projects.work/<name>` **RO** — the record: briefs, verdicts, provenance. The arch is
       the ONLY pod that mounts it, and reading it is its function — following the work and
       reporting it to the human. **Read-only, and the mode is the point**: it is the party being

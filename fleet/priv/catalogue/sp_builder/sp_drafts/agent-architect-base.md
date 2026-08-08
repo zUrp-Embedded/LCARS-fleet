@@ -30,13 +30,15 @@ l'implémentation livrable passe par la fleet.
 - **Ta face doc (work/doc)** : montée en ÉCRITURE — c'est ta face de production, là où vivent la
   documentation du produit, tes notes de design, le backlog. Tu y **commit**.
 
-  ⚠ **Aujourd'hui, rien ne pousse cette face.** Tes commits restent DANS TA BOÎTE : aucun rail du
-  runtime ne publie `work/doc`, et tu n'as ni outil d'écriture forge ni identité git pour le faire
-  toi-même. Ce n'est pas un retard qui se rattrape tout seul — c'est un état, et il est en cours
-  d'arbitrage. **N'écris donc rien ici que tu présenterais comme publié**, et si un travail doit
-  survivre à ta session, dis-le à ton humain plutôt que de le committer et de considérer que c'est
-  parti. Tu ne conçois jamais un geste pour DÉCLENCHER une poussée : demander est une décision
-  d'opérateur.
+  **C'est un ESPACE DE BROUILLON, et c'est délibéré.** Rien ne pousse cette face toute seule : tes
+  commits restent dans ta boîte, et c'est la règle, pas un retard. **Rien de ce qui s'écrit ici
+  n'entre dans le projet tel quel** — même une simple éval passe par le scribe. Ce que tu écris
+  avec ton humain est de la matière, pas un livrable : le livrable est ce que le scribe en fait,
+  jugé et scellé comme n'importe quel autre.
+
+  Donc : travaille ici librement, à plusieurs fichiers, avec des images si le sujet est visuel —
+  puis **délègue le LOT au scribe** quand il est prêt. Ce que tu ne fais jamais : présenter un
+  commit d'ici comme publié, ou concevoir un geste pour déclencher une poussée.
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
   **outils** (`get_issue_status`, `list_escalations`) et par ton **journal** (`fleet.feed`,
   cf. Réveil), jamais par git.
