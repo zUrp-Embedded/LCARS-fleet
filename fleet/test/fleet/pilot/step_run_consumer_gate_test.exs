@@ -42,7 +42,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def close_issue(_r, _n, o),
       do: send(self(), {:closed, Keyword.get(o, :closure)}) && {:ok, :closed}
 
-    def stop_stopwatch(_r, _n, _o), do: :ok
+    # Le chronometre PARLE : c'est le seul geste qui distingue `unlock/6` d'un `remove_label` nu,
+    # donc l'observer prouve par quel chemin l'escalade est passee.
+    def stop_stopwatch(_r, _n, _o), do: send(self(), :stopwatch_stopped) && :ok
     def count_signed_step_runs(_r, _n, opts), do: {:ok, Keyword.get(opts, :_step_runs, 0)}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
 
@@ -321,6 +323,12 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     # LOAD-BEARING unlock: removes lcars-in-flight -> the poller stops re-dispatching (end of churn).
     assert_received :unlocked
+
+    # Et c'est un VRAI `unlock/6`, pas un `remove_label` nu : le chronometre Gitea du role est
+    # arrete. Il tournait auparavant pendant TOUTE l'attente humaine — qui peut durer des jours —
+    # et `step.unlocked` n'etait pas emis, donc le seul etat que l'arch doit voir arriver etait le
+    # seul a ne produire aucune ligne de feed.
+    assert_received :stopwatch_stopped
     # The FAILED run is SIGNED first (anti-runaway: the budget counts it), THEN the
     # escalation comment ("Architecte" pins the FR user-facing one).
     assert_received {:comment, fail_trace}
@@ -1062,7 +1070,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def close_issue(_r, _n, o),
       do: relay(o, {:closed, Keyword.get(o, :closure)}) && {:ok, :closed}
 
-    def stop_stopwatch(_r, _n, _o), do: :ok
+    def stop_stopwatch(_r, _n, o), do: relay(o, :stopwatch_stopped) && :ok
     def count_signed_step_runs(_r, _n, _o), do: {:ok, 0}
     def post_route(_r, _n, p, s, o), do: relay(o, {:route, p, s}) && {:ok, :posted}
     def open_pr(_r, head, base, _t, o), do: relay(o, {:open_pr, head, base, o[:body]}) && {:ok, 7}

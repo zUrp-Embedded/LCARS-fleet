@@ -254,7 +254,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
          {:ok, _} <- forge.post_comment(repo, n, body, comment_opts),
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
-         {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
+         # UNLOCK, pas un `remove_label`. Ce chemin retirait `lcars-in-flight` EN LIGNE, donc il
+         # sautait les deux autres gestes de `unlock/6` : le chronometre Gitea du role n'etait
+         # jamais arrete — il tournait pendant TOUTE l'attente humaine, qui peut durer des jours —
+         # et `step.unlocked` n'etait jamais emis, donc une escalade ne laissait AUCUNE ligne de
+         # feed. Le seul etat que l'arch doit voir arriver etait le seul a n'en produire aucune.
+         {:ok, _} <- unlock(forge, repo, n, forge_opts, role, :awaiting_arch) do
       Logger.info(
         "StepRunCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
       )
