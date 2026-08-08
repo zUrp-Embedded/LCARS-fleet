@@ -1100,6 +1100,38 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "permanent HTTP failures are NAMED, and the tuple shape is untouched" do
+    test "423 says it is permanent, 500 says nothing extra" do
+      # 423 is declared by 31 contract operations and 412 by 3; nothing distinguished them from a
+      # 500. An ARCHIVED repo answers 423 forever, so a poller re-dispatching every tick reproduces
+      # the same failure indefinitely with nothing saying no tick will fix it.
+      locked = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42"} => {423, %{"message" => "archived"}}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 423, _}} =
+                   ForgeClient.get_issue("fleet/lcars", 42, opts(locked))
+        end)
+
+      assert log =~ "PERMANENTE"
+      assert log =~ "verrouille"
+
+      boom = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42"} => {500, %{"message" => "boom"}}
+      }
+
+      log500 =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 500, _}} =
+                   ForgeClient.get_issue("fleet/lcars", 42, opts(boom))
+        end)
+
+      refute log500 =~ "PERMANENTE"
+    end
+  end
+
   describe "role_login/2 — the login of THAT token, not of the default one" do
     defmodule LoginPerToken do
       @moduledoc false

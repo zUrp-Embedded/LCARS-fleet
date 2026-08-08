@@ -252,11 +252,38 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   # heuristique (cf. `do_paginate/5`).
   defp request(config, method, path, body) do
     case request_raw(config, method, path, body) do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 -> {:ok, body}
-      {:ok, %Req.Response{status: status, body: body}} -> {:error, {:http, status, body}}
-      {:error, exception} -> {:error, {:transport, exception}}
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        _ = name_permanent(status, method, path, body)
+        {:error, {:http, status, body}}
+
+      {:error, exception} ->
+        {:error, {:transport, exception}}
     end
   end
+
+  # DEUX ECHECS QUI NE REVIENDRONT PAS, ET QUI PORTAIENT LE VISAGE D'UN ECHEC PASSAGER.
+  #
+  # `423` est declare par 31 operations du contrat, `412` par 3, et rien dans ce depot ne les
+  # distinguait d'un `500` : tous ressortaient en `{:http, status, body}`. Or un depot ARCHIVE ou une
+  # conversation VERROUILLEE rend 423 a chaque tentative, pour toujours — un poller qui re-dispatche
+  # a chaque tour produit alors la meme panne indefiniment, sans que rien ne dise qu'aucun tour ne la
+  # resoudra.
+  #
+  # La FORME du retour ne change pas, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
+  # un tuple different ferait tomber ces deux codes dans leurs catch-all — en silence, c'est-a-dire
+  # exactement le contraire du but. Ce qui manquait n'etait pas un type, c'etait de le DIRE.
+  defp name_permanent(status, method, path, body) when status in [412, 423] do
+    Logger.warning(
+      "Transport: #{method} #{path} -> HTTP #{status} " <>
+        "(#{if status == 423, do: "verrouille", else: "precondition non tenue"}) — condition " <>
+        "PERMANENTE, aucun nouvel essai ne la levera : #{inspect(body)}"
+    )
+  end
+
+  defp name_permanent(_status, _method, _path, _body), do: :ok
 
   # Le total annonce, ou `nil` s'il ne l'est pas. `nil` n'est PAS zero : il veut dire « non dit »,
   # et la pagination retombe alors sur son heuristique en le sachant.
