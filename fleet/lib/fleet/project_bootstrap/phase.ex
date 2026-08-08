@@ -292,12 +292,21 @@ defmodule Fleet.ProjectBootstrap.Phase do
         sha when is_binary(sha) and sha != "" ->
           # pin_base_sha REUSED (reset --hard sha + targeted fetch as fallback if the base has advanced).
           # clean + checkout bounded via Shell.git (no bare `System.cmd git`; bare env, local).
-          # `sanitize_workspace` LAST and NON-optional (BL-6-16): `reset --hard` rebuilds the
-          # index from the tree-object — the CE_SKIP_WORKTREE bits are ERASED and every tracked
-          # victim (.claude/, nested CLAUDE.md) is RESTORED; `clean -fdx` only clears the
-          # UNtracked. Without this call a pipe pod gets the hostile material back on its 2nd
-          # ticket. FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on
-          # hostile material; the wedge is visible (reprovision FAILED log), the poison is not.
+          # `sanitize_workspace` LAST and NON-optional (BL-6-16) — but NOT for the reason this
+          # comment used to give. It claimed `reset --hard` erases the CE_SKIP_WORKTREE bits and
+          # restores every tracked victim. MEASURED, git 2.x: the bit SURVIVES `reset --hard`,
+          # `checkout -B` and `clean -fdx`, and the victim stays absent through all three. Remove
+          # the bit and `reset --hard` does restore the file — so what protects ticket N+1 is the
+          # bit set at CLONE time, not a re-sanitisation.
+          #
+          # What this call actually catches is the case the old reason hid: a `.claude/` or nested
+          # `CLAUDE.md` that enters the BASE BETWEEN two tickets. It did not exist at clone, so no
+          # bit was set for it; the re-brief pins a new `base_sha` and brings it in. Only a sanitise
+          # HERE sees it. The target repo is the parking lot — it gains files between tickets, and
+          # that is precisely when nobody is looking.
+          #
+          # FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on hostile
+          # material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
                {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-

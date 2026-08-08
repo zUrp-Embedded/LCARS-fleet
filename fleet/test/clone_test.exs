@@ -40,6 +40,124 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     }
   end
 
+  describe "reset_in_place/3 — the SECOND ticket of a resident pod" do
+    # NOTHING TESTED THIS FUNCTION. It is the whole cleaning path of a slot-freeze pod between two
+    # tickets, and its own comment carries the scar it exists for: `sanitize_workspace` is "LAST and
+    # NON-optional (BL-6-16)" because `reset --hard` rebuilds the index from the tree object, which
+    # ERASES the skip-worktree bits and RESTORES every tracked victim — "without this call a pipe pod
+    # gets the hostile material back on its 2nd ticket".
+    #
+    # A scar written in a comment and held by nothing is removed by the next refactor. The audit
+    # reported a `__pycache__` surviving and inferred "the workspace is not cleaned between cycles";
+    # the cleaning is there. What was missing is the proof that it stays.
+    setup %{tmp_dir: tmp} do
+      src = Path.join(tmp, "src")
+      make_source_repo(src)
+      {sha, 0} = git(["rev-parse", "HEAD"], src)
+      base = String.trim(sha)
+
+      pod_dir = Path.join(tmp, "pod")
+      profile = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => base})
+      {:ok, ws, _f} = Clone.clone_or_skip(pod_dir, profile, slug: "issue-1")
+
+      %{ws: ws, pod_dir: pod_dir, profile: profile}
+    end
+
+    test "an IGNORED leftover from the previous ticket is gone — `clean -fdx`, not `-fd`", %{
+      ws: ws,
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      # The audit's own observation: `__pycache__/`, gitignored, left by the pod's harness. `-x` is
+      # what removes it; `clean -fd` alone would leave every ignored artifact of ticket N inside
+      # ticket N+1, and a build directory from another brief is material nobody handed the pod.
+      File.write!(Path.join(ws, ".gitignore"), "__pycache__/\n")
+      File.mkdir_p!(Path.join(ws, "__pycache__"))
+      File.write!(Path.join([ws, "__pycache__", "stale.pyc"]), "from ticket 1\n")
+      File.write!(Path.join(ws, "scratch.txt"), "untracked too\n")
+
+      assert {:ok, ^ws, "feature/issue-2"} =
+               Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+
+      refute File.exists?(Path.join(ws, "__pycache__"))
+      refute File.exists?(Path.join(ws, "scratch.txt"))
+    end
+
+    test "the previous ticket's COMMITS are gone — the branch is recreated from the base", %{
+      ws: ws,
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      # Without the reset onto `base_sha`, ticket N+1 would start on top of ticket N's delivery and
+      # its PR would carry both — a deliverable nobody scoped, judged as one.
+      File.write!(Path.join(ws, "delivered.txt"), "ticket 1's work\n")
+      {_, 0} = git(["add", "-A"], ws)
+
+      {_, 0} =
+        git(["-c", "user.email=t@lcars.local", "-c", "user.name=t", "commit", "-qm", "t1"], ws)
+
+      assert {:ok, ^ws, "feature/issue-2"} =
+               Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+
+      refute File.exists?(Path.join(ws, "delivered.txt"))
+      {branch, 0} = git(["rev-parse", "--abbrev-ref", "HEAD"], ws)
+      assert String.trim(branch) == "feature/issue-2"
+    end
+
+    @tag :tmp_dir
+    test "a `.claude/` tracked IN THE BASE is neutralised again at every re-brief — the BL-6-16 scar",
+         %{tmp_dir: tmp} do
+      # THE ONE THE COMMENT WARNS ABOUT, and my first attempt at it proved a NEIGHBOURING property:
+      # committing the `.claude/` in the workspace puts it AFTER the base, so `reset --hard` alone
+      # removes it and the sanitiser is never exercised. Measured — dropping `sanitize_workspace`
+      # from the reset left that version green.
+      #
+      # The scar is a `.claude/` tracked in the TARGET REPO, therefore present in the base tree.
+      # `reset --hard` rebuilds the index from that tree, which ERASES the skip-worktree bits and
+      # RESTORES the hostile material. Sanitising once at clone is not enough: a pipe pod would read
+      # the parking-lot's directives on its second ticket.
+      # Ticket 1: a clean base. Nothing to sanitise, so NO skip-worktree bit is set for a file
+      # that does not exist yet.
+      src = Path.join(tmp, "hostile-src")
+      make_source_repo(src)
+      {sha1, 0} = git(["rev-parse", "HEAD"], src)
+
+      pod_dir = Path.join(tmp, "hostile-pod")
+      p1 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha1)})
+      {:ok, ws, _} = Clone.clone_or_skip(pod_dir, p1, slug: "issue-1")
+
+      # BETWEEN the two tickets, the target repo gains instruction-tier material. This is the
+      # parking lot: it moves while nobody is looking at it.
+      File.mkdir_p!(Path.join(src, ".claude"))
+      File.write!(Path.join([src, ".claude", "settings.json"]), ~s({"hostile": true}))
+      {_, 0} = git(["add", "-A", "-f"], src)
+
+      {_, 0} =
+        git(
+          ["-c", "user.email=t@lcars.local", "-c", "user.name=t", "commit", "-qm", "claude"],
+          src
+        )
+
+      {sha2, 0} = git(["rev-parse", "HEAD"], src)
+
+      # Ticket 2 pins the NEW base, which carries it in. Only a sanitise at re-brief sees it.
+      p2 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha2)})
+      assert {:ok, ^ws, _} = Clone.reset_in_place(pod_dir, p2, slug: "issue-2")
+
+      refute File.exists?(Path.join([ws, ".claude", "settings.json"])),
+             "a .claude/ that entered the base between two tickets reached the agent's directive tier"
+    end
+
+    test "no `base_sha` → REFUSED, never a reset onto an undefined base", %{
+      pod_dir: pod_dir
+    } do
+      # Fail-loud rather than a reset that silently keeps the previous ticket's state — which is
+      # exactly the failure the three tests above measure the absence of.
+      profile = cap(%{"repo_path" => "x", "base_branch" => "main"})
+      assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
+    end
+  end
+
   test "NON-absolute pod_dir → {:error, {:unsafe_pod_dir}} (guard: never mkdir/rm_rf relative to cwd)" do
     on_exit(fn -> File.rm_rf("relative-pod-x") end)
 
