@@ -39,6 +39,10 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
     @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
+    @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open", "title" => "Brique"}}
 
     @impl true

@@ -192,6 +192,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
@@ -264,6 +268,10 @@ defmodule Fleet.MCP.PodToolsTest do
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
@@ -364,6 +372,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
@@ -416,6 +428,10 @@ defmodule Fleet.MCP.PodToolsTest do
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
@@ -498,6 +514,10 @@ defmodule Fleet.MCP.PodToolsTest do
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
@@ -672,6 +692,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
@@ -748,6 +772,10 @@ defmodule Fleet.MCP.PodToolsTest do
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
@@ -1692,6 +1720,20 @@ defmodule Fleet.MCP.PodToolsTest do
   # DECLARED behaviour (`Delegation.EscalationForge`) → the stub ADOPTS it (compile-checked, anti
   # lying-stub, like StubForge). (No list_org_repos: the org-wide scan died with the per-project reorg.)
   defmodule EscalationForge do
+    # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
+    # l'ancien contrat sous le nouveau nom.
+    def escalation_verdict(repo, n, opts) do
+      {:ok, cs} = list_comments(repo, n, opts)
+
+      {:ok,
+       cs
+       |> Enum.reverse()
+       |> Enum.find_value(fn c ->
+         b = is_map(c) and c["body"]
+         if is_binary(b) and Fleet.Pilot.ForgeProtocol.escalation_marker?(b), do: b
+       end)}
+    end
+
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
     @impl true
@@ -1714,11 +1756,14 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_comments("fleet/alpha", 4, _opts) do
       {:ok,
        [
-         %{"body" => "commentaire de route (plus ancien)"},
          %{
            "body" =>
              "décision escalate_user — PING-RETOUR-OK [step_run:consultant:await:escalate_user]"
-         }
+         },
+         # APRES le marqueur, et sans marqueur : c'est ce qu'un fil reel contient des que quelqu'un
+         # a repondu. Tant que le commentaire marque etait le DERNIER, le test passait aussi avec
+         # l'ancien code (« le dernier du fil ») — il ne mesurait donc rien de ce qu'il nommait.
+         %{"body" => "commentaire de route, poste apres"}
        ]}
     end
 
@@ -1736,6 +1781,20 @@ defmodule Fleet.MCP.PodToolsTest do
   # Same process as the caller (handle_tool_call is synchronous) → the process dictionary IS the forge
   # state.
   defmodule RecordingEscalationForge do
+    # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
+    # l'ancien contrat sous le nouveau nom.
+    def escalation_verdict(repo, n, opts) do
+      {:ok, cs} = list_comments(repo, n, opts)
+
+      {:ok,
+       cs
+       |> Enum.reverse()
+       |> Enum.find_value(fn c ->
+         b = is_map(c) and c["body"]
+         if is_binary(b) and Fleet.Pilot.ForgeProtocol.escalation_marker?(b), do: b
+       end)}
+    end
+
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
     @impl true
@@ -1760,6 +1819,9 @@ defmodule Fleet.MCP.PodToolsTest do
   # Readback broken while posting still works: the fail-safe branch must POST, never swallow the
   # arch's reply on a transient blip.
   defmodule RecordingForgeBlindReadback do
+    # Aveugle par ce chemin aussi : ce stub existe pour prouver qu'une relecture impossible
+    # n'avale pas la reponse, et il doit l'etre de la meme facon sur les deux fonctions.
+    def escalation_verdict(_repo, _n, _opts), do: {:error, :forge_down}
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
     @impl true
@@ -1778,6 +1840,9 @@ defmodule Fleet.MCP.PodToolsTest do
   # The arch's single repo is UNREADABLE: an unreadable repo is an unreadable inbox, which must
   # surface as an error — not a `count: 0` the arch would read as "nothing to escalate".
   defmodule EscalationForgeUnreadable do
+    # L'inbox illisible doit le RESTER par ce chemin aussi : c'est la fonction que l'inbox appelle
+    # maintenant, et un `{:ok, nil}` ici transformerait une panne en « pas d'escalade ».
+    def escalation_verdict(_repo, _n, _opts), do: {:error, :forge_down}
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
     @impl true
@@ -1806,7 +1871,12 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "list_escalations: enumerates the awaits-arch (verdict = last comment), ignores the rest" do
+    test "list_escalations: the verdict is the ESCALATION comment, not the thread's last one" do
+      # Le nom de ce test portait le defaut : « verdict = last comment ». C'est ce que le code
+      # faisait, et c'est faux — des que l'arch avait repondu, son inbox lui rendait SA PROPRE
+      # REPONSE comme etant la question a trancher, sous une description d'outil qui promet
+      # « the worker's escalation comment — the reasoning ». Le stub pose donc un commentaire de
+      # route AVANT et une reponse d'arch APRES le commentaire marque : seul le marque doit sortir.
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
 
@@ -1969,6 +2039,10 @@ defmodule Fleet.MCP.PodToolsTest do
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true

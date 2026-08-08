@@ -1002,6 +1002,38 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  The last comment carrying an ESCALATION marker, or `nil` — the arch's inbox reads its arbitration
+  question through this.
+
+  It exists as a seam function rather than a filter on the MCP side because the marker FORMAT is
+  this domain's (`ForgeProtocol` builds it at both writing sites), and the boundary refuses
+  `Fleet.MCP -> Fleet.Pilot`. The inbox asks the forge client; the client knows the protocol —
+  exactly the shape `get_predecessor_result/3` already has.
+
+  `nil` is a RESULT, not a failure: the recurrence brake (`IncidentConsumer.default_brake/3`) poses
+  `lcars-awaits-arch` with NO comment at all, so there is no verdict to hand back. Saying so beats
+  handing over the thread's last comment, which is what this replaced — and which gave the arch its
+  own previous answer as the question to arbitrate.
+  """
+  @spec escalation_verdict(String.t(), integer(), Keyword.t()) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  def escalation_verdict(repo, issue_number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
+      body =
+        comments
+        |> Enum.reverse()
+        |> Enum.find_value(fn c ->
+          b = is_map(c) and c["body"]
+          if is_binary(b) and ForgeProtocol.escalation_marker?(b), do: b
+        end)
+
+      {:ok, body}
+    end
+  end
+
+  @doc """
   Extracts the latest result block from system-authored comments for the next judge's brief.
   """
   @spec get_predecessor_result(String.t(), integer(), Keyword.t()) ::

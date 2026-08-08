@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
           {:skipped, term()} | {:error, term()}
   def escalate_rework(%Seams{} = seams, pr_number, head, detail) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
-      signature = "[rework-exhausted-escalation:pr-#{pr_number}]"
+      signature = Fleet.Pilot.ForgeProtocol.rework_exhausted_marker(pr_number)
 
       body =
         "**Architecte** — ⚠ Rework non convergent sur la PR ##{pr_number} (issue ##{issue_n}) : le budget " <>

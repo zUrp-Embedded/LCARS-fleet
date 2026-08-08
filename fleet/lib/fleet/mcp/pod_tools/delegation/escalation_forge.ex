@@ -14,6 +14,17 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   @callback list_comments(repo :: String.t(), number :: integer(), opts :: keyword()) ::
               {:ok, [map()]} | {:error, term()}
 
+  @doc """
+  The last comment carrying an ESCALATION marker, or `nil`.
+
+  Separate from `list_comments/3` on purpose: the marker FORMAT belongs to the pilot domain
+  (`ForgeProtocol` builds it at both writing sites) and this boundary refuses to reach into it. The
+  inbox asks; the client knows the protocol. `nil` is a result — the recurrence brake poses the
+  label with no comment at all, so there is nothing to arbitrate on.
+  """
+  @callback escalation_verdict(repo :: String.t(), number :: integer(), opts :: keyword()) ::
+              {:ok, String.t() | nil} | {:error, term()}
+
   @doc "Posts a comment on an issue (author/token in `opts`)."
   @callback post_comment(
               repo :: String.t(),

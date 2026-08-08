@@ -1100,6 +1100,60 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "escalation_verdict/3 — the arch's inbox reads a MARKER, not recency" do
+    test "returns the last ESCALATION-marked comment, not the thread's last one" do
+      # The defect this replaced: `latest_verdict` took the last non-empty body, whatever it was.
+      # Once the arch had answered, its inbox handed back its OWN answer as the question to
+      # arbitrate — under a tool description promising "the worker's escalation comment".
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [
+             %{"body" => "bruit"},
+             %{"body" => "je bloque [step_run:engineer:await:escalate_user]"},
+             %{"body" => "OK, tranché : continue."}
+           ]}
+      }
+
+      assert {:ok, body} = ForgeClient.escalation_verdict("fleet/lcars", 42, opts(handlers))
+      assert body =~ "je bloque"
+      refute body =~ "tranché"
+    end
+
+    test "the OTHER escalation signature counts too (rework exhausted)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [
+             %{"body" => "budget épuisé [rework-exhausted-escalation:pr-7]"},
+             %{"body" => "réponse de l'arch"}
+           ]}
+      }
+
+      assert {:ok, body} = ForgeClient.escalation_verdict("fleet/lcars", 42, opts(handlers))
+      assert body =~ "budget"
+    end
+
+    test "no marked comment → nil, which is a RESULT" do
+      # The recurrence brake (`IncidentConsumer.default_brake/3`) poses `lcars-awaits-arch` with NO
+      # comment. "No verdict recorded" is the honest answer; the thread's last comment is not one.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200, [%{"body" => "juste une discussion"}]}
+      }
+
+      assert {:ok, nil} = ForgeClient.escalation_verdict("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "an unreadable thread is an ERROR, never an empty inbox" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {500, %{"message" => "boom"}}
+      }
+
+      assert {:error, _} = ForgeClient.escalation_verdict("fleet/lcars", 42, opts(handlers))
+    end
+  end
+
   describe "get_predecessor_result/3 — author-trust (F060)" do
     test "only extracts the result block from a bot comment" do
       bot_body =

@@ -173,6 +173,63 @@ defmodule Fleet.Pilot.ForgeProtocol do
     "[pr-open-fail:issue-#{n}:sha-#{String.slice(sha, 0, 12)}]"
   end
 
+  # LES DEUX SIGNATURES D'ESCALADE, memes literaux uniques que ci-dessus.
+  #
+  # POURQUOI ELLES SONT ICI. Un commentaire d'escalade est la seule chose que l'inbox de l'arch doit
+  # savoir RETROUVER. Sans marqueur a chercher, `list_escalations` rendait le dernier commentaire du
+  # fil, quel qu'il soit : des que l'arch avait repondu, l'inbox lui renvoyait SA PROPRE REPONSE sous
+  # une description promettant « the worker's escalation comment — the reasoning ». Les deux formats
+  # existaient, construits en dur chez leurs deux ecrivains, donc introuvables par un lecteur.
+  #
+  # Le troisieme poseur d'escalade (`IncidentConsumer.default_brake/3`, le frein sur recurrence) ne
+  # poste AUCUN commentaire : il n'y a donc pas de verdict a rendre pour lui, et `nil` est la reponse
+  # juste — pas le dernier commentaire venu.
+  @await_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:await:[^:\\]]+\\]")
+  @rework_exhausted_prefix "[rework-exhausted-escalation:"
+  @rework_exhausted_rx Regex.compile!(Regex.escape(@rework_exhausted_prefix) <> "[^\\]]+\\]")
+
+  @doc """
+  Format du marqueur d'attente d'arbitrage `[step_run:<role>:await:<decision>]`.
+
+  Distinct de `step_run_marker/2` par son segment `await` — et `step_run_marker?/1` ne le reconnait
+  pas, ce qui est voulu : une escalade n'est pas un step-run acheve et ne doit pas se compter comme
+  tel.
+
+      iex> m = Fleet.Pilot.ForgeProtocol.await_marker("engineer", "escalate_user")
+      iex> m
+      "[step_run:engineer:await:escalate_user]"
+      iex> Fleet.Pilot.ForgeProtocol.escalation_marker?(m)
+      true
+      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?(m)
+      false
+  """
+  @spec await_marker(String.t(), String.t()) :: String.t()
+  def await_marker(role, decision) when is_binary(role) and is_binary(decision),
+    do: "#{@step_run_prefix}#{role}:await:#{decision}]"
+
+  @doc """
+  Format du marqueur d'escalade « budget de rework epuise » `[rework-exhausted-escalation:pr-<n>]`.
+
+      iex> m = Fleet.Pilot.ForgeProtocol.rework_exhausted_marker(42)
+      iex> m
+      "[rework-exhausted-escalation:pr-42]"
+      iex> Fleet.Pilot.ForgeProtocol.escalation_marker?(m)
+      true
+  """
+  @spec rework_exhausted_marker(integer()) :: String.t()
+  def rework_exhausted_marker(pr_number) when is_integer(pr_number),
+    do: "#{@rework_exhausted_prefix}pr-#{pr_number}]"
+
+  @doc """
+  Ce corps porte-t-il l'une des deux signatures d'escalade ? Inverse des deux constructeurs
+  ci-dessus, pour le lecteur (`Delegation.list_escalations`).
+  """
+  @spec escalation_marker?(term()) :: boolean()
+  def escalation_marker?(body) when is_binary(body),
+    do: Regex.match?(@await_marker_rx, body) or Regex.match?(@rework_exhausted_rx, body)
+
+  def escalation_marker?(_), do: false
+
   @doc false
   # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native
   # counting (`ForgeClient.count_signed_step_runs`).

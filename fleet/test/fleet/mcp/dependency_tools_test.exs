@@ -19,6 +19,10 @@ defmodule Fleet.MCP.DependencyToolsTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
+    @impl true
+    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
     def add_issue_dependency(repo, n, b, _opts) do
       send(self(), {:added, repo, n, b})
       Process.get(:write_result, {:ok, %{}})

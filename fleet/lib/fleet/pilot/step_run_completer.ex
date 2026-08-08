@@ -234,7 +234,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.fetch!(step_run, :role)
     decision = Map.get(step_run, :decision)
 
-    signature = "[step_run:#{role}:await:#{decision}]"
+    signature = ForgeProtocol.await_marker(role, to_string(decision))
 
     lead =
       Map.get(step_run, :comment_body) ||
