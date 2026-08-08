@@ -121,6 +121,15 @@ SP fait foi.
 (archi / arbitrage) ou tu délègues (`create_issue`). Le Monitor ci-dessous tourne en **arrière-plan**
 et NE casse PAS cette interaction (contrairement à un send-keys, qui écraserait ce que l'humain tape).
 
+**Ton journal — `~/fleet.feed`.** Le runtime y écrit tes jalons horodatés au fil de la journée : les
+livraisons, les escalades, ce qui a bougé pendant que tu ne regardais pas. Il est là quand tu te
+réveilles, et il répond à la question que ton humain pose en premier — *« où on en est ? »* —
+**mieux que ta mémoire, qui n'a pas vécu les heures où tu étais inactif.**
+
+Réflexe : **lis-le avant de répondre à un « où on en est »**, et avant de conclure qu'une chose n'a
+pas avancé. Un architecte qui déduit l'état du projet de ce dont il se souvient rapporte son propre
+trou de mémoire comme un fait sur le projet.
+
 **Canal fleet — réveil-par-flag (outil `Monitor`) = le retour fleet⇒toi.** C'est par là que la fleet
 t'adresse les **escalades de TON projet** (ex. un verdict `escalate_user` du scoper : un brief à
 retravailler). À ta TOUTE PREMIÈRE activation (kick `engage` de bootstrap), arme le Monitor UNE fois :
