@@ -1375,6 +1375,49 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
     end
 
+    test "exit_status without result CHECKPOINTS the seed — a suffered death keeps its memory" do
+      # The checkpoint used to live only on `:releasing` and `:kill`, the two DELIBERATE deaths. So
+      # a pod killed by the watchdog or exited in error lost its seed, while a pod stopped cleanly
+      # kept it — the inverse of what is useful: it is the suffered death you want to resume from.
+      Process.flag(:trap_exit, true)
+      root = Path.join(System.tmp_dir!(), "seedroot-#{System.unique_integer([:positive])}")
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      on_exit(fn -> File.rm_rf(root) end)
+
+      fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
+      StubBackend.set_reply(interactive_reply(port: fake_port))
+
+      pod_id = "pod-exit-seed-#{System.unique_integer([:positive])}"
+      args = build_args(pod_id, "issue-1")
+      args = %{args | opts: Keyword.put(args.opts, :project_slug, "poc-8")}
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # A transcript must EXIST for there to be anything to checkpoint: with no JSONL the store
+      # writes nothing and the test would pass on an empty gesture.
+      info = GenServer.call(pid, :info)
+      jsonl_dir = Path.join([info.pod_dir, ".claude", "projects", "-x-poc8-engineer"])
+      File.mkdir_p!(jsonl_dir)
+
+      File.write!(
+        Path.join(jsonl_dir, "live.jsonl"),
+        ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n)
+      )
+
+      send(pid, {fake_port, {:exit_status, 137}})
+      assert_receive {:EXIT, ^pid, {:shutdown, {:exited_before_result, 137}}}, 2_000
+
+      # `slot_scope: instance` keys the seed PER TICKET (`<role>-<n>`), not per role — the same
+      # axis as everything else about a ticket-scoped pod. Asserting `engineer.jsonl` would have
+      # been asserting the wrong file and calling its absence a defect.
+      seed = Path.join([root, "poc-8", "pods", "engineer-1.jsonl"])
+
+      assert File.exists?(seed),
+             "a pod that DIED unexpectedly must keep its seed — that is the death you resume from"
+
+      assert File.read!(seed) =~ "r1"
+    end
+
     test "exit_status without result ENGRAVES the state.json tombstone phase=failed (PodWarden GC-able)" do
       Process.flag(:trap_exit, true)
       fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])

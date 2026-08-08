@@ -819,6 +819,12 @@ defmodule Fleet.Spawner.Pod do
     if MapSet.member?(data.conditions, :output_extracted) do
       {:stop, :normal, data}
     else
+      # LA MEMOIRE SE SAUVE SURTOUT QUAND LA MORT N'ETAIT PAS VOULUE. Le checkpoint ne vivait que
+      # sur `:releasing` et `:kill` — les deux morts DELIBEREES — donc un pod tue par le watchdog ou
+      # sorti en erreur perdait sa graine, et un pod qu'on arretait proprement la gardait. L'inverse
+      # de l'utile : c'est de la mort subie qu'on veut reprendre le fil. Ici comme la-bas, avant
+      # tout demontage, tant que le JSONL est encore lisible.
+      maybe_checkpoint_seed(data)
       clear_pod_task(data.pod_id)
 
       Events.lossy_broadcast("pod.failed", %{
@@ -1144,6 +1150,8 @@ defmodule Fleet.Spawner.Pod do
   defp transition_failed(data, reason) do
     Logger.warning("pod #{data.pod_id} failed: #{inspect(reason)}")
 
+    # Jumeau du site d'exit du Port : une mort subie garde sa graine, comme une mort voulue.
+    maybe_checkpoint_seed(data)
     clear_pod_task(data.pod_id)
     data = Map.put(data, :last_error, reason)
     StateFs.write_state_fs(put_phase(data, :failed))
