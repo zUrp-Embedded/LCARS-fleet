@@ -811,8 +811,10 @@ defmodule Fleet.Pilot.ForgeClient do
   whose CI passed are not the same fact, and collapsing them would let "the rail never ran" wear
   the face of "the rail is green". The caller decides what an absent rail means for it.
 
-  Statuses are returned newest-first per context; we keep the FIRST occurrence of each context —
-  an older green must never outvote the current red on the same context.
+  Per context, the CURRENT status wins — an older green must never outvote the current red. The rank
+  is read from the DATA (`id`), never from the order of the response: measured on Gitea 1.26.1, the
+  default order is OLDEST-first and only `sort=leastindex` returns newest-first, its name saying the
+  opposite of what it does. An order is not a contract you can verify locally.
   """
   @spec commit_ci_state(String.t(), String.t(), Keyword.t()) ::
           {:ok, :success | :pending | :failure | :none} | {:error, term()}
@@ -820,18 +822,34 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, statuses} <-
            paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
-      latest =
-        statuses
-        |> Enum.reduce(%{}, fn st, acc ->
-          # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat),
-          # `status` sur CommitStatus (l'element), et cet appel liste des CommitStatus. Un repli
-          # sur `state` ici ne pourrait jamais tirer et se lirait comme une couverture.
-          Map.put_new(acc, st["context"], st["status"])
-        end)
-        |> Map.values()
-
-      {:ok, worst_ci_state(latest)}
+      {:ok, statuses |> current_per_context() |> worst_ci_state()}
     end
+  end
+
+  # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
+  #
+  # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
+  # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
+  # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui gardait la
+  # PREMIERE occurrence par contexte gardait donc la plus ANCIENNE : sur un contexte pose
+  # `success` puis `failure`, `commit_ci_state` rendait `{:ok, :success}` — la porte de merge
+  # lisant vert sur un commit rouge.
+  #
+  # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat), `status`
+  # sur CommitStatus (l'element), et cet appel liste des CommitStatus.
+  defp current_per_context(statuses) do
+    statuses
+    |> Enum.group_by(& &1["context"])
+    |> Enum.flat_map(fn {_context, group} ->
+      if Enum.all?(group, &is_integer(&1["id"])) do
+        [group |> Enum.max_by(& &1["id"]) |> Map.get("status")]
+      else
+        # Ordre indeterminable : on garde TOUT le groupe, donc `worst_ci_state/1` prend le pire.
+        # Ne jamais rendre le meilleur d'un ensemble qu'on ne sait pas ordonner — c'est une porte
+        # de merge qui lit le resultat.
+        Enum.map(group, & &1["status"])
+      end
+    end)
   end
 
   # Worst-of, in the order that matters to a merge decision: one failure sinks it; otherwise any
