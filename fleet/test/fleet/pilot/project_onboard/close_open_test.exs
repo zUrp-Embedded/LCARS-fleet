@@ -115,6 +115,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
     [
       projects_root: Path.join(tmp, "projects"),
       work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: FileForge,
       forge_users: Humans,
@@ -189,6 +190,20 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
              ProjectOnboard.close_project("fleet/ghost", o)
 
     refute_received {:issue_created, _, _, _, _, _}
+  end
+
+  test "open: a project whose DOC face is missing is NOT on the machine", %{o: o} do
+    # `open` is what hands a project to the architect, whose producer path is on `doc`. Dropping
+    # the doc face from the on-machine check left the whole suite green (measured 2026-08-08):
+    # every fixture here is a fully onboarded project, so a two-face check and a three-face one
+    # answer identically. Opening a project without its doc face succeeds and then wedges at the
+    # first documentary ticket, far from the cause — which is the shape of failure the guard
+    # exists to prevent, not a new one.
+    assert {:ok, _} = ProjectOnboard.close_project("fleet/pong", o)
+    File.rm_rf!(Path.join(o[:doc_root], "pong"))
+
+    assert {:error, {:not_on_machine, "fleet/pong"}} = ProjectOnboard.open("fleet/pong", o)
+    refute_received {:arch_ensured, _}
   end
 
   test "open: unparks (ALL markers closed) then ensures the architect", %{o: o} do

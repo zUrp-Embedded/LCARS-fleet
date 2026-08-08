@@ -36,10 +36,25 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert File.read!(workflow) =~ "${GITHUB_REPOSITORY}"
   end
 
-  test "work/3: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
-    assert :ok = Scaffold.work(dir, "monprojet", [])
+  test "face/4 on the DOC template: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
+    # The arch's planning material moved to the doc face with the three-face split: it is neither
+    # product source nor runtime-written evidence, and the ops face now carries only the latter.
+    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", [])
     assert File.exists?(Path.join(dir, "backlog.md"))
     assert File.dir?(Path.join(dir, "plans"))
+  end
+
+  test "face/4 on the OPS template: writes the README that states who writes there", %{
+    tmp_dir: dir
+  } do
+    # The ops face ships ONE file and it is not decoration: an empty tree cannot be committed, and
+    # the branch has to exist before the first brief is materialized onto it. That the one file
+    # states the read-only invariant is what makes it worth shipping rather than a `.gitkeep`.
+    assert :ok = Scaffold.face(dir, "work-ops", "monprojet", [])
+    readme = File.read!(Path.join(dir, "README.md"))
+    assert readme =~ "monprojet"
+    assert readme =~ "face `ops`"
+    refute File.exists?(Path.join(dir, "backlog.md"))
   end
 
   test "F-C087: generated files carry the onboard date (seam :today), not a hardcoded one",
@@ -49,7 +64,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert spec =~ "**Date** : 2026-07-11"
     refute spec =~ "2026-06-14"
 
-    assert :ok = Scaffold.work(dir, "monprojet", today: "2026-07-11")
+    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", today: "2026-07-11")
     assert File.read!(Path.join(dir, "backlog.md")) =~ "**Date** : 2026-07-11"
   end
 

@@ -88,6 +88,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     [
       projects_root: Path.join(tmp, "projects"),
       work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: FileForge,
       forge_users: Humans,
@@ -259,6 +260,35 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     } do
       {o, _proj, _work} = landed_onboard(tmp)
       File.rm_rf!(Path.join([tmp, "forge", "fleet", "apollo.git"]))
+
+      assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
+    end
+
+    test "the DOC face alone on disk is enough to refuse — the door counts every face", %{
+      tmp_dir: tmp
+    } do
+      # `refute_existing/1` is what stops an onboard from writing over a residue. Dropping the doc
+      # face from the paths it checks left the whole suite green (measured 2026-08-08): every
+      # existing case here happens to leave a code or ops dir behind too, so no fixture could tell
+      # a two-face check from a three-face one. A doc dir alone is exactly the residue a compensated
+      # onboard can leave — the face is built LAST.
+      o = opts(tmp)
+      doc_dir = Path.join(o[:doc_root], "apollo")
+      File.mkdir_p!(doc_dir)
+
+      assert {:error, {:already_exists, ^doc_dir}} = ProjectOnboard.onboard("apollo", o)
+    end
+
+    test "a landed onboard whose DOC branch vanished is NOT satisfied — no idempotent 'done'", %{
+      tmp_dir: tmp
+    } do
+      # The twin of the work/ops case above, and it has to be stated per face: convergence answers
+      # "already realized" and creates nothing, so a face missing from what it verifies is a face
+      # that never gets built while the caller is told the project is ready.
+      {o, _proj, _work} = landed_onboard(tmp)
+      bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
+      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/work/doc"])
+      refute FileForge.branch_exists?("fleet/apollo", "work/doc", [])
 
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end

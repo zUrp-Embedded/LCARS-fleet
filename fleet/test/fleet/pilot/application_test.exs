@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.ApplicationTest do
   # `genre/ops` ticket burns, and nothing checked that the name resolves to a card that can serve
   # a doc ticket — a dead name or an all-code-face card failed at the FIRST doc ticket, silently.
   describe "validate_ops_card!/1 — the ops knob resolves to a card that can serve a doc ticket" do
-    test "the shipped canon passes (ops-direct carries its face: ops producer)" do
+    test "the shipped canon passes (ops-direct carries its face: doc producer)" do
       assert :ok = Application.validate_ops_card!()
     end
 
@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
 
     @tag :tmp_dir
-    test "a card with NO producer on face: ops raises — the doc ticket would build on the code face",
+    test "a card with NO producer on face: doc raises — the doc ticket would build on the code face",
          %{tmp_dir: tmp} do
       card = """
       kind: WorkflowMap
@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.ApplicationTest do
 
       File.write!(Path.join(tmp, "all-code.yaml"), card)
 
-      assert_raise RuntimeError, ~r/carries NO producer step on `face: ops`/, fn ->
+      assert_raise RuntimeError, ~r/carries NO producer step on `face: doc`/, fn ->
         Application.validate_ops_card!(workflow_maps_root: tmp, ops_workflow_map: "all-code")
       end
     end

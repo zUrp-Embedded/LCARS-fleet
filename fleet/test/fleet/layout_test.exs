@@ -10,9 +10,10 @@ defmodule Fleet.LayoutTest do
 
   alias Fleet.Layout
 
-  test "projects_root/work_root are the imposed container roots" do
+  test "the three face roots are the imposed container roots" do
     assert Layout.projects_root() == "/home/projects"
     assert Layout.work_root() == "/home/projects.work"
+    assert Layout.doc_root() == "/home/projects.doc"
   end
 
   describe "brief pointer trailer — the ticket says which text is the order" do
@@ -163,21 +164,66 @@ defmodule Fleet.LayoutTest do
   end
 
   describe "project faces (chantier face-projet — the branch half of the layout)" do
-    test "face_branch/1: the card vocabulary maps to the two structural branches" do
+    test "face_branch/1: each declared face maps to its structural branch" do
       assert Layout.face_branch("code") == "main"
+      assert Layout.face_branch("doc") == "work/doc"
       assert Layout.face_branch("ops") == "work/ops"
       assert Layout.code_branch() == "main"
+      assert Layout.doc_branch() == "work/doc"
       assert Layout.ops_branch() == "work/ops"
     end
 
-    test "face_branch/1: an unknown face RAISES — it bypassed the schema enum, never soften it" do
-      err = assert_raise ArgumentError, fn -> Layout.face_branch("doc") end
-      assert err.message =~ "unknown face"
-      assert err.message =~ "schema enum"
+    test "face_root/1: each face pairs with its own host root — three branches, three clones" do
+      # Git allows one worktree per branch, so the pairing is not a convention that could be
+      # collapsed: two faces sharing a root is not a tidier layout, it is an impossible one.
+      assert Layout.face_root("code") == Layout.projects_root()
+      assert Layout.face_root("doc") == Layout.doc_root()
+      assert Layout.face_root("ops") == Layout.work_root()
+
+      assert [Layout.projects_root(), Layout.doc_root(), Layout.work_root()]
+             |> Enum.uniq()
+             |> length() == 3,
+             "two faces sharing a root would make one of them uncheckoutable"
+    end
+
+    test "face_branch/1 and face_root/1: an unknown face RAISES — never soften a schema bypass" do
+      for fun <- [&Layout.face_branch/1, &Layout.face_root/1] do
+        err = assert_raise ArgumentError, fn -> fun.("backlog") end
+        assert err.message =~ "unknown face"
+      end
+    end
+
+    test "`ops` is NOT a card face — the enum is where that invariant lives" do
+      # The project HAS an ops branch; a producer may never be pointed at it. The wall is the
+      # workflow-map schema enum (`code | doc`) plus `additionalProperties: false`, not a check in
+      # code: an unwritable state needs no verification. This test reads the SHIPPED schema, so
+      # widening that enum breaks here rather than at the first pod handed a workspace on the
+      # record of its own judgement.
+      enum =
+        :code.priv_dir(:lcars_fleet)
+        |> to_string()
+        |> Path.join("workflow/schema/workflow-map-v2.5.json")
+        |> File.read!()
+        |> Jason.decode!()
+        |> get_in([
+          "properties",
+          "spec",
+          "properties",
+          "steps",
+          "patternProperties",
+          "^[a-zA-Z0-9_-]+$",
+          "properties",
+          "face",
+          "enum"
+        ])
+
+      assert Enum.sort(enum) == ["code", "doc"]
+      refute "ops" in enum
     end
 
     test "face_of/1 NAMES the face — a non-face answers nil, never another face by default" do
       assert Layout.face_of("work/ops") == "ops"
+      assert Layout.face_of("work/doc") == "doc"
       assert Layout.face_of("main") == "code"
 
       # The distinction a per-face predicate cannot draw: a producer's feature branch is not the
@@ -194,7 +240,7 @@ defmodule Fleet.LayoutTest do
       # `face_of/1` clause would be a branch the runtime routes and cannot name, and the generation
       # is the only thing standing between here and that. If the `for` comprehension is ever
       # unrolled into hand-written clauses, this test is what notices the one that was forgotten.
-      for face <- ["code", "ops"] do
+      for face <- ["code", "doc", "ops"] do
         assert Layout.face_of(Layout.face_branch(face)) == face,
                "#{face}: face_branch/1 and face_of/1 must be inverse on every declared face"
       end

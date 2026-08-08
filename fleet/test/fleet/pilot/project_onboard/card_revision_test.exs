@@ -83,6 +83,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
     [
       projects_root: Path.join(tmp, "projects"),
       work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: RecordingFileForge,
       forge_users: Humans,

@@ -83,6 +83,7 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
     [
       projects_root: Path.join(tmp, "projects"),
       work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: AdoptForge,
       forge_users: Humans,

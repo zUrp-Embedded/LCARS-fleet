@@ -41,12 +41,17 @@ spec:
   max_rework_rounds: 2
   steps:
 
-    # --- Step unique (racine ET terminal) : rédaction sur la face ops ---
+    # --- Step unique (racine ET terminal) : rédaction sur la face doc ---
     build:
       role: scribe
-      # LA clé du chantier : le workspace du producteur clone work/ops, sa PR y retourne,
+      # LA clé du chantier : le workspace du producteur clone work/doc, sa PR y retourne,
       # le réalignement post-merge suit cette face, et `main` devient sa référence RO.
-      face: ops
+      #
+      # PAS `ops`, et l'enum du schéma ne le permet plus. La face ops porte le REGISTRE que le
+      # runtime tient — briefs, verdicts, provenance. Un producteur qui y écrirait pourrait
+      # réécrire après coup ce qu'on lui a demandé et ce qu'on a jugé de son travail. La
+      # documentation du produit n'a rien à faire dans le même arbre que la preuve.
+      face: doc
       needs: []                     # racine DAG — et pas de successeur : chemin direct
       inputs:
         - ticket.body               # le brief rédigé par l'arch

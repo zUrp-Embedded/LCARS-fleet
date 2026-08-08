@@ -82,6 +82,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ImportExternalTest do
     [
       projects_root: Path.join(tmp, "projects"),
       work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: ExtForge,
       forge_users: Humans,

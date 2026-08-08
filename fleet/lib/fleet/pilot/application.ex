@@ -340,8 +340,8 @@ defmodule Fleet.Pilot.Application do
   #     rail, which is a legitimate deployment (an operator's own catalogue, a narrow fixture).
   #     Refusing the boot there would be a POLICY this check has no mandate to set: it says so
   #     LOUD instead, naming what such a deployment cannot do.
-  #   * card PRESENT but carrying no `face: ops` producer → fail-loud whatever the knob's origin:
-  #     that is the drift itself (a card that lost its ops face, the shipped canon breaking).
+  #   * card PRESENT but carrying no `face: doc` producer → fail-loud whatever the knob's origin:
+  #     that is the drift itself (a card that lost its doc face, the shipped canon breaking).
   #
   # What it proves is deliberately MINIMAL — it does not judge the card's shape. The per-face
   # redesign (ONE card declaring face-tagged producers, killing this knob) is the real exit; a
@@ -356,16 +356,16 @@ defmodule Fleet.Pilot.Application do
 
     case Fleet.Pilot.WorkflowMapNav.safe_load(&Fleet.Workflow.Loader.load!(&1, opts), name) do
       {:ok, card} ->
-        ops_producers =
-          for {_step, %{"face" => "ops"} = spec} <- card["steps"] || %{},
+        doc_producers =
+          for {_step, %{"face" => "doc"} = spec} <- card["steps"] || %{},
               is_binary(Map.get(spec, "role")),
               do: spec["role"]
 
-        if ops_producers == [] do
-          raise "fleet_pilot: the ops card #{inspect(name)} (:ops_workflow_map) carries NO " <>
-                  "producer step on `face: ops` — a doc ticket routed here would be built on the " <>
-                  "code face (or not at all). Declare the face on its producer step, or point " <>
-                  "the knob at a card that does."
+        if doc_producers == [] do
+          raise "fleet_pilot: the doc card #{inspect(name)} (:ops_workflow_map) carries NO " <>
+                  "producer step on `face: doc` — a documentary ticket routed here would be built " <>
+                  "on the code face (or not at all). Declare the face on its producer step, or " <>
+                  "point the knob at a card that does."
         end
 
         :ok

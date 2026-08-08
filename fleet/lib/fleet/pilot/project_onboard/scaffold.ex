@@ -53,12 +53,16 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   end
 
   @doc """
-  Writes the `work/ops` template face. `:pitch` falls back to `:description`, then `""`;
-  `:today` overrides the current UTC date.
+  Writes a WRITER face's template subtree (`"work-ops"`, `"work-doc"`). `:pitch` falls back to
+  `:description`, then `""`; `:today` overrides the current UTC date.
+
+  The subtree name is a PARAMETER and not a per-face function because nothing about the writing
+  differs between faces — only which directory of the template is read. A face is added by shipping
+  its subtree under `project_template/`, not by growing this module.
   """
-  @spec work(Path.t(), String.t(), keyword()) ::
+  @spec face(Path.t(), String.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
-  def work(dir, name, opts), do: write_face(dir, "work-ops", name, opts, "")
+  def face(dir, template, name, opts), do: write_face(dir, template, name, opts, "")
 
   # F-C087
   defp today(opts) do

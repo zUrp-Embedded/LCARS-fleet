@@ -1,8 +1,10 @@
 defmodule Fleet.Pilot.WorktreeSync do
   @moduledoc """
-  Serializes post-merge projection onto local worktrees. Code-face mirrors reset
-  to forge `main`; writer-owned ops faces rebase with autostash. Async requests
-  converge on the latest remote state and failures remain retryable.
+  Serializes post-merge projection onto the local face clones. The code face is a MIRROR — nobody
+  writes it locally — so it resets hard to the forge. The two WRITER faces, `ops` and `doc`, rebase
+  with autostash: something holds a live pen on them (the runtime on `ops`, the architect and the
+  human on `doc`), and a reset would erase work that exists nowhere else. Async requests converge on
+  the latest remote state and failures remain retryable.
   """
 
   use GenServer
@@ -33,7 +35,8 @@ defmodule Fleet.Pilot.WorktreeSync do
     {:ok,
      %{
        root: Keyword.get(opts, :projects_root, @projects_root),
-       work_root: Keyword.get(opts, :work_root, Fleet.Layout.work_root())
+       work_root: Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
+       doc_root: Keyword.get(opts, :doc_root, Fleet.Layout.doc_root())
      }}
   end
 
@@ -58,7 +61,8 @@ defmodule Fleet.Pilot.WorktreeSync do
     {dir, aligner} =
       case Fleet.Layout.face_of(branch) do
         "code" -> {Path.join(state.root, name), &align_code/1}
-        "ops" -> {Path.join(state.work_root, name), &align_ops/1}
+        "doc" -> {Path.join(state.doc_root, name), &align_writer(&1, Fleet.Layout.doc_branch())}
+        "ops" -> {Path.join(state.work_root, name), &align_writer(&1, Fleet.Layout.ops_branch())}
         nil -> {nil, nil}
       end
 
@@ -94,21 +98,26 @@ defmodule Fleet.Pilot.WorktreeSync do
     end
   end
 
-  # OPS face: the worktree is a WRITER — rebase local commits on top of the merged remote tip,
-  # never reset (§C). `FETCH_HEAD` (not `origin/work/ops`): a `--single-branch` clone's refspec
-  # may not maintain the remote-tracking ref, FETCH_HEAD is exact by construction. `--autostash`
-  # carries the arch's uncommitted edits across. A conflicted rebase is ABORTED so the worktree
-  # stays usable (a half-applied rebase would wedge OpsObject and every brief after it), and the
-  # error propagates loud: that divergence is a human's call.
-  defp align_ops(dir) do
-    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", Fleet.Layout.ops_branch()], auth: true) do
+  # WRITER faces (`ops` and `doc`): the clone is a WRITER — rebase local commits on top of the
+  # merged remote tip, never reset (§C). The two share this because they share the property that
+  # decides it: something holds a live pen on that clone — the runtime on `ops`, the architect and
+  # the human on `doc` — so a reset would erase work that exists nowhere else. `code` is the only
+  # face where nobody writes locally, which is why it is the only one that may reset.
+  #
+  # `FETCH_HEAD` (not `origin/<branch>`): a `--single-branch` clone's refspec may not maintain the
+  # remote-tracking ref, FETCH_HEAD is exact by construction. `--autostash` carries uncommitted
+  # edits across. A conflicted rebase is ABORTED so the clone stays usable (a half-applied rebase
+  # would wedge every object written after it), and the error propagates loud: that divergence is a
+  # human's call.
+  defp align_writer(dir, branch) do
+    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true) do
       case GitOps.run(["-C", dir, "rebase", "--autostash", "FETCH_HEAD"], auth: false) do
         :ok ->
           :ok
 
         {:error, reason} ->
           _ = GitOps.run(["-C", dir, "rebase", "--abort"], auth: false)
-          {:error, {:ops_rebase_conflict, reason}}
+          {:error, {:rebase_conflict, branch, reason}}
       end
     end
   end

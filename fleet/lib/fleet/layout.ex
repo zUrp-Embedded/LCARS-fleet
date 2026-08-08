@@ -23,6 +23,12 @@ defmodule Fleet.Layout do
 
   @projects_root "/home/projects"
   @work_root "/home/projects.work"
+  # THIRD ROOT, and it is a root and not a subdirectory because git imposes one worktree per
+  # branch: `work/doc` cannot live inside `<work_root>/<project>`, which is already checked out on
+  # `work/ops`. Same shape as the other two — a standalone clone, NOT a linked worktree, for the
+  # reason `ProjectOnboard` states about the ops face: a linked worktree keeps its git directory
+  # under the parent repo, which a pod mounting the parent RO could then not commit into.
+  @doc_root "/home/projects.doc"
   @state_dirname ".lcars"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
@@ -66,14 +72,24 @@ defmodule Fleet.Layout do
                 )
   @notes_ref_re Regex.compile!("\\A#{@notes_subdir}/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z")
 
-  # The two FACES of a project (chantier face-projet 2026-08-02). A project is ONE forge repo with
-  # two orthogonal branches — code (`main`) and ops (`work/ops`, orphan) — each checked out in its
-  # own host worktree (@projects_root vs @work_root). The pairing branch<->worktree is structural,
-  # exactly like the roots above: which face a PRODUCER works on is business (the card's `face`
-  # key), but what the faces ARE is layout, and it lives here so no consumer ever re-derives
-  # "main"/"work/ops" from convention. Six sites used to re-decide it in two spellings
-  # (cf. work/beyond_#6/chantier-face-projet 01-INVENTAIRE §D); they now read this single source.
-  @face_branches %{"code" => "main", "ops" => "work/ops"}
+  # The three FACES of a project. A project is ONE forge repo with three orthogonal branches, each
+  # checked out in its own standalone host clone. The pairing branch<->root is structural, exactly
+  # like the roots above: which face a PRODUCER works on is business (the card's `face` key), but
+  # what the faces ARE is layout, and it lives here so no consumer ever re-derives a branch name
+  # from convention.
+  #
+  # THE CUT, and it is the whole reason there are three rather than two: `ops` carries what the
+  # SYSTEM manipulates — what was asked, what was judged, what was proven. `doc` carries what the
+  # PRODUCT states. `code` carries what it IS. While `ops` held both the record and the
+  # documentation, one branch was simultaneously the tree a producer writes and the tree its
+  # judgement is recorded in, and no rule could separate them because they were the same object.
+  #
+  # TWO VOCABULARIES, and their difference is what makes the invariant structural rather than
+  # checked. A CARD's `face` enum is `code | doc` — the faces a producer may work. This map is
+  # `code | doc | ops` — the branches a project HAS. `ops` being absent from the card enum means no
+  # card can declare it, so no pod is ever given a workspace on it: the read-only treatment of the
+  # record has no exception to enforce because the exception cannot be written down.
+  @face_branches %{"code" => "main", "doc" => "work/doc", "ops" => "work/ops"}
 
   @doc "Root of the working repos (`/home/projects`) — imposed container layout."
   @spec projects_root() :: Path.t()
@@ -82,6 +98,10 @@ defmodule Fleet.Layout do
   @doc "Branch of the CODE face (`main`) — pairs with `projects_root/0`."
   @spec code_branch() :: String.t()
   def code_branch, do: @face_branches["code"]
+
+  @doc "Branch of the DOC face (`work/doc`, orphan) — pairs with `doc_root/0`."
+  @spec doc_branch() :: String.t()
+  def doc_branch, do: @face_branches["doc"]
 
   @doc "Branch of the OPS face (`work/ops`, orphan) — pairs with `work_root/0`."
   @spec ops_branch() :: String.t()
@@ -132,9 +152,35 @@ defmodule Fleet.Layout do
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
     do: Path.join(pod_dir, @pod_workspace_subdir)
 
-  @doc "Meta/ops root (`/home/projects.work`) — journals, seeds, resume folders."
+  @doc """
+  OPS root (`/home/projects.work`) — the record the RUNTIME keeps: briefs, gate-briefs, verdicts,
+  provenance, conflicts. Nothing a producer authors lives here, and no pod writes into it.
+  """
   @spec work_root() :: Path.t()
   def work_root, do: @work_root
+
+  @doc "DOC root (`/home/projects.doc`) — the product's documentation, authored by a producer."
+  @spec doc_root() :: Path.t()
+  def doc_root, do: @doc_root
+
+  @doc """
+  Host root of a face, by the name a card and `@face_branches` use.
+
+  The pairing branch <-> root is the structural half of a face: a consumer that knows which face it
+  is on must never re-derive which directory that means. Raises on an unknown face for the same
+  reason `face_branch/1` does — the schema enum bounds the vocabulary upstream.
+  """
+  @spec face_root(String.t()) :: Path.t()
+  def face_root("code"), do: @projects_root
+  def face_root("doc"), do: @doc_root
+  def face_root("ops"), do: @work_root
+
+  def face_root(other) do
+    raise ArgumentError,
+          "Fleet.Layout.face_root/1: unknown face #{inspect(other)} — the declared faces are " <>
+            "#{inspect(Map.keys(@face_branches))}; an unknown value here bypassed the schema. " <>
+            "Fix the caller."
+  end
 
   @doc """
   Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory

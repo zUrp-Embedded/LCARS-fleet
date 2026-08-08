@@ -54,6 +54,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # Derived from the single authority of the container layout (Fleet.Layout).
   @projects_root Fleet.Layout.projects_root()
   @work_root Fleet.Layout.work_root()
+  @doc_root Fleet.Layout.doc_root()
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
   # (wrote nothing). committer = the human (git config) traces who initiated.
   # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
@@ -64,6 +65,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
           repo: String.t(),
           project_dir: Path.t(),
           work_dir: Path.t(),
+          doc_dir: Path.t(),
           # Per-project architect ensure outcome (reorg 2026-07-19) — reported, never dropped:
           # %{status: "up", pod_id: _} | %{status: "failed", reason: _}.
           architect: map()
@@ -88,19 +90,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
     org = Keyword.get(opts, :org, "fleet")
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- refute_existing_or_converge("#{org}/#{name}", proj_dir, work_dir, opts),
+         :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
-      case finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
+      case finish_onboard(full_name, provision, dirs, name, opts) do
         {:ok, result} ->
           {:ok, result}
 
         {:error, reason} = err ->
-          compensate_onboard(full_name, proj_dir, work_dir, reason, opts)
+          compensate_onboard(full_name, dirs, reason, opts)
           err
       end
     else
@@ -109,40 +110,79 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp finish_onboard(full_name, provision, proj_dir, work_dir, name, opts) do
+  defp finish_onboard(full_name, provision, dirs, name, opts) do
     with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
-         :ok <- clone_main(url, proj_dir),
-         :ok <- maybe_scaffold_main(provision, proj_dir, name, opts),
-         :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts),
-         :ok <- commit(proj_dir, onboard_commit_msg(provision)),
-         :ok <- push(proj_dir, "main", false),
+         :ok <- clone_main(url, dirs.code),
+         :ok <- maybe_scaffold_main(provision, dirs.code, name, opts),
+         :ok <- Fleet.Pilot.ProjectIntensity.write(dirs.code, opts),
+         :ok <- commit(dirs.code, onboard_commit_msg(provision)),
+         :ok <- push(dirs.code, "main", false),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
-         :ok <- add_work_ops(work_dir, url),
-         :ok <- Scaffold.work(work_dir, name, opts),
-         :ok <- commit(work_dir, "chore(onboard): init work/ops"),
-         :ok <- publish_work_ops(full_name, work_dir, opts),
+         :ok <-
+           build_writer_face(
+             full_name,
+             url,
+             dirs.ops,
+             Fleet.Layout.ops_branch(),
+             "work-ops",
+             name,
+             opts
+           ),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <-
+           build_writer_face(
+             full_name,
+             url,
+             dirs.doc,
+             Fleet.Layout.doc_branch(),
+             "work-doc",
+             name,
+             opts
+           ),
          :ok <- lock_main(full_name, opts) do
-      Logger.info("ProjectOnboard: #{full_name} ready — main=#{proj_dir}, work/ops=#{work_dir}")
-      arch = ensure_architect(full_name, opts)
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+      Logger.info(
+        "ProjectOnboard: #{full_name} ready — main=#{dirs.code}, " <>
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.doc_branch()}=#{dirs.doc}"
+      )
+
+      {:ok, onboard_result(full_name, dirs, opts)}
     end
   end
 
-  defp compensate_onboard(full_name, proj_dir, work_dir, reason, opts) do
+  # Build-and-publish, for a repo we just created: the branch cannot pre-exist, so unlike
+  # `ensure_face/7` there is nothing to clone.
+  defp build_writer_face(_full_name, url, dir, branch, template, name, opts) do
+    with :ok <- init_face(dir, url, branch),
+         :ok <- Scaffold.face(dir, template, name, opts),
+         :ok <- commit(dir, "chore(onboard): init #{branch}") do
+      publish_face(dir, branch)
+    end
+  end
+
+  defp onboard_result(full_name, dirs, opts) do
+    %{
+      repo: full_name,
+      project_dir: dirs.code,
+      work_dir: dirs.ops,
+      doc_dir: dirs.doc,
+      architect: ensure_architect(full_name, opts)
+    }
+  end
+
+  defp compensate_onboard(full_name, dirs, reason, opts) do
     forge =
       case delete_forge(full_name, opts) do
         {:ok, verdict} -> verdict
         {:error, e} -> {:delete_failed, e}
       end
 
-    proj = compensate_dir(proj_dir)
-    work = compensate_dir(work_dir)
-
     Logger.warning(
       "ProjectOnboard: onboard #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-        "forge #{inspect(forge)}, project_dir #{inspect(proj)}, work_dir #{inspect(work)} " <>
+        "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
+        "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
+        "doc_dir #{inspect(compensate_dir(dirs.doc))} " <>
         "(a clean retry is possible; incomplete legs above must be cleared first)"
     )
   end
@@ -171,32 +211,30 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call
-  creates both local faces, creates or clones `work/ops`, reapplies branch protection and compensates
-  only its local artifacts on failure. An existing `work/ops` branch is preserved.
+  creates the three local faces, creates or clones each writer branch, reapplies branch protection
+  and compensates only its local artifacts on failure. Existing writer branches are preserved.
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
     org = Keyword.get(opts, :org, "fleet")
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- refute_existing_or_converge(full_name, proj_dir, work_dir, opts),
+         :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_org_membership(full_name, org),
          :ok <- require_default_branch_main(full_name, opts) do
-      case finish_import(full_name, proj_dir, work_dir, name, opts) do
+      case finish_import(full_name, dirs, name, opts) do
         {:ok, result} ->
           {:ok, result}
 
         {:error, reason} = err ->
-          proj = compensate_dir(proj_dir)
-          work = compensate_dir(work_dir)
-
           Logger.warning(
             "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-              "project_dir #{inspect(proj)}, work_dir #{inspect(work)} (repo untouched — " <>
+              "project_dir #{inspect(compensate_dir(dirs.code))}, " <>
+              "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
+              "doc_dir #{inspect(compensate_dir(dirs.doc))} (repo untouched — " <>
               "pre-existing; a clean retry is possible)"
           )
 
@@ -208,17 +246,17 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp finish_import(full_name, proj_dir, work_dir, name, opts) do
+  defp finish_import(full_name, dirs, name, opts) do
     with {:ok, url} <- repo_url(full_name, opts),
-         :ok <- clone_main(url, proj_dir),
-         :ok <- ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts),
+         :ok <- clone_main(url, dirs.code),
+         :ok <- ensure_writer_faces(full_name, url, dirs, name, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info(
-        "ProjectOnboard: #{full_name} imported — main=#{proj_dir}, work/ops=#{work_dir}"
+        "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.doc_branch()}=#{dirs.doc}"
       )
 
-      arch = ensure_architect(full_name, opts)
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+      {:ok, onboard_result(full_name, dirs, opts)}
     end
   end
 
@@ -232,15 +270,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @spec open(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def open(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
-         :ok <- require_on_machine(full_name, proj_dir, work_dir),
+         :ok <- require_all_faces_on_machine(full_name, dirs),
          :ok <- unpark(full_name, opts) do
-      arch = ensure_architect(full_name, opts)
-      Logger.info("ProjectOnboard: #{full_name} opened — architect #{arch.status}")
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+      result = onboard_result(full_name, dirs, opts)
+      Logger.info("ProjectOnboard: #{full_name} opened — architect #{result.architect.status}")
+      {:ok, result}
     end
   end
 
@@ -505,23 +542,22 @@ defmodule Fleet.Pilot.ProjectOnboard do
   def adopt_project(name, opts \\ []) when is_binary(name) do
     org = Keyword.get(opts, :org, "fleet")
     full_name = "#{org}/#{name}"
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- require_local_main(proj_dir),
-         :ok <- require_adoptable_origin(full_name, proj_dir, opts),
-         {:ok, work_state} <- classify_adopt_work_dir(work_dir),
+         :ok <- require_local_main(dirs.code),
+         :ok <- require_adoptable_origin(full_name, dirs.code, opts),
+         {:ok, states} <- classify_adopt_writer_faces(dirs),
          :ok <- require_forge_absent(full_name, opts),
          {:ok, url} <- repo_url(full_name, opts),
          {:ok, full_name} <- create_empty_repo(name, org, opts) do
-      case finish_adopt(full_name, url, proj_dir, work_dir, work_state, name, opts) do
+      case finish_adopt(full_name, url, dirs, states, name, opts) do
         {:ok, result} ->
           {:ok, result}
 
         {:error, reason} = err ->
-          compensate_adopt(full_name, work_dir, work_state, reason, opts)
+          compensate_adopt(full_name, dirs, states, reason, opts)
           err
       end
     end
@@ -545,26 +581,29 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp classify_adopt_work_dir(work_dir) do
+  # Per WRITER face: absent (we build it), already a git dir on that face's branch (we adopt it),
+  # or a directory that is something else — which is a refusal, never a thing to overwrite. The
+  # directory belongs to the user; adopt publishes what is there, it does not replace it.
+  defp classify_adopt_face(dir, branch) do
     cond do
-      not File.exists?(work_dir) ->
+      not File.exists?(dir) ->
         {:ok, :absent}
 
       match?(
         {:ok, _},
-        GitOps.read([
-          "-C",
-          work_dir,
-          "rev-parse",
-          "--verify",
-          "--quiet",
-          "refs/heads/work/ops"
-        ])
+        GitOps.read(["-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/" <> branch])
       ) ->
         {:ok, :present_git}
 
       true ->
-        {:error, {:not_adoptable, {:work_dir_not_workops, work_dir}}}
+        {:error, {:not_adoptable, {:face_dir_not_on_branch, dir, branch}}}
+    end
+  end
+
+  defp classify_adopt_writer_faces(dirs) do
+    with {:ok, ops} <- classify_adopt_face(dirs.ops, Fleet.Layout.ops_branch()),
+         {:ok, doc} <- classify_adopt_face(dirs.doc, Fleet.Layout.doc_branch()) do
+      {:ok, %{ops: ops, doc: doc}}
     end
   end
 
@@ -588,23 +627,41 @@ defmodule Fleet.Pilot.ProjectOnboard do
     classify_create_repo(result, org, name)
   end
 
-  defp finish_adopt(full_name, url, proj_dir, work_dir, work_state, name, opts) do
+  defp finish_adopt(full_name, url, dirs, states, name, opts) do
     with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
-         :ok <- set_origin(proj_dir, url),
-         :ok <- ensure_intensity(proj_dir, opts),
-         :ok <- push(proj_dir, "main", true),
+         :ok <- set_origin(dirs.code, url),
+         :ok <- ensure_intensity(dirs.code, opts),
+         :ok <- push(dirs.code, "main", true),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
-         :ok <- adopt_work_ops(work_state, full_name, url, work_dir, name, opts),
+         :ok <-
+           adopt_face(
+             states.ops,
+             url,
+             dirs.ops,
+             Fleet.Layout.ops_branch(),
+             "work-ops",
+             name,
+             opts
+           ),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <-
+           adopt_face(
+             states.doc,
+             url,
+             dirs.doc,
+             Fleet.Layout.doc_branch(),
+             "work-doc",
+             name,
+             opts
+           ),
          :ok <- lock_main(full_name, opts) do
-      arch = ensure_architect(full_name, opts)
-
       Logger.info(
-        "ProjectOnboard: #{full_name} ADOPTED from disk — main published, work/ops up, " <>
-          "protection placed"
+        "ProjectOnboard: #{full_name} ADOPTED from disk — main published, " <>
+          "#{Fleet.Layout.ops_branch()} and #{Fleet.Layout.doc_branch()} up, protection placed"
       )
 
-      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir, architect: arch}}
+      {:ok, onboard_result(full_name, dirs, opts)}
     end
   end
 
@@ -634,32 +691,38 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp adopt_work_ops(:absent, full_name, url, work_dir, name, opts) do
-    with :ok <- add_work_ops(work_dir, url),
-         :ok <- Scaffold.work(work_dir, name, opts),
-         :ok <- commit(work_dir, "chore(adopt): init work/ops") do
-      publish_work_ops(full_name, work_dir, opts)
+  defp adopt_face(:absent, url, dir, branch, template, name, opts) do
+    with :ok <- init_face(dir, url, branch),
+         :ok <- Scaffold.face(dir, template, name, opts),
+         :ok <- commit(dir, "chore(adopt): init #{branch}") do
+      publish_face(dir, branch)
     end
   end
 
-  defp adopt_work_ops(:present_git, full_name, url, work_dir, _name, opts) do
-    with :ok <- set_origin(work_dir, url) do
-      publish_work_ops(full_name, work_dir, opts)
+  defp adopt_face(:present_git, url, dir, branch, _template, _name, _opts) do
+    with :ok <- set_origin(dir, url) do
+      publish_face(dir, branch)
     end
   end
 
-  defp compensate_adopt(full_name, work_dir, work_state, reason, opts) do
+  defp compensate_adopt(full_name, dirs, states, reason, opts) do
     forge =
       case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
         :ok -> :deleted
         {:error, e} -> {:delete_failed, e}
       end
 
-    work = if work_state == :absent, do: compensate_dir(work_dir), else: :kept_preexisting
+    # A face we BUILT is removed; a face that was already the user's is KEPT. The distinction is
+    # per-face because the states are: adopting a project with a work/ops of its own and no
+    # work/doc must not delete the former while cleaning up the latter.
+    undo = fn state, dir ->
+      if state == :absent, do: compensate_dir(dir), else: :kept_preexisting
+    end
 
     Logger.warning(
       "ProjectOnboard: adopt #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-        "forge #{inspect(forge)}, work_dir #{inspect(work)} (proj_dir untouched — the user's; " <>
+        "forge #{inspect(forge)}, work_dir #{inspect(undo.(states.ops, dirs.ops))}, " <>
+        "doc_dir #{inspect(undo.(states.doc, dirs.doc))} (proj_dir untouched — the user's; " <>
         "a clean retry is possible)"
     )
   end
@@ -703,15 +766,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
   def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
     org = Keyword.get(opts, :org, "fleet")
     full_name = "#{org}/#{name}"
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
     # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
     url_gate = Keyword.get(opts, :url_gate, &default_external_url_gate/1)
 
     with :ok <- validate_name(name),
          :ok <- url_gate.(url),
          :ok <- ensure_human_provisioned(org, opts),
-         :ok <- require_machine_absent(full_name, proj_dir, work_dir),
+         :ok <- require_machine_absent(full_name, dirs),
          :ok <- require_forge_absent(full_name, opts) do
       scratch = external_scratch_dir(name)
 
@@ -731,8 +793,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
                  full_name,
                  forge_url,
                  scratch,
-                 proj_dir,
-                 work_dir,
+                 dirs,
                  name,
                  Keyword.put(opts, :source_host, source_host)
                ) do
@@ -740,7 +801,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
               {:ok, result}
 
             {:error, reason} = err ->
-              compensate_external(full_name, proj_dir, work_dir, reason, opts)
+              compensate_external(full_name, dirs, reason, opts)
               err
           end
         end
@@ -753,7 +814,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
   # existing local import leg for what it does (clone from OUR forge brings intensity.json
   # back down, so ITS lock_main reads the right jury).
-  defp finish_external(full_name, forge_url, scratch, proj_dir, work_dir, name, opts) do
+  defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
     with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
          :ok <-
@@ -765,7 +826,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- set_origin(scratch, forge_url),
          :ok <- push(scratch, "main", true),
          :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
-         {:ok, result} <- finish_import(full_name, proj_dir, work_dir, name, opts) do
+         {:ok, result} <- finish_import(full_name, dirs, name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} imported from EXTERNAL " <>
           "#{Keyword.get(opts, :source_host, "external")} — history preserved, origin " <>
@@ -786,8 +847,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp require_machine_absent(full_name, proj_dir, work_dir) do
-    if File.exists?(proj_dir) or File.exists?(work_dir),
+  defp require_machine_absent(full_name, dirs) do
+    if Enum.any?([dirs.code, dirs.ops, dirs.doc], &File.exists?/1),
       do: {:error, {:already_on_machine, full_name}},
       else: :ok
   end
@@ -909,20 +970,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # Same direct-primitive posture as compensate_adopt (the 6-32 lesson), plus both local dirs —
   # unlike adopt, EVERYTHING local here was created by this call.
-  defp compensate_external(full_name, proj_dir, work_dir, reason, opts) do
+  defp compensate_external(full_name, dirs, reason, opts) do
     forge =
       case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
         :ok -> :deleted
         {:error, e} -> {:delete_failed, e}
       end
 
-    proj = compensate_dir(proj_dir)
-    work = compensate_dir(work_dir)
-
     Logger.warning(
       "ProjectOnboard: import_external #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-        "forge #{inspect(forge)}, project_dir #{inspect(proj)}, work_dir #{inspect(work)} " <>
-        "(a clean retry is possible)"
+        "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
+        "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
+        "doc_dir #{inspect(compensate_dir(dirs.doc))} (a clean retry is possible)"
     )
   end
 
@@ -938,23 +997,23 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- delete_forge(full_name, opts) do
-      proj = nuke_if_is(full_name, proj_dir, opts)
-      work = nuke_if_is(full_name, work_dir, opts)
+      proj = nuke_if_is(full_name, dirs.code, opts)
+      work = nuke_if_is(full_name, dirs.ops, opts)
+      doc = nuke_if_is(full_name, dirs.doc, opts)
 
       architect =
-        if proj == :removed or work == :removed,
+        if :removed in [proj, work, doc],
           do: stop_architect(full_name, opts),
           else: :skipped_identity
 
       Logger.info(
         "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, " <>
-          "project_dir #{proj}, work_dir #{work}"
+          "project_dir #{proj}, work_dir #{work}, doc_dir #{doc}"
       )
 
       {:ok,
@@ -962,9 +1021,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
          repo: full_name,
          forge: forge,
          architect: architect,
-         project_dir: proj_dir,
-         work_dir: work_dir,
-         local: %{project: proj, work: work}
+         project_dir: dirs.code,
+         work_dir: dirs.ops,
+         doc_dir: dirs.doc,
+         local: %{project: proj, work: work, doc: doc}
        }}
     end
   end
@@ -1270,8 +1330,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp require_on_machine(full_name, proj_dir, work_dir) do
-    if File.dir?(proj_dir) and File.dir?(work_dir),
+  # ALL THREE faces, and the doc one is not optional here: `open` is what hands a project to the
+  # architect, whose producer path is on `doc`. Opening a project whose doc face never landed would
+  # succeed and then fail at the first documentary ticket, far from the cause.
+  defp require_all_faces_on_machine(full_name, dirs) do
+    if Enum.all?([dirs.code, dirs.ops, dirs.doc], &File.dir?/1),
       do: :ok,
       else: {:error, {:not_on_machine, full_name}}
   end
@@ -1290,16 +1353,18 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp ensure_work_ops(full_name, url, _proj_dir, work_dir, name, opts) do
-    if repo_mod(opts).branch_exists?(full_name, "work/ops", fc_opts(opts)) do
-      File.mkdir_p!(Path.dirname(work_dir))
-      GitOps.run(["clone", "--branch", "work/ops", url, work_dir], auth: true)
-    else
-      with :ok <- add_work_ops(work_dir, url),
-           :ok <- Scaffold.work(work_dir, name, opts),
-           :ok <- commit(work_dir, "chore(import): init work/ops") do
-        publish_work_ops(full_name, work_dir, opts)
-      end
+  defp ensure_writer_faces(full_name, url, dirs, name, opts) do
+    with :ok <-
+           ensure_face(
+             full_name,
+             url,
+             dirs.ops,
+             Fleet.Layout.ops_branch(),
+             "work-ops",
+             name,
+             opts
+           ) do
+      ensure_face(full_name, url, dirs.doc, Fleet.Layout.doc_branch(), "work-doc", name, opts)
     end
   end
 
@@ -1444,49 +1509,46 @@ defmodule Fleet.Pilot.ProjectOnboard do
       else: {:error, {:invalid_name, name}}
   end
 
-  defp refute_existing(proj_dir, work_dir) do
-    cond do
-      File.exists?(proj_dir) -> {:error, {:already_exists, proj_dir}}
-      File.exists?(work_dir) -> {:error, {:already_exists, work_dir}}
-      true -> :ok
+  # EVERY face, not two: a project whose doc face is missing is not realized, and answering `:ok`
+  # here would let a half-built project through the door that exists to refuse exactly that.
+  defp refute_existing(dirs) do
+    case Enum.find([dirs.code, dirs.ops, dirs.doc], &File.exists?/1) do
+      nil -> :ok
+      dir -> {:error, {:already_exists, dir}}
     end
   end
 
-  defp refute_existing_or_converge(full_name, proj_dir, work_dir, opts) do
-    case refute_existing(proj_dir, work_dir) do
+  defp refute_existing_or_converge(full_name, dirs, opts) do
+    case refute_existing(dirs) do
       :ok ->
         :ok
 
       {:error, _} = refusal ->
-        if satisfied_end_state?(full_name, proj_dir, work_dir, opts) do
+        if satisfied_end_state?(full_name, dirs, opts) do
           Logger.info(
-            "ProjectOnboard: #{full_name} already realized (repo + dual-dir proven ours + " <>
-              "work/ops published) — idempotent re-emit, nothing created"
+            "ProjectOnboard: #{full_name} already realized (repo + three faces proven ours + " <>
+              "writer branches published) — idempotent re-emit, nothing created"
           )
 
-          arch = ensure_architect(full_name, opts)
-
-          {:already_satisfied,
-           %{
-             repo: full_name,
-             project_dir: proj_dir,
-             work_dir: work_dir,
-             architect: arch,
-             idempotent: true
-           }}
+          {:already_satisfied, Map.put(onboard_result(full_name, dirs, opts), :idempotent, true)}
         else
           refusal
         end
     end
   end
 
-  defp satisfied_end_state?(full_name, proj_dir, work_dir, opts) do
+  defp satisfied_end_state?(full_name, dirs, opts) do
     ours? =
-      origin_full_name(proj_dir, opts) == {:ok, full_name} and
-        origin_full_name(work_dir, opts) == {:ok, full_name}
+      Enum.all?([dirs.code, dirs.ops, dirs.doc], fn dir ->
+        origin_full_name(dir, opts) == {:ok, full_name}
+      end)
 
-    ours? and forge_repo_present?(full_name, opts) and
-      repo_mod(opts).branch_exists?(full_name, "work/ops", fc_opts(opts))
+    published? =
+      Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.doc_branch()], fn branch ->
+        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts))
+      end)
+
+    ours? and forge_repo_present?(full_name, opts) and published?
   end
 
   defp forge_repo_present?(full_name, opts) do
@@ -1589,17 +1651,45 @@ defmodule Fleet.Pilot.ProjectOnboard do
     GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
   end
 
-  defp publish_work_ops(_full_name, work_dir, _opts) do
-    push(work_dir, "work/ops", true)
+  defp publish_face(dir, branch), do: push(dir, branch, true)
+
+  # STANDALONE, not a linked worktree, and this is the reason both non-code faces are built this
+  # way: `git worktree add` keeps the gitdir under the PARENT repository, so a face checked out
+  # that way is uncommittable from any context that has the parent read-only — which is every pod
+  # mounting `/home/projects` RO, and the architect itself. A standalone clone owns its `.git`.
+  defp init_face(dir, url, branch) do
+    File.mkdir_p!(Path.dirname(dir))
+
+    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false) do
+      GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
+    end
   end
 
-  # Standalone so the gitdir remains inside the architect's writable work root.
-  defp add_work_ops(work_dir, url) do
-    File.mkdir_p!(Path.dirname(work_dir))
-
-    with :ok <- GitOps.run(["init", "-q", "-b", "work/ops", work_dir], auth: false) do
-      GitOps.run(["-C", work_dir, "remote", "add", "origin", url], auth: false)
+  # Clone the face if the forge already carries the branch, otherwise build and publish it. Same
+  # shape for both writer faces: the ONLY per-face inputs are the branch and the template subtree,
+  # so a third one costs a call site and no new logic.
+  defp ensure_face(full_name, url, dir, branch, template, name, opts) do
+    if repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
+      File.mkdir_p!(Path.dirname(dir))
+      GitOps.run(["clone", "--branch", branch, url, dir], auth: true)
+    else
+      with :ok <- init_face(dir, url, branch),
+           :ok <- Scaffold.face(dir, template, name, opts),
+           :ok <- commit(dir, "chore(import): init #{branch}") do
+        publish_face(dir, branch)
+      end
     end
+  end
+
+  # The three host roots of a project, resolved once per entry point. Named rather than threaded as
+  # three positional paths: a face is added by extending this map and its template, not by widening
+  # every signature between here and the git calls.
+  defp face_dirs(name, opts) do
+    %{
+      code: Path.join(Keyword.get(opts, :projects_root, @projects_root), name),
+      doc: Path.join(Keyword.get(opts, :doc_root, @doc_root), name),
+      ops: Path.join(Keyword.get(opts, :work_root, @work_root), name)
+    }
   end
 
   defp commit(dir, message) do

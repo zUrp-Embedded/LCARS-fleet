@@ -45,7 +45,8 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
       human: "ghost-human",
       forge_users: users,
       projects_root: Path.join(tmp, "projects"),
-      work_root: Path.join(tmp, "work")
+      work_root: Path.join(tmp, "work"),
+      doc_root: Path.join(tmp, "doc")
     ]
 
   @tag :tmp_dir

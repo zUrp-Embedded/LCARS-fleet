@@ -70,19 +70,34 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     setup %{tmp_dir: tmp} do
       proj_root = Path.join(tmp, "projects")
       work_root = Path.join(tmp, "work")
+      doc_root = Path.join(tmp, "doc")
       proj_dir = Path.join(proj_root, "demo")
       work_dir = Path.join(work_root, "demo")
-      # The local `demo` belongs to fleet/demo (origin says so).
+      doc_dir = Path.join(doc_root, "demo")
+      # The local `demo` belongs to fleet/demo (origin says so) — on all three faces.
       init_repo_with_origin(proj_dir, "https://forge.test/fleet/demo.git")
       init_repo_with_origin(work_dir, "https://forge.test/fleet/demo.git")
-      {:ok, proj_root: proj_root, work_root: work_root, proj_dir: proj_dir, work_dir: work_dir}
+      init_repo_with_origin(doc_dir, "https://forge.test/fleet/demo.git")
+
+      {:ok,
+       proj_root: proj_root,
+       work_root: work_root,
+       doc_root: doc_root,
+       proj_dir: proj_dir,
+       work_dir: work_dir,
+       doc_dir: doc_dir}
     end
 
     defp del(ctx, extra) do
       ProjectOnboard.delete_project(
         "fleet/demo",
         Keyword.merge(
-          [projects_root: ctx.proj_root, work_root: ctx.work_root, spawner: OkSpawner],
+          [
+            projects_root: ctx.proj_root,
+            work_root: ctx.work_root,
+            doc_root: ctx.doc_root,
+            spawner: OkSpawner
+          ],
           extra
         )
       )
@@ -147,6 +162,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
                  "other/demo",
                  projects_root: ctx.proj_root,
                  work_root: ctx.work_root,
+                 doc_root: ctx.doc_root,
                  force: true,
                  forge_repo: AbsentRepo,
                  spawner: OkSpawner

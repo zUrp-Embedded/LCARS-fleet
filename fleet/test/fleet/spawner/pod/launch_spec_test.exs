@@ -133,23 +133,24 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
-  describe "code_reference_path/3 — the OPPOSITE face as RO reference (chantier face-projet #9)" do
-    # An ops-face pod reads the code it documents; a code-face pod gets nothing new (its workspace
+  describe "code_reference_path/3 — the OPPOSITE face as RO reference" do
+    # A doc-face pod reads the code it documents; a code-face pod gets nothing new (its workspace
     # IS the code). The face comes off the project map's base_branch — threaded, never re-derived.
+    # NEVER the ops face: no card can declare it, so no producer clone ever sits on that branch.
     defp ops_opts(project_extra \\ %{}) do
       [
         rc_name: "myproj_test",
         project_slug: "myproj",
         project:
           Map.merge(
-            %{"repo_path" => "http://f/x.git", "base_branch" => "work/ops"},
+            %{"repo_path" => "http://f/x.git", "base_branch" => "work/doc"},
             project_extra
           )
       ]
     end
 
     @tag :tmp_dir
-    test "ops-face pod + code worktree present → <projects_root>/<project>", %{tmp_dir: tmp} do
+    test "doc-face pod + code worktree present → <projects_root>/<project>", %{tmp_dir: tmp} do
       File.mkdir_p!(Path.join(tmp, "myproj"))
 
       assert LaunchSpec.code_reference_path(ops_opts(), cap_with_mounts([]), tmp) ==

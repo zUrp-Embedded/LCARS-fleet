@@ -28,11 +28,27 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     proj = Path.join(root, "myproj")
     git!(["clone", origin, proj])
 
+    # the DOC face: an orphan branch on the same origin, cloned into its own root. Its clone is a
+    # WRITER (the architect and the human author in it), which is the property the alignment turns on.
+    doc_root = Path.join(tmp, "projects.doc")
+    File.mkdir_p!(doc_root)
+    git_in!(seed, ["checkout", "-q", "--orphan", "work/doc"])
+    git_in!(seed, ["rm", "-rq", "--cached", "."])
+    File.write!(Path.join(seed, "backlog.md"), "v0\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "init doc"])
+    git_in!(seed, ["push", "-q", "origin", "work/doc"])
+    git_in!(seed, ["checkout", "-q", "main"])
+    doc = Path.join(doc_root, "myproj")
+    git!(["clone", "-q", "--branch", "work/doc", origin, doc])
+    git_in!(doc, ["config", "user.email", "t@lcars"])
+    git_in!(doc, ["config", "user.name", "t"])
+
     # unique name → async tests without collision on the GenServer's global name.
     name = :"wt_#{System.unique_integer([:positive])}"
-    start_supervised!({WorktreeSync, name: name, projects_root: root})
+    start_supervised!({WorktreeSync, name: name, projects_root: root, doc_root: doc_root})
 
-    %{seed: seed, proj: proj, sync: name}
+    %{seed: seed, proj: proj, doc: doc, origin: origin, sync: name}
   end
 
   test "aligns the local clone on origin/main after an advancement (the deliverable lands on disk)",
@@ -67,6 +83,42 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     # The GenServer serializes (one git at a time) → six concurrent alignments don't trample each other.
     assert Enum.all?(results, &(&1 == :ok))
     assert head(proj) == head(seed)
+  end
+
+  test "the DOC face REBASES: a local commit survives the remote advancing", %{
+    seed: seed,
+    doc: doc,
+    sync: sync
+  } do
+    # THE DESTRUCTIVE MUTATION, and nothing caught it: aligning `doc` with the code face's
+    # `reset --hard` left the whole suite green (measured 2026-08-08). It would have to — every
+    # other fixture here is on `main`, where reset IS right because nobody writes locally.
+    #
+    # On `doc` somebody does: the architect and the human author in that clone, and a merge landing
+    # on the forge would then silently erase whatever they had committed but not yet pushed. A reset
+    # does not fail on the work it destroys; it reports `:ok`.
+    #
+    # The discriminator is a local commit that the remote has never seen. Reset drops it. Rebase
+    # replays it on top of the merged tip — both survive, which is what this asserts.
+    git_in!(doc, ["config", "user.email", "t@lcars"])
+    File.write!(Path.join(doc, "local-note.md"), "written by the arch, not yet pushed\n")
+    git_in!(doc, ["add", "-A"])
+    git_in!(doc, ["commit", "-qm", "docs: arch note"])
+
+    # the forge advances on work/doc (a scribe's PR merged)
+    git_in!(seed, ["checkout", "-q", "work/doc"])
+    File.write!(Path.join(seed, "spec-notes.md"), "merged from a PR\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "docs: merged deliverable"])
+    git_in!(seed, ["push", "-q", "origin", "work/doc"])
+
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "work/doc")
+
+    assert File.exists?(Path.join(doc, "spec-notes.md")),
+           "the merged deliverable must have landed"
+
+    assert File.exists?(Path.join(doc, "local-note.md")),
+           "the arch's unpushed commit was ERASED — this face is a writer, it rebases, it never resets"
   end
 
   test "a branch that is NOT a face aligns NOTHING and says so — never the code worktree by default",
