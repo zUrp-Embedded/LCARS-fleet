@@ -606,10 +606,9 @@ defmodule Fleet.Pilot.Poller do
   defp repo_scoped_suspects(state),
     do: MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
 
-  # The project's work/ops worktree on disk — what `BriefArtifact.physicalize` commits into and
-  # what `LaunchSpec.project_ops_path` projects. Its ABSENCE is the mechanical signature of a repo
-  # that no onboarding verb ever touched: both consumers already degrade on exactly this condition,
-  # each in its own corner and without naming it.
+  # The project's work/ops worktree on disk — what `BriefArtifact.physicalize` commits into. Its
+  # ABSENCE is the mechanical signature of a repo that no onboarding verb ever touched: the
+  # consumer already degrades on exactly this condition, in its own corner and without naming it.
   # `:require_onboarded` is a TEST-HERMETICITY lever, not an operator knob: the unit tests drive
   # fictional repos that have no project directory anywhere, so `config/test.exs` turns the gate
   # off in the same breath as `start_listener: false` and the stub launch backend. The dedicated

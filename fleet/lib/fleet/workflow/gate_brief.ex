@@ -10,15 +10,13 @@ defmodule Fleet.Workflow.GateBrief do
   DEFUSES the quoted material (blockquotes — the executable state is unrepresentable).
 
   ONE EXCEPTION, stated because "the prose lives in the templates" read as absolute and is not: the
-  source-pointer body (`subject_body(:brief, …)` below) is written HERE, in French, like its twin
-  `BriefArtifact.pointer_brief/2`. What those two carry is not tone — it is PROTOCOL: ONE address,
-  `git show <sha>:<ref>`, which is the pinned object itself. Not the working-tree path with the pin
-  as a fallback: that mount is a live bind of a worktree the architect holds in RW, so the path and
-  the pin are not two ways of reading the same thing. Their imperative half
-  ("read it in full before judging") IS calibration, and moving that half to a template — the fragment
-  mechanism already exists, cf. `gate-brief-request-section` — is what it would take to tune the
-  wording without a deploy. Until then: framing in templates, pointers in code, and the reader is told
-  which is which rather than discovering the exception.
+  subject body (`subject_body(:brief, …)` below) is written HERE, in French. What it carries is not
+  tone — it is PROTOCOL: the resolved text AND the sha it was resolved at, so the judge reads what
+  it judges and cites the version it read. Its imperative half ("cite this sha in your verdict") IS
+  calibration, and moving that half to a template — the fragment mechanism already exists, cf.
+  `gate-brief-request-section` — is what it would take to tune the wording without a deploy. Until
+  then: framing in templates, protocol in code, and the reader is told which is which rather than
+  discovering the exception.
 
   Pure function over its inputs + the template files (fail-loud on a missing/miswired
   template — a judge never receives a half-rendered order).
