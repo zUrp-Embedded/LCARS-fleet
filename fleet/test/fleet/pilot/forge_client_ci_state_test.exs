@@ -105,6 +105,36 @@ defmodule Fleet.Pilot.ForgeClientCiStateTest do
              ])
   end
 
+  test "a SKIPPED context does not vote — a deliberate skip is not a wait" do
+    # `skipped` means the step did not run and was not meant to (its `if:` was false). Counting it
+    # as "not yet" made the gate wait 45 minutes and then ESCALATE to a human: a false alarm on a
+    # deliberate skip, and false alarms are what teach a human to ignore the channel.
+    items = [st(1, "ci/build", "success"), st(2, "ci/lint", "skipped")]
+    assert {:ok, :success} = ci_state(items)
+
+    # And it does not hide a red either: not voting is not vetoing.
+    assert {:ok, :failure} = ci_state([st(1, "ci/build", "failure"), st(2, "ci/lint", "skipped")])
+  end
+
+  test "ALL contexts skipped → :none, the honest answer (nothing ran)" do
+    # `:none` is what the gate already treats as a bounded wait then a loud escalation — correct
+    # here, because a repo whose every check was skipped has told us nothing.
+    assert {:ok, :none} = ci_state([st(1, "ci/build", "skipped"), st(2, "ci/lint", "skipped")])
+  end
+
+  test "a WARNING opens the door — the check ran and did not fail" do
+    # Blocking forever on a warning is a state no human can leave except by re-running. It is a
+    # success that comments.
+    assert {:ok, :success} = ci_state([st(1, "ci/build", "warning")])
+    assert {:ok, :success} = ci_state([st(1, "ci/build", "success"), st(2, "ci/lint", "warning")])
+  end
+
+  test "an UNKNOWN state still closes the door — the catch-all keeps its job" do
+    # The reason the catch-all existed stays true for states this code does not know: a forge that
+    # grows a new one must not widen the merge door by default.
+    assert {:ok, :pending} = ci_state([st(1, "ci/build", "quantum-superposed")])
+  end
+
   test "no status at all is :none, distinct from :success" do
     assert {:ok, :none} = ci_state([])
   end

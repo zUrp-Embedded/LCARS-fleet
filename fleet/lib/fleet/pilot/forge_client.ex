@@ -856,13 +856,33 @@ defmodule Fleet.Pilot.ForgeClient do
   # unfinished run means "not yet", never "yes".
   defp worst_ci_state([]), do: :none
 
+  # LES SIX ETATS QUE LE CONTRAT DECLARE, ET CE QU'ILS VALENT POUR UNE PORTE DE MERGE.
+  #
+  # `CommitStatus.status` : `pending | success | error | failure | warning | skipped` (enum du
+  # swagger de l'instance). Trois d'entre eux etaient traites par la clause fourre-tout « etat
+  # inconnu -> :pending », ce qui est juste pour un etat VRAIMENT inconnu et faux pour deux qui sont
+  # au contrat :
+  #
+  #   * `skipped` — l'etape ne s'est PAS executee et ne devait pas : sa condition `if:` etait
+  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » faisait attendre la porte
+  #     45 min puis ESCALADER vers un humain — une fausse alarme sur un saut delibere, et une
+  #     fausse alarme est ce qui apprend a un humain a ignorer le canal. Un contexte sans verdict ne
+  #     VOTE PAS ; si tous sont sautes, il ne reste rien et `:none` (aucun statut) est la reponse
+  #     juste, que la porte traite deja en attente bornee.
+  #   * `warning` — la verification a TOURNE et n'a pas echoue. La faire bloquer indefiniment est un
+  #     etat dont aucun humain ne peut sortir autrement qu'en relancant ; elle ouvre donc la porte,
+  #     comme un succes, parce que c'est ce qu'elle est : un succes qui commente.
+  #
+  # Le fourre-tout reste, et il reste `:pending` : un etat que ce code ne connait pas ne doit pas
+  # elargir la porte. La difference est qu'il ne couvre plus que l'inconnu REEL.
   defp worst_ci_state(states) do
+    voting = Enum.reject(states, &(&1 == "skipped"))
+
     cond do
-      Enum.any?(states, &(&1 in ["failure", "error"])) -> :failure
-      Enum.any?(states, &(&1 == "pending")) -> :pending
-      Enum.all?(states, &(&1 == "success")) -> :success
-      # An unknown state string is NOT read as success: a forge that grows a new state must not
-      # widen the merge door by default.
+      voting == [] -> :none
+      Enum.any?(voting, &(&1 in ["failure", "error"])) -> :failure
+      Enum.any?(voting, &(&1 == "pending")) -> :pending
+      Enum.all?(voting, &(&1 in ["success", "warning"])) -> :success
       true -> :pending
     end
   end
