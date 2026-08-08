@@ -309,6 +309,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} SLOW (#{ms} ms)")
     end
 
+    mark_activity(pod_id)
+
     case resp do
       {:ok, content, _state} ->
         content
@@ -316,6 +318,30 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       {:error, reason, _state} ->
         %{"content" => [%{"type" => "text", "text" => error_text(reason)}], "isError" => true}
     end
+  end
+
+  # A COMPLETED tools/call is the only liveness signal that PROVES the pod acted, and the acceptor
+  # was the only one holding it: `:timer.tc` above measured every call and kept none. The mtime of
+  # this marker is that timestamp, made durable for a reader in another domain (`Pod.Liveness`)
+  # that cannot call into MCP.
+  #
+  # Marked AFTER the call returns, deliberately: a mark posed on entry would keep re-arming the
+  # deadline of a pod stuck INSIDE a tool, which is precisely the death the watchdog exists to
+  # catch. Only completion is evidence.
+  #
+  # A failed touch is swallowed: a liveness HINT must never break the call it observes, and its
+  # absence already reads as "no signal" downstream, never as silence.
+  # No nil-guarded twin clause: `pod_id` is channel-owned and always a binary here, and dialyzer
+  # says so. A defensive clause that can never fire is not a safety net, it is a claim that the
+  # value might be something it cannot be.
+  defp mark_activity(pod_id) do
+    marker =
+      pod_id
+      |> Fleet.MCP.PodSocketSupervisor.socket_path()
+      |> Fleet.Layout.pod_mcp_activity_marker()
+
+    _ = File.touch(marker)
+    :ok
   end
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.

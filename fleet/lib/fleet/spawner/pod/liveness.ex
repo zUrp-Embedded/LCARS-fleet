@@ -10,14 +10,19 @@ defmodule Fleet.Spawner.Pod.Liveness do
   systematically co-arms it with the other's output: two modules for ONE mechanism, an
   artificial boundary. They stay co-located, in the distinct sections below:
 
-  - **Liveness probe**: on each tick of the `:liveness` generic timeout, sample the pod's activity —
-    the cumulative size of the `<session_id>.jsonl` ("produced output") and the CPU jiffies at
-    `/proc/<os_pid>/stat` — and decide whether the pod has MOVED since the previous tick. That os_pid
-    is the pod's HOLDER, though (the Port's `sleep infinity` that holds the namespace, cf. `PodTmux`),
-    NOT claude — which runs under tmux as a separate process, its CPU excluded from the holder's own
-    `/proc/stat`. So the near-idle holder makes the CPU a weak second signal; the jsonl-size carries
-    liveness (probing claude's real pid stays an open question, cf. `proc_cpu_jiffies/1`). A movement → the `Pod` re-arms the deadline
-    (pushes the kill back); total silence → the deadline runs until the timeout.
+  - **Liveness probe**: on each tick of the `:liveness` generic timeout, sample FOUR independent
+    signals and decide whether the pod has MOVED since the previous tick. A movement → the `Pod`
+    re-arms the deadline (pushes the kill back); total silence → the deadline runs until the timeout.
+
+    | signal | what it observes | what it is worth |
+    |---|---|---|
+    | jsonl size | produced output (`<session_id>.jsonl`) | strong, but FLAT during a single long generation |
+    | cpu jiffies | `/proc/<os_pid>/stat` | WEAK — that os_pid is the HOLDER (the Port's `sleep infinity` holding the namespace, cf. `PodTmux`), not claude, which runs under tmux as a separate process with its CPU outside the holder's `/proc/stat`. Probing claude's real pid stays an open question, cf. `proc_cpu_jiffies/1` |
+    | pane hash | the visible REPL screen | covers the generation the jsonl cannot carry (the TUI repaints its elapsed counter) — nil without a readable tmux pane |
+    | MCP activity | mtime of the marker the acceptor touches on a COMPLETED tools/call | the only PROOF of the four: the other three say something happened NEAR the pod, this one says the pod ACTED |
+
+    They are deliberately unequal and deliberately redundant: each covers a window where another
+    reads as silence, and none of them alone is trusted enough to kill on.
   - **Response timeout**: derive the delay (ms) of the `:result_deadline` watchdog from the cap-profile
     (override `spec.timeouts.response_sec`, otherwise a scope-coded default) and the tick cadence.
 
@@ -31,7 +36,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   ## Contract (called by `Pod`)
 
-  - `liveness_sample/1` (PUBLIC) — samples `{jsonl_size, cpu_jiffies}` (called by the liveness tick
+  - `liveness_sample/1` (PUBLIC) — samples the 4-tuple above (called by the liveness tick
     handler `handle_event({:timeout, :liveness}, :tick, :monitoring, ...)`).
   - `liveness_moved?/2` (PUBLIC) — compares the previous sample to the new one (called by the same
     handler).
@@ -43,6 +48,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
   `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` and
   `default_response_timeout_sec/1` are internal (called ONLY by the functions above).
   """
+
+  require Logger
 
   # ============================================================
   # Role 1 — liveness probe (has the pod MOVED?) + tick cadence
@@ -67,19 +74,24 @@ defmodule Fleet.Spawner.Pod.Liveness do
   end
 
   @doc """
-  Samples `{jsonl_size, holder_cpu_jiffies}` or delegates to the injected probe.
+  Samples `{jsonl_size, holder_cpu_jiffies, pane_hash, mcp_activity_at}` or delegates to the
+  injected probe. Each element is independently nil-able: nil means NO SIGNAL, never silence.
   """
   @spec liveness_sample(map()) :: term()
   def liveness_sample(state) do
     case keyword_opt(state, :liveness_probe_fun) ||
            Application.get_env(:fleet_spawner, :liveness_probe_fun) do
-      fun when is_function(fun, 1) -> fun.(state)
-      _ -> {jsonl_size(state), proc_cpu_jiffies(state), pane_hash(state)}
+      fun when is_function(fun, 1) ->
+        fun.(state)
+
+      _ ->
+        {jsonl_size(state), proc_cpu_jiffies(state), pane_hash(state), mcp_activity_at(state)}
     end
   end
 
   @doc """
-  Has the pod MOVED since the previous sample? Movement = at least ONE of the two signals has grown.
+  Has the pod MOVED since the previous sample? Movement = at least ONE signal has grown (or, for the
+  pane, changed).
   No baseline (1st tick, `prev = nil`) → alive (benefit of the doubt). Called by the same tick handler
   as `liveness_sample/1`.
 
@@ -89,26 +101,59 @@ defmodule Fleet.Spawner.Pod.Liveness do
   kill, destroying a pod we simply could not measure. So `{nil, nil}` reads as moved (re-arm +
   re-probe next tick), the same benefit-of-the-doubt as the missing baseline; only a sample
   where at least one signal IS readable, and neither grew, is genuine silence.
+
+  The tuple has GROWN over time (2 -> 3 -> 4 signals) and every arity is still answered, because a
+  sample is compared against the PREVIOUS one: a node that adds a signal, or a test that injects a
+  probe of another shape, would otherwise meet a sample pair of mismatched arity. That pair used to
+  raise `FunctionClauseError` and kill the pod inside its own liveness tick — the one place where an
+  observation failure must never be fatal. It now reads as UNKNOWN, like the all-nil sample.
   """
   @spec liveness_moved?(term(), term()) :: boolean()
   def liveness_moved?(nil, _now), do: true
   def liveness_moved?(_prev, {nil, nil}), do: true
   def liveness_moved?(_prev, {nil, nil, nil}), do: true
+  def liveness_moved?(_prev, {nil, nil, nil, nil}), do: true
 
   # 3-tuple (current default probe): the PANE hash is the primary in-generation signal — the
   # claude TUI repaints (spinner + elapsed counter) during a long SINGLE generation, exactly
   # when the jsonl sits between message boundaries and reads as silence (measured kill: a
   # producer writing one large doc for >5 min died mid-work). A pane CHANGE is movement; a nil
   # hash (capture failed) contributes nothing (anti-kill bias, same as the other signals).
+  # 4-tuple (current default probe): the 4th signal is the pod's LAST COMPLETED MCP tool call, and
+  # it is the only one of the four that PROVES activity instead of inferring it — a growing jsonl,
+  # cpu jiffies and a repainting pane all say "something happened near the pod", an MCP call says
+  # "the pod acted". It is also the only one that survives a pod with no readable tmux pane.
+  # Monotonic (an mtime), so it goes through `grew?` like the other counters: an old marker that
+  # stops moving contributes nothing, never a false alive.
+  def liveness_moved?({pj, pc, ph, pm}, {nj, nc, nh, nm}),
+    do: grew?(pj, nj) or grew?(pc, nc) or pane_changed?(ph, nh) or grew?(pm, nm)
+
   def liveness_moved?({pj, pc, ph}, {nj, nc, nh}),
     do: grew?(pj, nj) or grew?(pc, nc) or pane_changed?(ph, nh)
 
   def liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
 
-  @doc "Is this sample fully UNOBSERVABLE (both signals nil)? The tick handler logs the degrade."
+  # Shapes of DIFFERENT arity are not comparable, and the answer to "not comparable" is UNKNOWN.
+  # Anything else here would turn a signal upgrade into a pod kill.
+  #
+  # It says so out loud, though. A fallback that swallows an unexpected shape would hide a probe
+  # returning something wrong behind a permanent "alive" — the pod would simply never time out
+  # again, and nothing would ever say why. The condition is SELF-HEALING (the next tick compares
+  # two samples of the new shape), so this cannot flood: at most one line per pod per change.
+  def liveness_moved?(prev, now) do
+    Logger.warning(
+      "Liveness: sample shapes not comparable (prev #{inspect(prev)}, now #{inspect(now)}) — " <>
+        "read as UNKNOWN (deadline re-armed), never as silence"
+    )
+
+    true
+  end
+
+  @doc "Is this sample fully UNOBSERVABLE (EVERY signal nil)? The tick handler logs the degrade."
   @spec unobservable?(term()) :: boolean()
   def unobservable?({nil, nil}), do: true
   def unobservable?({nil, nil, nil}), do: true
+  def unobservable?({nil, nil, nil, nil}), do: true
   def unobservable?(_), do: false
 
   defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
@@ -125,6 +170,20 @@ defmodule Fleet.Spawner.Pod.Liveness do
   # An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive); a generating pod
   # repaints every second (elapsed counter) -> the signal the jsonl cannot carry mid-message.
   # Failure/absence -> nil = NO SIGNAL, never silence (anti-kill bias, cf. `liveness_moved?/2`).
+  # Posix mtime of the marker the MCP acceptor touches when a tools/call COMPLETES. Reading a
+  # timestamp someone else wrote is the whole point: the acceptor holds the proof and lives in a
+  # domain this one may not call, so the fact travels as a file — the same shape as `jsonl_size`.
+  # No marker (pod never called a tool, or MCP off) -> nil = NO SIGNAL, never silence.
+  defp mcp_activity_at(state) do
+    with path when is_binary(path) <- Map.get(state, :mcp_socket_path),
+         {:ok, %File.Stat{mtime: mtime}} <-
+           File.stat(Fleet.Layout.pod_mcp_activity_marker(path), time: :posix) do
+      mtime
+    else
+      _ -> nil
+    end
+  end
+
   defp pane_hash(state) do
     case Map.get(state, :pod_id) do
       pod_id when is_binary(pod_id) ->

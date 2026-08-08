@@ -86,6 +86,38 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
+  # THE ACCEPTOR IS THE ONLY WITNESS OF THIS FACT, AND IT USED TO THROW IT AWAY. `:timer.tc` around
+  # every tools/call produced a timestamp per call and kept only the slow ones, in a log line. The
+  # liveness watchdog three domains away was meanwhile inferring the pod's activity from a growing
+  # file, cpu jiffies and a repainting screen — proxies, while the proof passed through here.
+  #
+  # The marker's mtime IS that timestamp. Written as a file because the reader (`Pod.Liveness`) sits
+  # in a domain that may not call into MCP.
+  test "a COMPLETED tools/call marks the pod's MCP activity — the only PROOF of liveness we hold" do
+    pod = uniq("p")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    marker = Fleet.Layout.pod_mcp_activity_marker(path)
+    refute File.exists?(marker), "no call yet, so no proof yet"
+
+    assert {:ok, %{"done" => true}} = content(call(path, 1, "get_work_item", %{}))
+    assert File.exists?(marker)
+  end
+
+  test "a FAILING tools/call marks too — the pod spoke, which is what the signal measures" do
+    # It measures that the pod ACTED, not that it succeeded. A pod whose every call errors is a pod
+    # in trouble and very much alive; letting the watchdog kill it would destroy the evidence.
+    pod = uniq("p")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    marker = Fleet.Layout.pod_mcp_activity_marker(path)
+
+    assert %{"result" => %{"isError" => true}} = call(path, 1, "submit_result", %{})
+    assert File.exists?(marker)
+  end
+
   test "F-C138: tools/list served by the socket = base + threaded role tools (schemas from the deftools)" do
     # delegator role: the spawner threads create_issue + import_project (derived from canon allowedTools).
     pod = uniq("arch")

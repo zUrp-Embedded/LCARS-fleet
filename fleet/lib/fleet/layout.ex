@@ -25,6 +25,8 @@ defmodule Fleet.Layout do
   @work_root "/home/projects.work"
   @state_dirname ".lcars"
 
+  # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
+  @mcp_activity_marker "last_tool_call"
   # A pod's deliverable workspace subfolder. It lives HERE and not in either consumer because BOTH
   # need it and neither may depend on the other: Spawner already deps ProjectBootstrap, so the reverse
   # edge would close a cycle. The foundation is the third way — both already depend down onto it.
@@ -174,6 +176,27 @@ defmodule Fleet.Layout do
   """
   @spec state_dir() :: Path.t()
   def state_dir, do: Path.join(System.user_home!(), @state_dirname)
+
+  @doc """
+  Absolute path of a pod's MCP ACTIVITY marker, derived from that pod's socket path.
+
+  The marker is the durable trace of a fact the MCP acceptor is the only one to hold: at time T,
+  this pod SPOKE to the fleet. Of the liveness signals it is the only PROOF rather than an
+  inference — a jsonl that grows, cpu jiffies, a repainting pane all say "something happened near
+  the pod", an MCP call says "the pod acted".
+
+  It is defined HERE, in foundation, because two domains need the same name and neither may call
+  the other: `Fleet.MCP` writes it (it owns the socket), `Fleet.Spawner` reads its mtime (it owns
+  the liveness tick). A name posed twice is a name that drifts once.
+
+  Takes the socket PATH, not the pod id: foundation must not learn where MCP puts its sockets, and
+  each side already holds that path from its own authority — MCP from `PodSocketSupervisor`, the
+  spawner from what the provisioning seam handed back at spawn. Rebuilding the directory here
+  would give the layout a third opinion on it.
+  """
+  @spec pod_mcp_activity_marker(Path.t()) :: Path.t()
+  def pod_mcp_activity_marker(socket_path) when is_binary(socket_path),
+    do: Path.join(Path.dirname(socket_path), @mcp_activity_marker)
 
   @doc """
   work/ops-relative ref of a brief object: `briefs/<name>.md` (worker) or

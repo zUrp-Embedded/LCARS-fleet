@@ -427,7 +427,14 @@ defmodule Fleet.Spawner.Pod do
       # read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
       # :launching (BL-6-22 — they used to be validated then thrown away; the delivery half is
       # `LaunchSpec.skills_paths_env/1` consuming them from here).
-      data = %{add_condition(data, :home_projected) | skills_paths: skills_paths}
+      # The socket path is RETAINED, not just used: `Pod.Liveness` derives the MCP activity marker
+      # from it (Fleet.Layout.pod_mcp_activity_marker/1). The spawner cannot ask the MCP domain for
+      # this path — the seam exists because a literal would close a cycle — so the one moment it
+      # legitimately holds it is here, on the way back from the provisioner.
+      data =
+        %{add_condition(data, :home_projected) | skills_paths: skills_paths}
+        |> Map.put(:mcp_socket_path, mcp_socket_path)
+
       {:next_state, :launching, data, [{:next_event, :internal, :proceed}]}
     else
       {:error, reason} -> transition_failed(data, {:project_failed, reason})
@@ -595,7 +602,8 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # LIVENESS watchdog (recurring generic timeout, workers only). If the pod has MOVED since the
-  # previous tick (jsonl size ↑ OR CPU jiffies ↑) → re-arm the deadline (pushes back the kill) + the
+  # previous tick (ANY of the four signals of `Liveness` moved) → re-arm the deadline (pushes back
+  # the kill) + the
   # tick; otherwise → just reschedule the tick (the state_timeout deadline keeps running). Result:
   # an engineer at work NEVER times out; the deadline only fires on total silence.
   def handle_event({:timeout, :liveness}, :tick, :monitoring, data) do
@@ -608,7 +616,7 @@ defmodule Fleet.Spawner.Pod do
     # benefit-of-the-doubt that masks it.
     if Liveness.unobservable?(sample) do
       Logger.warning(
-        "pod #{data.pod_id} liveness UNOBSERVABLE this tick (no jsonl + /proc unreadable) — " <>
+        "pod #{data.pod_id} liveness UNOBSERVABLE this tick (every signal nil) — " <>
           "deadline re-armed (re-probe), not counted as silence"
       )
     end
