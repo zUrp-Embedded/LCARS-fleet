@@ -151,29 +151,57 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
 
     test "each is TOLD before its edge is lifted — a silent unblock is the defect" do
+      # CE TEST PORTAIT LE NOM DE L'ORDRE ET NE TESTAIT QUE LA PRESENCE. `assert_received` balaie la
+      # boite aux lettres pour CHAQUE motif independamment : sur deux motifs disjoints
+      # (`{:comment, 8, _}` et `{:lift, 8, 42}`) il reussit quel que soit l'ordre d'arrivee. Mesure
+      # du 2026-08-08 : intervertir les deux appels dans `release_dependents/4` laissait la suite
+      # entiere verte — 2440 tests — alors que le contrat d'ordre de `retire_issue/3` nomme le
+      # defaut correspondant : « l'ordre inverse debloquerait silencieusement un ticket sans rien
+      # dire ».
+      #
+      # La boite aux lettres EST la trace de l'ordre d'appel (meme processus, envois synchrones) :
+      # on la vide et on compare des POSITIONS.
       result = retire() |> decoded()
+      trace = drain_mailbox()
 
-      assert_received {:comment, 8, told}
+      assert {:comment, 8, told} = Enum.find(trace, &match?({:comment, 8, _}, &1))
       assert told =~ "bloqueur #42"
       assert told =~ "redemandé"
-      assert_received {:lift, 8, 42}
 
-      assert_received {:comment, 9, _}
-      assert_received {:lift, 9, 42}
+      for dep <- [8, 9] do
+        c = Enum.find_index(trace, &match?({:comment, ^dep, _}, &1))
+        l = Enum.find_index(trace, &match?({:lift, ^dep, 42}, &1))
+
+        assert is_integer(c) and is_integer(l),
+               "le dependant #{dep} doit recevoir un commentaire ET une levee"
+
+        assert c < l,
+               "dependant #{dep} : arete levee AVANT le commentaire — un ticket debloque en " <>
+                 "silence est exactement le defaut que cet ordre existe pour empecher"
+      end
 
       assert result["released"] == [8, 9]
     end
 
     test "every edge is lifted BEFORE the close — closing RELEASES, so the order is the contract" do
+      # Meme correction que ci-dessus, meme raison : la sequence se lit sur des POSITIONS, pas sur
+      # une suite d'`assert_received` que l'ordre d'arrivee n'engage pas.
       retire()
+      trace = drain_mailbox()
 
-      assert_received {:comment, 8, _}
-      assert_received {:lift, 8, 42}
-      assert_received {:comment, 9, _}
-      assert_received {:lift, 9, 42}
-      # …and only then the retired ticket's own comment and close.
-      assert_received {:comment, 42, _}
-      assert_received {:close_issue, 42, :retired}
+      close = Enum.find_index(trace, &match?({:close_issue, 42, :retired}, &1))
+      assert is_integer(close), "le ticket retire doit etre ferme"
+
+      for dep <- [8, 9] do
+        lift = Enum.find_index(trace, &match?({:lift, ^dep, 42}, &1))
+
+        assert is_integer(lift) and lift < close,
+               "arete du dependant #{dep} levee APRES la fermeture : fermer RELEASE, donc la " <>
+                 "fenetre entre les deux debloque sans rien dire"
+      end
+
+      own = Enum.find_index(trace, &match?({:comment, 42, _}, &1))
+      assert is_integer(own) and own < close, "le motif se poste avant la fermeture"
     end
 
     test "an edge that cannot be lifted ABORTS — a dependent left hanging is worse than no retirement" do
@@ -217,6 +245,17 @@ defmodule Fleet.MCP.RetireIssueTest do
 
       assert {:error, :forbidden_not_architect, _} = retire()
       refute_received {:close_issue, _, _}
+    end
+  end
+
+  # Vide la boite aux lettres du test dans une LISTE ordonnee. Le stub `Forge` s'envoie ses appels a
+  # lui-meme, donc l'ordre d'arrivee est l'ordre d'appel — mais `assert_received` ne le lit pas :
+  # il cherche un motif n'importe ou dans la file. Comparer des index le lit.
+  defp drain_mailbox(acc \\ []) do
+    receive do
+      msg -> drain_mailbox([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 end
