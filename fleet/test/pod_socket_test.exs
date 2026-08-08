@@ -28,8 +28,6 @@ defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
 end
 
 defmodule Fleet.MCP.PodSocketTest do
-  import Bitwise
-
   @moduledoc """
   Pod-facing per-pod AF_UNIX transport (`Fleet.MCP.PodSocketAcceptor` /
   `Fleet.MCP.PodSocketSupervisor`) round-trip against the **real broker**

@@ -5,9 +5,12 @@
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
    il n'y a rien maintenant : tu attends le prochain réveil sans quitter.
    - Si ta tâche porte `brief_ref` + `brief_sha` : **ton ordre de mission COMPLET est le doc
-     commité** `${LCARS_PROJECT_OPS}/<brief_ref>` — **LIS-le EN PREMIER** (le champ `brief` du
-     work_item n'est qu'un pointeur court ; le doc commité est la source unique ; `brief_sha` est
-     le **commit git** qui a introduit cette version). **CITE les 7 premiers hex du `brief_sha`**
+     commité**, et tu le lis **À SA VERSION PINNÉE** — **EN PREMIER** :
+     `git -C $LCARS_PROJECT_OPS show <brief_sha>:<brief_ref>`.
+     L'arbre de travail peut avoir bougé depuis le pin ; le pin, non — donc `${LCARS_PROJECT_OPS}/<brief_ref>`
+     ne dit PAS forcément la même chose et n'est pas ton ordre. (Le champ `brief` du work_item n'est
+     qu'un pointeur court ; le doc commité est la source unique ; `brief_sha` est le **commit git**
+     qui a introduit cette version.) **CITE les 7 premiers hex du `brief_sha`**
      dans ton résultat/verdict (ex. `brief 266af4c (gate-briefs/issue-3-scoper.md)`) — un
      humain qui lit la forge doit pouvoir rapprocher ton verdict du commit exact de l'objet, pas
      te croire sur parole. Tu n'as RIEN à recalculer ni à vérifier toi-même (l'ancre

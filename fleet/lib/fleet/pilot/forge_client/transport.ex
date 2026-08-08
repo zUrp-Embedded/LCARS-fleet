@@ -138,6 +138,27 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     end
   end
 
+  # LA BORNE DE CETTE BOUCLE, ECRITE POUR POUVOIR ETRE REFAITE.
+  #
+  # `paginate/3` tourne DANS le tour de poller, qui est synchrone : tant qu'elle marche, la fleet ne
+  # dispatche pas. Le pire cas a donc une valeur, et il vaut mieux qu'elle soit ecrite que devinee.
+  #
+  #   par requete   `receive_timeout: 10_000` (cf. `request_raw/4`) — une reponse qui ne vient pas
+  #                 coupe a 10 s, jamais plus.
+  #   par boucle    le TOTAL annonce (`X-Total-Count`) : on s'arrete des qu'on le tient. Le nombre de
+  #                 tours est donc `ceil(total / @page_limit)`, pas `@max_pages`. Sur les 642 issues
+  #                 mesurees en prod : 13 tours, soit ~130 s sur une forge maximalement lente.
+  #   deux gardes   une page VIDE termine quoi qu'annonce le total (une forge qui compte plus qu'elle
+  #                 ne sert ne nous fait pas marcher) ; sans en-tete, l'heuristique `< @page_limit`
+  #                 reprend la main.
+  #
+  # `@max_pages` n'est donc plus la borne effective : c'est le filet du cas ou tout le reste ment
+  # simultanement — et c'est exactement l'etat qu'il a attrape avant que le total soit lu (une forge
+  # qui ignore `page` rendait tout, a chaque tour, 200 fois). Les quatre tests de
+  # `forge_client_pagination_test.exs` tiennent les deux gardes.
+  #
+  # PAS de deadline murale sur la boucle, et c'est un choix : elle transformerait une lecture LENTE
+  # mais correcte en echec, alors que le mal a corriger etait une lecture qui ne finissait pas.
   @page_limit 50
   @max_pages 200
 
