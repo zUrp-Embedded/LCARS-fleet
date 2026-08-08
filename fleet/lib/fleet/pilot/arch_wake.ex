@@ -208,10 +208,14 @@ defmodule Fleet.Pilot.ArchWake do
       role: Fleet.Pilot.Roles.project_delegate_role(),
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
-          "`get_issue_status`), tranche avec ton humain, puis réponds (`comment_issue`) ou " <>
-          "corrige+re-délègue (`create_issue` avec `supersedes: #{n}` — la fleet retire l'ancien " <>
-          "ticket elle-même ; sans ça il repart en dispatch après ton submit_result). " <>
-          "Ferme le work-item (`submit_result`) quand c'est traité — la fleet retire alors le label d'attente." <>
+          "`get_issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>
+          "(`comment_issue`) ou corrige+re-délègue (`create_issue` avec `supersedes: #{n}` — la " <>
+          "fleet retire l'ancien ticket elle-même ; sans ça il repart en dispatch après ton " <>
+          "submit_result).\n\n⚠ CE QUI RÉSOUT L'ESCALADE EST `submit_result`, ET RIEN D'AUTRE. " <>
+          "Commenter, c'est parler ; c'est `submit_result` sur CE work-item qui draine le label " <>
+          "`lcars-awaits-arch` et rend la main au poller. Si tu commentes et que tu t'arrêtes, le " <>
+          "ticket reste en attente et la fleet te relance dessus indéfiniment — en croyant que tu " <>
+          "n'as pas encore répondu." <>
           deliverable_section(repo, n),
       metadata: %{"awaits_arch" => true, "repo" => repo, "number" => n}
     }

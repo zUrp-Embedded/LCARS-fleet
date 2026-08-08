@@ -471,9 +471,13 @@ defmodule Fleet.MCP.PodTools do
           "`lcars-awaits-arch`): a role (scoper/engineer/gatekeeper) hit `escalate_user` and " <>
           "handed the decision back to you. The wake (\"ton tour\") only signals THAT there is work; " <>
           "THIS reads WHAT. Returns each awaiting issue with `number`, `title` and `verdict` (the " <>
-          "worker's escalation comment — the reasoning). Then act: fix + re-`create_issue`, " <>
-          "`comment_issue` your decision, or bring it to your human. No arguments — it is your " <>
-          "project's inbox."
+          "worker's escalation comment — the reasoning). Then act: fix + re-`create_issue`, say your " <>
+          "decision on the thread with `comment_issue`, or bring it to your human. " <>
+          "⚠ NONE OF THOSE RESOLVES THE ESCALATION. Only `submit_result` on this work item " <>
+          "does: it is what drains the `lcars-awaits-arch` label and lets the poller serve the " <>
+          "next step. Comment and stop, and the ticket stays in your inbox forever while the " <>
+          "fleet re-kicks you about it. Speaking is not deciding. " <>
+          "No arguments — it is your project's inbox."
       )
     end
 
