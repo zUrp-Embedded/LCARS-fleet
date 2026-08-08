@@ -274,6 +274,77 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     refute attrs.brief =~ order
   end
 
+  @tag :tmp_dir
+  test "NOMINAL: the copy the DISPATCHER puts in the opts is dropped once the pointer exists",
+       %{tmp_dir: tmp} do
+    # The twin above passes opts WITHOUT `:brief`, so it proves `Spawn` does not ADD one — never
+    # that it REMOVES the one the real caller puts there. And the real caller does put one:
+    # `StepDispatcher` builds `spawn_opts = [brief: brief, …]`. That copy survived the merge (which
+    # only carries `brief_sha`/`brief_ref`), landed in `~/issues/<id>.md`, and was NEVER rewritten —
+    # `maybe_spawn` does not respawn a live pod. On an engineer crossing three rework rounds the
+    # file held order v1 while the pointer moved from sha to sha, and its content depended on the
+    # pod's LIVENESS rather than on the ticket's state.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+
+    work_dir = Path.join(tmp, "lcars-test")
+    File.mkdir_p!(work_dir)
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+    order = "Corrige le placement latéral des pièces."
+
+    assert {:ok, _} =
+             Spawn.spawn_step(
+               seams(RecordingSpawner),
+               "pod-x",
+               "engineer",
+               profile(),
+               order,
+               # EXACTLY what the dispatcher builds: the order text under `:brief`.
+               [repo_id: 7, work_root: tmp, brief: order],
+               42,
+               42,
+               "ctx"
+             )
+
+    assert_received {:spawn_opts, spawn_opts}
+
+    refute Keyword.has_key?(spawn_opts, :brief),
+           "the caller's copy survived materialisation — the pod would write a text that never " <>
+             "gets rewritten next to a pointer that keeps moving"
+
+    # And what replaces it is an ADDRESS: `Pod.Brief` names the pinned doc instead of holding it.
+    assert is_binary(spawn_opts[:brief_ref])
+    assert is_binary(spawn_opts[:brief_sha])
+  end
+
+  @tag :tmp_dir
+  test "DEGRADED (no pointer): the copy STAYS — there is no address to name in its place",
+       %{tmp_dir: tmp} do
+    # Fail-closed is not fail-always. With no work_dir there is no committed doc, so nothing can
+    # replace the text; dropping it here would leave the pod's file saying it was asked nothing,
+    # and the drift this fix targets does not exist on this rail — nothing moves beside the file.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, false)
+
+    order = "Ordre inline, rail degrade."
+
+    assert {:ok, _} =
+             Spawn.spawn_step(
+               seams(RecordingSpawner),
+               "pod-y",
+               "engineer",
+               profile(),
+               order,
+               [repo_id: 7, work_root: Path.join(tmp, "absent"), brief: order],
+               43,
+               43,
+               "ctx"
+             )
+
+    assert_received {:spawn_opts, spawn_opts}
+    assert spawn_opts[:brief] == order
+    refute Keyword.has_key?(spawn_opts, :brief_ref)
+  end
+
   test "a role DECLARING no forge identity is not a provisioning hole — no as_role, no warning" do
     # `forge_identity: false` had no runtime reader: only `mix lcars.contracts.check` consulted it.
     # So the dispatch could not tell "declares none" from "token MISSING" and warned identically —

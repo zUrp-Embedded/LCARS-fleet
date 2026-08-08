@@ -204,7 +204,26 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         refusal
 
       {:ok, brief, extra_opts} ->
-        spawn_opts = Keyword.merge(spawn_opts, extra_opts)
+        # UNE SEULE LIVRAISON DE L'ORDRE, ET C'EST LE POINTEUR.
+        #
+        # `materialize_order/6` rebinde la VARIABLE `brief` (elle devient le pointeur) mais rend des
+        # `extra_opts` qui ne portent que `brief_sha`/`brief_ref` : le `Keyword.merge` laissait donc
+        # intacte la cle `:brief` posee par l'appelant, avec le TEXTE INTEGRAL. Ce texte finissait
+        # dans `~/issues/<id>.md` — et `maybe_spawn/…` ne respawne pas un pod vivant, donc la copie
+        # n'etait JAMAIS reecrite : sur un engineer qui traverse trois rounds de rework, le fichier
+        # portait l'ordre v1 pendant que le pointeur avancait de sha en sha. Son contenu dependait
+        # de la LIVENESS du pod, pas de l'etat du ticket.
+        #
+        # Deux arbitrages user (2026-07-18, 2026-07-19) avaient ordonne le dedoublonnage ; il tenait
+        # sur le rail queue et pas sur le rail fichier. On retire donc la copie — mais SEULEMENT
+        # quand une adresse la remplace : `Pod.Brief` est deja ecrit pour ce cas et NOMME le
+        # pointeur (`brief_ref` + `brief_sha`, poses par ce meme dispatch). Sur le rail DEGRADE il
+        # n'y a pas d'adresse a nommer, et il n'y a pas de derive non plus : rien n'avance a cote
+        # du fichier. Retirer la copie la ne corrigerait rien et retirerait un artefact utile.
+        spawn_opts =
+          spawn_opts
+          |> Keyword.merge(extra_opts)
+          |> drop_duplicated_order(extra_opts)
 
         locked_spawn_step_run(
           {forge, spawner, task_queue, repo, forge_opts, wake_recovery},
@@ -234,6 +253,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # the second it happens. A brief is not instrumentation, it is the ORDER: losing a gauge's
   # provenance costs a metric, losing the order's costs the ability to answer "what was this pod
   # asked to do?" about a deliverable that went to production.
+  # La copie ne part que si une ADRESSE la remplace. `brief_ref` est le marqueur de la
+  # materialisation : present, l'ordre est un objet git que le pod resout par son pointeur ; absent
+  # (rail degrade), il n'y a rien vers quoi pointer.
+  defp drop_duplicated_order(spawn_opts, extra_opts) do
+    if Keyword.has_key?(extra_opts, :brief_ref),
+      do: Keyword.delete(spawn_opts, :brief),
+      else: spawn_opts
+  end
+
   defp materialize_order(brief, repo, issue_number, role, brief_kind, work_root) do
     materialize_opts =
       [name_hint: "issue-#{issue_number}-#{role}", kind: brief_kind, push: :work_ops]

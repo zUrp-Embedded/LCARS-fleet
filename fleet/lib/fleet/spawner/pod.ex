@@ -302,12 +302,22 @@ defmodule Fleet.Spawner.Pod do
   # from the TaskQueue (MCP `get_work_item`, triggered by `engage`); `issues/<issue_id>.md` is a
   # scaffold file written BESIDE it.
   #
-  # What that file actually holds, measured 2026-08-03 — it is not one thing:
-  #   * PRODUCERS: the step dispatcher puts NO `:brief` in the spawn opts (the order travels through
-  #     the queue alone), so the file holds the "(No brief provided)" placeholder. That covers the
-  #     rework rounds too: `RoleDispatch` re-briefs the producer on ITS OWN pod identity
-  #     (`pod_id_for_scope`, the same one `dispatch_issue` uses), and that pod was spawned from the
-  #     step rail — so the placeholder is what it had and what it keeps.
+  # What that file actually holds — it is not one thing:
+  #   * PRODUCERS, nominal rail: the dispatcher DOES put the order text under `:brief`, and
+  #     `Spawn` DROPS that copy as soon as the order has been materialized into a committed doc —
+  #     an address replaces it. So the file names the pinned doc (`brief_ref` @ `brief_sha`) and
+  #     holds no text. That covers the rework rounds too: `RoleDispatch` re-briefs the producer on
+  #     ITS OWN pod identity (`pod_id_for_scope`, the same one `dispatch_issue` uses), and that pod
+  #     was spawned from the step rail.
+  #   * PRODUCERS, degraded rail (no work dir, so no committed doc): the copy STAYS, because there
+  #     is no address to name in its place — and nothing moves beside the file there, so it cannot
+  #     go stale.
+  #
+  #   ⚠ Two claims of an earlier revision of this comment were false and cost a chantier: it said
+  #   the dispatcher put no `:brief` at all (it did, and the copy survived into `issues/<id>.md`,
+  #   never rewritten while the pointer advanced), and it said the file held a
+  #   "(No brief provided)" placeholder (`Pod.Brief` stopped writing that: with no `:brief` it
+  #   names the order's ADDRESS, precisely so an agent never reads that it was asked nothing).
   #   * JUDGES: `RoleDispatch` MUST pass `brief:` in the spawn opts — a judge is `one-shot` and
   #     `brief_guard` refuses a one-shot spawn without one — so the file holds the gate brief. Its
   #     pod is keyed on the PR (`PodId.for_pr`) and dies with its verdict, so each review writes it
