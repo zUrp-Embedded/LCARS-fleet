@@ -16,8 +16,14 @@ defmodule Fleet.Pilot.ProjectArchitect do
       reviewed, and an actor with a pen uses it where nobody is looking;
     * `/home/projects.doc/<name>` **RW** — this IS its producing face. The documentation is written
       here, with the human, at the terminal — which is the bulk of what actually happens — and a
-      scribe enriches it through the ordinary pipeline. The pod stays forge-blind like every
-      worker: it commits in its pod, the SYSTEM pushes;
+      scribe enriches it through the ordinary pipeline.
+
+      ⚠ NOTHING PUSHES THIS FACE TODAY, and the arch's SP says so in those words. Every push in the
+      runtime targets a producer's feature branch, `work/ops`, or the one-time creation at onboard;
+      the pod has neither a forge write tool nor a git identity of its own. So a commit here stays
+      in the box. That is a state under arbitration, not a rail that catches up — and until it is
+      settled, the honest thing is that the pod is told, because a pod that believes it published
+      is the failure this whole evening was spent closing;
     * `/home/projects.work/<name>` **RO** — the record: briefs, verdicts, provenance. The arch is
       the ONLY pod that mounts it, and reading it is its function — following the work and
       reporting it to the human. **Read-only, and the mode is the point**: it is the party being
