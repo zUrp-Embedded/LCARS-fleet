@@ -1070,9 +1070,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Jumeau du precedent, et meme raison d'exister : un ORDRE dans `start/2` que le compilateur ne
   # voit pas. `application.ex` l'ecrit noir sur blanc — *« the images below FREEZE their snapshot
   # from this disk, and a snapshot taken from an unchecked root would carry the fault forward under
-  # a proven-good name »*. Mesure du 2026-08-08 : deplacer `Catalogue.verify!/0` APRES les deux
-  # `publish_image!` laissait la suite ENTIERE verte (2439 tests) et ce check a 0. Une phrase de
-  # doctrine que rien ne tient est une phrase qui sera vraie jusqu'au premier refactor.
+  # a proven-good name »*. Une phrase de doctrine que rien ne tient est une phrase qui sera vraie
+  # jusqu'au premier refactor : ce check est ce qui la tient.
   #
   # Verrouille sur la SOURCE, comme F8, parce que le mode de panne n'est pas reproductible en test :
   # il demande un catalogue invalide ET des images publiees, c'est-a-dire exactement le boot qu'un

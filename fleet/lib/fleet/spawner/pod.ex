@@ -516,9 +516,9 @@ defmodule Fleet.Spawner.Pod do
   # geste de cette clause qui peut echouer sans consequence, alors que tuer le holder et retirer le
   # sock-dir sont irreversibles. Le faire d'abord, c'est ne pas dependre de leur reussite.
   #
-  # ⚠ Ce que PERSONNE ne tient encore : l'ordre lui-meme. Intervertir ces deux lignes laisse la suite
-  # verte (mesure 2026-08-08), parce que le stub de teardown ne touche pas au transcript et que
-  # l'ordre est donc inobservable en test. Ne pas lire ce commentaire comme une garantie.
+  # ⚠ CET ORDRE EST LOAD-BEARING ET RIEN NE LE TIENT : le muter DOIT faire rougir, et aujourd'hui
+  # ca ne rougit pas. La raison est mecanique — le stub de teardown ne touche pas au transcript,
+  # donc l'ordre est inobservable en test. Ne pas lire ce commentaire comme une garantie.
   def handle_event(:internal, :proceed, :releasing, data) do
     maybe_checkpoint_seed(data)
     Backend.teardown_backend(data)

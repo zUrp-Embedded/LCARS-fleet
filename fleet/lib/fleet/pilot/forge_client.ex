@@ -829,6 +829,11 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
   #
+  # LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE. La regle de redaction jette la recette et
+  # l'horodatage d'une mesure faite sur NOTRE suite — ils ne survivent pas au correctif. Celle-ci
+  # porte sur un SYSTEME EXTERNE dont le comportement peut changer sans nous : sans sa version, la
+  # phrase n'est plus verifiable, et un lecteur ne peut pas savoir si elle vaut encore.
+  #
   # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
   # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
   # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui gardait la

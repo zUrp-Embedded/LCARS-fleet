@@ -224,10 +224,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # a card that declares nothing keeps the pre-gate rail rather than inheriting a wall it never
   # asked for. Only `required` (the string the schema allows) arms the gate.
   # PUBLIC (@doc false) pour la meme raison que `retire_superseded` l'est : la propriete qui compte
-  # n'est pas « le champ traverse le loader » (tenu par `LoaderV25Test`) ni « la porte gate sur
+  # n'est ni « le champ traverse le loader » (tenu par `LoaderV25Test`) ni « la porte gate sur
   # :required » (tenu par `CiGateTest`, policy bouchee) — c'est la JOINTURE des deux, et elle n'est
-  # observable que d'ici. Mesure du 2026-08-08 : remplacer `"required"` par `"requis"` laissait les
-  # 2443 tests verts. Trois maillons tenus, le quatrieme muet.
+  # observable que d'ici. Le litteral compare ci-dessous est le maillon : la carte ECRIT un token,
+  # ce lecteur en attend un autre, et la porte se desarme sans que rien ne rougisse. `CiGateTest`
+  # le tient contre le loader canon.
   @doc false
   def issue_card_ci(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),

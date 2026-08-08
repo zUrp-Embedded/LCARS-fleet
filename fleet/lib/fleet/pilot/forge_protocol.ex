@@ -332,8 +332,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   ## AUCUN APPELANT DE PRODUCTION, ET C'EST L'ETAT, PAS UN OUBLI
 
-  Mesure du 2026-08-08 : ce constructeur n'est appele que par son propre test. Le maillon manquant
-  est en amont — `StepRunBuild.build_step_run/7` garde `eng_summary` (de la prose) et laisse tomber
+  Ce constructeur n'est appele que par son propre test. Le maillon manquant est en amont — `StepRunBuild.build_step_run/7` garde `eng_summary` (de la prose) et laisse tomber
   la charge structuree du pod, donc le completer n'a rien a serialiser.
 
   Le parseur, lui, EST vivant : `ForgeClient.get_predecessor_result/3` le lit pour le brief du juge
