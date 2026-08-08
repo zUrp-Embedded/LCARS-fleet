@@ -123,4 +123,61 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       assert {:wait, {:ci_unreadable, :timeout}} = decide(_ci: {:error, :timeout})
     end
   end
+
+  # LA JOINTURE, ET ELLE N'ETAIT TENUE PAR PERSONNE. Les tests ci-dessus bouchent la policy
+  # (`fn -> :required end`) : ils prouvent que la porte GATE sur `:required`, pas qu'une carte le
+  # produise. `LoaderV25Test` prouve l'autre bout — `spec.ci` traverse `normalize/1`. Entre les
+  # deux, `issue_card_ci/2` compare a un LITTERAL, et remplacer `"required"` par `"requis"` laissait
+  # les 2443 tests verts (mesure 2026-08-08).
+  #
+  # C'est la classe « ecrivain et lecteur en desaccord d'identite » : la carte ECRIT un token, le
+  # lecteur en attend un autre, et la porte se desarme sans que rien ne rougisse.
+  describe "issue_card_ci/2 — la carte arme reellement la porte" do
+    defmodule RoutingForge do
+      @moduledoc false
+      def get_route(_repo, 7, _opts), do: {:ok, {"standard-qa", "review"}}
+      def get_route(_repo, _n, _opts), do: :none
+    end
+
+    defp card_ctx(loader) do
+      %Ctx{
+        forge: RoutingForge,
+        loader: nil,
+        workflow_map_loader: loader,
+        spawner: nil,
+        task_queue: nil,
+        resolver: fn _, _ -> {:ok, %{}} end,
+        repo: "fleet/demo",
+        forge_opts: [],
+        wake_recovery: fn _, f, _ -> f.() end,
+        opts: []
+      }
+    end
+
+    test "une carte canon qui declare `ci: required` rend :required — bout en bout" do
+      # Le loader CANON, pas un litteral recopie : si la carte cesse de declarer `ci`, ou si le
+      # loader cesse de le porter, ce test tombe.
+      canon =
+        Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/canon/workflow_maps")
+
+      # `safe_load/2` enveloppe DEJA le retour du loader : rendre `{:ok, map}` ici produirait
+      # `{:ok, {:ok, map}}` et la clause `when is_map(map)` echouerait — un `:ignore` par forme,
+      # pas par contenu.
+      loader = fn name -> Fleet.Workflow.Loader.load!(name, workflow_maps_root: canon) end
+
+      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+               "lcars/issue-7-engineer",
+               card_ctx(loader)
+             ) == :required
+    end
+
+    test "une carte qui ne declare RIEN garde le rail d'avant la porte" do
+      loader = fn _ -> %{"name" => "muette", "steps" => %{}} end
+
+      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+               "lcars/issue-7-engineer",
+               card_ctx(loader)
+             ) == :ignore
+    end
+  end
 end
