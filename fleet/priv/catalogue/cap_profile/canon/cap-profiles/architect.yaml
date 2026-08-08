@@ -30,10 +30,22 @@ spec:
   interlocutor: both
   scope:
     # Tool naming convention (consistent with G24-9):
-    #   - PascalCase  = native Claude Code tools pod-side, validated via the `can_use_tool` permission callback
-    #   - snake_case  = Anthropic API server tools (bypass can_use_tool, executed server-side)
+    #   - PascalCase  = native Claude Code tools, run POD-SIDE by the CLI
+    #   - snake_case  = Anthropic API server tools, executed SERVER-SIDE
     # The 2 namespaces are DISJOINT — no contradiction when a name appears in both lists
     # (e.g. `WebFetch` allowed pod-side + `web_fetch` disallowed server-API-side).
+    #
+    # ⚠ WHAT ENFORCES THEM, and it is not what this comment used to say. It named the SDK's
+    # `can_use_tool` permission callback; this deployment does not use the SDK and has no such
+    # callback anywhere — `claude_launch.sh` passes `--permission-mode default` plus these two
+    # lists to the CLI, and the vendor decides. Naming a mechanism the runtime does not have made a
+    # reader believe the enforcement was ours and auditable in `lib/`.
+    #
+    # ⚠ AND THE LISTS DECLARE, they do not construct. Measured from inside a pod (audit 2026-08-08):
+    # a tool ABSENT from `allowedTools` was invoked successfully. Whether `disallowedTools` bites is
+    # NOT measured — it needs a probe from inside a pod, which is a different question from the one
+    # answered. Until it is answered, read these lists as an INTENT the runtime declares, never as a
+    # guarantee it holds.
     allowedTools:
       - Read
       - Glob
@@ -56,7 +68,8 @@ spec:
       - mcp__fleet__get_issue         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
       - mcp__fleet__comment_issue     # return channel: replies on an in-flight ticket (in the role's name)
     disallowedTools:
-      # snake_case: Anthropic API server tools, which bypass can_use_tool
+      # snake_case: server-side API tools. Declared here, enforced by the vendor — cf. the
+      # convention note above `allowedTools`.
       - web_search
       - web_fetch
       - code_execution
