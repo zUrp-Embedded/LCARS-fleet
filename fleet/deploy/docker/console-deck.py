@@ -22,6 +22,7 @@ import re
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
@@ -102,24 +103,43 @@ def fleet_pods(human):
     Pods vivants d'un humain, vus par SA fleet (le deck d'observation, base+1).
 
     Source unique volontaire : le runtime sait ce qu'il a spawne (role, phase), la ou une
-    enumeration de sockets ne rend que des noms. Fleet eteinte = liste vide, PAS une erreur :
-    une boite sans fleet est un etat nominal, la page le dit ailleurs.
+    enumeration de sockets ne rend que des noms.
+
+    TROIS ETATS, PAS DEUX. Une fleet eteinte est un etat NOMINAL ; un deck qu'on n'a pas pu
+    joindre est une mesure RATEE, et les deux ne se disent pas de la meme facon. Le code rendait
+    `None` sur n'importe quelle exception et l'appelant en faisait `fleet=False` : un timeout de
+    2 s s'affichait « fleet eteinte », c'est-a-dire une assertion d'extinction tiree d'une absence
+    de reponse. C'est le piege exact que le read-model du runtime a ferme par
+    `:live | :deaf | :unavailable`, refait ici a deux cents lignes de la.
+
+    Le discriminant est la CAUSE, pas l'echec : connexion refusee = personne n'ecoute = eteinte
+    (on a mesure) ; timeout, reset, DNS = on n'a pas mesure.
     """
     url = f"http://127.0.0.1:{human['ports']['deck']}/api/pods"
     try:
         with urlopen(url, timeout=2) as r:
-            data = json.load(r)
+            return "live", (json.load(r).get("pods") or [])
+    except HTTPError:
+        # Quelqu'un ecoute et repond autre chose que ce qu'on attend : mesure faite, etat anormal.
+        return "deaf", []
+    except URLError as e:
+        if isinstance(e.reason, ConnectionRefusedError):
+            return "off", []
+        return "unknown", []
+    except (TimeoutError, socket.timeout):
+        return "unknown", []
     except Exception:
-        return None
-    return data.get("pods") or []
+        return "unknown", []
 
 
 def state():
     projects = pod_projects()
     hs = []
     for h in humans():
-        pods = fleet_pods(h)
-        h = dict(h, fleet=(pods is not None), pods=[])
+        status, pods = fleet_pods(h)
+        # `fleet` reste le booleen « vivante », pour les consommateurs qui ne posent que cette
+        # question ; `fleet_status` porte la distinction que le booleen ne peut pas porter.
+        h = dict(h, fleet=(status == "live"), fleet_status=status, pods=[])
         for p in pods or []:
             pid = p.get("pod_id", "")
             if not POD_ID_RE.match(pid):
@@ -248,13 +268,34 @@ function dropPanes(keys) {
   });
 }
 
+// TROIS ETATS, ET AUCUN NE SE DIT COMME UN AUTRE. « eteinte » est une AFFIRMATION : on ne la
+// prononce que quand la connexion a ete refusee, c'est-a-dire qu'on a mesure que personne n'ecoute.
+// Un timeout ne dit rien, et une page qui le traduit en « eteinte » ment a son lecteur.
+function fleetLabel(h) {
+  switch (h.fleet_status) {
+    case 'live':    return `fleet vivante — ${h.pods.length} pod(s)`;
+    case 'off':     return 'fleet eteinte';
+    case 'deaf':    return 'deck present, reponse illisible';
+    default:        return 'fleet NON MESUREE (deck injoignable)';
+  }
+}
+
+function fleetHint(h) {
+  switch (h.fleet_status) {
+    case 'live':    return '';
+    case 'off':     return '(la fleet de cet humain ne tourne pas)';
+    case 'deaf':    return '(le deck repond, mais pas ce qu\'on attend)';
+    default:        return '(pas de reponse en 2 s — on ne sait PAS si elle tourne)';
+  }
+}
+
 function statusPanel(s) {
   const wrap = el('div');
   const t = el('table');
   const rows = [['hostname', s.hostname]];
   for (const h of s.humans) {
     rows.push([`humain ${h.human} (uid ${h.uid})`,
-      h.fleet ? `fleet vivante — ${h.pods.length} pod(s)` : 'fleet eteinte']);
+      fleetLabel(h)]);
   }
   for (const [k, v] of rows) {
     const tr = el('tr'); tr.appendChild(el('th', null, k)); tr.appendChild(el('td', null, v)); t.appendChild(tr);
@@ -289,9 +330,9 @@ function build(s) {
     add('humain ' + h.human, 'Console', 'shell ' + h.human,
         { key: 'console-' + h.human, crumb: 'CONSOLE — ' + h.human,
           url: `http://${HOST}:${h.ports.console}` });
-    add(null, 'Deck d\'observation', h.fleet ? 'fleet vivante' : 'fleet eteinte',
+    add(null, 'Deck d\'observation', fleetLabel(h),
         { key: 'deck-' + h.human, crumb: 'DECK — ' + h.human,
-          hint: h.fleet ? '' : '(la fleet de cet humain ne tourne pas)',
+          hint: fleetHint(h),
           url: `http://${HOST}:${h.ports.deck}` });
 
     // Les agents, GROUPES PAR PROJET. Le rattachement vient du montage reel du pod ; un pod sans
@@ -318,7 +359,7 @@ function build(s) {
 async function tick() {
   try {
     const s = await (await fetch('/api/state', { cache: 'no-store' })).json();
-    const sig = JSON.stringify(s.humans.map(h => [h.human, h.fleet, h.pods.map(p => [p.pod_id, p.role, p.phase, p.project])]));
+    const sig = JSON.stringify(s.humans.map(h => [h.human, h.fleet_status, h.pods.map(p => [p.pod_id, p.role, p.phase, p.project])]));
     if (sig !== window.__sig) { window.__sig = sig; build(s); }
   } catch (e) { /* la page survit a une sonde ratee : elle garde son dernier etat vrai */ }
 }

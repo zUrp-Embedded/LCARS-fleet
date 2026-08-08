@@ -22,7 +22,14 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTEST="$HERE/test_fleet_mcp_stdio_bridge.py"
+# LES tests python hors-mix. Une LISTE, pas un chemin : un second fichier pose a cote d'un crochet
+# code en dur serait compte comme corpus gate par `lcars.contracts.check` (le dossier `fleet/test`
+# y est declare `:gated`) tout en n'etant JAMAIS joue — exactement le defaut que ce registre existe
+# pour attraper. Ajouter un test python = ajouter sa ligne ICI, et c'est tout.
+PYTESTS=(
+  "$HERE/test_fleet_mcp_stdio_bridge.py"
+  "$HERE/test_console_deck.py"
+)
 
 # Politique bats-absent : warning compte (defaut) vs echec dur. Overridable par env pour le jour du
 # durcissement, sans re-editer le script. Defaut 0 = warning (cf. contrat ci-dessus).
@@ -38,23 +45,32 @@ echo "=== shell_gate : tests hors-mix (python + bats des launchers) ==="
 if ! command -v python3 >/dev/null 2>&1; then
   # python3 absent = le test NE PEUT PAS tourner. On ECHOUE au lieu de sauter en silence : un « pas de
   # python donc on passe » masquerait exactement la classe de bug (test jamais joue) que ce filet attrape.
-  echo "ECHEC: python3 absent — impossible de lancer $PYTEST (pas de skip silencieux)." >&2
+  echo "ECHEC: python3 absent — impossible de lancer ${PYTESTS[*]} (pas de skip silencieux)." >&2
   exit 1
 fi
 
-if [[ ! -f "$PYTEST" ]]; then
-  echo "ECHEC: fichier de test introuvable : $PYTEST" >&2
-  exit 1
-fi
+for f in "${PYTESTS[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "ECHEC: fichier de test introuvable : $f" >&2
+    exit 1
+  fi
+done
 
 # On capture sortie + code retour SANS que set -e n'avorte le script sur un test rouge (on veut le
-# decompte, pas un abandon a la premiere ligne FAIL).
+# decompte, pas un abandon a la premiere ligne FAIL). Le pire code retour de la serie l'emporte :
+# un fichier vert ne doit jamais couvrir un fichier rouge.
 set +e
-PY_OUT="$(python3 "$PYTEST" 2>&1)"
-PY_RC=$?
+PY_OUT=""
+PY_RC=0
+for f in "${PYTESTS[@]}"; do
+  OUT_ONE="$(python3 "$f" 2>&1)"
+  RC_ONE=$?
+  PY_OUT="${PY_OUT}${OUT_ONE}"$'\n'
+  [[ "$RC_ONE" -ne 0 ]] && PY_RC=$RC_ONE
+done
 set -e
 
-echo "$PY_OUT"
+printf '%s' "$PY_OUT"
 
 # Decompte a partir des lignes emises par check() : « PASS: ... » / « FAIL: ... » (ancre en debut de
 # ligne pour ne PAS attraper le « ALL PASS » du verdict). grep -c sort 0 + exit 1 quand rien ne matche
