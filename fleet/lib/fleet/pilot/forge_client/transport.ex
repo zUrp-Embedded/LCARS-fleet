@@ -96,15 +96,27 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     end
   end
 
+  # LA CLE DE CACHE PORTE CE QUI DETERMINE LA REPONSE.
+  #
+  # Le login est une propriete du JETON sur SA forge, jamais du module. Keye sur
+  # `{__MODULE__, :bot_login}` seul, un second jeton — rotation, ou deux forges dans la meme VM —
+  # heritait du login du premier pour toute la vie du noeud. Et ce login est l'argument du primitif
+  # de confiance `ForgeProtocol.system_authored?/2` : s'en tromper, ce n'est pas afficher un mauvais
+  # nom, c'est comparer l'auteur d'un commentaire au mauvais compte.
+  #
+  # Le jeton n'est JAMAIS stocke : `:persistent_term` est lisible par tout processus du noeud. Son
+  # empreinte suffit a distinguer deux jetons sans en reveler aucun.
   defp derive_bot_login(config) do
-    case :persistent_term.get({__MODULE__, :bot_login}, :unset) do
+    key = {__MODULE__, :bot_login, config.base_url, :crypto.hash(:sha256, config.token)}
+
+    case :persistent_term.get(key, :unset) do
       login when is_binary(login) ->
         {:ok, login}
 
       :unset ->
         case http_get(config, "/user") do
           {:ok, %{"login" => login}} when is_binary(login) and login != "" ->
-            :persistent_term.put({__MODULE__, :bot_login}, login)
+            :persistent_term.put(key, login)
             {:ok, login}
 
           {:ok, _} ->
