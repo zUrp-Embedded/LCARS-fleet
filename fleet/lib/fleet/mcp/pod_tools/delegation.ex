@@ -907,6 +907,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  # THE CONSEQUENCE, RELAYED. The card NAME does not say what the card does: `standard-qa` carries
+  # two judges and `c0-poc` carries none, so a revision between them removes a jury while reading
+  # like a rename. The arch relays this payload to its human, and a downgrade the human never hears
+  # named is a wall that came down in a sentence about configuration.
+  #
+  # ABSENT when the jury did not shrink (`put_present` drops nil): one meaning per shape — a key
+  # that appeared with `0` on every ordinary revision would be noise, and noise is what a reader
+  # learns to skip before the one time it matters.
+  defp jury_reduction(delta) when is_integer(delta) and delta < 0, do: abs(delta)
+  defp jury_reduction(_), do: nil
+
   defp do_revise_card(full_name, args, role) do
     with {:ok, onboard} <- conforming_onboard() do
       opts = [
@@ -932,6 +943,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
              "note" =>
                "les routes déjà gravées ne re-routent pas : la révision vaut pour les tickets FUTURS"
            }
+           |> put_present("jury_reduit_de", jury_reduction(Map.get(result, :jury_delta)))
            |> put_present("previous_card", Map.get(result, :previous_card))
            |> put_present(
              "protection",

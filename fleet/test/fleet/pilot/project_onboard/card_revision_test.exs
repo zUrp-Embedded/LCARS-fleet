@@ -144,6 +144,84 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
     {:ok, o: Keyword.put(o, :base_url_root, Path.join(tmp, "forge"))}
   end
 
+  test "a revision that REDUCES the jury names it — in the commit, the log and the payload", %{
+    o: o
+  } do
+    # `standard-qa` carries two judges, `c0-poc` carries none. The message used to read
+    # `card revision: standard-qa -> c0-poc` — a wall coming down, written in the vocabulary of a
+    # rename. Everything auditable, nothing legible: the card NAME does not say what the card does.
+    #
+    # NOT refused. The criticality level is the human's declaration and a project that genuinely
+    # became less critical must be able to say so. What a downgrade may not be is quiet.
+    assert {:ok, %{outcome: :revised}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "standard-qa")
+             )
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, %{jury_delta: -2}} =
+                 ProjectOnboard.revise_card(
+                   "fleet/tetris",
+                   revision_opts(o, workflow_map: "c0-poc")
+                 )
+      end)
+
+    assert log =~ "REDUCES the jury by 2"
+
+    msg = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%s", "main"])
+    assert msg =~ "JURY REDUIT DE 2"
+  end
+
+  test "a PREVIOUS card the catalogue no longer carries yields nil — never a delta of zero", %{
+    o: o
+  } do
+    # THE GUARD I WROTE WITH ITS REASON, AND NOTHING HELD IT: making an unloadable card read as 0
+    # left the whole suite green (measured 2026-08-08). Zero MEANS "the jury did not change", and a
+    # delta nobody could compute is not that — it is "I could not tell". Collapsing the two puts a
+    # reassuring number on the exact case where a wall may have moved unseen.
+    #
+    # Reachable: a project declares a card, the operator's catalogue drops it, the project keeps
+    # naming it in `intensity.json` until the next revision. The NEW card is guarded
+    # (`require_loadable_card`); the previous one never was.
+    proj = Path.join([o[:projects_root], "tetris"])
+    intensity = Path.join(proj, "intensity.json")
+
+    File.write!(
+      intensity,
+      File.read!(intensity)
+      |> String.replace(
+        ~s("pipeline_default": "c0-poc"),
+        ~s("pipeline_default": "carte-disparue")
+      )
+    )
+
+    assert {:ok, %{jury_delta: nil, previous_card: "carte-disparue"}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "standard-qa")
+             )
+
+    # And nothing claims a reduction it could not measure.
+    msg = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%s", "main"])
+    refute msg =~ "JURY REDUIT"
+  end
+
+  test "a revision that does NOT shrink the jury says nothing about it", %{o: o} do
+    # One meaning per shape: a suffix on every ordinary revision would be noise, and noise is what a
+    # reader learns to skip before the one time it matters. `c0-poc` and `doc-direct` both carry an
+    # empty jury — a delta of zero is not a reduction.
+    assert {:ok, %{jury_delta: 0}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "doc-direct")
+             )
+
+    msg = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%s", "main"])
+    refute msg =~ "JURY REDUIT"
+  end
+
   test "revision lands on the forge main — attributed, lift then sized restore, showcase synced",
        %{o: o} do
     assert {:ok, result} =

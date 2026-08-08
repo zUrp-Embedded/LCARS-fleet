@@ -1125,7 +1125,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp publish_revision(full_name, scratch, card, previous, opts) do
-    msg = "card revision: #{previous || "(undeclared)"} -> #{card}"
+    jury_delta = jury_delta(previous, card, opts)
+    msg = "card revision: #{previous || "(undeclared)"} -> #{card}#{jury_suffix(jury_delta)}"
 
     with :ok <- commit(scratch, msg),
          :ok <- lift_protection(full_name, opts) do
@@ -1133,6 +1134,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
         :ok ->
           sync_showcase(full_name, opts)
           protection = restore_protection(full_name, opts)
+          announce_jury_delta(full_name, previous, card, jury_delta)
 
           {:ok,
            %{
@@ -1140,6 +1142,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
              card: card,
              previous_card: previous,
              outcome: :revised,
+             jury_delta: jury_delta,
              protection: protection
            }}
 
@@ -1149,6 +1152,55 @@ defmodule Fleet.Pilot.ProjectOnboard do
       end
     end
   end
+
+  # A CARD REVISION MOVES A WALL, and the record said which card, never what the card DOES. Measured:
+  # `standard-qa` carries two judges, `c0-poc` carries none — so `card revision: standard-qa ->
+  # c0-poc` is a line that removes the jury AND drops `required_approvals` to zero, written in the
+  # vocabulary of a rename. Everything about it is auditable and nothing about it is legible.
+  #
+  # NOT REFUSED, and that is deliberate. The criticality level is the HUMAN's declaration (the
+  # framing interview; an agent never self-assesses it), so a project that genuinely became less
+  # critical must be able to say so. What a downgrade may not be is QUIET: the justification is
+  # already required and recorded, this adds the consequence beside it — in the commit message that
+  # lands on `main`, in the operator log, and in the payload the arch relays back.
+  #
+  # `nil` when either card refuses to load: a delta nobody could compute must not be reported as
+  # zero, which would read as "the jury did not change".
+  defp jury_delta(previous, card, opts) do
+    with {:ok, before} <- jury_size(previous, opts),
+         {:ok, after_} <- jury_size(card, opts) do
+      after_ - before
+    else
+      _ -> nil
+    end
+  end
+
+  defp jury_size(nil, _opts), do: :error
+
+  defp jury_size(name, opts) do
+    loader_opts = Keyword.take(opts, [:workflow_maps_root])
+    {:ok, length(Roles.jury(Fleet.Workflow.Loader.load!(name, loader_opts), []))}
+  rescue
+    _ -> :error
+  end
+
+  defp jury_suffix(delta) when is_integer(delta) and delta < 0,
+    do: " (JURY REDUIT DE #{abs(delta)} — moins de juges sur chaque livrable a venir)"
+
+  defp jury_suffix(_not_a_reduction), do: ""
+
+  defp announce_jury_delta(repo, previous, card, delta) when is_integer(delta) and delta < 0 do
+    Logger.warning(
+      "ProjectOnboard: #{repo} card revision #{previous} -> #{card} REDUCES the jury by " <>
+        "#{abs(delta)} — future deliverables carry fewer judges and main-protection re-projects " <>
+        "with fewer required approvals. Justified and recorded; named here because the card name " <>
+        "alone does not say it."
+    )
+
+    :ok
+  end
+
+  defp announce_jury_delta(_repo, _previous, _card, _delta), do: :ok
 
   defp lift_protection(repo, opts) do
     rule = %{
