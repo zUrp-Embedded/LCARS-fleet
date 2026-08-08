@@ -395,18 +395,43 @@ defmodule Fleet.Pilot.Application do
   # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
   def validate_card_steps!(opts \\ []) do
     for map_name <- Fleet.Workflow.Loader.canon_names!(opts),
-        {step_name, spec} <- Fleet.Workflow.Loader.load!(map_name, opts)["steps"] || %{},
+        card = Fleet.Workflow.Loader.load!(map_name, opts),
+        {step_name, spec} <- card["steps"] || %{},
         role = Map.get(spec, "role"),
         is_binary(role) do
       case Fleet.CapProfile.load(role) do
-        {:ok, _cp} ->
-          :ok
+        {:ok, cp} ->
+          refute_self_judgement!(map_name, step_name, role, cp, card["jury"])
 
         {:error, reason} ->
           raise "fleet_pilot: workflow map #{map_name} step #{inspect(step_name)} has role " <>
                   "#{inspect(role)} that does NOT resolve to a cap-profile (#{inspect(reason)}) — a bad " <>
                   "canon role WEDGES at dispatch (CapProfile.resolve → :not_found, stuck ticket). Fix the card."
       end
+    end
+
+    :ok
+  end
+
+  # A PRODUCER MAY NOT SIT ON THE JURY THAT JUDGES ITS OWN DELIVERY. The card names both halves and
+  # nothing compared them: `jury` is the set of roles whose approvals gate the seal, `steps[].role`
+  # is who produces — and a role in both reviews the PR it opened. The pipeline would report a
+  # normal approval, because every mechanism involved worked exactly as written.
+  #
+  # `brief_kind` IS THE DISCRIMINANT, not the step's position. A judge role appearing as a step is
+  # legitimate and shipped: `gk-smoke` runs a `reviewer` step with a soft gate, and `reviewer` is
+  # also in its jury — two different acts on two different objects. Only a `worker` opens the
+  # deliverable PR the jury then judges, so only a worker can collide with itself here.
+  #
+  # AT BOOT, over the whole canon, because a card is DATA an operator can bring: catching this at
+  # dispatch would mean catching it per ticket, on the ticket, after the spawn.
+  defp refute_self_judgement!(map_name, step_name, role, cp, jury) do
+    if Fleet.CapProfile.brief_kind(cp) == "worker" and is_list(jury) and role in jury do
+      raise "fleet_pilot: workflow map #{map_name} step #{inspect(step_name)} PRODUCES as " <>
+              "#{inspect(role)}, and #{inspect(role)} is also in that card's jury " <>
+              "#{inspect(jury)} — the producer would review its own PR and its approval would " <>
+              "count toward the seal. Nothing downstream can tell that apart from a real review. " <>
+              "Remove the role from the jury, or give the step a different producer."
     end
 
     :ok

@@ -39,6 +39,70 @@ defmodule Fleet.Pilot.ApplicationTest do
         Application.validate_card_steps!(workflow_maps_root: tmp)
       end
     end
+
+    @tag :tmp_dir
+    test "a PRODUCER sitting on its own card's jury raises — it would review its own PR", %{
+      tmp_dir: tmp
+    } do
+      # The card names both halves and nothing compared them. `engineer` produces AND sits on the
+      # jury whose approvals gate the seal: it reviews the PR it opened, and its approval counts.
+      # Every mechanism involved works exactly as written, so the pipeline reports a normal review
+      # — there is no downstream signal that could tell this apart from a real one.
+      File.write!(Path.join(tmp, "self-judge.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: self-judge
+        description: "the producer is in its own jury"
+        presentation: "test card — self judgement"
+      spec:
+        jury: [engineer, reviewer]
+        ci: ignore
+        max_rework_rounds: 2
+        steps:
+          implement:
+            role: engineer
+            needs: []
+      """)
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.validate_card_steps!(workflow_maps_root: tmp)
+        end
+
+      assert err.message =~ "PRODUCES as"
+      assert err.message =~ "own PR"
+    end
+
+    @tag :tmp_dir
+    test "a JUDGE role that is also a step is LEGITIMATE — gk-smoke ships exactly that", %{
+      tmp_dir: tmp
+    } do
+      # The guard keys on `brief_kind`, not on the step's position, and this is why. `gk-smoke`
+      # runs a `reviewer` step with a soft gate AND carries `reviewer` in its jury: two different
+      # acts on two different objects. A guard written on "the role appears as a step" would refuse
+      # a shipped canon card at boot — a wall that fires on a correct configuration is worse than
+      # the hole it closes, because the next person widens it until it stops firing.
+      File.write!(Path.join(tmp, "judge-step.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: judge-step
+        description: "a judge role also runs as a step"
+        presentation: "test card — judge as step"
+      spec:
+        jury: [qualifier, reviewer]
+        ci: ignore
+        max_rework_rounds: 2
+        steps:
+          build:
+            role: engineer
+            needs: []
+          review:
+            role: reviewer
+            needs: [build]
+      """)
+
+      assert :ok = Application.validate_card_steps!(workflow_maps_root: tmp)
+    end
   end
 
   # Interim brake (IPC consultant 2026-08-02): the :doc_workflow_map knob names the card every
