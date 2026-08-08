@@ -85,6 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_no_root_runtime_guard(root),
         # ── Topology lock ──
         check_boot_order_f8(root),
+        check_catalogue_before_freeze(root),
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
@@ -1063,6 +1064,51 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           evidence: ["children block extraction impossible — fail-closed"],
           note: "cf. Z3 (D-19) comment above"
         }
+    end
+  end
+
+  # Jumeau du precedent, et meme raison d'exister : un ORDRE dans `start/2` que le compilateur ne
+  # voit pas. `application.ex` l'ecrit noir sur blanc — *« the images below FREEZE their snapshot
+  # from this disk, and a snapshot taken from an unchecked root would carry the fault forward under
+  # a proven-good name »*. Mesure du 2026-08-08 : deplacer `Catalogue.verify!/0` APRES les deux
+  # `publish_image!` laissait la suite ENTIERE verte (2439 tests) et ce check a 0. Une phrase de
+  # doctrine que rien ne tient est une phrase qui sera vraie jusqu'au premier refactor.
+  #
+  # Verrouille sur la SOURCE, comme F8, parce que le mode de panne n'est pas reproductible en test :
+  # il demande un catalogue invalide ET des images publiees, c'est-a-dire exactement le boot qu'un
+  # test hermetique ne joue pas.
+  @doc false
+  def check_catalogue_before_freeze(root) do
+    app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
+
+    positions = %{
+      verify: :binary.match(app_src, "Fleet.Catalogue.verify!()"),
+      cap: :binary.match(app_src, "Fleet.CapProfile.publish_image!()"),
+      sp: :binary.match(app_src, "Fleet.SPBuilder.publish_image!()")
+    }
+
+    if Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
+      %{
+        id: "boot.catalogue_before_freeze",
+        remediation:
+          "restore in Fleet.Application.start/2: Catalogue.verify!() BEFORE " <>
+            "CapProfile.publish_image!() and SPBuilder.publish_image!()",
+        status: :fail,
+        evidence: ["one of verify!/publish_image! not found in application.ex — fail-closed"],
+        note: "boot-order lock, twin of boot.order_f8"
+      }
+    else
+      %{verify: {v, _}, cap: {c, _}, sp: {sp, _}} = positions
+
+      %{
+        id: "boot.catalogue_before_freeze",
+        remediation:
+          "move Catalogue.verify!() ABOVE both publish_image! calls: an image frozen from " <>
+            "an unchecked catalogue root carries the fault forward under a proven-good name",
+        status: if(v < c and v < sp, do: :pass, else: :fail),
+        evidence: ["offsets in application.ex: verify=#{v} cap_profile=#{c} sp_builder=#{sp}"],
+        note: "boot-order lock, twin of boot.order_f8"
+      }
     end
   end
 
