@@ -401,24 +401,6 @@ defmodule Fleet.Layout do
   def brief_pointer_line(ref, sha), do: "Brief: #{ref} @ #{sha}"
 
   @doc """
-  La commande qui lit un brief A SA VERSION PINNEE.
-
-  Deux ecrivains la rendaient : `BriefArtifact.pointer_brief/2` (le canal MCP, correct) et
-  `BriefBuilder.judge_criterion/1`, qui donnait le chemin de l'ARBRE MONTE tout en affirmant que
-  « c'est cette version pinnee qui fait foi ». Le `@ sha` y etait decoratif : un juge envoye sur
-  l'arbre lit ce que l'arbre contient MAINTENANT, pas ce qui a ete pinne — et un juge qui evalue
-  une autre version que celle qu'on lui annonce rend un verdict sur autre chose.
-
-  Une adresse, un seul endroit qui l'ecrit.
-
-      iex> Fleet.Layout.brief_read_command("briefs/x.md", "cafe1234")
-      "git -C $LCARS_PROJECT_OPS show cafe1234:briefs/x.md"
-  """
-  @spec brief_read_command(String.t(), String.t()) :: String.t()
-  def brief_read_command(ref, sha) when is_binary(ref) and is_binary(sha),
-    do: "git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}"
-
-  @doc """
   Scans a ticket body for the brief-pointer line. `:none` when absent (inline brief — the
   normal PoC path). `{:ok, {ref, sha}}` on a well-formed pointer. `{:error, {:invalid_pointer_ref, ref}}`
   when a line has the FULL pointer shape (40-hex commit) but an out-of-scheme ref — that is an

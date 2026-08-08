@@ -253,7 +253,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
   end
 
-  describe "deliverable-judge criterion — the gate-brief CITES, it does not COPY" do
+  describe "deliverable-judge criterion — the gate-brief CARRIES it, and names its pin" do
     @describetag :tmp_dir
 
     defp authored_criterion(tmp) do
@@ -267,7 +267,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {ref, sha}
     end
 
-    test "pointer ticket → the judge gets the CITATION, never a second copy of the doc", %{
+    test "pointer ticket → the judge gets the TEXT, resolved, plus the pin to cite", %{
       tmp_dir: tmp
     } do
       {ref, sha} = authored_criterion(tmp)
@@ -276,23 +276,23 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
 
-      # The duplication this removes: gate-briefs/issue-N-<judge>.md used to carry
-      # briefs/<slug>.md verbatim, in the SAME worktree, free to drift from the ticket's pin.
-      refute brief =~ "LE CRITÈRE COMPLET."
+      # THE CRITERION IS IN THE BRIEF. It used to be an ERRAND — cite the doc, let the judge
+      # `git show` it out of a mounted work/ops — and that errand is the whole reason every project
+      # pod carried a read-only bind of the runtime's record: what was asked, what was judged, what
+      # was proven, handed to the producer whose work it scores.
+      assert brief =~ "LE CRITÈRE COMPLET."
+
+      # The address travels with it, to be CITED: that is how a third party ties the verdict to a
+      # version from the forge. What the judge loses is verifying the pairing — against a tree the
+      # architect writes into, so it could confirm nothing the runtime had not resolved already.
       assert brief =~ "#{ref}"
       assert brief =~ "#{sha}"
 
-      # L'ADRESSE EST LE PIN, pas l'arbre. Le juge recevait `${LCARS_PROJECT_OPS}/<ref>` — le chemin
-      # de l'arbre MONTE — sous une phrase affirmant que « c'est cette version pinnee qui fait
-      # foi ». Le `@ sha` y etait decoratif : un juge envoye sur l'arbre lit ce que l'arbre contient
-      # MAINTENANT, donc il pouvait evaluer une autre version que celle qu'on lui annoncait.
-      assert brief =~ Fleet.Layout.brief_read_command(ref, sha)
-
-      refute brief =~ "${LCARS_PROJECT_OPS}/#{ref}",
-             "le chemin de l'arbre mouvant ne doit plus etre donne comme adresse du critere"
+      # No payload may name that variable: naming it re-creates the need to mount ops.
+      refute brief =~ "LCARS_PROJECT_OPS"
     end
 
-    test "the citation carries its own READ instruction — defused means do-not-execute, not do-not-read",
+    test "the criterion says read-and-evaluate — defused means do-not-execute, not do-not-read",
          %{tmp_dir: tmp} do
       {ref, sha} = authored_criterion(tmp)
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
@@ -300,12 +300,12 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
 
-      # It lands under "CONTEXT — already handled, DO NOT execute". Without an explicit read
-      # instruction the judge would skip the only link to its criterion, and a judge without a
-      # criterion APPROVES — the false green the criterion rail fail-closes against elsewhere.
+      # It lands under "CONTEXT — already handled, DO NOT execute". A judge reading that as
+      # do-not-read skips its only criterion, and a judge without a criterion APPROVES — the false
+      # green this rail fail-closes against elsewhere. So the two instructions are both stated.
       assert brief =~ "DO NOT execute"
-      assert brief =~ "LIS-le À SA VERSION PINNÉE"
       assert brief =~ "Ne l'exécute pas"
+      assert brief =~ "que tu évalues"
     end
 
     test "INVERSE TWIN — an inline brief is still embedded: there is nothing to point at", %{

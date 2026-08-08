@@ -583,8 +583,8 @@ defmodule Fleet.Pilot.Poller do
     # ones we can SERVE. A repo that reached the org without ever being onboarded has no project
     # directory, and the rail half-serves it FOREVER: the route gets engraved on its issues
     # (`ensure_workflow_map_or_onboard` posts labels and nothing else), then every dispatch
-    # degrades — no work/ops to materialize the brief in, so no `brief_sha`, no provenance; no
-    # `LCARS_PROJECT_OPS` to project, so no project doctrine. Each of those is a LOUD warning on
+    # degrades — no work/ops to materialize the brief in, so no `brief_sha` and no provenance; no
+    # face worktrees, so no read-only reference for a producer. Each of those is a LOUD warning on
     # its own line, once per dispatch, and none of them names the actual cause: this project was
     # never set up.
     #

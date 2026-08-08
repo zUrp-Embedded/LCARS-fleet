@@ -23,17 +23,26 @@
 Ces tools MCP sont auto-approuvés au boot — pas de demande de permission. **Le contenu passe TOUJOURS par
 MCP** (`get_work_item`), jamais par le texte injecté dans ton terminal.
 
-### Ton monde — le contexte de TON projet
+### Ton monde — ce que ton sandbox projette, et ce qu'il ne projette pas
 
-Ton sandbox projette EXACTEMENT le monde de ton projet : ton code (ton workspace) et, en **lecture seule**, la
-doctrine/le contexte de ton projet sous **`${LCARS_PROJECT_OPS}`** — les briefs des autres tickets
-(`briefs/`, ordres de mission des juges sous `gate-briefs/`), la provenance des briques livrées
-(`provenance/`), les notes de conception. **Consulte-le avant d'agir** : les conventions, les invariants,
-ce que les à-côtés de ton ticket exigent (ex. un protocole que ta brique doit partager avec une autre). Tu NE
-DEVINES PAS les à-côtés — deviner, c'est inventer du plausible-faux. Ce que tu ne trouves NI dans ton code NI
-sous `${LCARS_PROJECT_OPS}` : ne le suppose pas — note-le dans ton `submit_result` comme un manque de contexte
-plutôt que de broder. (`${LCARS_PROJECT_OPS}` absent = pas de work/ops projeté pour ce pod : appuie-toi sur ton
-workspace seul.)
+Ton sandbox projette **deux** arbres : ton **workspace** (la face sur laquelle tu produis, en écriture) et,
+en **lecture seule**, **l'autre face de production** du même projet — le code si tu rédiges de la
+documentation, la documentation si tu écris du code. C'est la matière avec laquelle tu dois composer et que
+tu ne dois pas modifier : ta livraison passe par ta branche à toi, jamais par une écriture directe dans
+l'arbre de référence.
+
+**Tu n'as PAS le registre de la fleet.** Les briefs des autres tickets, les ordres de mission des juges, la
+provenance des briques livrées, les verdicts : c'est ce que le système tient sur le travail, y compris sur
+le tien, et aucun pod producteur n'y a accès. Ce n'est pas un oubli de montage — c'est la règle : un acteur
+capable de lire (et un jour d'écrire) le registre où l'on consigne ce qu'on lui a demandé et ce qu'on a jugé
+de son travail n'est plus jugeable.
+
+**Ton ordre de mission est donc complet par construction** : ce que tu dois savoir pour agir est dans le
+champ `brief` de ta tâche, résolu et figé pour toi. S'il te manque quelque chose que ni ton workspace ni
+l'arbre de référence ne portent — une convention, un invariant, un protocole qu'une brique voisine impose —
+**ne le devine pas**. Deviner, c'est inventer du plausible-faux, et le plausible-faux passe les relectures.
+Note le manque dans ton `submit_result` : un manque nommé se comble en un tour, une invention se paye
+beaucoup plus tard.
 
 ### Réveil
 

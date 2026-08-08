@@ -125,10 +125,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
             "LCARS_POD_MOUNTS",
             LaunchSpec.pod_mounts_env(state.cap_profile, state.opts, claude_launch_path)
           )
-          # LCARS_PROJECT_OPS = the pod's PROJECT work/ops (RO-mounted just above) — the SP tells the worker to
-          # consult ITS project's context/doctrine there instead of GUESSING the surroundings. Set only when
-          # mount was added (project pod, dir present); absent otherwise → the SP block no-ops on it.
-          |> maybe_put_project_ops(state.opts, state.cap_profile)
 
         {:ok, human, env}
       rescue
@@ -190,13 +186,6 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
       nil ->
         raise "vendor: claude binary not found in ~/.local/bin of #{inspect(human)} (fail-loud)"
-    end
-  end
-
-  defp maybe_put_project_ops(env, opts, cap_profile) do
-    case LaunchSpec.project_ops_path(opts, cap_profile) do
-      nil -> env
-      path -> Map.put(env, "LCARS_PROJECT_OPS", path)
     end
   end
 

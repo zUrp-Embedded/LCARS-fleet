@@ -308,13 +308,6 @@ RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 # The cap-profile source is trusted-operator — the belt is anti-footgun, not anti-adversary.
 # =============================================================
 CATALOG_BINDS=()
-# Var pointing at the PROJECT work/ops mount, for the SP ("read ${LCARS_PROJECT_OPS}/briefs/…"): set by
-# the spawner (launch_env), it MUST cross the --clearenv or the pod has to rediscover the mount by hand.
-# The catalogue bind is same-path, so the host value stays true in-pod. Absent = a pod with no project
-# (the SP handles the absence).
-PROJECT_OPS_ENV=()
-[[ -n "${LCARS_PROJECT_OPS:-}" ]] && PROJECT_OPS_ENV=(--setenv LCARS_PROJECT_OPS "$LCARS_PROJECT_OPS")
-
 if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
   while IFS= read -r _mount; do
     [[ -z "$_mount" ]] && continue
@@ -409,7 +402,6 @@ exec env -i "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
   ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
-  ${PROJECT_OPS_ENV[@]+"${PROJECT_OPS_ENV[@]}"} \
   -- /bin/sh -c '
        tmux_bin=$1; sock=$2; name=$3; shift 3
        "$tmux_bin" -S "$sock" new-session -d -s "$name" "$@"

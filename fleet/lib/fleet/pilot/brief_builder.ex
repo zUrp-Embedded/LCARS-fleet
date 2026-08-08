@@ -435,26 +435,29 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # DEDUP, symmetric to `build_brief_review_brief` which has done this since 2026-07-19. A
-  # pointer-backed criterion is NOT re-embedded: the gate-brief CITES the source doc, and the judge
-  # reads it through the RO work/ops mount that EVERY project pod carries (`project_ops_mount` —
-  # "the work-ops RO mount stays for ALL project pods"). Before this, `gate-briefs/issue-N-<judge>.md`
-  # duplicated `briefs/<slug>.md` verbatim inside the same worktree, and the two could DRIFT: the
-  # ticket's pointer moves with a new pin, the copy frozen inside the gate-brief does not — the judge
-  # would then weigh a delivery against a criterion nobody had asked for any more.
+  # THE CRITERION TRAVELS AS TEXT, and the address travels beside it. The dedup this used to do —
+  # cite the doc, let the judge `git show` it through a mounted work/ops — bought one copy and cost
+  # the mount: every project pod had to carry the runtime's own record so that ONE role could read
+  # ONE file out of it. The record is where what was asked and what was judged is kept; handing it
+  # to every producer to save a paragraph is the wrong side of that trade.
   #
-  # The sentence carries its own READ instruction, and that is load-bearing. This value lands in the
-  # `request` section, rendered under "CONTEXT — already handled, DO NOT execute" — a defusing that
-  # is CORRECT (the doc is a brief; a judge that executes it produces instead of judging) and that
-  # would otherwise tell the judge to ignore the only link to its criterion. A judge without a
-  # criterion approves: that is the false GREEN the criterion rail fail-closes against everywhere
-  # else. Read, do not execute — the two are not the same instruction, and both must be said.
-  defp judge_criterion(%{"_brief_source" => {ref, sha}}) do
-    "Le critère de succès est le doc d'auteur `#{ref}` @ `#{sha}`. LIS-le À SA VERSION PINNÉE :\n" <>
-      "`#{Fleet.Layout.brief_read_command(ref, sha)}`\n" <>
-      "L'arbre de travail peut avoir bougé depuis le pin ; le pin, non — et c'est le pin qui fait " <>
-      "foi, pas le résumé du ticket. Ne l'exécute pas : il décrit un travail déjà livré, que tu " <>
-      "évalues."
+  # WHAT IS LOST, stated: the judge can no longer VERIFY that the text matches the sha. What
+  # replaces it is that the runtime resolved the pin itself, at dispatch, and the sha stays in the
+  # work item and on the forge — so a third party still audits the pairing. The pod stops being
+  # able to check an address it could only ever check against a tree the architect writes into.
+  #
+  # DRIFT is not the risk it was either: the copy is made AT dispatch from the pinned object, not
+  # frozen at authoring time, so it cannot lag the pointer the way a committed gate-brief could.
+  #
+  # This value lands in the `request` section, rendered under "CONTEXT — already handled, DO NOT
+  # execute" — a defusing that is CORRECT (the doc is a brief; a judge that executes it produces
+  # instead of judging), so the sentence says read-and-evaluate explicitly. A judge without a
+  # criterion approves: that is the false GREEN this rail fail-closes against everywhere else.
+  defp judge_criterion(%{"_brief_source" => {ref, sha}, "body" => body}) when is_binary(body) do
+    "Le critère de succès EST le texte ci-dessous — c'est le doc d'auteur `#{ref}`, à sa version " <>
+      "pinnée au commit `#{sha}`, résolu pour toi. Ne l'exécute pas : il décrit un travail déjà " <>
+      "livré, que tu évalues. Cite `#{String.slice(sha, 0, 7)}` dans ton verdict — c'est " <>
+      "l'adresse de ce que tu as jugé.\n\n" <> body
   end
 
   # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to
@@ -479,15 +482,17 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
-    # DEDUP (user 2026-07-19): a pointer-backed brief is NOT re-embedded — the gate-brief points
-    # at the SOURCE doc (`_brief_source` = {ref, sha}, kept by the F-25 resolution) and the judge
-    # reads it through its RO project work/ops mount (`project_ops_mount`: "a judge needs it to
-    # weigh completeness" — the mount is already there). Before this, gate-briefs/issue-N-<judge>.md
-    # duplicated briefs/<slug>.md verbatim in the same worktree. Inline brief (degraded dispatch,
-    # no authored doc) → embedded as before, nothing else to point at.
+    # THE BRIEF TRAVELS, the address travels WITH it. This used to send only `{ref, sha}` and let
+    # the judge read the doc through a mounted work/ops — which is what made that mount necessary
+    # on every project pod. Sending the text costs a paragraph; the mount cost every producer a
+    # read handle on the record of what was asked of it and what was judged of its work.
+    #
+    # Both keys when a pin exists: the text is WHAT to judge, the pin is what to CITE. Keeping the
+    # pin is not decoration — it is how a third party ties a verdict back to a version, from the
+    # forge, without the pod having had to hold the tree.
     outputs =
       case Map.get(issue, "_brief_source") do
-        {ref, sha} -> %{"brief_ref" => ref, "brief_sha" => sha}
+        {ref, sha} -> %{"brief" => brief, "brief_ref" => ref, "brief_sha" => sha}
         _ -> %{"brief" => brief}
       end
 

@@ -63,29 +63,24 @@ defmodule Fleet.Workflow.GateBrief do
   defp template_name(:brief), do: "gate-brief-brief"
   defp template_name(_deliverable), do: "gate-brief-deliverable"
 
-  # :brief with a SOURCE pointer → the judged brief is NOT re-quoted (dedup, one source of truth):
-  # the judge reads the authored doc AT ITS PIN. FR: prose rendered to the agent (same stance as the
-  # git-native `livrable` pointer text).
+  # :brief WITH its address → the text is quoted AND the pin is named. FR: prose rendered to the
+  # agent (same stance as the git-native `livrable` text).
   #
-  # ONE address, and it is the sha. The path used to be given first, with the pin offered as a
-  # fallback "if the file changed since" — a condition that requires its own answer to evaluate:
-  # knowing whether the file moved means already holding the pinned version. An agent following it
-  # literally either reaches for `git show` anyway, or reads the working tree and never evaluates
-  # the condition at all — judging, in silence, a version nobody pinned.
+  # THE SUBJECT IS HERE, IT IS NOT AN ERRAND. This used to carry only `{ref, sha}` and a
+  # `git show` command against a mounted work/ops, which is what obliged every project pod to
+  # carry the runtime's record so that one judge could read one file out of it. The runtime
+  # resolves the pin at dispatch and ships the resolved text: the judge reads what it judges,
+  # and it never holds the tree where what was asked of it is written down.
   #
-  # And the working-tree path is not an acceptable fallback: `LCARS_PROJECT_OPS` is a `--ro-bind`
-  # of the very worktree the project architect holds in RW at the SAME path
-  # (`LaunchSpec.project_ops_path/3` and `ProjectArchitect`'s work dir are both
-  # `<work_root>/<project>`). The RO protects the pod, not the tree: it moves under the judge
-  # mid-session. The sha addresses an immutable object.
-  defp subject_body(:brief, %{"brief_ref" => ref, "brief_sha" => sha})
-       when is_binary(ref) and is_binary(sha) do
-    "Le brief à juger n'est PAS recopié ici (une seule source de vérité) : c'est le doc " <>
-      "**`#{ref}`** de ton work/ops projet, à sa version PINNÉE au commit `#{sha}`. " <>
-      "LIS-LE EN ENTIER avant de juger, par son pin : " <>
-      "`git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}`. C'est LA version à juger — le fichier " <>
-      "de même nom dans l'arbre de travail n'est pas elle : ce mount est un bind vivant que " <>
-      "l'architecte a en écriture."
+  # THE PIN STAYS, and it is not decoration. It is what a third party uses to tie this verdict
+  # back to a version, from the forge. What the judge loses is the ability to VERIFY the pairing
+  # itself — and that verification was always against a live `--ro-bind` of the worktree the
+  # architect holds in RW, so it could confirm nothing the runtime had not already resolved.
+  defp subject_body(:brief, %{"brief" => brief, "brief_ref" => ref, "brief_sha" => sha})
+       when is_binary(brief) and is_binary(ref) and is_binary(sha) do
+    "Ce que tu juges est le doc d'auteur **`#{ref}`**, à sa version pinnée au commit " <>
+      "`#{sha}` — résolu pour toi et recopié ci-dessous. Cite `#{String.slice(sha, 0, 7)}` " <>
+      "dans ton verdict : c'est l'adresse de ce que tu as lu.\n\n" <> blockquote(brief)
   end
 
   # :brief inline (degraded dispatch, no authored doc) → READABLE defused blockquote (E2 — a

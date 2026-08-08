@@ -78,31 +78,37 @@ defmodule Fleet.Workflow.GateBriefTest do
     assert brief =~ "Judged step: s"
   end
 
-  test "subject :brief with a SOURCE pointer → the brief is POINTED, never re-embedded (dedup)" do
-    # User 2026-07-19: gate-briefs/issue-N-consultant.md duplicated briefs/<slug>.md verbatim.
-    # The pointer path renders ref + pinned sha + the RO-mount read instruction — no copy.
+  test "subject :brief WITH its address → the text is carried AND the pin is named" do
     brief =
       Fleet.Workflow.GateBrief.build(%{
         step: "brief-review",
         workflow_map_id: "brief-gate",
         gate: nil,
         subject: :brief,
-        outputs: %{"brief_ref" => "briefs/issue-5-engineer.md", "brief_sha" => "0627de8abc"}
+        outputs: %{
+          "brief" => "Implémente le décodeur morse.\nContrainte : pas d'allocation.",
+          "brief_ref" => "briefs/issue-5-engineer.md",
+          "brief_sha" => "0627de8abc"
+        }
       })
 
+    # THE SUBJECT IS PRESENT, not addressed. The judge used to receive only `{ref, sha}` plus a
+    # `git show` against a mounted work/ops — which is what obliged EVERY project pod to carry the
+    # runtime's record so that this one role could read one file out of it. Now the runtime
+    # resolves the pin at dispatch and the text travels.
+    assert brief =~ "> Implémente le décodeur morse."
+    assert brief =~ "> Contrainte : pas d'allocation."
+
+    # And the address travels WITH it: it is what ties this verdict to a version from the forge.
+    # What the judge loses is the ability to verify the pairing itself — a verification that ran
+    # against a live `--ro-bind` of the worktree the architect holds in RW, so it could confirm
+    # nothing the runtime had not already resolved.
     assert brief =~ "briefs/issue-5-engineer.md"
     assert brief =~ "0627de8abc"
 
-    # ONE address, and it is the PIN. The judge used to be given the working-tree path first, with
-    # `git show` offered only "if the file changed since the pin" — a condition that requires its
-    # own answer: knowing whether it changed means already holding the pinned version. And the path
-    # is not a fallback: `LCARS_PROJECT_OPS` is a live `--ro-bind` of the worktree the project
-    # architect holds in RW at the same path, so it moves under the judge mid-session.
-    assert brief =~ "git -C $LCARS_PROJECT_OPS show 0627de8abc:briefs/issue-5-engineer.md"
-    refute brief =~ "$LCARS_PROJECT_OPS/briefs/issue-5-engineer.md"
-
-    # No embedded blockquote of a brief body: the pointer instruction replaces the copy.
-    refute brief =~ "> "
+    # NO errand: a payload naming that variable re-creates the need to mount ops.
+    refute brief =~ "LCARS_PROJECT_OPS"
+    refute brief =~ "git -C"
   end
 
   test "subject :brief INLINE (degraded, no authored doc) → embedded blockquote as before" do

@@ -52,8 +52,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   end
 
   describe "pod_mounts_env/3 — the COMPOSITION, which nothing held" do
-    # Le monde d'un pod a CINQ sources — system, cap-profile, opts de spawn, project-ops,
-    # code-reference — concatenees puis passees a `Enum.uniq_by/2`. Chaque source avait ses tests ;
+    # Le monde d'un pod a QUATRE sources — system, cap-profile, opts de spawn, autre-face —
+    # concatenees puis passees a `Enum.uniq_by/2`. Chaque source avait ses tests ;
     # l'ASSEMBLAGE n'en avait aucun, alors qu'il porte une garantie ecrite (« Earlier entries win on
     # duplicate paths ») et que cette garantie decide un MODE. Or le mode est la propriete de
     # securite de ce module — les trois refus ci-dessus existent pour lui, et aucun ne regarde le
@@ -91,108 +91,124 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       refute env =~ "rw:/srv/shared"
     end
 
-    # ❌ PAS de test pour la collision REELLE de l'architecte — `opts[:mounts]` en `rw` sur
-    # `<work_root>/<project>` contre le `ro` que `project_ops_mount` pose sur le meme chemin, ou
-    # c'est l'ordre des `++` qui lui conserve son droit d'ecriture. Deux raisons, dans cet ordre :
-    # `Fleet.Layout.work_root/0` est une constante de compilation, donc le forcer demanderait un
-    # seam de plus dans `pod_mounts_env/3` ; et `project_ops_mount` est RETIRE par le chantier trois
-    # faces. Epingler ici un mecanisme programme pour disparaitre ferait un test a jeter avec lui.
-    # La propriete d'ordre qui SURVIT a ce retrait est celle des deux tests ci-dessus.
-  end
-
-  describe "project_ops_path/3 — the world of ITS project (RO, scoped), neither nothing nor everything" do
-    # The sanctuary projects ITS project's work/ops (context/doctrine) so the worker KNOWS instead of
-    # guessing the surroundings — not the whole `/home/projects.work` (other projects' world = noise +
-    # over-exposure), not nothing (starvation → it guesses = the poison). `work_root` seam = testable
-    # (the real one is hardcoded).
-    test "no project (:project_slug absent) → nil: nothing to project" do
-      assert LaunchSpec.project_ops_path([], cap_with_mounts([]), "/tmp") == nil
-    end
-
-    test "project but work/ops ABSENT → nil (the STRICT ro-bind launcher would crash on a missing source)" do
-      assert LaunchSpec.project_ops_path(
-               [rc_name: "ghost_test", project_slug: "ghost"],
-               cap_with_mounts([]),
-               "/tmp/nexiste-pas-42"
-             ) ==
-               nil
-    end
-
-    @tag :tmp_dir
-    test "project + work/ops present → the scoped path <work_root>/<project> (ITS world)", %{
-      tmp_dir: tmp
-    } do
-      File.mkdir_p!(Path.join(tmp, "myproj"))
-
-      assert LaunchSpec.project_ops_path(
-               [rc_name: "myproj_test", project_slug: "myproj"],
-               cap_with_mounts([]),
-               tmp
-             ) ==
-               Path.join(tmp, "myproj")
-    end
-  end
-
-  describe "code_reference_path/3 — the OPPOSITE face as RO reference" do
-    # A doc-face pod reads the code it documents; a code-face pod gets nothing new (its workspace
-    # IS the code). The face comes off the project map's base_branch — threaded, never re-derived.
-    # NEVER the ops face: no card can declare it, so no producer clone ever sits on that branch.
-    defp ops_opts(project_extra \\ %{}) do
-      [
-        rc_name: "myproj_test",
-        project_slug: "myproj",
-        project:
-          Map.merge(
-            %{"repo_path" => "http://f/x.git", "base_branch" => "work/doc"},
-            project_extra
-          )
-      ]
-    end
-
-    @tag :tmp_dir
-    test "doc-face pod + code worktree present → <projects_root>/<project>", %{tmp_dir: tmp} do
-      File.mkdir_p!(Path.join(tmp, "myproj"))
-
-      assert LaunchSpec.code_reference_path(ops_opts(), cap_with_mounts([]), tmp) ==
-               Path.join(tmp, "myproj")
-    end
-
-    @tag :tmp_dir
-    test "code-face pod → nil (its workspace IS the code; work-ops was already its reference)", %{
-      tmp_dir: tmp
-    } do
-      File.mkdir_p!(Path.join(tmp, "myproj"))
-
-      code_opts = [
+    test "AUCUN montage n'est derive de la racine ops — le registre n'est pas le monde d'un pod" do
+      # LA PROPRIETE DU SEVRAGE, et c'est une ABSENCE, donc elle a besoin d'un garde explicite : une
+      # absence ne rougit jamais toute seule. Chaque pod projet portait un `--ro-bind` de
+      # `<work_root>/<projet>` — briefs, gate-briefs, verdicts, provenance : le registre que le
+      # runtime tient sur le travail, y compris celui du pod qui le lisait. Il etait la pour qu'UN
+      # role lise UN fichier, et ce fichier voyage desormais en texte dans le work item.
+      #
+      # Re-ajouter une source derivee de la racine ops fait rougir cette ligne. C'est le seul
+      # endroit ou ca rougit : le reste du module ne regarde que la forme des mounts.
+      opts = [
         rc_name: "myproj_test",
         project_slug: "myproj",
         project: %{"repo_path" => "http://f/x.git", "base_branch" => "main"}
       ]
 
-      assert LaunchSpec.code_reference_path(code_opts, cap_with_mounts([]), tmp) == nil
+      env =
+        LaunchSpec.pod_mounts_env(cap_with_mounts([]), opts, "/usr/local/bin/claude_launch.sh")
+
+      refute env =~ Fleet.Layout.work_root(),
+             "un pod producteur ne monte pas l'arbre ou son propre travail est juge"
+    end
+
+    # ❌ PAS de test pour la collision RW/RO de l'architecte sur la face ops : le mecanisme qui la
+    # produisait — un `project_ops_mount` pose APRES `opts[:mounts]` sur le meme chemin — n'existe
+    # plus. L'architecte obtient ops par son `mounts:` explicite et rien ne le lui dispute, donc il
+    # n'y a plus de precedence a epingler la. Celle qui reste est celle des deux tests plus haut.
+  end
+
+  describe "other_face_reference_path/3 — the OTHER production face, read-only" do
+    # WHAT REPLACED THE OPS MOUNT. Every project pod used to carry a read-only bind of the
+    # runtime's record (`<work_root>/<project>`): briefs, gate-briefs, verdicts, provenance. It
+    # was there so ONE role could read ONE file out of it, and the brief and the judging criterion
+    # now travel as text. What a producer actually needs is the OTHER production face — the code it
+    # documents, or the documentation it implements against — and nothing else.
+    #
+    # The face comes off the project map's `base_branch`, threaded from the card, never re-derived.
+    defp face_opts(base_branch) do
+      [
+        rc_name: "myproj_test",
+        project_slug: "myproj",
+        project: %{"repo_path" => "http://f/x.git", "base_branch" => base_branch}
+      ]
+    end
+
+    defp roots(tmp), do: %{"code" => Path.join(tmp, "code"), "doc" => Path.join(tmp, "doc")}
+
+    @tag :tmp_dir
+    test "a DOC producer gets the code tree", %{tmp_dir: tmp} do
+      File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
+      File.mkdir_p!(Path.join([tmp, "doc", "myproj"]))
+
+      assert LaunchSpec.other_face_reference_path(
+               face_opts("work/doc"),
+               cap_with_mounts([]),
+               roots(tmp)
+             ) == Path.join([tmp, "code", "myproj"])
     end
 
     @tag :tmp_dir
-    test "a FEATURE branch is not the ops face → nil (judge cloning an ops PR head: code-face treatment)",
-         %{tmp_dir: tmp} do
-      File.mkdir_p!(Path.join(tmp, "myproj"))
+    test "a CODE producer gets the doc tree — the symmetry, which did not exist before", %{
+      tmp_dir: tmp
+    } do
+      # The old shape granted the reference in ONE direction and gave everyone the ops tree in the
+      # other. An engineer had the ledger and not the documentation it implements against; now it
+      # has the documentation and not the ledger.
+      File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
+      File.mkdir_p!(Path.join([tmp, "doc", "myproj"]))
 
-      judge_opts = [
-        rc_name: "myproj_test",
-        project_slug: "myproj",
-        project: %{"repo_path" => "http://f/x.git", "base_branch" => "lcars/issue-3-scribe"}
-      ]
-
-      assert LaunchSpec.code_reference_path(judge_opts, cap_with_mounts([]), tmp) == nil
+      assert LaunchSpec.other_face_reference_path(
+               face_opts("main"),
+               cap_with_mounts([]),
+               roots(tmp)
+             ) == Path.join([tmp, "doc", "myproj"])
     end
 
-    test "ops-face pod but code worktree ABSENT → nil (the STRICT ro-bind would crash the spawn)" do
-      assert LaunchSpec.code_reference_path(
-               ops_opts(),
+    @tag :tmp_dir
+    test "a FEATURE branch is not a face → nil (a judge clones the producer's head)", %{
+      tmp_dir: tmp
+    } do
+      File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
+      File.mkdir_p!(Path.join([tmp, "doc", "myproj"]))
+
+      assert LaunchSpec.other_face_reference_path(
+               face_opts("lcars/issue-3-scribe"),
                cap_with_mounts([]),
-               "/tmp/nexiste-pas-43"
-             ) ==
-               nil
+               roots(tmp)
+             ) == nil
+    end
+
+    @tag :tmp_dir
+    test "the OPS branch is not a production face → nil, and no clause says so", %{tmp_dir: tmp} do
+      # `face_of/1` answers "ops" here, and `other_face/1` has no clause for it — the guard is the
+      # `when face in ["code", "doc"]`, which is the same list the card enum allows. A pod on
+      # work/ops is unreachable by construction; this pins that the reference path agrees rather
+      # than inventing a direction for it.
+      File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
+
+      assert LaunchSpec.other_face_reference_path(
+               face_opts("work/ops"),
+               cap_with_mounts([]),
+               roots(tmp)
+             ) == nil
+    end
+
+    test "no project (:project_slug absent) → nil: nothing to reference" do
+      assert LaunchSpec.other_face_reference_path(
+               [project: %{"base_branch" => "main"}],
+               cap_with_mounts([]),
+               %{"code" => "/tmp", "doc" => "/tmp"}
+             ) == nil
+    end
+
+    test "the other face's worktree ABSENT → nil (the STRICT ro-bind would crash the spawn)" do
+      assert LaunchSpec.other_face_reference_path(
+               face_opts("main"),
+               cap_with_mounts([]),
+               %{"code" => "/tmp/nexiste-pas-43", "doc" => "/tmp/nexiste-pas-44"}
+             ) == nil
     end
   end
 

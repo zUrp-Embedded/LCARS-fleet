@@ -50,9 +50,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   `nil` (pod with no remap nor seed, neutral state) rather than a traversing `project` that would
   reach a `Path.join`. Single source → a single point to hold.
 
-  ⚠ Two of its consumers build HOST paths — `project_ops_path/3` (`<work_root>/<project>`) and
-  `code_reference_path/3` (`<projects_root>/<project>`) — whose documented authority is
-  `Fleet.Layout.project_name/1`, not the slug. The two derivations differ on `_`, `.` and
+  ⚠ Its consumer `other_face_reference_path/3` builds a HOST path (`<face_root>/<project>`) whose
+  documented authority is `Fleet.Layout.project_name/1`, not the slug. The two derivations differ on `_`, `.` and
   uppercase, so this would place a pod on a directory that does not exist. It does NOT, and the
   reason is a charset and not a contract: every onboarding entry point validates the project name
   against `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, strictly inside what the slug preserves, so a project
@@ -302,50 +301,55 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  Serializes the system, profile, spawn, project-ops and code-reference mounts for bwrap.
+  Serializes the system, profile, spawn and other-face mounts for bwrap.
 
   Earlier entries win on duplicate paths. Modes must be `ro` or `rw`; newline-bearing fields raise.
+
+  THE PROJECT'S OPS TREE IS NOT HERE, and its absence is the point. Every project pod used to carry
+  a read-only bind of `<work_root>/<project>` — the runtime's own record: what was asked, what was
+  judged, what was proven. It was there so that ONE role could read ONE file out of it, and the
+  brief and the judging criterion now travel as text instead. A producer holding the ledger its own
+  work is scored in is a hazard that buys nothing once the text is in its hands. The architect keeps
+  the tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
   """
   @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t()) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path) do
     (system_mounts(claude_launch_path) ++
        cap_profile_mounts(cap_profile) ++
        opts_mounts(opts) ++
-       project_ops_mount(opts, cap_profile) ++ code_reference_mount(opts, cap_profile))
+       other_face_reference_mount(opts, cap_profile))
     |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
     |> mounts_env()
   end
 
   defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])
 
-  defp project_ops_mount(opts, cap_profile) do
-    case project_ops_path(opts, cap_profile) do
-      nil -> []
-      path -> [%{"mode" => "ro", "path" => path}]
-    end
-  end
-
-  defp code_reference_mount(opts, cap_profile) do
-    case code_reference_path(opts, cap_profile) do
+  defp other_face_reference_mount(opts, cap_profile) do
+    case other_face_reference_path(opts, cap_profile) do
       nil -> []
       path -> [%{"mode" => "ro", "path" => path}]
     end
   end
 
   @doc """
-  Returns an existing code worktree as a read-only reference for an ops-face pod.
+  Returns the OTHER production face's worktree as a read-only reference for this pod.
 
-  Code-face pods and missing worktrees return `nil`. `projects_root` is a test seam.
+  A producer on `code` gets `doc`, a producer on `doc` gets `code` — each one reads what it must
+  compose with and may not edit. A branch that is neither face (a judge cloning a producer's head)
+  and a missing worktree both return `nil`.
+
+  NEVER `ops`, and no clause is needed to say so: no card can declare that face, so no producer
+  clone ever sits on that branch and `face_of/1` never answers it here. `face_root/1` raises on
+  anything outside the declared faces rather than guessing a directory.
+
+  `roots` is a test seam: `%{"code" => path, "doc" => path}`, defaulting to the layout.
   """
-  @spec code_reference_path(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t() | nil
-  def code_reference_path(opts, cap_profile, projects_root \\ Fleet.Layout.projects_root()) do
-    # `== "doc"`, not `!= "code"`: the reference is granted to the doc face because that face's
-    # producer needs the code as material it must not edit. A future face has to state its own
-    # need — inheriting this mount by not being `code` would hand a pod a tree nobody granted it.
-    # NEVER `ops`: no card can declare that face, so no producer clone ever sits on it.
-    with "doc" <- Fleet.Layout.face_of(effective_project(opts, cap_profile)["base_branch"]),
+  @spec other_face_reference_path(keyword(), Fleet.CapProfile.t(), map()) :: String.t() | nil
+  def other_face_reference_path(opts, cap_profile, roots \\ default_face_roots()) do
+    with face when face in ["code", "doc"] <-
+           Fleet.Layout.face_of(effective_project(opts, cap_profile)["base_branch"]),
          project when is_binary(project) <- rc_project(opts, cap_profile),
-         path = Path.join(projects_root, project),
+         path = Path.join(Map.fetch!(roots, other_face(face)), project),
          true <- File.dir?(path) do
       path
     else
@@ -353,22 +357,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  @doc """
-  Returns the existing project work/ops path or `nil`.
+  defp other_face("code"), do: "doc"
+  defp other_face("doc"), do: "code"
 
-  Existence is required because bwrap binds strictly. `work_root` is a test seam.
-  """
-  @spec project_ops_path(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t() | nil
-  def project_ops_path(opts, cap_profile, work_root \\ Fleet.Layout.work_root()) do
-    case rc_project(opts, cap_profile) do
-      nil ->
-        nil
-
-      project ->
-        path = Path.join(work_root, project)
-        if File.dir?(path), do: path, else: nil
-    end
-  end
+  defp default_face_roots,
+    do: %{"code" => Fleet.Layout.face_root("code"), "doc" => Fleet.Layout.face_root("doc")}
 
   defp cap_profile_mounts(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "mounts") || Map.get(meta, :mounts) || []

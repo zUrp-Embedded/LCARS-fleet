@@ -1,8 +1,8 @@
 defmodule Fleet.ProjectBootstrap.CloneTest do
-  # Workspace clone (invoked world): the pod's CODE face. The project's doc is NOT cloned here — it
-  # reaches the pod as an RO bind of the runtime's own work/ops worktree (`LCARS_PROJECT_OPS`).
-  # A second mechanism cloning it into `<pod_dir>/work` existed and NEVER ran (its trigger field had
-  # no writer in the whole corpus); removed 2026-08-03.
+  # Workspace clone (invoked world): the pod's PRODUCTION face. The other face is NOT cloned here —
+  # it reaches the pod as an RO bind (`LaunchSpec.other_face_reference_path/3`). A second mechanism
+  # cloning it into `<pod_dir>/work` existed and NEVER ran (its trigger field had no writer in the
+  # whole corpus); removed 2026-08-03.
   # REAL git fixture (no mock) — source repo with `main` + orphan branch `work/ops`.
   # async: git fixtures isolated by tmp_dir (git -C) — no application env mutated.
   use ExUnit.Case, async: true
@@ -59,8 +59,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     File.mkdir_p!(pod_dir)
     profile = cap(%{"repo_path" => src, "base_branch" => "main"})
 
-    # code branch → <pod_dir>/workspace. The project's DOC does not come through here: it reaches
-    # the pod as an RO bind of the runtime's own work/ops worktree (`LCARS_PROJECT_OPS`).
+    # code branch → <pod_dir>/workspace. The other face does not come through here: it reaches the
+    # pod as an RO bind (`LaunchSpec.other_face_reference_path/3`).
     assert {:ok, ws, feature} = Clone.clone_or_skip(pod_dir, profile, [])
     assert ws == Path.join(pod_dir, "workspace")
     assert File.exists?(Path.join(ws, "src.txt"))

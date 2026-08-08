@@ -74,10 +74,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
   workspace (with cwd=workspace it must be INSIDE the cwd). Absent (`repo_path` nil) → no-op.
 
-  The project's doc is NOT cloned here: it reaches the pod as an RO BIND of the runtime's own
-  work/ops worktree (`LaunchSpec.project_ops_path/3` → `LCARS_PROJECT_OPS`). A second mechanism
-  cloning it into `<pod_dir>/work` existed and never ran — its trigger field had no writer anywhere
-  in the corpus — so a reader met the dead one first and took it for the live one.
+  The OTHER production face is NOT cloned here: it reaches the pod as an RO BIND
+  (`LaunchSpec.other_face_reference_path/3`). A second mechanism cloning it into `<pod_dir>/work`
+  existed and never ran — its trigger field had no writer anywhere in the corpus — so a reader met
+  the dead one first and took it for the live one.
 
   Being a BIND and not a clone has one consequence worth knowing before assuming otherwise: the pod
   reads the LIVE worktree, the one the dispatcher commits other tickets' briefs into. Harmless (RO,

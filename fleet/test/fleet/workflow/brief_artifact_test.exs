@@ -220,51 +220,15 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     end
   end
 
-  test "pointer_brief: ONE address, and it is the pin the pod is asked to cite" do
-    ref = "briefs/issue-9-engineer.md"
-    sha = (String.duplicate("a1b2c3d", 5) <> "a1b2c") |> String.slice(0, 40)
-    order = BriefArtifact.pointer_brief(ref, sha)
-
-    assert order =~ ref
-    assert order =~ String.slice(sha, 0, 7)
-    assert order =~ "LIS-le EN PREMIER"
-
-    # The pin, as a COMMAND — not the working-tree path with the pin as a fallback. That mount is a
-    # live `--ro-bind` of the worktree the project architect holds in RW at the same path, so the
-    # two are not two ways of reading one thing. Sending the pod to the path and then asking it to
-    # cite the sha made it attest a version it had never opened.
-    assert order =~ "git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}"
-    refute order =~ "${LCARS_PROJECT_OPS}/#{ref}"
-  end
-
-  test "pointer_brief: SHORT is a property of the OVERHEAD, not of one fixture ref" do
-    # The old ceiling was `String.length(order) < 400` on a single 26-char ref. It measured a
-    # constant, not the function: a ref is `sanitize_artifact_name(<ticket title>)` with NO
-    # truncation anywhere (`Layout.brief_ref/2`), so the payload grows with the title and a long
-    # one crosses 400 while the order is still a perfectly good pointer. Measured: 405 with a
-    # 51-char ref, on prose nobody would call bloated.
-    #
-    # What "SHORT" actually means: the payload carries the ADDRESS, never the brief. So the bound
-    # that means something is the overhead once the ref is discounted — the ref appears twice, by
-    # design (once as the doc's name, once inside the command).
-    sha = String.duplicate("f", 40)
-
-    for ref <- [
-          "briefs/x.md",
-          "briefs/issue-9-engineer.md",
-          "briefs/#{String.duplicate("z", 80)}.md"
-        ] do
-      order = BriefArtifact.pointer_brief(ref, sha)
-      overhead = String.length(order) - 2 * String.length(ref)
-
-      # 320, calibrated on the MEASURED overhead (303 on 2026-08-03) and not the reverse: a bound
-      # picked first would have had me trim the prose to fit a number nobody had measured.
-      assert overhead < 320,
-             "pointer overhead #{overhead} for ref #{inspect(ref)} (measured 303 on 2026-08-03) " <>
-               "— the payload is drifting from a pointer towards a text"
-    end
-  end
-
+  # ❌ PLUS DE TEST `pointer_brief` : la fonction est SUPPRIMEE. Elle rendait l'ordre de mission
+  # court — « ton brief est le doc <ref> @ <sha>, lis-le par `git -C $LCARS_PROJECT_OPS show` » —
+  # et son dernier appelant de production etait parti avec le sevrage du dispatch (d576754f1). Ce
+  # qui restait etait un ecrivain sans lecteur, plus deux tests qui prouvaient soigneusement la
+  # forme d'un texte que plus aucun pod ne recevait.
+  #
+  # Ce qui les remplace n'est pas ici : le contenu voyage dans le work item (`Spawn.materialize`),
+  # et l'adresse l'accompagne pour etre CITEE. Les proprietes de cette forme-la se mesurent la ou
+  # elle est construite.
   test "commit inside an orphan git WORKTREE (the REAL work/ops: `.git` is a FILE, not a dir)",
        %{tmp_dir: tmp} do
     # Live regression: `git init` (`.git` = dir) passed, but the real work/ops is an orphan git
