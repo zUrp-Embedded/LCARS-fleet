@@ -38,9 +38,6 @@ defmodule Fleet.MCP.PodTools do
         write channel existed without its read half — a radio that transmits but not receives).
       - `get_issue`        : the arch reads ONE ticket in full (body + comment thread).
       - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
-      - `publish_doc`      : the arch publishes an authored document under `notes/` on the ops
-        face and gets a citable `<ref> @ <sha>` pointer — its commits used to be HOSTAGE to the
-        next ticket's push.
       - `add_dependency` / `remove_dependency` : the arch states the order between two tickets
         AFTER creation. The result SAYS what it does not do — on a ticket already in flight the
         edge blocks the CLOSURE, it does not stop the run.
@@ -667,36 +664,6 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}})
   end
 
-  deftool "publish_doc" do
-    meta do
-      name("Publish Doc")
-
-      description(
-        "PUBLISH a document you authored on your project's ops face (`work/ops`) and get a citable " <>
-          "pointer back. Use it for what you write on your own initiative — a campaign report, an " <>
-          "analysis, a note — instead of disguising it as a ticket nobody will implement. " <>
-          "`name` = a short file name without extension (it becomes `notes/<name>.md`; anything " <>
-          "outside letters, digits, `.`, `_`, `-` is replaced). `content` = the full markdown. " <>
-          "You can only write under `notes/`: briefs, gate-briefs and provenance are written by " <>
-          "the fleet and are the record your work is audited against. Publishing the SAME content " <>
-          "at the same name again changes nothing and returns the same commit; different content " <>
-          "creates a new version — git history keeps both, nothing is overwritten. Returns " <>
-          "{\"ref\":\"notes/...md\",\"sha\":\"<40 hex>\",\"pointer\":\"Doc: <ref> @ <sha>\"} — " <>
-          "cite the pointer, it names an immutable version. The sha is the LOCAL commit: pushing " <>
-          "to the forge is best-effort and this tool does not report whether it landed."
-      )
-    end
-
-    input_schema(%{
-      "type" => "object",
-      "properties" => %{
-        "name" => %{"type" => "string"},
-        "content" => %{"type" => "string"}
-      },
-      "required" => ["name", "content"]
-    })
-  end
-
   deftool "retire_issue" do
     meta do
       name("Retire Issue")
@@ -1038,19 +1005,6 @@ defmodule Fleet.MCP.PodTools do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
-  end
-
-  # Authored publication on the ops face (architect gate inside Delegation, repo from the channel).
-  def handle_tool_call("publish_doc", %{"name" => name, "content" => content}, state)
-      when is_binary(name) and name != "" and is_binary(content) and content != "" do
-    case Delegation.publish_doc(name, content, state) do
-      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-      {:error, reason} -> {:error, reason, state}
-    end
-  end
-
-  def handle_tool_call("publish_doc", _bad_args, state) do
-    {:error, :invalid_arguments, state}
   end
 
   # Retirement without a replacement (architect gate inside Delegation, repo from the channel).

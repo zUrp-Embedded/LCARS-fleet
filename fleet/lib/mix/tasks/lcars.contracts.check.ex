@@ -2018,11 +2018,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # ── Forge mutations: which have a door, and for whom ─────────────────
-  # PROBE N°4 of the pattern hunt — "a gesture with no door". The family that produced the five
-  # tools of lot 1: `retire_issue`, `publish_doc`, `list_projects`, `emergency_stop` all existed as
-  # CAPABILITIES the runtime could already execute, and had to be disguised as something else (or
-  # were simply unreachable) for want of a tool exposing them. An absence raises no error, which is
-  # why it survives: nothing fails, the gesture is just performed sideways.
+  # PROBE N°4 of the pattern hunt — "a gesture with no door". The family that produced the tools of
+  # lot 1: `retire_issue`, `list_projects`, `emergency_stop` all existed as CAPABILITIES the runtime
+  # could already execute, and had to be disguised as something else (or were simply unreachable)
+  # for want of a tool exposing them. An absence raises no error, which is why it survives: nothing
+  # fails, the gesture is just performed sideways.
+  #
+  # THE SYMMETRIC FAULT COST ONE OF THAT LOT ITS LIFE: `publish_doc` was a door built for a gesture
+  # that then reached no one — no canon cap-profile ever granted it — into the one tree that must
+  # stay read-only for every agent. A door nobody holds the key to is not harmless: it is an opening
+  # that reads as a decision. Removed with the `notes/` subtree it served.
   #
   # Mechanised as a two-column table the gate holds: every mutating op of the forge client is either
   # REACHED from a delegation tool, or listed here with why it is runtime-only. The runtime-only

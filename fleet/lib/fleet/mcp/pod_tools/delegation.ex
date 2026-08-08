@@ -1430,85 +1430,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
       "L'arête est levée. Si c'était le dernier bloqueur de ##{n}, il devient fermable " <>
         "immédiatement — la forge ne retient plus rien."
 
-  @doc """
-  Publishes an authored document on the project's ops face.
-
-  The architect COULD already commit — its mount is RW — and could not push: no MCP write tool, no
-  credential in its world, and its worktree has no remote identity (`could not read Username`,
-  measured by attempting the push in its place). The only push of `work/ops` is the one
-  `BriefArtifact` and `Provenance` perform on the dispatch and completion rails, and it pushes the
-  BRANCH — so an architect's commit left with the next ticket, whatever that ticket was. Not
-  stillborn: HOSTAGE. It worked often enough not to be noticed, and never when there was nothing
-  left to dispatch — which is exactly when a campaign report gets written.
-
-  `notes/` and nothing else. `briefs/`, `gate-briefs/` and `provenance/` are runtime-written and
-  read back as the record of what was asked and what was proven; an actor able to address them
-  could rewrite that record after the fact. The name is composed into the ref here and validated by
-  its defensive twin (BND-123 shape), so a traversal has no expression.
-
-  What this does NOT claim: publication to the forge is best-effort inside `OpsObject` (a push
-  failure logs loud and keeps the local commit), and it does not report which of the two happened.
-  The returned sha is therefore the identity of the LOCAL commit — true in both cases — and the
-  result never says "published".
-  """
-  @spec publish_doc(String.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def publish_doc(name, content, state, opts \\ [])
-
-  def publish_doc(name, content, state, opts)
-      when is_binary(name) and name != "" and is_binary(content) and content != "" do
-    # `:work_root` injectable, SAME seam and same reason as `BriefArtifact.materialize/3`:
-    # `Fleet.Layout.work_root/0` is a compile-time constant, so a test that could not redirect it
-    # would have to write into the real ops tree to prove anything about where this writes — and
-    # WHERE it writes is the property that matters here.
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, ref} <- notes_ref_or_refuse(name),
-         work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
-         work_dir = Path.join(work_root, Fleet.Layout.project_name(repo)),
-         {:ok, sha, push} <-
-           Fleet.Workflow.OpsObjectSync.commit_object(work_dir, ref, content,
-             label: "doc",
-             push: :work_ops
-           ) do
-      {:ok,
-       %{
-         "ref" => ref,
-         "sha" => sha,
-         "pointer" => "Doc: #{ref} @ #{sha}",
-         "publication" => publication_note(push)
-       }}
-    end
-  end
-
-  def publish_doc(_name, _content, _state, _opts), do: {:error, :invalid_arguments}
-
-  # The publication is BEST-EFFORT and now it SAYS which of the three things happened, instead of
-  # letting the arch assume the doc is reachable. Until 2026-08-05 the answer existed inside
-  # `OpsObject.maybe_push/2` and was discarded one function before this one — so `publish_doc`
-  # handed back a citable pointer that could name something present nowhere but this disk.
-  defp publication_note(:pushed),
-    do: "poussé sur la forge — le pointeur est suivable dès maintenant"
-
-  defp publication_note(:local_only),
-    do:
-      "commit LOCAL seulement : le push a échoué (la fleet réessaiera au prochain push de la " <>
-        "branche). Le pointeur est valide, mais un humain qui le suit ne trouvera rien tant que " <>
-        "la branche n'est pas repartie — dis-le si tu le cites maintenant."
-
-  defp publication_note(:unknown),
-    do:
-      "commit confirmé, sort du push INCONNU (la réponse a été perdue sur un timeout du " <>
-        "sérialiseur). Ne promets pas que le doc est en ligne."
-
-  defp publication_note(_not_requested),
-    do: "commit local, aucune publication demandée"
-
-  defp notes_ref_or_refuse(name) do
-    ref = Fleet.Layout.notes_ref(name)
-
-    if Fleet.Layout.valid_notes_ref?(ref),
-      do: {:ok, ref},
-      else: {:error, {:invalid_notes_ref, ref}}
-  end
+  # ❌ `publish_doc` A ETE SUPPRIME, avec le sous-arbre `ops/notes/` qu'il servait. Il laissait un
+  # agent ecrire dans l'arbre d'operations — le registre de ce qu'on lui a demande et de ce qu'on a
+  # juge de son travail — au motif que `notes/` etait « du materiau d'auteur que rien ne lit comme
+  # preuve ». MESURE : aucun cap-profile canon n'accordait cet outil. Ni l'architecte, ni personne.
+  # L'exception decrite par la doctrine n'existait donc pas en fait, et ce qui restait etait une
+  # porte ouverte dans le seul arbre qui doit rester en lecture seule pour tout le monde.
+  #
+  # La MATIERE, elle, a une destination : une note de conception est de la DOC. Elle vit sur la face
+  # `doc`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
+  # reste de la documentation avec l'humain.
 
   @doc """
   Retires a ticket WITHOUT inventing a replacement.

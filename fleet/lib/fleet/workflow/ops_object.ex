@@ -32,9 +32,9 @@ defmodule Fleet.Workflow.OpsObject do
   `push_state` is carried rather than dropped, and it is NOT a boolean because three different
   things are not "false": `:pushed` (the push ran and landed), `:local_only` (it ran and failed —
   the object exists here and nowhere else), `:not_requested` (no `:push` opt: nobody asked). A
-  caller that CITES this commit to a human — `publish_doc` handing back a pointer, `Pinning`
-  rendering `<ref> @ <sha>` — is naming something that may not be reachable, and until 2026-08-05
-  the answer existed inside `maybe_push/2` and was thrown away one function before its reader.
+  caller that CITES this commit to a human — `Pinning` rendering `<ref> @ <sha>` — is naming
+  something that may not be reachable, and until 2026-08-05 the answer existed inside
+  `maybe_push/2` and was thrown away one function before its reader.
 
   `opts`:
   - `:label` — commit-message prefix (`"<label>: <ref>"`), REQUIRED (the artifact family

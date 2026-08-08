@@ -142,11 +142,10 @@ defmodule Fleet.Workflow.PinningTest do
       refs = [
         Layout.verdict_ref(42, "qualifier"),
         Layout.gate_verdict_ref(42, "qualifier"),
-        Layout.conflict_ref(7),
-        Layout.notes_ref("bilan")
+        Layout.conflict_ref(7)
       ]
 
-      assert length(Enum.uniq(refs)) == 4
+      assert length(Enum.uniq(refs)) == 3
       assert Enum.all?(refs, &String.ends_with?(&1, ".md"))
     end
 

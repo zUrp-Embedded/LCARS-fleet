@@ -45,16 +45,13 @@ defmodule Fleet.Layout do
   @briefs_subdir "briefs"
   @gate_briefs_subdir "gate-briefs"
   @provenance_subdir "provenance"
-  # The one subdir an AGENT may write into. The three above are written by the RUNTIME only
-  # (dispatch materializes the briefs, completion emits the provenance) and they are what a
-  # verdict is later audited against — an actor able to overwrite them could rewrite the record
-  # of what was asked and what was proven, after the fact. `notes/` carries what an architect
-  # authors on its own initiative (campaign reports, analyses) and nothing reads it as evidence,
-  # so a free hand there costs nothing.
-  @notes_subdir "notes"
+  # NO SUBDIR HERE IS AGENT-WRITABLE, and there is no longer an exception. `notes/` was one: the
+  # subdir an architect could address through `publish_doc`, on the grounds that nothing read it as
+  # evidence. Measured: no canon cap-profile granted that tool, to any role — so the exception did
+  # not exist in fact, and what remained was a door in the one tree that must stay read-only for
+  # everyone. A note of design is DOC; it lives on the doc face, which its author mounts RW.
   # Verdicts committed in full when they exceed the inlining threshold. RUNTIME-written like the
-  # three above, and deliberately OUTSIDE `@notes_subdir`: an agent must never be able to address
-  # the tree its own judgement is recorded in.
+  # trees above: an agent must never be able to address the tree its own judgement is recorded in.
   @verdicts_subdir "verdicts"
   # Conflict-engine reports. A DELIBERATELY SEPARATE tree from `verdicts/`: a conflict report is not
   # a judgement on a delivery, it is a machine explaining what it did to a branch. Filing it under
@@ -70,7 +67,6 @@ defmodule Fleet.Layout do
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
                 )
-  @notes_ref_re Regex.compile!("\\A#{@notes_subdir}/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z")
 
   # The three FACES of a project. A project is ONE forge repo with three orthogonal branches, each
   # checked out in its own standalone host clone. The pairing branch<->root is structural, exactly
@@ -280,12 +276,6 @@ defmodule Fleet.Layout do
   def valid_brief_ref?(_), do: false
 
   @doc """
-  work/ops-relative ref of an authored note: `notes/<name>.md` (sanitized, one flat segment).
-  """
-  @spec notes_ref(String.t()) :: String.t()
-  def notes_ref(name), do: Path.join(@notes_subdir, sanitize_artifact_name(name) <> ".md")
-
-  @doc """
   work/ops-relative ref of a committed gate-decision trace: `gate-verdicts/issue-<n>-<role>.md`.
   """
   @spec gate_verdict_ref(integer(), String.t()) :: String.t()
@@ -320,22 +310,6 @@ defmodule Fleet.Layout do
         @verdicts_subdir,
         "issue-#{issue_number}-#{sanitize_artifact_name(role)}.md"
       )
-
-  @doc """
-  Validates a note ref SHAPE — the WRITE FRONTIER of an agent on the ops face.
-
-  It is a whitelist and it must stay one: `briefs/`, `gate-briefs/` and `provenance/` are written
-  by the runtime and read back as the record of what was asked and what was proven. An agent that
-  could address them could rewrite that record after the fact, and the audit would still read
-  green. `notes/` is authored material that nothing consumes as evidence.
-
-  Same shape rules as `valid_brief_ref?/1`: one flat path-safe `.md` segment, so `..`, nested
-  paths and a leading dot are refused — a traversal out of `notes/` lands exactly on the trees
-  this frontier exists to protect.
-  """
-  @spec valid_notes_ref?(term()) :: boolean()
-  def valid_notes_ref?(ref) when is_binary(ref), do: Regex.match?(@notes_ref_re, ref)
-  def valid_notes_ref?(_), do: false
 
   @doc """
   Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
