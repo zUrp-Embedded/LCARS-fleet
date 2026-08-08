@@ -23,6 +23,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           only:
             role: noop
@@ -56,6 +57,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           s1:
             role: noop
@@ -84,6 +86,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           only:
             role: noop
@@ -112,6 +115,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           a:
             role: scout
@@ -143,6 +147,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           review:
             role: reviewer
@@ -166,6 +171,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           review:
             role: reviewer
@@ -187,6 +193,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           s:
             role: noop
@@ -239,6 +246,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           only:
             role: noop
@@ -257,6 +265,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 9
         jury: [qualifier]
+        ci: ignore
         steps:
           a:
             role: noop
@@ -323,6 +332,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           a:
             role: noop

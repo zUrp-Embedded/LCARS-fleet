@@ -247,6 +247,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def load!("poc-mini") do
       %{
         "name" => "poc-mini",
+        "ci" => "ignore",
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
@@ -258,6 +259,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def load!("gkchain") do
       %{
         "name" => "gkchain",
+        "ci" => "ignore",
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{

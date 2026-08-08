@@ -146,13 +146,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     # PR object re-read by `route_merge_failure` to CLASSIFY a merge failure (MergeOutcome). Seam
     # `_test_pull` (map of mergeable/draft/state fields); default = real git conflict (mergeable:false).
+    # The default carries a `head` because a real PR object always does, and a double that omits a
+    # field the real seam always fills does not simplify a test — it hides a caller. `CiGate` reads
+    # this head, and its absence surfaced as `{:no_head_sha, …}`, a shape the forge cannot produce.
     def get_pull(_repo, n, opts) do
       {:ok,
        Keyword.get(opts, :_test_pull, %{
          "number" => n,
          "state" => "open",
          "draft" => false,
-         "mergeable" => false
+         "mergeable" => false,
+         "head" => %{"sha" => "d15pa7c4ed0000000000"},
+         "updated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
        })}
     end
 
@@ -350,7 +355,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         workflow_map_loader: fn _name ->
           %{
             "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
-            "max_rework_rounds" => 2
+            "max_rework_rounds" => 2,
+            # `ci` is mandatory on a real card, so a stub standing in for one declares it too.
+            # Omitting it no longer means "no CI policy": `Roles.ci/1` reads an un-declared card as
+            # a card that bypassed the schema and gates rather than assuming green — which is right
+            # in production and would turn every dispatch test here into a CI test.
+            "ci" => "ignore"
           }
         end
       ],
@@ -1783,7 +1793,14 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "F181: POST-lock failure (enqueue KO) -> PR lock removed + pod killed" do
-      opts = dispatch_opts(task_queue: FailTaskQueue, forge_opts: [_test_route: :none])
+      # `_test_route: :none` means the ISSUE carries no engraved card, so the CI policy comes from
+      # the PROJECT's declared card — which requires it. The green is a PREMISE of this test, not
+      # its subject: it says "the CI rail is fine, the enqueue is what breaks".
+      opts =
+        dispatch_opts(
+          task_queue: FailTaskQueue,
+          forge_opts: [_test_route: :none, _test_ci: :success]
+        )
 
       assert {:error, {:enqueue_failed, :broker_down}} =
                StepDispatcher.dispatch_review(pr(), opts)

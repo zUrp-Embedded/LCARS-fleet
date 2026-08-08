@@ -70,11 +70,17 @@ defmodule Fleet.Workflow.Loader do
   #
   # La regle, puisque cette map est un filtre : on n'ajoute rien ici sans consommateur, et on ne
   # RETIRE rien tant qu'il en reste un.
+  #
+  # `fetch!` ET PAS `get`, comme `jury` et `max_rework_rounds` : `spec.ci` est OBLIGATOIRE au schema.
+  # Un `get` rendrait `nil` pour une carte qui n'a pas ete validee (schema surcharge en test, appel
+  # hors `load!`), et ce `nil` redeviendrait une politique par defaut choisie par accident — le
+  # defaut meme qu'on vient de supprimer. Ici, une carte sans `ci` explose au lieu de se voir
+  # attribuer un avis.
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{
       "name" => get_in(yaml, ["metadata", "name"]),
       "steps" => steps,
-      "ci" => Map.get(spec, "ci"),
+      "ci" => Map.fetch!(spec, "ci"),
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds"),
       "jury" => Map.fetch!(spec, "jury"),
       "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],

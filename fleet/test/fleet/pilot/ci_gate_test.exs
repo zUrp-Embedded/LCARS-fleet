@@ -136,10 +136,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     defmodule RoutingForge do
       @moduledoc false
       def get_route(_repo, 7, _opts), do: {:ok, {"standard-qa", "review"}}
+      def get_route(_repo, 9, _opts), do: {:ok, {"ops-direct", "build"}}
       def get_route(_repo, _n, _opts), do: :none
     end
 
-    defp card_ctx(loader) do
+    defp card_ctx(loader, opts \\ []) do
       %Ctx{
         forge: RoutingForge,
         loader: nil,
@@ -150,34 +151,113 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
         repo: "fleet/demo",
         forge_opts: [],
         wake_recovery: fn _, f, _ -> f.() end,
-        opts: []
+        opts: opts
       }
+    end
+
+    defp canon_loader do
+      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/canon/workflow_maps")
+      fn name -> Fleet.Workflow.Loader.load!(name, workflow_maps_root: canon) end
     end
 
     test "une carte canon qui declare `ci: required` rend :required — bout en bout" do
       # Le loader CANON, pas un litteral recopie : si la carte cesse de declarer `ci`, ou si le
       # loader cesse de le porter, ce test tombe.
-      canon =
-        Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/canon/workflow_maps")
-
+      #
       # `safe_load/2` enveloppe DEJA le retour du loader : rendre `{:ok, map}` ici produirait
-      # `{:ok, {:ok, map}}` et la clause `when is_map(map)` echouerait — un `:ignore` par forme,
+      # `{:ok, {:ok, map}}` et la clause `when is_map(map)` echouerait — un resultat par forme,
       # pas par contenu.
-      loader = fn name -> Fleet.Workflow.Loader.load!(name, workflow_maps_root: canon) end
+      #
+      # ET L'ABSENCE D'ALARME EST LA MOITIE DE LA PROPRIETE. Mesure : renommer le litteral
+      # `"required"` en `"requis"` dans `Roles.ci/1` laissait les 2449 tests verts, parce que la
+      # carte tombait alors dans la clause de garde — qui repond `:required` elle aussi. Le
+      # resultat seul ne peut donc pas distinguer « la carte a ete LUE » de « la carte n'a pas ete
+      # comprise et on a ferme par defaut ». Le log, lui, le peut.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+                   "lcars/issue-7-engineer",
+                   card_ctx(canon_loader())
+                 ) == :required
+        end)
 
-      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
-               "lcars/issue-7-engineer",
-               card_ctx(loader)
-             ) == :required
+      refute log =~ "no readable `ci` policy",
+             "standard-qa declare `ci: required` : ce :required doit venir de la LECTURE de la " <>
+               "carte, pas de la clause de garde qui rend la meme valeur quand elle ne comprend pas"
     end
 
-    test "une carte qui ne declare RIEN garde le rail d'avant la porte" do
+    test "une carte canon qui declare `ci: ignore` rend :ignore — la derogation traverse aussi" do
+      # Le jumeau du test ci-dessus, et il n'est pas decoratif : tant que `:ignore` etait ce que
+      # rendaient AUSSI l'absence de champ, l'absence de carte et l'echec de lecture, il ne pouvait
+      # rien distinguer. Maintenant qu'il est le seul chemin vers `:ignore`, il mesure la
+      # DEROGATION — et ops-direct est le cas ou elle est mecaniquement obligatoire (aucun runner
+      # ne sert une PR basee sur work/ops).
+      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+               "lcars/issue-9-scribe",
+               card_ctx(canon_loader())
+             ) == :ignore
+    end
+
+    test "une carte qui ne declare RIEN ne prend PAS la branche permissive" do
+      # LE RENVERSEMENT. Ce test assertait `:ignore` — il epinglait le defaut qu'on vient de tuer :
+      # `spec.ci` etant desormais obligatoire au schema, une carte muette n'a pas pu passer par
+      # `Loader.load!`. Repondre `:ignore` sur ce chemin reconstruirait exactement le trou ferme :
+      # la carte non declaree prenant silencieusement la branche qui n'oppose rien.
       loader = fn _ -> %{"name" => "muette", "steps" => %{}} end
 
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+                   "lcars/issue-7-engineer",
+                   card_ctx(loader)
+                 ) == :required
+        end)
+
+      assert log =~ "no readable `ci` policy",
+             "l'alarme doit etre DITE : une carte qui contourne le schema est un defaut, pas un cas"
+    end
+
+    @tag :tmp_dir
+    test "sans route gravee, la policy suit la carte du PROJET — comme le jury, enfin", %{
+      tmp_dir: tmp
+    } do
+      # LA DIVERGENCE QUE LE COMMENTAIRE COUVRAIT. `issue_card_ci/2` se disait « lue exactement
+      # comme son jury, par le meme fallback » ; son jumeau `issue_card_jury/2` lisait la carte du
+      # PROJET, celui-ci rendait un `:ignore` en dur. Une PR sans route gravee — PR humaine, orphelin
+      # adopte — etait donc jugee sous le jury du projet et sous AUCUNE politique CI, sur un projet
+      # dont la carte en reclame une. L'issue 8 n'a pas de route (RoutingForge rend `:none`).
+      proj = Path.join(tmp, "demo")
+      File.mkdir_p!(proj)
+
+      :ok =
+        Fleet.Pilot.ProjectIntensity.write(proj,
+          intensity_level: "C2",
+          intensity_justification: "x",
+          workflow_map: "gated"
+        )
+
+      maps = Path.join(tmp, "maps")
+      File.mkdir_p!(maps)
+
+      File.write!(Path.join(maps, "gated.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: gated
+      spec:
+        max_rework_rounds: 1
+        jury: [qualifier]
+        ci: required
+        steps:
+          only:
+            role: engineer
+      """)
+
+      ctx = card_ctx(canon_loader(), projects_root: tmp, workflow_maps_root: maps)
+
       assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
-               "lcars/issue-7-engineer",
-               card_ctx(loader)
-             ) == :ignore
+               "lcars/issue-8-engineer",
+               ctx
+             ) == :required
     end
   end
 end

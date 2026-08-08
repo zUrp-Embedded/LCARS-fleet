@@ -60,7 +60,8 @@
       "required": [
         "steps",
         "max_rework_rounds",
-        "jury"
+        "jury",
+        "ci"
       ],
       "additionalProperties": false,
       "properties": {
@@ -218,7 +219,7 @@
             "required",
             "ignore"
           ],
-          "description": "Politique CI de la carte. `required` : le gate LIT le verdict du runner sur le sha de tete AVANT de convoquer le jury — rouge = rework producteur sans juge, pending/absent = attente BORNEE puis escalade, vert = le jury est convoque ET recoit le fait dans son brief. `ignore` (defaut si la cle est absente) : comportement d'avant la porte CI. La politique vit dans la CARTE, jamais dans le moteur (F-C061, meme regle que le jury)."
+          "description": "REQUIRED (`spec.required`), NEVER defaulted — exact twin of `jury`, and for the same reason. `required`: the gate READS the runner's verdict on the head sha BEFORE summoning the jury — red = producer rework with no judge spent, pending/absent = BOUNDED wait then escalation, green = the jury is summoned AND receives the fact in its brief. `ignore`: the pre-gate rail. The policy lives in the CARD, never in the engine (F-C061, same rule as the jury). WHY MANDATORY: while a default existed, a card that FORGOT to declare was indistinguishable from a card that DECIDED against — and the silent branch was the permissive one, so the omission read as green. Making the field mandatory does not pick a side; it makes the un-declared card unrepresentable, which is the only state that cannot be audited. CONSULTED WHENEVER A REVIEW IS PENDING, jury or not: `requested` is the union of the card's stable jury and the forge's volatile `requested_reviewers`, so a human asking for a review on a zero-jury card reaches this gate. `ignore` on `jury: []` is therefore a live declaration, not a decorative one."
         }
       }
     }

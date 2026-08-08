@@ -21,6 +21,11 @@ metadata:
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
   jury: [qualifier, reviewer]
+  # CI IGNORÉE — cette carte teste le chemin d'ESCALADE, pas le rail machine. Sous `required` elle
+  # dépendrait en plus d'un runner vivant servant le label `shell` : un banc sans runner rendrait
+  # `:none`, puis une escalade CI, et le smoke-test du gatekeeper échouerait en NOMMANT autre chose
+  # que ce qu'il mesure. Un instrument ne doit pas pouvoir rougir pour une raison hors de sa portée.
+  ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

@@ -311,6 +311,23 @@ defmodule Fleet.Pilot.PollerTest do
     # ne peut pas voir la porte, et la laisserait disparaitre sans qu'un test rougisse.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
 
+    # LE RAIL CI, PREMISSE ET PAS SUJET. Les PR de ce module portent des labels vides : leur issue
+    # n'a pas de carte gravee, donc la politique CI vient de la carte du PROJET — qui l'exige. Ces
+    # tests mesurent la COMPTABILITE du poller (dispatched/skipped/errors) ; ils declarent donc un
+    # rail vert et rien de plus. Le comportement de la porte elle-meme se mesure dans `CiGateTest`,
+    # pas ici. Sans ces deux fonctions le stub ne decrit pas une forge : il plante.
+    def get_pull(_repo, n, _opts) do
+      {:ok,
+       %{
+         "number" => n,
+         "state" => "open",
+         "head" => %{"sha" => "p011e4c0ffee00000000"},
+         "updated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+       }}
+    end
+
+    def commit_ci_state(_repo, _sha, _opts), do: {:ok, :success}
+
     # WS3 — the poller DISCOVERS its repos by org-membership (`list_org_repos`) BEFORE scanning.
     # Default = THE test repo (single-repo: 1 repo discovered → 1 `step_do_poll`). `_test_repos`
     # for multi-repo, `_test_discover` to simulate a failing discovery (forge down → backoff). No
@@ -434,13 +451,18 @@ defmodule Fleet.Pilot.PollerTest do
   defmodule StepStubWorkflowMapLoader do
     # 1-step (engineer producer): an issue routed here (step=build=1st) is QUEUED (not started).
     def load!("qa-build") do
-      %{"name" => "qa-build", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+      %{
+        "name" => "qa-build",
+        "ci" => "ignore",
+        "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
+      }
     end
 
     # 2-step: routed at the 2nd step (deploy ≠ 1st) = ADVANCED pipeline (between two step_runs) = ENGAGED.
     def load!("qa-2") do
       %{
         "name" => "qa-2",
+        "ci" => "ignore",
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "deploy" => %{"role" => "engineer", "needs" => ["build"]}

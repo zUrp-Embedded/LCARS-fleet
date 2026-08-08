@@ -21,6 +21,10 @@ spec:
   # Jury VIDE délibéré (doctrine schéma : « an empty array is a deliberate zero-judge card »).
   # required_approvals = 0 à l'onboard ; requested == [] est le chemin NOMINAL du poller → merge scellé.
   jury: []
+  # CI IGNORÉE, cohérent avec le sceau direct : la carte est celle du PoC jetable, elle assume de
+  # ne rien opposer entre le livrable et le merge. Le plancher mécanique (identité, provenance,
+  # protection main) n'est pas concerné — il tient quoi qu'il arrive et la carte ne le gouverne pas.
+  ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

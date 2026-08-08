@@ -27,6 +27,11 @@ spec:
   # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique
   # (identité, secrets, ancêtre, sceau) tient seul ; l'auditeur passe post-hoc.
   jury: []
+  # CI IGNORÉE : cette carte ne produit PAS de code — son livrable est un document d'audit. Le gate
+  # existe pour ne pas dépenser un juge sur du code que la machine n'a pas bâti ; il n'a rien à
+  # attester sur de la prose. Déclaration vivante malgré `jury: []` : une review demandée à la main
+  # sur la forge passe par le gate même sans jury de carte.
+  ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

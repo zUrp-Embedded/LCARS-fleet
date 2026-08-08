@@ -1458,6 +1458,7 @@ defmodule Fleet.MCP.PodToolsTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           only:
             role: noop
@@ -1486,6 +1487,7 @@ defmodule Fleet.MCP.PodToolsTest do
       spec:
         max_rework_rounds: 1
         jury: []
+        ci: ignore
         steps:
           only:
             role: noop

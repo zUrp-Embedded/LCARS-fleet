@@ -16,8 +16,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   BRIEF (`BriefBuilder`): the judge is told "it executes and passes, your work starts after that".
 
   THE CARD GOVERNS, THE ENGINE STAYS AGNOSTIC (F-C061, same rule as the jury). `spec.ci` on the
-  workflow map: `required` (the gate applies) or `ignore` (the pre-`ci` behaviour, and the DEFAULT
-  — a card that says nothing keeps the old rail rather than inheriting a wall it never declared).
+  workflow map: `required` (the gate applies) or `ignore` (the pre-`ci` rail). MANDATORY, with no
+  default on either side — the twin of `jury` and `max_rework_rounds`, which already carried the
+  rule ("no hidden default in code: the map's author declares"). While `ignore` was the default, a
+  card that FORGOT was indistinguishable from a card that DECIDED, and the silent branch was the
+  permissive one: the omission wore the face of a decision to skip. The fix is not a better default
+  but the absence of one, so that the un-declared card cannot be loaded at all.
 
   THE THREE STATES, AND WHY `:none` IS NOT `:success`. `ForgeClient.commit_ci_state/3` answers
   `:success | :pending | :failure | :none`, worst-of across contexts (two triggers -> two contexts

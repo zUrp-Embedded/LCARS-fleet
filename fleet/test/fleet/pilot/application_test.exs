@@ -21,6 +21,7 @@ defmodule Fleet.Pilot.ApplicationTest do
         presentation: "test card — bad step role"
       spec:
         jury: [qualifier, reviewer]
+        ci: ignore
         max_rework_rounds: 2
         steps:
           implement:
@@ -85,6 +86,7 @@ defmodule Fleet.Pilot.ApplicationTest do
         presentation: "test card — no ops face"
       spec:
         jury: [qualifier, reviewer]
+        ci: ignore
         max_rework_rounds: 2
         steps:
           implement:

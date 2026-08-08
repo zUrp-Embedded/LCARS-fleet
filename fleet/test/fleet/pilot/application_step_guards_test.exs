@@ -93,6 +93,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
       name: bad-card
     spec:
       jury: #{jury}
+      ci: ignore
       max_rework_rounds: 1
       steps:
         only:
@@ -149,6 +150,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     spec:
       max_rework_rounds: 1
       jury: []
+      ci: ignore
       steps:
         only:
           role: engineer

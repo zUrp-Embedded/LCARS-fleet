@@ -185,6 +185,51 @@ defmodule Fleet.Pilot.Roles do
     end
   end
 
+  @doc """
+  Returns the card's CI policy as the atom `CiGate` decides on.
+
+  THE ONLY SITE THAT KNOWS THE TOKENS. The schema enum and this function are the two ends of one
+  contract, and while the comparison lived at the call site it could drift from the schema without
+  anything going red: swapping `"required"` for `"requis"` in the reader left the whole suite green
+  (measured 2026-08-08). One site, one clause per enum member, and a mutation has nowhere to hide.
+
+  THE LAST CLAUSE IS NOT A DEFAULT, IT IS AN ALARM. `spec.ci` is mandatory, so a card reaching here
+  without a readable policy did not come through `Loader.load!`. Answering `:ignore` would rebuild
+  the very hole the mandatory field closed — the un-declared card silently taking the permissive
+  branch. It answers `:required` for the same reason `CiGate` treats an unreadable CI state as
+  pending: unknown is not green, and the two costs are not symmetric. Being wrong here costs one
+  status read; being wrong the other way costs a jury spent on code nobody built.
+  """
+  @spec ci(map() | nil) :: :required | :ignore
+  def ci(%{"ci" => "required"}), do: :required
+  def ci(%{"ci" => "ignore"}), do: :ignore
+
+  def ci(card) do
+    Logger.warning(
+      "Roles: card #{inspect(get_card_name(card))} carries no readable `ci` policy " <>
+        "(#{inspect(is_map(card) && Map.get(card, "ci"))}) — `spec.ci` is mandatory, so this card " <>
+        "bypassed schema validation. Gating on CI rather than assuming green."
+    )
+
+    :required
+  end
+
+  defp get_card_name(card) when is_map(card), do: Map.get(card, "name")
+  defp get_card_name(_), do: nil
+
+  @doc """
+  Returns the CI policy of the project's declared card — the twin of `project_jury/2`, and it exists
+  because the two were NOT twins.
+
+  `ReviewLifecycle.issue_card_ci/2` claimed in comment to fall back "exactly like its jury"; its
+  jury fallback read the PROJECT's declared card while its CI fallback answered a hardcoded
+  `:ignore`. So a PR with no engraved route — a human PR, an adopted orphan — was judged under the
+  project's jury and under NO CI policy, on a project whose card demands one. The comment described
+  the code it should have had.
+  """
+  @spec project_ci(String.t(), keyword()) :: :required | :ignore
+  def project_ci(repo, opts \\ []) when is_binary(repo), do: ci(load_project_card(repo, opts))
+
   defp load_project_card(repo, opts) do
     name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])

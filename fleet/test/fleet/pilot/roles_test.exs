@@ -142,6 +142,7 @@ defmodule Fleet.Pilot.RolesTest do
       spec:
         max_rework_rounds: 1
         jury: [qualifier]
+        ci: ignore
         steps:
           only:
             role: engineer

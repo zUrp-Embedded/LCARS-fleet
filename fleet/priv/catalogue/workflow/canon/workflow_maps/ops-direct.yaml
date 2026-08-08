@@ -30,6 +30,12 @@ metadata:
 spec:
   # Jury VIDE délibéré — cf. l'en-tête. Le plancher mécanique tient seul (précédent c0-poc).
   jury: []
+  # CI IGNORÉE, et ici la raison est MÉCANIQUE, pas doctrinale : le rail CI livré aux projets vit
+  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `work/ops`
+  # ne porte aucune définition de workflow, donc aucun runner ne la sert : sous `required` le gate
+  # lirait `:none`, attendrait sa borne, puis escaladerait — sur CHAQUE ticket ops. Le jour où la
+  # face ops porte son propre rail, cette ligne se relit.
+  ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level). Sans jury il n'y a pas de
   # déclencheur de rework mécanique ; le budget borne les relances arch → nouveau ticket.
   max_rework_rounds: 2

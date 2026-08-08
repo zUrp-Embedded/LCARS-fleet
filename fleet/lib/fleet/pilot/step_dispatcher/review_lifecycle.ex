@@ -134,33 +134,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     # a divergence between what the gate does and what the status says would be a second truth.
     case Fleet.Pilot.ForgeClient.Jury.review_outcome(requested, verdicts) do
       {:pending, [next | _]} ->
-        # THE CI IS A PRE-CONDITION OF THE SUMMONS, not an afterthought at merge time. Until this
-        # clause, the machine rail and the judgement rail never met: judges were spawned on code
-        # nobody had built, and the red surfaced at the PROMOTE, after the tokens were spent.
-        # `CiGate` decides (the CARD governs — `spec.ci`), and when it lets through, the fact it
-        # measured RIDES to the judge instead of being re-derived there.
-        case CiGate.decide(pr_number, head, ctx, fn -> issue_card_ci(head, ctx) end) do
-          {:proceed, fact} ->
-            RoleDispatch.dispatch(:judge, pr_number, head, next, with_ci_fact(ctx, fact))
-
-          {:refuse, :ci_red, message} ->
-            Remediation.ci_red_rework(pr_number, head, message, ctx)
-
-          # Three clauses rather than one passthrough, and the verbosity is the point: the BL-6-48
-          # reverse wall reads `lib/` for the reasons the fleet can actually EMIT, and a reason
-          # forwarded through a bare variable is invisible to it — the label table would carry
-          # entries nothing in the tree can be shown to produce.
-          {:wait, :ci_pending} ->
-            {:skipped, :ci_pending}
-
-          {:wait, {:ci_head_unreadable, why}} ->
-            {:skipped, {:ci_head_unreadable, why}}
-
-          {:wait, {:ci_unreadable, why}} ->
-            {:skipped, {:ci_unreadable, why}}
-
-          {:escalate, class, message} ->
-            Remediation.ci_stalled(pr_number, head, class, message, ctx)
+        # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
+        # not a fleet feature branch can never receive a judge — `RoleDispatch.dispatch` refuses it
+        # on this very parse — so paying two forge reads, and possibly a bounded CI wait ending in
+        # an escalation, to reach a conclusion already in hand is pure spend. The cost stayed
+        # invisible while an unparseable head made `issue_card_ci/2` answer `:ignore`: the gate
+        # short-circuited for the wrong reason, and the wrong reason paid the bill.
+        with {:ok, _} <- RoleDispatch.parse_feature_branch_or_skip(head) do
+          gate_then_dispatch(pr_number, head, next, ctx)
         end
 
       :no_jury ->
@@ -181,6 +162,37 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       :approved ->
         # All approved → MERGE (sealed, honest failure routing — `promote_or_route`).
         promote_or_route(pr_number, head, ctx)
+    end
+  end
+
+  # THE CI IS A PRE-CONDITION OF THE SUMMONS, not an afterthought at merge time. Until this gate,
+  # the machine rail and the judgement rail never met: judges were spawned on code nobody had built,
+  # and the red surfaced at the PROMOTE, after the tokens were spent. `CiGate` decides (the CARD
+  # governs — `spec.ci`), and when it lets through, the fact it measured RIDES to the judge instead
+  # of being re-derived there.
+  defp gate_then_dispatch(pr_number, head, next, %Ctx{} = ctx) do
+    case CiGate.decide(pr_number, head, ctx, fn -> issue_card_ci(head, ctx) end) do
+      {:proceed, fact} ->
+        RoleDispatch.dispatch(:judge, pr_number, head, next, with_ci_fact(ctx, fact))
+
+      {:refuse, :ci_red, message} ->
+        Remediation.ci_red_rework(pr_number, head, message, ctx)
+
+      # Three clauses rather than one passthrough, and the verbosity is the point: the BL-6-48
+      # reverse wall reads `lib/` for the reasons the fleet can actually EMIT, and a reason
+      # forwarded through a bare variable is invisible to it — the label table would carry
+      # entries nothing in the tree can be shown to produce.
+      {:wait, :ci_pending} ->
+        {:skipped, :ci_pending}
+
+      {:wait, {:ci_head_unreadable, why}} ->
+        {:skipped, {:ci_head_unreadable, why}}
+
+      {:wait, {:ci_unreadable, why}} ->
+        {:skipped, {:ci_unreadable, why}}
+
+      {:escalate, class, message} ->
+        Remediation.ci_stalled(pr_number, head, class, message, ctx)
     end
   end
 
@@ -220,15 +232,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   end
 
   # The card's CI policy, read exactly like its jury and through the same fallback: the ISSUE's
-  # engraved card when a route exists, `:ignore` otherwise. `:ignore` is the default on purpose —
-  # a card that declares nothing keeps the pre-gate rail rather than inheriting a wall it never
-  # asked for. Only `required` (the string the schema allows) arms the gate.
+  # engraved card when a route exists, the PROJECT's declared card otherwise. The sentence was here
+  # before the code was — the jury fallback read the project card, this one answered a hardcoded
+  # `:ignore`, and the divergence was invisible because the comment covered it. A PR with no
+  # engraved route (human PR, adopted orphan) was therefore judged under the project's jury and
+  # under no CI policy at all, on projects whose card demands one.
   # PUBLIC (@doc false) pour la meme raison que `retire_superseded` l'est : la propriete qui compte
   # n'est ni « le champ traverse le loader » (tenu par `LoaderV25Test`) ni « la porte gate sur
   # :required » (tenu par `CiGateTest`, policy bouchee) — c'est la JOINTURE des deux, et elle n'est
-  # observable que d'ici. Le litteral compare ci-dessous est le maillon : la carte ECRIT un token,
-  # ce lecteur en attend un autre, et la porte se desarme sans que rien ne rougisse. `CiGateTest`
-  # le tient contre le loader canon.
+  # observable que d'ici. Le maillon EST le token compare, mais il ne vit plus ici : `Roles.ci/1`
+  # est le site unique qui connait les valeurs de l'enum, pour qu'un renommage n'ait qu'un endroit
+  # ou echouer. `CiGateTest` tient la jointure contre le loader canon.
   @doc false
   def issue_card_ci(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
@@ -241,9 +255,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
            ),
          {:ok, map} when is_map(map) <-
            Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
-      if Map.get(map, "ci") == "required", do: :required, else: :ignore
+      Fleet.Pilot.Roles.ci(map)
     else
-      _ -> :ignore
+      _ -> Fleet.Pilot.Roles.project_ci(ctx.repo, ctx.opts)
     end
   end
 

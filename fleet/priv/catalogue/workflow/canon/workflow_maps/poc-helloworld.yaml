@@ -19,6 +19,10 @@ metadata:
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
   jury: [qualifier, reviewer]
+  # CI IGNORÉE — démo de la chaîne de DÉLÉGATION, réduite exprès à ce qu'elle prouve. Même raison
+  # que gk-smoke : ajouter une dépendance à un runner ferait échouer la démo pour une cause
+  # étrangère à ce qu'elle démontre. Pour un vrai PoC, prendre c0-poc ; pour du code jugé, c1-light.
+  ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:
