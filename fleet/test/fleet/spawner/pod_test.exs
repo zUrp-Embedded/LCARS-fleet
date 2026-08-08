@@ -1097,6 +1097,45 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
     end
 
+    test "result_timeout CHECKPOINTS the seed too — the agent that went silent keeps its memory" do
+      # The OTHER late suffered death, and the one the port-exit test does not cover: the agent ran,
+      # then stopped answering. `transition_failed/2` is its exit, and it had no checkpoint.
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+      root = Path.join(System.tmp_dir!(), "seedroot-to-#{System.unique_integer([:positive])}")
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      on_exit(fn -> File.rm_rf(root) end)
+
+      pod_id = "pod-timeout-seed-#{System.unique_integer([:positive])}"
+      {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        issue_id: "issue-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id, project_slug: "poc-8"]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      info = GenServer.call(pid, :info)
+      jsonl_dir = Path.join([info.pod_dir, ".claude", "projects", "-x-poc8-engineer"])
+      File.mkdir_p!(jsonl_dir)
+
+      File.write!(
+        Path.join(jsonl_dir, "live.jsonl"),
+        ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n)
+      )
+
+      assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
+
+      seed = Path.join([root, "poc-8", "pods", "engineer-1.jsonl"])
+      assert File.exists?(seed), "a pod that went SILENT must keep its seed"
+      assert File.read!(seed) =~ "r1"
+    end
+
     test "timeout WITHOUT active task (idle) → pod survives (Z1: no idle-kill)" do
       StubBackend.set_reply(interactive_reply())
 

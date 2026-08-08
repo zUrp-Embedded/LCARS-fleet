@@ -820,10 +820,13 @@ defmodule Fleet.Spawner.Pod do
       {:stop, :normal, data}
     else
       # LA MEMOIRE SE SAUVE SURTOUT QUAND LA MORT N'ETAIT PAS VOULUE. Le checkpoint ne vivait que
-      # sur `:releasing` et `:kill` — les deux morts DELIBEREES — donc un pod tue par le watchdog ou
-      # sorti en erreur perdait sa graine, et un pod qu'on arretait proprement la gardait. L'inverse
-      # de l'utile : c'est de la mort subie qu'on veut reprendre le fil. Ici comme la-bas, avant
-      # tout demontage, tant que le JSONL est encore lisible.
+      # sur `:releasing` et `:kill`. Les DEUX morts subies tardives — cet exit du Port avant
+      # resultat, et le `:result_timeout` via `transition_failed/2` — n'y passaient pas : un agent
+      # qui meurt seul, ou qui se tait, perdait sa graine alors que c'est exactement de la qu'on
+      # veut reprendre le fil. Ici comme la-bas, avant tout demontage, tant que le JSONL est lisible.
+      #
+      # NON concerne, et il faut le dire pour que personne ne le "corrige" en double : le kill du
+      # watchdog de vivacite passe par `Spawner.kill_pod/1` -> `:kill`, qui checkpointait deja.
       maybe_checkpoint_seed(data)
       clear_pod_task(data.pod_id)
 
@@ -1150,7 +1153,10 @@ defmodule Fleet.Spawner.Pod do
   defp transition_failed(data, reason) do
     Logger.warning("pod #{data.pod_id} failed: #{inspect(reason)}")
 
-    # Jumeau du site d'exit du Port : une mort subie garde sa graine, comme une mort voulue.
+    # Jumeau du site d'exit du Port. Compte surtout pour `:result_timeout` (l'agent a travaille
+    # puis s'est tu, il y a donc un transcript) ; sur les echecs PRECOCES — allocate, project,
+    # lancement — il n'y a aucun JSONL et le store rend `:none` sans rien ecrire, ce qui est le
+    # comportement voulu et non un oubli.
     maybe_checkpoint_seed(data)
     clear_pod_task(data.pod_id)
     data = Map.put(data, :last_error, reason)
