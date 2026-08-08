@@ -494,7 +494,19 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Capture the live seed before teardown removes access to the JSONL.
+  # LE SEED EST PRIS AVANT LE TEARDOWN — et la raison ecrite ici jusqu'au 2026-08-08 etait FAUSSE.
+  # Elle disait « avant que le teardown retire l'acces au JSONL ». Mesure : `teardown_backend/1` tue
+  # le holder (port/tmux) et retire le sock-dir, RIEN D'AUTRE ; et `bwrap_launch.sh` monte le pod_dir
+  # en BIND hote (`--bind "$POD_DIR" "$SANDBOX_HOME"`), donc le transcript est cote hote et survit.
+  # L'acces n'est pas retire.
+  #
+  # L'ordre est CONSERVE, et ce qu'il garantit reellement est plus etroit : le checkpoint est le seul
+  # geste de cette clause qui peut echouer sans consequence, alors que tuer le holder et retirer le
+  # sock-dir sont irreversibles. Le faire d'abord, c'est ne pas dependre de leur reussite.
+  #
+  # ⚠ Ce que PERSONNE ne tient encore : l'ordre lui-meme. Intervertir ces deux lignes laisse la suite
+  # verte (mesure 2026-08-08), parce que le stub de teardown ne touche pas au transcript et que
+  # l'ordre est donc inobservable en test. Ne pas lire ce commentaire comme une garantie.
   def handle_event(:internal, :proceed, :releasing, data) do
     maybe_checkpoint_seed(data)
     Backend.teardown_backend(data)
