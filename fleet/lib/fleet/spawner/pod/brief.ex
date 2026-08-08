@@ -68,7 +68,8 @@ defmodule Fleet.Spawner.Pod.Brief do
 
     The fleet expects you to use the MCP tool `submit_result` when your work is
     done — that is the LCARS convention, the structured return channel equivalent to a
-    signed-off Slack DM. No need to write any file yourself.
+    signed-off Slack DM. What COUNTS as the work itself is your role's contract, in your
+    system prompt: a producer delivers commits, a judge delivers a verdict.
 
     Here is the request:
 
@@ -89,6 +90,12 @@ defmodule Fleet.Spawner.Pod.Brief do
   # The pointer NOTATION comes from `Fleet.Layout`, foundation, which already owns it for exactly
   # this reason ("two domains, one truth"): `Fleet.Workflow.BriefArtifact` is not in this domain's
   # boundary deps, and re-writing its prose here would be a second source for one sentence.
+  # LA PHRASE QUI DISAIT « No need to write any file yourself » A ETE RETIREE DE L'EN-TETE
+  # CI-DESSUS, ET C'EST UNE CORRECTION DE CONTRAT, PAS DE STYLE. Elle etait vraie pour un juge
+  # (dont le livrable EST le verdict) et fausse pour un producteur, dont le SP dit « ton livrable =
+  # tes commits ». Un producteur qui ouvre `issues/<id>.md` avant son SP ne commite rien et rend un
+  # payload vide — mesure d'un audit de pod, 2026-08-08. Ce fichier ne connait pas le contrat du
+  # role : il nomme le canal de retour et renvoie au SP pour ce qui compte comme travail.
   defp request_body(brief, _opts, _issue_id) when is_binary(brief) and brief != "", do: brief
 
   defp request_body(_brief, opts, issue_id) do
