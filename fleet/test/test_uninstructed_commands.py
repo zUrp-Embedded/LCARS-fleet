@@ -37,6 +37,25 @@
 #     vivant de `list` absent de l'usage, ferme dans le meme geste) ;
 #   - sensibilite : 9 sous-commandes non documentees injectees dans 4 scripts, 9 attrapees. Une
 #     garde qu'on ne mesure que sur un corpus vert ne prouve que sa politesse.
+#
+# CE GARDE MARCHE UN ARBRE, ET IL Y A DEUX ARBRES. L'etage `build` de l'image rejoue ce gate sur un
+# tree qui n'est PAS le depot : il exclut `deploy/` par construction (le layer resterait invalide a
+# chaque edition de compose, et le gate — ~10 min — serait repaye pour rien). Or ONZE des treize
+# dispatchers vivent sous `deploy/`. L'image en voyait donc 2 pour 10 sous-commandes, et sa garde de
+# population a rougi — CORRECTEMENT : elle disait « je ne vois pas le corpus sur lequel on m'a
+# calibree ». Le defaut n'etait pas la garde, c'etait un seuil calibre sur un arbre applique a
+# l'autre. Date de la rencontre : garde resserree le 2026-08-08 10h22, derniere image verte le
+# 2026-08-07 17h25 — l'image n'avait jamais joue cette garde.
+#
+# Ce que ce fichier fait desormais, et c'est la forme DEJA en service dans `shell_gate.sh` pour GO-7
+# (« NON VERIFIE ici — contexte hors-depot ») : il DECLARE son perimetre au lieu de le supposer.
+# Hors depot, le seuil calibre tombe, l'assertion de fond reste. Un pas qui saute en silence est le
+# defaut ; un pas qui dit ce qu'il n'a pas mesure est une reponse.
+#
+# LE DISCRIMINANT EST UN FAIT : un depot porte une entree `.git` (dossier en clone, fichier en
+# worktree lie), l'artefact n'en a aucune. On ne relaie pas au binaire `git` comme le fait le shell
+# — ce test doit tourner dans une image ou sa presence n'est pas un acquis, et une exception
+# `FileNotFoundError` lue comme « hors depot » serait une devinette la ou on veut un fait.
 
 import os
 import re
@@ -44,13 +63,19 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 SCAN = [os.path.join(ROOT, "fleet"), os.path.join(ROOT, ".claude"), ROOT]
+IN_REPO = os.path.exists(os.path.join(ROOT, ".git"))
 SKIP_DIRS = {"_build", "deps", "node_modules", ".git", "tmp"}
 
 # Etiquettes de `case` qui ne sont pas des sous-commandes : catch-all et portes d'aide.
 NOT_A_COMMAND = {"*", "", "-h", "--help", "help", "-?"}
 
 SUBJECT = re.compile(r'^\s*case\s+"?\$\{?(1|cmd|command|subcmd|action)\b')
-LABEL = re.compile(r"^\s*\(?([A-Za-z0-9_|\-\*\?\.]+)\)\s")
+# La fin de ligne compte AUTANT qu'une espace. `  status)` seul sur sa ligne, corps en dessous, est
+# une forme bash ordinaire — 29 lignes de ce depot l'ecrivent. Exiger un `\s` APRES la parenthese
+# faisait rater ces etiquettes-la : la sous-commande existait, dispatchait, et ne ressortait jamais
+# en « non instruite ». Un faux NEGATIF, la moitie chere de la question, et invisible sur le corpus
+# du jour ou les 3 occurrences sous `fleet/` sont toutes des flags `--…` deja ecartes.
+LABEL = re.compile(r"^\s*\(?([A-Za-z0-9_|\-\*\?\.]+)\)(?=\s|$)")
 FUNC_OPEN = re.compile(r"^\s*(?:function\s+)?[A-Za-z_][A-Za-z0-9_:-]*\s*\(\)\s*\{\s*$")
 FUNC_CLOSE = re.compile(r"^\}\s*$")
 
@@ -204,8 +229,22 @@ print("mesure : %d scripts dispatchent, %d sous-commandes, %d `case` internes ec
 
 # L'instrument doit TROUVER quelque chose : s'il ne voit plus aucun dispatch (regex cassee, arbre
 # deplace), il rendrait « zero non instruite » — un vert par cecite, la forme la plus chere.
-check(dispatchers >= 10, "l'instrument voit encore les dispatchers (%d >= 10)" % dispatchers)
-check(total_cmds >= 30, "il voit encore leurs sous-commandes (%d >= 30)" % total_cmds)
+#
+# Les seuils 10/30 sont calibres sur LE DEPOT (13/39 au 2026-08-08) et n'ont de sens que la. Hors
+# depot, le plancher tombe a « l'instrument matche encore quelque chose » — et pas a un seuil
+# calibre sur l'artefact (2/10 au 2026-08-09) : ce chiffre est decide par le `COPY` du Dockerfile,
+# donc le figer ici ferait de ce test le gardien d'un perimetre qu'il ne choisit pas, rouge le jour
+# ou l'etage de build exclut un arbre de plus pour une raison qui le regarde. Ce qui reste garde est
+# ce que ce fichier possede : sa regex trouve des dispatchers, ou elle est cassee.
+if IN_REPO:
+    check(dispatchers >= 10, "l'instrument voit encore les dispatchers (%d >= 10)" % dispatchers)
+    check(total_cmds >= 30, "il voit encore leurs sous-commandes (%d >= 30)" % total_cmds)
+else:
+    print("--- perimetre : arbre HORS DEPOT (pas de .git sous %s) — `deploy/` et la racine du depot"
+          " sont absents de cet artefact. Seuils de population calibres NON APPLIQUES ;"
+          " ce qui suit ne porte que sur les %d dispatcher(s) presents ici. ---"
+          % (ROOT, dispatchers))
+    check(dispatchers >= 1, "l'instrument matche encore un dispatch (%d >= 1)" % dispatchers)
 
 for path, c in silent_all:
     print("   SILENCE: %s -> `%s`" % (path, c))
