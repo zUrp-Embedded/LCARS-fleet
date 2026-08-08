@@ -29,6 +29,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTESTS=(
   "$HERE/test_fleet_mcp_stdio_bridge.py"
   "$HERE/test_console_deck.py"
+  "$HERE/test_uninstructed_commands.py"
 )
 
 # Politique bats-absent : warning compte (defaut) vs echec dur. Overridable par env pour le jour du

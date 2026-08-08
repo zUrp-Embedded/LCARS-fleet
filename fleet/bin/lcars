@@ -62,7 +62,7 @@ USAGE
       boot_at_start (starfleet) montent seuls au boot de la fleet ; spawn sert
       surtout aux roles ponctuels et au test.
 
-  $PROG list
+  $PROG list        (alias : $PROG ls)
       Liste les pods VIVANTS (socks tmux par-pod) + le statut de leur session tmux.
 
   $PROG attach <pod_id>
