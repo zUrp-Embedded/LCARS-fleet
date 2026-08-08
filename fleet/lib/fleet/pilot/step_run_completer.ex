@@ -930,8 +930,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
       nil ->
-        # `closure: :delivered` — terminal a 1 step : le step_run s'est acheve nominalement.
-        case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, :delivered)) do
+        # DEUX TERMINAUX, PAS UN. `next_assignee: nil` couvrait aussi bien « la derniere etape s'est
+        # achevee » que « le brief a ete ABANDONNE », et les fermait tous deux en `:delivered` :
+        # `stage/merged`, donc `outcome/3` rendait `"merged"` — la valeur exacte que la description
+        # de l'outil presente a l'architecte comme *« the delivery proof; only chain issue N+1 on
+        # this »*. Un abandon invitait donc a chainer dessus.
+        #
+        # `Labels.stage_retired/0` existe pour ca et le dit : « fermeture SANS livraison (supersede,
+        # abandon) ». L'intention etait ecrite, le cablage ne la lisait pas. L'appelant declare donc
+        # sa fermeture ; le defaut reste `:delivered`, qui est le cas nominal de tous les autres.
+        closure = Map.get(step_run, :closure, :delivered)
+
+        case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, closure)) do
           {:ok, _} -> {:ok, :completed}
           {:error, reason} -> {:error, {:close, reason}}
         end

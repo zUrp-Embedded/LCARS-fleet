@@ -35,7 +35,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
-    def close_issue(_r, _n, _o), do: send(self(), :closed) && {:ok, :closed}
+
+    # La CLOTURE voyage dans le message. Le stub la jetait (`_o`), donc aucun test ne pouvait voir la
+    # difference entre « livre » et « abandonne » — et l'abandon fermait en `:delivered` depuis
+    # toujours, sans que rien ne rougisse.
+    def close_issue(_r, _n, o),
+      do: send(self(), {:closed, Keyword.get(o, :closure)}) && {:ok, :closed}
+
     def stop_stopwatch(_r, _n, _o), do: :ok
     def count_signed_step_runs(_r, _n, opts), do: {:ok, Keyword.get(opts, :_step_runs, 0)}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
@@ -327,7 +333,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:wake, "architect-r"}
     # human escalation, NOT a bounce (PR) nor an abandon (close).
     refute_received {:open_pr, _, _, _}
-    refute_received :closed
+    refute_received {:closed, _}
   end
 
   test "gate {:fail} but the failed-run SIGNATURE post fails -> ESCALATION, not an unbudgeted bounce" do
@@ -545,7 +551,10 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc()
              )
 
-    assert_received :closed
+    # `:retired`, JAMAIS `:delivered`. `:delivered` pose `stage/merged`, donc `outcome/3` rend
+    # `"merged"` — la valeur que la description de l'outil presente a l'architecte comme la preuve
+    # de livraison sur laquelle enchainer. Un abandon invitait a chainer dessus.
+    assert_received {:closed, :retired}
     refute_received {:publish, _}
     refute_received {:assignee, _}
 
@@ -571,7 +580,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:label, "lcars-awaits-arch"}
     assert_received :unlocked
     refute_received {:assignee, _}
-    refute_received :closed
+    refute_received {:closed, _}
     assert_received {:comment, body}
     assert body =~ "gatekeeper"
     assert body =~ "escalate_user"
@@ -706,7 +715,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     assert_received {:label, "lcars-awaits-arch"}
     refute_received {:assignee, _}
-    refute_received :closed
+    refute_received {:closed, _}
     assert_received {:comment, body}
     # "illisible ou absent" pins the FR user-facing escalation comment.
     assert body =~ "illisible ou absent"
@@ -800,7 +809,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:label, "lcars-awaits-arch"}
     assert_received :unlocked
     refute_received {:assignee, _}
-    refute_received :closed
+    refute_received {:closed, _}
     assert_received {:comment, body}
     assert body =~ "consultant"
     refute body =~ "gatekeeper"
@@ -813,7 +822,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc()
              )
 
-    assert_received :closed
+    assert_received {:closed, _}
     refute_received {:open_pr, _, _, _}
     refute_received {:publish, _}
   end
@@ -1048,7 +1057,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def set_assignee(_r, _n, l, o), do: relay(o, {:assignee, l}) && {:ok, :set}
     def remove_label(_r, _n, _l, o), do: relay(o, :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, o), do: relay(o, {:label, label}) && {:ok, :added}
-    def close_issue(_r, _n, o), do: relay(o, :closed) && {:ok, :closed}
+    # Jumeau du stub d'en haut : la CLOTURE voyage, sinon `:delivered` et `:retired` sont le meme
+    # message et aucun test ne peut les separer.
+    def close_issue(_r, _n, o),
+      do: relay(o, {:closed, Keyword.get(o, :closure)}) && {:ok, :closed}
+
     def stop_stopwatch(_r, _n, _o), do: :ok
     def count_signed_step_runs(_r, _n, _o), do: {:ok, 0}
     def post_route(_r, _n, p, s, o), do: relay(o, {:route, p, s}) && {:ok, :posted}
@@ -1146,7 +1159,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     )
 
     _ = :sys.get_state(pid)
-    assert_received :closed
+    assert_received {:closed, _}
     refute_received {:publish, _}
   end
 

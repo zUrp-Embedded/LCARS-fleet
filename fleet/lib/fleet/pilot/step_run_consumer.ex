@@ -775,6 +775,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
       deliverable_opts: nil,
       step_run_sha: "gate-abandon",
       next_assignee: nil,
+      # Fermeture SANS livraison : rien n'a ete livre, donc `stage/retired` et non `stage/merged`.
+      # Declare ICI, ou le verdict est connu, plutot que devine plus bas a partir du `step_run_sha`.
+      closure: :retired,
       comment_body: trace
     }
 
