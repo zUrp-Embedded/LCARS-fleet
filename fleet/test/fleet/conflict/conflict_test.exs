@@ -43,6 +43,59 @@ defmodule Fleet.ConflictTest do
     end
   end
 
+  # DEUX GARANTIES « NEVER GUESSES » QUE RIEN NE TENAIT. Mesure du 2026-08-08, chaque mutation
+  # contre la suite entiere (2441 tests) : faire GARDER les lignes a `:delete_no_change` au lieu de
+  # supprimer, et faire DEVINER `:non_overlapping` quand le merge 3-way rend `nil`, laissaient tout
+  # vert. Ce module decide quel code survit a un merge : un regresseur qui devine au lieu de passer
+  # la main merge du code faux, en silence, et le `@moduledoc` promet exactement l'inverse.
+  #
+  # (Un troisieme repli — la clause fourre-tout `resolve_lines(%Hunk{})` — a survecu lui aussi a sa
+  # mutation, mais il est INATTEIGNABLE par conception : `:complex` n'est pas dans
+  # `@writable_types`, donc `try_resolve/2` ne l'appelle jamais. C'est un filet pour un type
+  # writable qui serait ajoute sans clause. Pas un defaut, et pas de test invente pour lui.)
+  describe "never guesses" do
+    test "delete_no_change SUPPRIME le bloc — garder les lignes serait ressusciter du code efface" do
+      # C'est THEIRS qui supprime, pas ours — et ce detail EST le test. Avec le cote vide du cote
+      # `ours`, la mutation « rendre `h.ours_lines` au lieu de `[]` » rend `[]` elle aussi : le
+      # fixture ne distingue pas les deux mondes et passe dans les deux sens. Mesure faite : premiere
+      # version du test, mutation appliquee, 2443 verts. Ici `ours_lines == ["a"]`, donc garder
+      # ressusciterait la ligne effacee et le merge le montre.
+      content = "top\n<<<<<<< ours\na\n||||||| base\na\n=======\n>>>>>>> theirs\nbottom"
+
+      {:ok, r} = Conflict.resolve(content)
+
+      assert [%{type: :delete_no_change}] = r.hunks
+      assert r.merged == "top\nbottom", "le bloc supprime d'un cote doit disparaitre du merge"
+    end
+
+    test "non_overlapping dont le merge 3-way ECHOUE passe la main, il n'invente pas" do
+      # Teste `Assemble.resolve_lines/1` en direct : produire ce hunk par le classifieur
+      # demanderait un texte qui se classe `non_overlapping` ET dont le LCS echoue — l'assembleur
+      # est la surface publique ou la decision se prend, et c'est elle qui doit tenir.
+      h = %Fleet.Conflict.Hunk{
+        base_lines: ["a"],
+        ours_lines: ["b"],
+        theirs_lines: ["c"],
+        start_line: 1,
+        type: :non_overlapping,
+        confidence: %Fleet.Conflict.ConfidenceScore{score: 90, label: :high},
+        explanation: "fixture",
+        trace: %Fleet.Conflict.DecisionTrace{
+          selected: :non_overlapping,
+          summary: "fixture",
+          has_base: true
+        }
+      }
+
+      # Le merge 3-way ne sait pas combiner ces trois cotes — verifie, pas suppose.
+      assert Fleet.Conflict.Diff.merge_non_overlapping(["a"], ["b"], ["c"]) == nil
+
+      assert Fleet.Conflict.Assemble.resolve_lines(h) == :skip,
+             "un 3-way qui echoue doit rendre :skip (marqueurs restaures, routage amont), " <>
+               "jamais un cote choisi au hasard"
+    end
+  end
+
   describe "surrounding text is preserved" do
     test "leading and trailing text kept around a resolved hunk" do
       content = "top\n" <> diff3("b", "a", "b") <> "\nbottom"
