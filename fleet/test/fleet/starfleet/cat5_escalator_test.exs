@@ -1,3 +1,17 @@
+defmodule Fleet.Starfleet.CoordBackendRaising do
+  @moduledoc false
+  # Un backend de coordination qui EXPLOSE. Il n'existe que pour tenir l'ORDRE : c'est le seul
+  # moyen de distinguer « l'audit est ecrit » de « l'audit est ecrit AVANT le routage », et
+  # l'inversion des deux laissait 2438 tests verts.
+  @behaviour Fleet.Starfleet.CoordBackend
+
+  @impl true
+  def handle_decision(_decision, _correlation_id), do: raise("coord backend down")
+
+  @impl true
+  def handle_escalation(_source, _payload, _correlation_id), do: raise("coord backend down")
+end
+
 defmodule Fleet.Starfleet.Cat5EscalatorTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
@@ -123,5 +137,32 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert log =~ "REFUSED unknown Cat 5 source"
       refute_receive %Fleet.Event{source: :starfleet}, 200
     end
+  end
+
+  test "l'audit est ecrit AVANT le routage — un backend qui explose ne doit pas emporter la trace" do
+    # LA DOCTRINE D1 EST UN ORDRE, PAS UN APPEL. « la trace durable est l'audit log, ecrit AVANT le
+    # routage » : mesure du 2026-08-08, inverser les deux lignes laissait les 2438 tests verts.
+    # Seul un backend qui LEVE distingue les deux mondes — avec un backend qui rend `:ok`, l'ordre
+    # est inobservable et le test passerait dans les deux sens.
+    Application.put_env(:fleet_starfleet, :coord_backend, Fleet.Starfleet.CoordBackendRaising)
+    log_path = Application.get_env(:fleet_starfleet, :audit_log_path)
+
+    assert_raise RuntimeError, "coord backend down", fn ->
+      Cat5Escalator.escalate(:pod_drift, %{"drift_count" => 9}, "corr-order")
+    end
+
+    assert File.exists?(log_path),
+           "le routage a explose et la trace a disparu avec lui — c'est exactement ce que " <>
+             "l'ordre existe pour empecher"
+
+    entry =
+      log_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> List.last()
+      |> JSON.decode!()
+
+    assert entry["action"] == "cat5_escalate"
+    assert entry["correlation_id"] == "corr-order"
   end
 end
