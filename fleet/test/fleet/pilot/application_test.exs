@@ -41,37 +41,37 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # Interim brake (IPC consultant 2026-08-02): the :ops_workflow_map knob names the card every
-  # `genre/ops` ticket burns, and nothing checked that the name resolves to a card that can serve
+  # Interim brake (IPC consultant 2026-08-02): the :doc_workflow_map knob names the card every
+  # `genre/doc` ticket burns, and nothing checked that the name resolves to a card that can serve
   # a doc ticket — a dead name or an all-code-face card failed at the FIRST doc ticket, silently.
-  describe "validate_ops_card!/1 — the ops knob resolves to a card that can serve a doc ticket" do
-    test "the shipped canon passes (ops-direct carries its face: doc producer)" do
-      assert :ok = Application.validate_ops_card!()
+  describe "validate_doc_card!/1 — the doc knob resolves to a card that can serve a doc ticket" do
+    test "the shipped canon passes (doc-direct carries its face: doc producer)" do
+      assert :ok = Application.validate_doc_card!()
     end
 
     @tag :tmp_dir
     test "a knob EXPLICITLY set to a dead name raises with the operator's diagnosis",
          %{tmp_dir: tmp} do
-      assert_raise RuntimeError, ~r/ops card "no-such-card" .*does NOT load/s, fn ->
-        Application.validate_ops_card!(
+      assert_raise RuntimeError, ~r/doc card "no-such-card" .*does NOT load/s, fn ->
+        Application.validate_doc_card!(
           workflow_maps_root: tmp,
-          ops_workflow_map: "no-such-card"
+          doc_workflow_map: "no-such-card"
         )
       end
     end
 
     @tag :tmp_dir
-    test "no ops card + knob at its DEFAULT = a catalogue with no doc rail: LOUD, never a refusal",
+    test "no doc card + knob at its DEFAULT = a catalogue with no doc rail: LOUD, never a refusal",
          %{tmp_dir: tmp} do
       # A narrow catalogue (an operator's own, a fixture) legitimately has no doc rail. Refusing
       # the boot there would be a policy this check has no mandate to set — it names what such a
       # deployment cannot do instead.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = Application.validate_ops_card!(workflow_maps_root: tmp)
+          assert :ok = Application.validate_doc_card!(workflow_maps_root: tmp)
         end)
 
-      assert log =~ "no ops card in this catalogue"
+      assert log =~ "no doc card in this catalogue"
       assert log =~ "would wedge at dispatch"
     end
 
@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.ApplicationTest do
       File.write!(Path.join(tmp, "all-code.yaml"), card)
 
       assert_raise RuntimeError, ~r/carries NO producer step on `face: doc`/, fn ->
-        Application.validate_ops_card!(workflow_maps_root: tmp, ops_workflow_map: "all-code")
+        Application.validate_doc_card!(workflow_maps_root: tmp, doc_workflow_map: "all-code")
       end
     end
   end

@@ -136,7 +136,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     defmodule RoutingForge do
       @moduledoc false
       def get_route(_repo, 7, _opts), do: {:ok, {"standard-qa", "review"}}
-      def get_route(_repo, 9, _opts), do: {:ok, {"ops-direct", "build"}}
+      def get_route(_repo, 9, _opts), do: {:ok, {"doc-direct", "build"}}
       def get_route(_repo, _n, _opts), do: :none
     end
 
@@ -190,7 +190,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       # Le jumeau du test ci-dessus, et il n'est pas decoratif : tant que `:ignore` etait ce que
       # rendaient AUSSI l'absence de champ, l'absence de carte et l'echec de lecture, il ne pouvait
       # rien distinguer. Maintenant qu'il est le seul chemin vers `:ignore`, il mesure la
-      # DEROGATION — et ops-direct est le cas ou elle est mecaniquement obligatoire (aucun runner
+      # DEROGATION — et doc-direct est le cas ou elle est mecaniquement obligatoire (aucun runner
       # ne sert une PR basee sur work/ops).
       assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
                "lcars/issue-9-scribe",

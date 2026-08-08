@@ -69,7 +69,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
     @protocol_labels [
                        Fleet.Labels.in_flight(),
                        Fleet.Labels.awaits_arch(),
-                       Fleet.Labels.genre_ops(),
+                       Fleet.Labels.genre_doc(),
                        Fleet.Labels.stage_prefix() <> "brief-review",
                        Fleet.Labels.stage_prefix() <> "build",
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
@@ -100,16 +100,16 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
 
     test "a STALE label color is repainted; one already right is left alone (idempotent)" do
-      # Why this path exists at all: the operator palette landed on 2026-08-03, and `genre/ops` —
+      # Why this path exists at all: the operator palette landed on 2026-08-03, and `genre/doc` —
       # the marker whose near-white made it invisible on the very tickets it declares — ALREADY
       # existed on every repo ever seeded. A fix that only reaches repos nobody has created yet is
       # not a fix. Repaint only: the label keeps its id, and with it every issue wearing it.
       test_pid = self()
 
-      # Only `genre/ops` carries an id+color, so exactly one label is a repaint candidate.
+      # Only `genre/doc` carries an id+color, so exactly one label is a repaint candidate.
       labels_with = fn color ->
         Enum.map(@protocol_labels, fn name ->
-          if name == Fleet.Labels.genre_ops(),
+          if name == Fleet.Labels.genre_doc(),
             do: %{"id" => 7, "name" => name, "color" => color},
             else: %{"name" => name}
         end)
@@ -189,8 +189,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
     test "accepte aussi une liste de NOMS — l'appelant chaud a deja projete" do
       # `Poller.Lease.classify_issue` tient `Enum.map(labels, & &1["name"])`. Lui imposer une
       # re-projection pour appeler cette fonction lui ferait payer l'economie qu'il vient de faire.
-      assert {:ok, {"ops-direct", "redaction"}} =
-               ForgeClient.route_from_labels(["wfmap/ops-direct", "stage/redaction"])
+      assert {:ok, {"doc-direct", "redaction"}} =
+               ForgeClient.route_from_labels(["wfmap/doc-direct", "stage/redaction"])
     end
 
     test "un seul des deux → :none, jamais une route a moitie" do
@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :none =
                ForgeClient.route_from_labels([
                  %{"name" => "type:doc"},
-                 %{"name" => "genre/ops"},
+                 %{"name" => "genre/doc"},
                  %{"name" => "lcars-awaits-arch"}
                ])
     end

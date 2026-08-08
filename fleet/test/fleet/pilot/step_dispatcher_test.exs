@@ -821,22 +821,22 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "ROUTELESS issue with `genre/ops` → onboarded onto the OPS card, not the project's (chantier face-projet)" do
+    test "ROUTELESS issue with `genre/doc` → onboarded onto the OPS card, not the project's (chantier face-projet)" do
       # The genre gate of the burn: the label is the INPUT, the engraved wfmap/* the OUTPUT — read
       # once, here. A face-projet mutation that drops the gate re-routes ops tickets down the code
       # path silently; this is the test that falls.
-      payload = eng_issue(%{"labels" => [%{"name" => "genre/ops"}]})
+      payload = eng_issue(%{"labels" => [%{"name" => "genre/doc"}]})
 
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
-          workflow_map_loader: fn "ops-direct" ->
+          workflow_map_loader: fn "doc-direct" ->
             %{"steps" => %{"build" => %{"role" => "engineer", "face" => "ops", "needs" => []}}}
           end
         )
 
       assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
-      assert_received {:routed, 42, "ops-direct", "build"}
+      assert_received {:routed, 42, "doc-direct", "build"}
       refute_received {:spawned, _, _}
     end
 

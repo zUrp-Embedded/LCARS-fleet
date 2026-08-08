@@ -1,18 +1,19 @@
-# Pipeline V2 — ops-direct (chantier face-projet, 2026-08-02)
+# Pipeline V2 — doc-direct (chantier trois faces)
 #
 # Date: 2026-08-02
 # Statut: actif — rail cable et PROUVE le 2026-08-02 sur fleet neuve docker (banc faceproof) :
-#         ticket genre/ops -> burn ops-direct -> scribe -> PR base=work/ops -> merge scelle
+#         ticket genre/doc -> burn doc-direct -> scribe -> PR base=work/doc -> merge scelle
 #         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
 # Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
 # Consommé par: Fleet.Workflow.Loader (schema v2.5, clé `face` du step).
 #
 # LE CHEMIN DIRECT, et pourquoi il est direct — deux absences, toutes deux des DÉCISIONS :
 #
-#   PAS de scoper (pas de step brief-review) : sur un ticket ops, l'AUTEUR du brief est aussi le
-#   juge du retour (l'arch écrit la demande de doc, l'arch relit le doc livré dans son mount RW).
-#   Une porte de brief entre les deux arbitrerait un différend qui n'a qu'une partie. Propriété de
-#   CE chemin, pas règle globale — un ticket ops routé un jour vers un jury retrouverait sa porte.
+#   PAS de scoper (pas de step brief-review) : sur un ticket documentaire, l'AUTEUR du brief est
+#   aussi le juge du retour (l'arch écrit la demande de doc, l'arch relit le doc livré dans son
+#   mount RW sur la face doc). Une porte de brief entre les deux arbitrerait un différend qui n'a
+#   qu'une partie. Propriété de CE chemin, pas règle globale — un ticket documentaire routé un jour
+#   vers un jury retrouverait sa porte.
 #
 #   PAS de jury (`jury: []`, configuration supportée — précédent : audit-only, c0-poc) : les juges
 #   sont calibrés sur du mécanique (tests, secrets, ancêtre) ; sur de la prose ils n'ont pas de
@@ -22,19 +23,19 @@
 
 kind: WorkflowMap
 metadata:
-  name: ops-direct
-  description: "Ticket documentaire — le scribe rédige sur work/ops, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
-  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : le scribe rédige sur work/ops (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre ops), jamais par projet — toute carte de criticité garde son pipeline code."
+  name: doc-direct
+  description: "Ticket documentaire — le scribe rédige sur work/doc, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
+  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : le scribe rédige sur work/doc (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre/doc), jamais par projet — toute carte de criticité garde son pipeline code."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
   # Jury VIDE délibéré — cf. l'en-tête. Le plancher mécanique tient seul (précédent c0-poc).
   jury: []
   # CI IGNORÉE, et ici la raison est MÉCANIQUE, pas doctrinale : le rail CI livré aux projets vit
-  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `work/ops`
+  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `work/doc`
   # ne porte aucune définition de workflow, donc aucun runner ne la sert : sous `required` le gate
-  # lirait `:none`, attendrait sa borne, puis escaladerait — sur CHAQUE ticket ops. Le jour où la
-  # face ops porte son propre rail, cette ligne se relit.
+  # lirait `:none`, attendrait sa borne, puis escaladerait — sur CHAQUE ticket documentaire. Le
+  # jour où la face doc porte son propre rail, cette ligne se relit.
   ci: ignore
   # Budget anti-emballement (obligatoire, donnée map-level). Sans jury il n'y a pas de
   # déclencheur de rework mécanique ; le budget borne les relances arch → nouveau ticket.

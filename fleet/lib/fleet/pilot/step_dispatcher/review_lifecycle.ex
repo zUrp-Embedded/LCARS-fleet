@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       :no_jury ->
         # The CARD arbitrates (doc point 4): zero-judge card → this IS the nominal path, seal
         # directly; judged card → orphan PR, lay the card's jury (adoption). The arbitrating card
-        # is THE ISSUE'S ENGRAVED one when a route exists (`wfmap/*` — an ops-direct issue's
+        # is THE ISSUE'S ENGRAVED one when a route exists (`wfmap/*` — an doc-direct issue's
         # zero-judge choice is deliberate); the project's declared card only for a true orphan
         # (no route). Reading the project card unconditionally re-adopted brief-gate's judges
         # onto an ops PR every tick (faceproof bench).

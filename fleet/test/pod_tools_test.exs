@@ -1250,7 +1250,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # landing between the two burns the PROJECT card and sends an ops brief down the code path.
       assert_received {:create_issue, "fleet/demo", "doc", _body, opts}
       assert [id] = opts[:labels]
-      assert id == :erlang.phash2(Fleet.Labels.genre_ops(), 10_000)
+      assert id == :erlang.phash2(Fleet.Labels.genre_doc(), 10_000)
 
       # And the decoration agrees with the routing instead of contradicting it.
       assert_received {:add_label, "fleet/demo", 77, "type:doc", _}
@@ -1541,7 +1541,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {"revise_project_card",
        %{
          "full_name" => "fleet/demo-proj",
-         "workflow_map" => "ops-direct",
+         "workflow_map" => "doc-direct",
          "justification" => "le poc est devenu serieux"
        }},
       {"close_project", %{"full_name" => "fleet/demo-proj"}},
@@ -1678,7 +1678,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  "revise_project_card",
                  %{
                    "full_name" => "fleet/demo-proj",
-                   "workflow_map" => "ops-direct",
+                   "workflow_map" => "doc-direct",
                    "justification" => "le poc est devenu serieux"
                  },
                  pod_state(uniq("pod-sf"))
@@ -1687,13 +1687,13 @@ defmodule Fleet.MCP.PodToolsTest do
       # The seam receives the declaration verbatim + the ACTING role (revised_by = channel
       # identity, never a wire field).
       assert_received {:revise_card, "fleet/demo-proj", opts}
-      assert opts[:workflow_map] == "ops-direct"
+      assert opts[:workflow_map] == "doc-direct"
       assert opts[:justification] == "le poc est devenu serieux"
       assert opts[:revised_by] == "starfleet"
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "card_revised"
-      assert result["card"] == "ops-direct"
+      assert result["card"] == "doc-direct"
       assert result["previous_card"] == "brief-gate"
       assert result["outcome"] == "revised"
       # The one semantic the human must hear at this moment: engraved routes do not re-route.
@@ -2058,10 +2058,10 @@ defmodule Fleet.MCP.PodToolsTest do
          "title" => "vraie feature",
          "state" => "open",
          "body" => "le brief complet du ticket",
-         # Coherent pair: a `genre/ops` ticket wears `type:doc`. The fixture used to pin
+         # Coherent pair: a `genre/doc` ticket wears `type:doc`. The fixture used to pin
          # `type:feature` here — a read-side fixture teaching the very contradiction the write
          # side was producing.
-         "labels" => [%{"name" => "type:doc"}, %{"name" => "genre/ops"}]
+         "labels" => [%{"name" => "type:doc"}, %{"name" => "genre/doc"}]
        }}
     end
 
@@ -2184,7 +2184,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["title"] == "vraie feature"
       assert result["state"] == "open"
       assert result["body"] == "le brief complet du ticket"
-      assert result["labels"] == ["type:doc", "genre/ops"]
+      assert result["labels"] == ["type:doc", "genre/doc"]
 
       assert [
                %{

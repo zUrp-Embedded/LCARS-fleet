@@ -1209,7 +1209,7 @@ defmodule Fleet.Pilot.ForgeClient do
           "lcars-awaits-arch",
           # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-          "genre/ops",
+          "genre/doc",
           "stage/brief-review",
           "stage/build",
           "stage/review",
@@ -1262,7 +1262,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # An already-present label keeps its id, and with it every issue wearing it — only its COLOR is
   # reconciled. Creating-only would leave every repo seeded before the palette wearing the old
-  # near-white default, and the marker that motivated the palette (`genre/ops`) is precisely one
+  # near-white default, and the marker that motivated the palette (`genre/doc`) is precisely one
   # that already exists on all of them: a fix that only reaches repos nobody has created yet is not
   # a fix. Best-effort by design — a repo whose labels cannot be repainted still routes correctly,
   # so this never turns a working forge into a failed seeding.
@@ -1307,7 +1307,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # The NAME carries the protocol; the color carries the GLANCE. Operator palette, 2026-08-03.
   #
   # The former default was `#ededed` — near-white on a white UI. Every label outside the four
-  # `stage/*` landed there, so `genre/ops` was invisible on the very tickets whose genre it
+  # `stage/*` landed there, so `genre/doc` was invisible on the very tickets whose genre it
   # declares: present in the API, absent to the human. A label nobody can see is a label that is
   # not there, and it fails silently in the one direction that matters (an operator scanning a
   # list concludes the marker was never posed).
@@ -1319,7 +1319,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # kinship the code does not have.
   defp label_color("lcars-in-flight"), do: "#FF9900"
   defp label_color("lcars-awaits-arch"), do: "#CC6666"
-  defp label_color("genre/ops"), do: "#33BBCC"
+  defp label_color("genre/doc"), do: "#33BBCC"
   defp label_color("stage/brief-review"), do: "#6699CC"
   defp label_color("stage/build"), do: "#FFCC33"
   defp label_color("stage/review"), do: "#9966CC"
@@ -1359,7 +1359,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  defp label_description("genre/ops"),
+  defp label_description("genre/doc"),
     do:
       "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie ops (branche work/ops) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
 

@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
 
   Measured 2026-08-04 on the bench (`hello-world#4`): a PR with ZERO review carried "the judges
   APPROVED the PR (native reviews)", under a line claiming "nothing is faked". The card
-  (`ops-direct`) declares no jury on purpose — the seal was correct, the sentence was not.
+  (`doc-direct`) declares no jury on purpose — the seal was correct, the sentence was not.
   """
   use ExUnit.Case, async: true
 

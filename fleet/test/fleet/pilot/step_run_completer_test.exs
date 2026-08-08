@@ -872,7 +872,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "producer :review on a ROUTED map → the ENGRAVED card's jury, never the project's (faceproof bench)" do
-      # chantier face-projet: the step_run carries the engraved map (ops-direct, jury []) — the
+      # chantier face-projet: the step_run carries the engraved map (doc-direct, jury []) — the
       # review request must convene THAT card's jury, not the project card's. Reading the project
       # card laid brief-gate's qualifier+reviewer onto a zero-judge ops PR: REQUEST_CHANGES x2 on
       # prose, rework loop. Measured on the faceproof bench before this test existed.

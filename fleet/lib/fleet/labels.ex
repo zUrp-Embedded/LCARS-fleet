@@ -32,7 +32,7 @@ defmodule Fleet.Labels do
     * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` — concurrency / escalation.
     * SCOPED POSITION `wfmap/<map>` + `stage/<step>` — the workflow_map position; the state lives
       in the label and the mutex is native.
-    * SCOPED GENRE `genre/ops` — an INPUT to the burn (which card gets engraved).
+    * SCOPED GENRE `genre/doc` — an INPUT to the burn (which card gets engraved).
     * FLAT VISUAL `type:*` — decoration, `:` and not `/` so the namespace cannot be mistaken for a
       routing scope. Nothing mechanical reads it back.
 
@@ -43,14 +43,14 @@ defmodule Fleet.Labels do
   routing decision, never posted as its own constant.
 
   This list said "two families" until 2026-08-03, and closed with "outside these two families, a
-  label does not exist" — while `genre/ops` had been shipping for a chantier and `type:feature` was
+  label does not exist" — while `genre/doc` had been shipping for a chantier and `type:feature` was
   posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
   is the first thing a reader trusts and the last thing anyone updates.
   """
 
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
-  @genre_ops "genre/ops"
+  @genre_doc "genre/doc"
 
   @doc "\"Pod in flight\" lock: set BEFORE the spawn (anti double-spawn), lifted at end-of-step-run."
   @spec in_flight() :: String.t()
@@ -61,25 +61,25 @@ defmodule Fleet.Labels do
   def awaits_arch, do: @awaits_arch
 
   @doc """
-  Genre marker of a DOCUMENTARY ticket (`genre/ops`, chantier face-projet): an INPUT to the
-  workflow-map burn — present on a routeless issue, the poller engraves the ops card instead of
+  Genre marker of a DOCUMENTARY ticket (`genre/doc`, chantier face-projet): an INPUT to the
+  workflow-map burn — present on a routeless issue, the poller engraves the doc card instead of
   the project's declared card; absent, nothing changes. Read ONCE at burn time: the engraved
   `wfmap/*` stays the only route (the forge is the state machine). Distinct namespace from
   `type:*` on purpose — those are documented visual-never-routing, and this one routes.
   """
-  @spec genre_ops() :: String.t()
-  def genre_ops, do: @genre_ops
+  @spec genre_doc() :: String.t()
+  def genre_doc, do: @genre_doc
 
   @doc """
   VISUAL type of a ticket, derived from its genre — `type:doc` for a documentary ticket
-  (`genre/ops`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
+  (`genre/doc`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
   so Gitea creates it non-exclusive and no code reads it back. It exists for the human who scans
   a list of issues and wants to know what kind of thing each one is.
 
   DERIVED, never posted as a constant: the genre is resolved at create time, and a visual type
   contradicting it is a lie told by the interface — a doc ticket wearing `type:feature` (measured
   2026-08-03) says "feature" to every human who reads the list, while the burn routes it to the
-  ops card. One decision, one source; the label follows.
+  doc card. One decision, one source; the label follows.
   """
   @spec type_for_genre(String.t() | nil) :: String.t()
   def type_for_genre("ops"), do: "type:doc"

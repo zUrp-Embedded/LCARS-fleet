@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
   test "BL-6-33: the BARE fallback SEEDS the protocol labels (a workable repo, not a decorative one)",
        %{tmp_dir: tmp} do
     # FileForge.generate_repo → :template_missing → the bare path. The generate path inherits
-    # the labels from the template; the fallback must seed them itself or the first genre/ops
+    # the labels from the template; the fallback must seed them itself or the first genre/doc
     # ticket dies on {:genre_label_unresolved, _} (measured on a real bench).
     o = opts(tmp)
 
@@ -113,10 +113,10 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
        %{tmp_dir: tmp} do
     o =
       Keyword.put(opts(tmp), :ensure_labels, fn _repo, _o ->
-        {:error, {:labels_missing_after_ensure, ["genre/ops"]}}
+        {:error, {:labels_missing_after_ensure, ["genre/doc"]}}
       end)
 
-    assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["genre/ops"]}}} =
+    assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["genre/doc"]}}} =
              ProjectOnboard.onboard("nolabel", o)
 
     # Inside the compensated window: the forge repo this call created is unwound, dirs absent —

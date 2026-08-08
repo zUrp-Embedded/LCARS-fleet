@@ -1699,7 +1699,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         issue_opts_result =
           case genre do
             "ops" ->
-              case forge.repo_label_id(repo, Fleet.Labels.genre_ops(), author_opts) do
+              case forge.repo_label_id(repo, Fleet.Labels.genre_doc(), author_opts) do
                 {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
                 {:error, reason} -> {:error, {:genre_label_unresolved, inspect(reason)}}
               end

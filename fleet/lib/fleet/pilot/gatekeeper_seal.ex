@@ -96,7 +96,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     signature = Fleet.Pilot.ForgeProtocol.merge_marker(pr_number)
 
     # WHO ACTUALLY APPROVED — read, never asserted. The comment used to state "the judges APPROVED
-    # the PR (native reviews)" unconditionally, which is FALSE on a zero-judge card: `ops-direct`
+    # the PR (native reviews)" unconditionally, which is FALSE on a zero-judge card: `doc-direct`
     # declares no jury on purpose (no mechanical ground truth on prose), the seal is nominal there,
     # and the ticket ended up carrying a sentence claiming approvals that no account ever gave —
     # measured 2026-08-04 on `hello-world#4`, PR with 0 review. A closing comment is the trace an
@@ -572,7 +572,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   DESCRIPTIVE + HONEST closing comment (user traceability): who delivered, who validated, who sealed.
 
   `approvers` is the list of accounts whose APPROVED review was actually read on the PR. Empty is a
-  legitimate, frequent state — a zero-judge card (`ops-direct`) makes the direct seal NOMINAL — and
+  legitimate, frequent state — a zero-judge card (`doc-direct`) makes the direct seal NOMINAL — and
   it must READ as that state, not as a jury that stayed silent. The two cases print different
   sentences on purpose: an operator reading this comment months later must be able to tell a
   verdict from an absence of verdict without opening the PR.
