@@ -283,3 +283,42 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"indeterminee"* ]]
 }
+
+# `fleet_v2 status` imprimait `ref=` suivi de RIEN. Un champ vide n'est pas une valeur : le lecteur
+# devait choisir seul entre « la branche s'appelle vide », « le champ n'a pas ete rempli » et « il n'y
+# a pas de branche ». Les deux causes reelles sont distinctes et se disent maintenant differemment —
+# une release est batie depuis un commit (`BuildInfo.env_facts/0` rend `ref: nil` a dessein), un arbre
+# de travail sans reponse de git n'a PAS ete mesure. Les confondre ferait lire « pas de branche » la
+# ou il faut lire « je n'ai pas pu regarder ».
+@test "release sans ref → le status DIT qu'il n'y en a pas, il n'imprime pas un champ vide" {
+  local rel="$TMP_BASE/rt/rel/fleet_umbrella/lib/lcars_fleet-1.0.0/priv/api"
+  mkdir -p "$rel"
+  printf 'sha=abc1234\ndirty=false\nref=\n' > "$rel/build_info.txt"
+
+  run bash -c "source '$SCRIPT'; RUNTIME_DIR='$TMP_BASE/rt'; cmd_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source=release"* ]]
+  [[ "$output" != *"ref= "* ]]
+  [[ "$output" == *"ref=<aucune : bati depuis un commit>"* ]]
+}
+
+@test "release AVEC ref → la valeur mesuree passe telle quelle (le defaut ne l'ecrase pas)" {
+  local rel="$TMP_BASE/rt/rel/fleet_umbrella/lib/lcars_fleet-1.0.0/priv/api"
+  mkdir -p "$rel"
+  printf 'sha=abc1234\ndirty=true\nref=main\n' > "$rel/build_info.txt"
+
+  run bash -c "source '$SCRIPT'; RUNTIME_DIR='$TMP_BASE/rt'; cmd_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ref=main"* ]]
+  [[ "$output" == *"abc1234-dirty"* ]]
+}
+
+@test "arbre de travail sans git → 'illisible', PAS le message de la release (les causes ne se confondent pas)" {
+  mkdir -p "$TMP_BASE/nogit"
+
+  run bash -c "source '$SCRIPT'; RUNTIME_DIR='$TMP_BASE/nogit'; cmd_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source=working_tree"* ]]
+  [[ "$output" == *"ref=<illisible : git muet>"* ]]
+  [[ "$output" != *"bati depuis un commit"* ]]
+}

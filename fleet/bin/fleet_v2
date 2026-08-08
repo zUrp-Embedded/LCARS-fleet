@@ -487,14 +487,20 @@ cmd_version() {
     dirty="$(sed -n 's/^dirty=//p' "$build_file")"
     ref="$(sed -n 's/^ref=//p' "$build_file")"
     [[ "$dirty" == "true" ]] && dflag="-dirty"
-    echo "fleet_v2: build ${sha:-unknown}${dflag} ref=${ref} (source=release)"
+    # UN CHAMP VIDE N'EST PAS UNE VALEUR. `ref=` suivi de rien laissait le lecteur choisir entre
+    # « la branche s'appelle vide », « le champ n'a pas ete rempli » et « il n'y a pas de branche ».
+    # Une release n'a PAS de ref : elle est batie depuis un commit, pas depuis une branche, et
+    # `BuildInfo.env_facts/0` rend deliberement `ref: nil` pour cette raison. On le DIT.
+    echo "fleet_v2: build ${sha:-unknown}${dflag} ref=${ref:-<aucune : bati depuis un commit>} (source=release)"
   else
     # SOURCE/dev: git LIVE in the repo (git failure → unknown, never a hard error).
     local sha ref dflag=""
     sha="$(git -C "$RUNTIME_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     ref="$(git -C "$RUNTIME_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
     [[ -n "$(git -C "$RUNTIME_DIR" status --porcelain 2>/dev/null)" ]] && dflag="-dirty"
-    echo "fleet_v2: build ${sha}${dflag} ref=${ref} (source=working_tree)"
+    # Ici le vide a une AUTRE cause — git n'a pas repondu — et elle se dit autrement : confondre les
+    # deux ferait lire « pas de branche » la ou il faut lire « je n'ai pas pu regarder ».
+    echo "fleet_v2: build ${sha}${dflag} ref=${ref:-<illisible : git muet>} (source=working_tree)"
   fi
 }
 
