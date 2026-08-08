@@ -598,13 +598,20 @@ defmodule Fleet.TaskQueueTest do
     tid = t.id
     assert_receive %Fleet.Event{type: :"work_item.enqueued"}
 
+    # 5 s, et le chiffre porte un raisonnement plutot qu'une habitude. Ce test affirme QUE le timer
+    # part, pas qu'il part vite : la borne a 1 s affirmait en plus une LATENCE que personne ne
+    # promet, et elle est tombee dans un `mix gate` charge (2426 tests, 71 s de sync) ou le
+    # scheduler n'a pas rendu la main dans les 1200 ms cumules. Un rouge par charge de machine sur
+    # une assertion plus stricte que le contrat est un faux negatif de la pire espece : il apprend a
+    # relancer le gate au lieu de le lire. La borne large ne cache rien — un timer qui ne part
+    # JAMAIS echoue toujours, quatre secondes plus tard.
     assert_receive %Fleet.Event{
                      source: :task_queue,
                      type: :"work_item.failed",
                      correlation_id: ^tid,
                      payload: %{reason: :deadline_expired}
                    },
-                   1000
+                   5000
 
     assert {:ok, :failed} = TaskQueue.pod_status(q, "pod-A")
   end

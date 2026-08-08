@@ -16,8 +16,9 @@
 #   2. ce qui est DIT = l'aide DU MEME script, plus le README de son dossier
 # et l'ecart est un echec.
 #
-# DEUX PIEGES QUE CE FICHIER A DEJA PAYES, tous deux du meme genre — un instrument qui repond a la
-# question voisine :
+# QUATRE PIEGES QUE CE FICHIER A PAYES, tous du meme genre — un instrument qui repond a la question
+# voisine. Les deux premiers font des FAUX POSITIFS (il accuse un script correct), les deux suivants
+# des FAUX NEGATIFS (il rend vert sur un silence reel), et ceux-la sont les plus chers :
 #   - un `case "$1"` DANS une fonction n'est pas un dispatch (son `$1` est l'argument de la
 #     fonction) : `script_for_plane()` et `badge()` ressortaient en « sous-commandes ». Ce qui est
 #     ecarte est COMPTE et imprime — une soustraction invisible est un mensonge par omission.
@@ -25,9 +26,17 @@
 #     implementent un protocole (`<module> check|apply`) documente une fois dans le README de leur
 #     dossier. Chercher `check` dans chaque module demandait « ce fichier se documente-t-il
 #     lui-meme ? », pas « un operateur peut-il l'apprendre ? ».
+#   - chercher le MOT n'importe ou dans l'aide : `purge` et `forge` apparaissent dans la prose, donc
+#     une sous-commande non documentee portant ces noms passait. Mesure de l'angle mort : 1 sur 3
+#     injectees vue. Une instruction a une FORME (synopsis, alternance, invocation), une phrase non.
+#   - accepter n'importe quelle invocation : `` `chown root:fleet` `` est bien formee et `fleet` y
+#     est un nom de groupe. Le SUJET doit etre le script lui-meme.
 #
-# Mesure de reference au 2026-08-08 : 13 scripts dispatchent, 39 sous-commandes, 0 non instruite
-# (`lcars ls`, alias vivant de `list` absent de l'usage, ferme dans le meme geste).
+# Mesure de reference au 2026-08-08, dans les DEUX directions :
+#   - corpus reel : 13 scripts dispatchent, 39 sous-commandes, 0 non instruite (`lcars ls`, alias
+#     vivant de `list` absent de l'usage, ferme dans le meme geste) ;
+#   - sensibilite : 9 sous-commandes non documentees injectees dans 4 scripts, 9 attrapees. Une
+#     garde qu'on ne mesure que sur un corpus vert ne prouve que sa politesse.
 
 import os
 import re
@@ -104,10 +113,8 @@ def dispatch_labels(text):
     return [c for c in out if c not in NOT_A_COMMAND and not c.startswith("-")], skipped
 
 
-def help_text(path, text):
-    """L'aide du script : heredocs, bandeau de commentaires, echos — plus le README de son dossier
-    et du parent. On prend LARGE a dessein : le faux positif « non instruite » est le cout eleve
-    (il accuse un script correct), le faux negatif se paie au prochain ratissage."""
+def own_help(text):
+    """L'aide DU script : heredocs d'usage, bandeau de commentaires, echos."""
     chunks = []
     for m in re.finditer(r"<<-?\s*'?\"?([A-Za-z_][A-Za-z0-9_]*)'?\"?\n(.*?)\n\s*\1\b", text, re.S):
         chunks.append(m.group(2))
@@ -115,11 +122,62 @@ def help_text(path, text):
         chunks.append(m.group(1))
     for m in re.finditer(r"^\s*(?:echo|printf)\s+.*$", text, re.M):
         chunks.append(m.group(0))
+    return "\n".join(chunks)
+
+
+def readmes(path):
+    out = []
     for d in (os.path.dirname(path), os.path.dirname(os.path.dirname(path))):
         r = os.path.join(d, "README.md")
         if os.path.isfile(r):
-            chunks.append(open(r, encoding="utf-8", errors="replace").read())
-    return "\n".join(chunks)
+            out.append(open(r, encoding="utf-8", errors="replace").read())
+    return "\n".join(out)
+
+
+# UNE INSTRUCTION A UNE FORME, ET C'EST TOUT L'ECART ENTRE CE GARDE ET LE PRECEDENT.
+#
+# La premiere version cherchait le mot n'importe ou dans l'aide. Mesure : sur trois sous-commandes
+# non documentees injectees dans un module (`purge`, `human`, `forge`), elle n'en voyait qu'UNE —
+# `purge` et `forge` apparaissent dans la prose de l'en-tete et du README, et un mot dans une phrase
+# etait accepte comme une instruction. Deux tiers d'angle mort dans un garde cense fermer la classe.
+#
+# Deux formes admises, et rien d'autre :
+#   1. LIGNE DE SYNOPSIS — la commande est le PREMIER token de la ligne (apres un `#`, des espaces,
+#      ou le nom du script / `$PROG` / `$0`). C'est la forme de `docker.sh` et de `lcars`.
+#   2. DOS DE CITATION — la commande est dans un `code span`. C'est la forme de `fleet_v2` dans son
+#      bandeau (`` `fleet_v2 forge <n>` ``) et du protocole des modules (`` `<module> check|apply` ``).
+#   3. ALTERNANCE — la commande est un membre d'un `{start|stop|status}`. C'est la forme de l'usage
+#      de `fleet_v2`, et l'oublier faisait ressortir trois de ses six gestes comme non instruits :
+#      une regle trop stricte accuse un script correct, ce qui est le cout eleve ici.
+#
+# Dans un README, SEULE la forme 2 compte : la prose d'un README n'instruit personne, elle raconte.
+def instructed(cmd, path, text):
+    c = re.escape(cmd)
+    prefix = r"(?:[#*\-]\s*)?(?:\$PROG\s+|\$0\s+|" + re.escape(os.path.basename(path)) + r"\s+)?"
+    synopsis = re.compile(r"^\s*" + prefix + c + r"(?![A-Za-z0-9_-])", re.M)
+    brace = re.compile(r"\{[A-Za-z0-9_|\- \[\]]*(?<![A-Za-z0-9_-])" + c + r"(?![A-Za-z0-9_-])"
+                       r"[A-Za-z0-9_|\- \[\]]*\}")
+
+    # Une citation doit etre une INVOCATION, pas une mention, et la regle vaut PARTOUT — dans le
+    # README comme dans l'aide du script. `` `fleet` `` designe un groupe unix, `` `50-forge` `` un
+    # fichier : les accepter laissait passer des sous-commandes `fleet` et `forge` non documentees
+    # (mesure : 2 des 4 injectees, puis 1 apres avoir resserre le seul README). Une invocation a un
+    # token DEVANT elle — `` `<module> check|apply` ``, `` `fleet_v2 start` `` — donc la commande ne
+    # peut pas etre le premier mot de la citation.
+    # Et ce qui precede doit etre le SCRIPT, pas n'importe quel token. `` `chown root:fleet` `` est
+    # une invocation parfaitement formee ou `fleet` est un nom de groupe : la derniere sous-commande
+    # injectee passait par la. Le sujet nomme (`<module>`, le basename, `$PROG`, `$0`) suivi de son
+    # argument — dont les membres d'une alternance `check|apply` — est la seule forme retenue.
+    subject = r"(?:<module>|\$PROG|\$0|" + re.escape(os.path.basename(path)) + r")"
+    invocation = re.compile(r"`[^`\n]*" + subject + r"\s+([A-Za-z0-9_|.\-]+)")
+
+    def invoked(blob):
+        return any(cmd in m.group(1).split("|") for m in invocation.finditer(blob))
+
+    own = own_help(text)
+    if synopsis.search(own) or brace.search(own) or invoked(own):
+        return True
+    return invoked(readmes(path))
 
 
 dispatchers, total_cmds, skipped_total = 0, 0, 0
@@ -137,10 +195,8 @@ for path in sorted(candidate_files()):
     dispatchers += 1
     cmds = list(dict.fromkeys(cmds))
     total_cmds += len(cmds)
-    doc = help_text(path, text)
     for c in cmds:
-        # Mot entier : `up` ne doit pas etre satisfait par `setup`.
-        if not re.search(r"(?<![A-Za-z0-9_-])" + re.escape(c) + r"(?![A-Za-z0-9_-])", doc):
+        if not instructed(c, path, text):
             silent_all.append((os.path.relpath(path, ROOT), c))
 
 print("mesure : %d scripts dispatchent, %d sous-commandes, %d `case` internes ecartes"
