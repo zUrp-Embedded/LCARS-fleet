@@ -1100,6 +1100,67 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "count_signed_step_runs/3 — a marker names its role, and the role is VERIFIED" do
+    test "a marker signed by the ROLE it names is counted (F-E6 requires role signing)" do
+      # The filter used to be `author == system login` and therefore counted ZERO: F-E6 requires
+      # this comment to be signed by the finishing ROLE, never by the system, while the @doc
+      # promised no permissive undercount two lines above.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [
+             %{"user" => %{"login" => "lcars-engineer"}, "body" => "ok [step_run:engineer:aaa]"},
+             %{"user" => %{"login" => "lcars-bot"}, "body" => "sys [step_run:system:bbb]"}
+           ]},
+        {"GET", "/api/v1/user"} => {200, %{"login" => "lcars-engineer"}}
+      }
+
+      # Pas d'opt `role_tokens` : les jetons de role viennent de `:role_tokens_dir`, et le plug rend
+      # `lcars-engineer` sur `/user` quel que soit le jeton. Inventer une option ici suggererait un
+      # mecanisme qui n'existe pas — le genre de fixture qui fait croire a un lecteur qu'il en a un.
+      o = opts(handlers) |> Keyword.put(:forge_bot_login, "lcars-bot")
+
+      assert {:ok, 2} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, o)
+    end
+
+    test "F059 HOLDS: a third party's forged marker is not counted, and does not break the count" do
+      # The fixture that taught me this: a comment signed `attacker` carrying two fake markers.
+      # Anyone who can comment could otherwise inflate the anti-runaway budget — or, if an
+      # unresolvable role were treated as an error, BREAK the counter entirely.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [
+             %{"user" => %{"login" => "lcars-bot"}, "body" => "vrai [step_run:system:aaa]"},
+             %{"user" => %{"login" => "attacker"}, "body" => "[step_run:fake:ccc]"}
+           ]},
+        {"GET", "/api/v1/user"} => {200, %{"login" => "someone"}}
+      }
+
+      assert {:ok, 1} =
+               ForgeClient.count_signed_step_runs(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")
+               )
+    end
+
+    test "a marker whose role resolves to ANOTHER account is not counted" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200, [%{"user" => %{"login" => "imposteur"}, "body" => "ok [step_run:engineer:aaa]"}]},
+        {"GET", "/api/v1/user"} => {200, %{"login" => "lcars-engineer"}}
+      }
+
+      # Pas d'opt `role_tokens` : les jetons de role viennent de `:role_tokens_dir`, et le plug rend
+      # `lcars-engineer` sur `/user` quel que soit le jeton. Inventer une option ici suggererait un
+      # mecanisme qui n'existe pas — le genre de fixture qui fait croire a un lecteur qu'il en a un.
+      o = opts(handlers) |> Keyword.put(:forge_bot_login, "lcars-bot")
+
+      assert {:ok, 0} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, o)
+    end
+  end
+
   describe "escalation_verdict/3 — the arch's inbox reads a MARKER, not recency" do
     test "returns the last ESCALATION-marked comment, not the thread's last one" do
       # The defect this replaced: `latest_verdict` took the last non-empty body, whatever it was.

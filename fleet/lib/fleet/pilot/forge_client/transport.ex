@@ -106,6 +106,16 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   #
   # Le jeton n'est JAMAIS stocke : `:persistent_term` est lisible par tout processus du noeud. Son
   # empreinte suffit a distinguer deux jetons sans en reveler aucun.
+  @doc false
+  # Le login DE CE JETON, sans passer par les surcharges de `forge_bot_login/2`.
+  #
+  # `derive_bot_login/1` n'a jamais rien eu de specifique au bot : c'est « qui suis-je avec ce
+  # jeton », et depuis que sa cle porte l'empreinte du jeton, il repond juste pour n'importe lequel.
+  # `forge_bot_login/2`, lui, consulte d'abord `opts[:forge_bot_login]` puis l'env applicative —
+  # deux surcharges qui rendraient le login du SYSTEME pour un jeton de ROLE, ce qui est exactement
+  # le genre de reponse plausible et fausse qu'on cherche a supprimer.
+  def login_of(config), do: derive_bot_login(config)
+
   defp derive_bot_login(config) do
     key = {__MODULE__, :bot_login, config.base_url, :crypto.hash(:sha256, config.token)}
 

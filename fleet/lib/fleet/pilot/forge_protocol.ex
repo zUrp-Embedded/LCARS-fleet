@@ -87,6 +87,8 @@ defmodule Fleet.Pilot.ForgeProtocol do
   # Regex DERIVED from the same literal — `Regex.escape` neutralises the `[` of the prefix. NO anchor: the
   # marker is placed at the end of a comment body.
   @step_run_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:[^:\\]]+\\]")
+  # Meme literal, une capture de plus : le role que le marqueur DECLARE.
+  @step_run_role_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "([^:\\]]+):[^:\\]]+\\]")
 
   @doc """
   Format of the signed step_run marker `[step_run:<role>:<sha>]` (builder derived from `@step_run_prefix`, just like
@@ -229,6 +231,30 @@ defmodule Fleet.Pilot.ForgeProtocol do
     do: Regex.match?(@await_marker_rx, body) or Regex.match?(@rework_exhausted_rx, body)
 
   def escalation_marker?(_), do: false
+
+  @doc """
+  Le ROLE que nomme un marqueur de step-run, ou `nil`.
+
+  Le marqueur porte deja l'identite de son ecrivain : `[step_run:<role>:<sha>]`. Un lecteur qui veut
+  savoir si un commentaire a bien ete pose par la fleet n'a donc pas besoin d'enumerer les comptes —
+  il demande au marqueur QUI il pretend etre, puis verifie que l'auteur est bien ce compte-la.
+
+      iex> Fleet.Pilot.ForgeProtocol.step_run_marker_role("fait [step_run:engineer:deadbeef]")
+      "engineer"
+      iex> Fleet.Pilot.ForgeProtocol.step_run_marker_role("rien a signaler")
+      nil
+  """
+  @spec step_run_marker_role(term()) :: String.t() | nil
+  def step_run_marker_role(body) when is_binary(body) do
+    # `capture: :all_but_first` + le garde : `Regex.run/3` peut rendre des positions selon ses
+    # options, et une spec elargie pour couvrir un cas qu'on ne veut pas est une spec qui ment.
+    case Regex.run(@step_run_role_rx, body, capture: :all_but_first) do
+      [role] when is_binary(role) -> role
+      _ -> nil
+    end
+  end
+
+  def step_run_marker_role(_), do: nil
 
   @doc false
   # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native

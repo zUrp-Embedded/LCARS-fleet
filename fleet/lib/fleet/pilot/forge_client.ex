@@ -51,7 +51,8 @@ defmodule Fleet.Pilot.ForgeClient do
       http_delete: 2,
       http_delete_body: 3,
       paginate: 3,
-      forge_bot_login: 2
+      forge_bot_login: 2,
+      login_of: 1
     ]
 
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
@@ -896,19 +897,46 @@ defmodule Fleet.Pilot.ForgeClient do
       {:ok, comments} when is_list(comments) ->
         # Counted markers trust the system author; observability markers may opt into any author.
         trusted =
-          if Keyword.get(opts, :dedup_any_author, false) do
-            comments
-          else
-            case forge_bot_login(config, opts) do
-              {:ok, bot} -> Enum.filter(comments, &ForgeProtocol.system_authored?(&1, bot))
-              {:error, _} -> []
-            end
+          cond do
+            Keyword.get(opts, :dedup_any_author, false) ->
+              comments
+
+            true ->
+              # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
+              # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
+              # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
+              # premier ; se limiter au systeme rendait la dedup aveugle a tout ce qui est signe par
+              # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
+              case trusted_logins(config, opts) do
+                {:ok, logins} ->
+                  Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)
+
+                {:error, _} ->
+                  []
+              end
           end
 
         Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)
 
       _ ->
         false
+    end
+  end
+
+  defp trusted_logins(config, opts) do
+    with {:ok, bot} <- forge_bot_login(config, opts) do
+      case Keyword.get(opts, :dedup_role) do
+        role when is_binary(role) ->
+          case role_login(role, opts) do
+            {:ok, login} -> {:ok, [bot, login]}
+            # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
+            # publication pour une question de dedup.
+            {:error, _} -> {:ok, [bot]}
+          end
+
+        _ ->
+          {:ok, [bot]}
+      end
     end
   end
 
@@ -1000,9 +1028,39 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Counts system-authored step-run markers across all comment pages for the anti-runaway budget.
+  Le login de forge sous lequel `role` ecrit, ou `{:error, _}`.
 
-  An unverifiable bot or page is an error, never a permissive undercount.
+  LE RUNTIME NE SAVAIT SOUS QUEL COMPTE UN ROLE ECRIT. `as_role/2` echange un JETON
+  (`RoleIdentity` porte `{role, token}`) ; le compte qui apparait comme auteur est celui qui detient
+  ce jeton SUR LA FORGE. Deux defauts vivaient de ce trou : le compteur anti-emballement filtrait
+  sur le login SYSTEME et comptait donc ZERO marqueur (tous poses sous un role, cf. F-E6 qui l'exige),
+  et la dedup du meme marqueur ne le voyait jamais et le reposait a chaque rejeu.
+
+  La resolution est le meme geste que pour le bot — `GET /user` avec CE jeton — et son cache est
+  deja keye par empreinte de jeton, donc un role resolu une fois ne coute plus rien.
+  """
+  @spec role_login(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
+  def role_login(role, opts \\ []) when is_binary(role) do
+    with {:ok, role_opts} <- as_role(opts, role),
+         {:ok, config} <- resolve_config(role_opts) do
+      login_of(config)
+    end
+  end
+
+  @doc """
+  Counts the FLEET's step-run markers across all comment pages for the anti-runaway budget.
+
+  UN MARQUEUR DIT QUI IL PRETEND ETRE, ET ON LE VERIFIE. Le filtre etait `auteur == login systeme`
+  et comptait donc ZERO : F-E6 exige que ce commentaire soit signe par le ROLE qui finit, jamais par
+  le systeme, et le `@doc` promettait deux lignes plus haut de ne jamais sous-compter. Un marqueur
+  compte desormais si son auteur est le login du role QU'IL NOMME (ou le bot, pour les marqueurs que
+  le systeme pose lui-meme, cf. `pr-open-fail`).
+
+  La frontiere de F059 est intacte, et c'etait tout l'enjeu : un `[step_run:fake:ccc]` pose par un
+  tiers ne compte pas, puisque son auteur n'est pas le compte du role `fake` — et un compte de role
+  n'est detenu que par le daemon, dans `/home/private`.
+
+  Un role dont le login est irresolvable est une ERREUR, jamais un sous-compte permissif.
   """
   @spec count_signed_step_runs(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -1011,13 +1069,38 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      count =
-        comments
-        |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
-        |> Enum.map(& &1["body"])
-        |> Enum.count(&ForgeProtocol.step_run_marker?/1)
+      comments
+      |> Enum.filter(&(ForgeProtocol.step_run_marker_role(&1["body"]) != nil))
+      |> Enum.reduce_while({:ok, 0}, fn c, {:ok, n} ->
+        role = ForgeProtocol.step_run_marker_role(c["body"])
+        author = get_in(c, ["user", "login"])
 
-      {:ok, count}
+        cond do
+          author == bot ->
+            {:cont, {:ok, n + 1}}
+
+          true ->
+            case role_login(role, opts) do
+              {:ok, ^author} ->
+                {:cont, {:ok, n + 1}}
+
+              {:ok, _other} ->
+                {:cont, {:ok, n}}
+
+              # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
+              # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
+              # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
+              # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
+              {:error, :role_token_unavailable} ->
+                {:cont, {:ok, n}}
+
+              # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
+              # que de rendre un total qui pourrait etre bas.
+              {:error, reason} ->
+                {:halt, {:error, {:role_login_unresolved, role, reason}}}
+            end
+        end
+      end)
     end
   end
 

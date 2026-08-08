@@ -920,7 +920,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     case ForgeClient.as_role(forge_opts, role) do
       {:ok, role_opts} ->
-        comment_opts = Keyword.put(role_opts, :dedup_signature, signature)
+        # LA DEDUP DOIT VOIR CE QUE L'ECRIVAIN A POSE. Le marqueur est signe sous le compte du ROLE
+        # (F-E6 l'exige), et `comment_signed?` filtre par defaut sur l'auteur SYSTEME : elle ne
+        # voyait donc jamais le marqueur precedent, rendait `false`, et le reposait a chaque rejeu —
+        # sous un moduledoc qui promet `replay-safe` deux cents lignes plus haut. On ne desactive
+        # PAS le filtre (ce serait offrir a un tiers de SUPPRIMER un marqueur legitime en postant
+        # la signature en premier) : on dit sous quel role il a ete pose, et la dedup fait confiance
+        # a ce compte-la EN PLUS du systeme.
+        comment_opts =
+          role_opts
+          |> Keyword.put(:dedup_signature, signature)
+          |> Keyword.put(:dedup_role, role)
 
         case forge.post_comment(repo, n, body, comment_opts) do
           {:ok, _} = ok -> ok
