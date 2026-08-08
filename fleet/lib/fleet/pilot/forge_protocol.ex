@@ -329,6 +329,23 @@ defmodule Fleet.Pilot.ForgeProtocol do
   Co-located with its parser `parse_result_block/1` — round-trip guaranteed. `nil`/empty →
   `""` (no noise). JSON fenced if ≤ 8 KB; beyond that, a note pointing to the branch's
   deliverable (never truncated JSON = invalid). `\\n\\n` prefix included (body separator).
+
+  ## AUCUN APPELANT DE PRODUCTION, ET C'EST L'ETAT, PAS UN OUBLI
+
+  Mesure du 2026-08-08 : ce constructeur n'est appele que par son propre test. Le maillon manquant
+  est en amont — `StepRunBuild.build_step_run/7` garde `eng_summary` (de la prose) et laisse tomber
+  la charge structuree du pod, donc le completer n'a rien a serialiser.
+
+  Le parseur, lui, EST vivant : `ForgeClient.get_predecessor_result/3` le lit pour le brief du juge
+  suivant, et son appelant traite l'absence par un repli DELIBERE et documente — le juge est renvoye
+  vers le CODE de la branche (« the deliverable IS NOT a payload — it's the branch CODE »). Le
+  passage de sorties structurees d'une etape a la suivante a donc ete supplante par le rail
+  git-native ; ce couple builder/parser reste comme le FORMAT de ce passage, aller-retour garanti,
+  pret si la question se rouvre.
+
+  Ce qu'il ne faut PAS en conclure : ni que le champ `outputs` d'une carte alimente ce bloc (il est
+  DOCUMENTAIRE, cf. la description du schema v2.5), ni qu'un juge recoit une charge — il recoit une
+  branche.
   """
   @spec result_block(map() | nil) :: String.t()
   def result_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
