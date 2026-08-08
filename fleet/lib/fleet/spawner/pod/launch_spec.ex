@@ -339,7 +339,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   """
   @spec code_reference_path(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t() | nil
   def code_reference_path(opts, cap_profile, projects_root \\ Fleet.Layout.projects_root()) do
-    with true <- Fleet.Layout.ops_branch?(effective_project(opts, cap_profile)["base_branch"]),
+    # `== "ops"`, not `!= "code"`: the reference is granted to the ops face because that face's
+    # producer needs the code as documentation it must not edit. A future face has to state its own
+    # need — inheriting this mount by not being `code` would hand a pod a tree nobody granted it.
+    with "ops" <- Fleet.Layout.face_of(effective_project(opts, cap_profile)["base_branch"]),
          project when is_binary(project) <- rc_project(opts, cap_profile),
          path = Path.join(projects_root, project),
          true <- File.dir?(path) do

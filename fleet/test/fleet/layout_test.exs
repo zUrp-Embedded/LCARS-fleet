@@ -176,13 +176,28 @@ defmodule Fleet.LayoutTest do
       assert err.message =~ "schema enum"
     end
 
-    test "ops_branch?/1: feature branches and nil are NOT the ops face (code-face treatment)" do
-      assert Layout.ops_branch?("work/ops")
-      refute Layout.ops_branch?("main")
-      # A judge clones the producer's branch, whatever face it forked from: neither face → the
-      # code-face treatment (work-ops RO mount, reset realignment) — deliberate, cf. @doc.
-      refute Layout.ops_branch?("lcars/issue-3-scribe")
-      refute Layout.ops_branch?(nil)
+    test "face_of/1 NAMES the face — a non-face answers nil, never another face by default" do
+      assert Layout.face_of("work/ops") == "ops"
+      assert Layout.face_of("main") == "code"
+
+      # The distinction a per-face predicate cannot draw: a producer's feature branch is not the
+      # ops face, and it is not the code face either. A boolean answers `false` to both questions,
+      # and a caller reads that `false` as "the other face". Here it answers `nil`, and a caller
+      # that wants the code treatment for it has to write that clause itself.
+      assert Layout.face_of("lcars/issue-3-scribe") == nil
+      assert Layout.face_of(nil) == nil
+    end
+
+    test "face_of/1 covers EVERY face in the map — the two directions cannot drift apart" do
+      # The clauses are generated from `@face_branches`, so this holds by construction today. It is
+      # written down because the construction is the guarantee: a face added to the map without a
+      # `face_of/1` clause would be a branch the runtime routes and cannot name, and the generation
+      # is the only thing standing between here and that. If the `for` comprehension is ever
+      # unrolled into hand-written clauses, this test is what notices the one that was forgotten.
+      for face <- ["code", "ops"] do
+        assert Layout.face_of(Layout.face_branch(face)) == face,
+               "#{face}: face_branch/1 and face_of/1 must be inverse on every declared face"
+      end
     end
   end
 end

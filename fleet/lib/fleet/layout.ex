@@ -102,14 +102,25 @@ defmodule Fleet.Layout do
   end
 
   @doc """
-  Whether `branch` IS the ops face. The discriminant the face-dependent consumers ask (mounts:
-  which side is the RO reference; realignment: which worktree, and rebase-not-reset — the host
-  ops worktree is a WRITER, cf. inventory §C). A feature branch is neither face → `false`,
-  which yields the code-face treatment everywhere: correct for judges cloning a producer's
-  branch, whatever face it forked from.
+  The face `branch` IS, or `nil` when it is not a face at all (feature branch, `nil`, junk).
+
+  THE SHAPE IS THE POINT: this NAMES a face, it does not test for one. A predicate over a space of
+  faces (`ops_branch?`, `code_branch?`) answers "not that one", which every caller reads as "the
+  other one" — a reading that holds only while there are exactly two. It stays correct until the
+  day it silently is not, on every consumer at once, with nothing going red.
+
+  A clause per face, GENERATED from `@face_branches` so the two directions cannot drift: naming a
+  new face in that map gives it a `face_of/1` clause in the same gesture. The last clause is not a
+  catch-all over faces — it is the answer for a branch that is NOT one, which is legitimate and
+  frequent (a producer's feature branch), and every caller decides what to do with it explicitly
+  rather than inheriting a face by default.
   """
-  @spec ops_branch?(String.t() | nil) :: boolean()
-  def ops_branch?(branch), do: branch == @face_branches["ops"]
+  @spec face_of(String.t() | nil) :: String.t() | nil
+  for {face, branch} <- @face_branches do
+    def face_of(unquote(branch)), do: unquote(face)
+  end
+
+  def face_of(_not_a_face), do: nil
 
   @doc """
   A pod's deliverable workspace: `<pod_dir>/workspace`. PURE computation, SINGLE authority for the

@@ -1494,6 +1494,43 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       )
     end
 
+    # La sonde qui ne diagnostique rien : elle CAPTURE les opts qu'on lui tend. Le rendu `:error`
+    # renvoie le chemin sur le legacy, dont l'observable ne discrimine rien ici — c'est voulu, ce
+    # test n'assure pas le routage mais l'ARGUMENT, et l'argument n'est visible que d'ici.
+    defmodule DirCapturingProbe do
+      def probe(_repo, _ref, opts) do
+        send(self(), {:probe_opts, opts})
+        {:error, :captured}
+      end
+    end
+
+    test "la FACE de la PR decide le worktree ou son conflit est resolu" do
+      # Le commentaire de `conflict_face_opts/1` decrit ce defaut comme repare : les helpers
+      # tombaient sur leur defaut `origin/main` DANS le worktree de la face code, et sur une PR ops
+      # cela resolvait un conflit en fusionnant la face CODE dans une branche doc — silencieusement,
+      # en rapportant `{:ok, :auto_resolved}`. La reparation etait la, RIEN ne la tenait : renvoyer
+      # la face ops vers `projects_root` laissait les 2451 tests verts (mesure 2026-08-08). Une
+      # cicatrice ecrite en commentaire et non gardee se fait retirer par le prochain refactor, qui
+      # lit un `case` a trois branches identiques a deux details pres et « simplifie ».
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, DirCapturingProbe)
+
+      name = Fleet.Layout.project_name("lordzurp/lcars-test")
+
+      ops_pr = Map.put(conflict_pr(), "base", %{"ref" => "work/ops"})
+      _ = StepDispatcher.dispatch_review(ops_pr, conflict_opts([]))
+      assert_received {:probe_opts, ops_opts}
+      assert ops_opts[:dir] == Path.join(Fleet.Layout.work_root(), name)
+      assert ops_opts[:base_branch] == "origin/work/ops"
+
+      # Et le jumeau code, sans quoi l'assertion ci-dessus passerait aussi si les deux faces
+      # pointaient le meme arbre.
+      _ = StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+      assert_received {:probe_opts, code_opts}
+      assert code_opts[:dir] == Path.join(Fleet.Layout.projects_root(), name)
+      assert code_opts[:base_branch] == "origin/main"
+    end
+
     test "tier-0 : un conflit TOUT-SEMANTIQUE saute le producteur, et sans chief il atteint l'arch" do
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllSemanticProbe)

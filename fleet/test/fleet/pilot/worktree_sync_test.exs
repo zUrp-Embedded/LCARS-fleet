@@ -69,6 +69,21 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     assert head(proj) == head(seed)
   end
 
+  test "a branch that is NOT a face aligns NOTHING and says so — never the code worktree by default",
+       %{proj: proj, sync: sync} do
+    # THE FALL-THROUGH IS THE DANGEROUS CLAUSE, and nothing held it: replacing the explicit
+    # non-face branch with a catch-all onto the code worktree left the whole suite green (measured
+    # 2026-08-08). A feature branch handed here would then have been silently reset onto a face it
+    # does not belong to — the alignment is `reset --hard` on the code side, so the wrong guess
+    # does not fail, it DESTROYS, and it reports `:ok`.
+    before = head(proj)
+
+    assert {:error, {:not_a_face, "lcars/issue-3-scribe"}} =
+             WorktreeSync.sync_now(sync, "fleet/myproj", "lcars/issue-3-scribe")
+
+    assert head(proj) == before, "a non-face branch must not have touched a worktree"
+  end
+
   defp commit_push!(dir, file, content, msg) do
     File.write!(Path.join(dir, file), content)
     git_in!(dir, ["add", "-A"])

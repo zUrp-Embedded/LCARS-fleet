@@ -353,10 +353,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp conflict_face_opts(%Ctx{} = ctx) do
     base = Keyword.fetch!(ctx.opts, :pr_base_branch)
 
+    name = Fleet.Layout.project_name(ctx.repo)
+
+    # One clause per face, and the THIRD one is a decision rather than the fall-through it used to
+    # be. A fleet PR's base is a face branch, so `nil` means a stacked PR based on a feature branch:
+    # it is resolved in the code worktree, which is right for a code-face stack and is the only
+    # answer available — the base alone does not say which face the branch it forks from lives on.
+    # Written out because as an `else` it also swallowed every future face.
     dir =
-      if Fleet.Layout.ops_branch?(base),
-        do: Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(ctx.repo)),
-        else: Path.join(Fleet.Layout.projects_root(), Fleet.Layout.project_name(ctx.repo))
+      case Fleet.Layout.face_of(base) do
+        "ops" -> Path.join(Fleet.Layout.work_root(), name)
+        "code" -> Path.join(Fleet.Layout.projects_root(), name)
+        nil -> Path.join(Fleet.Layout.projects_root(), name)
+      end
 
     [base_branch: "origin/" <> base, dir: dir]
   end

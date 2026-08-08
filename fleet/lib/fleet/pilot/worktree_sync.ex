@@ -51,16 +51,15 @@ defmodule Fleet.Pilot.WorktreeSync do
   defp do_sync(repo, branch, state) do
     name = Fleet.Layout.project_name(repo)
 
+    # One clause per face and NO catch-all: the day `@face_branches` names a third one, this case
+    # raises with the face in the message instead of quietly routing it to a worktree that is not
+    # its own. A crash that names the missing branch is a two-minute fix; a doc deliverable
+    # realigned into the code worktree is a corruption nobody attributes.
     {dir, aligner} =
-      cond do
-        branch == Fleet.Layout.code_branch() ->
-          {Path.join(state.root, name), &align_code/1}
-
-        Fleet.Layout.ops_branch?(branch) ->
-          {Path.join(state.work_root, name), &align_ops/1}
-
-        true ->
-          {nil, nil}
+      case Fleet.Layout.face_of(branch) do
+        "code" -> {Path.join(state.root, name), &align_code/1}
+        "ops" -> {Path.join(state.work_root, name), &align_ops/1}
+        nil -> {nil, nil}
       end
 
     cond do
