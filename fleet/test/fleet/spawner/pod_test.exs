@@ -2232,6 +2232,48 @@ defmodule Fleet.Spawner.PodTest do
   # `recover_or_init` into `:release` (mute stop, no launch) → orphan loop on the poller side.
   # `spawn_pod` calls `clear_terminal_snapshot/3` BEFORE spawn to restart FRESH. Regression
   # validated live.
+  describe "spawn_pod WIRES the anti-tombstone clear (not just exposes it)" do
+    # LE JUMEAU DE D-43, DANS LE MEME FICHIER : la FONCTION etait tenue par les deux tests ci-dessous,
+    # son BRANCHEMENT par personne. Mesure du 2026-08-08 : retirer l'appel a
+    # `clear_terminal_snapshot/3` dans `Fleet.Spawner.spawn_pod/3` laissait les 2439 tests VERTS.
+    #
+    # Et la cicatrice juste au-dessus dit ce que ca coute : sous pod_id DETERMINISTE, un re-dispatch
+    # retombe sur le meme id ; une pierre tombale terminale d'un cycle precedent court-circuite
+    # `recover_or_init` en `:release` — arret MUET, pas de lancement — et le poller reboucle sur un
+    # orphelin. Le defaut ne casse rien, il ne lance simplement rien.
+    test "une pierre tombale terminale est effacee par le SPAWN lui-meme", %{tmp_dir: tmp} do
+      pod_id = "issue-1-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      pod_dir = seed_pod_dir!(tmp, pod_id)
+
+      assert File.exists?(snap),
+             "la pierre tombale doit exister AVANT, sinon le test ne prouve rien"
+
+      assert File.exists?(pod_dir)
+
+      StubBackend.set_reply(interactive_reply())
+      StubBackend.set_parent(self())
+
+      # `spawn_pod/3` exige un interlocutor (garde structurelle DR-019) la ou `Pod.start_link` non :
+      # les autres tests de ce fichier passent par le second. On ajoute le champ ICI plutot que dans
+      # `valid_profile/0`, que tout le fichier partage.
+      profile =
+        put_in(valid_profile().spec, Map.put(valid_profile().spec, "interlocutor", "machine"))
+
+      assert {:ok, _} =
+               Fleet.Spawner.spawn_pod(profile, "issue-1",
+                 repo_id: @test_repo_id,
+                 pod_id: pod_id,
+                 brief: "fais X"
+               )
+
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      refute File.exists?(Path.join(pod_dir, "workspace_marker")),
+             "le pod_dir rance survit au spawn : le pod repart sur l'etat d'un cycle mort"
+    end
+  end
+
   describe "clear_terminal_snapshot/3 (anti-tombstone)" do
     test "erases the TERMINAL tombstone (:succeeded) + the pod_dir → fresh re-spawn", %{
       tmp_dir: tmp
