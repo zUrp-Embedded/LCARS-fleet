@@ -5,15 +5,23 @@ defmodule Fleet.Pilot.ProjectArchitect do
   per repo, project-bound identity (numeric repo id in its deterministic UUID → a stable Desktop
   slot per project), spawned ON-OPEN (create/import/open) and ON-DEMAND (escalation rail).
 
-  ## No clone — mounts (§14.d)
+  ## No clone — the three faces, and one of them only in reading
 
-  The arch is NOT a producer: a work clone (frozen at spawn, forge-blind so never fetched) is the
-  wrong window for it. Its world = two DYNAMIC mounts derived from the project name:
+  The arch is NOT a producer of code: a work clone (frozen at spawn, forge-blind so never fetched)
+  is the wrong window for it. Its world = three DYNAMIC mounts derived from the project name, one
+  per face:
 
     * `/home/projects/<name>` **RO** — read the code to frame briefs (the host-side dir, the same
-      view the human has);
-    * `/home/projects.work/<name>` **RW** — author its docs/briefs (the system pushes; the pod
-      stays forge-blind like every worker: it commits in its pod, the SYSTEM pushes).
+      view the human has). Read-only and HARD: a typo fixed by hand here is a change nobody
+      reviewed, and an actor with a pen uses it where nobody is looking;
+    * `/home/projects.doc/<name>` **RW** — this IS its producing face. The documentation is written
+      here, with the human, at the terminal — which is the bulk of what actually happens — and a
+      scribe enriches it through the ordinary pipeline. The pod stays forge-blind like every
+      worker: it commits in its pod, the SYSTEM pushes;
+    * `/home/projects.work/<name>` **RO** — the record: briefs, verdicts, provenance. The arch is
+      the ONLY pod that mounts it, and reading it is its function — following the work and
+      reporting it to the human. **Read-only, and the mode is the point**: it is the party being
+      judged, and a judged party that can rewrite the tree it is judged on is not judged at all.
 
   The in-flight work view (branches, PRs) is the FORGE via its MCP tools (`get_issue_status`),
   never git — neither a frozen clone nor a mount shows branches born after spawn.
@@ -32,8 +40,8 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:spawner` — default `Fleet.Spawner` (the `spawn_pod/3` provider).
     * `:forge_client` — default `Fleet.Pilot.ForgeClient` (numeric repo id for the UUID).
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
-    * `:projects_root` / `:work_root` — FS roots (defaults `Fleet.Layout`), same keys as
-      `ProjectOnboard` (the onboard opts thread through unchanged).
+    * `:projects_root` / `:work_root` / `:doc_root` — FS roots (defaults `Fleet.Layout`), same
+      keys as `ProjectOnboard` (the onboard opts thread through unchanged).
   """
 
   require Logger
@@ -68,11 +76,16 @@ defmodule Fleet.Pilot.ProjectArchitect do
     name = Fleet.Layout.project_name(repo)
     proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
+    doc_dir = Path.join(Keyword.get(opts, :doc_root, Fleet.Layout.doc_root()), name)
     repo_id_result = Spawn.repo_id(forge, repo, forge_opts)
 
     cond do
-      not File.dir?(proj_dir) ->
-        {:error, {:not_onboarded, proj_dir}}
+      # EVERY mounted face must exist, because bwrap binds STRICTLY: a missing source is not an
+      # empty mount, it is a launcher that dies. Checking only the code face let a project whose
+      # doc face never landed pass this door and fail at the bind, with an error naming bwrap
+      # instead of the onboarding that never completed.
+      missing = Enum.find([proj_dir, work_dir, doc_dir], &(not File.dir?(&1))) ->
+        {:error, {:not_onboarded, missing}}
 
       match?({:error, _}, repo_id_result) ->
         {:error, reason} = repo_id_result
@@ -101,10 +114,18 @@ defmodule Fleet.Pilot.ProjectArchitect do
             repo_id: repo_id,
             rc_name: Fleet.Layout.pod_label(name, "architect"),
             project_slug: name,
-            # The arch's world (moduledoc): live host dirs, not a frozen clone.
+            # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
+            # face and it is `doc` — the face it produces on. `ops` is the record it is judged
+            # against, so it reads it and cannot touch it; `code` goes through the pipeline like
+            # everyone else's.
+            #
+            # ORDER MATTERS HERE. `pod_cwd/3` falls back to the FIRST rw mount for a pod with no
+            # project remap, and `pod_mounts_env/3` keeps the FIRST occurrence of a path. Putting
+            # the two read-only faces ahead of the writable one is therefore not cosmetic.
             mounts: [
               %{"mode" => "ro", "path" => proj_dir},
-              %{"mode" => "rw", "path" => work_dir}
+              %{"mode" => "ro", "path" => work_dir},
+              %{"mode" => "rw", "path" => doc_dir}
             ]
           ]
 

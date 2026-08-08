@@ -41,20 +41,25 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
   describe "ensure/2" do
     @describetag :tmp_dir
 
-    # The project's dual-dir on the machine (ensure refuses an absent project — its mounts ARE its world).
+    # The project's THREE faces on the machine (ensure refuses an absent one — its mounts ARE its
+    # world, and bwrap binds strictly: a missing source kills the launcher, it does not skip).
     defp mk_dirs(tmp) do
       proj = Path.join([tmp, "projects", "demo"])
       work = Path.join([tmp, "projects.work", "demo"])
-      File.mkdir_p!(proj)
-      File.mkdir_p!(work)
+      doc = Path.join([tmp, "projects.doc", "demo"])
+      Enum.each([proj, work, doc], &File.mkdir_p!/1)
 
-      {proj, work,
-       [projects_root: Path.join(tmp, "projects"), work_root: Path.join(tmp, "projects.work")]}
+      {proj, work, doc,
+       [
+         projects_root: Path.join(tmp, "projects"),
+         work_root: Path.join(tmp, "projects.work"),
+         doc_root: Path.join(tmp, "projects.doc")
+       ]}
     end
 
     test "spawns the architect PROJECT-BOUND: composed cap + repo_id + repo + rc_name + MOUNTS (no clone)",
          %{tmp_dir: tmp} do
-      {proj, work, roots} = mk_dirs(tmp)
+      {proj, work, doc, roots} = mk_dirs(tmp)
 
       assert {:ok, "architect-demo"} =
                ProjectArchitect.ensure(
@@ -79,13 +84,43 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       # No ticket: the architect is project-bound, not ticket-bound — the label carries no number,
       # and the slug still travels explicitly (the spawn choke point demands it of every named pod).
       assert opts[:project_slug] == "demo"
-      # NO CLONE (§14.d): the arch is not a producer — its world is the two live host dirs.
+      # NO CLONE (§14.d): the arch is not a producer of code — its world is the three live host
+      # dirs, one per face.
       refute Keyword.has_key?(opts, :project)
 
+      # ONE writable face, and it is `doc`. `ops` is the record the arch is JUDGED against: it
+      # reads it to follow the work and report, and it cannot touch it — a judged party that can
+      # rewrite the tree it is judged on is not judged. `code` goes through the pipeline like
+      # everyone else's, with no typo exception: an actor holding a pen uses it where nobody looks.
       assert opts[:mounts] == [
                %{"mode" => "ro", "path" => proj},
-               %{"mode" => "rw", "path" => work}
+               %{"mode" => "ro", "path" => work},
+               %{"mode" => "rw", "path" => doc}
              ]
+
+      # And the ORDER is load-bearing, not cosmetic: `pod_cwd/3` falls back to the FIRST rw mount
+      # for a pod with no project remap, and `pod_mounts_env/3` keeps the FIRST occurrence of a
+      # path. The two read-only faces must precede the writable one.
+      assert [%{"mode" => "ro"}, %{"mode" => "ro"}, %{"mode" => "rw"}] =
+               Enum.map(opts[:mounts], &Map.take(&1, ["mode"]))
+    end
+
+    test "a project whose DOC face is absent is NOT onboarded — bwrap would die on the bind", %{
+      tmp_dir: tmp
+    } do
+      # The guard used to look at the code face alone. A project whose doc face never landed then
+      # passed this door and failed at the bind, with an error naming bwrap instead of the
+      # onboarding that never finished — and the arch's producing face IS the doc one.
+      {_proj, _work, doc, roots} = mk_dirs(tmp)
+      File.rm_rf!(doc)
+
+      assert {:error, {:not_onboarded, ^doc}} =
+               ProjectArchitect.ensure(
+                 "fleet/demo",
+                 [spawner: CaptureSpawner, forge_client: StubForge] ++ roots
+               )
+
+      refute_received {:spawn_pod, _, _, _}
     end
 
     test "project NOT on the machine → {:error, {:not_onboarded, _}} — no spawn", %{tmp_dir: tmp} do
@@ -104,7 +139,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
     test "numeric repo id unresolved → refusal CARRYING the forge's reason, no spawn", %{
       tmp_dir: tmp
     } do
-      {_proj, _work, roots} = mk_dirs(tmp)
+      {_proj, _work, _doc, roots} = mk_dirs(tmp)
 
       defmodule NoIdForge do
         def repo_id(_repo, _opts), do: {:error, :forge_down}
@@ -131,7 +166,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
     test "a seam with no repo_id/2 is a WIRING fact, never reported as a forge failure", %{
       tmp_dir: tmp
     } do
-      {_proj, _work, roots} = mk_dirs(tmp)
+      {_proj, _work, _doc, roots} = mk_dirs(tmp)
 
       defmodule NoRepoIdFunctionForge do
         # deliberately exports nothing: the historical stub shape
@@ -153,7 +188,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
     end
 
     test "a spawn failure is returned (best-effort at call sites)", %{tmp_dir: tmp} do
-      {_proj, _work, roots} = mk_dirs(tmp)
+      {_proj, _work, _doc, roots} = mk_dirs(tmp)
 
       assert {:error, :launch_failed} =
                ProjectArchitect.ensure(
