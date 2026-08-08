@@ -13,6 +13,13 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @sync_debounce_ms 2_000
   @retry_ms 30_000
 
+  @doc """
+  The recurrence KEY of an incident: `op:subject:reason_category`.
+
+  Deliberately coarser than the reason itself — the subject is normalised and the reason folded to a
+  category, so the same failure on the same object collapses to one signature instead of a new one
+  per error message. A key that never repeats measures nothing.
+  """
   @spec signature(String.t(), String.t(), term()) :: String.t()
   def signature(op, subject, reason) when is_binary(op) and is_binary(subject) do
     "#{op}:#{normalize(subject)}:#{reason_category(reason)}"

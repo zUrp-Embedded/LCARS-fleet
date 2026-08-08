@@ -17,6 +17,19 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   # (default "main"). No forge configured → `{:ok, nil}` (pod without repo, e.g. local
   # tests). The clone/ls-remote auth is carried by the runtime (`Fleet.Credentials.ForgeAuth.
   # git_env`, token via env), never by the pod (forge-blind).
+  @doc """
+  Resolves the project map a pod clones from: repo URL, base branch, and the two pinned shas.
+
+  `nil` when no forge is configured (the pod works without a project). RAISES when `:base_branch` is
+  missing rather than defaulting: the face decision is made once at the dispatch entry and threaded,
+  and a substituting default here silently pinned the CODE face for an ops deliverable.
+
+  `gate_base_sha` is pinned SEPARATELY from `base_sha` only when the two refs diverge — a rebase
+  resolution clones the feature and must descend from the target. On the forward path the read is
+  reused rather than repeated, which is cheaper and, more importantly, consistent: two reads of one
+  ref at two instants can return two shas, and the pod would be judged against a base it never
+  cloned.
+  """
   @spec default_project_resolver(String.t(), keyword()) ::
           {:ok, map() | nil} | {:error, term()}
   def default_project_resolver(repo, opts) do

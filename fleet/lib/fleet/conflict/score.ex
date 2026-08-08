@@ -21,6 +21,12 @@ defmodule Fleet.Conflict.Score do
   def scope_impact(lines) when lines <= 30, do: 35
   def scope_impact(_), do: 55
 
+  @doc """
+  Folds a numeric confidence into the label the rest of the engine routes on.
+
+  The thresholds live HERE and nowhere else: a second table would let a report say `:high` while the
+  gate read the number as medium, and the two would disagree without either being wrong.
+  """
   @spec label_from_score(number()) :: ConfidenceScore.label()
   def label_from_score(s) when s >= 92, do: :certain
   def label_from_score(s) when s >= 68, do: :high

@@ -148,6 +148,13 @@ defmodule Fleet.Spawner.PodTmux do
 
   @dead_confirm_attempts 5
   @dead_confirm_sleep_ms 40
+  @doc """
+  Whether a pod session is REALLY gone — `:absent` observed within a bounded poll, never a single
+  read.
+
+  `false` on `:unknown` as well as on `:alive`: a state we could not read is not a death, and the
+  caller of this reaps. One transient miss would kill a living pod and its context.
+  """
   @spec confirm_dead?(String.t(), (String.t() -> :alive | :absent | :unknown)) :: boolean()
   def confirm_dead?(pod_id, state_fun \\ &session_state/1) when is_binary(pod_id) do
     Enum.reduce_while(1..@dead_confirm_attempts, false, fn attempt, _acc ->

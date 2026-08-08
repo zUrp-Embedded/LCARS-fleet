@@ -98,7 +98,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_forge_mutations_exposed(root),
         check_intensity_max_fan_ceiling(root),
         check_test_corpora_on_record(root),
-        check_doctest_declarations_have_examples(root)
+        check_doctest_declarations_have_examples(root),
+        check_public_functions_documented(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
         # nothing separate to contract.
@@ -1813,6 +1814,115 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             else: " (#{length(unresolved)} module(s) unresolved, not judged)"
           )
     }
+  end
+
+  @doc false
+  # A PUBLIC FUNCTION WITH NO `@doc` IS A HOLE IN THE SSoT. The repo's contract rule is that a
+  # module's `@moduledoc` carries the domain contract and each public function carries its own
+  # `@doc` — machine-visible through `h`/ExDoc. A public function without one answers `h` with
+  # nothing, and the caller reads the body instead: the source becomes the contract, and every
+  # detail of it becomes load-bearing by accident.
+  #
+  # WHAT THIS DOES NOT CHECK, and the distinction is the whole reliability of it. It does NOT
+  # require the `@moduledoc` to enumerate the public functions — measured on this tree, that rule
+  # accuses 157 modules out of 194 (80%), starting with `Fleet.Layout`, whose moduledoc explains a
+  # LAYOUT and is right not to be an index. A wall that fires on 80% of correct code is not a wall,
+  # it is a nag, and the next person widens it until it stops firing.
+  #
+  # `@impl` callbacks are EXCLUDED: their contract lives in the behaviour, and restating it per
+  # implementation is the duplication this repo refuses elsewhere. OTP callbacks likewise.
+  #
+  # Calibrated by measurement, in this order: the naive rule accused 80%, "no `@doc`" accused 33
+  # modules — dominated by behaviour implementations — and excluding `@impl` left 9 modules and 12
+  # functions, four of which were verified BY HAND before anything shipped. Those twelve were
+  # documented; the check then starts green, which is the only state a wall may be born in.
+  def check_public_functions_documented(root) do
+    undocumented =
+      Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
+      |> Enum.flat_map(fn path ->
+        case File.read(path) do
+          {:ok, src} ->
+            case undocumented_public_functions(src) do
+              [] -> []
+              names -> [{Path.relative_to(path, root), names}]
+            end
+
+          _ ->
+            []
+        end
+      end)
+
+    scanned = length(Path.wildcard(Path.join([root, "lib", "**", "*.ex"])))
+
+    %{
+      id: "docs.public_functions_documented",
+      remediation:
+        "give the function an `@doc` saying its contract — or `@doc false` if it is public only " <>
+          "for a reason the reader must not take as an API. `h Module.fun` answering nothing is " <>
+          "the source becoming the contract by default",
+      status: if(scanned > 0 and undocumented == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          scanned == 0 ->
+            ["INSTRUMENT BROKEN — no source file scanned under lib/"]
+
+          undocumented != [] ->
+            Enum.map(undocumented, fn {p, n} -> "#{p}: #{Enum.join(n, ", ")}" end)
+
+          true ->
+            []
+        end,
+      note:
+        "#{scanned} modules scanned, #{length(undocumented)} carrying an undocumented public function"
+    }
+  end
+
+  # `@doc false` COUNTS AS DOCUMENTED, deliberately: it is an explicit statement that the function is
+  # public for a mechanical reason and not as an API. Treating it as a miss would push its authors to
+  # write a hollow `@doc` instead, which is worse — a sentence nobody meant, in the place a reader
+  # trusts most.
+  defp undocumented_public_functions(src) do
+    otp =
+      ~w(start_link init child_spec handle_call handle_cast handle_info terminate code_change handle_continue)
+
+    {public, documented, impls} =
+      src
+      |> String.split("\n")
+      |> Enum.reduce({MapSet.new(), MapSet.new(), MapSet.new(), false, false}, fn line, acc ->
+        {pub, doc, imp, pending_doc, pending_impl} = acc
+        trimmed = String.trim_leading(line)
+
+        cond do
+          String.starts_with?(trimmed, "@doc") ->
+            {pub, doc, imp, true, pending_impl}
+
+          String.starts_with?(trimmed, "@impl") ->
+            {pub, doc, imp, pending_doc, true}
+
+          String.starts_with?(trimmed, "@spec") ->
+            acc
+
+          match?([_, _], Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)) ->
+            [_, name] = Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)
+            imp = if pending_impl, do: MapSet.put(imp, name), else: imp
+
+            if name in otp do
+              {pub, doc, imp, false, false}
+            else
+              doc = if pending_doc, do: MapSet.put(doc, name), else: doc
+              {MapSet.put(pub, name), doc, imp, false, false}
+            end
+
+          Regex.match?(~r/^  defp?\s/, line) ->
+            {pub, doc, imp, false, false}
+
+          true ->
+            acc
+        end
+      end)
+      |> then(fn {pub, doc, imp, _, _} -> {pub, doc, imp} end)
+
+    public |> MapSet.difference(documented) |> MapSet.difference(impls) |> Enum.sort()
   end
 
   @doc false

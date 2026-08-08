@@ -7,6 +7,12 @@ defmodule Fleet.Conflict.Assemble do
   alias Fleet.Conflict.{Diff, Hunk}
   alias Fleet.Conflict.Patterns.Utils
 
+  @doc """
+  Resolved lines for a hunk the engine can settle mechanically, with the sentence explaining WHY.
+
+  `:skip` for every hunk whose type carries a real disagreement — the explanation is not decoration
+  there either: a resolution nobody can read is a merge nobody can review.
+  """
   @spec resolve_lines(Hunk.t()) :: {:ok, [String.t()], String.t()} | :skip
   def resolve_lines(%Hunk{type: :same_change} = h),
     do: {:ok, h.ours_lines, "Same edit on both sides -- trivial (ours == theirs)."}

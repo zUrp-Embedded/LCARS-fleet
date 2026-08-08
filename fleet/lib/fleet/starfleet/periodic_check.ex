@@ -37,12 +37,24 @@ defmodule Fleet.Starfleet.PeriodicCheck do
     GenServer.start_link(module, opts, name: Keyword.get(opts, :name, module))
   end
 
+  @doc """
+  Arms the next tick — `Process.send_after/3`, returning its reference.
+
+  Separate from `tick/3` so a GenServer can arm the first one from `init/1` without running a check.
+  """
   @spec schedule(atom(), pos_integer()) :: reference()
   def schedule(tick_message, interval_ms)
       when is_atom(tick_message) and is_integer(interval_ms) and interval_ms > 0 do
     Process.send_after(self(), tick_message, interval_ms)
   end
 
+  @doc """
+  Runs one periodic check and RE-ARMS from the new state, in that order.
+
+  The interval is read from the state AFTER the check, so a check that changes its own cadence takes
+  effect on the next tick rather than the one after. Re-arming last also means a raising check stops
+  the timer instead of looping on the failure.
+  """
   @spec tick(map(), atom(), (map() -> map())) :: {:noreply, map()}
   def tick(state, tick_message, do_check) when is_function(do_check, 1) do
     new_state = do_check.(state)
@@ -50,6 +62,12 @@ defmodule Fleet.Starfleet.PeriodicCheck do
     {:noreply, new_state}
   end
 
+  @doc """
+  Runs the check ON DEMAND and replies from the RESULTING state — the `handle_call` twin of `tick/3`.
+
+  Does NOT re-arm: an out-of-band check must not shift the periodic cadence, or a caller polling it
+  would silently suppress the scheduled one.
+  """
   @spec check_now(map(), (map() -> map()), (map() -> term())) :: {:reply, term(), map()}
   def check_now(state, do_check, reply)
       when is_function(do_check, 1) and is_function(reply, 1) do

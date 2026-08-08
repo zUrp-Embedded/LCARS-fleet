@@ -27,6 +27,14 @@ defmodule Fleet.Pilot.BriefBuilder do
   # blind (a cautious eng refuses to guess → `blocked_dep` → wedge). We read the feedback on the forge
   # (the runtime, not the pod: forge boundary preserved) and inject it. If the read fails / no body,
   # we fall back to the generic instruction (the pod still has the cloned PR + its code).
+  @doc """
+  Brief of a PRODUCER resuming on a PR that carries REQUEST_CHANGES, conflict sections included.
+
+  Carries the same git-native commit instruction as the initial work order: the pod is forge-blind,
+  so a rework told only to "re-push" delivers nothing. `opts[:conflict]` selects the voice — the
+  OWNER resumes work the judges approved, an OUTSIDER arrives on someone else's branch after that
+  budget ran out, and telling the second "ton brief est INCHANGÉ" names a brief it never had.
+  """
   def rework_brief(role, forge, repo, pr, forge_opts, _route, opts \\ []) do
     # The eng-voice prose (OUTGOING info, twin of the incoming info starvation) lives IN the
     # template (F-23): the summary posted on the PR is the producer's only voice for the human.
@@ -155,6 +163,16 @@ defmodule Fleet.Pilot.BriefBuilder do
   # the DELIVERABLE-judge path, when the criterion (issue body) can't be READ from the forge (F-C083:
   # read-error ≠ absence → the dispatch DEFERS rather than spawn a criterion-less judge). Out-of-vocab
   # `brief_kind`/`judge_target` still `raise` (structural config bug, fail-loud).
+  @doc """
+  Builds the brief a pod receives, and its `brief_kind` — the SUM over the four shapes.
+
+  TOTAL and fail-loud on an out-of-vocabulary `brief_kind`/`judge_target`: judge-ness is a security
+  property, so it is never inferred by the omission of a clause. A judge that received an executable
+  issue body would produce instead of judging, and nothing downstream distinguishes the two.
+
+  `{:error, {:criterion_unavailable, _}}` when the judging criterion cannot be read: a judge without
+  a criterion approves, which is the false green this rail fail-closes against everywhere else.
+  """
   @spec build_brief(
           Fleet.CapProfile.t(),
           String.t(),

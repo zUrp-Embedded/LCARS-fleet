@@ -10,6 +10,14 @@ defmodule Fleet.Workflow.GraphValidator do
   @type detail :: map()
   @type error :: {kind(), detail()}
 
+  @doc """
+  Validates a card's step graph: no phantom edge, exactly one root, all reachable, acyclic, no
+  fan-out.
+
+  Returns the FIRST violation as `{:error, {kind, detail}}` — `describe/1` renders it for a human.
+  A single root and a single successor are not graph theory for its own sake: the engine walks the
+  card one step at a time, so a fork would leave a branch nobody advances.
+  """
   @spec validate(steps()) :: :ok | {:error, error()}
   def validate(steps) when is_map(steps) do
     # Shared adjacency for reachability, acyclicity, and fan-out checks.

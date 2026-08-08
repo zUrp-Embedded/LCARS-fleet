@@ -307,6 +307,13 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @spec merge_marker(integer()) :: String.t()
   def merge_marker(pr_number) when is_integer(pr_number), do: "[merge:pr-#{pr_number}]"
 
+  @doc """
+  Extracts the PR number from a merge marker, or `:error` — the co-located inverse of
+  `merge_marker/1`.
+
+  `:error` on anything else, including a non-binary: the marker is read from forge content, which is
+  untrusted input, and a body that merely resembles one must not resolve to a number.
+  """
   @spec parse_merge_marker(term()) :: {:ok, integer()} | :error
   def parse_merge_marker(body) when is_binary(body) do
     case Regex.run(@merge_marker_rx, body) do
