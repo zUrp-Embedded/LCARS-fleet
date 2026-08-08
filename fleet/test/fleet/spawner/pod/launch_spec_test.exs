@@ -51,6 +51,55 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
+  describe "pod_mounts_env/3 — the COMPOSITION, which nothing held" do
+    # Le monde d'un pod a CINQ sources — system, cap-profile, opts de spawn, project-ops,
+    # code-reference — concatenees puis passees a `Enum.uniq_by/2`. Chaque source avait ses tests ;
+    # l'ASSEMBLAGE n'en avait aucun, alors qu'il porte une garantie ecrite (« Earlier entries win on
+    # duplicate paths ») et que cette garantie decide un MODE. Or le mode est la propriete de
+    # securite de ce module — les trois refus ci-dessus existent pour lui, et aucun ne regarde le
+    # cas ou deux sources reclament le meme chemin.
+    #
+    # `uniq_by` garde la PREMIERE occurrence : l'ordre de concatenation n'est donc pas un detail de
+    # style, c'est la table de priorite, et elle n'est ecrite nulle part ailleurs que dans l'ordre
+    # des `++`.
+    test "deux sources sur le MEME chemin : la premiere gagne, et c'est son MODE qui sort" do
+      # system (`/opt/bin`, ro) est concatene AVANT le cap-profile. Le profil reclame `rw` sur le
+      # meme chemin : il perd. Un `uniq_by` qui garderait la derniere occurrence rendrait ici un
+      # `rw` hors sandbox sans qu'aucun des refus de ce module ne se declenche — ils valident la
+      # FORME d'un mount, jamais lequel des deux survit.
+      cap = cap_with_mounts([%{"mode" => "rw", "path" => "/opt/bin"}])
+      env = LaunchSpec.pod_mounts_env(cap, [], "/opt/bin/claude_launch.sh")
+
+      assert env =~ "ro:/opt/bin"
+      refute env =~ "rw:/opt/bin"
+    end
+
+    test "cap-profile AVANT opts de spawn : le catalogue gagne sur la demande de spawn" do
+      # L'ordre qui compte le jour ou un appelant de spawn passe un `mounts:` chevauchant le
+      # catalogue. Le catalogue est la declaration statique auditee ; la demande de spawn est
+      # dynamique. Elle ne relache pas un mode que le catalogue a serre.
+      cap = cap_with_mounts([%{"mode" => "ro", "path" => "/srv/shared"}])
+
+      env =
+        LaunchSpec.pod_mounts_env(
+          cap,
+          [mounts: [%{"mode" => "rw", "path" => "/srv/shared"}]],
+          "/usr/local/bin/claude_launch.sh"
+        )
+
+      assert env =~ "ro:/srv/shared"
+      refute env =~ "rw:/srv/shared"
+    end
+
+    # ❌ PAS de test pour la collision REELLE de l'architecte — `opts[:mounts]` en `rw` sur
+    # `<work_root>/<project>` contre le `ro` que `project_ops_mount` pose sur le meme chemin, ou
+    # c'est l'ordre des `++` qui lui conserve son droit d'ecriture. Deux raisons, dans cet ordre :
+    # `Fleet.Layout.work_root/0` est une constante de compilation, donc le forcer demanderait un
+    # seam de plus dans `pod_mounts_env/3` ; et `project_ops_mount` est RETIRE par le chantier trois
+    # faces. Epingler ici un mecanisme programme pour disparaitre ferait un test a jeter avec lui.
+    # La propriete d'ordre qui SURVIT a ce retrait est celle des deux tests ci-dessus.
+  end
+
   describe "project_ops_path/3 — the world of ITS project (RO, scoped), neither nothing nor everything" do
     # The sanctuary projects ITS project's work/ops (context/doctrine) so the worker KNOWS instead of
     # guessing the surroundings — not the whole `/home/projects.work` (other projects' world = noise +

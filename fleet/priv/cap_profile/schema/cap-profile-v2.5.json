@@ -39,7 +39,7 @@
         },
         "mounts": {
           "type": "array",
-          "description": "CATALOGUE mounts projected into the bwrap sandbox (the world provided TO the pod). bwrap_launch binds them at the SAME path, RO/RW, after the /home tmpfs. Inert when containment: none (host = native access). Empty/absent = no extra mount (bare worker).",
+          "description": "CATALOGUE mounts projected into the bwrap sandbox: the STATIC, per-role half of the world provided to the pod. bwrap_launch binds them at the SAME path, RO/RW, after the /home tmpfs. Inert when containment: none (host = native access). NOT THE WHOLE WORLD, and reading it as such is the trap: the runtime composes five sources — system, this list, the spawn call's `mounts:` opt, and two PER-PROJECT grants the runtime derives itself (the project's ops worktree, and the code worktree as a read-only reference for an ops-face producer). Empty/absent here means no extra CATALOGUE mount, never a bare pod. PRECEDENCE IS THE CONCATENATION ORDER, first occurrence of a path wins (`Enum.uniq_by`), and what it decides is a MODE: two sources naming one path resolve to the earlier one's ro/rw. So an audit of what a pod may write is not readable here alone.",
           "items": {
             "type": "object",
             "required": [
