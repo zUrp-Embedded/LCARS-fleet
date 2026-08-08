@@ -421,7 +421,19 @@ defmodule Fleet.Spawner.Pod do
            ),
          :ok <- Assets.provision_monitor_watch(data),
          :ok <- Scaffold.maybe_bootstrap_project_workspace(data),
-         # Deliberate recall — restores the seed BEFORE the launch (after workspace = cwd set).
+         # Recall deliberate : la graine est restauree AVANT le lancement. C'est la seule moitie
+         # de cette phrase qui soit vraie, et elle l'est par position dans le `with`.
+         #
+         # Ce qui etait ecrit ici jusqu'au 2026-08-08 — « (after workspace = cwd set) » — affirmait
+         # une DEPENDANCE qui n'existe pas. Mesure : `LaunchSpec.pod_cwd/3` et ses deux helpers ne
+         # lisent PAS le disque (le cwd est CALCULE depuis opts/cap_profile/pod_dir, pas pose par le
+         # bootstrap) ; `SeedStore.restore/4` fait son propre `mkdir_p!` ; et le seul geste
+         # destructeur du bootstrap (`morgue_residual_workspace/1`) vise `ws`, jamais
+         # `pod_dir/.claude/projects/`. Les deux gestes sont INDEPENDANTS, et intervertir les deux
+         # lignes laisse la suite entiere verte — non pas par trou de couverture, mais parce qu'il
+         # n'y a rien a observer.
+         #
+         # L'ordre est garde tel quel : rien de mesure ne demande d'en changer.
          :ok <- Scaffold.maybe_recall_restore(data) do
       # SP no longer stored in data (no longer in argv): the SOURCE = .lcars/system-prompt.md (written above),
       # read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
