@@ -269,8 +269,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
     case Fleet.Workflow.BriefArtifact.materialize(brief, repo, materialize_opts) do
       {:ok, {ref, sha}} ->
-        {:ok, Fleet.Workflow.BriefArtifact.pointer_brief(ref, sha),
-         [brief_sha: sha, brief_ref: ref]}
+        # LE CONTENU, PAS UN POINTEUR VERS UN ARBRE MONTE. `materialize/3` vient de commiter
+        # EXACTEMENT `brief` a `sha` : le contenu pinne est celui qu'on tient deja, aucune relecture
+        # git n'y ajoute quoi que ce soit. L'adresse voyage a cote (`brief_ref`/`brief_sha`) pour
+        # que le pod CITE la version sur laquelle il a agi, et un tiers rejoue depuis la forge.
+        #
+        # Ce que ca ferme : le pointeur envoyait le pod lire `$LCARS_PROJECT_OPS/<ref>`, donc
+        # exigeait de monter l'arbre d'operations ENTIER — tous les briefs, tous les verdicts — pour
+        # qu'il lise UN objet. Le pod n'a plus de chemin vers ops, donc plus de mauvais chemin.
+        {:ok, brief, [brief_sha: sha, brief_ref: ref]}
 
       # The only genuinely transient cause, and the only one that still degrades. But the ARTIFACT
       # says so: the pod carries its order AND the fact that it has no sha to cite, instead of that

@@ -103,8 +103,13 @@ defmodule Fleet.Spawner.Pod.Brief do
     sha = Keyword.get(opts, :brief_sha)
 
     if is_binary(ref) and is_binary(sha) do
-      "Your work item carries the order. Pull it with the MCP tool `get_work_item`; it points at " <>
-        "the committed doc, pinned:\n\n" <> Fleet.Layout.brief_pointer_line(ref, sha)
+      # PAS DE CHEMIN ICI. Cette branche rendait le pointeur `Brief: <ref> @ <sha>`, qui envoyait le
+      # pod lire l'arbre d'operations monte — donc exigeait de le monter. Le work item porte
+      # desormais le CONTENU a sa version pinnee ; ce fichier nomme le canal et l'adresse a citer,
+      # rien de plus. Un pod qui ne trouve pas son ordre ici doit demander, pas aller le chercher.
+      "Your work item carries the order, in full, at the version it was pinned to. Pull it with " <>
+        "the MCP tool `get_work_item`. Cite `#{String.slice(sha, 0, 7)}` — that is the version " <>
+        "you acted on, and it is what makes your work auditable by a third party."
     else
       "(No brief in the spawn opts, and no pinned doc either — issue #{issue_id}. If your work " <>
         "item is empty too, this pod was started without an order: say so rather than guess one.)"

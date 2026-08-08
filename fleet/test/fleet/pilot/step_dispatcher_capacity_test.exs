@@ -179,7 +179,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   end
 
   @tag :tmp_dir
-  test "NOMINAL: the order is materialized, and what travels is the POINTER — not a second copy",
+  test "NOMINAL: the order is materialized, and what travels is its CONTENT at the pinned version",
        %{tmp_dir: tmp} do
     # THE nominal branch, and it had NO coverage: measured before writing, zero test in the
     # dispatcher suite materializes a brief — all of them run with the work_dir absent, i.e. on the
@@ -221,14 +221,25 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     assert_received {:enqueued, "pod-x", attrs}
     payload = attrs.brief
 
-    # The pointer, addressed by its PIN — the one thing the pod is later asked to cite.
-    assert payload =~ "git -C $LCARS_PROJECT_OPS show #{sha}:#{ref}"
+    # LE CONTENU, ET IL EST CELUI DU PIN. Ce test epinglait le POINTEUR jusqu'au 2026-08-08 :
+    # `git -C $LCARS_PROJECT_OPS show <sha>:<ref>`. C'etait une adresse correcte vers un arbre que
+    # le pod devait monter ENTIER — tous les briefs, tous les verdicts — pour lire un objet. Le
+    # contenu voyage maintenant par la file, l'adresse a cote, et le pod n'a plus de chemin vers
+    # l'arbre d'operations.
+    assert payload =~ order
 
-    # And NOT a second copy of the order. The committed doc is the single source; a payload that
-    # also carried the text would make "the version to judge" ambiguous the moment the two differ.
-    refute payload =~ order
+    # L'ADRESSE VOYAGE QUAND MEME : c'est elle que le pod cite, et elle rend le geste auditable par
+    # un tiers depuis la forge. Le contenu sans adresse serait un ordre que personne ne peut situer.
+    assert is_binary(sha) and byte_size(sha) >= 7
+    assert Fleet.Layout.valid_brief_ref?(ref)
 
-    # The doc really exists at that pin, and it holds the order.
+    # ET AUCUN CHEMIN VERS L'ARBRE : c'est l'invariant du sevrage, pas un detail de redaction. Un
+    # payload qui nomme `$LCARS_PROJECT_OPS` re-cree le besoin de monter ops.
+    refute payload =~ "LCARS_PROJECT_OPS"
+    refute payload =~ "git -C"
+
+    # Et le doc existe VRAIMENT a ce pin, avec ce contenu — le champ `brief` n'est pas une copie
+    # parallele, c'est l'objet commite.
     {content, 0} = System.cmd("git", ["show", "#{sha}:#{ref}"], cd: work_dir)
     assert content =~ order
   end
@@ -270,8 +281,11 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
            "the dispatcher put the order in the spawn opts — the pod would write it to " <>
              "issues/<id>.md, a second copy of a text whose single source is the committed doc"
 
+    # La file porte l'ordre — c'est le canal, et le seul. Ce qui compte ici est que les OPTS DE
+    # SPAWN n'en portent pas de copie : le pod ecrirait son `issues/<id>.md` avec une version qui
+    # ne bouge plus, pendant que le pointeur, lui, suit les rounds de rework.
     assert_received {:enqueued, "pod-x", attrs}
-    refute attrs.brief =~ order
+    assert attrs.brief =~ order
   end
 
   @tag :tmp_dir
