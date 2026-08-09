@@ -30,8 +30,21 @@ TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 # Sondes d'identité — verdicts + consignes, AUCUNE mutation, TOUJOURS en warn : les credentials
 # sont des gestes de l'humain, un apply ne peut ni les converger ni échouer dessus.
 probe_identity() {
+  # « PRÉSENTES » ET NON « VALIDES », ET LA NUANCE N'EST PAS DE LA PRUDENCE. Mesuré le 2026-08-09 :
+  # un fichier complet de forme (scopes, subscriptionType, refreshTokenExpiresAt dans le futur) dont
+  # les DEUX jetons faisaient zéro octet. Cette ligne annonçait « wizard fait », la fleet montait, et
+  # chaque spawn mourait en `credentials_invalid`.
+  #
+  # ON NE PARSE PAS LE FICHIER ICI, DÉLIBÉRÉMENT. Sa forme appartient au vendor ; la relire en shell
+  # revient à recopier son format dans notre provisioning et à le patcher à chaque fois qu'il bouge.
+  # L'autorité existe et c'est `Fleet.Credentials.Gate.status/1`, qui tranche au spawn. Cette sonde
+  # dit donc ce qu'elle SAIT — le fichier est là — et nomme qui tranche.
+  #
+  # ⚠ Le refresh est porté par un agent VIVANT. Une fleet restée sans aucun pod au-delà de la
+  # fenêtre ne se rafraîchit pas toute seule : `starfleet` est toujours-up, et c'est ce qui garde
+  # les credentials en vie autant que c'est un choix d'ergonomie.
   if [[ -f "$HOME_DIR/.claude/.credentials.json" ]]; then
-    p_ok "credentials claude présentes (wizard fait)"
+    p_ok "fichier de credentials claude présent — sa VALIDITÉ est tranchée au spawn par le runtime (Credentials.Gate), pas ici"
   else
     p_warn "credentials claude absentes — l'humain lance « claude », /login, bonjour, /exit (geste d'identité, jamais automatisé)"
   fi
