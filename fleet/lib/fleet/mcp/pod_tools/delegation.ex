@@ -58,6 +58,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
       onboarding into an org nobody scans is a silently dead rail.
   """
 
+  # THE WIRE TOKEN OF THE DOCUMENTARY GENRE, from its single authority and evaluated at compile
+  # time so this module recompiles if the token changes. A local literal here is what let the
+  # wire enum and this clause drift apart, and the drift is silent in the worst direction: the
+  # tool advertises a value the router does not match, so every documentary ticket takes the
+  # code path while the description says otherwise.
+  @doc_genre Fleet.Labels.genre_doc_token()
+
   require Logger
 
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
@@ -1643,10 +1650,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        # Put the ops label on create so polling cannot route an unlabeled ops issue as project work.
+        # The genre label rides the CREATE so polling cannot route an unlabeled doc issue as
+        # project work. THE WIRE TOKEN IS THE FACE, and it used to be "ops" — a leftover from
+        # before the third tree, when the documentary deliverable landed on `work/ops`. It lands
+        # on `work/doc`; a token naming the wrong face sends the only reader who has to choose
+        # (the arch, from the tool description) to the wrong tree in their head.
         issue_opts_result =
           case genre do
-            "ops" ->
+            @doc_genre ->
               case forge.repo_label_id(repo, Fleet.Labels.genre_doc(), author_opts) do
                 {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
                 {:error, reason} -> {:error, {:genre_label_unresolved, inspect(reason)}}

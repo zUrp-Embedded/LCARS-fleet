@@ -171,13 +171,13 @@ defmodule Fleet.MCP.PodTools do
         },
         "genre" => %{
           "type" => "string",
-          "enum" => ["code", "ops"],
+          "enum" => ["code", Fleet.Labels.genre_doc_token()],
           "description" =>
-            "Genre of the deliverable. \"ops\" = DOCUMENTARY ticket (spec rework, addendum, " <>
-              "design note): routed to the ops producer on the work/ops face, direct path — " <>
+            "Genre of the deliverable. \"doc\" = DOCUMENTARY ticket (spec rework, addendum, " <>
+              "design note): routed to the scribe on the DOC face (`work/doc`), direct path — " <>
               "no scoper (you authored the brief, you judge the return in your own mount), " <>
               "no PR jury (no mechanical ground truth on prose). \"code\" or absent = the " <>
-              "project's declared card, unchanged. Use ops for every ticket whose deliverable " <>
+              "project's declared card, unchanged. Use doc for every ticket whose deliverable " <>
               "is a document, never a hack around the code path."
         }
       },

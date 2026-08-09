@@ -1237,7 +1237,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["assignee"] == human
     end
 
-    test "genre `ops` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
+    test "genre `doc` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
       # The branch that had no test until 2026-08-03, and could not have one: `repo_label_id` was
       # missing from the seam contract, so every stub raised UndefinedFunctionError here. What
       # shipped in that blind spot: a documentary ticket wearing `type:feature` — the interface
@@ -1247,12 +1247,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "doc", "brief" => "documente Y", "genre" => "ops"},
+                 %{"title" => "doc", "brief" => "documente Y", "genre" => "doc"},
                  pod_state(pod)
                )
 
       # The genre label rides the CREATE call as an id — never a post-create add: a poller tick
-      # landing between the two burns the PROJECT card and sends an ops brief down the code path.
+      # landing between the two burns the PROJECT card and sends a doc brief down the code path.
       assert_received {:create_issue, "fleet/demo", "doc", _body, opts}
       assert [id] = opts[:labels]
       assert id == :erlang.phash2(Fleet.Labels.genre_doc(), 10_000)

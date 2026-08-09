@@ -50,7 +50,13 @@ defmodule Fleet.Labels do
 
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
-  @genre_doc "genre/doc"
+  # ONE LITERAL FOR THE FACE, and the label is derived from it. Three places used to spell it
+  # independently — the wire enum offered to the arch, the clause that routes the wire value, and
+  # the label posted on the forge — so the wire could ANNOUNCE a token the code did not accept and
+  # nothing would be red (measured: renaming the enum alone survived the whole suite). It shipped
+  # exactly that way: the wire said `"ops"` long after the deliverable moved to `work/doc`.
+  @genre_doc_token "doc"
+  @genre_doc "genre/" <> @genre_doc_token
 
   @doc "\"Pod in flight\" lock: set BEFORE the spawn (anti double-spawn), lifted at end-of-step-run."
   @spec in_flight() :: String.t()
@@ -71,8 +77,17 @@ defmodule Fleet.Labels do
   def genre_doc, do: @genre_doc
 
   @doc """
+  The WIRE token of the documentary genre (`"doc"`) — what an architect passes to `create_issue`,
+  and the value the routing clause matches. Same literal as `genre_doc/0`'s scope, on purpose: the
+  token names the FACE the deliverable lands on, and a wire that offers a token the handler does
+  not accept refuses every documentary ticket while looking perfectly documented.
+  """
+  @spec genre_doc_token() :: String.t()
+  def genre_doc_token, do: @genre_doc_token
+
+  @doc """
   VISUAL type of a ticket, derived from its genre — `type:doc` for a documentary ticket
-  (`genre/doc`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
+  (wire token `"doc"`, label `genre/doc`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
   so Gitea creates it non-exclusive and no code reads it back. It exists for the human who scans
   a list of issues and wants to know what kind of thing each one is.
 
@@ -82,7 +97,7 @@ defmodule Fleet.Labels do
   doc card. One decision, one source; the label follows.
   """
   @spec type_for_genre(String.t() | nil) :: String.t()
-  def type_for_genre("ops"), do: "type:doc"
+  def type_for_genre(@genre_doc_token), do: "type:doc"
   def type_for_genre(_), do: "type:feature"
 
   @doc "The visual types, for the seeding that must create them before anyone can wear them."
