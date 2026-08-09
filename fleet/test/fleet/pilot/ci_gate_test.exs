@@ -230,7 +230,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Pilot.ProjectIntensity.write(proj,
+        Fleet.Project.Intensity.write(proj,
           intensity_level: "C2",
           intensity_justification: "x",
           workflow_map: "gated"

@@ -360,6 +360,15 @@ if config_env() != :test and not tool_mode? do
          :completion_inflight_fun,
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
+  # The project-lifecycle domain sits BELOW the rail that drives projects, so its two card-fallback
+  # sites cannot reference the incident registry at compile time. Same shape as the seam above and
+  # as `:coord_backend`: the module crosses the boundary as a VALUE. Unwired, the fallback still
+  # runs and warns — what is lost is the durable trace, and `Project.Incidents` says so loudly
+  # rather than swallowing it.
+  config :fleet_project,
+         :incident_rail,
+         {Fleet.Pilot.IncidentRegistry, :record_or_escalate}
+
   # ============================================================
   # fleet_coord — wired Fleet.Coord backend for starfleet
   # ============================================================

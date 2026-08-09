@@ -1,11 +1,11 @@
-defmodule Fleet.Pilot.Roles do
+defmodule Fleet.Project.Roles do
   @moduledoc """
   **Roles of the single-brick model** — accessors for the workshop's roles (producer, judges,
   gatekeeper). This module is the SINGLE accessor (without it the resolution would be rewritten in
   each caller). Override per project/test via the opts.
 
   The three roles live HERE: producer (`producer_role/1`), jury (`jury/2`) and gatekeeper
-  (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
+  (`gatekeeper_role/1`). `Fleet.Project.Onboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
   (never an `engineer`/`gatekeeper` literal rewritten at the caller).
 
   ## The structural roles are RESOLVED, not defaulted
@@ -66,18 +66,18 @@ defmodule Fleet.Pilot.Roles do
         role
 
       {:ok, []} ->
-        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+        raise "Fleet.Project.Roles: no catalogue role declares the producer capability " <>
                 "(#{inspect(@producer_capability)}) — no card can name a producer. Fix the catalogue."
 
       {:ok, roles} ->
-        raise "Fleet.Pilot.Roles: #{length(roles)} roles declare the producer capability " <>
+        raise "Fleet.Project.Roles: #{length(roles)} roles declare the producer capability " <>
                 "(#{inspect(roles)}), and this is the LAST-RESORT path — the card names the producer " <>
                 "per step, the run carries it in the feature branch, and both were unavailable here. " <>
                 "On a catalogue with several producers there is no fleet-wide default to fall back " <>
                 "on; set `:fleet_pilot, :producer_role` if this deployment has one."
 
       {:error, reason} ->
-        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+        raise "Fleet.Project.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
                 "resolving the producer role — broken deploy, fail-loud."
     end
   end
@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.Roles do
   defp producers! do
     case Fleet.CapProfile.roles_with_capability(@producer_capability) do
       {:ok, []} ->
-        raise "Fleet.Pilot.Roles: no catalogue role declares the producer capability " <>
+        raise "Fleet.Project.Roles: no catalogue role declares the producer capability " <>
                 "(#{inspect(@producer_capability)}) — no card could name a producer, the fleet " <>
                 "produces nothing. Fix the catalogue."
 
@@ -129,7 +129,7 @@ defmodule Fleet.Pilot.Roles do
         roles
 
       {:error, reason} ->
-        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+        raise "Fleet.Project.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
                 "resolving the producers — broken deploy, fail-loud."
     end
   end
@@ -140,18 +140,18 @@ defmodule Fleet.Pilot.Roles do
         role
 
       {:ok, []} ->
-        raise "Fleet.Pilot.Roles: no catalogue role declares the #{label} capability " <>
+        raise "Fleet.Project.Roles: no catalogue role declares the #{label} capability " <>
                 "(#{inspect(capability)}) — the single-brick model has no #{label}. A catalogue " <>
                 "must NAME it; there is no default to fall back on. Fix the catalogue."
 
       {:ok, roles} ->
-        raise "Fleet.Pilot.Roles: #{length(roles)} catalogue roles declare the #{label} capability " <>
+        raise "Fleet.Project.Roles: #{length(roles)} catalogue roles declare the #{label} capability " <>
                 "(#{inspect(capability)}): #{inspect(roles)} — this one is unique BY DESIGN (single " <>
                 "writer of the signed merge), and picking one at random would be an arbitrary " <>
                 "fleet-wide policy. Fix the catalogue."
 
       {:error, reason} ->
-        raise "Fleet.Pilot.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
+        raise "Fleet.Project.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
                 "resolving the #{label} role — broken deploy, fail-loud."
     end
   end
@@ -231,7 +231,7 @@ defmodule Fleet.Pilot.Roles do
   def project_ci(repo, opts \\ []) when is_binary(repo), do: ci(load_project_card(repo, opts))
 
   defp load_project_card(repo, opts) do
-    name = Fleet.Pilot.ProjectIntensity.pipeline_default(repo, opts)
+    name = Fleet.Project.Intensity.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
     try do
@@ -244,7 +244,7 @@ defmodule Fleet.Pilot.Roles do
         )
 
         incident =
-          Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+          Keyword.get(opts, :incident_fun, &Fleet.Project.Incidents.record_or_escalate/4)
 
         _ =
           try do
@@ -312,5 +312,5 @@ defmodule Fleet.Pilot.Roles do
 
   # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was
   # REMOVED by the 2026-07-19 reorg: the architect is PER-PROJECT, its pod id derives from the repo
-  # via the single authority `Fleet.Pilot.ProjectArchitect.pod_id_for/1`.)
+  # via the single authority `Fleet.Project.Architect.pod_id_for/1`.)
 end

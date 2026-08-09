@@ -470,7 +470,7 @@ defmodule Fleet.Pilot.Poller do
 
     reconciler =
       state.protection_reconciler ||
-        (&Fleet.Pilot.ProjectOnboard.reconcile_main_protection/2)
+        (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
     Enum.each(due, fn repo ->
       case reconciler.(repo, state.forge_opts) do

@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.WorktreeSyncTest do
+defmodule Fleet.Project.WorktreeSyncTest do
   @moduledoc """
   `WorktreeSync` REALLY aligns the local clone on `origin/main` — real git (local bare origin +
   clone + advancement), not a stub. This is the anti-hollow-green of the fix: without alignment, the
@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.WorktreeSync
+  alias Fleet.Project.WorktreeSync
 
   @moduletag :tmp_dir
 

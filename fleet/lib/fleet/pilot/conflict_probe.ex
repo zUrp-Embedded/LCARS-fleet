@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ConflictProbe do
   alias Fleet.Conflict
   alias Fleet.Conflict.Report
   alias Fleet.Credentials.Shell
-  alias Fleet.Pilot.GitOps
+  alias Fleet.Project.GitOps
 
   @type totals :: %{
           trivial: non_neg_integer(),

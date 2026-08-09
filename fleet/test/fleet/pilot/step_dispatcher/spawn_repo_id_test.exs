@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
     # code table, the bare guard lies about a function that exists.
     refute function_exported?(ColdForgeStub, :repo_id, 2)
 
-    assert {:ok, id} = Spawn.repo_id(ColdForgeStub, "fleet/demo", [])
+    assert {:ok, id} = Fleet.Forge.repo_id(ColdForgeStub, "fleet/demo", [])
     assert id == ColdForgeStub.expected_id()
   end
 
@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   end
 
   test "a module that genuinely lacks repo_id/2 is still refused, and names the wiring" do
-    assert {:error, :repo_id_unsupported} = Spawn.repo_id(NoRepoIdForge, "fleet/demo", [])
+    assert {:error, :repo_id_unsupported} = Fleet.Forge.repo_id(NoRepoIdForge, "fleet/demo", [])
     assert Spawn.resolve_repo_id(NoRepoIdForge, "fleet/demo", []) == nil
   end
 end

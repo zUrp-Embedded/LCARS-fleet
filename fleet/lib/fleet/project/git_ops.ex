@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.GitOps do
+defmodule Fleet.Project.GitOps do
   @moduledoc """
   Pilot adapter over bounded `Fleet.Credentials.Shell.git`: injects forge auth
   outside argv, applies commit identity, and returns typed failures.

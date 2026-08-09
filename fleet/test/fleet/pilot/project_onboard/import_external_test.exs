@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboard.ImportExternalTest do
+defmodule Fleet.Project.Onboard.ImportExternalTest do
   @moduledoc """
   `import_external/3` (BL-6-31 — repatriation from an external forge through the adoption
   gate). The "external forge" is a local git repo reached by `file://` through the `url_gate`
@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ImportExternalTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 

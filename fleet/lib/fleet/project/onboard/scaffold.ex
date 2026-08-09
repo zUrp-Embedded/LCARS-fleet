@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
+defmodule Fleet.Project.Onboard.Scaffold do
   @moduledoc """
-  Filesystem projection of the project template used by `Fleet.Pilot.ProjectOnboard`.
+  Filesystem projection of the project template used by `Fleet.Project.Onboard`.
 
   `main/3` and `work/3` read their respective faces from
   `priv/catalogue/project_template`, expand the supported Gitea `${VAR}` placeholders, omit the

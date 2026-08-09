@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectArchitect do
+defmodule Fleet.Project.Architect do
   @moduledoc """
   The PER-PROJECT architect — pod-id AUTHORITY + idempotent `ensure/2` (reorg 2026-07-19,
   cf. DESIGN-carte-des-roles §6/§14). Replaces the old fleet-level permanent arch: ONE architect
@@ -52,8 +52,6 @@ defmodule Fleet.Pilot.ProjectArchitect do
 
   require Logger
 
-  alias Fleet.Pilot.StepDispatcher.Spawn
-
   # Deterministic per-project arch pod id. NOT `permanent-*`: the arch is not a fleet permanent
   # (PermanentWarden must not respawn it — the escalation rail and the open verbs do, on demand).
   @pod_prefix "architect-"
@@ -83,7 +81,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.code_root()), name)
     work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
     doc_dir = Path.join(Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root()), name)
-    repo_id_result = Spawn.repo_id(forge, repo, forge_opts)
+    repo_id_result = Fleet.Forge.repo_id(forge, repo, forge_opts)
 
     cond do
       # EVERY mounted face must exist, because bwrap binds STRICTLY: a missing source is not an
@@ -97,7 +95,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
         {:error, reason} = repo_id_result
 
         Logger.error(
-          "ProjectArchitect: repo id unresolved for #{repo} (#{inspect(reason)}) — arch NOT ensured"
+          "Project.Architect: repo id unresolved for #{repo} (#{inspect(reason)}) — arch NOT ensured"
         )
 
         {:error, {:repo_id_unresolved, repo, reason}}
@@ -109,7 +107,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
         # the gate that admits the call (`Delegation.require_architect/1`, B-03). Naming it here
         # would gate correctly on a renamed delegate and then ensure a role the catalogue lacks.
         with {:ok, cap} <-
-               Fleet.CapProfile.resolve(loader, Fleet.Pilot.Roles.project_delegate_role()) do
+               Fleet.CapProfile.resolve(loader, Fleet.Project.Roles.project_delegate_role()) do
           pod_id = pod_id_for(name)
 
           spawn_opts = [
@@ -138,7 +136,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
           case spawner.spawn_pod(cap, pod_id, spawn_opts) do
             {:ok, _pid} ->
               Logger.info(
-                "ProjectArchitect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
+                "Project.Architect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
               )
 
               {:ok, pod_id}
@@ -148,7 +146,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
 
             {:error, reason} = err ->
               Logger.error(
-                "ProjectArchitect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
+                "Project.Architect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
                   "retried on the next open/escalation trigger"
               )
 
@@ -157,7 +155,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
         else
           {:error, reason} = err ->
             Logger.error(
-              "ProjectArchitect: architect cap-profile load/compose failed (#{inspect(reason)})"
+              "Project.Architect: architect cap-profile load/compose failed (#{inspect(reason)})"
             )
 
             err

@@ -102,7 +102,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   """
   @spec max_fan(String.t(), keyword()) :: pos_integer()
   def max_fan(repo, opts \\ []) when is_binary(repo) do
-    case Fleet.Pilot.ProjectIntensity.declared_max_fan(repo, opts) do
+    case Fleet.Project.Intensity.declared_max_fan(repo, opts) do
       n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
       _ -> max_fan()
     end

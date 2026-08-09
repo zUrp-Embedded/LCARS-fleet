@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
           Seams.t()
         ) :: {:ok, term()} | {:error, term()}
   def dispatch(workflow_map, step, outputs, payload, n, role, %Seams{} = seams) do
-    gk_role = Fleet.Pilot.Roles.gatekeeper_role()
+    gk_role = Fleet.Project.Roles.gatekeeper_role()
     pod_id = Fleet.Pilot.PodId.for_issue(seams.repo, n, gk_role)
 
     gate = get_in(workflow_map, ["steps", step, "gate"])
@@ -98,7 +98,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
   defp spawn_gatekeeper(%Seams{} = seams, pod_id, brief) do
     loader = seams.loader || Fleet.CapProfile
-    gk_role = Fleet.Pilot.Roles.gatekeeper_role()
+    gk_role = Fleet.Project.Roles.gatekeeper_role()
 
     with {:ok, cap} <- Fleet.CapProfile.resolve(loader, gk_role) do
       spawn_opts = [

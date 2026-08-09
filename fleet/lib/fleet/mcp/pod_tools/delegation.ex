@@ -49,7 +49,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       (DR-012): `Delegation.ForgeClient` (DELEGATION/TRACKING surface: create_issue/add_label/get_issue/…)
       and `Delegation.EscalationForge` (ESCALATION surface: list_org_repos/list_open_issues/list_comments/
       post_comment) — each an inspectable contract with its own `resolved/0`, no hidden ad-hoc op list.
-    * `:project_onboard` (default `Fleet.Pilot.ProjectOnboard`) — onboarding
+    * `:project_onboard` (default `Fleet.Project.Onboard`) — onboarding
       sequence. CONTRACT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
     * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
       of the pod's role.
@@ -663,7 +663,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # The onboarding sequence proper. The SYSTEM runs the mechanics (forge repo +
   # three faces main/ops/workshop + scaffold + push) via the :project_onboard seam (contract =
-  # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
+  # behaviour Delegation.ProjectOnboard; default Fleet.Project.Onboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args, onboarder_role) do
     with {:ok, onboard} <- conforming_onboard() do

@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.RolesStructuralTest do
+defmodule Fleet.Project.RolesStructuralTest do
   @moduledoc """
   Resolution des roles STRUCTURELS par capability, et son refus des deux cotes.
 
@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.RolesStructuralTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.Roles
+  alias Fleet.Project.Roles
 
   # Un defaut est une exigence qui a renonce a etre verifiee : avant, un catalogue sans producteur
   # bootait VERT et mourait au premier dispatch. Ces deux tests sont la seule raison pour laquelle

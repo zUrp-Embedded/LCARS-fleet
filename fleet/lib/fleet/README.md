@@ -25,14 +25,15 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 
 | Layer | Domain | H |
 |-------|--------|---|
-| OTP root | `Fleet.Application` | 9 |
+| OTP root | `Fleet.Application` | 10 |
 | surface | `Fleet.Observation` | 5 |
-| surface | `Fleet.API` | 8 |
-| steering | `Fleet.Pilot` | 7 |
+| surface | `Fleet.API` | 9 |
 | steering | `Fleet.Starfleet` | 7 |
+| steering | `Fleet.Pilot` | 8 |
 | work | `Fleet.Workflow` | 5 |
 | work | `Fleet.Forge` | 6 |
 | work | `Fleet.MCP` | 6 |
+| work | `Fleet.Project` | 7 |
 | pod composition | `Fleet.ProjectBootstrap` | 3 |
 | pod composition | `Fleet.Spawner` | 4 |
 | pod primitives | `Fleet.Coord` | 2 |

@@ -14,7 +14,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   ## Implementations
 
-    * `Fleet.Pilot.ProjectOnboard` — the REAL impl (canonical default: forge repo +
+    * `Fleet.Project.Onboard` — the REAL impl (canonical default: forge repo +
       three faces `main`/`ops`/`workshop` + scaffold + push). It lives in
       `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt this
       behaviour and stays DUCK-TYPED with a cross-reference comment; the callback
@@ -25,7 +25,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   @doc """
   Onboards the project `name` (kebab-case slug). `opts` consumed by the real default:
-  `:org`, `:description`, `:pitch` (cf. `Fleet.Pilot.ProjectOnboard.onboard/2`).
+  `:org`, `:description`, `:pitch` (cf. `Fleet.Project.Onboard.onboard/2`).
   The result MUST carry the 4 keys — `Delegation.do_create_project/2` pattern-matches
   `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE, and the fourth
   was missing while the runtime already produced it: the wire announced two of the three trees it
@@ -158,11 +158,11 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom
   # (not a literal remote call) → no compile-time dep. Set HERE once.
-  @default_onboard Fleet.Pilot.ProjectOnboard
+  @default_onboard Fleet.Project.Onboard
 
   @doc """
   Resolved onboarding sequence: config `:fleet_mcp, :project_onboard` otherwise the
-  canonical default `Fleet.Pilot.ProjectOnboard`. SINGLE SOURCE of the default.
+  canonical default `Fleet.Project.Onboard`. SINGLE SOURCE of the default.
   """
   @spec resolved() :: module()
   def resolved, do: Application.get_env(:fleet_mcp, :project_onboard, @default_onboard)

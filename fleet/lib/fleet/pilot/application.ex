@@ -157,7 +157,7 @@ defmodule Fleet.Pilot.Application do
       incident_registry: Fleet.Pilot.IncidentRegistry,
       incident_consumer: Fleet.Pilot.IncidentConsumer,
       incident_task_supervisor: Fleet.Pilot.IncidentConsumer.task_supervisor(),
-      worktree_sync: Fleet.Pilot.WorktreeSync,
+      worktree_sync: Fleet.Project.WorktreeSync,
       arch_feed: Fleet.Pilot.ArchFeed,
       fleet_feed: Fleet.Pilot.FleetFeed
     ]
@@ -241,7 +241,7 @@ defmodule Fleet.Pilot.Application do
       # `/home/projects/<name>`. Started BEFORE Poller + StepRunConsumer — its two merge triggers
       # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
       # alignments (one `git` at a time per worktree, against index corruption).
-      Fleet.Pilot.WorktreeSync,
+      Fleet.Project.WorktreeSync,
       # The architects' per-project activity feed (Bus consumer → fleet.feed in each arch pod_dir +
       # the single informational wake on the :delivered unlock). Rides the step rail: its lines ARE
       # step milestones — same lifecycle, hermetic in tests for free (step off).
@@ -276,10 +276,10 @@ defmodule Fleet.Pilot.Application do
   # The two STRUCTURAL roles of the single-brick model — the one that codes the brick, the one that
   # signs the merge — resolved from the catalogue by capability at rail boot. Same dead-man's-switch
   # as the two card guards above: a catalogue naming neither would otherwise reach readiness GREEN
-  # and die at the first dispatch, far from the deploy fault. `Fleet.Pilot.Roles` carries the
+  # and die at the first dispatch, far from the deploy fault. `Fleet.Project.Roles` carries the
   # resolution and the refusal messages; here we only make it happen before readiness.
   # (No log line: this module has none, and the resolution is not a milestone — its FAILURE is, and
-  # the raise carries it. `Fleet.Pilot.Roles` remains the place to ask who they are.)
+  # the raise carries it. `Fleet.Project.Roles` remains the place to ask who they are.)
   @doc """
   The catalogue's card + structural-role checks, off the supervision path — for the standalone
   verifier. Runs EXACTLY what `start_link/1` runs at rail boot, in the same order and through the
@@ -300,7 +300,7 @@ defmodule Fleet.Pilot.Application do
   end
 
   defp validate_structural_roles! do
-    _ = Fleet.Pilot.Roles.resolve_structural_roles!()
+    _ = Fleet.Project.Roles.resolve_structural_roles!()
     :ok
   end
 
@@ -348,7 +348,7 @@ defmodule Fleet.Pilot.Application do
   # check that anticipated it would be rewritten with it. This one only closes the silence.
   # (`opts` carries the test roots; prod calls it argument-less.)
   def validate_workshop_card!(opts \\ []) do
-    name = Fleet.Pilot.Roles.workshop_workflow_map(opts)
+    name = Fleet.Project.Roles.workshop_workflow_map(opts)
 
     chosen? =
       Keyword.has_key?(opts, :workshop_workflow_map) or

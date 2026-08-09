@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectIntensityTest do
+defmodule Fleet.Project.IntensityTest do
   @moduledoc """
   The criticality declaration: always written complete and schema-valid; the human's
   level RELAYED (never agent-assessed); absence recorded honestly (undeclared C0), never
@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ProjectIntensityTest do
 
   import ExUnit.CaptureLog
 
-  alias Fleet.Pilot.ProjectIntensity
+  alias Fleet.Project.Intensity, as: ProjectIntensity
 
   @moduletag :tmp_dir
 

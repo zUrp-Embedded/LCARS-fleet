@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboardTest do
+defmodule Fleet.Project.OnboardTest do
   @moduledoc """
   F-C084 — `onboard/2` CREATES a fresh project: it scaffolds `main` + pushes over it. A PRE-EXISTING
   repo is NOT a safe target (clobbering the `main` of a real repo: a human's repo onboarded by mistake,
@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
   import ExUnit.CaptureLog
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   describe "classify_create_repo/3 (F-C084 — pre-existing repo is not an onboard target)" do
     test "genuine CREATE ({:ok, full_name}) → {:ok, full_name} (onboard owns the fresh repo)" do

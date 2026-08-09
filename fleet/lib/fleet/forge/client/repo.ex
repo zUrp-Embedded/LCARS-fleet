@@ -7,7 +7,7 @@ defmodule Fleet.Forge.Client.Repo do
 
   The *seam-faced* ops (`repo_id`, `list_org_repos`) are forwarded by `ForgeClient` (the module injected
   by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
-  are called directly by `Fleet.Pilot.ProjectOnboard`.
+  are called directly by `Fleet.Project.Onboard`.
   """
 
   import Fleet.Forge.Client.Transport,

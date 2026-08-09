@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
+defmodule Fleet.Project.Onboard.CardRevisionTest do
   @moduledoc """
   `revise_card/2` (BL-6-29) over a REAL on-disk `file://` forge — the fixture is built by the
   REAL `onboard/2` (declared card engraved at birth), then revised. The protection lift/restore
@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 
@@ -159,7 +159,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
     proj = Path.join([o[:projects_root], "tetris"])
 
     :ok =
-      Fleet.Pilot.ProjectIntensity.write(proj,
+      Fleet.Project.Intensity.write(proj,
         workflow_map: "c0-poc",
         intensity_level: "C3",
         intensity_nature: "outil interne",
@@ -216,7 +216,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
     proj = Path.join([o[:projects_root], "tetris"])
 
     :ok =
-      Fleet.Pilot.ProjectIntensity.write(proj,
+      Fleet.Project.Intensity.write(proj,
         workflow_map: "c0-poc",
         intensity_level: "C3",
         intensity_justification: "entretien de cadrage",

@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Forge.Protocol, as: ForgeProtocol
   alias Fleet.Labels
-  alias Fleet.Pilot.Roles
+  alias Fleet.Project.Roles
 
   # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by
   # contract (the completion depends on none of their results: the deliverable truth is the

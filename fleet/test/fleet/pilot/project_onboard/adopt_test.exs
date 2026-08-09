@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
+defmodule Fleet.Project.Onboard.AdoptTest do
   @moduledoc """
   `adopt_project/2` (BL-6-32 — the disk→forge inverse of import). The fixture is the measured
   wedge itself: a real local git pair that NO other verb could handle. The landing is asserted
@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 

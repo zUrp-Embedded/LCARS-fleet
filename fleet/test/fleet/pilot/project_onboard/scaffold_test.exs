@@ -1,8 +1,8 @@
-defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
+defmodule Fleet.Project.Onboard.ScaffoldTest do
   use ExUnit.Case, async: true
   @moduletag :tmp_dir
 
-  alias Fleet.Pilot.ProjectOnboard.Scaffold
+  alias Fleet.Project.Onboard.Scaffold
 
   test "main/3: writes README/.gitignore/.editorconfig/docs/spec.md → :ok", %{tmp_dir: dir} do
     assert :ok = Scaffold.main(dir, "monprojet", pitch: "un pitch")

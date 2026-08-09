@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
+defmodule Fleet.Project.Onboard.CloseOpenTest do
   @moduledoc """
   `close_project/2` + `open/2`'s unpark half (BL-6-30) — the fixture is built by the REAL
   `onboard/2` (dirs whose git origin PROVES the project), the forge issue side is a recording
@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 

@@ -39,13 +39,13 @@ restated, only pointed at.
 - `Fleet.Pilot.FleetFeed` — twin of `ArchFeed` for the FRONT DESK: one line per ESCALATED incident into the permanent starfleet pod, plus the typed flag notify. Escalations only — a raw failure rail here would build a roster out of `pod.failed`.
 - `Fleet.Pilot.PodFeed` — the feed FILE primitive shared by both (name, `HH:MM` stamp, 200-line bound). The format has one owner; the log prefix stays with each facade's rail.
 - `Fleet.Pilot.WakeRecovery` — hardening of `Spawner.wake_pod/1` (re-roll / escalate).
-- `Fleet.Pilot.ProjectArchitect` — the PER-PROJECT architect: pod-id authority + idempotent `ensure/2` (one architect per repo, project-bound identity).
-- `Fleet.Pilot.ProjectIntensity` — single owner of the per-project criticality declaration (`<project>/intensity.json`, schema `intensity-v1`): written at onboarding, read at the workflow-map burn.
-- `Fleet.Pilot.ProjectOnboard` — `onboard/2` / `import/2`: mechanically create/import a dual-dir project. Sub-module `Scaffold` (pure templates).
+- `Fleet.Project.Architect` — the PER-PROJECT architect: pod-id authority + idempotent `ensure/2` (one architect per repo, project-bound identity).
+- `Fleet.Project.Intensity` — single owner of the per-project criticality declaration (`<project>/intensity.json`, schema `intensity-v1`): written at onboarding, read at the workflow-map burn.
+- `Fleet.Project.Onboard` — `onboard/2` / `import/2`: mechanically create/import a dual-dir project. Sub-module `Scaffold` (pure templates).
 
 **Primitives (single-authority utils)**
 - `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
-- `Fleet.Pilot.Roles` / `Opts` / `Offload` / `IssueId` / `PodId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
+- `Fleet.Project.Roles` / `Opts` / `Offload` / `IssueId` / `PodId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
 
 ## Config & deps
 

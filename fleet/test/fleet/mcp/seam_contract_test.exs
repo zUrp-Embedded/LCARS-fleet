@@ -32,7 +32,7 @@ defmodule Fleet.MCP.SeamContractTest do
     # spawner → mcp: a pod spawn cannot provision its socket if this one drifts.
     {Fleet.Spawner.McpSocketProvisioner, Fleet.MCP.PodSocketSupervisor},
     # mcp → pilot: the arch's `create_project` lands here.
-    {Fleet.MCP.PodTools.Delegation.ProjectOnboard, Fleet.Pilot.ProjectOnboard}
+    {Fleet.MCP.PodTools.Delegation.ProjectOnboard, Fleet.Project.Onboard}
   ]
 
   for {contract, impl} <- @seams do

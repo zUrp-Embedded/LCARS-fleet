@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.ArchWake do
   @moduledoc """
   SINGLE authority for waking a project's architect on an `lcars-awaits-arch`
   escalation: the ORDERED offer-then-wake pair, shared by the two rails — PER-PROJECT
-  since the 2026-07-19 reorg (one architect per repo, `Fleet.Pilot.ProjectArchitect`).
+  since the 2026-07-19 reorg (one architect per repo, `Fleet.Project.Architect`).
 
   Callers (design 2026-07-19 — "first kick immediate, protection BEHIND it"):
 
@@ -51,7 +51,7 @@ defmodule Fleet.Pilot.ArchWake do
 
   require Logger
 
-  alias Fleet.Pilot.ProjectArchitect
+  alias Fleet.Project.Architect, as: ProjectArchitect
 
   @type outcome ::
           :offered | :woken_pending | :busy | :wake_unreached | {:error, {:enqueue, term()}}
@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.ArchWake do
   end
 
   defp total_fetch(repo, n) do
-    Fleet.Pilot.WorktreeSync.fetch_issue_refs(repo, n)
+    Fleet.Project.WorktreeSync.fetch_issue_refs(repo, n)
   catch
     :exit, reason -> {:error, {:sync_unavailable, reason}}
   end
@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.ArchWake do
       issue_id: "issue-#{n}",
       # Same source as the ensure (`ProjectArchitect`): the delegate is resolved by capability, so a
       # mandate is never enqueued for a role the catalogue no longer carries.
-      role: Fleet.Pilot.Roles.project_delegate_role(),
+      role: Fleet.Project.Roles.project_delegate_role(),
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
           "`get_issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>

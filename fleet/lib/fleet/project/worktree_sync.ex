@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.WorktreeSync do
+defmodule Fleet.Project.WorktreeSync do
   @moduledoc """
   Serializes post-merge projection onto the local face clones. The code face is a MIRROR — nobody
   writes it locally — so it resets hard to the forge. The two WRITER faces, `ops` and `doc`, rebase
@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   require Logger
 
-  alias Fleet.Pilot.GitOps
+  alias Fleet.Project.GitOps
 
   @projects_root Fleet.Layout.code_root()
 

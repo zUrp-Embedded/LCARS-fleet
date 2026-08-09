@@ -8,7 +8,7 @@
 #            sas humain + work-order producteur jamais servi) et `role: starfleet` n'est pas un worker —
 #            le projet partait en boucle reclaim/attente silencieuse. La méthode (TDD, plan) vit dans
 #            les MODOPS du producteur et le jugement dans le JURY, pas dans des steps non-dispatchables.
-# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Pilot.Roles.project_jury.
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Project.Roles.project_jury.
 
 kind: WorkflowMap
 metadata:

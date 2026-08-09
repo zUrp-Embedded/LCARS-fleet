@@ -1,8 +1,8 @@
-defmodule Fleet.Pilot.ProjectArchitectTest do
+defmodule Fleet.Project.ArchitectTest do
   # async: false — captures the spawn call via an app-env pid (global).
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectArchitect
+  alias Fleet.Project.Architect, as: ProjectArchitect
 
   @cap_key :test_project_architect_capture_pid
 

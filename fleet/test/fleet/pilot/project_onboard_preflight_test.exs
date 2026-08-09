@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
+defmodule Fleet.Project.OnboardPreflightTest do
   @moduledoc """
   F2: preflight `ensure_human_provisioned` BEFORE any creation. Contracts tested: PROVEN absence of
   account/team → error with the EXACT admin gestures; forge DOWN → :forge_preflight_failed WITHOUT
@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.ProjectOnboardPreflightTest do
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   defmodule OkUsers do
     def user_exists?(_u, _fc), do: {:ok, true}

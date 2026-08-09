@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboard do
+defmodule Fleet.Project.Onboard do
   @moduledoc """
   Onboarding of a project: "idea → the project exists".
 
@@ -60,12 +60,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
   """
 
   alias Fleet.Forge.Client, as: ForgeClient
-  alias Fleet.Pilot.GitOps
-  alias Fleet.Pilot.Roles
+  alias Fleet.Project.GitOps
+  alias Fleet.Project.Roles
 
   # Content + writing of the scaffold (pure templates, one subtree per face) — extracted:
   # no dependency on the orchestration, onboard calls it at the right moments of its sequence.
-  alias Fleet.Pilot.ProjectOnboard.Scaffold
+  alias Fleet.Project.Onboard.Scaffold
 
   require Logger
 
@@ -160,7 +160,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
          :ok <- clone_main(url, dirs.code),
          :ok <- maybe_scaffold_main(provision, dirs.code, name, opts),
-         :ok <- Fleet.Pilot.ProjectIntensity.write(dirs.code, opts),
+         :ok <- Fleet.Project.Intensity.write(dirs.code, opts),
          :ok <- commit(dirs.code, onboard_commit_msg(provision)),
          :ok <- push(dirs.code, "main", false),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
@@ -243,7 +243,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp ensure_architect(repo, opts) do
-    ensure = Keyword.get(opts, :ensure_architect, &Fleet.Pilot.ProjectArchitect.ensure/2)
+    ensure = Keyword.get(opts, :ensure_architect, &Fleet.Project.Architect.ensure/2)
 
     case ensure.(repo, opts) do
       {:ok, pod_id} -> %{status: "up", pod_id: pod_id}
@@ -733,7 +733,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     if File.exists?(Path.join(proj_dir, "intensity.json")) do
       :ok
     else
-      with :ok <- Fleet.Pilot.ProjectIntensity.write(proj_dir, opts) do
+      with :ok <- Fleet.Project.Intensity.write(proj_dir, opts) do
         commit(proj_dir, msg)
       end
     end
@@ -1102,7 +1102,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       try do
         with :ok <- clone_main(url, scratch),
              :ok <-
-               Fleet.Pilot.ProjectIntensity.write(
+               Fleet.Project.Intensity.write(
                  scratch,
                  revision_write_opts(opts, current_declaration(proj_dir))
                ),
@@ -1312,7 +1312,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp sync_showcase(repo, opts) do
     sync =
-      Keyword.get(opts, :sync_showcase, fn r -> Fleet.Pilot.WorktreeSync.sync_now(r, "main") end)
+      Keyword.get(opts, :sync_showcase, fn r -> Fleet.Project.WorktreeSync.sync_now(r, "main") end)
 
     case sync.(repo) do
       :ok ->
@@ -1431,7 +1431,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp stop_architect(full_name, opts) do
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
-    pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(full_name)
+    pod_id = Fleet.Project.Architect.pod_id_for(full_name)
 
     case spawner.kill_pod(pod_id) do
       :ok -> :stopped

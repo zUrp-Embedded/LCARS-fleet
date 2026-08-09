@@ -3,7 +3,7 @@
 # Date: 2026-07-18
 # Statut: actif — carte de production C1 légère : un seul juge (qualifier).
 # Dérivé de: programme carte-driven 2026-07-18 (la mécanique de criticité EST le choix de la carte).
-# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Pilot.Roles.project_jury.
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Project.Roles.project_jury.
 #
 # UN SEUL JUGE : le qualifier. Sa mission plancher (SP subagent-spec-reviewer) : le code
 # COMPILE avant tout verdict — base minimale correcte. Les tests du runner ne sont pas

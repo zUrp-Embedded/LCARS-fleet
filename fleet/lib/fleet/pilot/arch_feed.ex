@@ -33,7 +33,8 @@ defmodule Fleet.Pilot.ArchFeed do
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Pilot.{PodFeed, ProjectArchitect}
+  alias Fleet.Pilot.PodFeed
+  alias Fleet.Project.Architect, as: ProjectArchitect
 
   # `step.unlocked` = the PROGRESS rail (user design 2026-07-18): every lock release IS a
   # step crossed, emitted at the gesture itself (after the forge reflects it — no announce

@@ -40,6 +40,7 @@ flowchart TB
     subgraph work["work"]
         Fleet_Forge["Fleet.Forge"]
         Fleet_MCP["Fleet.MCP"]
+        Fleet_Project["Fleet.Project"]
         Fleet_Workflow["Fleet.Workflow"]
     end
     subgraph pod_composition["pod composition"]
@@ -81,9 +82,16 @@ flowchart TB
     Fleet_Pilot --> Fleet_Credentials
     Fleet_Pilot --> Fleet_EventRouter
     Fleet_Pilot --> Fleet_Forge
+    Fleet_Pilot --> Fleet_Project
     Fleet_Pilot --> Fleet_Spawner
     Fleet_Pilot --> Fleet_TaskQueue
     Fleet_Pilot --> Fleet_Workflow
+    Fleet_Project --> Fleet_CapProfile
+    Fleet_Project --> Fleet_Credentials
+    Fleet_Project --> Fleet_EventRouter
+    Fleet_Project --> Fleet_Forge
+    Fleet_Project --> Fleet_Spawner
+    Fleet_Project --> Fleet_Workflow
     Fleet_ProjectBootstrap --> Fleet_CapProfile
     Fleet_ProjectBootstrap --> Fleet_Credentials
     Fleet_SPBuilder --> Fleet_CapProfile

@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
   # key were already `async: false` — these two were the outliers.
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 
@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
       dir = project(tmp, "alpha")
 
       :ok =
-        Fleet.Pilot.ProjectIntensity.write(dir,
+        Fleet.Project.Intensity.write(dir,
           workflow_map: "standard-qa",
           intensity_level: "C2",
           intensity_justification: "cadrage",

@@ -11,7 +11,7 @@ import Config
 #
 
 # Le jury (juges PR) n'a PLUS de config moteur : LA CARTE workflow est la source unique
-# (`spec.jury`, schéma-required — accesseur `Fleet.Pilot.Roles.jury/2` ; l'opt
+# (`spec.jury`, schéma-required — accesseur `Fleet.Project.Roles.jury/2` ; l'opt
 # `:reviewer_roles` reste un seam d'injection test, jamais une config). La voie config
 # parallèle est morte avec l'arbitrage « la carte gouverne le jugement ».
 

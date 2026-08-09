@@ -68,4 +68,45 @@ defmodule Fleet.Forge do
   """
   @spec finch_name() :: atom()
   def finch_name, do: @finch_name
+
+  @doc """
+  The repo's forge id, EXPLAINED: `{:ok, id}` | `{:error, reason}`.
+
+  TWO SHAPES, one authority, because the callers are not asking the same question. The pilot's
+  `Spawn.resolve_repo_id/3` wraps this one to `nil` and puts the id through `Opts.maybe_put` — for those, `nil` is the right answer to "optional, absent",
+  and an `{:error, _}` they must unwrap would be noise. `Fleet.Project.Architect` makes it a FAILURE
+  condition (no id ⇒ no project identity ⇒ no arch), and a failure has to say why: it used to get a
+  bare `nil` and then GUESS in its log ("forge down?") over a forge that was answering. An
+  instrument that supposes is worse than one that is silent — the supposition gets quoted.
+
+  It lives HERE and not in the dispatcher that used to hold it: reading a repo's forge id is a
+  FORGE question, and the dispatcher was simply its first caller. The extraction of the project
+  lifecycle is what surfaced it — an architect needs the id to exist, and had to reach up into the
+  step rail to ask for it.
+
+  Reasons: the forge's own (`{:error, :no_id}`, HTTP tuple…), or `:repo_id_unsupported` when the
+  seam module does not export `repo_id/2` at all (a test stub) — which is a fact about the wiring,
+  not about the forge, and must never be reported as the latter.
+  """
+  @spec repo_id(module(), String.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def repo_id(forge, repo, forge_opts) do
+    # `Code.ensure_loaded?/1` FIRST, and it is load-bearing: `function_exported?/3` does NOT load a
+    # module — it answers about the code table as it stands. On a freshly booted BEAM the forge
+    # client is not loaded yet, so the guard alone reports "this module has no repo_id/2" about a
+    # module that plainly does, and every caller reads that as an absent id.
+    # Measured: on a cold node, `:erlang.module_loaded(Fleet.Forge.Client)` is false and
+    # `function_exported?(_, :repo_id, 2)` is false; after `Code.ensure_loaded?/1`, both are true.
+    # The visible symptom was the FIRST project onboarded after a start losing its architect, with
+    # a log blaming the forge — which was answering the whole time.
+    if Code.ensure_loaded?(forge) and function_exported?(forge, :repo_id, 2) do
+      case forge.repo_id(repo, forge_opts) do
+        {:ok, id} when is_integer(id) and id >= 0 -> {:ok, id}
+        {:error, reason} -> {:error, reason}
+        other -> {:error, {:unexpected_repo_id, other}}
+      end
+    else
+      {:error, :repo_id_unsupported}
+    end
+  end
 end

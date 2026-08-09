@@ -225,9 +225,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
          {:ok, %{"jury" => jury} = map} when is_list(jury) <-
            Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
       # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
-      Fleet.Pilot.Roles.jury(map, ctx.opts)
+      Fleet.Project.Roles.jury(map, ctx.opts)
     else
-      _ -> Fleet.Pilot.Roles.project_jury(ctx.repo, ctx.opts)
+      _ -> Fleet.Project.Roles.project_jury(ctx.repo, ctx.opts)
     end
   end
 
@@ -255,9 +255,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
            ),
          {:ok, map} when is_map(map) <-
            Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
-      Fleet.Pilot.Roles.ci(map)
+      Fleet.Project.Roles.ci(map)
     else
-      _ -> Fleet.Pilot.Roles.project_ci(ctx.repo, ctx.opts)
+      _ -> Fleet.Project.Roles.project_ci(ctx.repo, ctx.opts)
     end
   end
 

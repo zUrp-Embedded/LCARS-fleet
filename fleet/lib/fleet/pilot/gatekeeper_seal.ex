@@ -16,15 +16,15 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
   `as_gatekeeper/1`). A caller cannot forget the signature nor fork it. `as_role` remains
   the single source of the credential→wire adapter (`Fleet.Forge.Client.as_role/2` — not
-  duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
+  duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Project.Roles`;
   `gatekeeper_role/0` here is only a re-export.
   """
 
-  @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
+  @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Project.Roles.gatekeeper_role/0`."
   require Logger
 
   @spec gatekeeper_role() :: String.t()
-  defdelegate gatekeeper_role(), to: Fleet.Pilot.Roles
+  defdelegate gatekeeper_role(), to: Fleet.Project.Roles
 
   @doc """
   Applies the gatekeeper role identity without a system-token fallback.
@@ -360,7 +360,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
-    do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Pilot.WorktreeSync)
+    do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Project.WorktreeSync)
 
   # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
   defp spawner,
@@ -397,7 +397,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
          # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch
          # the head branch so the deliverable objects are verifiable. Best-effort.
          _ =
-           Fleet.Pilot.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
+           Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
              auth: true
            ),
          ref = Fleet.Layout.provenance_ref("issue-#{issue_n}-#{String.slice(head_sha, 0, 7)}"),

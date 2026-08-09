@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.ConflictApply do
   The normal jury then re-judges the new head.
   """
   alias Fleet.Conflict
-  alias Fleet.Pilot.GitOps
+  alias Fleet.Project.GitOps
 
   @author %{name: "lcars-conflict-engine", email: "conflict-engine@lcars.local"}
 

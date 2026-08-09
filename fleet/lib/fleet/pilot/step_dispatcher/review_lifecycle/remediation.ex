@@ -245,7 +245,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         label: "conflict"
       )
 
-    case ForgeClient.as_role(ctx.forge_opts, Fleet.Pilot.Roles.conflict_resolver_role()) do
+    case ForgeClient.as_role(ctx.forge_opts, Fleet.Project.Roles.conflict_resolver_role()) do
       {:ok, role_opts} ->
         case ctx.forge.post_comment(ctx.repo, pr_number, body, role_opts) do
           {:ok, _} ->
@@ -469,7 +469,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           :conflict_rework_exception,
           pr_number,
           head,
-          Fleet.Pilot.Roles.conflict_resolver_role(),
+          Fleet.Project.Roles.conflict_resolver_role(),
           ctx
         )
 

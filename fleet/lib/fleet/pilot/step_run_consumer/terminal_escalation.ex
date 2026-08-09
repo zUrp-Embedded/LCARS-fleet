@@ -182,7 +182,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   """
   @spec kick_architect(module(), String.t(), String.t()) :: :ok
   def kick_architect(spawner, repo, message) do
-    pod_id = Fleet.Pilot.ProjectArchitect.pod_id_for(repo)
+    pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
     if function_exported?(spawner, :notify_pod, 2) do
       _ = spawner.notify_pod(pod_id, message)

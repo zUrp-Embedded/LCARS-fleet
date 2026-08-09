@@ -123,7 +123,11 @@ defmodule Fleet.Pilot do
       # The forge is a DOMAIN now, not a corner of this one. What used to sit here in its place was
       # `Req`/`Req.Response`: the business domain declared the HTTP library, so "one HTTP exit" was
       # a convention. It is compiled in `Fleet.Forge` instead.
-      Fleet.Forge
+      Fleet.Forge,
+      # The project's LIFECYCLE (onboarding, card, roles, architect, worktrees) is its own domain:
+      # imperative, called from outside on demand — the opposite nature of this reactive rail, and
+      # it used to sit under a facade that described only one of the two.
+      Fleet.Project
     ],
     exports: [Application]
 
@@ -133,6 +137,6 @@ defmodule Fleet.Pilot do
   @doc "Immediate synchronous poll (ops/debug) — cf. `Fleet.Pilot.Poller.force_poll/1`."
   defdelegate force_poll, to: Fleet.Pilot.Poller
 
-  @doc "Onboarding of a fresh project (repo + its three faces + scaffold) — cf. `Fleet.Pilot.ProjectOnboard.onboard/2`."
-  defdelegate onboard(name, opts \\ []), to: Fleet.Pilot.ProjectOnboard
+  @doc "Onboarding of a fresh project (repo + its three faces + scaffold) — cf. `Fleet.Project.Onboard.onboard/2`."
+  defdelegate onboard(name, opts \\ []), to: Fleet.Project.Onboard
 end

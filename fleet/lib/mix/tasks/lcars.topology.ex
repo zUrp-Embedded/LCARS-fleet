@@ -59,6 +59,10 @@ defmodule Mix.Tasks.Lcars.Topology do
   # — those swap an implementation for hermeticity, they do not cross a forbidden edge.
   @seams [
     {"Fleet.Spawner", "Fleet.MCP", ":mcp_socket_provisioner"},
+    # Both are RETIRABLE now and neither is retired: `Fleet.Forge` and `Fleet.Project` were
+    # extracted BELOW MCP precisely so these edges could become ordinary compile deps. What still
+    # holds them up is not the graph but the `conforming/2` check each behaviour carries — the
+    # anti-lying-stub guarantee that would go with it. One gesture each, not a cleanup.
     {"Fleet.MCP", "Fleet.Pilot", ":forge_client / :project_onboard"}
   ]
 
@@ -90,6 +94,11 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.ProjectBootstrap" => "pod composition",
     "Fleet.Spawner" => "pod composition",
     "Fleet.Workflow" => "work",
+    # The project LIFECYCLE — what a project is (onboarding, card, roles, architect, worktrees) —
+    # as opposed to the rail that drives it afterwards. It sits at `work` and NOT at `steering`
+    # deliberately: MCP declares a plain dep on it, which is the whole point of the extraction (the
+    # `:project_onboard` upward seam existed only because this code sat above MCP).
+    "Fleet.Project" => "work",
     # The forge sits ABOVE work and BELOW steering: the pilot drives it, it drives nothing. Its
     # floor is what makes "one HTTP exit" compiled rather than conventional — `Req` is fenced to
     # this boundary alone.

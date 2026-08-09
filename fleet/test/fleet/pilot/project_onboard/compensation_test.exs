@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
+defmodule Fleet.Project.OnboardCompensationTest do
   @moduledoc """
   Compensation of a FAILED onboard/import — the mid-sequence failure must not leave half-created
   state that wedges the retry (repo 409 + dir-exists walls, host rm the only way out — seen LIVE).
@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ProjectOnboard
+  alias Fleet.Project.Onboard, as: ProjectOnboard
 
   @moduletag :tmp_dir
 

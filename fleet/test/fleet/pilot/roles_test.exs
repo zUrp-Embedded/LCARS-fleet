@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.RolesTest do
+defmodule Fleet.Project.RolesTest do
   @moduledoc """
-  Locks the single AUTHORITY for workshop roles (`Fleet.Pilot.Roles`): capability RESOLUTION +
+  Locks the single AUTHORITY for workshop roles (`Fleet.Project.Roles`): capability RESOLUTION +
   opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
   """
   # `async: false` : ce fichier tient `:fleet_pilot, :producer_role` — une clé GLOBALE que le code de
@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.RolesTest do
 
   import ExUnit.CaptureLog
 
-  alias Fleet.Pilot.Roles
+  alias Fleet.Project.Roles
 
   test "producer_role: RESOLU par capability, jamais un litteral — et l'opt garde la main" do
     # Le catalogue declare DEUX producers depuis scribe (chantier face-projet 2026-08-02) : le
@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Pilot.ProjectIntensity.write(proj,
+        Fleet.Project.Intensity.write(proj,
           intensity_level: "C1",
           intensity_justification: "light card",
           workflow_map: "c1-light"
@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.RolesTest do
       File.mkdir_p!(poc)
 
       :ok =
-        Fleet.Pilot.ProjectIntensity.write(poc,
+        Fleet.Project.Intensity.write(poc,
           intensity_level: "C0",
           intensity_justification: "throwaway",
           workflow_map: "c0-poc"
@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.RolesTest do
       # on a card typo) — the fallback happens LOUD at read time, here.
       capture_log(fn ->
         :ok =
-          Fleet.Pilot.ProjectIntensity.write(proj,
+          Fleet.Project.Intensity.write(proj,
             intensity_level: "C1",
             intensity_justification: "typo'd card",
             workflow_map: "ghost-card"
@@ -123,7 +123,7 @@ defmodule Fleet.Pilot.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Pilot.ProjectIntensity.write(proj,
+        Fleet.Project.Intensity.write(proj,
           intensity_level: "C2",
           intensity_justification: "x",
           workflow_map: "standard-qa"
@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.RolesTest do
   test "the arch pod id is PER-PROJECT — the single authority is ProjectArchitect.pod_id_for/1" do
     # Reorg 2026-07-19: Roles.architect_pod_id (the "permanent-architect" singleton accessor) is GONE.
     refute function_exported?(Roles, :architect_pod_id, 1)
-    assert Fleet.Pilot.ProjectArchitect.pod_id_for("fleet/demo") == "architect-demo"
-    assert Fleet.Pilot.ProjectArchitect.pod_id_for("demo") == "architect-demo"
+    assert Fleet.Project.Architect.pod_id_for("fleet/demo") == "architect-demo"
+    assert Fleet.Project.Architect.pod_id_for("demo") == "architect-demo"
   end
 end

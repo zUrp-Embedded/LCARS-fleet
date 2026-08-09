@@ -358,7 +358,7 @@ defmodule Fleet.Pilot.StepDispatcher do
           {:ok, %{verdicts: verdicts, reviewers: jury}} ->
             # F-C061: only configured jury roles can dispatch or affect the verdict.
             jury_roles =
-              MapSet.new(Fleet.Pilot.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
+              MapSet.new(Fleet.Project.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
 
             {requested, foreign} =
               Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))
@@ -495,8 +495,8 @@ defmodule Fleet.Pilot.StepDispatcher do
 
     workflow_map_name =
       if Fleet.Labels.destination_workshop() in labels,
-        do: Fleet.Pilot.Roles.workshop_workflow_map(),
-        else: Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
+        do: Fleet.Project.Roles.workshop_workflow_map(),
+        else: Fleet.Project.Intensity.pipeline_default(repo)
 
     with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),

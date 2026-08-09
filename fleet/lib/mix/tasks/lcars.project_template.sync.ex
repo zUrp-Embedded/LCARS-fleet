@@ -32,7 +32,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
       Supervisor.start_link([Fleet.Pilot.Application.forge_finch_spec()], strategy: :one_for_one)
 
     fc = forge_opts!()
-    repo = Fleet.Pilot.ProjectOnboard.project_template()
+    repo = Fleet.Project.Onboard.project_template()
     [org, name] = String.split(repo, "/", parts: 2)
 
     with :ok <- ensure_repo(org, name, repo, fc),

@@ -13,7 +13,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   Two operations on the SAME project's work_dir can collide on `.git/index.lock`, or observe a HEAD
   that moved between OpsObject's idempotency probe (`File.read == content` / `last_commit_sha`) and
   the commit. `OpsObject`'s own comment only covers the "identical content → nothing_to_commit" race,
-  not concurrent git. This GenServer closes it by construction — same move as `Fleet.Pilot.WorktreeSync`
+  not concurrent git. This GenServer closes it by construction — same move as `Fleet.Project.WorktreeSync`
   for the post-merge `reset --hard`: it handles one message at a time → ONE git transaction at a time,
   whatever the number of triggers. `OpsObject` stays the untouched engine; this is only the gate.
 

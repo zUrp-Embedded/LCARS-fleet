@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ProjectIntensity do
+defmodule Fleet.Project.Intensity do
   @moduledoc """
   Single owner of the per-project criticality declaration (`<project>/intensity.json`,
   schema `intensity-v1`) — writes it at onboarding, reads it at the workflow-map burn.
@@ -85,7 +85,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
       declaration["pipeline_default"]
     else
       {:error, :enoent} ->
-        Fleet.Pilot.Roles.delegation_workflow_map(opts)
+        Fleet.Project.Roles.delegation_workflow_map(opts)
 
       other ->
         Logger.warning(
@@ -94,7 +94,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
         )
 
         incident =
-          Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+          Keyword.get(opts, :incident_fun, &Fleet.Project.Incidents.record_or_escalate/4)
 
         _ =
           try do
@@ -108,7 +108,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
               )
           end
 
-        Fleet.Pilot.Roles.delegation_workflow_map(opts)
+        Fleet.Project.Roles.delegation_workflow_map(opts)
     end
   end
 
@@ -148,7 +148,7 @@ defmodule Fleet.Pilot.ProjectIntensity do
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
       "justification" => justification || default_justification(level, card),
-      "pipeline_default" => card || Fleet.Pilot.Roles.delegation_workflow_map(opts)
+      "pipeline_default" => card || Fleet.Project.Roles.delegation_workflow_map(opts)
     }
 
     base =
