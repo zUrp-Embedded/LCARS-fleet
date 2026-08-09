@@ -81,10 +81,23 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
           # Permission mode: default `default` → claude_launch passes `--permission-mode default`
           # (allow/deny lists ENFORCED) instead of `--dangerously-skip-permissions` (legacy "agents in the
-          # wild" that bypasses EVERYTHING). Shaped world (bwrap RO/RW + cap-profile) → the bypass is useless, it
-          # would only neutralize our lists. Override by cap-profile `spec.invocation.permission_mode`
+          # wild" that bypasses EVERYTHING). Override by cap-profile `spec.invocation.permission_mode`
           # (e.g. "bypassPermissions" to explicitly re-open yolo). NB: write enforcement =
           # the MOUNT (RO/RW), not the tool-list → the judges keep Write/Edit (reports), bounded by the mount.
+          #
+          # ⚠ THIS CHOICE RESTED ON "the bypass is useless, it would only neutralize our lists", AND
+          # THAT HALF IS MEASURED FALSE. It is not neutral: under `default` a tool absent from
+          # `allowedTools` does not get skipped, it PROMPTS — and a pod has nobody to answer.
+          # Measured on a bench 2026-08-09 with a real pod: a scribe reached for `NotebookEdit`
+          # (in neither list) and froze on "Do you want to insert this cell? 1. Yes 2. Yes, allow
+          # all 3. No", still alive, still holding its slot and the ticket's in-flight lock,
+          # producing nothing. The recovery chain then re-dispatches a pod that wedges identically.
+          #
+          # What the rest of the comment says stays TRUE and is the reason the trade is arguable:
+          # the wall is the MOUNT, so a bypass lowers no real barrier — it only removes the prompt
+          # path. Every canon cap-profile leaves this field undeclared, so every pod runs `default`
+          # today. Which posture the fleet wants is an operator decision, NOT a code one; it is
+          # open, and the measurement above is what it should be decided on.
           |> Map.put("LCARS_PERMISSION_MODE", LaunchSpec.permission_mode(state.cap_profile))
           # RC Desktop name: `<project>_<role>` supplied by the dispatch (`opts[:rc_name]`); default = role
           # alone (permanent / project-less pods). claude_launch passes it as
