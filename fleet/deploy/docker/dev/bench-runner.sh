@@ -49,6 +49,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-api)    FORGE_API="${2:?}"; shift 2 ;;
     --admin-token)  TOKEN="${2:?}"; shift 2 ;;
+    --reg-token)    REG_GIVEN="${2:?}"; shift 2 ;;
     --instance-url) INSTANCE_URL="${2:?}"; shift 2 ;;
     --network)      NETWORK="${2:?}"; shift 2 ;;
     --project)      PROJECT="${2:?}"; shift 2 ;;
@@ -117,9 +118,24 @@ EOM
 check_labels
 
 # ─── 1. Token d'enregistrement, minte par la forge (site-admin, portee instance) ────────────────
-REG=$(curl -s -m 10 -X POST -H "Authorization: token $TOKEN" "$FORGE_API/admin/actions/runners/registration-token" \
-      | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
-[[ -n "$REG" ]] || { say "la forge n'a pas rendu de token d'enregistrement"; exit 2; }
+# `--reg-token` court-circuite l'appel API, et ce n'est pas une commodite : le endpoint exige une
+# PORTEE de token que le token operateur d'un banc n'a pas forcement (mesure du 2026-08-09 : 403
+# « token does not have at least one of required scope » avec un token pourtant is_admin=True). La
+# forge sait toujours en minter un elle-meme, depuis son propre conteneur :
+#     docker exec <forge> gitea actions generate-runner-token
+# Sans cette porte, un banc dont le token est trop etroit n'a AUCUNE sortie et le runner reste
+# absent — donc la CI muette, donc des gates qui attendent leur borne puis escaladent.
+if [[ -n "${REG_GIVEN:-}" ]]; then
+  REG="$REG_GIVEN"
+  say "token d'enregistrement FOURNI (--reg-token), pas d'appel API"
+else
+  REG=$(curl -s -m 10 -X POST -H "Authorization: token $TOKEN" "$FORGE_API/admin/actions/runners/registration-token" \
+        | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+fi
+[[ -n "$REG" ]] || {
+  say "la forge n'a pas rendu de token d'enregistrement (portee du token ? cf. --reg-token)"
+  exit 2
+}
 say "token d'enregistrement minte (${#REG} car)"
 
 # ─── 2. Config jobs + override reseau, generes a cote de rien (tmpdir) ──────────────────────────
@@ -163,13 +179,41 @@ LCARS_RUNNER_LABELS="$LABELS" \
 say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volume)"
 
 # ─── 4. Preuve d'enregistrement : la forge le LISTE — pas le log du runner ──────────────────────
+# LA SONDE DISTINGUE « pas enregistre » DE « je n'ai pas pu regarder », parce qu'elle a menti sur
+# cette difference. Mesure du 2026-08-09 : le runner s'etait enregistre (« Runner registered
+# successfully », et il tirait deja une tache) pendant que ce bloc annoncait ECHEC — le token du
+# banc n'a pas la portee du endpoint admin, `curl` rendait un 403, le `|| echo 0` l'ecrasait en
+# « zero runner ». Un banc sain declare en panne, et le geste suivant part reparer ce qui marche.
+#
+# Donc : le code HTTP est lu AVANT le corps. 403/401 → on ne SAIT pas, on le dit, et on ne prononce
+# pas d'echec sur une mesure qu'on n'a pas pu prendre.
+SEEN=0
+PROBE_HTTP=""
 for _ in $(seq 1 20); do
   sleep 3
-  n=$(curl -s -m 5 -H "Authorization: token $TOKEN" "$FORGE_API/admin/actions/runners" \
-      | python3 -c "import json,sys;print(len(json.load(sys.stdin).get('runners') or []))" 2>/dev/null || echo 0)
-  [[ "${n:-0}" -ge 1 ]] && { say "enregistre : la forge liste $n runner(s)"; break; }
+  body="$(mktemp)"
+  PROBE_HTTP=$(curl -s -m 5 -o "$body" -w '%{http_code}' -H "Authorization: token $TOKEN" \
+               "$FORGE_API/admin/actions/runners" 2>/dev/null || echo 000)
+  if [[ "$PROBE_HTTP" == "200" ]]; then
+    n=$(python3 -c "import json,sys;print(len(json.load(open('$body')).get('runners') or []))" 2>/dev/null || echo 0)
+    rm -f "$body"
+    [[ "${n:-0}" -ge 1 ]] && { SEEN=1; say "enregistre : la forge liste $n runner(s)"; break; }
+  else
+    rm -f "$body"
+    [[ "$PROBE_HTTP" =~ ^(401|403)$ ]] && break
+  fi
 done
-[[ "${n:-0}" -ge 1 ]] || { say "ECHEC : la forge ne liste aucun runner apres 60 s"; exit 3; }
+
+if [[ "$SEEN" -ne 1 ]]; then
+  if [[ "$PROBE_HTTP" =~ ^(401|403)$ ]]; then
+    say "NON VERIFIE (HTTP $PROBE_HTTP sur /admin/actions/runners — portee du token) : le runner est"
+    say "  peut-etre enregistre, cette sonde ne peut pas le dire. Verifier a la main :"
+    say "    $DOCKER_BIN logs ${PROJECT}-runner-1 | grep -i 'registered successfully'"
+    exit 0
+  fi
+  say "ECHEC : la forge ne liste aucun runner apres 60 s (HTTP ${PROBE_HTTP:-?})"
+  exit 3
+fi
 
 # ─── 5. Preuve de bout en bout (optionnelle) : un run du repo temoin passe VERT ─────────────────
 # Un runner enregistre qui rate tous ses jobs est PIRE qu'un runner absent (il consomme les runs
